@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+
+# Node / Vite
+frontend/node_modules/
+frontend/.vite/
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Runtime data (price store, FF series — auto-generated)
+backend/data/*.db
+backend/data/*.sqlite
+backend/data/*.sqlite3
+backend/data/*.db-shm
+backend/data/*.db-wal
+backend/data/underlying_prices/
+backend/data/fx_rates/
+backend/data/ff_data/
+
+# Claude memory
+.claude/
+
+# Temp / debug files at root
+debug_*.py
+AVANCEMENT.md
+DECISION_ANALYSIS_ENGINE.md
+MANAGER_DNA_ENGINE.md
+REPRISE_TRAVAIL.md
+SKILL_VS_LUCK_ENGINE.md
+check_nav.py
+test_parse.py
+
+# OS
+.DS_Store
+Thumbs.db

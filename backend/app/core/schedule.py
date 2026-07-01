@@ -1,0 +1,179 @@
+"""
+Schedule generation — the "expert mode" calendar/CONSTAT system.
+
+This is additive and independent of the PayScript engine, which keeps working
+in relative-year offsets via `AT 1, 2, 3:` (the "simple mode"). A later phase
+will let PayScript's AT statement reference a named schedule generated here
+instead of inline year offsets; for now this module only builds and previews
+real-date calendars.
+
+Three levels, mirroring the spec:
+  CONSTAT      — a single date.
+  CONSTAT()    — a schedule: start date, end date, roll date (anchor), roll
+                 frequency (a tenor, e.g. "3M"), and a stub convention.
+  CONSTAT()()  — CONSTAT() plus a sub-frequency that subdivides every interval
+                 of the main schedule (no stub logic of its own — it just fills
+                 each already-resolved interval evenly).
+
+Stub convention (ISDA-style):
+  *_LAST  — the regular grid is generated FORWARD, anchored on roll_date, and
+            the irregular boundary period (if any) falls at the END, between
+            the last regular date and end_date.
+  *_FIRST — the regular grid is generated BACKWARD, anchored on roll_date, and
+            the irregular boundary period falls at the START, between
+            start_date and the first regular date.
+  SHORT_* — that boundary period is left as-is (shorter than a regular period).
+  LONG_*  — that boundary period is merged into its regular neighbor (dropping
+            the adjoining grid point) whenever it would otherwise be shorter
+            than half a regular period — producing one longer period instead.
+start_date and end_date are always part of the resulting schedule.
+"""
+from __future__ import annotations
+import re
+from dataclasses import dataclass
+from datetime import date, timedelta
+from enum import Enum
+
+from dateutil.relativedelta import relativedelta
+
+DAYS_PER_YEAR = 365.25   # simple ACT/365.25 day count for the year-fraction preview
+
+
+class StubConvention(str, Enum):
+    SHORT_FIRST = "short_first"
+    SHORT_LAST = "short_last"
+    LONG_FIRST = "long_first"
+    LONG_LAST = "long_last"
+
+
+@dataclass
+class Tenor:
+    """A step size like "3M", "1W", "1Y", "1D" — value + unit."""
+    value: int
+    unit: str   # 'D' | 'W' | 'M' | 'Y'
+
+    def __post_init__(self):
+        if self.value <= 0:
+            raise ValueError("Le tenor doit être strictement positif.")
+        if self.unit not in ("D", "W", "M", "Y"):
+            raise ValueError(f"Unité de tenor inconnue: {self.unit!r} (attendu D/W/M/Y).")
+
+
+_TENOR_RE = re.compile(r"^(\d+)\s*([DWMYdwmy])$")
+
+
+def parse_tenor(s: str) -> Tenor:
+    """Parse a tenor string like "3M", "1W", "1Y", "1D"."""
+    m = _TENOR_RE.match(s.strip())
+    if not m:
+        raise ValueError(f"Tenor invalide: {s!r} (format attendu: ex. '3M', '1W', '1Y', '1D').")
+    return Tenor(value=int(m.group(1)), unit=m.group(2).upper())
+
+
+def _step(d: date, tenor: Tenor, n: int = 1) -> date:
+    """Move d forward (n>0) or backward (n<0) by n steps of tenor."""
+    amount = tenor.value * n
+    if tenor.unit == "D":
+        return d + timedelta(days=amount)
+    if tenor.unit == "W":
+        return d + timedelta(weeks=amount)
+    if tenor.unit == "M":
+        return d + relativedelta(months=amount)
+    return d + relativedelta(years=amount)   # 'Y'
+
+
+def generate_main_schedule(start: date, end: date, roll_date: date,
+                            frequency: Tenor, stub: StubConvention) -> list[date]:
+    """Generate the CONSTAT() date list. start and end are always included."""
+    if end <= start:
+        raise ValueError("end_date doit être strictement après start_date.")
+
+    if stub in (StubConvention.SHORT_LAST, StubConvention.LONG_LAST):
+        # Forward generation anchored on roll_date: walk roll_date forward by
+        # whole steps until past start_date, then keep stepping up to end_date.
+        d = roll_date
+        if d <= start:
+            while d <= start:
+                d = _step(d, frequency)
+        else:
+            while _step(d, frequency, -1) > start:
+                d = _step(d, frequency, -1)
+
+        dates = [start]
+        while d < end:
+            dates.append(d)
+            d = _step(d, frequency)
+        dates.append(end)
+
+        if stub == StubConvention.LONG_LAST and len(dates) >= 3:
+            last_period = (dates[-1] - dates[-2]).days
+            regular_period = (dates[-2] - dates[-3]).days
+            if last_period < regular_period / 2:
+                dates.pop(-2)
+        return dates
+
+    else:
+        # Backward generation anchored on roll_date: walk roll_date backward by
+        # whole steps until past end_date, then keep stepping down to start_date.
+        d = roll_date
+        if d >= end:
+            while d >= end:
+                d = _step(d, frequency, -1)
+        else:
+            while _step(d, frequency) < end:
+                d = _step(d, frequency)
+
+        dates = [end]
+        while d > start:
+            dates.insert(0, d)
+            d = _step(d, frequency, -1)
+        dates.insert(0, start)
+
+        if stub == StubConvention.LONG_FIRST and len(dates) >= 3:
+            first_period = (dates[1] - dates[0]).days
+            regular_period = (dates[2] - dates[1]).days
+            if first_period < regular_period / 2:
+                dates.pop(1)
+        return dates
+
+
+def _fill_interval(lo: date, hi: date, sub_frequency: Tenor) -> list[date]:
+    """Sub-divide (lo, hi) evenly by sub_frequency, stepping forward from lo.
+    No stub handling at this level — the last sub-step before hi simply closes
+    out at hi, by construction (see module docstring)."""
+    out = [lo]
+    d = _step(lo, sub_frequency)
+    while d < hi:
+        out.append(d)
+        d = _step(d, sub_frequency)
+    return out
+
+
+def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
+                       stub: StubConvention, sub_frequency: Tenor | None = None) -> dict:
+    """Build a full CONSTAT() or CONSTAT()() schedule.
+
+    Returns a dict with:
+      main_dates — the CONSTAT() roll schedule (always includes start/end).
+      dates      — the fully expanded schedule (== main_dates when no
+                   sub_frequency; otherwise every main interval subdivided).
+      year_fractions — each date's ACT/365.25 offset from start, for preview
+                   purposes (this is what a future phase would feed to AT).
+    """
+    main_dates = generate_main_schedule(start, end, roll_date, frequency, stub)
+
+    if sub_frequency is None:
+        dates = main_dates
+    else:
+        dates = []
+        for lo, hi in zip(main_dates[:-1], main_dates[1:]):
+            dates.extend(_fill_interval(lo, hi, sub_frequency))
+        dates.append(main_dates[-1])
+
+    year_fractions = [round((d - start).days / DAYS_PER_YEAR, 6) for d in dates]
+
+    return {
+        "main_dates": main_dates,
+        "dates": dates,
+        "year_fractions": year_fractions,
+    }
