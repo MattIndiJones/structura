@@ -73,6 +73,42 @@
           <p class="text-xs text-slate-600">Décomposez la performance d'un AMC en facteurs de risque et mesurez la valeur ajoutée du gérant.</p>
         </RouterLink>
 
+        <!-- Charger une étude -->
+        <div class="card flex flex-col gap-3">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-indigo-900/50 flex items-center justify-center text-xl">📂</div>
+            <div>
+              <div class="font-bold text-slate-100">Charger une étude</div>
+              <div class="text-xs text-slate-500">Études AMC sauvegardées</div>
+            </div>
+          </div>
+          <div v-if="recentStudiesLoading" class="text-xs text-slate-600">Chargement…</div>
+          <div v-else-if="!recentStudies.length" class="text-xs text-slate-600">Aucune étude sauvegardée pour l'instant. Lancez une étude dans le module AMC puis sauvegardez-la.</div>
+          <ul v-else class="flex flex-col gap-1.5">
+            <li v-for="s in recentStudies" :key="s.id" @click="openStudy(s.id)"
+              class="flex items-center justify-between gap-2 text-xs px-2.5 py-2 rounded-lg border border-slate-800 hover:border-indigo-600 hover:bg-indigo-950/20 cursor-pointer transition-colors">
+              <div class="min-w-0">
+                <div class="text-slate-200 truncate">{{ s.label }}</div>
+                <div class="text-[10px] text-slate-600 font-mono">{{ s.isin }} · {{ new Date(s.updated_at).toLocaleDateString('fr-FR') }}</div>
+              </div>
+              <span class="text-indigo-400 shrink-0">→</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Carnet d'ordres FIFO -->
+        <RouterLink to="/fifo"
+          class="card flex flex-col gap-3 hover:border-cyan-700 hover:bg-cyan-950/20 transition-colors cursor-pointer group">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-cyan-900/50 flex items-center justify-center text-xl">📋</div>
+            <div>
+              <div class="font-bold text-slate-100 group-hover:text-cyan-300 transition-colors">Carnet d'ordres</div>
+              <div class="text-xs text-slate-500">FIFO · P&amp;L réalisé &amp; latent</div>
+            </div>
+          </div>
+          <p class="text-xs text-slate-600">Compilez les carnets d'ordres de fonds et AMC. Reconstruction FIFO avec modes actions ou cert-units.</p>
+        </RouterLink>
+
         <!-- Booking (bientôt) -->
         <div class="card flex flex-col gap-3 opacity-40 cursor-not-allowed">
           <div class="flex items-center gap-3">
@@ -104,11 +140,31 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
+import { apiFetch } from '../utils/api.js'
 
 const auth   = useAuthStore()
 const router = useRouter()
+
+const recentStudies        = ref([])
+const recentStudiesLoading = ref(true)
+
+async function fetchRecentStudies() {
+  recentStudiesLoading.value = true
+  try {
+    const res = await apiFetch('/api/amc/studies')
+    if (res.ok) recentStudies.value = (await res.json()).slice(0, 5)
+  } catch { /* ignore */ } finally {
+    recentStudiesLoading.value = false
+  }
+}
+fetchRecentStudies()
+
+function openStudy(id) {
+  router.push({ path: '/amc', query: { study_id: id } })
+}
 
 function logout() {
   auth.logout()

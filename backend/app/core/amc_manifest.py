@@ -55,6 +55,10 @@ class TermsheetPosition(BaseModel):
 class ManualParams(BaseModel):
     """Inputs that are NOT present in the raw exports — must be supplied."""
     management_fee_pct: Optional[float] = None   # term sheet; p.a. %, for gross add-back
+    perf_fee_pct: Optional[float] = None         # term sheet; % of gains above high-water-mark,
+                                                  # crystallised daily on new highs (NAV reconciliation)
+    txn_cost_pct: Optional[float] = None         # term sheet; % of notional per rebalancing trade
+                                                  # (NAV reconciliation)
     benchmark_ticker: str = "ACWI"               # thematic benchmark (2nd regression)
     factor_model: str = "FF5+MOM"                # FF3 | FF5 | FF5+MOM
     ff_series: str = "Developed_5F"              # key into amc_engine.FF_SERIES
@@ -119,7 +123,14 @@ MANIFEST_DOC: List[dict] = [
              "(union dédoublonnée) ; sinon les « * DataN.json »."},
     {"path": "params.management_fee_pct", "required": True, "auto": False,
      "desc": "⚠️ MANUEL — commission de gestion p.a. (%), lue sur la term sheet PDF. "
-             "Sert au calcul de l'alpha BRUT (NAV regrossie des frais)."},
+             "Sert au calcul de l'alpha BRUT (NAV regrossie des frais) et à la réconciliation NAV (Bloc B)."},
+    {"path": "params.perf_fee_pct", "required": False, "auto": False,
+     "desc": "⚠️ MANUEL — commission de performance (%) sur les gains au-dessus du plus haut "
+             "historique (High Water Mark), lue sur la term sheet PDF. Prélevée quotidiennement "
+             "sur chaque nouveau plus-haut, pas annuellement. Sert à la réconciliation NAV (Bloc B)."},
+    {"path": "params.txn_cost_pct", "required": False, "auto": False,
+     "desc": "⚠️ MANUEL — coût de transaction (%) du notionnel à chaque rebalancement, lu sur la "
+             "term sheet PDF. Sert à la réconciliation NAV (Bloc B)."},
     {"path": "params.benchmark_ticker", "required": True, "auto": False,
      "desc": "⚠️ MANUEL — ticker du benchmark sectoriel du thème (2ᵉ régression). "
              "Ex. XLF financières, PAVE/IGF infrastructures, XBI biotech."},

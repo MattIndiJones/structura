@@ -1646,6 +1646,56 @@ def _append_block_b(story, b, ccy, space, meta=None):
             f"  ·  {_meta.get('nav_n_obs', '—')} observations NAV", S_SMALL))
         story.append(space(4))
 
+    recon = totals.get("reconciliation")
+    if recon:
+        story.append(Paragraph(f"Réconciliation NAV (as of {recon.get('as_of', '—')})", S_SECTION))
+        story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
+        story.append(space(6))
+        gap_pct = recon.get("gap_pct")
+        story.append(_kpi_row([
+            (f"P&L FIFO (brut){ccy_lbl}", _fmt_prod(totals.get("total_pnl")),
+             "#10b981" if (totals.get("total_pnl") or 0) >= 0 else "#ef4444"),
+            (f"Frais cumulés{ccy_lbl}", _fmt_prod(totals.get("fee_drag_prod")), "#ef4444"),
+            (f"P&L net estimé{ccy_lbl}", _fmt_prod(totals.get("total_pnl_net_of_fees")),
+             "#10b981" if (totals.get("total_pnl_net_of_fees") or 0) >= 0 else "#ef4444"),
+            (f"P&L implicite NAV{ccy_lbl}", _fmt_prod(recon.get("nav_implied_pnl_prod")), "#10b981"),
+            ("Écart résiduel", f"{gap_pct:+.1f}%" if gap_pct is not None else "—",
+             "#f59e0b" if (gap_pct is not None and abs(gap_pct) > 15) else "#10b981"),
+        ]))
+        story.append(space(8))
+
+        fb = recon.get("fee_breakdown") or {}
+        if any(fb.get(k) for k in ("management_fee_prod", "performance_fee_prod", "transaction_cost_prod")):
+            mgmt_pct = fb.get("management_fee_pct")
+            perf_pct = fb.get("performance_fee_pct")
+            txn_pct = fb.get("transaction_cost_pct")
+            fee_rows = [
+                [_p(f"Gestion ({mgmt_pct}% p.a., accrual quotidien)" if mgmt_pct else "Gestion — non renseigné", S_BODY),
+                 _pn(_fmt_prod(fb.get("management_fee_prod"), ccy))],
+                [_p(f"Performance ({perf_pct}% sur High Water Mark, {fb.get('performance_fee_events', '—')} plus-hauts, prélevé le jour même)"
+                    if perf_pct else "Performance — non renseigné", S_BODY),
+                 _pn(_fmt_prod(fb.get("performance_fee_prod"), ccy))],
+                [_p(f"Transaction ({txn_pct}% du notionnel par rebalancement)" if txn_pct else "Transaction — non renseigné", S_BODY),
+                 _pn(_fmt_prod(fb.get("transaction_cost_prod"), ccy))],
+            ]
+            story.append(Paragraph("Décomposition des frais", S_SMALL))
+            story.append(space(3))
+            story.append(_tbl([[_p("Composante", S_HDR), _p("Montant", S_HDR)]] + fee_rows,
+                              col_widths=[13.4*cm, 4.0*cm]))
+            story.append(space(6))
+        else:
+            story.append(Paragraph(
+                "⚠ Aucun frais renseigné (management_fee_pct / perf_fee_pct / txn_cost_pct) — "
+                "l'écart résiduel ci-dessus est probablement surestimé.", S_SMALL))
+            story.append(space(6))
+
+        story.append(Paragraph(
+            "P&L implicite NAV calculé directement depuis la NAV quotidienne et les flux de "
+            "souscription/rachat (Δ Outstanding × NAV à chaque mouvement), indépendamment du "
+            "carnet d'ordres. Frais de performance modélisés en High Water Mark journalier "
+            "(prélevé uniquement les jours de nouveau plus-haut, pas un accrual continu).", S_SMALL))
+        story.append(space(12))
+
     story.append(Paragraph("P&L par sous-jacent (réalisé + latent, devise produit)", S_SECTION))
     story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
     story.append(space(6))

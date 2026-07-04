@@ -32,6 +32,10 @@ const routes = [
     component: () => import('../views/AmcView.vue'),
   },
   {
+    path: '/fifo',
+    component: () => import('../views/FifoView.vue'),
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },

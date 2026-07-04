@@ -20,9 +20,138 @@ def _safe_div(a: float, b: float) -> Optional[float]:
     return (a / b) if b else None
 
 
+# ── NAV/fee reconciliation — ground truth for the FIFO gross P&L ───────
+
+def _performance_fee_drag(rows: List[dict], filled_outstanding: List[Optional[float]],
+                          perf_fee_pct: Optional[float]) -> tuple:
+    """High-water-mark performance fee, crystallised daily on NEW highs only.
+
+    On any day the (net, published) NAV sets a new all-time high, that day's
+    net gain over the previous HWM is 90% of the day's gross gain (10% —or
+    whatever perf_fee_pct is— having already been skimmed before publication).
+    So the fee for that day, in NAV-per-unit terms, is:
+
+        fee_per_unit = net_gain_over_hwm × perf_fee_pct / (100 − perf_fee_pct)
+
+    Summed across every new-high day and multiplied by that day's outstanding
+    units. Days where the NAV is below its historical HWM incur no fee — this
+    is what distinguishes it from the flat daily management-fee accrual.
+    """
+    if not perf_fee_pct or not rows:
+        return 0.0, {}
+    frac = (perf_fee_pct / 100.0) / (1.0 - perf_fee_pct / 100.0)
+    hwm = rows[0]["nav"]
+    total_fee = 0.0
+    n_events = 0
+    for r, out in zip(rows, filled_outstanding):
+        if r["nav"] > hwm:
+            fee_per_unit = (r["nav"] - hwm) * frac
+            total_fee += fee_per_unit * (out or 0.0)
+            hwm = r["nav"]
+            n_events += 1
+    return total_fee, {"n_events": n_events, "hwm_final": round(hwm, 4)}
+
+
+def _transaction_cost_drag(carnet_orders: Optional[list], txn_cost_pct: Optional[float]) -> float:
+    """Rebalancing cost: txn_cost_pct of the notional on every carnet trade."""
+    if not txn_cost_pct or not carnet_orders:
+        return 0.0
+    total_notional = sum(abs(o.qty * o.price_prod) for o in carnet_orders)
+    return total_notional * (txn_cost_pct / 100.0)
+
+
+def _nav_reconciliation(nav: List[dict], management_fee_pct: Optional[float],
+                        as_of: Optional[str],
+                        perf_fee_pct: Optional[float] = None,
+                        txn_cost_pct: Optional[float] = None,
+                        carnet_orders: Optional[list] = None) -> Optional[dict]:
+    """Compute the exact NAV-implied fund P&L and estimated fee drag, as of
+    the same date the FIFO reconstruction used (not "today").
+
+    net_subscriptions is derived purely from the daily NAV CSV: every date
+    where `Outstanding quantity` changes is a subscription/redemption event,
+    valued at that day's NAV — no external/assumed subscription figure needed.
+
+        nav_implied_pnl = (outstanding_asof × NAV_asof) − net_subscriptions
+
+    fee_drag has three components, each optional (only computed when the
+    corresponding rate is supplied), used to bring the FIFO gross P&L down to
+    a NAV-comparable "net of fees" figure:
+      - management: daily accrual on AUM (fee_pct/100/252)
+      - performance: high-water-mark, crystallised daily on new highs only
+      - transaction: per-trade cost on carnet notional
+    """
+    if not nav or not as_of:
+        return None
+    rows = [r for r in nav if r["date"] <= as_of]
+    if not rows:
+        return None
+
+    # Forward-filled outstanding — AUM base for the management/perf fee accruals.
+    filled: List[Optional[float]] = []
+    cur: Optional[float] = None
+    for r in rows:
+        if r.get("outstanding"):
+            cur = r["outstanding"]
+        filled.append(cur)
+    first_known = next((x for x in filled if x), None)
+    if first_known is None:
+        return None
+    filled = [x if x else first_known for x in filled]
+
+    management_fee_drag = 0.0
+    if management_fee_pct:
+        fee_daily = (management_fee_pct / 100.0) / 252.0
+        for r, out in zip(rows, filled):
+            management_fee_drag += r["nav"] * out * fee_daily
+
+    performance_fee_drag, perf_meta = _performance_fee_drag(rows, filled, perf_fee_pct)
+    transaction_cost_drag = _transaction_cost_drag(carnet_orders, txn_cost_pct)
+
+    total_fee_drag = management_fee_drag + performance_fee_drag + transaction_cost_drag
+
+    # Raw (non-forward-filled) outstanding changes = actual sub/red events.
+    net_flow_prod = 0.0
+    prev_out: Optional[float] = None
+    for r in rows:
+        out = r.get("outstanding")
+        if out is None:
+            continue
+        net_flow_prod += (out - prev_out) * r["nav"] if prev_out is not None else out * r["nav"]
+        prev_out = out
+
+    last_row = rows[-1]
+    nav_value_prod = last_row["nav"] * filled[-1]
+    nav_implied_pnl_prod = nav_value_prod - net_flow_prod
+
+    return {
+        "as_of": last_row["date"],
+        "nav_value_prod": round(nav_value_prod, 2),
+        "net_subscriptions_prod": round(net_flow_prod, 2),
+        "nav_implied_pnl_prod": round(nav_implied_pnl_prod, 2),
+        "fee_drag_prod": round(-total_fee_drag, 2) if total_fee_drag else None,
+        "fee_breakdown": {
+            "management_fee_pct": management_fee_pct,
+            "management_fee_prod": round(-management_fee_drag, 2) if management_fee_pct else None,
+            "performance_fee_pct": perf_fee_pct,
+            "performance_fee_prod": round(-performance_fee_drag, 2) if perf_fee_pct else None,
+            "performance_fee_events": perf_meta.get("n_events"),
+            "performance_fee_hwm_final": perf_meta.get("hwm_final"),
+            "transaction_cost_pct": txn_cost_pct,
+            "transaction_cost_prod": round(-transaction_cost_drag, 2) if txn_cost_pct else None,
+        },
+    }
+
+
 # ── Bloc B — Attribution by underlying & period ────────────────────────
 
-def block_b_attribution(recon: ReconResult, composition: dict) -> dict:
+def block_b_attribution(recon: ReconResult, composition: dict,
+                        nav: Optional[List[dict]] = None,
+                        management_fee_pct: Optional[float] = None,
+                        fifo_as_of: Optional[str] = None,
+                        perf_fee_pct: Optional[float] = None,
+                        txn_cost_pct: Optional[float] = None,
+                        carnet_orders: Optional[list] = None) -> dict:
     """P&L contribution per underlying (realised + latent), price vs FX split,
     and a temporal (quarterly) breakdown of realised P&L."""
     weight_by_isin = {c["isin"]: c["weight"] for c in composition.get("components", [])}
@@ -73,21 +202,44 @@ def block_b_attribution(recon: ReconResult, composition: dict) -> dict:
     tot_unreal = sum(s["unreal_pnl"] for s in per_name.values())
     tot_price = sum(s["price_pnl"] for s in per_name.values())
     tot_fx = sum(s["fx_pnl"] for s in per_name.values())
+    total_pnl_gross = tot_real + tot_unreal
+
+    totals = {
+        "realized_pnl": round(tot_real, 2),
+        "unreal_pnl": round(tot_unreal, 2),
+        "total_pnl": round(total_pnl_gross, 2),
+        "realized_price_pnl": round(tot_price, 2),
+        "realized_fx_pnl": round(tot_fx, 2),
+        "fx_share_of_realized_pct": round(_safe_div(abs(tot_fx), abs(tot_price) + abs(tot_fx)) * 100, 1)
+                                    if (abs(tot_price) + abs(tot_fx)) else None,
+    }
+
+    # ── NAV reconciliation — validates the FIFO gross P&L against the ──
+    # ── fund's actual subscription-flow-implied P&L, net of est. fees ──
+    nav_recon = _nav_reconciliation(
+        nav, management_fee_pct, fifo_as_of,
+        perf_fee_pct=perf_fee_pct, txn_cost_pct=txn_cost_pct, carnet_orders=carnet_orders,
+    ) if nav else None
+    if nav_recon:
+        fee_drag = nav_recon["fee_drag_prod"] or 0.0
+        total_pnl_net = total_pnl_gross + fee_drag
+        nav_pnl = nav_recon["nav_implied_pnl_prod"]
+        gap = total_pnl_net - nav_pnl
+        totals["fee_drag_prod"] = round(fee_drag, 2)
+        totals["total_pnl_net_of_fees"] = round(total_pnl_net, 2)
+        totals["reconciliation"] = {
+            **nav_recon,
+            "total_pnl_net_of_fees": round(total_pnl_net, 2),
+            "gap_prod": round(gap, 2),
+            "gap_pct": round(gap / nav_pnl * 100, 1) if nav_pnl else None,
+        }
 
     return {
         "per_name": rows,
         "top5": rows[:5],
         "flop5": rows[-5:][::-1],
         "quarterly_realized": quarterly,
-        "totals": {
-            "realized_pnl": round(tot_real, 2),
-            "unreal_pnl": round(tot_unreal, 2),
-            "total_pnl": round(tot_real + tot_unreal, 2),
-            "realized_price_pnl": round(tot_price, 2),
-            "realized_fx_pnl": round(tot_fx, 2),
-            "fx_share_of_realized_pct": round(_safe_div(abs(tot_fx), abs(tot_price) + abs(tot_fx)) * 100, 1)
-                                        if (abs(tot_price) + abs(tot_fx)) else None,
-        },
+        "totals": totals,
         "note": "P&L latent des positions ouvertes non décomposé prix/FX (un seul mark "
                 "courant, pas de série de prix continue par constituant).",
     }

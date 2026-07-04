@@ -1,7 +1,7 @@
 from pathlib import Path
 import bcrypt
 from sqlmodel import SQLModel, Session, create_engine
-from .models import Entity, User, Folder, Script, Deal, DealEvent, Document
+from .models import Entity, User, Folder, Script, Deal, DealEvent, Document, AmcStudy
 
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
 _DB_PATH.parent.mkdir(parents=True, exist_ok=True)

@@ -33,6 +33,17 @@ _FX_STORE.mkdir(parents=True, exist_ok=True)
 
 # ── helpers ───────────────────────────────────────────────────────────
 
+def is_gbx_ticker(ticker: str, currency: str) -> bool:
+    """Return True when yfinance prices are in GBX (pence) but declared as GBP.
+
+    London Stock Exchange tickers end in .L and are quoted in pence.
+    yfinance reports currency='GBP' which is misleading — values are actually
+    in GBX (1 GBP = 100 GBX).  Dividing by 100 gives real GBP pounds.
+    """
+    suffix = ticker.upper().rsplit(".", 1)[-1] if "." in ticker else ""
+    return currency.upper() == "GBP" and suffix == "L"
+
+
 def _slug(key: str) -> str:
     """Turn an ISIN or name into a safe filename slug."""
     return re.sub(r"[^A-Za-z0-9_\-]", "_", key.strip())[:80]
@@ -138,9 +149,7 @@ def fetch_prices(key: str, ticker: str,
     df = df[["Close"]].rename(columns={"Close": "close"})
     df.index = pd.to_datetime(df.index).tz_localize(None)
     df.index.name = "date"
-    # LSE tickers (.L) are quoted in GBX (pence) but yfinance reports currency='GBP'.
-    # Divide by 100 to store real GBP values and avoid a 100× FX error downstream.
-    if ticker.strip().upper().endswith(".L") and currency.upper() == "GBP":
+    if is_gbx_ticker(ticker.strip(), currency):
         df["close"] = df["close"] / 100
     df.attrs["source"]   = f"yahoo:{ticker.strip()}"
     df.attrs["currency"] = currency.upper()
@@ -343,10 +352,17 @@ def load_prices(key: str) -> pd.DataFrame:
 def yf_symbol(isin: str, name: str = "") -> str:
     """Return a yfinance-usable symbol for the given ISIN.
 
-    yfinance validates ISIN checksums internally and raises ValueError for some
-    valid ISINs. Falls back to a name-based search when that happens.
-    Centralised here so every module uses the same resolution path.
+    Resolution order:
+      1. ticker_map (explicit user mapping, handles ISINs yfinance can't resolve, e.g. IL*)
+      2. yfinance ISIN checksum validation
+      3. Name-based Yahoo Finance search as fallback
     """
+    # Check explicit ticker map first (e.g. IL0011334468 → CYBR)
+    tm = _load_ticker_map()
+    mapped = tm.get(_slug(isin))
+    if mapped:
+        return mapped
+
     try:
         yf.Ticker(isin).fast_info  # lightweight check — raises ValueError on bad checksum
         return isin
@@ -423,8 +439,7 @@ def build_marks(components: list[dict], as_of_date: str, prod_ccy: str) -> dict[
                 )
                 if not hist.empty:
                     price_local = float(hist["Close"].iloc[-1])
-                    # LSE tickers (.L): yfinance returns GBX (pence), not GBP → ÷100
-                    if sym.upper().endswith(".L") and price_ccy == "GBP":
+                    if is_gbx_ticker(sym, price_ccy):
                         price_local /= 100
             except Exception:
                 pass
@@ -488,7 +503,7 @@ def auto_populate_store(components: list[dict],
             df = df[["Close"]].rename(columns={"Close": "close"})
             df.index = pd.to_datetime(df.index).tz_localize(None)
             df.index.name = "date"
-            if sym.upper().endswith(".L") and currency.upper() == "GBP":
+            if is_gbx_ticker(sym, currency):
                 df["close"] = df["close"] / 100
             df.attrs["source"]   = f"yahoo_auto:{sym}"
             df.attrs["currency"] = currency

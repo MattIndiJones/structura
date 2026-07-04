@@ -99,6 +99,21 @@ class Document(SQLModel, table=True):
     metadata_json: str = Field(default="{}", sa_column=Column(Text))
 
 
+class AmcStudy(SQLModel, table=True):
+    __tablename__ = "amc_studies"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    isin: str = Field(default="", index=True)
+    product_name: str = Field(default="")
+    label: str = Field(default="")
+    folder: str = Field(default="")
+    manifest_json: str = Field(default="{}", sa_column=Column(Text))
+    result_json: str = Field(default="{}", sa_column=Column(Text))
+    synthese_text: str = Field(default="", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class DealEvent(SQLModel, table=True):
     __tablename__ = "deal_events"
     id: Optional[int] = Field(default=None, primary_key=True)

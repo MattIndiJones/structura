@@ -614,6 +614,19 @@ def load_study_data(folder: str, files: Dict) -> dict:
         composition.get("currency", "USD"),
     )
 
+    # Def.txt's own `weight`/`value_prod` fields are unreliable — cross-checked
+    # against the issuer's own published factsheet on CH1352587724 and found stale
+    # (e.g. 33.78% reported for a position independently confirmed to be ~4%).
+    # `position` (share count) has proven accurate in every check; recompute the
+    # dollar value and weight from it directly using a real fetched mark instead.
+    total_aum = composition.get("total_aum") or 0.0
+    for c in composition["components"]:
+        mark = composition["marks"].get(c["isin"])
+        if mark is not None and c.get("position") is not None:
+            c["value_prod"] = c["position"] * mark
+            if total_aum:
+                c["weight"] = c["value_prod"] / total_aum
+
     return {
         "composition": composition,
         "nav": nav,

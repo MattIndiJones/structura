@@ -224,6 +224,34 @@
         <!-- ══════════════════════════════════════════════════════════ -->
         <template v-if="mainTab === 'study'">
 
+        <!-- Études sauvegardées -->
+        <div class="card" v-if="savedStudies.length || savedStudiesLoading">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Études sauvegardées</h3>
+            <button class="text-[10px] text-slate-500 hover:text-slate-300" @click="fetchSavedStudies">↻</button>
+          </div>
+          <div v-if="savedStudiesLoading" class="text-xs text-slate-600">Chargement…</div>
+          <ul v-else class="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+            <li v-for="s in savedStudies" :key="s.id"
+              class="flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded border border-slate-800 hover:border-emerald-700 transition-colors">
+              <div class="min-w-0">
+                <div class="text-slate-300 truncate">{{ s.label }}</div>
+                <div class="text-[10px] text-slate-600 font-mono">{{ s.isin }} · {{ new Date(s.updated_at).toLocaleDateString('fr-FR') }}</div>
+              </div>
+              <div class="flex items-center gap-1 shrink-0">
+                <button @click="loadStudyById(s.id)" :disabled="loadStudyLoadingId === s.id"
+                  title="Charger"
+                  class="w-6 h-6 flex items-center justify-center rounded border border-emerald-800 text-emerald-400 hover:border-emerald-500 hover:text-emerald-300 transition-colors">
+                  <span v-if="loadStudyLoadingId === s.id" class="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin"></span>
+                  <span v-else>↩</span>
+                </button>
+                <button @click="deleteStudy(s.id)" title="Supprimer"
+                  class="w-6 h-6 flex items-center justify-center rounded text-slate-600 hover:text-red-400 transition-colors">✕</button>
+              </div>
+            </li>
+          </ul>
+        </div>
+
         <!-- FF Series étude -->
         <div class="card">
           <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">1. Série Fama-French</h3>
@@ -356,12 +384,31 @@
             </div>
 
             <div class="bg-slate-900 rounded p-2 text-xs space-y-2">
-              <div>
-                <label class="text-slate-500 block mb-0.5">Frais de gestion (% p.a.)</label>
-                <input type="number" step="0.1" min="0" max="5"
-                  :value="manifestData.manifest?.params?.management_fee_pct || ''"
-                  @input="manifestData.manifest.params.management_fee_pct = parseFloat($event.target.value) || null"
-                  class="input text-xs w-full" placeholder="ex: 1.2" />
+              <div class="grid grid-cols-3 gap-2">
+                <div>
+                  <label class="text-slate-500 block mb-0.5">Frais gestion (% p.a.)</label>
+                  <input type="number" step="0.1" min="0" max="5"
+                    :value="manifestData.manifest?.params?.management_fee_pct || ''"
+                    @input="manifestData.manifest.params.management_fee_pct = parseFloat($event.target.value) || null"
+                    class="input text-xs w-full" placeholder="ex: 0.75" />
+                </div>
+                <div>
+                  <label class="text-slate-500 block mb-0.5">Frais perf. (% HWM)</label>
+                  <input type="number" step="0.1" min="0" max="30"
+                    :value="manifestData.manifest?.params?.perf_fee_pct || ''"
+                    @input="manifestData.manifest.params.perf_fee_pct = parseFloat($event.target.value) || null"
+                    class="input text-xs w-full" placeholder="ex: 10" />
+                </div>
+                <div>
+                  <label class="text-slate-500 block mb-0.5">Coût transac. (%)</label>
+                  <input type="number" step="0.01" min="0" max="2"
+                    :value="manifestData.manifest?.params?.txn_cost_pct || ''"
+                    @input="manifestData.manifest.params.txn_cost_pct = parseFloat($event.target.value) || null"
+                    class="input text-xs w-full" placeholder="ex: 0.10" />
+                </div>
+              </div>
+              <div class="text-[10px] text-slate-600 leading-relaxed">
+                Frais de performance : prélevés quotidiennement sur chaque nouveau plus-haut historique de la NAV (High Water Mark), pas annuellement. Coût de transaction : % du notionnel à chaque rebalancement (achat/vente carnet).
               </div>
 
               <!-- FIFO mode selector -->
@@ -484,18 +531,6 @@
               {{ studyPdfSimpleLoading ? 'Génération…' : 'PDF simplifié (sans annexes)' }}
             </button>
           </div>
-
-          <!-- Load saved study -->
-          <template v-if="!studyResult && manifestData && savedStudyMeta()">
-            <div class="border-t border-slate-800 mt-3 pt-3">
-              <div class="text-[10px] text-slate-500 mb-1">Étude sauvegardée détectée :</div>
-              <div class="text-[10px] text-slate-400 font-mono mb-2">{{ savedStudyMeta()?.result?.meta?.isin }}</div>
-              <button @click="loadSavedStudy"
-                class="w-full text-xs py-2 rounded-lg border border-emerald-800 text-emerald-400 hover:border-emerald-500 hover:text-emerald-300 flex items-center justify-center gap-2 transition-colors">
-                ↩ Charger l'étude sauvegardée
-              </button>
-            </div>
-          </template>
         </div>
 
         </template><!-- /MODE ÉTUDE -->
@@ -1111,16 +1146,18 @@
                     placeholder="Rédigez ici votre synthèse sur la gestion, le positionnement, les points clés de l'analyse…"
                     class="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm text-slate-200 placeholder-slate-600 resize-y focus:outline-none focus:border-blue-500 leading-relaxed font-sans"></textarea>
                   <div class="flex items-center gap-3">
-                    <button @click="saveStudy"
-                      class="flex-1 py-2 px-4 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-2">
-                      💾 Sauvegarder l'étude complète
+                    <input v-model="saveLabel" type="text" placeholder="Nom de la sauvegarde (optionnel)"
+                      class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500" />
+                    <button @click="saveStudy" :disabled="saveLoading"
+                      class="py-2 px-4 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 shrink-0">
+                      <span v-if="saveLoading" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      <span v-else>💾</span>
+                      {{ saveLoading ? 'Sauvegarde…' : "Sauvegarder l'étude" }}
                     </button>
-                    <div v-if="savedStudyMeta()" class="text-[10px] text-slate-500 shrink-0">
-                      Dernière sauvegarde :<br>{{ new Date(savedStudyMeta().savedAt).toLocaleString('fr-FR') }}
-                    </div>
                   </div>
-                  <div v-if="savedStudyMeta()" class="text-[10px] text-slate-600 border-t border-slate-800 pt-3">
-                    Une étude sauvegardée existe pour cet ISIN. Le bouton "Charger" dans le panneau gauche permet de la recharger sans relancer l'analyse.
+                  <div v-if="saveError" class="text-[10px] text-red-400">{{ saveError }}</div>
+                  <div class="text-[10px] text-slate-600 border-t border-slate-800 pt-3">
+                    Chaque sauvegarde crée une nouvelle entrée (historique conservé). Retrouvez-les dans "Études sauvegardées" en haut du panneau gauche, ou depuis l'accueil.
                   </div>
                 </div>
 
@@ -2051,6 +2088,62 @@
                     <div class="text-base font-bold" :class="cls">
                       <SensitiveValue v-if="isSensitiveAmt(label)">{{ val }}</SensitiveValue>
                       <template v-else>{{ val }}</template>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="studyResult.block_b.totals?.reconciliation" class="card">
+                  <div class="flex items-center justify-between mb-3">
+                    <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Réconciliation NAV</div>
+                    <div class="text-[10px] text-slate-600 font-mono">as of {{ studyResult.block_b.totals.reconciliation.as_of }}</div>
+                  </div>
+                  <div class="grid grid-cols-5 gap-2">
+                    <div v-for="([label, val, cls, tip]) in [
+                      ['P&L FIFO (brut)', fmtPnl(studyResult.block_b.totals?.total_pnl, studyResult.meta?.currency), 'text-slate-200',
+                        'P&L total reconstruit par le FIFO, brut de frais de gestion.'],
+                      ['Frais cumulés (est.)', fmtPnl(studyResult.block_b.totals?.fee_drag_prod, studyResult.meta?.currency), 'text-red-300',
+                        'Frais de gestion estimés (accrual quotidien sur l\'AUM, au taux du termsheet) cumulés depuis la date de fixing jusqu\'à la date du dernier ordre du carnet.'],
+                      ['P&L net estimé', fmtPnl(studyResult.block_b.totals?.total_pnl_net_of_fees, studyResult.meta?.currency), 'text-slate-200',
+                        'P&L FIFO brut moins les frais de gestion cumulés estimés — comparable à la performance NAV publiée.'],
+                      ['P&L implicite NAV', fmtPnl(studyResult.block_b.totals.reconciliation.nav_implied_pnl_prod, studyResult.meta?.currency), 'text-emerald-400',
+                        'P&L réel du fonds calculé directement depuis la NAV quotidienne et les flux de souscription/rachat (Δ Outstanding × NAV à chaque mouvement). Indépendant du carnet d\'ordres et du FIFO.'],
+                      ['Écart résiduel', studyResult.block_b.totals.reconciliation.gap_pct != null ? (studyResult.block_b.totals.reconciliation.gap_pct >= 0 ? '+' : '') + studyResult.block_b.totals.reconciliation.gap_pct.toFixed(1) + '%' : '—',
+                        Math.abs(studyResult.block_b.totals.reconciliation.gap_pct || 0) > 15 ? 'text-amber-400' : 'text-emerald-400',
+                        'Écart entre le P&L net estimé et le P&L implicite NAV, en % du P&L implicite NAV. Un écart résiduel traduit des opérations sur titre non résolues, un cash drag non modélisé, ou des différences de source de valorisation (yfinance vs valorisateur du fonds).'],
+                    ]" :key="label" class="bg-slate-800/60 rounded-lg p-3 text-center">
+                      <div class="text-[10px] text-slate-500 mb-1 flex items-center justify-center gap-1">{{ label }}
+                        <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help shrink-0">?<span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-60 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">{{ tip }}</span></span>
+                      </div>
+                      <div class="text-sm font-bold" :class="cls">
+                        <SensitiveValue>{{ val }}</SensitiveValue>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="!studyResult.block_b.totals?.fee_drag_prod" class="text-[10px] text-amber-500/80 mt-3">
+                    ⚠ Aucun frais renseigné (params.management_fee_pct / perf_fee_pct / txn_cost_pct dans le manifest) — le P&L net estimé n'inclut aucun add-back de frais, l'écart résiduel affiché est donc probablement surestimé.
+                  </div>
+
+                  <div v-if="studyResult.block_b.totals?.reconciliation?.fee_breakdown" class="mt-3 pt-3 border-t border-slate-800">
+                    <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Décomposition des frais</div>
+                    <div class="grid grid-cols-3 gap-2">
+                      <div v-for="([label, val, tip]) in [
+                        ['Gestion (' + (studyResult.block_b.totals.reconciliation.fee_breakdown.management_fee_pct ?? '—') + '% p.a.)',
+                          studyResult.block_b.totals.reconciliation.fee_breakdown.management_fee_prod,
+                          'Accrual quotidien sur l\'AUM (taux annuel ÷ 252), cumulé sur toute la période.'],
+                        ['Performance (' + (studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_pct ?? '—') + '% HWM' + (studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_events != null ? ', ' + studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_events + ' plus-hauts' : '') + ')',
+                          studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_prod,
+                          'Prélevé uniquement les jours où la NAV atteint un nouveau plus haut historique — 10% du gain brut ce jour-là, pas un accrual continu. Plus haut final atteint : ' + (studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_hwm_final ?? '—') + '.'],
+                        ['Transaction (' + (studyResult.block_b.totals.reconciliation.fee_breakdown.transaction_cost_pct ?? '—') + '% notionnel)',
+                          studyResult.block_b.totals.reconciliation.fee_breakdown.transaction_cost_prod,
+                          'Coût appliqué au notionnel de chaque ordre du carnet (achat et vente), à chaque rebalancement.'],
+                      ]" :key="label" class="bg-slate-800/40 rounded-lg p-2.5 text-center">
+                        <div class="text-[9px] text-slate-500 mb-1 flex items-center justify-center gap-1">{{ label }}
+                          <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help shrink-0">?<span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-60 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">{{ tip }}</span></span>
+                        </div>
+                        <div class="text-xs font-bold" :class="val ? 'text-red-300' : 'text-slate-600'">
+                          <SensitiveValue>{{ val ? fmtPnl(val, studyResult.meta?.currency) : 'non renseigné' }}</SensitiveValue>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -4129,7 +4222,7 @@
 
 <script setup>
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { Chart, registerables } from 'chart.js'
 import { apiFetch } from '../utils/api.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
@@ -4531,6 +4624,7 @@ const studyMode       = ref(false)       // switch between FF-only and full stud
 const studyFolder     = ref('')          // absolute path on the server
 const manifestData    = ref(null)        // pre-filled manifest from detect or template
 const studyResult     = ref(null)        // run_study() output
+const lastRunManifest = ref(null)        // exact manifest sent to /study/run (for save/reload)
 const showTsEditor    = ref(false)
 const tsEditorError   = ref('')
 const tsEditorJson    = ref('')
@@ -4838,39 +4932,94 @@ const momFactor = computed(() =>
   studyResult.value?.block_a?.net?.regression?.factors?.find(f => f.name === 'MOM') ?? null
 )
 
-function _studyStorageKey() {
-  const isin = studyResult.value?.meta?.isin || manifestData.value?.product?.isin
-  return 'structura_study_' + (isin || 'unknown')
-}
+// ── Saved studies (server-backed, multiple versions per ISIN) ─────────
+const savedStudies        = ref([])    // GET /api/amc/studies — most recent first
+const savedStudiesLoading = ref(false)
+const saveLabel           = ref('')
+const saveLoading         = ref(false)
+const saveError           = ref('')
+const loadStudyLoadingId  = ref(null)  // id currently being loaded, for spinner
 
-function saveStudy() {
-  const key = _studyStorageKey()
-  localStorage.setItem(key, JSON.stringify({
-    result: studyResult.value,
-    synthese: syntheseText.value,
-    savedAt: new Date().toISOString(),
-  }))
-}
-
-function hasSavedStudy() {
-  return !!localStorage.getItem(_studyStorageKey())
-}
-
-function loadSavedStudy() {
-  const raw = localStorage.getItem(_studyStorageKey())
-  if (!raw) return
+async function fetchSavedStudies() {
+  savedStudiesLoading.value = true
   try {
-    const data = JSON.parse(raw)
-    if (data.result) studyResult.value = data.result
-    syntheseText.value = data.synthese || ''
-    activeStudyTab.value = 'synthese'
-  } catch { /* ignore */ }
+    const res = await apiFetch('/api/amc/studies')
+    if (res.ok) savedStudies.value = await res.json()
+  } catch { /* ignore */ } finally {
+    savedStudiesLoading.value = false
+  }
 }
 
-function savedStudyMeta() {
-  const raw = localStorage.getItem(_studyStorageKey())
-  if (!raw) return null
-  try { return JSON.parse(raw) } catch { return null }
+async function saveStudy() {
+  if (!studyResult.value) return
+  saveLoading.value = true
+  saveError.value = ''
+  try {
+    const res = await apiFetch('/api/amc/studies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        isin:         studyResult.value?.meta?.isin || '',
+        product_name: studyResult.value?.meta?.product_name || '',
+        label:        saveLabel.value.trim(),
+        folder:       studyFolder.value,
+        manifest:     lastRunManifest.value || manifestData.value?.manifest || {},
+        result:       studyResult.value,
+        synthese:     syntheseText.value,
+      }),
+    })
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || `Erreur ${res.status}`) }
+    saveLabel.value = ''
+    await fetchSavedStudies()
+  } catch (e) {
+    saveError.value = `Sauvegarde : ${e.message}`
+  } finally {
+    saveLoading.value = false
+  }
+}
+
+async function loadStudyById(id) {
+  if (!id) return
+  loadStudyLoadingId.value = id
+  studyError.value = ''
+  try {
+    const res = await apiFetch(`/api/amc/studies/${id}`)
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || `Erreur ${res.status}`) }
+    const data = await res.json()
+    mainTab.value          = 'study'
+    studyFolder.value      = data.folder || ''
+    manifestData.value     = { manifest: data.manifest }
+    lastRunManifest.value  = data.manifest
+    studyResult.value      = data.result
+    syntheseText.value     = data.synthese || ''
+    activeStudyTab.value   = 'meta'
+    studyRollingVisible.value = data.result?.block_a?.net?.factors_used?.slice(0, 3) || []
+    brinsonResult.value    = null
+    attrResult.value       = null
+    priceStatusList.value  = []
+    const p = data.manifest?.params
+    if (p) {
+      studyConfig.value = {
+        ff_series:        p.ff_series        ?? studyConfig.value.ff_series,
+        selected_factors: p.selected_factors ?? studyConfig.value.selected_factors,
+        benchmark_ticker: p.benchmark_ticker ?? studyConfig.value.benchmark_ticker,
+        rolling_window:   p.rolling_window   ?? studyConfig.value.rolling_window,
+      }
+    }
+    loadPriceStatus()
+  } catch (e) {
+    studyError.value = `Chargement étude : ${e.message}`
+  } finally {
+    loadStudyLoadingId.value = null
+  }
+}
+
+async function deleteStudy(id) {
+  if (!confirm('Supprimer cette étude sauvegardée ?')) return
+  try {
+    await apiFetch(`/api/amc/studies/${id}`, { method: 'DELETE' })
+    await fetchSavedStudies()
+  } catch { /* ignore */ }
 }
 
 async function loadPriceStatus() {
@@ -5078,6 +5227,7 @@ async function runStudy() {
         rolling_window:   studyConfig.value.rolling_window,
       },
     }
+    lastRunManifest.value = manifestToSend
     const res = await apiFetch('/api/amc/study/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -5230,6 +5380,13 @@ function fmtPnl(v, ccy) {
 }
 
 loadStudyDoc()
+fetchSavedStudies()
+
+// Deep-link from the Home "load a study" module: /amc?study_id=123
+const route = useRoute()
+if (route.query.study_id) {
+  loadStudyById(Number(route.query.study_id))
+}
 
 // Rebuild charts when switching to performance or facteurs tab
 watch(activeTab, async (tab) => {

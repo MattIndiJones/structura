@@ -9,11 +9,15 @@ without sinking the whole study.
 """
 from __future__ import annotations
 
+import glob
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from .amc_manifest import StudyManifest, BLOCK_CATALOG
-from .amc_orderbook import load_study_data, reconstruct
+from .amc_orderbook import load_study_data
+from .amc_fifo_adapter import fifo_to_legacy_recon
 from .amc_blocks import block_b_attribution, block_c_trading, block_d_behaviour
+from .fifo.pipeline import run_fifo_recon
 from .amc_confidence import build_confidence
 from .amc_replicability import compute_replicability
 from .amc_timing import compute_timing_score
@@ -31,6 +35,28 @@ _FACTOR_SETS = {
 }
 
 
+def _resolve_order_files(folder: str, names: list[str]) -> Optional[List[str]]:
+    """Resolve manifest-listed order files against the study folder.
+
+    Mirrors amc_orderbook.load_study_data()'s _resolve() so a manifest edited
+    to include/exclude specific carnet files is honoured by the FIFO pipeline
+    too, instead of it silently re-globbing the folder from scratch.
+    """
+    if not names:
+        return None
+    base = Path(folder)
+    resolved = []
+    for name in names:
+        p = base / name
+        if p.exists():
+            resolved.append(str(p))
+            continue
+        hits = glob.glob(str(base / name))
+        if hits:
+            resolved.append(hits[0])
+    return resolved or None
+
+
 def run_study(manifest_dict: dict, folder: str) -> dict:
     """Run the full (or partial) study described by the manifest over `folder`."""
     manifest = StudyManifest(**manifest_dict)
@@ -43,13 +69,21 @@ def run_study(manifest_dict: dict, folder: str) -> dict:
     nav = data["nav"]
     as_of = data["as_of"]
 
-    recon = reconstruct(
-        orders, composition["marks"], composition["components"], as_of,
+    prod_ccy = composition.get("currency") or "USD"
+    # qty_mode is always "shares": the T0 basket formula (n_certs × weight% × NAV /
+    # real_market_price) already cancels out whatever unit the term sheet's qty_per_cert
+    # was expressed in (shares or accounting units) — confirmed on CH1352587724 by
+    # cross-checking against the LUKB factsheet. A separate "cert_units" carnet mode
+    # would only matter if the carnet itself recorded accounting-unit trades, which
+    # isn't the case for any fund studied so far (carnets are real share executions).
+    fifo_result, carnet_orders, fifo_meta = run_fifo_recon(
+        folder,
+        qty_mode="shares",
         recon_mode=manifest.params.recon_mode,
-        nav_start_date=nav[0]["date"] if nav else None,
-        prod_ccy=composition.get("currency", ""),
-        termsheet_positions=[p.model_dump() for p in manifest.params.termsheet_positions],
+        prod_ccy=prod_ccy,
+        order_files=_resolve_order_files(folder, manifest.files.orders),
     )
+    recon = fifo_to_legacy_recon(fifo_result, carnet_orders, as_of, prod_ccy)
 
     # NAV history helpers
     nav_first = nav[0] if nav else None
@@ -90,6 +124,8 @@ def run_study(manifest_dict: dict, folder: str) -> dict:
             "blocks_run":     sorted(enabled),
             # Study folder — embedded so downstream tools (VAG) can load raw files
             "folder":         folder,
+            # FIFO pipeline diagnostics (T0 fixing, ISIN aliases, injected orders)
+            "fifo":           fifo_meta,
         },
         "block_catalog": BLOCK_CATALOG,
         "warnings": list(recon.warnings),
@@ -120,7 +156,14 @@ def run_study(manifest_dict: dict, folder: str) -> dict:
 
     # ── Bloc B — attribution ──
     if toggles.B_attribution:
-        result["block_b"] = block_b_attribution(recon, composition)
+        result["block_b"] = block_b_attribution(
+            recon, composition, nav=nav,
+            management_fee_pct=manifest.params.management_fee_pct,
+            fifo_as_of=fifo_meta.get("as_of"),
+            perf_fee_pct=manifest.params.perf_fee_pct,
+            txn_cost_pct=manifest.params.txn_cost_pct,
+            carnet_orders=carnet_orders,
+        )
         _add_concentration_warnings(result)
 
     # ── Bloc C — trading ──

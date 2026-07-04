@@ -16,6 +16,8 @@ from .api.kid import router as kid_router
 from .api.documents import router as documents_router
 from .api.amc import router as amc_router
 from .api.amc_prices import router as amc_prices_router
+from .api.amc_studies import router as amc_studies_router
+from .api.fifo import router as fifo_router
 from .db.database import init_db
 
 app = FastAPI(
@@ -44,6 +46,8 @@ app.include_router(kid_router)
 app.include_router(documents_router)
 app.include_router(amc_router)
 app.include_router(amc_prices_router)
+app.include_router(amc_studies_router)
+app.include_router(fifo_router)
 app.include_router(pricing_router)
 app.include_router(market_data_router)
 app.include_router(simulation_router)
