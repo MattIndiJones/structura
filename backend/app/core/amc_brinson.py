@@ -268,14 +268,18 @@ def compute_brinson(
     bench_sector_returns = _get_sector_etf_returns(period_start, period_end)
 
     # If benchmark return is unavailable, estimate from sector ETF returns
-    # weighted by benchmark sector weights — best available proxy.
+    # weighted by benchmark sector weights — best available proxy. Only
+    # sectors with BOTH a weight and an available ETF return are summed;
+    # the weights are renormalized over that subset so a missing/failed
+    # sector ETF download is excluded rather than silently scored as 0%.
     _bench_return_estimated = False
     if bench_return_raw is None:
-        if bench_sector_returns and bench_weights:
+        covered = {s: w for s, w in bench_weights.items() if s in bench_sector_returns}
+        w_sum = sum(covered.values())
+        if covered and w_sum > 1e-9:
             bench_return_raw = sum(
-                bench_weights.get(s, 0) * bench_sector_returns.get(s, 0)
-                for s in bench_weights
-            )
+                w * bench_sector_returns[s] for s, w in covered.items()
+            ) / w_sum
             _bench_return_estimated = True
         else:
             bench_return_raw = 0.0

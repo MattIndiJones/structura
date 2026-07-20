@@ -11,21 +11,29 @@
     <template v-else>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
         <div>
-          <label class="label">Paramètre à résoudre</label>
+          <label class="label">Paramètre à résoudre
+            <HelpTip text="Le PARAM du script dont on cherche la valeur — un seul à la fois. Le solveur relance un pricing MC complet à chaque itération en ne faisant varier que celui-ci, tous les autres restent à leur valeur courante." />
+          </label>
           <select v-model="form.param_name" class="select" @change="prefillBounds">
             <option v-for="p in store.scriptParams" :key="p.name" :value="p.name">{{ p.name }}</option>
           </select>
         </div>
         <div>
-          <label class="label">Prix cible (%)</label>
+          <label class="label">Prix cible (%)
+            <HelpTip text="Le prix (% du notionnel) que le solveur cherche à atteindre en ajustant le paramètre — typiquement 100% pour trouver le coupon/la barrière qui rend le produit 'zéro-coût' à l'émission." />
+          </label>
           <SensitiveValue mode="input"><input v-model.number="form.target_price_pct" type="number" step="0.5" class="input" /></SensitiveValue>
         </div>
         <div>
-          <label class="label">Borne basse{{ unitSuffix }}</label>
+          <label class="label">Borne basse{{ unitSuffix }}
+            <HelpTip text="Borne inférieure de la recherche (méthode de bissection — il faut que la solution soit encadrée). Si le solveur répond 'non bracketé', élargissez cette borne : le prix cible n'est atteignable dans aucune valeur de l'intervalle actuel." />
+          </label>
           <SensitiveValue mode="input"><input v-model.number="form.lo" type="number" step="0.1" class="input" /></SensitiveValue>
         </div>
         <div>
-          <label class="label">Borne haute{{ unitSuffix }}</label>
+          <label class="label">Borne haute{{ unitSuffix }}
+            <HelpTip text="Borne supérieure de la recherche — même logique que la borne basse. Les deux bornes sont pré-remplies à 0,5x/1,5x la valeur par défaut du paramètre, à ajuster si le prix cible sort de cette plage." />
+          </label>
           <SensitiveValue mode="input"><input v-model.number="form.hi" type="number" step="0.1" class="input" /></SensitiveValue>
         </div>
       </div>
@@ -34,15 +42,21 @@
         <summary class="text-xs text-slate-500 cursor-pointer hover:text-slate-300">Options avancées</summary>
         <div class="grid grid-cols-3 gap-3 text-xs mt-2">
           <div>
-            <label class="label">N chemins</label>
+            <label class="label">N chemins
+              <HelpTip text="Nombre de chemins Monte Carlo utilisés à CHAQUE itération du solveur — un seul réglage global, pas un raffinement progressif. Plus il est bas, plus le solveur est rapide mais plus le bruit MC peut le faire osciller ou stagner avant convergence." />
+            </label>
             <SensitiveValue mode="input"><input v-model.number="form.N" type="number" step="1000" min="1000" max="50000" class="input" /></SensitiveValue>
           </div>
           <div>
-            <label class="label">Tolérance (prix)</label>
+            <label class="label">Tolérance (prix)
+              <HelpTip text="Écart de prix (en fraction du notionnel) en-dessous duquel le solveur considère avoir convergé et s'arrête. Trop serré par rapport au bruit MC (voir N chemins) et le solveur n'atteindra jamais la tolérance avant max_iter." />
+            </label>
             <input v-model.number="form.tol" type="number" step="0.0001" class="input" />
           </div>
           <div>
-            <label class="label">Itérations max</label>
+            <label class="label">Itérations max
+              <HelpTip text="Nombre maximum d'itérations de bissection avant abandon, même si la tolérance n'est pas atteinte — un garde-fou, pas un objectif à viser." />
+            </label>
             <input v-model.number="form.max_iter" type="number" step="1" min="5" max="100" class="input" />
           </div>
         </div>
@@ -66,15 +80,21 @@
             <div class="text-xl font-bold text-blue-400"><SensitiveValue>{{ displaySolved }}</SensitiveValue></div>
           </div>
           <div class="stat-box min-w-28">
-            <div class="text-xs text-slate-500 mb-1">Prix atteint</div>
+            <div class="text-xs text-slate-500 mb-1">Prix atteint
+              <HelpTip text="Prix effectivement obtenu avec la valeur résolue du paramètre — à comparer au prix cible. Un écart résiduel est normal si la tolérance ou N chemins sont larges." />
+            </div>
             <div class="text-lg font-bold text-slate-200"><SensitiveValue>{{ (store.solver.achieved_price * 100).toFixed(3) }}%</SensitiveValue></div>
           </div>
           <div class="stat-box min-w-28">
-            <div class="text-xs text-slate-500 mb-1">Itérations</div>
+            <div class="text-xs text-slate-500 mb-1">Itérations
+              <HelpTip text="Nombre d'évaluations de pricing effectuées par la bissection avant arrêt (convergence ou max_iter atteint)." />
+            </div>
             <div class="text-lg font-bold text-slate-300">{{ store.solver.iterations }}</div>
           </div>
           <div class="stat-box min-w-28">
-            <div class="text-xs text-slate-500 mb-1">Convergence</div>
+            <div class="text-xs text-slate-500 mb-1">Convergence
+              <HelpTip text="Oui si l'écart au prix cible est passé sous la tolérance avant max_iter. Non signifie que le résultat affiché est la meilleure approximation trouvée, pas une solution exacte — vérifiez le message d'avertissement." />
+            </div>
             <div class="text-lg font-bold" :class="store.solver.converged ? 'text-green-400' : 'text-red-400'">
               {{ store.solver.converged ? '✓ Oui' : '✗ Non' }}
             </div>
@@ -100,6 +120,7 @@ import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
+import HelpTip from './HelpTip.vue'
 import {
   Chart, LineElement, LineController, PointElement,
   CategoryScale, LinearScale, Tooltip, Legend,

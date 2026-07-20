@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="flex flex-col gap-4">
 
     <!-- Toolbar -->
@@ -16,28 +16,12 @@
           @click="expertMode = true"
         >Expert</button>
       </div>
+      <HelpTip width="w-72" text="Normal : dates AT écrites en dur (AT 1, 2, 3). Expert : calendrier CONSTAT() généré (start/end/roll/fréquence/stub), pratique pour des échéanciers réguliers longs sans lister chaque date à la main, et pour rejouer un calendrier réel avec jours fériés/roll gérés proprement. Change seulement les templates chargés — ne convertit pas le script actuellement en cours d'édition." />
 
       <select class="select text-xs w-auto" @change="loadExample($event.target.value); $event.target.value=''">
         <option value="">{{ expertMode ? 'Exemples (expert)…' : 'Exemples…' }}</option>
-        <optgroup label="Autocall">
-          <option value="autocall_athena">Autocall Athena 3Y</option>
-          <option value="autocall_phoenix">Phoenix 3Y (coupon conditionnel)</option>
-          <option value="autocall_worst_of">Worst-of Athena 2 actifs</option>
-        </optgroup>
-        <optgroup label="Options">
-          <option value="call_vanilla">Call Vanille</option>
-          <option value="put_vanilla">Put Vanille</option>
-          <option value="call_spread">Call Spread</option>
-          <option value="digital">Digital (binaire)</option>
-        </optgroup>
-        <optgroup label="Produits à capital">
-          <option value="capital_garanti">Capital Garanti 5Y</option>
-          <option value="reverse_convertible">Reverse Convertible</option>
-          <option value="twin_win">Twin Win</option>
-          <option value="booster">Booster 3Y</option>
-        </optgroup>
-        <optgroup label="Validation">
-          <option value="zcb">ZCB (test actualisation)</option>
+        <optgroup v-for="(items, group) in groupedTemplates" :key="group" :label="group">
+          <option v-for="t in items" :key="t.key" :value="t.key">{{ t.label }}</option>
         </optgroup>
       </select>
 
@@ -132,11 +116,43 @@
 
     <!-- Dynamic PARAM inputs -->
     <div v-if="store.scriptParams.length > 0" class="card">
-      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Paramètres du script</div>
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Paramètres du script
+        <HelpTip text="Détectés automatiquement depuis les lignes PARAM du script (parsing à chaque modification). Les valeurs saisies ici surchargent les valeurs par défaut du script pour le pricing courant, sans modifier le texte du script lui-même." />
+      </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <div v-for="p in store.scriptParams" :key="p.name" class="flex flex-col gap-1">
-          <label class="label">{{ p.name }}</label>
-          <SensitiveValue mode="input">
+        <div v-for="p in store.scriptParams" :key="p.name" class="flex flex-col gap-1"
+          :class="p.kind === 'array' ? 'col-span-2 sm:col-span-1' : ''">
+          <label class="label">{{ p.name }}
+            <span v-if="p.kind === 'array'" class="text-slate-600 font-normal normal-case">
+              (par observation)
+              <HelpTip text="Une valeur par observation, dans l'ordre des dates AT. La dernière ligne s'étend aux observations suivantes — une seule ligne = valeur constante. Une ligne en trop est ignorée." />
+            </span>
+          </label>
+
+          <!-- PARAM() : une ligne par observation -->
+          <template v-if="p.kind === 'array'">
+            <div v-for="(v, ri) in store.paramOverrides[p.name]" :key="ri"
+              class="flex items-center gap-1.5">
+              <span class="text-[10px] text-slate-600 font-mono w-9 shrink-0">Obs {{ ri + 1 }}</span>
+              <SensitiveValue mode="input">
+                <div class="relative flex-1">
+                  <input type="number" class="input pr-7 text-xs py-1" step="any"
+                    v-model.number="store.paramOverrides[p.name][ri]" />
+                  <span v-if="p.is_pct" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">%</span>
+                </div>
+              </SensitiveValue>
+              <button v-if="store.paramOverrides[p.name].length > 1"
+                class="text-slate-600 hover:text-red-400 text-xs shrink-0"
+                @click="store.paramOverrides[p.name].splice(ri, 1)">✕</button>
+            </div>
+            <button class="text-xs text-blue-400 hover:underline self-start"
+              @click="store.paramOverrides[p.name].push(store.paramOverrides[p.name].at(-1) ?? p.display_default)">
+              + Ajouter une observation
+            </button>
+          </template>
+
+          <!-- PARAM scalaire -->
+          <SensitiveValue v-else mode="input">
             <div class="relative">
               <input
                 :id="`param-${p.name}`"
@@ -153,96 +169,21 @@
       </div>
     </div>
 
-    <!-- Dynamic CONSTAT inputs (mode expert — calendrier) -->
+    <!-- Rappel calendrier (mode expert — CONSTAT) — édition dans l'onglet Deal -->
     <div v-if="store.scriptConstats.length > 0" class="card">
-      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Calendrier du script (CONSTAT)</div>
-      <div class="flex flex-col gap-3">
-        <div v-for="c in store.scriptConstats" :key="c.name"
-             class="bg-slate-800/60 border border-slate-700 rounded-lg p-3">
-          <div class="text-xs font-semibold text-slate-300 mb-2">{{ c.name }}</div>
-
-          <!-- CONSTAT : une date unique -->
-          <div v-if="c.kind === 'single'" class="text-xs max-w-xs">
-            <label class="label">Date</label>
-            <SensitiveValue mode="input">
-              <input type="date" v-model="store.constatOverrides[c.name]" class="input" />
-            </SensitiveValue>
-          </div>
-
-          <!-- CONSTAT() / CONSTAT()() -->
-          <div v-else class="flex flex-wrap gap-4 text-xs items-start">
-            <div class="flex flex-col gap-2 min-w-[160px]">
-              <div>
-                <label class="label">Date de début</label>
-                <SensitiveValue mode="input">
-                  <input type="date" v-model="store.constatOverrides[c.name].start_date" class="input" />
-                </SensitiveValue>
-              </div>
-              <div>
-                <label class="label">Date de fin</label>
-                <SensitiveValue mode="input">
-                  <input type="date" v-model="store.constatOverrides[c.name].end_date" class="input" />
-                </SensitiveValue>
-              </div>
-              <div>
-                <label class="label">Date de roll</label>
-                <SensitiveValue mode="input">
-                  <input type="date" v-model="store.constatOverrides[c.name].roll_date" class="input" />
-                </SensitiveValue>
-              </div>
-            </div>
-            <div class="flex flex-col gap-2 w-36 shrink-0">
-              <div>
-                <label class="label">Fréquence</label>
-                <div class="flex gap-1">
-                  <input type="number" min="1" v-model.number="store.constatOverrides[c.name].frequency.value"
-                         class="input w-14" />
-                  <select v-model="store.constatOverrides[c.name].frequency.unit" class="select">
-                    <option value="D">D</option>
-                    <option value="M">M</option>
-                    <option value="Y">Y</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label class="label">Stub</label>
-                <select v-model="store.constatOverrides[c.name].stub" class="select">
-                  <option value="short_last">Short Last</option>
-                  <option value="long_last">Long Last</option>
-                  <option value="short_first">Short First</option>
-                  <option value="long_first">Long First</option>
-                </select>
-              </div>
-              <div v-if="c.kind === 'nested_schedule'">
-                <label class="label">Sous-fréq.</label>
-                <div class="flex gap-1">
-                  <input type="number" min="1" v-model.number="store.constatOverrides[c.name].sub_frequency.value"
-                         class="input w-14" />
-                  <select v-model="store.constatOverrides[c.name].sub_frequency.unit" class="select">
-                    <option value="D">D</option>
-                    <option value="M">M</option>
-                    <option value="Y">Y</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Aperçu calendrier -->
-          <div v-if="c.kind !== 'single'" class="mt-2 text-xs">
-            <button class="text-blue-400 hover:underline" @click="previewConstat(c.name)">
-              Aperçu du calendrier
-            </button>
-            <span v-if="previewErrors[c.name]" class="text-red-400 ml-2">⚠ {{ previewErrors[c.name] }}</span>
-            <span v-else-if="previews[c.name]" class="text-slate-500 ml-2">
-              <SensitiveValue>
-                — {{ previews[c.name].dates.length }} dates générées
-                ({{ previews[c.name].dates[0] }} → {{ previews[c.name].dates[previews[c.name].dates.length - 1] }})
-              </SensitiveValue>
-            </span>
-          </div>
-        </div>
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Calendrier du script (CONSTAT)
+        <HelpTip width="w-72" text="Les dates concrètes (début/fin/roll/fréquence) de chaque calendrier référencé ici se saisissent dans l'onglet Deal, à côté de l'aperçu des constatations — pas dans le script lui-même." />
       </div>
+      <div class="flex flex-wrap gap-2">
+        <span v-for="c in store.scriptConstats" :key="c.name"
+          class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono border"
+          :class="isConstatResolved(c) ? 'border-slate-700 text-slate-400' : 'border-amber-800/60 text-amber-400'">
+          {{ c.name }}
+          <span v-if="isConstatResolved(c)" class="text-emerald-500">✓</span>
+          <span v-else>⚠ non défini</span>
+        </span>
+      </div>
+      <p class="text-[10px] text-slate-600 mt-2">→ défini dans l'onglet Deal</p>
     </div>
 
     <!-- PayScript quick reference -->
@@ -262,11 +203,21 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick } from 'vue'
+import { ref, reactive, computed, nextTick } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import SensitiveValue from './SensitiveValue.vue'
+import HelpTip from './HelpTip.vue'
+import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
 
 const store = usePricingStore()
+
+const groupedTemplates = computed(() => {
+  const groups = {}
+  for (const t of templateMeta) {
+    (groups[t.group] ||= []).push(t)
+  }
+  return groups
+})
 let debounceTimer = null
 
 const expertMode = ref(false)
@@ -318,8 +269,12 @@ async function doSave() {
   }
 }
 
-const previews = reactive({})
-const previewErrors = reactive({})
+function isConstatResolved(c) {
+  const v = store.constatOverrides[c.name]
+  if (!v) return false
+  if (c.kind === 'single') return !!v
+  return !!(v.start_date && v.end_date)
+}
 
 // ── Date helpers ───────────────────────────────────────────────────
 function isoToday() {
@@ -332,298 +287,25 @@ function addYears(n) {
   return d.toISOString().slice(0, 10)
 }
 
-// ── Normal examples ────────────────────────────────────────────────
-const examples = {
-  autocall_athena: `# Autocall Athena 3 ans
-PARAM COUPON = 8%
-PARAM AC_BAR = 100%
-PARAM KI_BAR = 60%
-
-AT 1, 2, 3:
-  SET CALL = INDIC(WOF >= AC_BAR)
-  PAY CALL * COUPON * INDEX
-  PAY CALL * 1
-  IF CALL = 1:
-    STOP
-
-AT MATURITY:
-  SET KI = INDIC(WOF < KI_BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF`,
-
-  autocall_phoenix: `# Phoenix 3 ans — coupon conditionnel
-PARAM COUPON = 10%
-PARAM AC_BAR = 100%
-PARAM CPN_BAR = 80%
-PARAM KI_BAR = 60%
-
-AT 1, 2, 3:
-  SET CALL = INDIC(WOF >= AC_BAR)
-  SET CPN  = INDIC(WOF >= CPN_BAR)
-  PAY CPN * COUPON
-  PAY CALL * 1
-  IF CALL = 1:
-    STOP
-
-AT MATURITY:
-  SET KI = INDIC(WOF < KI_BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF`,
-
-  autocall_worst_of: `# Worst-of Athena 2 sous-jacents
-PARAM COUPON = 12%
-PARAM AC_BAR = 100%
-PARAM KI_BAR = 55%
-
-AT 1, 2, 3:
-  SET CALL = INDIC(WOF >= AC_BAR)
-  PAY CALL * COUPON * INDEX
-  PAY CALL * 1
-  IF CALL = 1:
-    STOP
-
-AT MATURITY:
-  SET KI = INDIC(WOF_MIN < KI_BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF`,
-
-  call_vanilla: `# Call Vanille
-PARAM STRIKE = 100%
-
-AT MATURITY:
-  PAY MAX(0, WOF - STRIKE)`,
-
-  put_vanilla: `# Put Vanille
-PARAM STRIKE = 100%
-
-AT MATURITY:
-  PAY MAX(0, STRIKE - WOF)`,
-
-  call_spread: `# Call Spread 100%-120%
-PARAM K1 = 100%
-PARAM K2 = 120%
-
-AT MATURITY:
-  PAY MAX(0, MIN(WOF - K1, K2 - K1))`,
-
-  digital: `# Digital (option binaire)
-PARAM STRIKE = 100%
-PARAM REBATE = 10%
-
-AT MATURITY:
-  SET ITM = INDIC(WOF >= STRIKE)
-  PAY ITM * REBATE`,
-
-  capital_garanti: `# Capital Garanti 5 ans
-PARAM PART = 80%
-PARAM STRIKE = 100%
-
-AT MATURITY:
-  PAY 1
-  PAY MAX(0, WOF - STRIKE) * PART`,
-
-  reverse_convertible: `# Reverse Convertible 1 an
-PARAM COUPON = 10%
-PARAM BAR = 80%
-
-AT MATURITY:
-  PAY COUPON
-  SET KI = INDIC(WOF < BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF`,
-
-  twin_win: `# Twin Win 3 ans
-PARAM CAP = 150%
-PARAM BAR = 70%
-
-AT MATURITY:
-  SET BREACHED = INDIC(WOF_MIN < BAR)
-  SET UPS = MIN(CAP, MAX(1, WOF))
-  SET DNS = MIN(CAP, MAX(1, 2 - WOF))
-  PAY (1 - BREACHED) * MAX(UPS, DNS)
-  PAY BREACHED * WOF`,
-
-  booster: `# Booster 3 ans (levier haussier)
-PARAM PART = 200%
-PARAM CAP = 140%
-PARAM FLOOR = 100%
-
-AT MATURITY:
-  SET PERF = WOF
-  SET BOOSTED = MIN(CAP, FLOOR + (PERF - 1) * PART)
-  SET DOWN = MIN(1, PERF)
-  SET IS_UP = INDIC(PERF >= 1)
-  PAY IS_UP * BOOSTED
-  PAY (1 - IS_UP) * DOWN`,
-
-  zcb: `# ZCB — validation actualisation
-# Prix théorique = exp(-r * T)
-AT MATURITY:
-  PAY 1`,
+function addMonths(n) {
+  const d = new Date()
+  d.setMonth(d.getMonth() + n)
+  return d.toISOString().slice(0, 10)
 }
 
-// ── Expert examples (CONSTAT) ──────────────────────────────────────
-const expertExamples = {
-  autocall_athena: `# Autocall Athena 3 ans — mode expert
-PARAM COUPON = 8%
-PARAM AC_BAR = 100%
-PARAM KI_BAR = 60%
-
-CONSTAT() OBSERVATIONS
-
-AT OBSERVATIONS:
-  SET CALL = INDIC(WOF >= AC_BAR)
-  PAY CALL * COUPON * INDEX
-  PAY CALL * 1
-  IF CALL = 1:
-    STOP
-
-AT OBSERVATIONS.last:
-  SET KI = INDIC(WOF < KI_BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF`,
-
-  autocall_phoenix: `# Phoenix 3 ans — mode expert
-PARAM COUPON = 10%
-PARAM AC_BAR = 100%
-PARAM CPN_BAR = 80%
-PARAM KI_BAR = 60%
-
-CONSTAT() OBSERVATIONS
-
-AT OBSERVATIONS:
-  SET CALL = INDIC(WOF >= AC_BAR)
-  SET CPN  = INDIC(WOF >= CPN_BAR)
-  PAY CPN * COUPON
-  PAY CALL * 1
-  IF CALL = 1:
-    STOP
-
-AT OBSERVATIONS.last:
-  SET KI = INDIC(WOF < KI_BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF`,
-
-  autocall_worst_of: `# Worst-of Athena 2 sous-jacents — mode expert
-PARAM COUPON = 12%
-PARAM AC_BAR = 100%
-PARAM KI_BAR = 55%
-
-CONSTAT() OBSERVATIONS
-
-AT OBSERVATIONS:
-  SET CALL = INDIC(WOF >= AC_BAR)
-  PAY CALL * COUPON * INDEX
-  PAY CALL * 1
-  IF CALL = 1:
-    STOP
-
-AT OBSERVATIONS.last:
-  SET KI = INDIC(WOF_MIN < KI_BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF`,
-
-  call_vanilla: `# Call Vanille — mode expert
-PARAM STRIKE = 100%
-
-CONSTAT MATURITE
-
-AT MATURITE:
-  PAY MAX(0, WOF - STRIKE)`,
-
-  put_vanilla: `# Put Vanille — mode expert
-PARAM STRIKE = 100%
-
-CONSTAT MATURITE
-
-AT MATURITE:
-  PAY MAX(0, STRIKE - WOF)`,
-
-  call_spread: `# Call Spread 100%-120% — mode expert
-PARAM K1 = 100%
-PARAM K2 = 120%
-
-CONSTAT MATURITE
-
-AT MATURITE:
-  PAY MAX(0, MIN(WOF - K1, K2 - K1))`,
-
-  digital: `# Digital (option binaire) — mode expert
-PARAM STRIKE = 100%
-PARAM REBATE = 10%
-
-CONSTAT MATURITE
-
-AT MATURITE:
-  SET ITM = INDIC(WOF >= STRIKE)
-  PAY ITM * REBATE`,
-
-  capital_garanti: `# Capital Garanti 5 ans — mode expert
-PARAM PART = 80%
-PARAM STRIKE = 100%
-
-CONSTAT MATURITE
-
-AT MATURITE:
-  PAY 1
-  PAY MAX(0, WOF - STRIKE) * PART`,
-
-  reverse_convertible: `# Reverse Convertible 1 an — mode expert
-PARAM COUPON = 10%
-PARAM BAR = 80%
-
-CONSTAT MATURITE
-
-AT MATURITE:
-  PAY COUPON
-  SET KI = INDIC(WOF < BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF`,
-
-  twin_win: `# Twin Win 3 ans — mode expert
-PARAM CAP = 150%
-PARAM BAR = 70%
-
-CONSTAT MATURITE
-
-AT MATURITE:
-  SET BREACHED = INDIC(WOF_MIN < BAR)
-  SET UPS = MIN(CAP, MAX(1, WOF))
-  SET DNS = MIN(CAP, MAX(1, 2 - WOF))
-  PAY (1 - BREACHED) * MAX(UPS, DNS)
-  PAY BREACHED * WOF`,
-
-  booster: `# Booster 3 ans — mode expert
-PARAM PART = 200%
-PARAM CAP = 140%
-PARAM FLOOR = 100%
-
-CONSTAT MATURITE
-
-AT MATURITE:
-  SET PERF = WOF
-  SET BOOSTED = MIN(CAP, FLOOR + (PERF - 1) * PART)
-  SET DOWN = MIN(1, PERF)
-  SET IS_UP = INDIC(PERF >= 1)
-  PAY IS_UP * BOOSTED
-  PAY (1 - IS_UP) * DOWN`,
-
-  zcb: `# ZCB — validation actualisation — mode expert
-CONSTAT MATURITE
-
-AT MATURITE:
-  PAY 1`,
-}
-
+// Templates (examples / expertExamples) now live in ../data/payscriptTemplates.js
 // ── Expert CONSTAT pre-fill (dates computed from today) ────────────
 function getExpertConstatDefaults(key) {
   const t0 = isoToday()
+  const defs = []
 
   // Products with CONSTAT() OBSERVATIONS (annual schedule)
   const scheduleMap = {
-    autocall_athena:   3,
-    autocall_phoenix:  3,
-    autocall_worst_of: 3,
+    autocall_athena:            3,
+    autocall_phoenix:           3,
+    autocall_worst_of:          3,
+    autocall_gear_put:          3,
+    autocall_gear_put_worst_of: 3,
   }
 
   // Products with CONSTAT MATURITE (single date) → years to maturity
@@ -637,21 +319,37 @@ function getExpertConstatDefaults(key) {
     twin_win:            3,
     booster:             3,
     zcb:                 1,
+    shark_note:          3,
+    shark_note_worst_of: 3,
+  }
+
+  // Products with CONSTAT() STRIKE_FIX (fixing window, always before OBSERVATIONS)
+  const strikeFixMap = {
+    autocall_gear_put:          1,
+    autocall_gear_put_worst_of: 1,
   }
 
   if (key in scheduleMap) {
     const endDate = addYears(scheduleMap[key])
-    return { name: 'OBSERVATIONS', kind: 'schedule', values: {
+    defs.push({ name: 'OBSERVATIONS', kind: 'schedule', values: {
       start_date: t0, end_date: endDate, roll_date: endDate,
       frequency: { value: 1, unit: 'Y' }, stub: 'short_last',
-    }}
+    }})
   }
 
   if (key in singleMap) {
-    return { name: 'MATURITE', kind: 'single', values: addYears(singleMap[key]) }
+    defs.push({ name: 'MATURITE', kind: 'single', values: addYears(singleMap[key]) })
   }
 
-  return null
+  if (key in strikeFixMap) {
+    const endDate = addMonths(strikeFixMap[key])
+    defs.push({ name: 'STRIKE_FIX', kind: 'schedule', values: {
+      start_date: t0, end_date: endDate, roll_date: endDate,
+      frequency: { value: 1, unit: 'D' }, stub: 'short_last',
+    }})
+  }
+
+  return defs
 }
 
 // ── Load example ───────────────────────────────────────────────────
@@ -663,8 +361,8 @@ async function loadExample(key) {
     store.script = expertExamples[key] || examples[key] || ''
     await store.parseScript()
 
-    const def = getExpertConstatDefaults(key)
-    if (def && def.name in store.constatOverrides) {
+    for (const def of getExpertConstatDefaults(key)) {
+      if (!(def.name in store.constatOverrides)) continue
       if (def.kind === 'single') {
         store.constatOverrides[def.name] = def.values
       } else {
@@ -684,22 +382,6 @@ async function loadExample(key) {
 }
 
 // ── Misc ───────────────────────────────────────────────────────────
-const tenorStr = t => (t && t.value) ? `${t.value}${t.unit}` : null
-
-async function previewConstat(name) {
-  delete previewErrors[name]
-  try {
-    const v = store.constatOverrides[name]
-    previews[name] = await store.fetchSchedulePreview({
-      start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
-      frequency: tenorStr(v.frequency), stub: v.stub,
-      sub_frequency: tenorStr(v.sub_frequency),
-    })
-  } catch (e) {
-    previewErrors[name] = e.message
-  }
-}
-
 function onInput() {
   clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => store.parseScript(), 500)
@@ -716,6 +398,8 @@ const referenceSections = [
     title: 'Déclarations & dates',
     items: [
       { kw: 'PARAM K = 5%', desc: 'Paramètre modifiable par l\'UI ("desc" ou # desc optionnelle)' },
+      { kw: 'PARAM() K = 5%', desc: 'Paramètre par observation : tableau d\'une valeur par date AT dans l\'UI (la dernière ligne s\'étend, une ligne = constant). Le = 5% pré-remplit la 1ère ligne' },
+      { kw: 'PARAM M_XXX', desc: 'Préfixe M_ = surveillé par la watchlist Booking. Direction et observable déduits de l\'usage : WOF >= M_X = rappel par le haut, WOF < M_X = KI par le bas' },
       { kw: 'AT 1, 2, 3:', desc: 'Événement à des dates précises (années)' },
       { kw: 'AT 1..5:0.5', desc: 'Événement sur une plage (début..fin:pas, pas=1 par défaut)' },
       { kw: 'AT MATURITY:', desc: 'Événement à maturité' },
@@ -726,6 +410,7 @@ const referenceSections = [
       { kw: 'AT Nom.first:', desc: 'Événement additionnel à la 1ère date du calendrier' },
       { kw: 'AT Nom.last:', desc: 'Événement additionnel à la dernière date (ex : check KI à maturité)' },
       { kw: 'AT Nom[3]:', desc: 'Événement additionnel à la 3e date (1-indexé)' },
+      { kw: 'CONSTAT() STRIKE_FIX', desc: 'Nom réservé : fenêtre de fixing du strike (toujours avant le calendrier d\'autocall). Pas de bloc AT — utiliser FIX_MIN/FIX_MAX/FIX_AVG' },
     ],
   },
   {
@@ -745,6 +430,7 @@ const referenceSections = [
       { kw: 'BOF', desc: 'Best-of actuel (max des spots)' },
       { kw: 'WOF_MIN', desc: 'Min historique du WoF depuis t=0' },
       { kw: 'BOF_MAX', desc: 'Max historique du BoF depuis t=0' },
+      { kw: 'FIX_MIN / FIX_MAX / FIX_AVG', desc: 'Min/max/moyenne du WoF sur la fenêtre CONSTAT() STRIKE_FIX — niveau de référence (fixing), indépendant du strike du put. Ex: SET REF = FIX_AVG puis SET PERF = WOF/REF, et utiliser PERF (pas WOF) partout ensuite' },
       { kw: 'ACCUM', desc: 'Valeur accumulée via ACCRUE' },
       { kw: 'INDEX', desc: 'Numéro d\'observation (1, 2, …)' },
       { kw: 'T', desc: 'Temps actuel (en années)' },

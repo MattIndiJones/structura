@@ -24,6 +24,7 @@ from .amc_timing import compute_timing_score
 from .amc_stockpicking import compute_stockpicking_score
 from .amc_riskmanagement import compute_risk_management_score
 from .amc_managerskill import compute_manager_skill_score
+from .amc_marketshocks import compute_market_shocks
 from . import amc_engine
 
 
@@ -200,6 +201,14 @@ def run_study(manifest_dict: dict, folder: str) -> dict:
         except Exception as e:
             result["block_j"] = {"available": False, "error": f"Erreur Bloc J : {e}"}
 
+    # ── Bloc K — Réactivité aux Chocs de Marché ──
+    if toggles.K_marketshocks:
+        try:
+            result["block_k"] = compute_market_shocks(
+                orders, result["meta"], block_h=result.get("block_h"))
+        except Exception as e:
+            result["block_k"] = {"available": False, "error": f"Erreur Bloc K : {e}"}
+
     # ── Bloc E — Référentiel Inertiel (B&H depuis l'émission) ──
     ts_positions = [p.model_dump() for p in manifest.params.termsheet_positions] or None
     try:
@@ -246,17 +255,26 @@ def run_study(manifest_dict: dict, folder: str) -> dict:
 
 def _nav_records(nav: list[dict], fee_pct: Optional[float], gross: bool) -> list[dict]:
     """Build run_analysis-compatible NAV records. For gross, add back the daily
-    fee accrual to the net return (fee drag is deterministic from the term sheet)."""
+    fee accrual to the net return (fee drag is deterministic from the term sheet)
+    and rebuild the "nav" level series by compounding those gross-adjusted returns
+    — otherwise run_analysis's NAV-level metrics (chart, drawdown, full-period
+    stats) would keep showing the net trajectory while only the regression and
+    total-return scalars reflected the fee add-back."""
     recs = []
-    prev = None
+    prev_net = None
+    prev_level = None
     fee_daily = ((fee_pct or 0.0) / 100.0) / 252.0 if gross else 0.0
     for r in nav:
         ret = None
-        if prev is not None and prev != 0:
-            ret = r["nav"] / prev - 1.0 + fee_daily
-        recs.append({"date": r["date"], "nav": r["nav"], "return": ret,
+        level = r["nav"]
+        if prev_net is not None and prev_net != 0:
+            ret = r["nav"] / prev_net - 1.0 + fee_daily
+            if gross:
+                level = prev_level * (1.0 + ret)
+        recs.append({"date": r["date"], "nav": level, "return": ret,
                      "Outstanding Quantity": r.get("outstanding")})
-        prev = r["nav"]
+        prev_net = r["nav"]
+        prev_level = level
     return recs
 
 

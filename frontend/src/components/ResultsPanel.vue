@@ -26,6 +26,7 @@
         <span class="text-sm text-slate-500">
           IC 95% [<SensitiveValue>{{ f2(store.result.ic95[0]) }}%, {{ f2(store.result.ic95[1]) }}%</SensitiveValue>]
           &nbsp;±<SensitiveValue>{{ f2((store.result.ic95[1] - store.result.ic95[0]) / 2) }}%</SensitiveValue>
+          <HelpTip text="Incertitude d'estimation Monte Carlo sur le prix lui-même (erreur standard × 1.96), pas une fourchette bid/offer de marché. Se resserre en 1/√N — pour la diviser par 2, il faut 4× plus de chemins." />
         </span>
       </div>
     </div>
@@ -37,11 +38,15 @@
         <div class="text-xl font-bold text-slate-200"><SensitiveValue>{{ f2(store.result.median) }}%</SensitiveValue></div>
       </div>
       <div class="stat-box">
-        <div class="text-xs text-slate-500 mb-1">VaR 5%</div>
+        <div class="text-xs text-slate-500 mb-1">VaR 5%
+          <HelpTip text="5ᵉ percentile du payoff simulé (non actualisé) — la valeur en dessous de laquelle tombent 5% des chemins. C'est une VaR sur le remboursement final, pas sur le P&amp;L d'une position déjà en portefeuille." />
+        </div>
         <div class="text-xl font-bold text-amber-400"><SensitiveValue>{{ f2(store.result.var5) }}%</SensitiveValue></div>
       </div>
       <div class="stat-box">
-        <div class="text-xs text-slate-500 mb-1">P(retour &gt; 100%)</div>
+        <div class="text-xs text-slate-500 mb-1">P(retour &gt; 100%)
+          <HelpTip text="Fraction des chemins simulés où le payoff (non actualisé) dépasse strictement le nominal — probabilité d'un scénario gagnant, pas la probabilité que le prix de marché dépasse le pair." />
+        </div>
         <div class="text-xl font-bold text-green-400"><SensitiveValue>{{ f1(store.result.prob_gt100) }}%</SensitiveValue></div>
       </div>
       <div class="stat-box">
@@ -53,7 +58,9 @@
         <div class="text-lg font-semibold text-slate-300"><SensitiveValue>{{ store.result.elapsed_ms?.toFixed(0) }} ms</SensitiveValue></div>
       </div>
       <div class="stat-box">
-        <div class="text-xs text-slate-500 mb-1">Spread P75–P25</div>
+        <div class="text-xs text-slate-500 mb-1">Spread P75–P25
+          <HelpTip text="Écart interquartile du payoff simulé (P75 − P25) — dispersion typique de la distribution autour de la médiane, moins sensible aux valeurs extrêmes que l'écart-type." />
+        </div>
         <div class="text-lg font-semibold text-slate-300"><SensitiveValue>{{ spreadP75P25 }}</SensitiveValue></div>
       </div>
     </div>
@@ -61,7 +68,9 @@
     <!-- Histogramme -->
     <div class="card">
       <div class="flex items-baseline gap-2 mb-3">
-        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Distribution des payoffs</div>
+        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Distribution des payoffs
+          <HelpTip text="Histogramme des payoffs bruts (non actualisés) sur tous les chemins simulés. Barres bleues = payoff ≥ prix équitable actualisé (scénarios au-dessus du prix), barres grises = en dessous." />
+        </div>
         <div class="text-xs text-slate-600 italic">
           <SensitiveValue>
             valeurs nominales non actualisées · {{ store.result.payoffs?.length?.toLocaleString() }} chemins
@@ -138,7 +147,9 @@
 
           <!-- Fugit — seulement si le script a un STOP -->
           <div v-if="inputs.hasStop && store.result.fugit != null" class="bg-slate-800/50 rounded-lg px-3 py-2">
-            <div class="text-slate-500 mb-1">Fugit <span class="text-slate-600 font-normal">(durée moy.)</span></div>
+            <div class="text-slate-500 mb-1">Fugit <span class="text-slate-600 font-normal">(durée moy.)</span>
+              <HelpTip text="Durée de vie moyenne pondérée par probabilité E[τ] — la date à laquelle le produit s'arrête en moyenne (rappel anticipé ou échéance). Sert de point d'interpolation sur la courbe de taux pour ce produit à STOP, puisqu'il n'a pas une maturité unique fixe." />
+            </div>
             <div class="font-mono font-bold text-amber-300 text-base">
               <SensitiveValue>{{ store.result.fugit.toFixed(2) }} Y</SensitiveValue>
             </div>
@@ -192,13 +203,17 @@
 
           <!-- Modèle vol -->
           <div class="bg-slate-800/50 rounded-lg px-3 py-2">
-            <div class="text-slate-500 mb-1">Modèle vol</div>
+            <div class="text-slate-500 mb-1">Modèle vol
+              <HelpTip text="Dynamique du sous-jacent simulée sous la mesure risque-neutre. Constant = Black-Scholes (vol figée) ; Heston/SABR = vol stochastique, capture le smile mais plus lent et plus sensible aux paramètres de calibration ; Local Vol = surface de vol locale à la Dupire." />
+            </div>
             <div class="font-mono font-semibold text-slate-200 text-sm">{{ modelLabel(inputs.model) }}</div>
           </div>
 
           <!-- Modèle taux -->
           <div class="bg-slate-800/50 rounded-lg px-3 py-2">
-            <div class="text-slate-500 mb-1">Modèle taux</div>
+            <div class="text-slate-500 mb-1">Modèle taux
+              <HelpTip text="Déterministe = taux plat/courbe figée, pas de risque de taux dans la simulation. ABM/Hull-White = taux court stochastique — affecte l'actualisation ET, si le sous-jacent a un ρ(r,S) non nul, la trajectoire simulée elle-même." />
+            </div>
             <div class="font-mono font-semibold text-slate-200 text-sm"><SensitiveValue>{{ rateModelLabel(inputs) }}</SensitiveValue></div>
           </div>
 
@@ -211,13 +226,16 @@
         <div class="flex flex-wrap gap-2 text-xs">
           <span class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-400">
             N <span class="font-mono font-semibold text-slate-200 ml-1"><SensitiveValue>{{ inputs.N.toLocaleString() }}</SensitiveValue></span>
+            <HelpTip text="Nombre de chemins Monte Carlo demandé. Plus N est grand, plus l'IC 95% affiché sur le prix se resserre (en 1/√N) — mais le temps de calcul croît linéairement." />
           </span>
           <span class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-400">
             Seed <span class="font-mono font-semibold text-slate-200 ml-1"><SensitiveValue>{{ inputs.seed }}</SensitiveValue></span>
+            <HelpTip text="Graine du générateur aléatoire — même seed + mêmes paramètres = mêmes chemins simulés, donc même prix exact. Utile pour reproduire un résultat ou pour le bump-and-reprice des Greeks (CRN)." />
           </span>
           <span class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1"
                 :class="inputs.antithetic ? 'text-green-400 border-green-900' : 'text-slate-500'">
             {{ inputs.antithetic ? '✓ Antithétique' : 'Sans antithétique' }}
+            <HelpTip text="Variance réduite : chaque chemin simulé est apparié à son symétrique (browniens opposés). Réduit le bruit MC sur le prix à N égal, sans biais — désactiver seulement pour diagnostiquer un problème de convergence." />
           </span>
         </div>
       </div>
@@ -231,6 +249,94 @@
             <span class="text-slate-500">{{ p.name }}</span>
             <span class="text-slate-100 font-bold ml-1">=<SensitiveValue>{{ p.value }}{{ p.is_pct ? '%' : '' }}</SensitiveValue></span>
           </span>
+        </div>
+      </div>
+
+      <!-- ── Dates clés ───────────────────────────────────────────── -->
+      <div class="flex flex-col gap-2">
+        <div class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Dates clés</div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div class="bg-slate-800/50 rounded-lg px-3 py-2">
+            <div class="text-slate-500 mb-1">Trade date
+              <HelpTip text="Date d'accord des termes entre les parties. Sert de référence commerciale/juridique — n'intervient pas dans le calcul du prix lui-même (c'est value date qui fixe t=0)." />
+            </div>
+            <div class="font-mono font-semibold text-slate-200"><SensitiveValue>{{ inputs.trade_date || '—' }}</SensitiveValue></div>
+          </div>
+          <div class="bg-slate-800/50 rounded-lg px-3 py-2">
+            <div class="text-slate-500 mb-1">Strike date <span class="text-slate-600 font-normal">(fixing S₀)</span>
+              <HelpTip text="Date à laquelle le niveau initial S₀ des sous-jacents est figé — la référence par rapport à laquelle toutes les performances (WOF, barrières...) sont mesurées ensuite." />
+            </div>
+            <div class="font-mono font-semibold text-slate-200"><SensitiveValue>{{ inputs.strike_date || '—' }}</SensitiveValue></div>
+          </div>
+          <div class="bg-slate-800/50 rounded-lg px-3 py-2">
+            <div class="text-slate-500 mb-1">Value date <span class="text-slate-600 font-normal">(t=0)</span>
+              <HelpTip text="Date d'échange effectif du nominal — le t=0 depuis lequel tous les flux sont actualisés. Généralement strike date + 2 jours ouvrés (délai de règlement-livraison standard)." />
+            </div>
+            <div class="font-mono font-semibold text-slate-200"><SensitiveValue>{{ inputs.value_date || '—' }}</SensitiveValue></div>
+          </div>
+          <div class="bg-slate-800/50 rounded-lg px-3 py-2">
+            <div class="text-slate-500 mb-1">Maturité</div>
+            <div class="font-mono font-semibold text-slate-200"><SensitiveValue>{{ maturityDateStr || '—' }}</SensitiveValue></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Dates d'observation ──────────────────────────────────── -->
+      <div v-if="observationRows.length" class="flex flex-col gap-2">
+        <div class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Dates d'observation</div>
+        <div class="max-h-56 overflow-y-auto border border-slate-800 rounded">
+          <table class="w-full text-xs border-collapse">
+            <thead class="sticky top-0 bg-slate-900">
+              <tr class="border-b border-slate-700">
+                <th class="text-left py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">#</th>
+                <th class="text-left py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">Label</th>
+                <th class="text-left py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">Date</th>
+                <th class="text-right py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">T (Y)</th>
+                <th class="text-right py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(ev, i) in observationRows" :key="i" class="border-b border-slate-800/60">
+                <td class="py-1 px-2 text-slate-500">{{ i + 1 }}</td>
+                <td class="py-1 px-2 text-slate-300">{{ ev.label }}</td>
+                <td class="py-1 px-2 font-mono text-slate-300"><SensitiveValue>{{ ev.date }}</SensitiveValue></td>
+                <td class="py-1 px-2 font-mono text-right text-slate-400">{{ ev.t.toFixed(2) }}</td>
+                <td class="py-1 px-2 text-right text-[10px]"
+                    :class="ev.isFuture ? 'text-slate-500' : 'text-amber-400'">
+                  {{ ev.isFuture ? 'à venir' : 'passé' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Spots ────────────────────────────────────────────────── -->
+      <div class="flex flex-col gap-2">
+        <div class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Spots (à la strike date)</div>
+        <div class="flex flex-col gap-2">
+          <div v-for="(u, i) in inputs.underlyings" :key="i"
+               class="flex flex-wrap items-center gap-3 bg-slate-800/50 rounded-lg px-3 py-2 text-xs">
+            <span class="font-semibold text-slate-200 min-w-[80px]">
+              <SensitiveValue placeholder="SJ">{{ demo.underlyingLabel(u.name, i) }}</SensitiveValue>
+            </span>
+            <template v-if="u.ticker">
+              <span v-if="spotState[u.ticker]?.loading" class="text-slate-500">chargement…</span>
+              <template v-else-if="spotState[u.ticker]?.value">
+                <span class="font-mono font-bold text-slate-100">
+                  <SensitiveValue>{{ spotState[u.ticker].value.close.toFixed(2) }}</SensitiveValue>
+                </span>
+                <span class="text-slate-600">au {{ spotState[u.ticker].value.date }}</span>
+              </template>
+              <span v-else class="text-slate-600">non disponible</span>
+              <button class="text-blue-400 hover:underline ml-auto"
+                      :disabled="spotState[u.ticker]?.refreshing"
+                      @click="refreshSpot(u.ticker)">
+                {{ spotState[u.ticker]?.refreshing ? '…' : '↺ Actualiser' }}
+              </button>
+            </template>
+            <span v-else class="text-slate-600">100% (référence normalisée, aucun ticker)</span>
+          </div>
         </div>
       </div>
     </div>
@@ -273,10 +379,18 @@
             <tr class="bg-slate-800/60 border-b-2 border-slate-700">
               <th class="text-left py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">Date</th>
               <th class="text-left py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide">Expression</th>
-              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">P(actif)</th>
-              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">E[CF]</th>
-              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">DF</th>
-              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">Contrib. PV</th>
+              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">P(actif)
+                <HelpTip align="right" text="Fraction des chemins simulés où cette instruction PAY a effectivement produit un flux (ex : condition IF vraie, produit pas encore rappelé). 100% = flux systématique." />
+              </th>
+              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">E[CF]
+                <HelpTip align="right" text="Espérance du flux brut, non actualisé, moyennée sur tous les chemins (y compris ceux où il vaut 0). C'est le montant avant application du facteur d'actualisation DF." />
+              </th>
+              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">DF
+                <HelpTip align="right" text="Facteur d'actualisation implicite = PV ÷ E[CF]. Sous taux déterministes c'est exp(−r·t) ; sous taux stochastiques c'est l'espérance conditionnelle E[B(0,t) | ce flux se déclenche], donc peut différer légèrement de exp(−r·t)." />
+              </th>
+              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">Contrib. PV
+                <HelpTip align="right" text="Contribution actualisée de cette ligne au prix total = E[CF] × DF. La somme de toutes les lignes de toutes les dates redonne exactement le Prix équitable de l'onglet Résultats." />
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -334,10 +448,13 @@
       <div class="card">
         <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
           Greeks — CRN bump-and-reprice (seed <SensitiveValue>{{ store.globalParams.seed }}</SensitiveValue>)
+          <HelpTip width="w-72" text="Chaque Greek est estimé en repricant avec un paramètre de marché légèrement décalé (bump), en réutilisant EXACTEMENT les mêmes nombres aléatoires (Common Random Numbers) que le pricing de référence. Ça annule l'essentiel du bruit Monte Carlo dans la différence bumpée-référence — sans CRN, les Greeks seraient beaucoup trop instables pour être utilisables." />
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div v-for="(val, name) in store.result.greeks" :key="name" class="stat-box">
-            <div class="text-xs text-slate-500 mb-1 font-mono">{{ gLabel(name) }}</div>
+            <div class="text-xs text-slate-500 mb-1 font-mono">{{ gLabel(name) }}
+              <HelpTip :text="gDesc(name)" />
+            </div>
             <div class="text-base font-bold font-mono"
                  :class="val > 0 ? 'text-green-400' : val < 0 ? 'text-red-400' : 'text-slate-400'">
               <SensitiveValue>{{ fmtG(val) }}</SensitiveValue>
@@ -379,7 +496,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
@@ -393,6 +510,7 @@ import SimulationTab from './SimulationTab.vue'
 import ScenarioGrid from './ScenarioGrid.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
+import HelpTip from './HelpTip.vue'
 
 Chart.register(BarElement, BarController, CategoryScale, LinearScale, Tooltip)
 
@@ -418,6 +536,69 @@ const spreadP75P25 = computed(() => {
 // ── Résumé market data (snapshot pris au moment du pricing) ───────
 const inputs = computed(() => store.result?._inputs ?? null)
 const showRhoRS = computed(() => inputs.value?.rateModel !== 'deterministic')
+
+// ── Dates clés + calendrier d'observation ─────────────────────────
+const todayStr = () => new Date().toISOString().split('T')[0]
+
+function addDaysStr(isoDate, days) {
+  const d = new Date(isoDate)
+  d.setDate(d.getDate() + Math.round(days))
+  return d.toISOString().split('T')[0]
+}
+
+const maturityDateStr = computed(() => {
+  if (!inputs.value?.value_date) return null
+  const T = store.result?.t_max_effective || inputs.value.T
+  return addDaysStr(inputs.value.value_date, T * 365.25)
+})
+
+const observationRows = computed(() => {
+  if (!store.result?.flux_table || !inputs.value?.value_date) return []
+  const times = [...new Set(Object.values(store.result.flux_table).map(e => e.t))].sort((a, b) => a - b)
+  const vd = inputs.value.value_date
+  const now = todayStr()
+  return times.map((t, idx) => {
+    const date = addDaysStr(vd, t * 365.25)
+    return {
+      label: idx === times.length - 1 ? 'Maturité' : `Obs. ${idx + 1}`,
+      date, t, isFuture: date > now,
+    }
+  })
+})
+
+// ── Spots (store Parquet — lecture seule + bouton d'actualisation) ─
+const spotState = reactive({})
+
+async function loadSpot(ticker) {
+  if (!ticker) return
+  if (!spotState[ticker]) spotState[ticker] = { loading: false, refreshing: false, value: null }
+  spotState[ticker].loading = true
+  try {
+    spotState[ticker].value = await store.fetchStoredSpot(ticker, inputs.value?.strike_date || todayStr())
+  } finally {
+    spotState[ticker].loading = false
+  }
+}
+
+async function refreshSpot(ticker) {
+  if (!spotState[ticker]) spotState[ticker] = { loading: false, refreshing: false, value: null }
+  spotState[ticker].refreshing = true
+  try {
+    await store.refreshStoredSpot(ticker, ticker)
+    await loadSpot(ticker)
+  } catch (e) {
+    spotState[ticker].error = e.message
+  } finally {
+    spotState[ticker].refreshing = false
+  }
+}
+
+watch(inputs, (inp) => {
+  if (!inp) return
+  for (const u of inp.underlyings) {
+    if (u.ticker) loadSpot(u.ticker)
+  }
+}, { immediate: true })
 
 const MODEL_LABELS = { constant: 'Constant (GBM)', heston: 'Heston QE', sabr: 'SABR (Hagan)', localvol: 'Local Vol (Dupire)' }
 const modelLabel = m => MODEL_LABELS[m] || m
@@ -556,6 +737,19 @@ const gLabel = name => {
   const idx = +m[2] - 1   // backend keys are 1-indexed (delta_1 = underlying 0)
   const ul  = store.underlyings[idx]
   return ul ? `${sym} ${demo.underlyingLabel(ul.name, idx)}` : name
+}
+
+const GREEK_DESC = {
+  delta: "Δ — sensibilité du prix à une hausse de 1% du spot de ce sous-jacent. Couverture = vendre/acheter Δ×nominal du sous-jacent pour neutraliser ce risque au premier ordre.",
+  gamma: "Γ — sensibilité du delta lui-même à une variation du spot (convexité). Un gamma élevé signifie que la couverture delta doit être réajustée fréquemment.",
+  vega:  "ν — sensibilité du prix à une hausse de 1% de la volatilité implicite de ce sous-jacent.",
+  theta: "Θ — décroissance du prix due au seul passage d'un jour, marché inchangé (portage temporel).",
+  rho:   "ρ — sensibilité du prix à une hausse de 100bp du taux sans risque.",
+  corr:  "ρᵢⱼ — sensibilité du prix à une hausse de 5pts de corrélation entre les sous-jacents concernés (pertinent surtout sur les payoffs worst-of/best-of).",
+}
+const gDesc = name => {
+  const key = name.match(/^([a-z]+)/)?.[1] || name
+  return GREEK_DESC[key] || ''
 }
 
 const gUnit = name => {

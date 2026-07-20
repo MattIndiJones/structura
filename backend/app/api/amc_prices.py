@@ -12,7 +12,7 @@ from ..db.models import User
 from ..api.auth import get_current_user
 from ..core.amc_prices import (
     price_status, fetch_prices, upload_prices, delete_prices, load_prices, _slug,
-    resolve_ticker,
+    resolve_ticker, spot_on_date,
 )
 from ..core.amc_attribution import compute_attribution
 
@@ -27,6 +27,19 @@ def get_price_status(
 ):
     """List all stored price series."""
     return price_status()
+
+
+@router.get("/spot")
+def get_spot_on_date(
+    key: str, date: str,
+    current: Annotated[User, Depends(get_current_user)],
+):
+    """Last known close on or before *date* for a stored key — read-only,
+    no Yahoo call (use POST /fetch first if the series isn't stored yet)."""
+    result = spot_on_date(key, date)
+    if result is None:
+        raise HTTPException(404, f"Pas de données disponibles pour '{key}' à cette date.")
+    return result
 
 
 @router.post("/status-for-study")

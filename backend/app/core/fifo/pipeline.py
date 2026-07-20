@@ -74,8 +74,7 @@ def fix_carnet_splits(
     fetched for valuation are themselves fetched as-of that same date.
     """
     import dataclasses
-    from ..amc_prices import yf_symbol
-    import yfinance as yf
+    from ..amc_prices import split_factor_between
 
     by_isin: dict[str, list[Order]] = collections.defaultdict(list)
     for o in carnet_orders:
@@ -102,31 +101,11 @@ def fix_carnet_splits(
         for o in carnet_orders
     ]
 
-    # ── Step 2: per-order split correction (real yfinance calendar) ────
-    symbol_cache: dict[str, str] = {}
-    split_cache: dict[str, dict] = {}
-
-    def _splits(symbol: str) -> dict:
-        if symbol not in split_cache:
-            try:
-                actions = yf.Ticker(symbol).actions
-                if actions is None or actions.empty or "Stock Splits" not in actions.columns:
-                    split_cache[symbol] = {}
-                else:
-                    s = actions["Stock Splits"]
-                    split_cache[symbol] = {d.date(): float(r) for d, r in s[s != 0].items()}
-            except Exception:
-                split_cache[symbol] = {}
-        return split_cache[symbol]
-
+    # ── Step 2: per-order split correction (real yfinance calendar,
+    # shared with amc_orderbook.apply_split_corrections via amc_prices) ─
     corrected = []
     for o in relabelled:
-        if o.isin not in symbol_cache:
-            symbol_cache[o.isin] = yf_symbol(o.isin, o.name)
-        factor = 1.0
-        for split_date, ratio in _splits(symbol_cache[o.isin]).items():
-            if o.date < split_date <= as_of:
-                factor *= ratio
+        factor = split_factor_between(o.isin, o.name, o.date, as_of)
         if factor != 1.0:
             corrected.append(dataclasses.replace(
                 o, qty=o.qty * factor,
@@ -184,6 +163,18 @@ def run_fifo_recon(
     for o in carnet_orders:
         carnet_name_to_all_isins[o.name.lower().strip()].add(o.isin)
 
+    # ── Split-price correction ────────────────────────────────────────
+    # The carnet always records real share executions (confirmed across every
+    # fund studied so far, regardless of whether the term sheet/composition
+    # snapshot is expressed in accounting units) — so this correction always
+    # applies, independent of qty_mode. Bounded by as_of: a split after the
+    # carnet's last order must not be applied, since marks are also fetched
+    # as-of that same date. Done up front (before growth top-ups below) since
+    # those need real, split-corrected share counts to size proportional
+    # top-ups correctly.
+    as_of = max(o.date for o in carnet_orders)
+    carnet_orders = fix_carnet_splits(carnet_orders, carnet_name_to_all_isins, as_of)
+
     if nav_csv_path and termsheet:
         try:
             nav_rows = load_nav_csv(nav_csv_path)
@@ -207,28 +198,38 @@ def run_fifo_recon(
                 termsheet, n_certs, nav_initial, fixing_date, prod_ccy, isin_aliases,
                 qty_mode=qty_mode,
             )
-            ts_isins = {o.isin for o in initial_orders}
+
+            # Certificate-growth top-ups (build_growth_topups, see nav.py) were
+            # tried and measured on CH1352587724: they cut spurious synthetic
+            # injections from 42 to 11, but at the cost of injecting ~1100
+            # extra BUY orders that inflate total P&L by ~395k (mostly latent
+            # mark-to-market), while only 13k of that was ever a genuine
+            # correction. Cross-checked against the fund's own published NAV:
+            # even WITHOUT any top-up, reconstructed open-position market
+            # value already exceeds the fund's real AUM by 41% (CH1352587724)
+            # / 10% (CH1473731680) — a large, pre-existing gap the top-up
+            # mechanism makes worse (to +78%), not better. Disabled pending
+            # investigation of that bigger, still-unexplained overstatement;
+            # kept in nav.py (tested, doesn't regress anything) in case it's
+            # needed again once the underlying gap is understood.
+            topup_orders: list[Order] = []
+            initial_orders = initial_orders + topup_orders
+            # T0-basket ISINs only (not every ISIN that happened to receive a
+            # growth top-up) — used below to decide which ISINs' T0 price
+            # comes from the termsheet basket vs. a fetched earliest-lot price.
+            ts_isins = {o.isin for o in initial_orders if o.id.startswith("T0_INIT_")}
 
             nav_info = {
                 "fixing_date": fixing_date.isoformat(),
                 "n_certs_initial": n_certs,
                 "nav_initial": nav_initial,
-                "initial_orders_built": len(initial_orders),
+                "initial_orders_built": len(initial_orders) - len(topup_orders),
+                "growth_topup_orders": len(topup_orders),
                 "isin_aliases": alias_log,
             }
         except Exception as exc:
             import traceback; traceback.print_exc()
             nav_info = {"nav_csv_error": str(exc)}
-
-    # ── Split-price correction ────────────────────────────────────────
-    # The carnet always records real share executions (confirmed across every
-    # fund studied so far, regardless of whether the term sheet/composition
-    # snapshot is expressed in accounting units) — so this correction always
-    # applies, independent of qty_mode. Bounded by as_of: a split after the
-    # carnet's last order must not be applied, since marks are also fetched
-    # as-of that same date.
-    as_of = max(o.date for o in carnet_orders)
-    carnet_orders = fix_carnet_splits(carnet_orders, carnet_name_to_all_isins, as_of)
 
     # ── Combine orders ────────────────────────────────────────────────
     all_orders = sorted(initial_orders + carnet_orders, key=lambda o: o.date)
@@ -260,7 +261,13 @@ def run_fifo_recon(
         t0_prices_prod = {**t0_cert_prices, **{o.isin: o.price_prod for o in initial_orders}}
         marks = get_marks_cert_units(components, scaling_factors, as_of.isoformat(), prod_ccy)
     else:
-        t0_prices_prod = {o.isin: o.price_prod for o in initial_orders}
+        # Only the genuine T0_INIT_ orders carry the isin's true T0 price —
+        # growth top-ups are dated later and must not overwrite it here,
+        # since t0_prices_prod is used (isin-keyed, date-agnostic) to price
+        # ANY future synthetic injection for that isin at its own t0_date.
+        t0_prices_prod = {
+            o.isin: o.price_prod for o in initial_orders if o.id.startswith("T0_INIT_")
+        }
         non_ts_lots = {
             isin: lot for isin, lot in result_p1.earliest_lots.items()
             if isin not in ts_isins
@@ -269,6 +276,37 @@ def run_fifo_recon(
             t0_prices_prod.update(fetch_t0_prices_from_earliest_lots(non_ts_lots, prod_ccy))
         marks = get_marks_shares(components, as_of.isoformat(), prod_ccy)
 
+    # ── Pass 1.5 — detect deficit dates for accurate synthetic pricing ──
+    # A shortfall almost always means a real BUY leg is missing from the
+    # carnet on the exact day it happened — observed to cluster on days
+    # where the manager rebalances 10+ names at once (the feed loses
+    # individual legs from those large batches). It should be priced at
+    # THAT day's real market price, not the isin's T0/earliest-order price.
+    # The deficits themselves (isin, date, qty) depend only on quantities,
+    # never on price, so a detection pass using the existing isin-only
+    # t0_prices_prod finds exactly the same (isin, date) events the final
+    # pass below will need — just fetch a real price for each first.
+    deficit_prices_prod: dict[tuple, float] = {}
+    if qty_mode == "shares":
+        result_detect = reconstruct(
+            all_orders, {}, as_of, prod_ccy,
+            qty_mode=qty_mode,
+            recon_mode="t0_synthetic",
+            t0_date=t0_date,
+            t0_prices_prod=t0_prices_prod,
+        )
+        deficit_events = {(si.isin, si.t0_date) for si in result_detect.synthetic_report}
+        by_deficit_date: dict = collections.defaultdict(list)
+        for d_isin, d_date in deficit_events:
+            by_deficit_date[d_date].append(d_isin)
+        for d_date, d_isins in by_deficit_date.items():
+            d_components = [{"isin": i, "name": names.get(i, ""), "currency": ""} for i in d_isins]
+            prices = get_marks_shares(d_components, d_date.isoformat(), prod_ccy)
+            for i in d_isins:
+                p = prices.get(i)
+                if p is not None:
+                    deficit_prices_prod[(i, d_date)] = p
+
     # ── Pass 2 — final FIFO ───────────────────────────────────────────
     result = reconstruct(
         all_orders, marks, as_of, prod_ccy,
@@ -276,6 +314,7 @@ def run_fifo_recon(
         recon_mode=recon_mode,
         t0_date=t0_date,
         t0_prices_prod=t0_prices_prod,
+        deficit_prices_prod=deficit_prices_prod,
     )
 
     meta = {

@@ -8,6 +8,7 @@
         <span class="font-bold text-slate-100 tracking-tight">Structura</span>
         <span class="text-slate-600 text-xs hidden sm:block">— Pricing Engine</span>
       </RouterLink>
+      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5 shrink-0">← Accueil</RouterLink>
 
       <!-- Progress bar -->
       <div class="flex-1 min-w-0">
@@ -86,8 +87,9 @@
           </button>
         </div>
         <div class="flex-1 overflow-y-auto p-5">
-          <ResultsPanel v-show="store.rightTab !== 'kid'" />
+          <ResultsPanel v-show="store.rightTab !== 'kid' && store.rightTab !== 'emt'" />
           <KidPanel     v-if="store.rightTab === 'kid'" />
+          <EmtPanel     v-if="store.rightTab === 'emt'" />
         </div>
       </div>
     </main>
@@ -102,14 +104,19 @@ import DealTab         from '../components/DealTab.vue'
 import EventsTab       from '../components/EventsTab.vue'
 import ResultsPanel    from '../components/ResultsPanel.vue'
 import KidPanel        from '../components/KidPanel.vue'
+import EmtPanel        from '../components/EmtPanel.vue'
 import SensitiveValue  from '../components/SensitiveValue.vue'
 import DemoModeToggle  from '../components/DemoModeToggle.vue'
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
+import { useDealsStore } from '../stores/deals.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 
 const store = usePricingStore()
+const dealsStore = useDealsStore()
 const demo = useDemoModeStore()
+const route = useRoute()
 
 const eventsInitialDealId = ref(null)
 
@@ -118,10 +125,21 @@ function goToEvents(dealId) {
   store.leftTab = 'events'
 }
 
+// Deep link from the Booking view (/pricer?dealId=…) — reload that deal's
+// exact frozen state (script + params + underlyings) into every tab, not
+// just Events, then jump straight there instead of landing on Script.
+onMounted(async () => {
+  const dealId = route.query.dealId
+  if (!dealId) return
+  const deal = await dealsStore.selectDeal(Number(dealId))
+  if (deal) await store.loadFromDeal(deal)
+  goToEvents(Number(dealId))
+})
+
 const leftTabs = [
   { id: 'script', label: '✏️ Script PayScript' },
-  { id: 'params', label: '⚙️ Marché & Paramètres' },
   { id: 'deal',   label: '📋 Deal' },
+  { id: 'params', label: '⚙️ Marché & Paramètres' },
   { id: 'events', label: '📅 Events' },
 ]
 const rightTabs = [
@@ -136,5 +154,6 @@ const rightTabs = [
   { id: 'simulation', label: '🧮 Simulation' },
   { id: 'scenarios', label: '🎯 Scénarios' },
   { id: 'kid',       label: '⚖️ KID PRIIPs' },
+  { id: 'emt',       label: '🎯 EMT / Marché cible' },
 ]
 </script>

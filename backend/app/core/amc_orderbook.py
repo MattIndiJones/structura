@@ -169,6 +169,48 @@ def load_orders(paths: list[str]) -> list[dict]:
     return out
 
 
+def apply_split_corrections(orders: list[dict], as_of: Optional[_dt.datetime]) -> list[dict]:
+    """Rescale as-traded carnet prices/quantities for real stock splits that
+    occurred strictly after each order's date and on/before `as_of`, using
+    the same yfinance corporate-action calendar as core/fifo/pipeline.py's
+    fix_carnet_splits() (shared via amc_prices.split_factor_between).
+
+    Without this, an order executed before a split (e.g. KLA Corp 10:1) is
+    compared — in Blocks H (timing) and I (stock picking) and the VAG
+    Attribution module — against a terminal/current price sourced from the
+    auto-adjusted (auto_adjust=True) price store, i.e. already post-split.
+    That mismatch alone produces a spurious ~10x price gap that reads as a
+    massive false alpha/timing signal, not a real one.
+    """
+    if not orders or as_of is None:
+        return orders
+    from .amc_prices import split_factor_between
+
+    as_of_date = as_of.date() if hasattr(as_of, "date") else as_of
+    corrected: list[dict] = []
+    for o in orders:
+        date = o.get("date")
+        if date is None or not (o.get("isin") or o.get("name")):
+            corrected.append(o)
+            continue
+        order_date = date.date() if hasattr(date, "date") else date
+        factor = split_factor_between(o.get("isin", ""), o.get("name", ""), order_date, as_of_date)
+        if factor == 1.0:
+            corrected.append(o)
+            continue
+
+        c = dict(o)
+        c["ordered_qty"] = o["ordered_qty"] * factor
+        c["executed_qty"] = o["executed_qty"] * factor
+        if o.get("price_local") is not None:
+            c["price_local"] = o["price_local"] / factor
+        if o.get("price_prod") is not None:
+            c["price_prod"] = o["price_prod"] / factor
+            c["notional_prod"] = abs(c["executed_qty"] * c["price_prod"])
+        corrected.append(c)
+    return corrected
+
+
 # ── T0 price fetcher (for synthetic inception BUYs) ───────────────────
 
 def _fetch_t0_price(isin: str, ccy: str, prod_ccy: str,
@@ -598,6 +640,7 @@ def load_study_data(folder: str, files: Dict) -> dict:
     nav = load_nav(nav_path) if nav_path else []
     orders = load_orders(order_paths)
     as_of = composition.get("nav_date") or (orders[-1]["date"] if orders else None)
+    orders = apply_split_corrections(orders, as_of)
 
     # Auto-populate the price store for any component not yet cached.
     # This ensures Blocks H and I have price history on the very first study run.
@@ -619,9 +662,28 @@ def load_study_data(folder: str, files: Dict) -> dict:
     # (e.g. 33.78% reported for a position independently confirmed to be ~4%).
     # `position` (share count) has proven accurate in every check; recompute the
     # dollar value and weight from it directly using a real fetched mark instead.
+    #
+    # Cash/FX lines (isin=None, e.g. the "USD" residual) never get a mark from
+    # build_marks() — it skips components with no ISIN — so they used to keep
+    # Def.txt's stale weight untouched while every stock line got recomputed,
+    # breaking the "weights sum to 100%" invariant (found live: an 18-line USD
+    # book summed to 117% because the cash line kept a stale 17.23%). Cash is
+    # by definition already in its own currency at par value (mark=1.0); only
+    # convert if genuinely denominated in a different currency than the fund.
     total_aum = composition.get("total_aum") or 0.0
+    prod_ccy = (composition.get("currency") or "").upper()
     for c in composition["components"]:
-        mark = composition["marks"].get(c["isin"])
+        isin = c.get("isin")
+        if not isin:
+            c_ccy = (c.get("currency") or "").upper()
+            if c_ccy and c_ccy != prod_ccy:
+                from .amc_prices import get_fx_series
+                fx_s = get_fx_series(c_ccy, prod_ccy)
+                mark = float(fx_s.iloc[-1]) if not fx_s.empty else 1.0
+            else:
+                mark = 1.0
+        else:
+            mark = composition["marks"].get(isin)
         if mark is not None and c.get("position") is not None:
             c["value_prod"] = c["position"] * mark
             if total_aum:

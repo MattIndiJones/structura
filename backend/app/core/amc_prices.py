@@ -349,6 +349,23 @@ def load_prices(key: str) -> pd.DataFrame:
     return pd.read_parquet(p)
 
 
+def spot_on_date(key: str, date_str: str) -> dict | None:
+    """Last close on or before *date_str* from the stored series (same
+    as-of convention used for Total Return in amc_bh.py) — a pure read
+    against the local Parquet store, no Yahoo call. None if the series
+    isn't stored yet, or has no data on/before that date."""
+    try:
+        df = load_prices(key)
+    except ValueError:
+        return None
+    df = df.copy()
+    df.index = pd.to_datetime(df.index).tz_localize(None)
+    before = df[df.index <= pd.Timestamp(date_str)]["close"]
+    if before.empty:
+        return None
+    return {"date": str(before.index[-1].date()), "close": float(before.iloc[-1])}
+
+
 def yf_symbol(isin: str, name: str = "") -> str:
     """Return a yfinance-usable symbol for the given ISIN.
 
@@ -385,6 +402,49 @@ def yf_symbol(isin: str, name: str = "") -> str:
         except Exception:
             pass
     return isin
+
+
+_split_calendar_cache: dict[str, dict] = {}
+
+
+def get_split_calendar(isin: str, name: str = "") -> dict:
+    """Return {split_date: ratio} of real stock splits for this security,
+    via yfinance's corporate-action calendar. Cached per resolved ticker
+    symbol for the lifetime of the process. Empty dict when no splits are
+    found or the ticker can't be resolved.
+
+    Shared by every module that mixes as-traded carnet prices with the
+    auto-adjusted (auto_adjust=True) price store — core/fifo/pipeline.py's
+    fix_carnet_splits() and amc_orderbook.py's apply_split_corrections() —
+    so the split calendar and ticker resolution are fetched once, not
+    duplicated per caller.
+    """
+    symbol = yf_symbol(isin, name)
+    if symbol not in _split_calendar_cache:
+        try:
+            actions = yf.Ticker(symbol).actions
+            if actions is None or actions.empty or "Stock Splits" not in actions.columns:
+                _split_calendar_cache[symbol] = {}
+            else:
+                s = actions["Stock Splits"]
+                _split_calendar_cache[symbol] = {d.date(): float(r) for d, r in s[s != 0].items()}
+        except Exception:
+            _split_calendar_cache[symbol] = {}
+    return _split_calendar_cache[symbol]
+
+
+def split_factor_between(isin: str, name: str,
+                         order_date: "datetime.date", as_of: "datetime.date") -> float:
+    """Cumulative split factor for real splits strictly after order_date and
+    on/before as_of. Multiply a raw carnet quantity by this factor and
+    divide its price by it to convert an as-traded order into the same
+    post-split terms used by the auto-adjusted price store. Returns 1.0
+    when no qualifying split occurred."""
+    factor = 1.0
+    for split_date, ratio in get_split_calendar(isin, name).items():
+        if order_date < split_date <= as_of:
+            factor *= ratio
+    return factor
 
 
 def build_marks(components: list[dict], as_of_date: str, prod_ccy: str) -> dict[str, float]:
@@ -433,6 +493,13 @@ def build_marks(components: list[dict], as_of_date: str, prod_ccy: str) -> dict[
             sym = yf_symbol(isin, name)
             start_str = (as_of_ts - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
             end_str   = (as_of_ts + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+            if not price_ccy:
+                try:
+                    fi_ccy = yf.Ticker(sym).fast_info.get("currency")
+                    if fi_ccy:
+                        price_ccy = fi_ccy.upper()
+                except Exception:
+                    pass
             try:
                 hist = yf.Ticker(sym).history(
                     start=start_str, end=end_str, auto_adjust=True

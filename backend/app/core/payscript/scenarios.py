@@ -25,7 +25,9 @@ DEFAULT_SCENARIO_N = 2000
 
 def _price_with_shocks(script: CompiledScript, underlyings, corr_matrix, r: float, T: float,
                         N: int, model: str, seed: int, user_params: dict,
-                        spot_shock: float, vol_shock: float, rate_shock: float = 0.0) -> float:
+                        spot_shock: float, vol_shock: float, rate_shock: float = 0.0,
+                        yield_curve=None, sigma_r: float = 0.0, a_r: float = 0.0,
+                        barrier_monitoring: str = "weekly") -> float:
     """Reprice with shocked spot/vol/rate, all else (incl. seed) held fixed.
 
     rate_shock defaults to 0 and isn't exposed as a grid axis yet — run_mc
@@ -35,24 +37,32 @@ def _price_with_shocks(script: CompiledScript, underlyings, corr_matrix, r: floa
     n = len(underlyings)
     res = run_mc(script, underlyings, corr_matrix, r, T, N, model, seed,
                  antithetic=True, user_params=user_params,
-                 spot_mult=[1.0 + spot_shock] * n, vol_add=[vol_shock] * n, dr=rate_shock)
+                 spot_mult=[1.0 + spot_shock] * n, vol_add=[vol_shock] * n, dr=rate_shock,
+                 yield_curve=yield_curve or [], sigma_r=sigma_r, a_r=a_r,
+                 barrier_monitoring=barrier_monitoring)
     return res["price"]
 
 
 def compute_scenario_grid(script: CompiledScript, underlyings, corr_matrix, r: float, T: float,
                            model: str, seed: int, user_params: dict,
                            spot_shocks: list[float], vol_shocks: list[float],
-                           N: int = DEFAULT_SCENARIO_N) -> dict:
+                           N: int = DEFAULT_SCENARIO_N,
+                           yield_curve=None, sigma_r: float = 0.0, a_r: float = 0.0,
+                           barrier_monitoring: str = "weekly") -> dict:
     """2D stress grid: price(spot_shock, vol_shock) for every combination, plus
     the unshocked base price for reference (computed independently of whether
     0.0 is actually present in the shock lists)."""
     base_price = _price_with_shocks(script, underlyings, corr_matrix, r, T, N, model, seed,
-                                     user_params, 0.0, 0.0)
+                                     user_params, 0.0, 0.0,
+                                     yield_curve=yield_curve, sigma_r=sigma_r, a_r=a_r,
+                                     barrier_monitoring=barrier_monitoring)
 
     prices: list[list[float]] = []
     for dV in vol_shocks:
         row = [round(_price_with_shocks(script, underlyings, corr_matrix, r, T, N, model, seed,
-                                         user_params, dS, dV), 6)
+                                         user_params, dS, dV,
+                                         yield_curve=yield_curve, sigma_r=sigma_r, a_r=a_r,
+                                         barrier_monitoring=barrier_monitoring), 6)
                for dS in spot_shocks]
         prices.append(row)
 

@@ -8,6 +8,7 @@
         <span class="font-bold text-slate-100 tracking-tight">Structura</span>
       </RouterLink>
       <span class="text-slate-600 text-xs">/ Analyse AMC</span>
+      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5 shrink-0">← Accueil</RouterLink>
       <!-- Main tab switcher -->
       <div class="flex gap-1 ml-4">
         <button @click="mainTab = 'classic'"
@@ -450,7 +451,7 @@
 
               <div class="flex gap-3 flex-wrap">
                 <label class="text-slate-500 text-[10px] mt-0.5">Blocs :</label>
-                <label v-for="bl in ['A_factor','B_attribution','C_trading','D_behaviour','F_replicability']" :key="bl"
+                <label v-for="bl in ['A_factor','B_attribution','C_trading','D_behaviour','F_replicability','K_marketshocks']" :key="bl"
                   class="flex items-center gap-1 cursor-pointer text-[10px] text-slate-400">
                   <input type="checkbox"
                     :checked="manifestData.manifest?.blocks?.[bl]"
@@ -513,6 +514,10 @@
             <label class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none px-0.5">
               <input type="checkbox" v-model="includeBrinsonInPdf" class="w-3.5 h-3.5 accent-blue-500" />
               Inclure Brinson dans le PDF
+            </label>
+            <label class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none px-0.5">
+              <input type="checkbox" v-model="includeMarketShocksInPdf" class="w-3.5 h-3.5 accent-blue-500" />
+              Inclure Chocs de Marché (K) dans le PDF
             </label>
             <button
               class="w-full text-xs py-2 rounded-lg border border-slate-600 text-slate-300 hover:border-blue-500 hover:text-blue-300 flex items-center justify-center gap-2 transition-colors"
@@ -3499,6 +3504,108 @@
               </div>
 
               <!-- ╔══════════════════════════════════════════════════════════╗ -->
+              <!-- ║  BLOC K — RÉACTIVITÉ AUX CHOCS DE MARCHÉ                 ║ -->
+              <!-- ╚══════════════════════════════════════════════════════════╝ -->
+              <div v-if="activeStudyTab === 'marketshocks'" class="flex flex-col gap-5">
+
+                <!-- No result yet — like Bloc G, computed on demand -->
+                <div v-if="!studyResult.block_k && !marketShocksLoading" class="card text-center py-12">
+                  <div class="text-4xl mb-3">🌍</div>
+                  <div class="text-slate-400 text-sm mb-2">Réactivité aux Chocs de Marché</div>
+                  <div class="text-slate-600 text-xs mb-5 max-w-md mx-auto leading-relaxed">
+                    Juxtapose l'activité de trading avec les grands chocs de marché (subprimes, Chine, COVID, SVB...)
+                    pour identifier une sur-réaction, une sous-réaction, ou une gestion disciplinée.
+                  </div>
+                  <button
+                    class="mx-auto px-5 py-2.5 text-sm font-semibold bg-blue-700 hover:bg-blue-600 text-white rounded-lg transition-colors flex items-center gap-2"
+                    :disabled="marketShocksLoading"
+                    @click="computeMarketShocks">
+                    <span v-if="marketShocksLoading" class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    🌍 Calculer la Réactivité aux Chocs
+                  </button>
+                  <div v-if="marketShocksError" class="mt-3 text-red-400 text-xs">{{ marketShocksError }}</div>
+                </div>
+
+                <div v-if="marketShocksLoading && !studyResult.block_k" class="card text-center py-8 text-slate-500 text-xs">
+                  <div class="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                  Calcul en cours…
+                </div>
+
+                <template v-if="studyResult.block_k && studyResult.block_k.available">
+
+                  <div class="flex items-center justify-between">
+                    <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500">
+                      Période d'étude : {{ studyResult.meta.nav_start_date }} → {{ studyResult.meta.nav_current_date }}
+                    </div>
+                    <button
+                      class="text-[10px] border border-slate-700 text-slate-500 hover:text-blue-300 hover:border-blue-700 px-2 py-1 rounded transition-colors"
+                      :disabled="marketShocksLoading"
+                      @click="computeMarketShocks">↻ Recalculer</button>
+                  </div>
+
+                  <div v-if="studyResult.block_k.warning"
+                       class="card border border-amber-500/30 text-amber-400 text-xs py-3 px-4">
+                    ⚠ {{ studyResult.block_k.warning }}
+                  </div>
+
+                  <div class="card border border-slate-700">
+                    <div class="text-xs font-semibold text-slate-400 mb-2">Résumé</div>
+                    <p class="text-xs text-slate-300 leading-5">{{ studyResult.block_k.interpretation }}</p>
+                  </div>
+
+                  <div v-if="studyResult.block_k.n_events_applicable === 0" class="card text-slate-600 text-sm text-center py-8">
+                    Aucun choc de marché du calendrier ne chevauche l'historique de ce fonds.
+                  </div>
+
+                  <div v-else class="card overflow-x-auto">
+                    <table class="w-full text-xs">
+                      <thead>
+                        <tr class="border-b border-slate-800 text-slate-500">
+                          <th class="text-left py-2 px-2">Événement</th>
+                          <th class="text-left py-2 px-2">Période</th>
+                          <th class="text-right py-2 px-2">Trades</th>
+                          <th class="text-right py-2 px-2">Ratio activité</th>
+                          <th class="text-right py-2 px-2">Flux net</th>
+                          <th class="text-right py-2 px-2">Timing moy.</th>
+                          <th class="text-left py-2 px-2">Diagnostic</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="e in studyResult.block_k.events" :key="e.id"
+                            class="border-b border-slate-800/50">
+                          <td class="py-2 px-2">
+                            <div class="font-medium text-slate-200">{{ e.label }}</div>
+                            <div class="text-slate-500">{{ e.category }}</div>
+                          </td>
+                          <td class="py-2 px-2 text-slate-400 font-mono">{{ e.start }} → {{ e.end }}</td>
+                          <td class="py-2 px-2 text-right font-mono">{{ e.n_trades }}</td>
+                          <td class="py-2 px-2 text-right font-mono"
+                              :class="e.activity_ratio == null ? 'text-slate-500'
+                                     : e.activity_ratio > 1.8 ? 'text-amber-400'
+                                     : e.activity_ratio < 0.4 ? 'text-slate-500' : 'text-slate-300'">
+                            {{ e.activity_ratio != null ? 'x' + e.activity_ratio.toFixed(2) : '—' }}
+                          </td>
+                          <td class="py-2 px-2 text-right font-mono"
+                              :class="e.net_flow > 0 ? 'text-emerald-400' : e.net_flow < 0 ? 'text-red-400' : 'text-slate-500'">
+                            {{ e.net_flow > 0 ? '+' : '' }}{{ e.net_flow.toLocaleString('fr-CH', {maximumFractionDigits:0}) }}
+                          </td>
+                          <td class="py-2 px-2 text-right font-mono text-slate-400">
+                            {{ e.avg_timing_score != null ? e.avg_timing_score.toFixed(2) : '—' }}
+                          </td>
+                          <td class="py-2 px-2 text-slate-300">{{ e.reaction_label }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                </template>
+                <div v-else-if="studyResult.block_k && !studyResult.block_k.available"
+                     class="card border border-red-500/30 text-red-400 text-sm py-4 px-4">
+                  ⚠ {{ studyResult.block_k.error || 'Réactivité aux chocs de marché non disponible.' }}
+                </div>
+              </div>
+
+              <!-- ╔══════════════════════════════════════════════════════════╗ -->
               <!-- ║  MANAGER SKILL SCORE                                     ║ -->
               <!-- ╚══════════════════════════════════════════════════════════╝ -->
               <div v-if="activeStudyTab === 'managerskill'" class="flex flex-col gap-5">
@@ -4689,6 +4796,7 @@ const studyError      = ref('')
 const studyPdfLoading       = ref(false)
 const studyPdfSimpleLoading = ref(false)
 const includeBrinsonInPdf   = ref(false)
+const includeMarketShocksInPdf = ref(false)
 const studyDoc        = ref(null)        // field doc + block catalog
 const activeStudyTab  = ref('meta')
 const studyTabs = [
@@ -4706,6 +4814,7 @@ const studyTabs = [
   { id: 'timing',        label: '⏱ H — Timing Score' },
   { id: 'stockpicking',  label: '🎯 I — Stock Picking' },
   { id: 'riskmanagement',label: '🛡 J — Risk Mgmt' },
+  { id: 'marketshocks',  label: '🌍 K — Chocs de Marché' },
   { id: 'managerskill',  label: '⭐ Manager Skill' },
   { id: 'confidence',    label: '📊 Confiance & Limites' },
 ]
@@ -4786,6 +4895,13 @@ const blockMethodology = {
     methode: 'Score composite basé sur : concentration (indice HHI), diversification sectorielle et géographique, drawdown maximal, ratio Sharpe, et cohérence entre conviction affichée et taille réelle des positions.',
     limites: 'Évaluation rétroactive basée sur le snapshot actuel — ne capture pas la dynamique intra-période du risque. Un HHI élevé peut être intentionnel pour une stratégie concentrée assumée.',
     sources: 'Snapshot Def.txt. Carnet d\'ordres JSON. Résultats blocs B/C (P&L, durée de détention).',
+  },
+  marketshocks: {
+    label: 'K — Réactivité aux Chocs de Marché',
+    but: 'Juxtaposer l\'activité de trading avec les grands chocs de marché (subprimes, Chine 2015/2021/2023, COVID, SVB...) pour identifier une sur-réaction, une sous-réaction, ou une gestion disciplinée pendant ces épisodes de stress.',
+    methode: 'Pour chaque événement chevauchant l\'historique du fonds : ratio d\'activité = volume tradé pendant la fenêtre / volume journalier moyen du fonds hors fenêtres d\'événements. Flux net acheteur/vendeur. Qualité de timing des trades exécutés dans la fenêtre (recoupée avec le Bloc H si disponible).',
+    limites: 'Calendrier statique et non exhaustif. Un fonds émis après le dernier choc du calendrier n\'aura aucun événement applicable — cas fréquent pour les AMC récents. Échantillon parfois très faible (fenêtre courte, fonds peu actif) : chaque événement rapporte son propre nombre de trades pour juger la significativité.',
+    sources: 'Carnet d\'ordres JSON (corrigé des splits). Résultat Bloc H (optionnel, pour la qualité de timing).',
   },
   managerskill: {
     label: 'Score Global Manager Skill',
@@ -4927,6 +5043,8 @@ const attrError         = ref('')
 const brinsonResult     = ref(null)
 const brinsonLoading    = ref(false)
 const brinsonError      = ref('')
+const marketShocksLoading = ref(false)
+const marketShocksError   = ref('')
 
 const momFactor = computed(() =>
   studyResult.value?.block_a?.net?.regression?.factors?.find(f => f.name === 'MOM') ?? null
@@ -5177,6 +5295,29 @@ async function computeBrinson() {
   }
 }
 
+async function computeMarketShocks() {
+  if (!studyResult.value) return
+  marketShocksLoading.value = true
+  marketShocksError.value   = ''
+  try {
+    const res = await apiFetch('/api/amc/marketshocks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        study_result: studyResult.value,
+        folder:       studyFolder.value || '',
+      }),
+    })
+    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `Erreur ${res.status}`) }
+    studyResult.value.block_k = await res.json()
+    activeStudyTab.value = 'marketshocks'
+  } catch(e) {
+    marketShocksError.value = e.message
+  } finally {
+    marketShocksLoading.value = false
+  }
+}
+
 async function loadStudyDoc() {
   try {
     const res = await apiFetch('/api/amc/study/doc')
@@ -5343,10 +5484,12 @@ async function exportStudyPdf(includeAnnexes = true) {
         synthese_text:      syntheseText.value,
         attribution_result: attrResult.value    || null,
         brinson_result:     brinsonResult.value || null,
+        market_shocks_result: studyResult.value?.block_k || null,
         company_name:       'TP Advisory Services',
         client_name:        'UTI',
         include_annexes:    includeAnnexes,
         include_brinson:    includeBrinsonInPdf.value,
+        include_marketshocks: includeMarketShocksInPdf.value,
       }),
     })
     if (!res.ok) {

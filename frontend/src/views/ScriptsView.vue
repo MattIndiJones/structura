@@ -8,6 +8,7 @@
         <span class="font-bold text-slate-100 tracking-tight">Structura</span>
         <span class="text-slate-600 text-xs">/ Mes Scripts</span>
       </RouterLink>
+      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Accueil</RouterLink>
       <span class="text-xs text-slate-500">{{ auth.user?.username }}</span>
       <RouterLink to="/pricer" class="btn-primary text-xs px-3 py-1.5">+ Nouveau script</RouterLink>
     </header>
@@ -92,7 +93,8 @@
         <!-- Grid -->
         <div v-else class="flex-1 overflow-y-auto p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 content-start">
           <div v-for="s in filteredScripts" :key="s.id"
-               class="card flex flex-col gap-2 hover:border-blue-700/60 transition-colors group cursor-pointer"
+               class="card flex flex-col gap-2 hover:border-blue-700/60 hover:shadow-xl hover:shadow-black/30
+                      hover:-translate-y-0.5 transition-all duration-200 group cursor-pointer"
                @click="openScript(s.id)">
 
             <!-- Header -->

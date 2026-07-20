@@ -236,11 +236,13 @@ class StudyExportRequest(BaseModel):
     synthese_text:      str = ""
     vag_result:         Optional[dict] = None
     attribution_result: Optional[dict] = None
-    brinson_result:     Optional[dict] = None
+    brinson_result:      Optional[dict] = None
+    market_shocks_result: Optional[dict] = None
     company_name:       str = "TP Advisory Services"
     client_name:        str = ""
     include_annexes:    bool = True
     include_brinson:    bool = False
+    include_marketshocks: bool = False
 
 
 @router.get("/study/doc")
@@ -296,6 +298,53 @@ def compute_manager_skill(
         raise HTTPException(422, str(e))
 
 
+class MarketShocksRequest(BaseModel):
+    study_result: dict
+    folder:       str
+
+
+@router.post("/marketshocks")
+def compute_market_shocks_endpoint(
+    req: MarketShocksRequest,
+    current: Annotated[User, Depends(get_current_user)],
+):
+    """Compute Bloc K (Réactivité aux Chocs de Marché) on demand.
+
+    Mirrors Bloc G (Brinson): not run automatically inside run_study() unless
+    manifest.blocks.K_marketshocks was pre-selected — otherwise computed here,
+    from its own tab, on an already-completed study.
+    """
+    import glob
+    from pathlib import Path
+    from ..core.amc_orderbook import load_orders, apply_split_corrections
+    from ..core.amc_marketshocks import compute_market_shocks
+
+    base = Path(req.folder)
+    paths: list[str] = []
+    seen: set[str] = set()
+    for p in (list(base.glob("* Data*.json")) + list(base.glob("*Data*.json"))
+              + list(base.glob("merged-*.json"))):
+        rp = str(p.resolve())
+        if rp not in seen:
+            seen.add(rp)
+            paths.append(str(p))
+    if not paths:
+        raise HTTPException(422, f"Aucun fichier d'ordres JSON trouvé dans {req.folder}")
+
+    meta = req.study_result.get("meta") or {}
+    orders = load_orders(paths)
+    as_of = orders[-1]["date"] if orders else None
+    orders = apply_split_corrections(orders, as_of)
+
+    try:
+        result = compute_market_shocks(orders, meta, block_h=req.study_result.get("block_h"))
+    except Exception as e:
+        raise HTTPException(500, f"Erreur Bloc K : {e}")
+    if not result.get("available") and "error" in result:
+        raise HTTPException(422, result["error"])
+    return result
+
+
 @router.post("/study/run")
 def study_run(
     req: StudyRunRequest,
@@ -327,6 +376,7 @@ def study_export_pdf(
             vag_result=req.vag_result,
             attribution_result=req.attribution_result,
             brinson_result=req.brinson_result if req.include_brinson else None,
+            market_shocks_result=req.market_shocks_result if req.include_marketshocks else None,
             company_name=req.company_name,
             client_name=req.client_name,
             include_annexes=req.include_annexes,

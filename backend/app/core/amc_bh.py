@@ -187,13 +187,19 @@ def _bh_from_termsheet(
             "total_return_pct":    round((tr_prod - 1) * 100, 2),
             "tr_ratio":            round(tr_prod, 6),
             "tr_source":           tr_source,
-            "bh_contribution_pts": round(weight * nav_t0 * (tr_prod - 1), 4),
+            # Unnormalized here — rescaled by total_weight below so that
+            # Σ(bh_contribution_pts) matches bh_perf_pct × nav_t0 exactly,
+            # even when the term sheet doesn't sum to 100% (cash not listed).
+            "bh_contribution_pts": weight * nav_t0 * (tr_prod - 1),
         })
 
     if not positions or total_weight <= 0:
         return {"available": False, "error": "Données de prix insuffisantes (term sheet)"}
 
     # Normalisation sur le poids equity (exclut le cash s'il n'est pas dans la liste)
+    for _p in positions:
+        _p["bh_contribution_pts"] = round(_p["bh_contribution_pts"] / total_weight, 4)
+
     bh_perf_raw     = weighted_return / total_weight   # ratio total return normalisé
     # Guard against NaN/Inf (e.g. yfinance returned NaN close for some positions)
     if not math.isfinite(bh_perf_raw):
@@ -265,7 +271,7 @@ def _bh_accounting_identity(
             continue
         stock_meta.setdefault(isin, {
             "name": o.get("name", ""),
-            "ccy":  o.get("currency", prod_ccy),
+            "ccy":  o.get("ccy", prod_ccy),
         })
         qty = float(o.get("executed_qty") or o.get("qty", 0) or 0)
         if o.get("side") == "BUY":

@@ -27,6 +27,17 @@ def load_hist_vol(tickers: list[str], period: str = "1y") -> dict:
             try:
                 hist = yf.Ticker(tk).history(period=period, auto_adjust=True)
                 if not hist.empty and "Close" in hist.columns:
+                    # Each exchange's index is tz-aware in ITS OWN local timezone
+                    # (Europe/Paris for ^FCHI, America/New_York for AAPL, etc.) —
+                    # combining series across timezones without stripping this
+                    # makes pandas treat "same calendar day, different close
+                    # time" as distinct rows, so a DataFrame of >1 ticker ends up
+                    # almost entirely unaligned (verified: 2 tickers x ~250 daily
+                    # rows each merged into ~500 rows of mostly-single-column
+                    # data). Normalizing to the naive local date is the standard
+                    # (imperfect but industry-standard) fix for daily-close
+                    # cross-timezone alignment.
+                    hist.index = hist.index.tz_localize(None)
                     s = hist["Close"].dropna()
                     if len(s) > 5:
                         price_series[tk] = s
@@ -55,8 +66,16 @@ def load_hist_vol(tickers: list[str], period: str = "1y") -> dict:
             vols[tk] = round(float(s.std() * math.sqrt(252)), 4)
             found.append(tk)
             try:
-                info = yf.Ticker(tk).fast_info
-                dy = getattr(info, "dividend_yield", 0.0) or 0.0
+                # fast_info.dividend_yield doesn't exist on current yfinance
+                # (0.2.66) — silently returned 0.0 for every ticker via the
+                # getattr(..., 0.0) fallback. info['dividendYield'] exists but
+                # is pre-multiplied by 100 (0.34 means 0.34%, not a fraction)
+                # — trailingAnnualDividendYield is the one field that's a
+                # plain fraction, consistent with what UnderlyingParams.q
+                # expects. None for tickers with no per-security dividend
+                # data (indices) — 0.0 is the right fallback there.
+                info = yf.Ticker(tk).get_info()
+                dy = info.get("trailingAnnualDividendYield") or 0.0
                 div_yields[tk] = round(float(dy), 4)
             except Exception:
                 div_yields[tk] = 0.0
@@ -96,6 +115,11 @@ def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None) 
             try:
                 hist = yf.Ticker(tk).history(start=start, end=end, auto_adjust=True)
                 if not hist.empty and "Close" in hist.columns:
+                    # Same cross-timezone alignment fix as load_hist_vol above —
+                    # without it, a multi-ticker basket backtest silently
+                    # compares near-random staggered rows instead of the same
+                    # calendar day across exchanges.
+                    hist.index = hist.index.tz_localize(None)
                     price_series[tk] = hist["Close"].dropna()
             except Exception as e:
                 logger.debug("YF prices error %s: %s", tk, e)

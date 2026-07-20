@@ -87,6 +87,9 @@ class BlockToggles(BaseModel):
     H_timing: bool = True          # entry/exit timing score (requires stored prices)
     I_stockpicking: bool = True    # stock picking alpha vs benchmark (requires stored prices)
     J_riskmanagement: bool = True  # risk management score (requires nav + composition)
+    K_marketshocks: bool = False   # trading reactivity around known market-shock windows — opt-in,
+                                    # like Bloc G: runs automatically only if selected here, otherwise
+                                    # computed on demand from its own tab (POST /api/amc/marketshocks)
 
 
 class OutputOptions(BaseModel):
@@ -249,6 +252,18 @@ BLOCK_CATALOG: List[dict] = [
             "de la fenêtre du Bloc A (intersection avec facteurs FF).",
      "inputs": "NAV historique (timeseries), composition actuelle (Def.txt), résultat Bloc A (pour le risque factoriel), "
                "benchmark (yfinance — pour les capture ratios et le benchmark drawdown)."},
+    {"key": "K_marketshocks", "title": "K — Réactivité aux Chocs de Marché",
+     "what": "Juxtapose l'activité de trading avec un calendrier de chocs de marché majeurs "
+             "(subprimes, Chine 2015/2021/2023, COVID, SVB...) pour identifier une sur-réaction, "
+             "une sous-réaction, ou une gestion disciplinée pendant ces épisodes.",
+     "how": "Pour chaque événement chevauchant l'historique du fonds : ratio d'activité = "
+            "volume tradé pendant la fenêtre / volume journalier moyen du fonds hors fenêtres "
+            "d'événements. Flux net acheteur/vendeur pendant la fenêtre. Qualité d'exécution "
+            "(Bloc H) des trades exécutés dans la fenêtre si disponible. "
+            "NOTE : calendrier statique et non exhaustif (voir amc_marketshocks.MARKET_EVENTS) ; "
+            "un fonds émis après le dernier choc du calendrier n'aura aucun événement applicable.",
+     "inputs": "Carnet d'ordres (déjà corrigé des splits), période d'activité du fonds "
+               "(meta.nav_start_date/as_of), résultat Bloc H (optionnel, pour le timing)."},
 ]
 
 

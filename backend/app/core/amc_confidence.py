@@ -132,7 +132,7 @@ def build_confidence(blocks: Dict, block_a: Optional[dict], n_orders: int,
     # ── Bloc H — Timing Score ──
     if block_h_result is not None:
         if block_h_result.get("available"):
-            n_h      = block_h_result.get("n_orders_analyzed", 0)
+            n_h      = block_h_result.get("n_trades_analyzed", 0)
             cov_h    = block_h_result.get("coverage_pct", 0) or 0
             score_h  = round((block_h_result.get("global_score_mean") or 0.5) * 100, 1)
             h_conf   = 0.80 if cov_h >= 50 else 0.65 if cov_h >= 20 else 0.50
@@ -158,7 +158,7 @@ def build_confidence(blocks: Dict, block_a: Optional[dict], n_orders: int,
     # ── Bloc I — Stock Picking Score ──
     if block_i_result is not None:
         if block_i_result.get("available"):
-            n_i     = block_i_result.get("n_trades", 0)
+            n_i     = block_i_result.get("n_buys_analyzed", 0)
             cov_i   = block_i_result.get("coverage_pct", 0) or 0
             score_i = block_i_result.get("score", 0)
             i_conf  = 0.80 if cov_i >= 60 else 0.65 if cov_i >= 30 else 0.50

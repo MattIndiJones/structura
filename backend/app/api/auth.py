@@ -56,6 +56,12 @@ def get_current_user(
     return user
 
 
+def get_current_admin(current: Annotated[User, Depends(get_current_user)]) -> User:
+    if current.role != "admin":
+        raise HTTPException(status_code=403, detail="Réservé aux administrateurs")
+    return current
+
+
 @router.post("/login")
 def login(
     form: Annotated[OAuth2PasswordRequestForm, Depends()],

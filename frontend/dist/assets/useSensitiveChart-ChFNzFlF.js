@@ -1,0 +1,1 @@
+function e(t={},n){var i;if(!n)return t;const s={};for(const[o,l]of Object.entries(t.scales||{}))s[o]={...l,ticks:{...l.ticks||{},display:!1}};return{...t,scales:s,plugins:{...t.plugins,tooltip:{...(i=t.plugins)==null?void 0:i.tooltip,enabled:!1}}}}export{e as d};

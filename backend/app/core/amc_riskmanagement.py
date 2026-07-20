@@ -181,7 +181,10 @@ def _score_drawdown(returns: pd.Series, bench_series: Optional[pd.Series],
     ulcer_score  = _clamp(100 - ulcer_pct * 3.0)
     ep_score     = 0.6 * _clamp(100 - avg_dur * 0.8) + 0.4 * _clamp(100 - n_ep * 8)
     if bench_max_dd_pct is not None:
-        bench_score = _clamp(50 - (max_dd_pct - bench_max_dd_pct) * 2.5)
+        # Both figures are negative (e.g. -10%). A shallower (less negative)
+        # drawdown than the benchmark means max_dd_pct - bench_max_dd_pct > 0
+        # and must INCREASE the score, not decrease it.
+        bench_score = _clamp(50 + (max_dd_pct - bench_max_dd_pct) * 2.5)
     else:
         bench_score = 50.0
     score = round(_clamp(0.35 * max_dd_score + 0.30 * ulcer_score +

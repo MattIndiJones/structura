@@ -15,7 +15,9 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
         <div class="grid grid-cols-3 gap-2 text-xs">
           <div class="col-span-3">
-            <label class="label">Axe X</label>
+            <label class="label">Axe X
+              <HelpTip text="PARAM du script balayé en colonnes. Les deux axes sont variés indépendamment l'un de l'autre — si les deux paramètres ont un lien économique dans le produit (ex: une barrière et un coupon censés bouger ensemble), la grille testera aussi des combinaisons qui n'ont pas de sens commercial." />
+            </label>
             <select v-model="form.param_x" class="select" @change="prefillX">
               <option v-for="p in store.scriptParams" :key="p.name" :value="p.name">{{ p.name }}</option>
             </select>
@@ -29,7 +31,9 @@
             <SensitiveValue mode="input"><input v-model.number="form.x_max" type="number" step="0.1" class="input" /></SensitiveValue>
           </div>
           <div>
-            <label class="label">Pas</label>
+            <label class="label">Pas
+              <HelpTip text="Nombre de valeurs testées entre Min et Max sur cet axe — le nombre total de cellules calculées est Pas(X) × Pas(Y), chacune avec son propre pricing MC complet." />
+            </label>
             <input v-model.number="form.x_steps" type="number" min="2" max="15" class="input" />
           </div>
         </div>
@@ -49,7 +53,9 @@
             <SensitiveValue mode="input"><input v-model.number="form.y_max" type="number" step="0.1" class="input" /></SensitiveValue>
           </div>
           <div>
-            <label class="label">Pas</label>
+            <label class="label">Pas
+              <HelpTip text="Nombre de valeurs testées entre Min et Max sur cet axe." />
+            </label>
             <input v-model.number="form.y_steps" type="number" min="2" max="15" class="input" />
           </div>
         </div>
@@ -63,7 +69,9 @@
         <summary class="text-xs text-slate-500 cursor-pointer hover:text-slate-300">Options avancées</summary>
         <div class="grid grid-cols-3 gap-3 text-xs mt-2">
           <div>
-            <label class="label">N chemins / cellule</label>
+            <label class="label">N chemins / cellule
+              <HelpTip text="Chemins MC par cellule de la grille — un pricing complet et indépendant par cellule, pas partagé entre elles. Baisser cette valeur accélère la grille mais augmente le bruit MC visible d'une cellule à l'autre (des variations qui peuvent sembler être un effet du paramètre alors que c'est juste du bruit d'échantillonnage)." />
+            </label>
             <input v-model.number="form.N" type="number" step="500" min="500" max="20000" class="input" />
           </div>
         </div>
@@ -123,6 +131,7 @@ import { reactive, computed } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import SensitiveValue from './SensitiveValue.vue'
+import HelpTip from './HelpTip.vue'
 
 const store = usePricingStore()
 const demo = useDemoModeStore()

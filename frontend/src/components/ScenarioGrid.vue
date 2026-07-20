@@ -17,15 +17,21 @@
 
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs mb-3">
       <div>
-        <label class="label">Chocs spot (%, séparés par virgule)</label>
+        <label class="label">Chocs spot (%, séparés par virgule)
+          <HelpTip text="Chocs MULTIPLICATIFS sur le spot : -10 veut dire spot × 0,90. Ne pas confondre avec les chocs vol ci-contre, qui sont additifs — les deux se lisent différemment." />
+        </label>
         <input v-model="spotInput" type="text" class="input" />
       </div>
       <div>
-        <label class="label">Chocs vol (pts de %, séparés par virgule)</label>
+        <label class="label">Chocs vol (pts de %, séparés par virgule)
+          <HelpTip text="Chocs ADDITIFS sur la vol, en points de %: +5 sur une vol de 20% donne 25% (pas 20%×1,05). C'est l'inverse de la convention des chocs spot à gauche, qui sont multiplicatifs." />
+        </label>
         <input v-model="volInput" type="text" class="input" />
       </div>
       <div>
-        <label class="label">N chemins / cellule</label>
+        <label class="label">N chemins / cellule
+          <HelpTip text="Chemins MC par cellule — chaque cellule est un reprice indépendant, avec le même seed que le pricing principal (chemins communs entre cellules) pour que les écarts observés reflètent le choc, pas juste du bruit d'échantillonnage différent." />
+        </label>
         <SensitiveValue mode="input"><input v-model.number="N" type="number" step="500" min="300" max="20000" class="input" /></SensitiveValue>
       </div>
     </div>
@@ -42,7 +48,9 @@
       <table class="border-collapse text-xs mx-auto">
         <thead>
           <tr>
-            <th class="p-1 text-right text-slate-500 font-semibold whitespace-nowrap pr-2">Δvol \ Δspot</th>
+            <th class="p-1 text-right text-slate-500 font-semibold whitespace-nowrap pr-2">Δvol \ Δspot
+              <HelpTip text="Lignes = choc de vol (additif, pts de %), colonnes = choc de spot (multiplicatif, %). Le prix sous chaque pourcentage est l'écart en points de prix (pp) par rapport à la cellule encadrée en bleu (scénario de base, sans choc)." />
+            </th>
             <th v-for="(s, i) in store.scenarios.spot_shocks" :key="'hx' + i"
                 class="p-1 text-center text-slate-400 font-semibold whitespace-nowrap">
               <SensitiveValue>{{ fmtPct(s) }}</SensitiveValue>
@@ -80,6 +88,7 @@ import { ref, computed } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import SensitiveValue from './SensitiveValue.vue'
+import HelpTip from './HelpTip.vue'
 
 const store = usePricingStore()
 const demo = useDemoModeStore()

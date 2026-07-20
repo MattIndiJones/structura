@@ -178,8 +178,8 @@ def _distribution(alphas: list[float], n_bins: int = 12) -> dict:
 def _compute_score_100(alpha_mean: float, success_rate: float,
                        info_ratio: float) -> int:
     """Map three metrics to a 0-100 composite score."""
-    # Alpha magnitude: sigmoid centered at 0, +10% → 76, +20% → 90
-    alpha_score = 50 + 50 * math.tanh(alpha_mean / 0.10)
+    # Alpha magnitude: sigmoid centered at 0, +10% → ~76, +20% → ~91
+    alpha_score = 50 + 50 * math.tanh(alpha_mean / 0.175)
     # Success rate: 30% → 0, 50% → 50, 70% → 100
     sr_score = min(max((success_rate - 0.30) / 0.40, 0), 1) * 100
     # Information ratio: IR −0.5 → 0, IR 0 → 25, IR 1 → 75, IR 2 → 100
@@ -196,7 +196,7 @@ def _score_label(score: int) -> str:
 
 
 def _interpret(score: int, alpha_means: dict[str, float],
-               success_rates: dict[str, float], n_analyzed: int,
+               global_sr: float, n_analyzed: int,
                coverage_pct: float, benchmark_ticker: str,
                tstat: float, pvalue: float) -> str:
     parts = []
@@ -258,16 +258,15 @@ def _interpret(score: int, alpha_means: dict[str, float],
             f"(t={tstat:+.2f}, p={pvalue:.3f})."
         )
 
-    if success_rates:
-        avg_sr = sum(success_rates.values()) / len(success_rates)
-        if avg_sr >= 0.60:
+    if global_sr is not None:
+        if global_sr >= 0.60:
             parts.append(
-                f"Taux de succès moyen de {avg_sr*100:.0f}% — "
+                f"Taux de succès de {global_sr*100:.0f}% — "
                 "plus d'un achat sur deux surperforme le benchmark post-achat."
             )
-        elif avg_sr < 0.45:
+        elif global_sr < 0.45:
             parts.append(
-                f"Taux de succès moyen de {avg_sr*100:.0f}% — "
+                f"Taux de succès de {global_sr*100:.0f}% — "
                 "moins d'un achat sur deux surperforme le benchmark."
             )
 
@@ -456,7 +455,7 @@ def compute_stockpicking_score(orders: list[dict],
         "tstat_alpha":         tstat,
         "pvalue_alpha":        pvalue,
         "stats_by_horizon":    stats_by_horizon,
-        "interpretation":      _interpret(score, alpha_means, success_rates, n_analyzed,
+        "interpretation":      _interpret(score, alpha_means, global_sr, n_analyzed,
                                           coverage, benchmark_ticker, tstat, pvalue),
         "best_ideas":          best_ideas,
         "worst_ideas":         worst_ideas,

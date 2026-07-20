@@ -13,7 +13,9 @@
         <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Paramètres KID</h3>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
-            <label class="label">CRM (risque crédit)</label>
+            <label class="label">CRM (risque crédit)
+              <HelpTip text="Classe de risque de crédit de l'émetteur (notation), 1=AAA à 6=CCC et moins. Combiné au MRM (risque marché, calculé depuis la VEV) via la table PRIIPs pour donner le SRI final — un émetteur moins bien noté remonte le SRI même si le payoff est identique." />
+            </label>
             <select v-model.number="params.crm" class="select text-xs">
               <option :value="1">1 — AAA</option>
               <option :value="2">2 — AA</option>
@@ -24,15 +26,21 @@
             </select>
           </div>
           <div>
-            <label class="label">Frais d'entrée (%)</label>
+            <label class="label">Frais d'entrée (%)
+              <HelpTip text="Frais ponctuel prélevé à la souscription, en % du montant investi. Réduit le capital réellement investi (10 000€ × (1 − frais)) avant application des scénarios de performance." />
+            </label>
             <input v-model.number="params.cost_entry" type="number" step="0.1" min="0" max="10" class="input text-xs" />
           </div>
           <div>
-            <label class="label">Frais de sortie (%)</label>
+            <label class="label">Frais de sortie (%)
+              <HelpTip text="Frais ponctuel prélevé à la sortie (vente ou remboursement), appliqué au montant final de chaque scénario." />
+            </label>
             <input v-model.number="params.cost_exit" type="number" step="0.1" min="0" max="10" class="input text-xs" />
           </div>
           <div>
-            <label class="label">Frais courants (% / an)</label>
+            <label class="label">Frais courants (% / an)
+              <HelpTip text="Frais récurrent annuel (gestion), composé sur la durée de détention de chaque horizon affiché — plus l'horizon est long, plus son impact cumulé pèse sur le montant final." />
+            </label>
             <input v-model.number="params.cost_ongoing" type="number" step="0.01" min="0" max="5" class="input text-xs" />
           </div>
         </div>
@@ -50,6 +58,7 @@
       <div v-if="kid" class="card">
         <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
           Indicateur Synthétique de Risque (SRI)
+          <HelpTip width="w-72" text="Échelle réglementaire PRIIPs de 1 (risque le plus faible) à 7 (le plus élevé), combinant le risque de marché (MRM, dérivé de la VEV du produit) et le risque de crédit de l'émetteur (CRM) via une table de correspondance fixée par le règlement." />
         </h3>
         <div class="flex items-center gap-6">
           <!-- Gauge 1-7 -->
@@ -71,7 +80,9 @@
           <!-- Détails -->
           <div class="flex flex-col gap-1.5">
             <div class="flex items-center gap-2 text-xs">
-              <span class="text-slate-500 w-36">Risque marché (MRM)</span>
+              <span class="text-slate-500 w-36">Risque marché (MRM)
+                <HelpTip text="Market Risk Measure, 1 à 7, dérivé directement de la VEV (voir ci-dessous) via des seuils fixés par le règlement PRIIPs." />
+              </span>
               <span class="font-mono font-bold text-slate-200">{{ kid.mrm }} / 7</span>
             </div>
             <div class="flex items-center gap-2 text-xs">
@@ -79,11 +90,15 @@
               <span class="font-mono font-bold text-slate-200">{{ kid.crm }} / 6</span>
             </div>
             <div class="flex items-center gap-2 text-xs">
-              <span class="text-slate-500 w-36">VEV (équiv. vol)</span>
+              <span class="text-slate-500 w-36">VEV (équiv. vol)
+                <HelpTip text="Volatility Equivalent Value — la volatilité annualisée implicite qui, dans un modèle log-normal simple, produirait le même percentile 1% de perte à l'échéance que celui observé en simulation Monte Carlo sur ce produit précis. Une façon de résumer le risque de queue en un seul chiffre comparable entre produits." />
+              </span>
               <span class="font-mono font-bold text-slate-200">{{ kid.vev.toFixed(1) }}%</span>
             </div>
             <div class="flex items-center gap-2 text-xs">
-              <span class="text-slate-500 w-36">Durée recommandée</span>
+              <span class="text-slate-500 w-36">Durée recommandée
+                <HelpTip text="Recommended Holding Period (T_rhp) — fixée ici à la maturité du produit. Toute la lecture du SRI et des scénarios de performance suppose que vous conservez le produit jusque-là ; une sortie anticipée expose à un profil de risque différent, non capturé par ces chiffres." />
+              </span>
               <span class="font-mono font-bold text-slate-200">{{ kid.T_rhp.toFixed(1) }} ans</span>
             </div>
           </div>
@@ -172,22 +187,26 @@
           </div>
         </div>
         <div class="flex items-center justify-between mt-3 pt-3 border-t border-slate-800 text-xs">
-          <span class="text-slate-500">Impact total des coûts sur la durée recommandée</span>
+          <span class="text-slate-500">Impact total des coûts sur la durée recommandée
+            <HelpTip text="(frais d'entrée + frais de sortie) + frais courants × durée recommandée (T_rhp) — l'érosion cumulée en % du capital sur toute la durée de détention conseillée, à comparer au rendement attendu." />
+          </span>
           <span class="font-mono font-bold text-amber-400">
             {{ totalCostImpact }}
           </span>
         </div>
       </div>
 
-      <!-- ── Bouton générer PDF ──────────────────────────────── -->
+      <!-- ── Boutons sauvegarde / export ──────────────────────── -->
       <div v-if="kid" class="flex gap-3">
+        <button class="btn-primary text-xs px-4 py-2 flex-1" @click="saveKid" :disabled="saving">
+          <span v-if="saving" class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1.5"></span>
+          {{ saving ? 'Sauvegarde…' : (saveConfirm ? '✓ Sauvegardé' : '💾 Sauvegarder') }}
+        </button>
         <button class="btn-secondary text-xs px-4 py-2 flex-1" @click="printKid">
           🖨️ Imprimer / Exporter PDF
         </button>
-        <button class="btn-secondary text-xs px-4 py-2" @click="goToDoc">
-          📁 Enregistrer dans Documentation
-        </button>
       </div>
+      <div v-if="saveError" class="text-xs text-red-400">⚠ {{ saveError }}</div>
 
     </template>
   </div>
@@ -197,12 +216,17 @@
 import { ref, computed } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { apiFetch } from '../utils/api.js'
+import HelpTip from './HelpTip.vue'
 
 const store = usePricingStore()
 
 const loading = ref(false)
 const error   = ref('')
-const kid     = ref(null)
+const kid     = computed({ get: () => store.kid, set: (v) => { store.kid = v } })
+
+const saving      = ref(false)
+const saveError   = ref('')
+const saveConfirm = ref(false)
 
 const params = ref({
   crm: 3,
@@ -283,8 +307,35 @@ function printKid() {
   window.print()
 }
 
-function goToDoc() {
-  // TODO: ouvre la page Documentation avec le KID pré-rempli
-  window.open('#/documentation', '_blank')
+// Sauvegarde append-only — rattachée à la fiche Indicatif (créée à la
+// volée au premier enregistrement, réutilisée ensuite pour ce pricing).
+async function saveKid() {
+  if (!kid.value) return
+  saving.value = true
+  saveError.value = ''
+  try {
+    const indicativeId = await store.ensureIndicative()
+    const res = await apiFetch('/api/kid/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indicative_id: indicativeId,
+        product_title: store.productTitle,
+        sri: kid.value.sri, mrm: kid.value.mrm, crm: kid.value.crm,
+        vev: kid.value.vev, T_rhp: kid.value.T_rhp,
+        horizons: kid.value.horizons, costs: kid.value.costs,
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || `Erreur ${res.status}`)
+    }
+    saveConfirm.value = true
+    setTimeout(() => { saveConfirm.value = false }, 2000)
+  } catch (e) {
+    saveError.value = e.message || 'Erreur de sauvegarde'
+  } finally {
+    saving.value = false
+  }
 }
 </script>

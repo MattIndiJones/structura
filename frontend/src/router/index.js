@@ -28,12 +28,58 @@ const routes = [
     component: () => import('../views/DocumentationView.vue'),
   },
   {
+    path: '/booking',
+    component: () => import('../views/BookingView.vue'),
+  },
+  {
+    path: '/reinvest',
+    component: () => import('../views/ReinvestView.vue'),
+  },
+  {
     path: '/amc',
     component: () => import('../views/AmcView.vue'),
   },
   {
     path: '/fifo',
     component: () => import('../views/FifoView.vue'),
+  },
+  {
+    path: '/rfq',
+    component: () => import('../views/RfqView.vue'),
+  },
+  {
+    path: '/rfq/analyse',
+    component: () => import('../views/RfqAnalysisView.vue'),
+  },
+  {
+    path: '/admin',
+    component: () => import('../views/AdminView.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
+    path: '/admin/rfq-providers',
+    component: () => import('../views/AdminRfqProvidersView.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
+    path: '/admin/counterparties',
+    component: () => import('../views/AdminCounterpartiesView.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
+    path: '/admin/browse/:table?',
+    component: () => import('../views/AdminBrowseView.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
+    path: '/admin/users',
+    component: () => import('../views/AdminUsersView.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
+    path: '/admin/entities',
+    component: () => import('../views/AdminEntitiesView.vue'),
+    meta: { requiresAdmin: true },
   },
   {
     path: '/:pathMatch(.*)*',
@@ -53,6 +99,7 @@ router.beforeEach(async (to) => {
   // Restore user profile if missing (e.g. page refresh)
   if (!auth.user) await auth.fetchMe()
   if (!auth.isAuthenticated) return '/login'
+  if (to.meta.requiresAdmin && !auth.isAdmin) return '/'
   return true
 })
 

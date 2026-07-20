@@ -18,8 +18,14 @@ recon_mode="strict"
     Signals a data quality issue — do not inject synthetic lots.
 
 recon_mode="t0_synthetic"
-    Excess sells trigger a synthetic BUY at t0_date with the T0 price sourced from
-    t0_prices_prod {isin: price_in_prod_ccy}.
+    Excess sells trigger a synthetic BUY dated at the sell that revealed the
+    shortfall, priced via deficit_prices_prod {(isin, date): price} when the
+    caller has it (the accurate, per-event price) — falling back to
+    t0_prices_prod {isin: price_in_prod_ccy} (a single price per isin) when it
+    doesn't. A shortfall almost always means a real BUY leg is simply missing
+    from the carnet on that exact date (observed to cluster on days where the
+    manager rebalances 10+ names at once — the feed loses individual legs from
+    those large batches), not that the position never existed before T0.
 """
 from __future__ import annotations
 
@@ -49,6 +55,7 @@ def reconstruct(
     recon_mode: str = "t0_synthetic",   # "strict" | "t0_synthetic"
     t0_date: Optional[datetime.date] = None,
     t0_prices_prod: Optional[dict[str, float]] = None,  # {isin: price} for synthetic BUYs
+    deficit_prices_prod: Optional[dict[tuple[str, datetime.date], float]] = None,
 ) -> ReconResult:
     """Run FIFO matching on a list of Orders and return a ReconResult.
 
@@ -72,8 +79,13 @@ def reconstruct(
         Inception date for synthetic BUYs.  Required when recon_mode="t0_synthetic".
     t0_prices_prod:
         Pre-fetched T0 prices per ISIN in prod_ccy.  Required for t0_synthetic.
+    deficit_prices_prod:
+        Pre-fetched {(isin, deficit_date): price_in_prod_ccy}, one entry per
+        actual shortfall event — the accurate price for that specific date.
+        Takes priority over t0_prices_prod when present for a given event.
     """
     t0_prices_prod = t0_prices_prod or {}
+    deficit_prices_prod = deficit_prices_prod or {}
 
     # ── Per-ISIN state ─────────────────────────────────────────────────
     lot_queues: dict[str, collections.deque[Lot]] = collections.defaultdict(collections.deque)
@@ -122,12 +134,21 @@ def reconstruct(
                 available = sum(l.qty for l in queue)
                 if available < sell_qty and recon_mode == "t0_synthetic":
                     excess = sell_qty - available
+                    # Date the synthetic lot at the sell that revealed the
+                    # shortfall, not the isin's earliest order — a missing BUY
+                    # leg belongs on the day it was dropped from the feed, so
+                    # it's priced at THAT day's real market price rather than
+                    # some unrelated, often much older or younger, date.
+                    inject_date = order.date
+                    price = deficit_prices_prod.get((isin, inject_date))
+                    if price is None:
+                        price = t0_prices_prod.get(isin)
                     _inject_synthetic(
                         isin=isin,
                         name=name,
                         excess_qty=excess,
-                        t0_date=t0_date or order.date,
-                        t0_prices_prod=t0_prices_prod,
+                        inject_date=inject_date,
+                        price_prod=price,
                         queue=queue,
                         synthetic_report=synthetic_report,
                         prod_ccy=prod_ccy,
@@ -225,23 +246,23 @@ def _inject_synthetic(
     isin: str,
     name: str,
     excess_qty: float,
-    t0_date: datetime.date,
-    t0_prices_prod: dict[str, float],
+    inject_date: datetime.date,
+    price_prod: Optional[float],
     queue: collections.deque[Lot],
     synthetic_report: list[SyntheticInjection],
     prod_ccy: str,
 ) -> None:
-    """Inject a synthetic T0 BUY lot for an excess SELL, and record it."""
-    price_prod = t0_prices_prod.get(isin)
+    """Inject a synthetic BUY lot for an excess SELL, dated/priced at the
+    shortfall's own date, and record it."""
     source = "unavailable"
     injected = False
 
     if price_prod is not None and price_prod > 0:
-        source = "t0_price"
+        source = "deficit_date_price"
         injected = True
         queue.appendleft(Lot(
-            order_id=f"synthetic_{isin}_{t0_date}",
-            date=t0_date,
+            order_id=f"synthetic_{isin}_{inject_date}",
+            date=inject_date,
             isin=isin,
             name=name,
             qty=excess_qty,
@@ -256,7 +277,7 @@ def _inject_synthetic(
         isin=isin,
         name=name,
         excess_qty=excess_qty,
-        t0_date=t0_date,
+        t0_date=inject_date,
         price_prod=price_prod or 0.0,
         price_local=None,
         price_ccy=prod_ccy,

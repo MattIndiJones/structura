@@ -415,7 +415,11 @@ def block_d_behaviour(recon: ReconResult, orders: list[dict], composition: dict,
         max_hold = max_hold_by_isin.get(isin, 0)
         churn = rt_count.get(isin, 0) + flips_by_isin.get(isin, 0)
         total_pnl = pnl_by_isin.get(isin, 0.0)
-        high_conviction = (weight_pct >= conviction_weight_pct) or (max_hold >= long_term_days and weight_pct > 0)
+        # max_hold_by_isin is only populated from round_trips/open_positions (real
+        # trading history), so a long max_hold already proves this ISIN was a real
+        # position — gating it on the CURRENT weight_pct wrongly disqualifies every
+        # fully closed position (weight_pct=0 by construction once fully sold).
+        high_conviction = (weight_pct >= conviction_weight_pct) or (max_hold >= long_term_days)
         positive = total_pnl > 0
         rec = {
             "isin": isin,

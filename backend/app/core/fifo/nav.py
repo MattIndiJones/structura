@@ -170,21 +170,8 @@ def build_initial_orders(
         orders.sort(key=lambda o: o.isin)
         return orders
 
-    from ..amc_prices import build_marks
-
-    # Use FIFO ISIN (= carnet ISIN if aliased) for the yfinance price lookup.
-    # For ISINs that changed after a corporate action (e.g. Swissquote 10:1 split),
-    # the termsheet ISIN may map to a stale or wrong price in yfinance, while the
-    # carnet ISIN correctly reflects the current trading price.
-    components = [
-        {
-            "isin": isin_aliases.get(e["isin"], e["isin"]),   # fifo_isin for lookup
-            "name": e["name"],
-            "currency": e.get("ccy", ""),
-        }
-        for e in termsheet
-    ]
-    yf_prices = build_marks(components, as_of_date=fixing_date.isoformat(), prod_ccy=prod_ccy)
+    split_factors, yf_prices = _compute_split_factors(
+        termsheet, fixing_date, nav_initial, prod_ccy, isin_aliases)
 
     orders: list[Order] = []
     for e in termsheet:
@@ -197,20 +184,20 @@ def build_initial_orders(
         if qty_per_cert <= 0:
             continue
 
-        # USD per share at inception implied by the termsheet
-        expected_price_usd = (weight_pct / 100.0 * nav_initial) / qty_per_cert
-
+        split_factor = split_factors.get(fifo_isin)
+        if split_factor is None:
+            continue
         yf_price = yf_prices.get(fifo_isin)
-        if not yf_price or yf_price <= 0:
-            # yfinance unavailable (e.g. delisted/IL ISIN): trust termsheet-implied price,
-            # assume no post-fixing split (split_factor=1).
-            initial_qty = n_certs * qty_per_cert
+
+        if yf_price is None:
+            # yfinance unavailable (e.g. delisted/IL ISIN): trust termsheet-implied price.
+            expected_price_usd = (weight_pct / 100.0 * nav_initial) / qty_per_cert
             orders.append(Order(
                 id=f"T0_INIT_{fifo_isin}",
                 date=fixing_date,
                 isin=fifo_isin,
                 name=name,
-                qty=initial_qty,
+                qty=n_certs * qty_per_cert,
                 price_local=expected_price_usd,
                 price_ccy=prod_ccy,
                 fx=1.0,
@@ -218,25 +205,12 @@ def build_initial_orders(
             ))
             continue
 
-        # Split detection: integer ratio expected_price / yfinance_adjusted
-        # yfinance uses auto_adjust=True so historical prices are split-adjusted backward.
-        # split_factor ≈ 10 for Nvidia (10:1 split after fixing), 1 for others.
-        raw_factor = expected_price_usd / yf_price
-        nearest_int = round(raw_factor)
-        # Accept integer if within 15% of raw ratio; otherwise keep float
-        split_factor = float(nearest_int) if nearest_int >= 1 and abs(raw_factor - nearest_int) / raw_factor < 0.15 else raw_factor
-
-        if split_factor <= 0:
-            continue
-
-        initial_qty = n_certs * qty_per_cert * split_factor
-
         orders.append(Order(
             id=f"T0_INIT_{fifo_isin}",
             date=fixing_date,
             isin=fifo_isin,
             name=name,
-            qty=initial_qty,        # positive = BUY
+            qty=n_certs * qty_per_cert * split_factor,        # positive = BUY
             price_local=yf_price,
             price_ccy=prod_ccy,
             fx=1.0,
@@ -246,3 +220,182 @@ def build_initial_orders(
     # Sort by ISIN for determinism
     orders.sort(key=lambda o: o.isin)
     return orders
+
+
+def _compute_split_factors(
+    termsheet: list[dict],
+    fixing_date: datetime.date,
+    nav_initial: float,
+    prod_ccy: str,
+    isin_aliases: dict[str, str],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Per-ISIN split_factor (termsheet-unit → real post-split shares) and the
+    yfinance fixing-date price used to derive it. Shared by build_initial_orders
+    (the one-off T0 lump sum) and build_subscription_topups (the same formula
+    re-applied incrementally whenever outstanding certificates grow) so both
+    stay on the exact same real-share basis.
+
+    Returns ({fifo_isin: split_factor}, {fifo_isin: yfinance_price_at_fixing}).
+    An ISIN absent from the price dict means yfinance was unavailable for it
+    (caller falls back to the termsheet-implied price, split_factor=1 assumed).
+    """
+    from ..amc_prices import build_marks
+
+    # Use FIFO ISIN (= carnet ISIN if aliased) for the yfinance price lookup.
+    # For ISINs that changed after a corporate action (e.g. Swissquote 10:1 split),
+    # the termsheet ISIN may map to a stale or wrong price in yfinance, while the
+    # carnet ISIN correctly reflects the current trading price.
+    components = [
+        {
+            "isin": isin_aliases.get(e["isin"], e["isin"]),
+            "name": e["name"],
+            "currency": e.get("ccy", ""),
+        }
+        for e in termsheet
+    ]
+    yf_prices = build_marks(components, as_of_date=fixing_date.isoformat(), prod_ccy=prod_ccy)
+
+    split_factors: dict[str, float] = {}
+    for e in termsheet:
+        ts_isin = e["isin"]
+        fifo_isin = isin_aliases.get(ts_isin, ts_isin)
+        qty_per_cert: float = e["qty_per_cert"]
+        weight_pct: float = e["weight_pct"]
+        if qty_per_cert <= 0:
+            continue
+
+        yf_price = yf_prices.get(fifo_isin)
+        if not yf_price or yf_price <= 0:
+            split_factors[fifo_isin] = 1.0
+            yf_prices.pop(fifo_isin, None)  # signal "unavailable" to callers
+            continue
+
+        # Split detection: integer ratio expected_price / yfinance_adjusted.
+        # yfinance uses auto_adjust=True so historical prices are split-adjusted
+        # backward. split_factor ≈ 10 for Nvidia (10:1 split after fixing), 1 for
+        # others.
+        expected_price_usd = (weight_pct / 100.0 * nav_initial) / qty_per_cert
+        raw_factor = expected_price_usd / yf_price
+        nearest_int = round(raw_factor)
+        split_factor = (float(nearest_int)
+                        if nearest_int >= 1 and abs(raw_factor - nearest_int) / raw_factor < 0.15
+                        else raw_factor)
+        if split_factor > 0:
+            split_factors[fifo_isin] = split_factor
+
+    return split_factors, yf_prices
+
+
+def build_growth_topups(
+    orders: list,
+    nav_rows: list[tuple],
+    fixing_date: datetime.date,
+    n_certs_fixing: int,
+    prod_ccy: str,
+    seed_deficits: Optional[dict[str, float]] = None,
+) -> list:
+    """Extra BUY orders for certificate growth after the fixing date, applied
+    to EVERY currently open position — not just the original termsheet names.
+
+    An AMC's outstanding certificates grow through creation: new subscriptions
+    are backed by buying a pro-rata slice of whatever the fund holds AT THAT
+    MOMENT, not a replay of the day-1 termsheet. So when outstanding certs grow
+    from n to n' on some date, every position open on that date should grow
+    by the same ratio (n'/n) — whether that position originated from the T0
+    basket or was built up later through active management. Confirmed on
+    CH1352587724: Cleanspark (never in the termsheet) accumulated to 14'223
+    shares by Dec 2024, then a single sell of 17'568 on 2025-02-19 pushed it
+    to -3'345 — a deficit of the same order as 14'223 × (34'500/26'932 - 1)
+    ≈ 3'980, the fund's cert growth ratio over that period, not a data gap.
+
+    Walks `orders` (T0 basket + real carnet, already split-corrected,
+    chronological) alongside NAV growth events. At each event, every ISIN
+    with a positive running net quantity as of that date gets a top-up sized
+    `open_qty × (ratio - 1)`, priced at that date's market price. The top-up
+    itself compounds into the running quantity, so a later growth event scales
+    the already-topped-up size. Redemptions (certs decreasing) are not
+    modelled — the manager's real sell orders in the carnet already cover
+    raising that cash. ISINs that are flat or short (net qty <= 0) at an event
+    date are left alone — a name the manager has already exited is not
+    revived just because AUM grew elsewhere.
+
+    seed_deficits: {isin: qty}, added to that isin's running quantity at its
+    own first order — before it can be excluded as "flat or short". Without
+    this, a name whose real carnet trading happens to dip negative BEFORE most
+    of the fund's growth occurred (e.g. Amazon on CH1352587724, negative from
+    Nov 2024 while the bulk of subscription growth landed afterwards) gets
+    silently skipped for every later growth event, even though it demonstrably
+    needed one — the deficit just surfaces later as a big single sell instead
+    of being distributed proportionally across growth events. Callers should
+    pass the total excess_qty a synthetic-injection pre-pass (T0 basket + real
+    carnet, no top-ups) found for each isin: that is the size of the "hidden"
+    true position this isin's own first order failed to fully capture.
+    """
+    import collections
+    from .schema import Order
+    from ..amc_prices import build_marks
+
+    growth_events: list[tuple[datetime.date, float]] = []
+    prev_certs = n_certs_fixing
+    for date, _price, certs in nav_rows:
+        if certs is None or date <= fixing_date:
+            continue
+        if certs > prev_certs:
+            growth_events.append((date, certs / prev_certs))
+        prev_certs = certs
+    if not growth_events:
+        return []
+
+    seed_deficits = seed_deficits or {}
+    seeded: set[str] = set()
+    ordered = sorted(orders, key=lambda o: o.date)
+    net_qty: dict[str, float] = collections.defaultdict(float)
+    isin_names: dict[str, str] = {}
+    topups: list = []
+
+    event_idx = 0
+    n_events = len(growth_events)
+
+    def apply_events_up_to(cutoff: Optional[datetime.date]) -> None:
+        nonlocal event_idx
+        while event_idx < n_events and (cutoff is None or growth_events[event_idx][0] <= cutoff):
+            date, ratio = growth_events[event_idx]
+            event_idx += 1
+            targets = [isin for isin, q in net_qty.items() if q > 1e-9]
+            if not targets:
+                continue
+            components = [
+                {"isin": isin, "name": isin_names[isin], "currency": ""}
+                for isin in targets
+            ]
+            prices = build_marks(components, as_of_date=date.isoformat(), prod_ccy=prod_ccy)
+            for isin in targets:
+                price = prices.get(isin)
+                if not price or price <= 0:
+                    continue
+                qty = net_qty[isin] * (ratio - 1)
+                if qty <= 0:
+                    continue
+                topups.append(Order(
+                    id=f"GROWTH_TOPUP_{isin}_{date.isoformat()}",
+                    date=date,
+                    isin=isin,
+                    name=isin_names[isin],
+                    qty=qty,
+                    price_local=price,
+                    price_ccy=prod_ccy,
+                    fx=1.0,
+                    price_prod=price,
+                ))
+                net_qty[isin] += qty
+
+    for o in ordered:
+        apply_events_up_to(o.date)
+        if o.isin not in seeded:
+            seeded.add(o.isin)
+            net_qty[o.isin] += seed_deficits.get(o.isin, 0.0)
+        net_qty[o.isin] += o.qty
+        isin_names[o.isin] = o.name
+
+    apply_events_up_to(None)  # any growth events after the last order
+    return topups

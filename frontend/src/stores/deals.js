@@ -115,9 +115,15 @@ export const useDealsStore = defineStore('deals', () => {
     return res.json()
   }
 
+  async function getWatchlist() {
+    const res = await apiFetch('/api/deals/watchlist')
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur watchlist') }
+    return res.json()
+  }
+
   return {
     deals, currentDeal, loading, error, refreshStatus,
     loadDeals, nextRef, bookDeal, selectDeal, updateDeal,
-    updateEvent, refreshEvents, getRepriceInputs,
+    updateEvent, refreshEvents, getRepriceInputs, getWatchlist,
   }
 })

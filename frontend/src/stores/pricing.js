@@ -4,25 +4,25 @@ import { apiFetch } from '../utils/api.js'
 
 const DEFAULT_SCRIPT = `# Autocall Athena 3 ans
 PARAM COUPON = 8%
-PARAM AC_BAR = 100%
-PARAM KI_BAR = 60%
+PARAM M_AC_BAR = 100%
+PARAM M_KI_BAR = 60%
 
 AT 1, 2, 3:
-  SET CALL = INDIC(WOF >= AC_BAR)
+  SET CALL = INDIC(WOF >= M_AC_BAR)
   PAY CALL * COUPON * INDEX
   PAY CALL * 1
   IF CALL = 1:
     STOP
 
 AT MATURITY:
-  SET KI = INDIC(WOF < KI_BAR)
+  SET KI = INDIC(WOF < M_KI_BAR)
   PAY (1 - KI) * 1
   PAY KI * WOF`
 
 export const usePricingStore = defineStore('pricing', () => {
   // ── Tabs ──────────────────────────────────────────────────────────
   const leftTab = ref('script')   // 'script' | 'params' | 'deal' | 'events'
-  const rightTab = ref('empty')   // 'empty' | 'results' | 'flux' | 'greeks' | 'profile' | 'paths' | 'proba' | 'backtest' | 'mtf' | 'simulation' | 'scenarios'
+  const rightTab = ref('empty')   // 'empty' | 'results' | 'flux' | 'greeks' | 'profile' | 'paths' | 'proba' | 'backtest' | 'mtf' | 'simulation' | 'scenarios' | 'kid' | 'emt'
 
   // ── Script ────────────────────────────────────────────────────────
   const script = ref(DEFAULT_SCRIPT)
@@ -43,7 +43,19 @@ export const usePricingStore = defineStore('pricing', () => {
       if (!names.has(k)) delete paramOverrides[k]
     }
     for (const p of scriptParams.value) {
-      if (!(p.name in paramOverrides)) paramOverrides[p.name] = p.display_default
+      if (!(p.name in paramOverrides)) {
+        // PARAM() → a table of per-observation rows, seeded with one row
+        // (the script's optional seed). One row = constant across all
+        // observations (the engine extends the last row), so this initial
+        // state is immediately priceable.
+        paramOverrides[p.name] = p.kind === 'array' ? [p.display_default] : p.display_default
+      } else if (p.kind === 'array' && !Array.isArray(paramOverrides[p.name])) {
+        // Declaration changed PARAM → PARAM() under a sticky override:
+        // promote the scalar to a single-row table instead of crashing the UI.
+        paramOverrides[p.name] = [paramOverrides[p.name]]
+      } else if (p.kind !== 'array' && Array.isArray(paramOverrides[p.name])) {
+        paramOverrides[p.name] = paramOverrides[p.name][0] ?? p.display_default
+      }
     }
   }
 
@@ -95,6 +107,10 @@ export const usePricingStore = defineStore('pricing', () => {
     },
   ])
   const corrMatrix = ref([[1.0]])
+  // Which underlying is being shown/edited — shared between the Deal tab
+  // (ticker picker) and Marché & Paramètres (market-data calibration) so
+  // switching the active name in one is reflected in the other.
+  const activeUnderlyingIdx = ref(0)
 
   // ── Global params ─────────────────────────────────────────────────
   const globalParams = reactive({
@@ -105,6 +121,8 @@ export const usePricingStore = defineStore('pricing', () => {
     model: 'constant',
     antithetic: true,
     deal_ccy: 'EUR',
+    trade_date: new Date().toISOString().split('T')[0],
+    strike_date: new Date().toISOString().split('T')[0],
     value_date: new Date().toISOString().split('T')[0],
     // 'deterministic' (r constant) | 'abm' (gaussien sans retour à la moyenne)
     // | 'hull_white' (gaussien avec retour à la moyenne)
@@ -115,6 +133,10 @@ export const usePricingStore = defineStore('pricing', () => {
     // sont des ordres de grandeur réalistes pour un Hull-White EUR/USD.
     sigma_r: 1.5,   // vol du taux court (%/an) — utilisé si rateModel != 'deterministic'
     a_r: 0.3,       // vitesse de retour à la moyenne — utilisé seulement si 'hull_white'
+    // 'weekly' (extrema aux pas hebdomadaires de la grille MC, historique)
+    // | 'continuous' (pont brownien intra-pas : WOF_MIN/S_MIN/BOF_MAX reflètent
+    // le chemin continu — P(KI) plus élevée, jambe put mieux valorisée)
+    barrierMonitoring: 'weekly',
   })
 
   // ── Yield curve (term structure of zero rates) ────────────────────
@@ -146,6 +168,42 @@ export const usePricingStore = defineStore('pricing', () => {
   const currentScriptId   = ref(null)
   const currentScriptName = ref('')
 
+  // ── Pre-trade opportunity (Indicative) this pricing session is tied to —
+  // created lazily on first KID/EMT save, reused for every save after that
+  // until reset. See db/models.py:Indicative for the full rationale. ──────
+  const currentIndicativeId = ref(null)
+
+  // Product title from the script's leading "# comment" line — shared by
+  // KidPanel/EmtPanel save actions and the EMT print view.
+  const productTitle = computed(() => {
+    const m = script.value.match(/^\s*#\s*(.+)$/m)
+    return m ? m[1].trim() : 'Produit structuré'
+  })
+
+  async function ensureIndicative() {
+    if (currentIndicativeId.value) return currentIndicativeId.value
+    const res = await apiFetch('/api/indicatives', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contrepartie: '',
+        devise: globalParams.deal_ccy || 'EUR',
+        nominal: 0,
+        underlyings: underlyings.value.map(u => ({ name: u.name, ticker: u.ticker })),
+        script_snapshot: script.value,
+        script_id: currentScriptId.value || null,
+        market_snapshot: { r: globalParams.r, T: globalParams.T, model: globalParams.model },
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Erreur création fiche indicative')
+    }
+    const ind = await res.json()
+    currentIndicativeId.value = ind.id
+    return ind.id
+  }
+
   // ── Results & state ───────────────────────────────────────────────
   const result    = ref(null)
   const profile   = ref(null)
@@ -156,6 +214,7 @@ export const usePricingStore = defineStore('pricing', () => {
   const solver    = ref(null)
   const grid      = ref(null)
   const scenarios = ref(null)
+  const kid       = ref(null)
   const loading   = ref(false)
   const error     = ref(null)
   const progress  = ref(0)
@@ -182,7 +241,15 @@ export const usePricingStore = defineStore('pricing', () => {
     const up = {}
     for (const p of scriptParams.value) {
       const v = paramOverrides[p.name] ?? p.raw_default
-      up[p.name] = p.is_pct ? v / 100 : v
+      if (Array.isArray(v)) {
+        // PARAM() rows, display → stored units per row; blank rows dropped.
+        // Empty table → fall back to the seed so pricing stays possible.
+        const rows = v.filter(x => x !== '' && x != null && !isNaN(x))
+          .map(x => p.is_pct ? x / 100 : x)
+        up[p.name] = rows.length ? rows : [p.is_pct ? p.raw_default / 100 : p.raw_default]
+      } else {
+        up[p.name] = p.is_pct ? v / 100 : v
+      }
     }
     return up
   }
@@ -253,6 +320,7 @@ export const usePricingStore = defineStore('pricing', () => {
       yield_curve: yieldCurve.enabled
         ? yieldCurve.pillars.map(p => [p.T, p.rate / 100])
         : [],
+      barrier_monitoring: globalParams.barrierMonitoring,
       constats: _buildConstats(),
     }
   }
@@ -305,6 +373,9 @@ export const usePricingStore = defineStore('pricing', () => {
       r: globalParams.r, T: globalParams.T, N: globalParams.N, seed: globalParams.seed,
       model: globalParams.model, antithetic: globalParams.antithetic,
       rateModel: globalParams.rateModel, sigma_r: globalParams.sigma_r, a_r: globalParams.a_r,
+      barrierMonitoring: globalParams.barrierMonitoring,
+      trade_date: globalParams.trade_date, strike_date: globalParams.strike_date,
+      value_date: globalParams.value_date,
       yieldCurveEnabled: yieldCurve.enabled,
       paramsUsed: scriptParams.value.map(p => ({
         name: p.name, value: paramOverrides[p.name] ?? p.raw_default, is_pct: p.is_pct,
@@ -437,6 +508,70 @@ export const usePricingStore = defineStore('pricing', () => {
       else { backtest.value = await res.json(); rightTab.value = 'backtest' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
+  }
+
+  // ── Underlying comparator — backtest the script against a candidate pool
+  // (managed locally in ComparatorTab.vue, independent from the underlyings
+  // actually used for pricing) individually, then (if the product needs
+  // more than one underlying) combined — see backend BacktestCompareRequest
+  // docstring for the two-stage funnel. basket_size is NOT a user choice:
+  // it's the number of underlyings the product currently has configured in
+  // Marché & Paramètres (a worst-of-2 product searches for the best pair,
+  // not an arbitrary basket size). ─────────────────────────────────────
+  const comparator = ref(null)
+  const comparatorError = ref('')
+  const comparatorLoading = ref(false)
+
+  async function runBacktestCompare(candidates, params = {}) {
+    comparatorLoading.value = true; comparatorError.value = ''
+    try {
+      const res = await apiFetch('/api/backtest/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          script: script.value,
+          candidates,
+          r: globalParams.r / 100,
+          T: globalParams.T,
+          model: globalParams.model,
+          user_params: _buildUserParams(),
+          constats: _buildConstats(),
+          basket_size: params.basket_size || 1,
+          shortlist_n: params.shortlist_n || 8,
+          start_date: params.start_date || '2010-01-01',
+          end_date: params.end_date || null,
+          freq: params.freq || 21,
+          invest_pct: params.invest_pct || 100,
+          rf_rate: params.rf_rate || 2.0,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || `Erreur ${res.status}`)
+      }
+      comparator.value = await res.json()
+    } catch (e) {
+      comparatorError.value = e.message
+    } finally {
+      comparatorLoading.value = false
+    }
+  }
+
+  // Replace the current underlyings/correlation with a candidate basket
+  // picked from the comparator, then refresh σ/q for the new tickers.
+  async function adoptBasket(tickers, names, corrMat) {
+    underlyings.value = tickers.map((tk, i) => ({
+      ..._defaultUnderlying(i + 1),
+      ticker: tk, name: names[i] || tk,
+    }))
+    // loadYfAll() also recalculates the correlation matrix itself (1y
+    // window) as a side effect of refreshing σ/q — it would silently
+    // overwrite the realized, full-history correlation from the backtest
+    // that made this the winning basket. Re-apply it after, so what gets
+    // priced matches exactly what "prix indicatif" already showed.
+    corrMatrix.value = corrMat.map(row => [...row])
+    await loadYfAll()
+    corrMatrix.value = corrMat.map(row => [...row])
   }
 
   // ── Mark to Future (nested Monte Carlo) ────────────────────────────
@@ -636,6 +771,24 @@ export const usePricingStore = defineStore('pricing', () => {
     } catch (e) { yfStatus.value = '⚠ Erreur: ' + e.message }
   }
 
+  // ── Stored spot lookup (Parquet price store — separate from hist_vol
+  // above, which only calibrates σ/q on the fly and persists nothing) ──
+  async function fetchStoredSpot(key, date) {
+    const res = await fetch(`/api/amc/prices/spot?key=${encodeURIComponent(key)}&date=${encodeURIComponent(date)}`)
+    if (!res.ok) return null
+    return res.json()
+  }
+
+  async function refreshStoredSpot(key, ticker) {
+    const res = await fetch('/api/amc/prices/fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, ticker }),
+    })
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur Yahoo Finance') }
+    return res.json()
+  }
+
   // ── Underlyings management ────────────────────────────────────────
   // ── Reset / Load from DB ──────────────────────────────────────────
   function _defaultUnderlying(n) {
@@ -652,6 +805,9 @@ export const usePricingStore = defineStore('pricing', () => {
     result.value = null; profile.value = null; paths.value = null
     proba.value = null; backtest.value = null; mtf.value = null
     solver.value = null; grid.value = null; scenarios.value = null
+    kid.value = null
+    comparator.value = null
+    currentIndicativeId.value = null
     rightTab.value = 'empty'
   }
 
@@ -664,12 +820,72 @@ export const usePricingStore = defineStore('pricing', () => {
     Object.assign(globalParams, {
       r: 3.0, T: 3.0, N: 20000, seed: 42, model: 'constant',
       antithetic: true, deal_ccy: 'EUR', rateModel: 'deterministic',
-      sigma_r: 1.5, a_r: 0.3,
+      sigma_r: 1.5, a_r: 0.3, barrierMonitoring: 'weekly',
       value_date: new Date().toISOString().split('T')[0],
     })
     yieldCurve.enabled = false
     _clearResults()
     parseScript()
+  }
+
+  // Reopen a booked deal's exact frozen state — script, market params, full
+  // underlyings/corr, PARAM overrides — so Script/Marché & Paramètres/Deal/
+  // Events all agree, instead of showing whatever was last being edited here.
+  async function loadFromDeal(deal) {
+    const market = deal.market_snapshot || {}
+    currentScriptId.value   = deal.script_id || null
+    currentScriptName.value = deal.reference
+    script.value = deal.script_snapshot
+
+    if (market.underlyings?.length) {
+      // Merge over full defaults: old / API-booked deals have a partial
+      // snapshot ({name, ticker, ccy, sigma, q}) — missing model fields
+      // would flow as undefined → NaN → null → 422 at pricing time.
+      // Explicit nulls in the snapshot are dropped for the same reason.
+      underlyings.value = market.underlyings.map((u, i) => ({
+        ..._defaultUnderlying(i + 1),
+        ...Object.fromEntries(Object.entries(u).filter(([, v]) => v != null)),
+      }))
+      corrMatrix.value = market.corrMatrix?.length ? market.corrMatrix : [[1.0]]
+      activeUnderlyingIdx.value = 0
+    }
+
+    Object.assign(globalParams, {
+      r: market.r ?? globalParams.r,
+      T: deal.T,
+      model: market.model ?? globalParams.model,
+      antithetic: market.antithetic ?? globalParams.antithetic,
+      deal_ccy: market.deal_ccy ?? deal.devise,
+      rateModel: market.rateModel ?? globalParams.rateModel,
+      sigma_r: market.sigma_r ?? globalParams.sigma_r,
+      a_r: market.a_r ?? globalParams.a_r,
+      trade_date: deal.trade_date,
+      strike_date: deal.strike_date,
+      value_date: deal.value_date,
+    })
+
+    if (market.yieldCurve?.length) {
+      yieldCurve.enabled = true
+      yieldCurve.pillars = market.yieldCurve
+    }
+
+    _clearResults()
+    await parseScript()
+
+    // Restore the PARAM overrides frozen at booking. Without this, the
+    // params card under the script shows the SCRIPT's seed defaults, not
+    // the deal's actual negotiated terms (a degressive PARAM() barrier
+    // would collapse back to one row). user_params are stored-units
+    // fractions — convert back to display units via each param's is_pct.
+    const up = market.user_params || {}
+    for (const [name, v] of Object.entries(up)) {
+      if (!(name in paramOverrides)) continue
+      if (Array.isArray(v)) {
+        paramOverrides[name] = v.map(x => fromStoredUnits(name, x))
+      } else {
+        paramOverrides[name] = fromStoredUnits(name, v)
+      }
+    }
   }
 
   async function loadFromDb(data) {
@@ -741,6 +957,7 @@ export const usePricingStore = defineStore('pricing', () => {
         seed: globalParams.seed, model: globalParams.model,
         antithetic: globalParams.antithetic, deal_ccy: globalParams.deal_ccy,
         rateModel: globalParams.rateModel, sigma_r: globalParams.sigma_r, a_r: globalParams.a_r,
+        barrierMonitoring: globalParams.barrierMonitoring,
         value_date: globalParams.value_date,
       }),
     }
@@ -785,6 +1002,7 @@ export const usePricingStore = defineStore('pricing', () => {
     m.forEach(row => row.push(0))
     m.push(new Array(n+1).fill(0))
     m[n][n] = 1
+    activeUnderlyingIdx.value = n
   }
 
   function removeUnderlying(i) {
@@ -792,22 +1010,27 @@ export const usePricingStore = defineStore('pricing', () => {
     underlyings.value.splice(i, 1)
     corrMatrix.value.splice(i, 1)
     corrMatrix.value.forEach(row => row.splice(i, 1))
+    activeUnderlyingIdx.value = Math.min(activeUnderlyingIdx.value, underlyings.value.length - 1)
   }
 
   return {
     leftTab, rightTab,
     script, scriptParams, parseError, paramOverrides, scriptConstats, constatOverrides, scriptHasStop,
-    underlyings, corrMatrix,
+    underlyings, corrMatrix, activeUnderlyingIdx,
     globalParams, yieldCurve, greekSel, selectedGreeks,
-    result, profile, paths, proba, backtest, mtf, solver, grid, scenarios,
+    result, profile, paths, proba, backtest, mtf, solver, grid, scenarios, kid,
+    comparator, comparatorError, comparatorLoading, runBacktestCompare, adoptBasket,
     loading, error, progress, yfStatus,
     currentScriptId, currentScriptName,
+    currentIndicativeId, productTitle, ensureIndicative,
     parseScript, runPricing, runGreeks,
     runProfile, runPaths, runProba, runBacktest, runMtf,
     runSolver, runGrid, paramIsPct, fromStoredUnits, runScenarios, fetchSchedulePreview,
-    loadYfOne, loadYfAll,
+    buildUserParams: _buildUserParams,
+    buildConstats: _buildConstats,
+    loadYfOne, loadYfAll, fetchStoredSpot, refreshStoredSpot,
     addUnderlying, removeUnderlying,
-    resetToDefaults, loadFromDb, saveScript, updateScript,
+    resetToDefaults, loadFromDb, loadFromDeal, saveScript, updateScript,
     pricingBody: () => ({ ..._baseBody(), N: globalParams.N, antithetic: globalParams.antithetic, ..._rateParams() }),
   }
 })

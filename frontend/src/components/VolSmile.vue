@@ -33,12 +33,13 @@ const canvas = ref(null)
 let chart = null
 
 const showSmile = computed(() =>
-  ['localvol', 'heston', 'sabr'].includes(store.globalParams.model)
+  ['localvol', 'heston', 'sabr', 'lsv'].includes(store.globalParams.model)
 )
 
 const title = computed(() => {
   const m = store.globalParams.model
   return m === 'localvol' ? 'DUPIRE SMILE Σ(K)'
+    : m === 'lsv' ? 'DUPIRE SMILE Σ(K) — cible de calibration LSV'
     : m === 'heston' ? 'HESTON SMILE Σ(K) — approx.'
     : 'SABR SMILE Σ(K) — Hagan 2002'
 })
@@ -108,7 +109,7 @@ function computeData() {
     label: `T=${T}Y`,
     data: moneyness.map(K => {
       let v
-      if (model === 'localvol') {
+      if (model === 'localvol' || model === 'lsv') {
         const sig0 = u.sigma / 100
         const sk   = u.skew / 100
         const cv   = u.curvature / 100
@@ -183,7 +184,7 @@ const smileKey = computed(() => {
   const T = store.globalParams.T
   const u = store.underlyings[props.idx]
   if (!u || !showSmile.value) return null
-  if (model === 'localvol')
+  if (model === 'localvol' || model === 'lsv')
     return `lv|${u.sigma}|${u.skew}|${u.curvature}|${T}`
   if (model === 'heston')
     return `h|${u.v0}|${u.kappa}|${u.theta}|${u.xi}|${u.rho_h}|${T}`

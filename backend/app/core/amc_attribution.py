@@ -26,7 +26,7 @@ from typing import Dict, List
 
 import pandas as pd
 
-from .amc_orderbook import load_orders
+from .amc_orderbook import load_orders, apply_split_corrections
 from .amc_prices import load_prices, get_fx_series, _slug
 
 
@@ -100,6 +100,9 @@ def compute_attribution(
 
     all_orders = load_orders(paths)
     orders = [o for o in all_orders if o.get("state") == "Done"]
+    if orders:
+        as_of = max(o["date"] for o in orders if o.get("date") is not None)
+        orders = apply_split_corrections(orders, as_of)
     if not orders:
         return {"error": "Aucun ordre exécuté trouvé."}
 

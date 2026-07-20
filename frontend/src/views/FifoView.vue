@@ -3,7 +3,11 @@
 
     <!-- Header -->
     <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 shrink-0">
-      <RouterLink to="/" class="text-slate-500 hover:text-slate-300 transition-colors text-sm">← Accueil</RouterLink>
+      <RouterLink to="/" class="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
+        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
+        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
+      </RouterLink>
+      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Accueil</RouterLink>
       <span class="text-slate-700">|</span>
       <span class="font-bold text-slate-100 tracking-tight">Carnet d'ordres — FIFO</span>
       <div class="ml-auto flex items-center gap-3">

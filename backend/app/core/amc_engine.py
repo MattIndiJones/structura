@@ -130,6 +130,8 @@ BENCHMARKS: list[dict] = [
     {"ticker": "IGF",   "label": "MSCI World Infrastructure (IGF – iShares)",   "group": "Infrastructures"},
     {"ticker": "NFRA",  "label": "Global Infrastructure (NFRA – FlexShares)",   "group": "Infrastructures"},
     {"ticker": "PAVE",  "label": "US Infrastructure (PAVE – Global X)",         "group": "Infrastructures"},
+    # ── Longévité ──────────────────────────────────────────────────
+    {"ticker": "AGED.L","label": "iShares Ageing Population UCITS ETF (IE00BYZK4669 – iSTOXX FactSet Ageing Population)", "group": "Longévité"},
     # ── Personnalisé ───────────────────────────────────────────────
     {"ticker": "CUSTOM","label": "Personnalisé (entrer un ticker)",              "group": "Autre"},
 ]
@@ -187,12 +189,17 @@ def parse_amc_excel(buf: io.BytesIO) -> dict:
         _df.columns = [str(c).strip() for c in _df.columns]
         _date_col = next((c for c in _df.columns if "date" in c.lower()), None)
         _nav_col  = next((c for c in _df.columns if c in _NAV_COL_NAMES), None)
+        _oq_col   = next((c for c in _df.columns if "outstanding" in c.lower()), None)
         if _date_col and _nav_col:
-            nav_df = _df[[_date_col, _nav_col]].rename(columns={_date_col: "date", _nav_col: "nav"})
+            _cols = [_date_col, _nav_col] + ([_oq_col] if _oq_col else [])
+            nav_df = _df[_cols].rename(columns={_date_col: "date", _nav_col: "nav",
+                                                 **({_oq_col: "Outstanding Quantity"} if _oq_col else {})})
             nav_df["date"] = pd.to_datetime(nav_df["date"], errors="coerce")
             nav_df = nav_df.dropna(subset=["date", "nav"]).sort_values("date")
             nav_df["nav"] = pd.to_numeric(nav_df["nav"], errors="coerce")
             nav_df = nav_df.dropna(subset=["nav"])
+            if "Outstanding Quantity" in nav_df.columns:
+                nav_df["Outstanding Quantity"] = pd.to_numeric(nav_df["Outstanding Quantity"], errors="coerce")
             nav_df["return"] = nav_df["nav"].pct_change()
             nav_df["return"] = nav_df["return"].where(pd.notna(nav_df["return"]), None)
             break  # found valid NAV sheet
@@ -774,12 +781,12 @@ def _compute_activity(tx_records: list[dict], nav_records: list[dict]) -> dict:
     avg_aum = 0.0
     if nav_records:
         nav_df = pd.DataFrame(nav_records)
-        if "nav" in nav_df.columns and "Outstanding Quantity" in nav_df.columns:
-            nav_df["aum"] = nav_df["nav"].astype(float) * nav_df["Outstanding Quantity"].fillna(method="ffill").astype(float)
+        if ("nav" in nav_df.columns and "Outstanding Quantity" in nav_df.columns
+                and nav_df["Outstanding Quantity"].notna().any()):
+            nav_df["aum"] = nav_df["nav"].astype(float) * nav_df["Outstanding Quantity"].ffill().astype(float)
             avg_aum = float(nav_df["aum"].mean())
-        elif "nav" in nav_df.columns:
-            # Fallback: use first outstanding qty if available
-            avg_aum = float(nav_df["nav"].mean()) * 4050  # use initial qty as proxy
+        # else: outstanding quantity unavailable — avg_aum stays 0.0 and
+        # turnover_rate is reported as unavailable rather than guessed.
 
     turnover_rate = gross_traded / avg_aum if avg_aum > 0 else 0.0
 

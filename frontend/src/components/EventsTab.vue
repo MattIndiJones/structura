@@ -1,32 +1,6 @@
 <template>
   <div class="flex flex-col gap-5">
 
-    <!-- ── Deal selector (affiché seulement si des deals existent) ── -->
-    <div v-if="dealsStore.deals.length" class="card">
-      <div class="flex flex-col gap-1.5">
-        <button v-for="d in dealsStore.deals" :key="d.id"
-          @click="selectDeal(d.id)"
-          :class="[
-            'flex items-center justify-between px-3 py-2 rounded-lg border text-xs transition-colors text-left',
-            selectedId === d.id
-              ? 'bg-blue-900/40 border-blue-600 text-blue-200'
-              : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
-          ]">
-          <div class="flex items-center gap-2">
-            <span class="font-mono font-semibold">{{ d.reference }}</span>
-            <span class="text-slate-600">·</span>
-            <span>{{ d.contrepartie }}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="font-mono">{{ formatNominal(d.nominal) }} {{ d.devise }}</span>
-            <span :class="statusClass(d.status)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold">
-              {{ d.status }}
-            </span>
-          </div>
-        </button>
-      </div>
-    </div>
-
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- MODE A — Deal booké sélectionné                                -->
     <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -106,11 +80,13 @@
             <option value="échu">Échu</option>
             <option value="résilié">Résilié</option>
           </select>
+          <HelpTip text="Statut du deal, indépendant du statut de chaque constatation individuelle. Actif = en vie. Callé/Échu = terminé normalement (rappel anticipé ou maturité atteinte). Résilié = terminaison anticipée hors mécanisme du produit (défaut, novation…)." />
           <button class="btn-secondary text-xs px-3 py-1.5" @click="reprice" :disabled="repricing">
             <span v-if="repricing"
               class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
             ↺ Re-pricer
           </button>
+          <HelpTip width="w-72" text="Recharge le script figé au booking dans le Pricer, avec la maturité restante (T remaining) et les spots normalisés (spot actuel / S₀) comme point de départ — pour obtenir une valorisation mark-to-market actuelle du deal. Vous atterrissez ensuite dans Marché &amp; Paramètres pour lancer le pricing." />
           <span v-if="repriceMsg" class="text-xs"
             :class="repriceMsg.startsWith('⚠') ? 'text-amber-400' : 'text-emerald-400'">
             {{ repriceMsg }}
@@ -166,8 +142,12 @@
                   {{ u.ticker || u.name }}
                   <span class="text-slate-600 font-normal ml-1">spot / perf.</span>
                 </th>
-                <th class="text-left text-slate-500 font-medium pb-2 pr-3">Source</th>
-                <th class="text-left text-slate-500 font-medium pb-2">Statut</th>
+                <th class="text-left text-slate-500 font-medium pb-2 pr-3">Source
+                  <HelpTip text="auto = spot récupéré automatiquement depuis Yahoo Finance (bouton Actualiser). manuel = saisi à la main dans le tableau — prioritaire, jamais écrasé par un Actualiser ultérieur." />
+                </th>
+                <th class="text-left text-slate-500 font-medium pb-2">Statut
+                  <HelpTip text="futur = date pas encore atteinte. observé = spot constaté normalement. callé = ce constat a déclenché le rappel anticipé du produit. ki = barrière de knock-in franchie à ce constat. final = constat de maturité." />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -329,6 +309,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useDealsStore } from '../stores/deals.js'
 import { usePricingStore } from '../stores/pricing.js'
+import HelpTip from './HelpTip.vue'
 
 const props = defineProps({ initialDealId: { type: Number, default: null } })
 
@@ -336,7 +317,6 @@ const dealsStore = useDealsStore()
 const store = usePricingStore()
 
 const today = new Date().toISOString().split('T')[0]
-const selectedId = ref(null)
 const repricing = ref(false)
 const repriceMsg = ref('')
 const savingEventId = ref(null)
@@ -392,14 +372,20 @@ function goToDeal() {
 }
 
 // ── Lifecycle ─────────────────────────────────────────────
+// Events is scoped to the product currently open in this Pricer session —
+// not a picker across every deal ever booked (that's what /booking is for).
+// It shows the real, frozen deal only if THIS script has already been
+// booked; otherwise it falls back to the live indicative preview (Mode B).
 onMounted(async () => {
   await dealsStore.loadDeals()
-  const id = props.initialDealId ?? dealsStore.deals[0]?.id ?? null
+  const id = props.initialDealId
+    ?? (store.currentScriptId
+        ? dealsStore.deals.find(d => d.script_id === store.currentScriptId)?.id ?? null
+        : null)
   if (id) await selectDeal(id)
 })
 
 async function selectDeal(id) {
-  selectedId.value = id
   dealsStore.refreshStatus = ''
   await dealsStore.selectDeal(id)
 }
@@ -431,16 +417,6 @@ function perfClass(ev, u) {
   const s = ev.spots[u.name], s0 = s0ForUnderlying(u.name)
   if (!s || !s0) return ''
   return s >= s0 ? 'text-emerald-400' : 'text-red-400'
-}
-
-function statusClass(s) {
-  const map = {
-    actif: 'bg-emerald-900/40 text-emerald-400',
-    'callé': 'bg-amber-900/40 text-amber-400',
-    'échu': 'bg-slate-700 text-slate-400',
-    'résilié': 'bg-red-900/40 text-red-400',
-  }
-  return map[s] || 'bg-slate-700 text-slate-400'
 }
 
 function sourceClass(s) {
@@ -507,10 +483,28 @@ async function reprice() {
   repricing.value = true; repriceMsg.value = ''
   try {
     const inputs = await dealsStore.getRepriceInputs(deal.value.id)
+
+    // Deal already resolved (callé/échu) — no optionality left to run a
+    // Monte Carlo on. Re-simulating from today on the raw script would
+    // price it as if it restarted now (AT 1,2,3 means "1/2/3Y from now" to
+    // the engine, not from the original inception). Show what was actually
+    // realized instead.
+    if (inputs.resolved) {
+      const payout = inputs.realized_payout != null ? `${(inputs.realized_payout * 100).toFixed(2)}%` : 'inconnu'
+      repriceMsg.value = `Prix résiduel : 0% (deal clos) · Remboursement réalisé : ${payout}` +
+        (inputs.resolution_date ? ` le ${inputs.resolution_date}` : '')
+      return
+    }
+
     store.script = inputs.script_snapshot
     await store.parseScript()
     store.globalParams.T = inputs.T_remaining
     store.globalParams.value_date = deal.value.value_date
+    if (inputs.underlyings?.length) {
+      store.underlyings = inputs.underlyings.map(u => ({ ...u }))
+      store.activeUnderlyingIdx = 0
+    }
+    if (inputs.corr_matrix?.length) store.corrMatrix = inputs.corr_matrix
     const ms = inputs.market_snapshot || {}
     if (ms.model) store.globalParams.model = ms.model
     if (ms.r != null) store.globalParams.r = ms.r

@@ -469,11 +469,12 @@ def build_synthesis_payload(
                         f"t={_fmt(f.get('tstat'), 2)}  "
                         f"p={_fmt(f.get('pvalue'), 3)}"
                     )
-        bench_reg = ba.get("benchmark_regression") or {}
-        if bench_reg.get("available"):
-            add(f"\n  Régression vs benchmark ({bench_reg.get('benchmark_ticker', '')})")
+        bench_reg = (ba.get("net") or {}).get("benchmark_regression") or {}
+        if bench_reg:
+            add(f"\n  Régression vs benchmark ({bench_reg.get('ticker', '')})")
             add(f"    Alpha ann.   : {_pct(bench_reg.get('alpha_ann_pct'))}")
-            add(f"    Beta marché  : {_fmt(bench_reg.get('beta_market'), 3)}")
+            add(f"    Alpha t-stat : {_fmt(bench_reg.get('alpha_tstat'), 2)}")
+            add(f"    Beta marché  : {_fmt(bench_reg.get('beta'), 3)}")
             add(f"    R²           : {_pct((bench_reg.get('r2') or 0) * 100)}")
     add("")
 

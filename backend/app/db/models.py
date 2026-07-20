@@ -57,6 +57,12 @@ class Deal(SQLModel, table=True):
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     user_id: int = Field(foreign_key="users.id")
 
+    # Pre-trade opportunity this deal was booked from, if any — a permanent
+    # backward pointer. Indicative-stage KID/EMT records stay attached to
+    # indicative_id forever (never re-keyed); this is the only link needed
+    # to retrieve them alongside the booked deal's own documents.
+    indicative_id: Optional[int] = Field(default=None, foreign_key="indicatives.id")
+
     # Script frozen at booking time
     script_snapshot: str = Field(default="", sa_column=Column(Text))
     script_id: Optional[int] = Field(default=None, foreign_key="scripts.id")
@@ -68,13 +74,27 @@ class Deal(SQLModel, table=True):
     nominal: float = Field(default=0.0)
     fair_value: float = Field(default=0.0)     # % at booking time
     price_traded: float = Field(default=0.0)   # % actually traded
+    # Free-text family (e.g. "Autocall Athena", "Reverse Convertible") — set
+    # at booking time, used to classify/filter the Booking view. No formal
+    # link to Script.tags — a deal booked from an unsaved ad-hoc script has
+    # nothing to inherit tags from, so this stays a plain field on the deal.
+    product_type: str = Field(default="")
 
     # Dates (ISO strings)
     trade_date: str = Field(default="")
     strike_date: str = Field(default="")
     value_date: str = Field(default="")
     maturity_date: str = Field(default="")
+    payment_date: str = Field(default="")
     T: float = Field(default=0.0)
+    # Total cash flow actually realized (fraction of nominal), computed once
+    # the deal resolves (callé/échu) — see api/deals.py:_evaluate_lifecycle.
+    # None while still actif.
+    realized_payout: Optional[float] = Field(default=None)
+    # Mirrors the terminal event's status ("callé" | "ki" | "final") once
+    # resolved — lets the Booking view compute a hit-ratio straight from the
+    # deal list, no per-deal events fetch needed. None while still actif.
+    resolution_outcome: Optional[str] = Field(default=None)
 
     # JSON blobs
     underlyings_json: str = Field(default="[]", sa_column=Column(Text))   # [{name, ticker, s0_abs}]
@@ -114,6 +134,180 @@ class AmcStudy(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class Indicative(SQLModel, table=True):
+    """A pre-trade pricing opportunity — exists before any Deal does.
+
+    Holds its own frozen script/market snapshot exactly like Deal does, so
+    KID/EMT generated during client discussion have something stable to
+    attach to. If it converts to a trade, the resulting Deal points back via
+    Deal.indicative_id — this row's id never changes and nothing here is
+    ever re-keyed.
+    """
+    __tablename__ = "indicatives"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    reference: str = Field(index=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
+    user_id: int = Field(foreign_key="users.id")
+
+    script_snapshot: str = Field(default="", sa_column=Column(Text))
+    script_id: Optional[int] = Field(default=None, foreign_key="scripts.id")
+
+    contrepartie: str = Field(default="")
+    devise: str = Field(default="EUR")
+    nominal: float = Field(default=0.0)
+
+    underlyings_json: str = Field(default="[]", sa_column=Column(Text))
+    market_snapshot_json: str = Field(default="{}", sa_column=Column(Text))
+
+    status: str = Field(default="ouvert")  # ouvert | converti | abandonné
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class KidRecord(SQLModel, table=True):
+    """One immutable KID PRIIPs computation. Never updated in place — each
+    regeneration (required at least annually under PRIIPs) is a new row, so
+    what was shown to a client at a given date stays reconstructable.
+    Attached to exactly one of indicative_id / deal_id, whichever exists at
+    generation time."""
+    __tablename__ = "kid_records"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    indicative_id: Optional[int] = Field(default=None, foreign_key="indicatives.id")
+    deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
+    user_id: int = Field(foreign_key="users.id")
+
+    product_title: str = Field(default="")
+    sri: int = Field(default=0)
+    mrm: int = Field(default=0)
+    crm: int = Field(default=0)
+    vev: float = Field(default=0.0)
+    t_rhp: float = Field(default=0.0)
+    horizons_json: str = Field(default="[]", sa_column=Column(Text))
+    costs_json: str = Field(default="{}", sa_column=Column(Text))
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class EmtRecord(SQLModel, table=True):
+    """One immutable EMT / target-market computation — same append-only
+    logic as KidRecord. sri/mrm/crm are copied from the KidRecord it was
+    generated from (see emt.py), never recomputed independently."""
+    __tablename__ = "emt_records"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    indicative_id: Optional[int] = Field(default=None, foreign_key="indicatives.id")
+    deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
+    user_id: int = Field(foreign_key="users.id")
+
+    product_title: str = Field(default="")
+    sri: int = Field(default=0)
+    mrm: int = Field(default=0)
+    crm: int = Field(default=0)
+    t_rhp: float = Field(default=0.0)
+
+    capital_tier: str = Field(default="")
+    capital_label: str = Field(default="")
+    knowledge_tier: str = Field(default="")
+    knowledge_label: str = Field(default="")
+    risk_tolerance: str = Field(default="")
+    objective: str = Field(default="")
+    features_json: str = Field(default="{}", sa_column=Column(Text))
+
+    client_type: str = Field(default="retail")
+    distribution: str = Field(default="advice")
+    negative_target_market: str = Field(default="", sa_column=Column(Text))
+    description: str = Field(default="", sa_column=Column(Text))
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqRequest(SQLModel, table=True):
+    """A request for quote sent to one or more counterparty banks for a
+    structured product. Mirrors Deal/Indicative: script frozen at creation
+    time (template snapshot or copied from an existing Script), never
+    re-keyed. Individual bank responses live in RfqQuote."""
+    __tablename__ = "rfq_requests"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    reference: str = Field(index=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
+    user_id: int = Field(foreign_key="users.id")
+
+    name: str = Field(default="")
+    ao_date: str = Field(default="")  # ISO date — when the tender was actually sent, distinct from created_at
+    template_type: str = Field(default="")
+    script_id: Optional[int] = Field(default=None, foreign_key="scripts.id")
+    script_snapshot: str = Field(default="", sa_column=Column(Text))
+    params_json: str = Field(default="{}", sa_column=Column(Text))
+
+    model_price: Optional[float] = Field(default=None)
+    model_price_at: Optional[datetime] = Field(default=None)
+
+    status: str = Field(default="draft")  # draft | envoye | quote | clos
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqQuote(SQLModel, table=True):
+    __tablename__ = "rfq_quotes"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rfq_id: int = Field(foreign_key="rfq_requests.id", index=True)
+    provider: str = Field(default="manuel")
+    contact: Optional[str] = Field(default=None)
+    price: Optional[float] = Field(default=None)
+    currency: Optional[str] = Field(default=None)
+    status: str = Field(default="en_attente")  # en_attente | recu | decline | expire
+    note: Optional[str] = Field(default=None)
+    quoted_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Counterparty(SQLModel, table=True):
+    """Admin-managed catalog of counterparties eligible to face a booked
+    deal. Deal.contrepartie stores the name directly (free string, not a FK)
+    — same rationale as RfqProvider: booked history stays readable if a
+    counterparty is later renamed or removed from the eligible list."""
+    __tablename__ = "counterparties"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    country: str = Field(default="")
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqProvider(SQLModel, table=True):
+    """Admin-managed catalog of RFQ counterparties. RfqQuote.provider stores
+    the label directly (free string, not a FK) so historical quotes stay
+    readable even if a provider is later renamed or deleted."""
+    __tablename__ = "rfq_providers"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    label: str
+    mode: str = Field(default="manual")  # manual | api
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Alert(SQLModel, table=True):
+    """Lifecycle/barrier alert raised by the daily refresh (or the manual
+    'Rafraîchir le book' action) — see services/lifecycle_alerts.py.
+    dedup_key guarantees at most one alert per logical fact (one per deal
+    resolution, one per barrier crossing) no matter how many runs re-detect
+    it; deal_reference is denormalized so the alert stays readable even if
+    the deal is later deleted."""
+    __tablename__ = "alerts"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
+    deal_reference: str = Field(default="")
+    kind: str = Field(default="")   # callé | ki | final | barrier_ki | barrier_ac
+    message: str = Field(default="", sa_column=Column(Text))
+    dedup_key: str = Field(default="", index=True)
+    read: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class DealEvent(SQLModel, table=True):
     __tablename__ = "deal_events"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -123,5 +317,5 @@ class DealEvent(SQLModel, table=True):
     t_years: float = Field(default=0.0)    # time from value_date in years
     spots_json: str = Field(default="{}")  # {underlying_name: spot_value}
     source: str = Field(default="pending") # pending | auto | manuel
-    status: str = Field(default="futur")   # futur | observé | callé | ki | final
+    status: str = Field(default="futur")   # futur | observé | callé | ki | final | annulé
     label: str = Field(default="")

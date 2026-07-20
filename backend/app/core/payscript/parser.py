@@ -4,6 +4,11 @@ Transpiles PayScript code to compiled Python event functions.
 
 Grammar:
   PARAM NAME = value[%]   [# description]
+  PARAM() NAME [= seed%]  (per-observation values: the UI supplies a table of
+                           rows, one per observation, resolved by INDEX at
+                           runtime; the last row extends to any further
+                           observations, so one row behaves like a scalar.
+                           The optional `= seed` only pre-fills row 1.)
   CONSTAT NAME            (single date, filled in via the UI)
   CONSTAT() NAME          (a CONSTAT() calendar: start/end/roll/freq/stub)
   CONSTAT()() NAME        (CONSTAT() + a sub-frequency)
@@ -48,6 +53,27 @@ class Param:
     stored_val: float
     is_pct: bool
     desc: str
+    # 'scalar' (PARAM) | 'array' (PARAM() — one value per observation, the UI
+    # supplies a table; stored_val/raw_default then only seed the first row).
+    kind: str = 'scalar'
+
+
+def _pobs(ctx, name):
+    """Resolve a PARAM() value for the current observation. The UI supplies a
+    list in memo; INDEX (1-based observation counter, unchanged during the
+    AT MATURITY block) picks the row. The last row extends to any further
+    observations — so a single row behaves exactly like a scalar PARAM, and
+    AT MATURITY naturally lands on the last row. A plain scalar (user sent
+    one value, or the seed default) passes through untouched."""
+    v = ctx["memo"].get(name, 0)
+    if isinstance(v, (list, tuple)):
+        if not v:
+            return 0
+        idx = int(ctx.get("index", 1)) - 1
+        if idx < 0:
+            idx = 0
+        return v[idx] if idx < len(v) else v[-1]
+    return v
 
 
 @dataclass
@@ -69,6 +95,16 @@ class CompiledScript:
     params: list[Param]
     constats: list[Constat]
     has_stop: bool = False
+    # Monitoring contract derived from M_-prefixed PARAMs: for each, how the
+    # script actually compares it — [{name, observable, direction}] where
+    # direction is 'up' (condition fires when the observable rises to the
+    # level — autocall-like), 'down' (fires below — KI-like) or None when the
+    # usage is ambiguous/undetected. See _analyze_monitors.
+    monitors: list | None = None
+    # Resolved dates (year-fractions) of the reserved `CONSTAT() STRIKE_FIX`
+    # fixing window, if declared — filled in by resolve_constats(), None until
+    # then (and None permanently for scripts that don't declare it).
+    strike_fix_dates: list[float] | None = None
 
 
 @dataclass
@@ -87,7 +123,14 @@ class CompiledEvent:
 
 
 # ── Expression transpiler ─────────────────────────────────────────
-def _transpile_expr(src: str) -> str:
+def _transpile_expr(src: str, unknown: set | None = None,
+                     array_params: set | None = None) -> str:
+    """unknown, when passed, collects (uppercased) identifiers that fall
+    through to the generic memo lookup below — used by parse_script() to
+    flag typos (a PARAM/SET name referenced but never declared) instead of
+    letting them silently price as 0. array_params holds the PARAM() names:
+    those resolve through _pobs (per-observation row lookup) instead of the
+    plain memo get — scalar params keep the fast direct lookup."""
     s = src.strip()
     out = []
     i = 0
@@ -116,14 +159,14 @@ def _transpile_expr(src: str) -> str:
                 while i < len(s) and s[i] != ']':
                     idx += s[i]; i += 1
                 if i < len(s): i += 1
-                out.append(f'_c["spots"][int({_transpile_expr(idx)})-1]'); continue
+                out.append(f'_c["spots"][int({_transpile_expr(idx, unknown, array_params)})-1]'); continue
             if u in ('S_MIN', 'S_MAX', 'S_PREV') and i < len(s) and s[i] == '[':
                 idx = ''; i += 1
                 while i < len(s) and s[i] != ']':
                     idx += s[i]; i += 1
                 if i < len(s): i += 1
                 key = {'S_MIN': 's_min', 'S_MAX': 's_max', 'S_PREV': 's_prev'}[u]
-                out.append(f'_c["{key}"][int({_transpile_expr(idx)})-1]'); continue
+                out.append(f'_c["{key}"][int({_transpile_expr(idx, unknown, array_params)})-1]'); continue
             if u == 'AND': out.append(' and '); continue
             if u == 'OR':  out.append(' or ');  continue
             if u == 'NOT': out.append(' not '); continue
@@ -132,6 +175,8 @@ def _transpile_expr(src: str) -> str:
             BV = {
                 'WOF': 'min(_c["spots"])', 'BOF': 'max(_c["spots"])',
                 'WOF_MIN': '_c["wof_min"]', 'BOF_MAX': '_c["bof_max"]',
+                'FIX_MIN': '_c["fix_min"]', 'FIX_MAX': '_c["fix_max"]',
+                'FIX_AVG': '_c["fix_avg"]',
                 'ACCUM': '_c["accum"]', 'INDEX': '_c["index"]',
                 'T': '_c["t"]', 'N': 'len(_c["spots"])',
                 'REALVOL': '_c["realvol"]',
@@ -155,6 +200,10 @@ def _transpile_expr(src: str) -> str:
                 else:
                     out.append('(sum(_c["spots"])/max(1,len(_c["spots"])))')
                 continue
+            if unknown is not None:
+                unknown.add(u)
+            if array_params and u in array_params:
+                out.append(f'_pobs(_c, "{u}")'); continue
             out.append(f'_c["memo"].get("{u}", 0)'); continue
         if s[i] == '=' and (not out or out[-1].strip() not in ('!', '<', '>', '=')):
             out.append('=='); i += 1; continue
@@ -171,7 +220,13 @@ def _basket(ctx, *weights):
 
 
 # ── Body compiler ─────────────────────────────────────────────────
-def _compile_body(lines: list[dict], errors: list, base_indent: int = 0) -> str:
+def _compile_body(lines: list[dict], errors: list, base_indent: int = 0,
+                   declared: set | None = None, unknown: dict | None = None,
+                   array_params: set | None = None) -> str:
+    """declared collects every SET-assigned name (uppercased); unknown maps
+    every identifier that fell through to the generic memo lookup to a line
+    number it was seen on. parse_script() diffs the two afterwards to flag
+    typos instead of letting them silently price as 0."""
     out = []
     i = 0
     while i < len(lines):
@@ -182,14 +237,17 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0) -> str:
 
         m = re.match(r'^IF\s+(.+?)\s*:?\s*$', text, re.I)
         if m:
-            try: cond = _transpile_expr(m.group(1))
+            refs: set = set()
+            try: cond = _transpile_expr(m.group(1), refs, array_params)
             except Exception as e: errors.append(f'Ligne {no}: {e}'); i += 1; continue
+            if unknown is not None:
+                for name in refs: unknown[name] = no
             i += 1
             body_lines = []
             while i < len(lines) and lines[i]['indent'] > base_indent:
                 body_lines.append(lines[i]); i += 1
             nbi = body_lines[0]['indent'] if body_lines else base_indent + 4
-            body_code = _compile_body(body_lines, errors, nbi)
+            body_code = _compile_body(body_lines, errors, nbi, declared, unknown, array_params)
             out.append(f'if {cond}:')
             for bl in body_code.splitlines(): out.append('  ' + bl)
             while i < len(lines) and lines[i]['indent'] == base_indent:
@@ -197,13 +255,16 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0) -> str:
                 mei = re.match(r'^ELSE\s+IF\s+(.+?)\s*:?\s*$', et, re.I)
                 me  = re.match(r'^ELSE\s*:?\s*$', et, re.I)
                 if mei:
-                    try: ec = _transpile_expr(mei.group(1))
+                    erefs: set = set()
+                    try: ec = _transpile_expr(mei.group(1), erefs, array_params)
                     except Exception as e: errors.append(str(e)); break
+                    if unknown is not None:
+                        for name in erefs: unknown[name] = no
                     i += 1
                     el = []
                     while i < len(lines) and lines[i]['indent'] > base_indent: el.append(lines[i]); i += 1
                     nbi2 = el[0]['indent'] if el else base_indent + 4
-                    ec_code = _compile_body(el, errors, nbi2)
+                    ec_code = _compile_body(el, errors, nbi2, declared, unknown, array_params)
                     out.append(f'elif {ec}:')
                     for bl in ec_code.splitlines(): out.append('  ' + bl)
                 elif me:
@@ -211,7 +272,7 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0) -> str:
                     el = []
                     while i < len(lines) and lines[i]['indent'] > base_indent: el.append(lines[i]); i += 1
                     nbi2 = el[0]['indent'] if el else base_indent + 4
-                    el_code = _compile_body(el, errors, nbi2)
+                    el_code = _compile_body(el, errors, nbi2, declared, unknown, array_params)
                     out.append('else:')
                     for bl in el_code.splitlines(): out.append('  ' + bl)
                     break
@@ -226,23 +287,34 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0) -> str:
         m = re.match(r'^(?:PAY|FLOW)\s+(.+?)(?:\s+"([^"]*)")?\s*$', text, re.I)
         if m:
             raw_expr, lbl_raw = m.group(1), (m.group(2) or m.group(1))
-            try: e = _transpile_expr(raw_expr)
+            refs = set()
+            try: e = _transpile_expr(raw_expr, refs)
             except Exception as ex: errors.append(f'Ligne {no}: {ex}'); i += 1; continue
+            if unknown is not None:
+                for name in refs: unknown[name] = no
             lbl = lbl_raw.replace("'", "\\'")
             out.append(f"if not _c['done'] and not _st['done']: _st['flows'].append({{'v': {e}, 'lbl': '{lbl}'}})")
             i += 1; continue
 
         m = re.match(r'^ACCRUE\s+(.+?)(?:\s+"[^"]*")?\s*$', text, re.I)
         if m:
-            try: e = _transpile_expr(m.group(1))
+            refs = set()
+            try: e = _transpile_expr(m.group(1), refs, array_params)
             except Exception as ex: errors.append(f'Ligne {no}: {ex}'); i += 1; continue
+            if unknown is not None:
+                for name in refs: unknown[name] = no
             out.append(f"_c['accum'] += {e}")
             i += 1; continue
 
         m = re.match(r'^SET\s+([A-Za-z_]\w*)\s*=\s*(.+)$', text, re.I)
         if m:
-            try: e = _transpile_expr(m.group(2))
+            refs = set()
+            try: e = _transpile_expr(m.group(2), refs, array_params)
             except Exception as ex: errors.append(f'Ligne {no}: {ex}'); i += 1; continue
+            if declared is not None:
+                declared.add(m.group(1).upper())
+            if unknown is not None:
+                for name in refs: unknown[name] = no
             out.append(f"_c['memo']['{m.group(1).upper()}'] = {e}")
             i += 1; continue
 
@@ -270,6 +342,13 @@ def _parse_dates(s: str, line_no: int) -> list[float]:
                 dates.append(float(v))
             except ValueError:
                 raise ValueError(f'Ligne {line_no}: date invalide: "{part}"')
+    # A date <= 0 would make the engine index the path tensor from the END
+    # (Python negative indexing on S_min/WOF_min) — a look-ahead, not an error
+    # it can detect itself. t=0 is the pricing date: nothing observes there.
+    bad = [d for d in dates if d <= 0]
+    if bad:
+        raise ValueError(f'Ligne {line_no}: date d\'observation invalide ({bad[0]:g}) — '
+                         f'les dates AT doivent être strictement positives.')
     return sorted(set(dates))
 
 
@@ -296,7 +375,22 @@ def parse_script(code: str) -> CompiledScript:
     params = []
     constats = []
     i = 0
-    exec_globals = {**_SAFE_MATH, '_basket': _basket}
+    exec_globals = {**_SAFE_MATH, '_basket': _basket, '_pobs': _pobs}
+    # Every PARAM/SET name ever declared, vs. every identifier that fell
+    # through to the generic memo lookup (name -> a line it appeared on) —
+    # diffed at the end so a typo (referenced but never declared) raises a
+    # clear error instead of silently pricing as 0.
+    declared: set = set()
+    unknown: dict = {}
+
+    # Pre-pass: PARAM() names must be known BEFORE any AT body is compiled
+    # (the transpiler routes them through _pobs), and declaration order in the
+    # script is free — a PARAM() below an AT block must still work.
+    array_params: set = set()
+    for ln0 in lines:
+        m0 = re.match(r'^PARAM\(\)\s+([A-Za-z_]\w*)', ln0['text'], re.I)
+        if m0 and ln0['indent'] == 0:
+            array_params.add(m0.group(1).upper())
 
     while i < len(lines):
         ln = lines[i]
@@ -304,6 +398,21 @@ def parse_script(code: str) -> CompiledScript:
 
         if ln['indent'] != 0:
             errors.append(f'Ligne {no}: indentation 0 attendue pour "{text}"')
+            i += 1; continue
+
+        # PARAM() NAME [= seed[%]] ["description" | # description] — per-
+        # observation values. The seed (optional) only pre-fills the first UI
+        # row; the actual rows arrive at pricing time via user_params.
+        m = re.match(r'^PARAM\(\)\s+([A-Za-z_]\w*)\s*(?:=\s*([\d.]+)(%?))?\s*(?:"([^"]*)")?\s*$', text, re.I)
+        if m:
+            name = m.group(1).upper()
+            raw_val = float(m.group(2)) if m.group(2) else 0.0
+            is_pct = m.group(3) == '%' if m.group(2) else True
+            stored = raw_val / 100 if is_pct else raw_val
+            desc = (m.group(4) or '').strip() or ln.get('comment') or name
+            params.append(Param(name=name, raw_default=raw_val, stored_val=stored,
+                                is_pct=is_pct, desc=desc, kind='array'))
+            declared.add(name)
             i += 1; continue
 
         # PARAM K = 1.0  "description"  OR  # description  OR no description.
@@ -325,6 +434,7 @@ def parse_script(code: str) -> CompiledScript:
             else:
                 desc = name
             params.append(Param(name=name, raw_default=raw_val, stored_val=stored, is_pct=is_pct, desc=desc))
+            declared.add(name)
             i += 1; continue
 
         # CONSTAT Name          -> single date, filled in via the UI
@@ -350,8 +460,11 @@ def parse_script(code: str) -> CompiledScript:
 
         m = re.match(r'^SET\s+([A-Za-z_]\w*)\s*=\s*(.+)$', text, re.I)
         if m:
-            try: e = _transpile_expr(m.group(2))
+            refs: set = set()
+            try: e = _transpile_expr(m.group(2), refs, array_params)
             except Exception as ex: errors.append(f'Ligne {no}: {ex}'); i += 1; continue
+            declared.add(m.group(1).upper())
+            for name in refs: unknown[name] = no
             top_stmts.append(f"_c['memo']['{m.group(1).upper()}'] = {e}")
             i += 1; continue
 
@@ -361,7 +474,7 @@ def parse_script(code: str) -> CompiledScript:
             while i < len(lines) and lines[i]['indent'] > 0:
                 body_lines.append(lines[i]); i += 1
             bi = body_lines[0]['indent'] if body_lines else 4
-            body_code = _compile_body(body_lines, errors, bi)
+            body_code = _compile_body(body_lines, errors, bi, declared, unknown, array_params)
             fn_src = "def _fn(_c, _st):\n"
             for bl in body_code.splitlines():
                 fn_src += f"  {bl}\n"
@@ -405,7 +518,7 @@ def parse_script(code: str) -> CompiledScript:
             while i < len(lines) and lines[i]['indent'] > 0:
                 body_lines.append(lines[i]); i += 1
             bi = body_lines[0]['indent'] if body_lines else 4
-            body_code = _compile_body(body_lines, errors, bi)
+            body_code = _compile_body(body_lines, errors, bi, declared, unknown, array_params)
             fn_src = "def _fn(_c, _st):\n"
             for bl in body_code.splitlines():
                 fn_src += f"  {bl}\n"
@@ -421,6 +534,10 @@ def parse_script(code: str) -> CompiledScript:
         errors.append(f'Ligne {no}: instruction inconnue au niveau 0: "{text}"')
         i += 1
 
+    for name, line_no in unknown.items():
+        if name not in declared:
+            errors.append(f'Ligne {line_no}: identifiant inconnu "{name}" (ni PARAM ni SET déclaré — faute de frappe ?)')
+
     if errors:
         raise ValueError('\n'.join(errors))
 
@@ -434,8 +551,48 @@ def parse_script(code: str) -> CompiledScript:
         init_fn = ns['_init']
 
     has_stop = bool(re.search(r'^\s*STOP\s*$', code, re.I | re.MULTILINE))
+    monitors = _analyze_monitors(code, [p.name for p in params if p.name.startswith('M_')])
     return CompiledScript(events=events, init_fn=init_fn, params=params, constats=constats,
-                          has_stop=has_stop)
+                          has_stop=has_stop, monitors=monitors)
+
+
+# ── M_ monitoring analysis ──────────────────────────────────────────
+#
+# PARAMs prefixed M_ are the script author's explicit "watch this" contract
+# (used by the deals watchlist). The prefix says WHAT to watch; the DIRECTION
+# and the OBSERVABLE come from how the script actually compares the param —
+# `WOF >= M_AC_BAR` fires when the worst-of RISES to the level (autocall-
+# like, 'up'), `WOF < M_KI_BAR` fires below it (KI-like, 'down'). Deriving
+# this from usage keeps it impossible for the monitoring metadata to diverge
+# from the payoff itself. Conflicting usages → direction None (the watchlist
+# shows a neutral gap, no color).
+_MONITOR_OBS = r'(WOF_MIN|BOF_MAX|WOF|BOF|BASKET(?:\(\))?|S\[\d+\]|S_MIN\[\d+\]|S_MAX\[\d+\])'
+
+
+def _analyze_monitors(code: str, m_param_names: list[str]) -> list[dict]:
+    monitors = []
+    for name in m_param_names:
+        found: list[tuple] = []   # (observable, direction)
+        # observable OP name  — e.g. "WOF >= M_AC_BAR"
+        for m in re.finditer(_MONITOR_OBS + r'\s*(>=|<=|>|<)\s*' + re.escape(name) + r'\b', code, re.I):
+            obs, op = m.group(1).upper().replace('()', ''), m.group(2)
+            found.append((obs, 'up' if op in ('>=', '>') else 'down'))
+        # name OP observable  — e.g. "M_AC_BAR <= WOF" (level below obs = obs above level)
+        for m in re.finditer(r'\b' + re.escape(name) + r'\s*(>=|<=|>|<)\s*' + _MONITOR_OBS, code, re.I):
+            op, obs = m.group(1), m.group(2).upper().replace('()', '')
+            found.append((obs, 'down' if op in ('>=', '>') else 'up'))
+
+        if not found:
+            monitors.append({'name': name, 'observable': None, 'direction': None})
+            continue
+        observables = {f[0] for f in found}
+        directions = {f[1] for f in found}
+        monitors.append({
+            'name': name,
+            'observable': found[0][0] if len(observables) == 1 else None,
+            'direction': found[0][1] if len(directions) == 1 else None,
+        })
+    return monitors
 
 
 # ── CONSTAT resolution (Phase 2: plugged into the engine) ───────────
@@ -452,10 +609,16 @@ def parse_script(code: str) -> CompiledScript:
 # rest of the engine already uses everywhere (T_max is "years from now").
 # Using each CONSTAT's own start_date as its private zero instead would make
 # multiple CONSTATs in the same script inconsistent with each other.
-def resolve_constats(script: CompiledScript, constat_values: dict) -> CompiledScript:
+def resolve_constats(script: CompiledScript, constat_values: dict,
+                     anchor=None) -> CompiledScript:
     """Resolve constat_ref-only events into concrete dates. Raises ValueError
     if an AT references a CONSTAT with no corresponding entry in
     constat_values, or with malformed values.
+
+    anchor is the date the year-fractions are measured from (default: today —
+    the pre-trade pricing case). Replaying a deal booked in the past must pass
+    its value_date, otherwise every calendar date lands too early by the time
+    already elapsed.
 
     Qualifiers (`AT Name.first:` / `.last:` / `[N]:`) pin down ONE date out of
     the full schedule, as an ADDITIONAL event at that date — `AT Name:` still
@@ -466,13 +629,14 @@ def resolve_constats(script: CompiledScript, constat_values: dict) -> CompiledSc
     date, in script order, same mechanism step_map already uses for any two
     events that land on the same step (a STOP in the first skips the second,
     since both share the same per-path `done` flag)."""
-    if not any(getattr(ev, 'constat_ref', None) for ev in script.events):
+    has_strike_fix = any(c.name == 'STRIKE_FIX' for c in script.constats)
+    if not has_strike_fix and not any(getattr(ev, 'constat_ref', None) for ev in script.events):
         return script   # nothing to resolve — common/simple-mode case
 
     from datetime import date
     from ..schedule import generate_schedule, parse_tenor, StubConvention
 
-    today = date.today()
+    today = anchor or date.today()
     constat_by_name = {c.name: c for c in script.constats}
 
     def _to_year_frac(d: date) -> float:
@@ -550,8 +714,11 @@ def resolve_constats(script: CompiledScript, constat_values: dict) -> CompiledSc
             resolved = list(dates)   # plain `AT Name:` — every date, unfiltered
         new_events.append(CompiledEvent(type=ev.type, dates=resolved, fn=ev.fn))
 
+    strike_fix_dates = _full_dates('STRIKE_FIX') if has_strike_fix else None
+
     return CompiledScript(events=new_events, init_fn=script.init_fn,
-                           params=script.params, constats=script.constats)
+                           params=script.params, constats=script.constats,
+                           has_stop=script.has_stop, strike_fix_dates=strike_fix_dates)
 
 
 def effective_T_max(script: CompiledScript, requested_T: float) -> float:

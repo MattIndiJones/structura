@@ -16,7 +16,8 @@
            rounded-md text-sm transition-colors;
   }
   .card {
-    @apply bg-slate-900 border border-slate-800 rounded-xl p-5;
+    @apply bg-slate-900 bg-gradient-to-b from-slate-900 to-slate-950/40
+           border border-slate-800 rounded-xl p-5 shadow-lg shadow-black/20;
   }
   .label {
     @apply block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1;
@@ -39,4 +40,59 @@
     min-height: 280px;
     tab-size: 2;
   }
+}
+
+/* Drill-down accueil (HomeView) : crossfade + léger scale entre le niveau 1
+   (4 catégories) et le niveau 2 (sous-cards). */
+.category-switch-enter-active,
+.category-switch-leave-active {
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+.category-switch-enter-from,
+.category-switch-leave-to {
+  opacity: 0;
+  transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .category-switch-enter-active,
+  .category-switch-leave-active {
+    transition: opacity 1ms linear;
+  }
+  .category-switch-enter-from,
+  .category-switch-leave-to {
+    transform: none;
+  }
+}
+
+/* Dégradé de marque — réservé aux chiffres/éléments qu'on veut mettre en
+   évidence (ex. MtM), distinct des couleurs fonctionnelles de navigation. */
+.text-brand-gradient {
+  @apply bg-gradient-to-r from-indigo-400 to-purple-500 bg-clip-text text-transparent;
+}
+
+/* Halo diagonal subtil pour une tuile de chiffres clés (KPI) — à combiner
+   avec .card : class="card kpi-tile". */
+.kpi-tile {
+  @apply relative overflow-hidden;
+}
+.kpi-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.10) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+/* Anneau pulsant — signale un élément "vivant"/en attente d'attention
+   (alerte non lue). */
+@keyframes pulse-ring {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.35), 0 0 0 6px rgba(239, 68, 68, 0.12); }
+  50%      { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.25), 0 0 0 9px rgba(239, 68, 68, 0.06); }
+}
+.pulse-ring {
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse-ring { animation: none; }
 }

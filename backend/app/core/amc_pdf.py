@@ -1150,6 +1150,7 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
                         vag_result: dict | None = None,
                         attribution_result: dict | None = None,
                         brinson_result: dict | None = None,
+                        market_shocks_result: dict | None = None,
                         company_name: str = "TP Advisory Services",
                         client_name: str = "",
                         include_annexes: bool = True) -> bytes:
@@ -1368,6 +1369,15 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
         story.append(PageBreak())
         section("J — Risk Management Score : Évaluation de la Gestion du Risque")
         _append_block_j_rms(story, block_j, space, meta)
+
+    # ── BLOC K — Réactivité aux Chocs de Marché ──────────────────────────
+    # Not read from study_result — like Bloc G/Brinson, only included when
+    # explicitly selected upfront (manifest.blocks.K_marketshocks) or run on
+    # demand from its own tab, then explicitly opted into the PDF export.
+    if market_shocks_result and market_shocks_result.get("available"):
+        story.append(PageBreak())
+        section("K — Réactivité aux Chocs de Marché")
+        _append_block_k_marketshocks(story, market_shocks_result, space)
 
     # ── MANAGER SKILL SCORE (detailed breakdown) ─────────────────────────
     # mss_early already computed at top (with VAG) — reuse it here
@@ -3711,6 +3721,58 @@ def _append_block_j_rms(story, bj: dict, space, meta=None):
                                             leading=12.5, spaceAfter=4,
                                             alignment=TA_JUSTIFY)))
         story.append(space(6))
+
+
+def _append_block_k_marketshocks(story, bk: dict, space):
+    """Render Block K — Réactivité aux Chocs de Marché."""
+    if not bk.get("available"):
+        story.append(Paragraph(f"⚠  {bk.get('error', 'Données non disponibles.')}", S_WARN))
+        return
+
+    warn = bk.get("warning")
+    if warn:
+        story.append(Paragraph(f"⚠  {warn}", S_WARN))
+        story.append(space(4))
+
+    story.append(Paragraph(
+        f"Période analysée : {bk.get('fund_start', '—')} → {bk.get('fund_end', '—')}", S_SMALL))
+    story.append(space(4))
+
+    interp = bk.get("interpretation", "")
+    if interp:
+        story.append(Paragraph(interp, _sty("ki", fontSize=8, textColor=C_TEXT,
+                                            leading=12.5, spaceAfter=4,
+                                            alignment=TA_JUSTIFY)))
+        story.append(space(8))
+
+    events = bk.get("events") or []
+    if not events:
+        story.append(Paragraph(
+            "Aucun choc de marché du calendrier ne chevauche l'historique de ce fonds.", S_SMALL))
+        return
+
+    story.append(Paragraph("Événements de Marché", S_SECTION))
+    story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
+    story.append(space(6))
+
+    hdr = [_p("Événement", S_HDR), _p("Période", S_HDR), _p("Trades", S_HDR),
+           _p("Ratio activité", S_HDR), _p("Flux net", S_HDR), _p("Diagnostic", S_HDR)]
+    rows = [hdr]
+    for e in events:
+        ratio = e.get("activity_ratio")
+        net_flow = e.get("net_flow") or 0
+        rows.append([
+            _p(f"{e.get('label','')}", S_BODY),
+            _p(f"{e.get('start','')} → {e.get('end','')}", S_SMALL),
+            _pn(str(e.get("n_trades", 0))),
+            _pn(f"x{ratio:.2f}" if ratio is not None else "—"),
+            Paragraph(f"{net_flow:+,.0f}", _sty("kf", alignment=TA_RIGHT, fontSize=8,
+                      textColor=colors.HexColor("#10b981" if net_flow > 0 else
+                                                 "#ef4444" if net_flow < 0 else "#64748b"))),
+            _p(e.get("reaction_label", ""), S_SMALL),
+        ])
+    story.append(_tbl(rows, col_widths=[4.2*cm, 3.2*cm, 1.6*cm, 2.2*cm, 2.4*cm, 3.8*cm]))
+    story.append(space(6))
 
 
 def _append_manager_skill(story, mss: dict, space):

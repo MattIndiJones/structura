@@ -56,7 +56,8 @@ ISIN_DEFAULT_BENCHMARK: dict[str, str] = {
     "CH1473733959": "uti_infrastructure",
     "CH1473736143": "uti_infrastructure",
     # ── UTI Life ────────────────────────────────────────────────────────
-    "CH1473731680": "uti_life",
+    # Benchmark officiel du produit: iShares Ageing Population UCITS ETF (IE00BYZK4669)
+    "CH1473731680": "AGED.L",
 }
 
 # Fast lookup by id

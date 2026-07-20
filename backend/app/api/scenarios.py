@@ -8,7 +8,7 @@ router = APIRouter(prefix="/api", tags=["scenarios"])
 
 
 @router.post("/scenarios")
-async def scenarios_endpoint(req: ScenarioRequest):
+def scenarios_endpoint(req: ScenarioRequest):
     """2D stress grid — price(spot_shock, vol_shock) plus the unshocked base price."""
     try:
         compiled = parse_script(req.script)
@@ -26,7 +26,12 @@ async def scenarios_endpoint(req: ScenarioRequest):
         raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
 
     T_eff = effective_T_max(compiled, req.T)
-    return compute_scenario_grid(
-        compiled, uls, corr, req.r, T_eff, req.model, req.seed, req.user_params,
-        req.spot_shocks, req.vol_shocks, N=req.N,
-    )
+    try:
+        return compute_scenario_grid(
+            compiled, uls, corr, req.r, T_eff, req.model, req.seed, req.user_params,
+            req.spot_shocks, req.vol_shocks, N=req.N,
+            yield_curve=req.yield_curve or [], sigma_r=req.sigma_r, a_r=req.a_r,
+            barrier_monitoring=req.barrier_monitoring,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))

@@ -4,7 +4,9 @@
     <div class="card">
       <div class="flex items-center gap-3 flex-wrap">
         <div>
-          <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">🔀 Chemins Monte Carlo</div>
+          <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">🔀 Chemins Monte Carlo
+            <HelpTip width="w-72" text="Simulation dédiée et indépendante du pricing principal : 500 chemins tirés pour ce visuel (pas les N chemins de l'onglet Résultats), dont seulement 50 sont affichés pour rester lisible. Les % de la légende sont calculés sur les 500, pas sur les 50 dessinés — mais restent un échantillon plus petit que le pricing principal, donc à lire comme indicatif, pas comme la probabilité de référence (voir onglet Probabilités pour ça)." />
+          </div>
           <div class="text-xs text-slate-600 mt-0.5 italic">50 chemins colorés par scénario de sortie</div>
         </div>
         <div class="ml-auto">
@@ -50,6 +52,7 @@ import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
+import HelpTip from './HelpTip.vue'
 import {
   Chart, LineElement, LineController, PointElement,
   LinearScale, Tooltip

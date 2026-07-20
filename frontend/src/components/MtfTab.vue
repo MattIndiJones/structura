@@ -22,19 +22,27 @@
 
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-2">
         <div>
-          <label class="label">N outer</label>
+          <label class="label">N outer
+            <HelpTip text="Nombre de scénarios de marché futurs simulés à chaque date MTM — c'est ce qui construit la distribution (P05/P95 etc). Plus il est élevé, moins la distribution est bruitée, mais chaque scénario supplémentaire déclenche N inner re-pricings : le coût total grossit linéairement avec N outer." />
+          </label>
           <SensitiveValue mode="input"><input v-model.number="form.n_outer" type="number" step="50" min="20" max="2000" class="input" /></SensitiveValue>
         </div>
         <div>
-          <label class="label">N inner</label>
+          <label class="label">N inner
+            <HelpTip text="Nombre de chemins Monte Carlo utilisés pour re-pricer le produit résiduel à l'intérieur de chaque scénario outer. Augmenter N inner réduit le bruit de pricing sur chaque point de la distribution, mais ne change pas le nombre de scénarios — c'est un raffinement de précision par scénario, pas un élargissement de l'échantillon." />
+          </label>
           <SensitiveValue mode="input"><input v-model.number="form.n_inner" type="number" step="100" min="50" max="5000" class="input" /></SensitiveValue>
         </div>
         <div>
-          <label class="label">Dates MTM</label>
+          <label class="label">Dates MTM
+            <HelpTip text="Nombre de dates futures auxquelles la distribution de valeur mark-to-model est calculée, réparties entre aujourd'hui et la maturité (ou le premier rappel possible). Chaque date ajoutée multiplie le coût total par N outer × N inner re-pricings supplémentaires." />
+          </label>
           <SensitiveValue mode="input"><input v-model.number="form.n_dates" type="number" step="1" min="2" max="12" class="input" /></SensitiveValue>
         </div>
         <div>
-          <label class="label">Seed</label>
+          <label class="label">Seed
+            <HelpTip text="Graine du générateur aléatoire pour les scénarios outer. Fixe le résultat pour permettre la reproductibilité — changer la seed déplace le bruit d'échantillonnage mais pas la distribution théorique sous-jacente." />
+          </label>
           <SensitiveValue mode="input"><input v-model.number="form.seed" type="number" class="input" /></SensitiveValue>
         </div>
       </div>
@@ -72,7 +80,9 @@
       <!-- Scalar sanity tiles (last MTM date) -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div v-for="s in scalarTiles" :key="s.label" class="stat-box">
-          <div class="text-xs text-slate-500 mb-1">{{ s.label }}</div>
+          <div class="text-xs text-slate-500 mb-1">{{ s.label }}
+            <HelpTip v-if="s.tip" :text="s.tip" />
+          </div>
           <div class="text-lg font-bold" :class="s.cls"><SensitiveValue>{{ s.val }}</SensitiveValue></div>
         </div>
       </div>
@@ -84,15 +94,19 @@
           <thead>
             <tr class="border-b border-slate-700 text-slate-500">
               <th class="text-left py-1.5 pr-3 font-semibold">Date</th>
-              <th class="text-right py-1.5 pr-3 font-semibold">E(MTM)</th>
-              <th class="text-right py-1.5 pr-3 font-semibold">σ</th>
+              <th class="text-right py-1.5 pr-3 font-semibold">E(MTM)
+                <HelpTip text="Espérance de la valeur mark-to-model à cette date, sur les N outer scénarios — la moyenne de la distribution, pas une prévision de ce qui va se passer." /></th>
+              <th class="text-right py-1.5 pr-3 font-semibold">σ
+                <HelpTip text="Écart-type de la distribution des MTM à cette date — mesure la dispersion entre scénarios, donc l'incertitude sur la valeur future du produit à cet horizon." /></th>
               <th class="text-right py-1.5 pr-3 font-semibold">P05</th>
               <th class="text-right py-1.5 pr-3 font-semibold">P25</th>
               <th class="text-right py-1.5 pr-3 font-semibold">P50</th>
               <th class="text-right py-1.5 pr-3 font-semibold">P75</th>
               <th class="text-right py-1.5 pr-3 font-semibold">P95</th>
-              <th class="text-right py-1.5 pr-3 font-semibold whitespace-nowrap">P(&gt;100%)</th>
-              <th class="text-right py-1.5 font-semibold whitespace-nowrap">P(&ge;P&#8320;)</th>
+              <th class="text-right py-1.5 pr-3 font-semibold whitespace-nowrap">P(&gt;100%)
+                <HelpTip align="right" text="Probabilité que le produit vaille plus que 100% du notionnel à cette date — indicateur brut de gain, indépendant du prix réellement payé à l'achat." /></th>
+              <th class="text-right py-1.5 font-semibold whitespace-nowrap">P(&ge;P&#8320;)
+                <HelpTip align="right" text="Probabilité que la valeur mark-to-model dépasse le prix d'entrée P₀ (le prix de pricing initial, pas 100%) — répond à 'ai-je une majorité de chances d'être gagnant par rapport à ce que j'ai payé', ce qui diffère de P(>100%) si le produit a été acheté au-dessus ou en-dessous du pair." /></th>
             </tr>
           </thead>
           <tbody>
@@ -134,6 +148,7 @@ import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
+import HelpTip from './HelpTip.vue'
 import {
   Chart, LineElement, LineController, PointElement,
   CategoryScale, LinearScale, Filler, Tooltip, Legend,
@@ -165,11 +180,15 @@ const scalarTiles = computed(() => {
   const lbl = last.t.toFixed(1) + 'Y'
   return [
     { label: `P(MTM>100%) @ ${lbl}`, val: last.stats.p_above_100.toFixed(1) + '%',
-      cls: last.stats.p_above_100 >= 50 ? 'text-green-400' : 'text-red-400' },
+      cls: last.stats.p_above_100 >= 50 ? 'text-green-400' : 'text-red-400',
+      tip: "Probabilité que le produit vaille plus que 100% du notionnel à la dernière date MTM — gain brut, sans référence au prix payé." },
     { label: `P(MTM≥P₀) @ ${lbl}`, val: last.stats.p_above_p0.toFixed(1) + '%',
-      cls: last.stats.p_above_p0 >= 50 ? 'text-green-400' : 'text-red-400' },
-    { label: `E(MTM) @ ${lbl}`, val: pf(last.stats.e_mtm), cls: 'text-blue-400' },
-    { label: `E(max(MTM-100,0)) @ ${lbl}`, val: pf(last.stats.e_upside), cls: 'text-green-400' },
+      cls: last.stats.p_above_p0 >= 50 ? 'text-green-400' : 'text-red-400',
+      tip: "Probabilité que la valeur future dépasse le prix de pricing initial P₀ — la vraie question 'suis-je gagnant par rapport à mon prix d'entrée', à distinguer de P(>100%)." },
+    { label: `E(MTM) @ ${lbl}`, val: pf(last.stats.e_mtm), cls: 'text-blue-400',
+      tip: "Valeur moyenne attendue à cette date sous la mesure risque-neutre — pas une prévision, une espérance de pricing." },
+    { label: `E(max(MTM-100,0)) @ ${lbl}`, val: pf(last.stats.e_upside), cls: 'text-green-400',
+      tip: "Espérance du seul potentiel de hausse au-dessus de 100% — équivalent à la valeur d'une option call sur le MTM du produit lui-même, strike 100%." },
   ]
 })
 

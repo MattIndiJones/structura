@@ -44,6 +44,10 @@ class PricingRequest(BaseModel):
     yield_curve: List[List[float]] = []
     sigma_r: float = Field(default=0.0, ge=0.0, le=0.10)
     a_r: float = Field(default=0.0, ge=0.0, le=2.0)
+    # Barrier monitoring: "weekly" (extrema at the weekly grid steps, historic
+    # behaviour) or "continuous" (Brownian-bridge within-step extrema — WOF_MIN/
+    # S_MIN/BOF_MAX then reflect the continuous path, raising KI probability).
+    barrier_monitoring: str = Field(default="weekly", pattern="^(weekly|continuous)$")
     # CONSTAT values, keyed by name — see core/payscript/parser.resolve_constats.
     # Empty dict is a no-op (the common/simple-mode case: no AT<ConstatName>:).
     constats: Dict[str, Any] = {}
@@ -80,6 +84,9 @@ class ParseResponse(BaseModel):
     constats: List[Dict[str, Any]] = []
     events_count: int
     has_stop: bool = False
+    # M_-prefixed PARAMs and how the script compares them — see
+    # payscript/parser._analyze_monitors. [{name, observable, direction}].
+    monitors: List[Dict[str, Any]] = []
     errors: Optional[str] = None
 
 
@@ -96,6 +103,9 @@ class AnalysisBase(BaseModel):
     model: str = "constant"
     user_params: Dict[str, Any] = {}
     yield_curve: List[List[float]] = []
+    sigma_r: float = Field(default=0.0, ge=0.0, le=0.10)
+    a_r: float = Field(default=0.0, ge=0.0, le=2.0)
+    barrier_monitoring: str = Field(default="weekly", pattern="^(weekly|continuous)$")
     constats: Dict[str, Any] = {}
 
 
@@ -115,7 +125,29 @@ class ProbaRequest(AnalysisBase):
 class BacktestRequest(AnalysisBase):
     start_date: str = "2010-01-01"
     end_date: Optional[str] = None
-    freq: int = Field(default=21, ge=5, le=252)
+    freq: int = Field(default=21, ge=1, le=252)
+    invest_pct: float = Field(default=100.0, gt=0, le=200)
+    rf_rate: float = 2.0
+
+
+class BacktestCompareRequest(BaseModel):
+    """Underlying comparator — backtest the same script against a pool of
+    candidate underlyings, one at a time, then (if basket_size > 1) against
+    combinations drawn from the best `shortlist_n` single performers only —
+    testing every C(N, basket_size) combination is combinatorially
+    infeasible for any non-trivial candidate pool."""
+    script: str
+    candidates: List[UnderlyingParams]
+    r: float = 0.03
+    T: float = 3.0
+    model: str = "constant"
+    user_params: Dict[str, Any] = {}
+    constats: Dict[str, Any] = {}
+    basket_size: int = Field(default=1, ge=1, le=5)
+    shortlist_n: int = Field(default=8, ge=2, le=20)
+    start_date: str = "2010-01-01"
+    end_date: Optional[str] = None
+    freq: int = Field(default=21, ge=1, le=252)
     invest_pct: float = Field(default=100.0, gt=0, le=200)
     rf_rate: float = 2.0
 
@@ -139,6 +171,67 @@ class SolverRequest(AnalysisBase):
     N: int = Field(default=8000, ge=1000, le=50000)
     tol: float = Field(default=1e-4, gt=0, le=0.01)
     max_iter: int = Field(default=40, ge=5, le=100)
+
+
+class ReinvestCandidate(BaseModel):
+    ticker: str
+    name: str = ""
+
+
+class ReinvestMetricFilter(BaseModel):
+    """One risk guardrail on the candidate scan — a hard cutoff, not a
+    weight: candidates violating it are dropped before the coupon ranking,
+    never just penalized. metric is one of ki/autocall/capital_loss/full_coupon
+    (the *_pct fields returned by /pricing/proba). direction "max" means the
+    metric must not exceed threshold; "min" means it must not fall below it."""
+    metric: str = Field(pattern="^(ki|autocall|capital_loss|full_coupon)$")
+    threshold: float = Field(ge=0, le=100)
+    direction: str = Field(pattern="^(max|min)$")
+
+
+class ReinvestScanRequest(BaseModel):
+    """Flow B — scan a pool of candidate underlyings for the deal's own script:
+    solve each candidate's coupon (or whichever PARAM) to par, price its risk
+    profile, keep only those passing every filter, rank the rest by coupon.
+    target_price/lo/hi are in the PARAM's stored units, same convention as
+    SolverRequest (the frontend converts display % to stored units before
+    calling, exactly like the existing Solver panel does)."""
+    candidates: List[ReinvestCandidate]
+    param_name: str
+    target_price: float
+    lo: float
+    hi: float
+    filters: List[ReinvestMetricFilter] = []
+    N: int = Field(default=6000, ge=1000, le=20000)
+    model: str = "constant"
+    vol_period: str = "1y"
+    # Maturité du scan — None = tenor d'origine du deal (deal.T). Bissection
+    # tenue sur param_name uniquement ; param_overrides (mode avancé) fixe
+    # tout autre PARAM à une valeur choisie plutôt qu'à celle du booking,
+    # en unités stockées (même convention que lo/hi/target_price).
+    T: Optional[float] = None
+    param_overrides: Dict[str, Any] = {}
+
+
+class ReinvestProposalRequest(BaseModel):
+    """A single scanned candidate turned into a proposal: same conventions
+    as ReinvestScanRequest (one candidate instead of a pool), plus a backtest
+    window. Re-derives price/proba server-side rather than trusting
+    client-echoed scan-result figures for a document."""
+    ticker: str
+    name: str = ""
+    param_name: str
+    target_price: float
+    lo: float
+    hi: float
+    T: Optional[float] = None
+    param_overrides: Dict[str, Any] = {}
+    N: int = Field(default=8000, ge=1000, le=20000)
+    model: str = "constant"
+    vol_period: str = "1y"
+    backtest_start: str = "2015-01-01"
+    backtest_freq: int = Field(default=21, ge=1, le=252)
+    backtest_invest_pct: float = Field(default=100.0, gt=0, le=200)
 
 
 class GridRequest(AnalysisBase):

@@ -18,11 +18,15 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+import json
+from sqlmodel import Session, select
+
 from ..core.schemas import PricingRequest
 from ..core.payscript.parser import parse_script, resolve_constats, effective_T_max
 from ..core.payscript.engine import run_mc
 from .auth import get_current_user
-from ..db.models import User
+from ..db.database import get_session
+from ..db.models import User, KidRecord, Indicative, Deal
 
 router = APIRouter(prefix="/api/kid", tags=["kid"])
 
@@ -154,16 +158,19 @@ def kid_compute(
         yield_curve=req.yield_curve or [], sigma_r=req.sigma_r, a_r=req.a_r,
     )
 
-    # Step 1 — run full simulation first to get floor_price
-    sc_full = _mc_percentiles(**common, T_cap=T_full, floor_price=0.0)
-    floor   = sc_full["price"]
+    try:
+        # Step 1 — run full simulation first to get floor_price
+        sc_full = _mc_percentiles(**common, T_cap=T_full, floor_price=0.0)
+        floor   = sc_full["price"]
 
-    # Step 2 — intermediate horizons in parallel (use floor_price for surviving paths)
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        fut_half = ex.submit(_mc_percentiles, **common, T_cap=T_half, floor_price=floor)
-        fut_1y   = ex.submit(_mc_percentiles, **common, T_cap=T_1y,   floor_price=floor)
-        sc_half = fut_half.result()
-        sc_1y   = fut_1y.result()
+        # Step 2 — intermediate horizons in parallel (use floor_price for surviving paths)
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fut_half = ex.submit(_mc_percentiles, **common, T_cap=T_half, floor_price=floor)
+            fut_1y   = ex.submit(_mc_percentiles, **common, T_cap=T_1y,   floor_price=floor)
+            sc_half = fut_half.result()
+            sc_1y   = fut_1y.result()
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
     # VEV from 1st-percentile payoff at maturity (PRIIPs Annex II)
     p1 = sc_full["p1"]
@@ -198,3 +205,78 @@ def kid_compute(
             "ongoing": req.cost_ongoing,
         },
     }
+
+
+# ── Persistence — append-only, one row per generation ──────────────────
+
+class KidSaveRequest(BaseModel):
+    indicative_id: Optional[int] = None
+    deal_id: Optional[int] = None
+    product_title: str = "Produit structuré"
+    sri: int
+    mrm: int
+    crm: int
+    vev: float
+    T_rhp: float
+    horizons: list = []
+    costs: dict = {}
+
+
+def _kid_record_row(k: KidRecord) -> dict:
+    return {
+        "id": k.id,
+        "indicative_id": k.indicative_id,
+        "deal_id": k.deal_id,
+        "product_title": k.product_title,
+        "sri": k.sri, "mrm": k.mrm, "crm": k.crm, "vev": k.vev, "T_rhp": k.t_rhp,
+        "horizons": json.loads(k.horizons_json),
+        "costs": json.loads(k.costs_json),
+        "created_at": k.created_at.isoformat(),
+    }
+
+
+@router.post("/save", status_code=201)
+def save_kid(
+    req: KidSaveRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    if not req.indicative_id and not req.deal_id:
+        raise HTTPException(422, "indicative_id ou deal_id requis.")
+    if req.indicative_id:
+        ind = session.get(Indicative, req.indicative_id)
+        if not ind or ind.user_id != current.id:
+            raise HTTPException(404, "Indicatif introuvable")
+    if req.deal_id:
+        deal = session.get(Deal, req.deal_id)
+        if not deal or deal.user_id != current.id:
+            raise HTTPException(404, "Deal introuvable")
+
+    rec = KidRecord(
+        indicative_id=req.indicative_id, deal_id=req.deal_id, user_id=current.id,
+        product_title=req.product_title,
+        sri=req.sri, mrm=req.mrm, crm=req.crm, vev=req.vev, t_rhp=req.T_rhp,
+        horizons_json=json.dumps(req.horizons), costs_json=json.dumps(req.costs),
+    )
+    session.add(rec)
+    session.commit()
+    session.refresh(rec)
+    return _kid_record_row(rec)
+
+
+@router.get("/records")
+def list_kid_records(
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    indicative_id: Optional[int] = None,
+    deal_id: Optional[int] = None,
+):
+    if not indicative_id and not deal_id:
+        raise HTTPException(422, "indicative_id ou deal_id requis.")
+    q = select(KidRecord).where(KidRecord.user_id == current.id)
+    if indicative_id:
+        q = q.where(KidRecord.indicative_id == indicative_id)
+    if deal_id:
+        q = q.where(KidRecord.deal_id == deal_id)
+    rows = session.exec(q.order_by(KidRecord.created_at.desc())).all()
+    return [_kid_record_row(r) for r in rows]

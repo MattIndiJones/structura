@@ -65,7 +65,8 @@
 
           <div v-else class="flex flex-col gap-2">
             <div v-for="doc in filteredDocs" :key="doc.id"
-              class="card flex items-center gap-4 hover:border-slate-600 transition-colors">
+              class="card flex items-center gap-4 hover:border-slate-600 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200">
               <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
                 :class="docTypeColor(doc.doc_type)">
                 <span class="text-lg">{{ docTypeIcon(doc.doc_type) }}</span>
@@ -103,7 +104,8 @@
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
             <!-- Term Sheet Indicatif -->
-            <div class="card flex flex-col gap-3 hover:border-blue-700 transition-colors">
+            <div class="card flex flex-col gap-3 hover:border-blue-700 hover:shadow-xl hover:shadow-black/30
+                       hover:-translate-y-0.5 transition-all duration-200">
               <div class="flex items-center gap-3">
                 <div class="w-12 h-12 rounded-xl bg-blue-900/50 flex items-center justify-center text-2xl">📋</div>
                 <div>
@@ -121,7 +123,8 @@
             </div>
 
             <!-- KID PRIIPs -->
-            <div class="card flex flex-col gap-3 hover:border-amber-700 transition-colors">
+            <div class="card flex flex-col gap-3 hover:border-amber-700 hover:shadow-xl hover:shadow-black/30
+                       hover:-translate-y-0.5 transition-all duration-200">
               <div class="flex items-center gap-3">
                 <div class="w-12 h-12 rounded-xl bg-amber-900/50 flex items-center justify-center text-2xl">⚖️</div>
                 <div>
@@ -139,7 +142,8 @@
             </div>
 
             <!-- Term Sheet Final (après booking) -->
-            <div class="card flex flex-col gap-3 hover:border-emerald-700 transition-colors">
+            <div class="card flex flex-col gap-3 hover:border-emerald-700 hover:shadow-xl hover:shadow-black/30
+                       hover:-translate-y-0.5 transition-all duration-200">
               <div class="flex items-center gap-3">
                 <div class="w-12 h-12 rounded-xl bg-emerald-900/50 flex items-center justify-center text-2xl">✅</div>
                 <div>

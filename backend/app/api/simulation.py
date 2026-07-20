@@ -41,20 +41,25 @@ def _check_param_exists(compiled, param_name: str):
 
 
 @router.post("/solve")
-async def solve_endpoint(req: SolverRequest):
+def solve_endpoint(req: SolverRequest):
     """Bisection solve: find the PARAM value that hits a target price."""
     compiled, uls, corr, T_eff = _parse_and_validate(req)
     _check_param_exists(compiled, req.param_name)
 
-    return solve_for_param(
-        compiled, uls, corr, req.r, T_eff, req.model, req.seed, req.user_params,
-        req.param_name, req.target_price, req.lo, req.hi,
-        N=req.N, tol=req.tol, max_iter=req.max_iter,
-    )
+    try:
+        return solve_for_param(
+            compiled, uls, corr, req.r, T_eff, req.model, req.seed, req.user_params,
+            req.param_name, req.target_price, req.lo, req.hi,
+            N=req.N, tol=req.tol, max_iter=req.max_iter,
+            yield_curve=req.yield_curve or [], sigma_r=req.sigma_r, a_r=req.a_r,
+            barrier_monitoring=req.barrier_monitoring,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.post("/grid")
-async def grid_endpoint(req: GridRequest):
+def grid_endpoint(req: GridRequest):
     """2D price heatmap over two PARAM ranges."""
     compiled, uls, corr, T_eff = _parse_and_validate(req)
     _check_param_exists(compiled, req.param_x)
@@ -63,9 +68,14 @@ async def grid_endpoint(req: GridRequest):
         raise HTTPException(status_code=422,
                              detail="Les deux axes doivent porter sur des paramètres différents.")
 
-    return compute_price_grid(
-        compiled, uls, corr, req.r, T_eff, req.model, req.seed, req.user_params,
-        req.param_x, req.x_min, req.x_max, req.x_steps,
-        req.param_y, req.y_min, req.y_max, req.y_steps,
-        N=req.N,
-    )
+    try:
+        return compute_price_grid(
+            compiled, uls, corr, req.r, T_eff, req.model, req.seed, req.user_params,
+            req.param_x, req.x_min, req.x_max, req.x_steps,
+            req.param_y, req.y_min, req.y_max, req.y_steps,
+            N=req.N,
+            yield_curve=req.yield_curve or [], sigma_r=req.sigma_r, a_r=req.a_r,
+            barrier_monitoring=req.barrier_monitoring,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
