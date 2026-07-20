@@ -29,6 +29,21 @@ en français. Code, commentaires, noms de fichiers/variables : anglais.
 - pytest se lance depuis la **racine** du repo : `.venv\Scripts\python.exe -m pytest
   backend\tests` — pas depuis `backend/`.
 
+## Base de données
+
+`backend/data/structura.db` (SQLite) n'est **jamais versionné** (`.gitignore`) — les
+deals, scripts, études AMC, RFQ etc. de Philippe sont des données réelles, pas du code.
+Sur une machine où ce fichier n'existe pas encore (nouveau clone, autre PC), l'app
+démarre quand même normalement : `init_db()` (appelé au boot dans `main.py`) crée le
+schéma et sème deux comptes par défaut (`admin`/`admin123`, `test`/`test123`) — une base
+vide n'est donc **pas une panne à corriger**, c'est l'état attendu. Ce qui manque alors,
+c'est uniquement le travail réel de Philippe (deals bookés, scripts sauvegardés,
+études...) — pour le retrouver sur une autre machine, il doit copier
+`backend/data/structura.db` lui-même (cloud perso, clé USB...) ; ni git ni Claude ne
+peuvent le faire à sa place. Les données Fama-French (`backend/data/ff_factors/*.parquet`)
+sont elles versionnées et arrivent avec le clone ; les caches de prix
+(`underlying_prices/`, `fx_rates/`) sont auto-régénérés à la demande.
+
 ## Mémoire
 
 L'historique du projet (architecture, chantiers passés, décisions actées et leur
