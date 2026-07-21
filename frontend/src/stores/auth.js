@@ -29,9 +29,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function fetchMe() {
     if (!token.value) return
-    const res = await fetch('/api/auth/me', { headers: authHeaders() })
-    if (!res.ok) { logout(); return }
-    user.value = await res.json()
+    try {
+      const res = await fetch('/api/auth/me', { headers: authHeaders() })
+      if (!res.ok) { logout(); return }
+      user.value = await res.json()
+    } catch {
+      logout()
+    }
   }
 
   function logout() {

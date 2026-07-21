@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import Deal, DealEvent, Entity, User, Counterparty
+from ..db.models import Deal, DealEvent, Entity, User, Counterparty, Portfolio
 from .auth import get_current_user
 from ..services.market_data import load_hist_prices
 from ..core.payscript.parser import parse_script, resolve_constats, CompiledScript, effective_T_max
@@ -80,6 +80,7 @@ def _deal_row(d: Deal, events: list | None = None) -> dict:
         "entity_id": d.entity_id,
         "user_id": d.user_id,
         "indicative_id": d.indicative_id,
+        "portfolio_id": d.portfolio_id,
         "sens": d.sens,
         "contrepartie": d.contrepartie,
         "devise": d.devise,
@@ -98,6 +99,8 @@ def _deal_row(d: Deal, events: list | None = None) -> dict:
         "resolution_outcome": d.resolution_outcome,
         "underlyings": json.loads(d.underlyings_json),
         "market_snapshot": json.loads(d.market_snapshot_json),
+        "greeks": json.loads(d.greeks_json) if d.greeks_json else {},
+        "greeks_computed_at": d.greeks_computed_at.isoformat() if d.greeks_computed_at else None,
         "status": d.status,
         "script_id": d.script_id,
         "script_snapshot": d.script_snapshot,
@@ -147,13 +150,17 @@ def book_deal(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    from .portfolios import get_or_create_default_portfolio
+
     entity = session.get(Entity, current.entity_id) if current.entity_id else None
     reference = _gen_ref(entity.name if entity else None, session)
+    default_portfolio = get_or_create_default_portfolio(session, current.id)
 
     deal = Deal(
         reference=reference,
         entity_id=current.entity_id,
         user_id=current.id,
+        portfolio_id=default_portfolio.id,
         indicative_id=body.indicative_id,
         script_snapshot=body.script_snapshot,
         script_id=body.script_id,
@@ -218,6 +225,32 @@ def book_deal(
     session.commit()
     session.refresh(deal)
     return _deal_row(deal, _get_events(deal.id, session))
+
+
+class DealPortfolioAssign(BaseModel):
+    # Required — a deal always belongs to a portfolio (at minimum the user's
+    # default one); there is no "unassign", only "move to another portfolio".
+    portfolio_id: int
+
+
+@router.patch("/{deal_id}/portfolio")
+def assign_deal_portfolio(
+    deal_id: int,
+    body: DealPortfolioAssign,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    deal = session.get(Deal, deal_id)
+    if not deal or deal.user_id != current.id:
+        raise HTTPException(404, "Deal introuvable")
+    portfolio = session.get(Portfolio, body.portfolio_id)
+    if not portfolio or portfolio.user_id != current.id:
+        raise HTTPException(404, "Portefeuille introuvable")
+    deal.portfolio_id = body.portfolio_id
+    deal.updated_at = datetime.utcnow()
+    session.add(deal)
+    session.commit()
+    return {"id": deal.id, "portfolio_id": deal.portfolio_id}
 
 
 @router.get("")
@@ -1220,6 +1253,15 @@ class MtmRequest(BaseModel):
     window_days: int = 252
 
 
+class DealGreeksRequest(MtmRequest):
+    """Body of POST /{deal_id}/greeks — same market-assumption knobs as the
+    MtM (recalibrate/overrides/r), plus which sensitivities to compute. corr
+    (cross-gamma) is supported by compute_greeks but left out of the default
+    selection — not something a future portfolio aggregation can simply sum
+    across deals with different baskets."""
+    selected: List[str] = ["delta", "gamma", "vega", "theta", "rho"]
+
+
 def _mtm_core(
     deal: Deal,
     session: Session,
@@ -1520,6 +1562,72 @@ def deal_mtm(
     if not deal or deal.user_id != current.id:
         raise HTTPException(404, "Deal introuvable")
     payload, _ctx = _mtm_core(deal, session, n_paths, body)
+    return payload
+
+
+@router.post("/{deal_id}/greeks")
+def deal_greeks(
+    deal_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    n_paths: int = 20000,
+    body: Optional[DealGreeksRequest] = None,
+):
+    """Bump-and-reprice Greeks on the residual MtM leg — reuses _mtm_core's
+    ctx (residual script, effective underlyings, corr, rates) exactly as
+    compute_greeks needs it, so the sensitivities are consistent with
+    whatever MtM number the same market assumptions would produce. Last
+    result is persisted on the deal (greeks_json/greeks_computed_at),
+    overwritten at each call — see PLAN squishy-baking-sedgewick."""
+    from ..core.payscript.engine import compute_greeks
+
+    deal = session.get(Deal, deal_id)
+    if not deal or deal.user_id != current.id:
+        raise HTTPException(404, "Deal introuvable")
+
+    body = body or DealGreeksRequest()
+    mtm_payload, ctx = _mtm_core(deal, session, n_paths, body)
+    if ctx is None:
+        return mtm_payload   # resolved_pending short-circuit — nothing to bump
+
+    raw = compute_greeks(
+        ctx["residual_script"], ctx["engine_uls"], ctx["corr"],
+        ctx["r_frac"], ctx["T_remaining"], ctx["N_used"], ctx["model_used"],
+        seed=42, user_params=ctx["user_params"], selected=body.selected,
+        sigma_r=ctx["sigma_r"], a_r=ctx["a_r"], yield_curve=ctx["yc"],
+        barrier_monitoring=ctx["barrier_monitoring"],
+    )
+
+    names = [u["name"] for u in ctx["underlyings_json"]]
+    per_underlying: dict[str, dict] = {}
+    scalar: dict[str, float | None] = {}
+    corr_pairs: dict[str, float] = {}
+    for key, val in raw.items():
+        m = re.match(r"^(delta|gamma|vega)_(\d+)$", key)
+        if m:
+            greek, idx = m.group(1), int(m.group(2)) - 1
+            per_underlying.setdefault(names[idx], {})[greek] = val
+        elif key.startswith("corr_"):
+            corr_pairs[key] = val
+        else:
+            scalar[key] = val   # theta, rho
+
+    payload = {
+        "deal_id": deal_id,
+        "reference": deal.reference,
+        "computed_at": datetime.utcnow().isoformat(),
+        "mtm_reference": mtm_payload["mtm"],
+        "per_underlying": per_underlying,
+        "scalar": scalar,
+        "corr_pairs": corr_pairs,
+        "market_used": mtm_payload["market_used"],
+    }
+
+    deal.greeks_json = json.dumps(payload)
+    deal.greeks_computed_at = datetime.utcnow()
+    session.add(deal)
+    session.commit()
+
     return payload
 
 

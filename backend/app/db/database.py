@@ -5,7 +5,7 @@ from sqlmodel import SQLModel, Session, create_engine
 from .models import (
     Entity, User, Folder, Script, Deal, DealEvent, Document, AmcStudy,
     Indicative, KidRecord, EmtRecord, RfqRequest, RfqQuote, RfqProvider,
-    Counterparty, Alert,
+    Counterparty, Alert, Portfolio, ShockRun,
 )
 
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
@@ -55,10 +55,56 @@ def _migrate():
             conn.execute(text("ALTER TABLE deals ADD COLUMN product_type TEXT DEFAULT ''"))
             conn.commit()
 
+        if "greeks_json" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN greeks_json TEXT DEFAULT '{}'"))
+            conn.commit()
+
+        if "greeks_computed_at" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN greeks_computed_at DATETIME"))
+            conn.commit()
+
+        if "portfolio_id" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN portfolio_id INTEGER"))
+            conn.commit()
+
         rfq_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_requests)"))}
         if rfq_cols and "ao_date" not in rfq_cols:
             conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN ao_date TEXT DEFAULT ''"))
             conn.commit()
+
+        portfolio_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(portfolios)"))}
+        if portfolio_cols and "is_default" not in portfolio_cols:
+            conn.execute(text("ALTER TABLE portfolios ADD COLUMN is_default BOOLEAN DEFAULT 0"))
+            conn.commit()
+
+
+def _backfill_default_portfolios():
+    """Risk must always be monitored somewhere — every deal.portfolio_id is
+    non-NULL from here on. Assigns any orphan deal (pre-existing db, or a
+    deal booked before this feature) to its owner's default portfolio,
+    creating that portfolio (is_default=True, never deletable — see
+    api/portfolios.py) the first time it's needed. Idempotent: a user with
+    no orphans and no default portfolio yet gets neither created."""
+    from sqlmodel import select
+    with Session(engine) as s:
+        orphan_user_ids = {
+            d.user_id for d in s.exec(select(Deal).where(Deal.portfolio_id == None)).all()  # noqa: E711
+        }
+        for uid in orphan_user_ids:
+            default = s.exec(
+                select(Portfolio).where(Portfolio.user_id == uid, Portfolio.is_default == True)  # noqa: E712
+            ).first()
+            if not default:
+                default = Portfolio(name="Portefeuille par défaut", user_id=uid, is_default=True)
+                s.add(default)
+                s.flush()
+            orphans = s.exec(
+                select(Deal).where(Deal.user_id == uid, Deal.portfolio_id == None)  # noqa: E711
+            ).all()
+            for d in orphans:
+                d.portfolio_id = default.id
+                s.add(d)
+        s.commit()
 
 
 def init_db():
@@ -67,6 +113,7 @@ def init_db():
     _seed()
     _seed_rfq_providers()
     _seed_counterparties()
+    _backfill_default_portfolios()
 
 
 def _seed():

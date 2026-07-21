@@ -32,6 +32,21 @@ class Folder(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class Portfolio(SQLModel, table=True):
+    """A user-defined named bucket of deals, for aggregating risk (see
+    api/portfolios.py). A deal belongs to exactly one portfolio at all times
+    — no association table, just Deal.portfolio_id, never NULL: risk must
+    always be monitored somewhere. Each user gets one is_default=True
+    portfolio (auto-created, never deletable) that catches deals not
+    explicitly filed elsewhere."""
+    __tablename__ = "portfolios"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    user_id: int = Field(foreign_key="users.id")
+    is_default: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class Script(SQLModel, table=True):
     __tablename__ = "scripts"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -62,6 +77,13 @@ class Deal(SQLModel, table=True):
     # indicative_id forever (never re-keyed); this is the only link needed
     # to retrieve them alongside the booked deal's own documents.
     indicative_id: Optional[int] = Field(default=None, foreign_key="indicatives.id")
+
+    # Risk-aggregation grouping (api/portfolios.py) — one portfolio at a time,
+    # reassignable. Always set going forward (book_deal assigns the user's
+    # default portfolio at creation); column stays nullable only so a
+    # pre-existing db can be backfilled once at boot (see
+    # database.py:_backfill_default_portfolios).
+    portfolio_id: Optional[int] = Field(default=None, foreign_key="portfolios.id")
 
     # Script frozen at booking time
     script_snapshot: str = Field(default="", sa_column=Column(Text))
@@ -99,6 +121,11 @@ class Deal(SQLModel, table=True):
     # JSON blobs
     underlyings_json: str = Field(default="[]", sa_column=Column(Text))   # [{name, ticker, s0_abs}]
     market_snapshot_json: str = Field(default="{}", sa_column=Column(Text))
+
+    # Last computed Greeks (bump-and-reprice, see api/deals.py POST /{id}/greeks) —
+    # overwritten at each recompute, no history kept. None while never computed.
+    greeks_json: str = Field(default="{}", sa_column=Column(Text))
+    greeks_computed_at: Optional[datetime] = Field(default=None)
 
     status: str = Field(default="actif")  # actif | callé | échu | résilié
 
@@ -319,3 +346,21 @@ class DealEvent(SQLModel, table=True):
     source: str = Field(default="pending") # pending | auto | manuel
     status: str = Field(default="futur")   # futur | observé | callé | ki | final | annulé
     label: str = Field(default="")
+
+
+class ShockRun(SQLModel, table=True):
+    """One market-shock scenario (spot/vol/rate/corr, full reprice — see
+    api/shocks.py) played against a deal or a portfolio. Append-only, same
+    immutable-history pattern as KidRecord/EmtRecord — a shock's parameters
+    can change on the next run, so past runs stay reconstructable rather than
+    overwritten."""
+    __tablename__ = "shock_runs"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id")
+    scope: str = Field(default="deal")   # "deal" | "portfolio" | "global"
+    deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
+    portfolio_id: Optional[int] = Field(default=None, foreign_key="portfolios.id")
+    label: str = Field(default="")
+    params_json: str = Field(default="{}", sa_column=Column(Text))
+    result_json: str = Field(default="{}", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow)

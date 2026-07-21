@@ -1,7 +1,13 @@
 import asyncio
+import mimetypes
 from datetime import datetime, timedelta
 from pathlib import Path
 from fastapi import FastAPI
+
+# Windows registry can have wrong MIME entries for .js/.css — force correct types
+# so StaticFiles doesn't serve module scripts as text/plain (breaks ES modules).
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -14,6 +20,8 @@ from .api.auth import router as auth_router
 from .api.folders import router as folders_router
 from .api.scripts_db import router as scripts_db_router
 from .api.deals import router as deals_router
+from .api.portfolios import router as portfolios_router
+from .api.shocks import router as shocks_router
 from .api.indicatives import router as indicatives_router
 from .api.kid import router as kid_router
 from .api.emt import router as emt_router
@@ -68,6 +76,8 @@ app.include_router(auth_router)
 app.include_router(folders_router)
 app.include_router(scripts_db_router)
 app.include_router(deals_router)
+app.include_router(portfolios_router)
+app.include_router(shocks_router)
 app.include_router(indicatives_router)
 app.include_router(kid_router)
 app.include_router(emt_router)

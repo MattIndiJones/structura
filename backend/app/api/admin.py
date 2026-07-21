@@ -3,7 +3,7 @@ catalog, the generic read-only+delete data browser (core/admin_registry.py),
 and Users/Entities CRUD, all gated by get_current_admin."""
 from __future__ import annotations
 import bcrypt
-from datetime import datetime
+from datetime import datetime, date
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from ..db.database import get_session
 from ..db.models import RfqProvider, User, Entity, Counterparty
 from .auth import get_current_admin
 from ..core import admin_registry
+from ..core.amc_prices import fetch_prices as _fetch_prices, price_status as _price_status, _slug
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -338,3 +339,129 @@ def update_entity(
     session.add(e)
     session.commit()
     return _entity_row(e)
+
+
+# ── Market data catalog ────────────────────────────────────────────────
+
+_CATALOG = [
+    # Indices US
+    {"key": "SPX",  "ticker": "^GSPC",     "label": "S&P 500",           "category": "Indices US"},
+    {"key": "NDX",  "ticker": "^NDX",      "label": "Nasdaq 100",        "category": "Indices US"},
+    {"key": "DJI",  "ticker": "^DJI",      "label": "Dow Jones",         "category": "Indices US"},
+    {"key": "RTY",  "ticker": "^RUT",      "label": "Russell 2000",      "category": "Indices US"},
+    {"key": "VIX",  "ticker": "^VIX",      "label": "VIX",               "category": "Indices US"},
+    # Indices EU
+    {"key": "SX5E", "ticker": "^STOXX50E", "label": "EuroStoxx 50",     "category": "Indices EU"},
+    {"key": "DAX",  "ticker": "^GDAXI",    "label": "DAX 40",            "category": "Indices EU"},
+    {"key": "CAC",  "ticker": "^FCHI",     "label": "CAC 40",            "category": "Indices EU"},
+    {"key": "SMI",  "ticker": "^SSMI",     "label": "SMI",               "category": "Indices EU"},
+    {"key": "FTSE", "ticker": "^FTSE",     "label": "FTSE 100",          "category": "Indices EU"},
+    {"key": "AEX",  "ticker": "^AEX",      "label": "AEX",               "category": "Indices EU"},
+    {"key": "IBEX", "ticker": "^IBEX",     "label": "IBEX 35",           "category": "Indices EU"},
+    {"key": "MIB",  "ticker": "FTSEMIB.MI","label": "FTSE MIB",          "category": "Indices EU"},
+    # Indices Asie
+    {"key": "NKY",  "ticker": "^N225",     "label": "Nikkei 225",        "category": "Indices Asie"},
+    {"key": "HSI",  "ticker": "^HSI",      "label": "Hang Seng",         "category": "Indices Asie"},
+    {"key": "KS11", "ticker": "^KS11",     "label": "KOSPI",             "category": "Indices Asie"},
+    {"key": "AXJO", "ticker": "^AXJO",     "label": "ASX 200",           "category": "Indices Asie"},
+    # Actions US
+    {"key": "AAPL", "ticker": "AAPL",      "label": "Apple",             "category": "Actions US"},
+    {"key": "MSFT", "ticker": "MSFT",      "label": "Microsoft",         "category": "Actions US"},
+    {"key": "AMZN", "ticker": "AMZN",      "label": "Amazon",            "category": "Actions US"},
+    {"key": "GOOGL","ticker": "GOOGL",     "label": "Alphabet",          "category": "Actions US"},
+    {"key": "META", "ticker": "META",      "label": "Meta",              "category": "Actions US"},
+    {"key": "NVDA", "ticker": "NVDA",      "label": "Nvidia",            "category": "Actions US"},
+    {"key": "TSLA", "ticker": "TSLA",      "label": "Tesla",             "category": "Actions US"},
+    {"key": "AMD",  "ticker": "AMD",       "label": "AMD",               "category": "Actions US"},
+    {"key": "INTC", "ticker": "INTC",      "label": "Intel",             "category": "Actions US"},
+    {"key": "JPM",  "ticker": "JPM",       "label": "JPMorgan",          "category": "Actions US"},
+    {"key": "BAC",  "ticker": "BAC",       "label": "Bank of America",   "category": "Actions US"},
+    {"key": "GS",   "ticker": "GS",        "label": "Goldman Sachs",     "category": "Actions US"},
+    {"key": "V",    "ticker": "V",         "label": "Visa",              "category": "Actions US"},
+    {"key": "MA",   "ticker": "MA",        "label": "Mastercard",        "category": "Actions US"},
+    {"key": "JNJ",  "ticker": "JNJ",       "label": "Johnson & Johnson", "category": "Actions US"},
+    {"key": "PFE",  "ticker": "PFE",       "label": "Pfizer",            "category": "Actions US"},
+    {"key": "LLY",  "ticker": "LLY",       "label": "Eli Lilly",         "category": "Actions US"},
+    {"key": "ABBV", "ticker": "ABBV",      "label": "AbbVie",            "category": "Actions US"},
+    {"key": "AMGN", "ticker": "AMGN",      "label": "Amgen",             "category": "Actions US"},
+    {"key": "XOM",  "ticker": "XOM",       "label": "ExxonMobil",        "category": "Actions US"},
+    {"key": "NKE",  "ticker": "NKE",       "label": "Nike",              "category": "Actions US"},
+    {"key": "COIN", "ticker": "COIN",      "label": "Coinbase",          "category": "Actions US"},
+    # Actions EU
+    {"key": "ASML", "ticker": "ASML",      "label": "ASML",              "category": "Actions EU"},
+    {"key": "MC",   "ticker": "MC.PA",     "label": "LVMH",              "category": "Actions EU"},
+    {"key": "OR",   "ticker": "OR.PA",     "label": "L'Oreal",           "category": "Actions EU"},
+    {"key": "AIR",  "ticker": "AIR.PA",    "label": "Airbus",            "category": "Actions EU"},
+    {"key": "TTE",  "ticker": "TTE.PA",    "label": "TotalEnergies",     "category": "Actions EU"},
+    {"key": "SAN",  "ticker": "SAN.PA",    "label": "Sanofi",            "category": "Actions EU"},
+    {"key": "BNP",  "ticker": "BNP.PA",    "label": "BNP Paribas",       "category": "Actions EU"},
+    {"key": "AXA",  "ticker": "CS.PA",     "label": "AXA",               "category": "Actions EU"},
+    {"key": "SIE",  "ticker": "SIE.DE",    "label": "Siemens",           "category": "Actions EU"},
+    {"key": "SAP",  "ticker": "SAP.DE",    "label": "SAP",               "category": "Actions EU"},
+    {"key": "BMW",  "ticker": "BMW.DE",    "label": "BMW",               "category": "Actions EU"},
+    {"key": "VOW",  "ticker": "VOW3.DE",   "label": "Volkswagen",        "category": "Actions EU"},
+    {"key": "BAYN", "ticker": "BAYN.DE",   "label": "Bayer",             "category": "Actions EU"},
+    {"key": "ENI",  "ticker": "ENI.MI",    "label": "Eni",               "category": "Actions EU"},
+    {"key": "ITX",  "ticker": "ITX.MC",    "label": "Inditex",           "category": "Actions EU"},
+    # Actions CH
+    {"key": "NESN", "ticker": "NESN.SW",   "label": "Nestle",            "category": "Actions CH"},
+    {"key": "NOVN", "ticker": "NOVN.SW",   "label": "Novartis",          "category": "Actions CH"},
+    {"key": "UBSG", "ticker": "UBSG.SW",   "label": "UBS Group",         "category": "Actions CH"},
+    {"key": "ABBN", "ticker": "ABBN.SW",   "label": "ABB",               "category": "Actions CH"},
+    {"key": "ZURN", "ticker": "ZURN.SW",   "label": "Zurich Insurance",  "category": "Actions CH"},
+    {"key": "CFR",  "ticker": "CFR.SW",    "label": "Richemont",         "category": "Actions CH"},
+    # Matières premières
+    {"key": "GOLD", "ticker": "GC=F",      "label": "Or (Gold)",         "category": "Matières premières"},
+    {"key": "SILV", "ticker": "SI=F",      "label": "Argent (Silver)",   "category": "Matières premières"},
+    {"key": "OIL",  "ticker": "CL=F",      "label": "Pétrole WTI",       "category": "Matières premières"},
+    # Crypto
+    {"key": "BTC",  "ticker": "BTC-USD",   "label": "Bitcoin",           "category": "Crypto"},
+    {"key": "ETH",  "ticker": "ETH-USD",   "label": "Ethereum",          "category": "Crypto"},
+    {"key": "SOL",  "ticker": "SOL-USD",   "label": "Solana",            "category": "Crypto"},
+]
+
+
+@router.get("/market-data")
+def market_data_catalog(admin: Annotated[User, Depends(get_current_admin)]):
+    stored = {s["key"]: s for s in _price_status()}
+    today = date.today()
+    result = []
+    for item in _CATALOG:
+        slug = _slug(item["key"])
+        s = stored.get(slug, {})
+        available = s.get("available", False)
+        date_max = s.get("date_max", "")
+        if not available or not date_max:
+            cache_status = "missing"
+        else:
+            days_old = (today - date.fromisoformat(date_max)).days
+            cache_status = "stale" if days_old > 7 else "ok"
+        result.append({
+            **item,
+            "slug":         slug,
+            "available":    available,
+            "date_min":     s.get("date_min", ""),
+            "date_max":     date_max,
+            "rows":         s.get("rows", 0),
+            "currency":     s.get("currency", ""),
+            "cache_status": cache_status,
+        })
+    return result
+
+
+class MarketDataFetchRequest(BaseModel):
+    key: str
+    ticker: str
+
+
+@router.post("/market-data/fetch")
+def market_data_fetch(
+    body: MarketDataFetchRequest,
+    admin: Annotated[User, Depends(get_current_admin)],
+):
+    try:
+        return _fetch_prices(body.key, body.ticker)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Erreur Yahoo Finance : {e}")

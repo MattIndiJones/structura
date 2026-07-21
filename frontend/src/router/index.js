@@ -82,6 +82,11 @@ const routes = [
     meta: { requiresAdmin: true },
   },
   {
+    path: '/admin/market-data',
+    component: () => import('../views/AdminMarketDataView.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },
