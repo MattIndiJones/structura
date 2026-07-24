@@ -10,81 +10,92 @@ const routes = [
   {
     path: '/',
     component: () => import('../views/HomeView.vue'),
+    meta: { title: 'Accueil' },
   },
   {
     path: '/scripts',
     component: () => import('../views/ScriptsView.vue'),
+    meta: { title: 'Mes Scripts' },
   },
   {
     path: '/pricer',
     component: () => import('../views/PricerView.vue'),
+    meta: { title: 'Pricer' },
   },
   {
     path: '/pricer/:id',
     component: () => import('../views/PricerView.vue'),
+    meta: { title: 'Pricer' },
   },
   {
     path: '/documentation',
     component: () => import('../views/DocumentationView.vue'),
+    meta: { title: 'Documentation' },
   },
   {
     path: '/booking',
     component: () => import('../views/BookingView.vue'),
+    meta: { title: 'Booking — produits bookés' },
   },
   {
     path: '/reinvest',
     component: () => import('../views/ReinvestView.vue'),
+    meta: { title: 'Réinvestissement' },
   },
   {
     path: '/amc',
     component: () => import('../views/AmcView.vue'),
+    meta: { title: 'Analyse AMC' },
   },
   {
     path: '/fifo',
     component: () => import('../views/FifoView.vue'),
+    meta: { title: "Carnet d'ordres — FIFO" },
   },
   {
     path: '/rfq',
     component: () => import('../views/RfqView.vue'),
+    meta: { title: 'RFQ Fournisseurs' },
   },
   {
     path: '/rfq/analyse',
     component: () => import('../views/RfqAnalysisView.vue'),
+    meta: { title: 'Analyse Contreparties' },
   },
   {
     path: '/admin',
     component: () => import('../views/AdminView.vue'),
-    meta: { requiresAdmin: true },
+    meta: { requiresAdmin: true, title: 'Administration' },
   },
   {
     path: '/admin/rfq-providers',
     component: () => import('../views/AdminRfqProvidersView.vue'),
-    meta: { requiresAdmin: true },
+    meta: { requiresAdmin: true, title: 'Fournisseurs RFQ' },
   },
   {
     path: '/admin/counterparties',
     component: () => import('../views/AdminCounterpartiesView.vue'),
-    meta: { requiresAdmin: true },
+    meta: { requiresAdmin: true, title: 'Contreparties deals' },
   },
   {
     path: '/admin/browse/:table?',
     component: () => import('../views/AdminBrowseView.vue'),
-    meta: { requiresAdmin: true },
+    meta: { requiresAdmin: true, title: "Données de l'application" },
   },
   {
     path: '/admin/users',
     component: () => import('../views/AdminUsersView.vue'),
-    meta: { requiresAdmin: true },
+    meta: { requiresAdmin: true, title: 'Utilisateurs' },
   },
   {
     path: '/admin/entities',
     component: () => import('../views/AdminEntitiesView.vue'),
-    meta: { requiresAdmin: true },
+    meta: { requiresAdmin: true, title: 'Entités' },
   },
   {
     path: '/admin/market-data',
     component: () => import('../views/AdminMarketDataView.vue'),
-    meta: { requiresAdmin: true },
+    meta: { requiresAdmin: true, title: 'Données de marché' },
   },
   {
     path: '/:pathMatch(.*)*',

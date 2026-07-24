@@ -17,6 +17,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import {
@@ -25,6 +26,7 @@ import {
 } from 'chart.js'
 
 Chart.register(LineElement, LineController, PointElement, LinearScale, CategoryScale, Tooltip, Legend)
+applyChartTheme(Chart)
 
 const props = defineProps({ idx: { type: Number, required: true } })
 const store = usePricingStore()
@@ -92,7 +94,7 @@ function hestonVol(K, T, v0, kappa, theta, xi, rho_h) {
   return Math.max(0.001, sigATM + skewH * logK + curvH * logK ** 2)
 }
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899']
+const COLORS = chartTheme.series.slice(0, 4)
 
 function computeData() {
   const u = store.underlyings[props.idx]
@@ -154,7 +156,7 @@ async function renderChart() {
         legend: {
           display: d.datasets.length > 1,
           position: 'top',
-          labels: { color: '#94a3b8', font: { size: 9 }, boxWidth: 16, padding: 6 },
+          labels: { font: { size: 9 }, boxWidth: 16, padding: 6 },
         },
         tooltip: {
           mode: 'index',
@@ -164,14 +166,12 @@ async function renderChart() {
       },
       scales: {
         x: {
-          title: { display: true, text: 'Moneyness K/F', color: '#475569', font: { size: 8 } },
-          ticks: { color: '#475569', font: { size: 8 }, maxTicksLimit: 9 },
-          grid: { color: '#1e293b' },
+          title: { display: true, text: 'Moneyness K/F', font: { size: 8 } },
+          ticks: { font: { size: 8 }, maxTicksLimit: 9 },
         },
         y: {
-          title: { display: true, text: 'Vol implicite (%)', color: '#475569', font: { size: 8 } },
-          ticks: { color: '#475569', font: { size: 9 }, callback: v => v + '%' },
-          grid: { color: '#1e293b' },
+          title: { display: true, text: 'Vol implicite (%)', font: { size: 8 } },
+          ticks: { font: { size: 9 }, callback: v => v + '%' },
         },
       },
     }, demo.enabled),

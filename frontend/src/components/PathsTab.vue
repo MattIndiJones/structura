@@ -50,6 +50,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -59,6 +60,7 @@ import {
 } from 'chart.js'
 
 Chart.register(LineElement, LineController, PointElement, LinearScale, Tooltip)
+applyChartTheme(Chart)
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -74,9 +76,9 @@ const yAxisLabel = computed(() => {
 })
 
 const COLORS = {
-  autocall: { stroke: 'rgba(34,197,94,0.35)',  solid: '#16a34a', label: 'Rappel autocall' },
-  ki:       { stroke: 'rgba(239,68,68,0.35)',   solid: '#dc2626', label: 'KI / Perte en capital' },
-  normal:   { stroke: 'rgba(148,163,184,0.30)', solid: '#64748b', label: 'Remboursement normal' },
+  autocall: { stroke: 'rgba(26,122,74,0.35)', solid: chartTheme.positive, label: 'Rappel autocall' },
+  ki:       { stroke: 'rgba(192,57,43,0.35)', solid: chartTheme.negative, label: 'KI / Perte en capital' },
+  normal:   { stroke: 'rgba(122,116,105,0.30)', solid: chartTheme.ticks, label: 'Remboursement normal' },
 }
 
 const legend = computed(() => {
@@ -99,7 +101,7 @@ async function renderChart() {
   const datasets = []
 
   path_data.forEach(p => {
-    const col = COLORS[p.outcome]?.stroke || 'rgba(100,116,139,0.3)'
+    const col = COLORS[p.outcome]?.stroke || 'rgba(122,116,105,0.3)'
     datasets.push({
       data: p.times.map((t, i) => ({ x: t, y: p.wof[i] * 100 })),
       borderColor: col,
@@ -117,14 +119,14 @@ async function renderChart() {
   if (up.AC_BAR != null) {
     datasets.push({
       data: [{ x: 0, y: up.AC_BAR * 100 }, { x: T, y: up.AC_BAR * 100 }],
-      borderColor: '#f59e0b', borderWidth: 1.5, borderDash: [6, 4],
+      borderColor: chartTheme.gold, borderWidth: 1.5, borderDash: [6, 4],
       pointRadius: 0, fill: false, label: `AC_BAR ${(up.AC_BAR*100).toFixed(0)}%`,
     })
   }
   if (up.KI_BAR != null) {
     datasets.push({
       data: [{ x: 0, y: up.KI_BAR * 100 }, { x: T, y: up.KI_BAR * 100 }],
-      borderColor: '#ef4444', borderWidth: 1.5, borderDash: [6, 4],
+      borderColor: chartTheme.negative, borderWidth: 1.5, borderDash: [6, 4],
       pointRadius: 0, fill: false, label: `KI_BAR ${(up.KI_BAR*100).toFixed(0)}%`,
     })
   }
@@ -146,13 +148,11 @@ async function renderChart() {
         x: {
           type: 'linear', min: 0, max: T,
           title: { display: true, text: 'Temps (années)', font: { size: 9 } },
-          ticks: { color: '#475569', font: { size: 9 }, callback: v => v + 'Y' },
-          grid: { color: '#1e293b' },
+          ticks: { font: { size: 9 }, callback: v => v + 'Y' },
         },
         y: {
           title: { display: true, text: yAxisLabel.value, font: { size: 9 } },
-          ticks: { color: '#475569', font: { size: 9 }, callback: v => v + '%' },
-          grid: { color: '#1e293b' },
+          ticks: { font: { size: 9 }, callback: v => v + '%' },
         },
       },
     }, demo.enabled),

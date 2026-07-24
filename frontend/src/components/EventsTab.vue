@@ -129,14 +129,14 @@
           {{ saveMsg }}
         </div>
 
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto table-shell" tabindex="0" role="region">
           <table class="w-full text-xs border-collapse">
             <thead>
               <tr class="border-b border-slate-700">
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3">#</th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Label</th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Date</th>
-                <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">T (Y)</th>
+                <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap num">T (Y)</th>
                 <th v-for="u in deal.underlyings" :key="u.name"
                   class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">
                   {{ u.ticker || u.name }}
@@ -174,7 +174,7 @@
                   {{ ev.event_date }}
                   <span v-if="ev.event_date === today" class="ml-1 text-amber-400 text-[10px]">aujourd'hui</span>
                 </td>
-                <td class="py-2 pr-3 font-mono text-slate-400">{{ ev.t_years.toFixed(2) }}</td>
+                <td class="py-2 pr-3 font-mono num text-slate-400">{{ ev.t_years.toFixed(2) }}</td>
                 <td v-for="u in deal.underlyings" :key="u.name" class="py-2 pr-3">
                   <div class="flex items-center gap-1.5">
                     <input :value="ev.spots[u.name] ?? ''"
@@ -248,14 +248,14 @@
           </button>
         </div>
 
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto table-shell" tabindex="0" role="region">
           <table class="w-full text-xs border-collapse">
             <thead>
               <tr class="border-b border-slate-700">
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3">#</th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Label</th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Date indicative</th>
-                <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">T (Y)</th>
+                <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap num">T (Y)</th>
                 <th v-for="u in store.underlyings" :key="u.name"
                   class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">
                   {{ u.ticker || u.name }}
@@ -282,7 +282,7 @@
                   {{ ev.label }}
                 </td>
                 <td class="py-2 pr-3 font-mono text-slate-400 whitespace-nowrap">{{ ev.date }}</td>
-                <td class="py-2 pr-3 font-mono text-slate-400">{{ ev.t.toFixed(2) }}</td>
+                <td class="py-2 pr-3 font-mono num text-slate-400">{{ ev.t.toFixed(2) }}</td>
                 <td v-for="u in store.underlyings" :key="u.name" class="py-2 pr-3">
                   <span class="text-slate-700 font-mono text-[10px]">–</span>
                 </td>

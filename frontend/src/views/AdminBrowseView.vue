@@ -1,16 +1,5 @@
 <template>
-  <div class="h-screen bg-slate-950 flex flex-col overflow-hidden">
-
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 shrink-0 bg-slate-950/95 backdrop-blur">
-      <RouterLink to="/" class="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-        <span class="text-slate-600 text-xs">/ Données de l'application</span>
-      </RouterLink>
-      <RouterLink to="/admin" class="btn-secondary text-xs px-3 py-1.5">← Administration</RouterLink>
-      <span class="text-xs text-slate-500 ml-auto">{{ auth.user?.username }}</span>
-    </header>
+  <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
 
     <div class="flex flex-1 min-h-0">
 
@@ -25,11 +14,20 @@
 
       <!-- Rows -->
       <main class="flex-1 overflow-y-auto p-6">
-        <div v-if="error" class="bg-red-950/60 border border-red-800 rounded px-3 py-2 text-xs text-red-300 mb-4">{{ error }}</div>
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Données de l'application</h1>
+          </div>
+          <div class="page-actions">
+            <RouterLink to="/admin" class="btn-ghost btn-sm">← Administration</RouterLink>
+          </div>
+        </div>
 
-        <div class="card overflow-x-auto">
-          <div v-if="loading" class="text-xs text-slate-600 py-6 text-center">Chargement…</div>
-          <div v-else-if="!rows.length" class="text-xs text-slate-600 py-6 text-center">Aucun enregistrement.</div>
+        <AlertMessage v-if="error" kind="error" class="mb-4">{{ error }}</AlertMessage>
+
+        <div class="card overflow-x-auto table-shell" tabindex="0" role="region">
+          <LoadingSpinner v-if="loading" class="py-6" />
+          <EmptyState v-else-if="!rows.length" icon="🗄️" title="Aucun enregistrement" />
           <table v-else class="w-full text-xs">
             <thead>
               <tr class="text-left text-slate-500 border-b border-slate-800">
@@ -57,10 +55,13 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
+import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import AlertMessage from '../components/ui/AlertMessage.vue'
+import { useToastsStore } from '../stores/toasts.js'
 
-const auth  = useAuthStore()
+const toasts = useToastsStore()
 const route = useRoute()
 
 const tables  = ref([])
@@ -112,6 +113,7 @@ async function deleteRow(row) {
     const res = await apiFetch(`/api/admin/browse/${activeTable.value}/${row.id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')
     rows.value = rows.value.filter(r => r.id !== row.id)
+    toasts.success('Enregistrement supprimé')
   } catch (e) {
     error.value = e.message
   }

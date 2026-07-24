@@ -1,38 +1,31 @@
 <template>
-  <div class="min-h-screen flex flex-col bg-slate-950">
+  <div class="flex-1 flex flex-col min-h-0">
 
-    <!-- ── Header ───────────────────────────────────────────────── -->
-    <header class="border-b border-slate-800 px-5 py-3 flex items-center gap-4 bg-slate-950/95 backdrop-blur sticky top-0 z-20">
-      <RouterLink to="/" class="flex items-center gap-2.5 shrink-0 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-        <span class="text-slate-600 text-xs hidden sm:block">— Pricing Engine</span>
-      </RouterLink>
-      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5 shrink-0">← Accueil</RouterLink>
+    <!-- ── Barre d'outils : statut de pricing + actions ─────────── -->
+    <div class="sticky top-0 z-30 border-b px-5 py-2.5 flex items-center gap-4 shrink-0"
+         style="background: rgba(255,255,255,.95); backdrop-filter: blur(6px); border-color: var(--border);">
 
-      <!-- Progress bar -->
+      <!-- Progress bar / résumé prix / erreur -->
       <div class="flex-1 min-w-0">
-        <div v-if="store.progress > 0" class="h-1 bg-slate-800 rounded-full overflow-hidden">
-          <div class="h-full bg-blue-500 rounded-full transition-all duration-100"
-               :style="{ width: store.progress + '%' }"></div>
+        <div v-if="store.progress > 0" class="progress-track">
+          <div class="progress-fill" :style="{ width: store.progress + '%' }"></div>
         </div>
-        <div v-else-if="store.result" class="hidden sm:flex items-center gap-3 text-xs text-slate-500">
-          <span class="text-blue-400 font-bold text-sm">
+        <div v-else-if="store.result" class="hidden sm:flex items-center gap-3 text-xs" style="color: var(--muted);">
+          <span class="font-bold text-sm" style="color: var(--accent);">
             <SensitiveValue>{{ (store.result.price * 100).toFixed(2) }}%</SensitiveValue>
           </span>
           <span>
             IC 95% [<SensitiveValue>{{ (store.result.ic95[0]*100).toFixed(2) }}%, {{ (store.result.ic95[1]*100).toFixed(2) }}%</SensitiveValue>]
           </span>
-          <span v-if="!demo.linkedinMode" class="text-slate-600">
+          <span v-if="!demo.linkedinMode" style="color: var(--subtle);">
             <SensitiveValue>{{ store.result.elapsed_ms.toFixed(0) }} ms · {{ store.result.n_eff.toLocaleString() }} chemins</SensitiveValue>
           </span>
         </div>
         <!-- Error display -->
-        <div v-if="store.error" class="text-xs text-red-400 truncate">⚠ {{ store.error }}</div>
+        <div v-if="store.error" class="text-xs truncate" style="color: var(--negative);">⚠ {{ store.error }}</div>
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
-        <DemoModeToggle />
         <button v-if="store.result && store.selectedGreeks.length > 0"
           class="btn-secondary text-xs px-3 py-1.5"
           :disabled="store.loading"
@@ -47,20 +40,17 @@
           {{ store.loading ? 'Calcul…' : '▶ Pricer' }}
         </button>
       </div>
-    </header>
+    </div>
 
     <!-- ── Main 2-col ──────────────────────────────────────────── -->
-    <main class="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-0 items-stretch">
+    <main class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-0 items-stretch">
 
       <!-- LEFT: Script + Params tabs -->
       <div class="border-r border-slate-800 flex flex-col">
-        <div class="flex border-b border-slate-800 bg-slate-900/50">
+        <div class="flex gap-1 border-b border-slate-800 bg-slate-900/50 px-2 py-1.5">
           <button
             v-for="tab in leftTabs" :key="tab.id"
-            class="px-5 py-3 text-sm font-semibold transition-colors border-b-2 -mb-px"
-            :class="store.leftTab === tab.id
-              ? 'text-blue-400 border-blue-500'
-              : 'text-slate-500 border-transparent hover:text-slate-300'"
+            class="tab-btn" :class="{ active: store.leftTab === tab.id }"
             @click="store.leftTab = tab.id">
             {{ tab.label }}
           </button>
@@ -75,13 +65,10 @@
 
       <!-- RIGHT: Results tabs -->
       <div class="flex flex-col">
-        <div class="flex border-b border-slate-800 bg-slate-900/50 overflow-x-auto">
+        <div class="flex gap-1 border-b border-slate-800 bg-slate-900/50 overflow-x-auto px-2 py-1.5">
           <button
             v-for="tab in rightTabs" :key="tab.id"
-            class="px-4 py-3 text-xs font-semibold transition-colors border-b-2 -mb-px whitespace-nowrap"
-            :class="store.rightTab === tab.id
-              ? 'text-blue-400 border-blue-500'
-              : 'text-slate-500 border-transparent hover:text-slate-300'"
+            class="tab-btn whitespace-nowrap text-xs px-3 py-1.5" :class="{ active: store.rightTab === tab.id }"
             @click="store.rightTab = tab.id">
             {{ tab.label }}
           </button>
@@ -97,7 +84,6 @@
 </template>
 
 <script setup>
-import { RouterLink } from 'vue-router'
 import PayScriptEditor from '../components/PayScriptEditor.vue'
 import MarketParams    from '../components/MarketParams.vue'
 import DealTab         from '../components/DealTab.vue'
@@ -106,7 +92,6 @@ import ResultsPanel    from '../components/ResultsPanel.vue'
 import KidPanel        from '../components/KidPanel.vue'
 import EmtPanel        from '../components/EmtPanel.vue'
 import SensitiveValue  from '../components/SensitiveValue.vue'
-import DemoModeToggle  from '../components/DemoModeToggle.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'

@@ -1,17 +1,5 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col">
-
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4">
-      <div class="flex items-center gap-2.5 mr-auto">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-      </div>
-      <span class="text-xs text-slate-500">{{ auth.user?.username }}</span>
-      <RouterLink v-if="auth.isAdmin" to="/admin" title="Administration"
-        class="text-slate-400 hover:text-amber-300 transition-colors text-lg leading-none">⚙️</RouterLink>
-      <button class="btn-secondary text-xs" @click="logout">Déconnexion</button>
-    </header>
+  <div class="flex-1 flex flex-col min-h-0">
 
     <!-- Landing -->
     <main class="flex-1 flex flex-col items-center justify-center gap-10 px-6 py-16">
@@ -22,12 +10,12 @@
 
           <!-- Titre : accueil ou catégorie sélectionnée -->
           <div v-if="!selectedCategory" class="text-center">
-            <h1 class="text-2xl font-black tracking-tight bg-gradient-to-r from-slate-100 to-slate-400 bg-clip-text text-transparent">Bonjour, {{ auth.user?.username }}</h1>
+            <h1 class="font-display text-2xl font-black tracking-tight bg-gradient-to-r from-slate-100 to-slate-400 bg-clip-text text-transparent">Bonjour, {{ auth.user?.username }}</h1>
             <p class="text-sm text-slate-500 mt-1">Que voulez-vous faire ?</p>
           </div>
           <div v-else class="flex items-center gap-3 w-full max-w-xl">
             <button class="btn-secondary" @click="backToCategories">← Retour</button>
-            <h1 class="text-xl font-black tracking-tight bg-gradient-to-r from-slate-100 to-slate-400 bg-clip-text text-transparent">{{ categoryTitle }}</h1>
+            <h1 class="font-display text-xl font-black tracking-tight bg-gradient-to-r from-slate-100 to-slate-400 bg-clip-text text-transparent">{{ categoryTitle }}</h1>
           </div>
 
           <!-- Niveau 1 : les 4 grandes catégories -->
@@ -322,11 +310,6 @@ fetchUnreadAlerts()
 
 function openStudy(id) {
   router.push({ path: '/amc', query: { study_id: id } })
-}
-
-function logout() {
-  auth.logout()
-  router.push('/login')
 }
 
 // ── Accueil en 4 catégories + drill-down (HOME_REDESIGN_DESIGN.md) ────────

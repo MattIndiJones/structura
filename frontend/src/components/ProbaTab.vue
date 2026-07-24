@@ -110,6 +110,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -121,6 +122,7 @@ import {
 
 Chart.register(DoughnutController, ArcElement, BarElement, BarController,
                CategoryScale, LinearScale, Tooltip, Legend)
+applyChartTheme(Chart)
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -181,7 +183,7 @@ async function renderCharts() {
 
   if (has_autocall) {
     // Donut: per-date autocall + ki + normal
-    const acColors = ['#10b981','#34d399','#6ee7b7','#a7f3d0','#059669','#047857']
+    const acColors = ['#14603a','#1a7a4a','#2f9d61','#4cb883','#7fd0a5','#a8e0c2']
     const acLabels = obs_times.map(t => `Rappel T=${t.toFixed(1)}Y`)
     const acData   = obs_times.map(t => ec[t] || 0)
 
@@ -191,14 +193,14 @@ async function renderCharts() {
         labels: [...acLabels, 'Remboursement normal', 'Perte en capital'],
         datasets: [{
           data: [...acData, normal_count, ki_count],
-          backgroundColor: [...acColors.slice(0, obs_times.length), '#64748b', '#ef4444'],
-          borderWidth: 1.5, borderColor: '#0f172a',
+          backgroundColor: [...acColors.slice(0, obs_times.length), chartTheme.ticks, chartTheme.negative],
+          borderWidth: 1.5, borderColor: chartTheme.surface,
         }],
       },
       options: demoChartOptions({
         responsive: true, maintainAspectRatio: false, cutout: '62%',
         plugins: {
-          legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 12 } },
+          legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12 } },
           tooltip: { callbacks: {
             label: it => `${it.label}: ${(it.raw/total*100).toFixed(1)}% (${it.raw})`,
           }},
@@ -219,9 +221,8 @@ async function renderCharts() {
         plugins: { legend: { display: false },
           tooltip: { callbacks: { label: it => `${it.raw.toFixed(1)}%` } } },
         scales: {
-          x: { ticks: { color: '#475569', font: { size: 10 } }, grid: { color: '#1e293b' } },
-          y: { ticks: { color: '#475569', font: { size: 9 }, callback: v => v + '%' },
-               grid: { color: '#1e293b' }, min: 0 },
+          x: { ticks: { font: { size: 10 } } },
+          y: { ticks: { font: { size: 9 }, callback: v => v + '%' }, min: 0 },
         },
         animation: { duration: 200 },
       }, demo.enabled),
@@ -233,12 +234,12 @@ async function renderCharts() {
       data: {
         labels: ['ITM (payoff > 0)', 'OTM (payoff nul)'],
         datasets: [{ data: [normal_count, ki_count],
-          backgroundColor: ['#10b981', '#334155'], borderWidth: 1.5, borderColor: '#0f172a' }],
+          backgroundColor: [chartTheme.positive, chartTheme.ticks], borderWidth: 1.5, borderColor: chartTheme.surface }],
       },
       options: demoChartOptions({
         responsive: true, maintainAspectRatio: false, cutout: '62%',
         plugins: {
-          legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 14 } },
+          legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 14 } },
           tooltip: { callbacks: { label: it => `${it.label}: ${(it.raw/total*100).toFixed(1)}% (${it.raw})` } },
         },
         animation: { duration: 250 },
@@ -256,7 +257,7 @@ async function renderCharts() {
       }
     })
     const bpct   = bdata.map(c => fw.length > 0 ? +(c/fw.length*100).toFixed(1) : 0)
-    const bcolors = edges.slice(0,-1).map(v => v < 1 ? 'rgba(239,68,68,.65)' : 'rgba(16,185,129,.65)')
+    const bcolors = edges.slice(0,-1).map(v => v < 1 ? 'rgba(192,57,43,.65)' : 'rgba(26,122,74,.65)')
     barChart = new Chart(barCanvas.value, {
       type: 'bar',
       data: { labels: lbls, datasets: [{ data: bpct, backgroundColor: bcolors, borderRadius: 4 }] },
@@ -265,9 +266,8 @@ async function renderCharts() {
         plugins: { legend: { display: false },
           tooltip: { callbacks: { label: it => `${it.raw.toFixed(1)}% des chemins` } } },
         scales: {
-          x: { ticks: { color: '#475569', font: { size: 9 }, maxRotation: 45 }, grid: { color: '#1e293b' } },
-          y: { ticks: { color: '#475569', font: { size: 9 }, callback: v => v + '%' },
-               grid: { color: '#1e293b' }, min: 0 },
+          x: { ticks: { font: { size: 9 }, maxRotation: 45 } },
+          y: { ticks: { font: { size: 9 }, callback: v => v + '%' }, min: 0 },
         },
         animation: { duration: 200 },
       }, demo.enabled),

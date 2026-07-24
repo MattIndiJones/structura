@@ -4,9 +4,9 @@
 
       <!-- Logo -->
       <div class="flex flex-col items-center gap-3">
-        <div class="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center font-black text-white text-xl">S</div>
+        <div class="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center font-display font-black text-white text-xl">S</div>
         <div class="text-center">
-          <div class="text-xl font-black text-slate-100 tracking-tight">Structura</div>
+          <div class="text-xl font-display font-black text-slate-100 tracking-tight">Structura</div>
           <div class="text-xs text-slate-500 mt-0.5">Pricing Engine for Structured Products</div>
         </div>
       </div>
@@ -27,9 +27,7 @@
 
       <!-- Login form -->
       <div v-if="mode === 'login'" class="card flex flex-col gap-4">
-        <div v-if="error" class="bg-red-950/60 border border-red-800 rounded-lg px-3 py-2 text-xs text-red-300">
-          {{ error }}
-        </div>
+        <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
 
         <div class="flex flex-col gap-1">
           <label class="label">Identifiant</label>
@@ -48,9 +46,7 @@
 
       <!-- Register form -->
       <div v-else class="card flex flex-col gap-4">
-        <div v-if="error" class="bg-red-950/60 border border-red-800 rounded-lg px-3 py-2 text-xs text-red-300">
-          {{ error }}
-        </div>
+        <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
 
         <div class="flex flex-col gap-1">
           <label class="label">Identifiant *</label>
@@ -107,6 +103,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
+import AlertMessage from '../components/ui/AlertMessage.vue'
 
 const router   = useRouter()
 const auth     = useAuthStore()

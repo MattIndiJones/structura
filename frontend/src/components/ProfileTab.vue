@@ -51,19 +51,19 @@
       <!-- Numeric table — mirrors the chart exactly, same store.profile data -->
       <div class="mt-3 pt-3 border-t border-slate-800">
         <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Valeurs numériques</div>
-        <div class="max-h-64 overflow-y-auto border border-slate-800 rounded">
+        <div class="max-h-64 overflow-y-auto border border-slate-800 rounded table-shell" tabindex="0" role="region">
           <table class="w-full text-xs border-collapse">
             <thead class="sticky top-0 bg-slate-900">
               <tr class="border-b border-slate-700">
-                <th class="text-left py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">Spot</th>
-                <th class="text-right py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">{{ viewMode === 'payoff' ? 'Payoff' : 'Coupon annualisé' }}</th>
+                <th class="text-left py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase num">Spot</th>
+                <th class="text-right py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase num">{{ viewMode === 'payoff' ? 'Payoff' : 'Coupon annualisé' }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="row in tableRows" :key="row.level"
                   :class="['border-b border-slate-800/60', row.level === 100 ? 'bg-slate-800/50' : '']">
-                <td class="py-1 px-2 font-mono text-slate-400">{{ row.level.toFixed(1) }}%</td>
-                <td class="py-1 px-2 font-mono text-right text-slate-300">{{ row.value.toFixed(2) }}{{ unit }}</td>
+                <td class="py-1 px-2 font-mono num text-slate-400">{{ row.level.toFixed(1) }}%</td>
+                <td class="py-1 px-2 font-mono text-right num text-slate-300">{{ row.value.toFixed(2) }}{{ unit }}</td>
               </tr>
             </tbody>
           </table>
@@ -78,6 +78,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -87,6 +88,7 @@ import {
 } from 'chart.js'
 
 Chart.register(LineElement, LineController, PointElement, CategoryScale, LinearScale, Tooltip, Legend)
+applyChartTheme(Chart)
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -127,11 +129,11 @@ async function renderChart() {
   const datasets = [{
     label: seriesLabel,
     data: series,
-    borderColor: '#3b82f6',
-    backgroundColor: 'rgba(59,130,246,0.08)',
+    borderColor: chartTheme.primary,
+    backgroundColor: chartTheme.primarySoft,
     borderWidth: 2.5,
     pointRadius: levels.map(l => l === 100 ? 5 : 0),
-    pointBackgroundColor: '#3b82f6',
+    pointBackgroundColor: chartTheme.primary,
     fill: true,
     tension: 0,
   }]
@@ -140,7 +142,7 @@ async function renderChart() {
     datasets.push({
       label: 'Prix MC',
       data: levels.map(() => priceLine),
-      borderColor: 'rgba(100,116,139,0.5)',
+      borderColor: chartTheme.border,
       borderWidth: 1.5,
       borderDash: [5, 4],
       pointRadius: 0,
@@ -168,13 +170,11 @@ async function renderChart() {
       scales: {
         x: {
           title: { display: true, text: 'Niveau spot (% du niveau initial)', font: { size: 9 } },
-          ticks: { maxTicksLimit: 10, font: { size: 9 }, color: '#475569' },
-          grid: { color: '#1e293b' },
+          ticks: { maxTicksLimit: 10, font: { size: 9 } },
         },
         y: {
           title: { display: true, text: `${seriesLabel} (${unit.value})`, font: { size: 9 } },
-          ticks: { callback: v => v + unit.value, font: { size: 9 }, color: '#475569' },
-          grid: { color: '#1e293b' },
+          ticks: { callback: v => v + unit.value, font: { size: 9 } },
         },
       },
       animation: { duration: 200 },

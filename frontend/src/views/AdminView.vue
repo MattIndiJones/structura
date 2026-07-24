@@ -1,21 +1,10 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col">
-
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 sticky top-0 z-20 bg-slate-950/95 backdrop-blur">
-      <RouterLink to="/" class="flex items-center gap-2.5 mr-auto hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-        <span class="text-slate-600 text-xs">/ Administration</span>
-      </RouterLink>
-      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Accueil</RouterLink>
-      <span class="text-xs text-slate-500">{{ auth.user?.username }}</span>
-    </header>
+  <div class="flex-1 flex flex-col min-h-0">
 
     <main class="flex-1 flex flex-col items-center gap-10 px-6 py-16">
       <div class="text-center">
-        <h1 class="text-2xl font-black text-slate-100 tracking-tight">Administration</h1>
-        <p class="text-sm text-slate-500 mt-1">Réglages accessibles aux administrateurs</p>
+        <h1 class="page-title text-2xl">Administration</h1>
+        <p class="page-subtitle">Réglages accessibles aux administrateurs</p>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl">
@@ -97,7 +86,4 @@
 
 <script setup>
 import { RouterLink } from 'vue-router'
-import { useAuthStore } from '../stores/auth.js'
-
-const auth = useAuthStore()
 </script>

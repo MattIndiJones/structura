@@ -12,8 +12,19 @@
 export function demoChartOptions(base = {}, enabled) {
   if (!enabled) return base
 
+  // Always mask the default cartesian axes ('x'/'y') even when a chart's
+  // options don't declare a `scales` block at all (e.g. after a styling
+  // cleanup removes a now-redundant color-only scales entry) — Chart.js
+  // still renders real tick labels on its implicit default scales, and an
+  // empty `base.scales` here would otherwise silently stop masking them.
+  // Non-cartesian charts (doughnut, etc.) simply ignore unknown scale ids,
+  // so this fallback is a no-op for them.
+  const declaredKeys = Object.keys(base.scales || {})
+  const keys = declaredKeys.length ? declaredKeys : ['x', 'y']
+
   const scales = {}
-  for (const [key, scale] of Object.entries(base.scales || {})) {
+  for (const key of keys) {
+    const scale = (base.scales || {})[key] || {}
     scales[key] = { ...scale, ticks: { ...(scale.ticks || {}), display: false } }
   }
 

@@ -118,6 +118,7 @@ import { reactive, ref, computed, watch, nextTick, onMounted, onUnmounted } from
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -127,6 +128,7 @@ import {
 } from 'chart.js'
 
 Chart.register(LineElement, LineController, PointElement, CategoryScale, LinearScale, Tooltip, Legend)
+applyChartTheme(Chart)
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -179,22 +181,22 @@ async function renderTrace() {
     data: {
       labels,
       datasets: [
-        { label: 'Prix testé', data: prices, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,.1)',
+        { label: 'Prix testé', data: prices, borderColor: chartTheme.primary, backgroundColor: chartTheme.primarySoft,
           borderWidth: 1.5, pointRadius: 3, tension: 0.15 },
-        { label: 'Cible', data: labels.map(() => target), borderColor: 'rgba(239,68,68,.6)',
+        { label: 'Cible', data: labels.map(() => target), borderColor: chartTheme.negative,
           borderWidth: 1, borderDash: [5, 4], pointRadius: 0 },
       ],
     },
     options: demoChartOptions({
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 12 } },
+        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } },
         tooltip: { callbacks: { label: it => `${it.dataset.label}: ${it.raw.toFixed(3)}%` } },
       },
       scales: {
-        x: { title: { display: true, text: 'Itération', font: { size: 9 }, color: '#64748b' },
-             ticks: { color: '#475569', font: { size: 9 } }, grid: { color: '#1e293b' } },
-        y: { ticks: { color: '#475569', font: { size: 9 }, callback: v => v + '%' }, grid: { color: '#1e293b' } },
+        x: { title: { display: true, text: 'Itération', font: { size: 9 } },
+             ticks: { font: { size: 9 } } },
+        y: { ticks: { font: { size: 9 }, callback: v => v + '%' } },
       },
       animation: { duration: 200 },
     }, demo.enabled),

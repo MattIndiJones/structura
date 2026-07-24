@@ -340,14 +340,14 @@
       </div>
 
       <div v-else>
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto table-shell" tabindex="0" role="region">
           <table class="w-full text-xs border-collapse">
             <thead>
               <tr class="border-b border-slate-700">
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3">#</th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Label</th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Date</th>
-                <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">T (Y)</th>
+                <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap num">T (Y)</th>
                 <th v-for="u in store.underlyings" :key="u.name"
                   class="text-left text-slate-500 font-medium pb-2 pr-2 whitespace-nowrap">
                   {{ u.ticker || u.name }}
@@ -369,7 +369,7 @@
                   {{ ev.label }}
                 </td>
                 <td class="py-1.5 pr-3 font-mono text-slate-300 whitespace-nowrap">{{ ev.date }}</td>
-                <td class="py-1.5 pr-3 font-mono text-slate-400">{{ ev.t.toFixed(2) }}</td>
+                <td class="py-1.5 pr-3 font-mono num text-slate-400">{{ ev.t.toFixed(2) }}</td>
                 <td v-for="u in store.underlyings" :key="u.name" class="py-1.5 pr-2">
                   <span class="text-slate-600 font-mono text-[10px]">–</span>
                 </td>
