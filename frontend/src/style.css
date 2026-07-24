@@ -2,43 +2,269 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design tokens — thème clair "institutional finance" (inspiré italian_app) ──
+   Rampes en triplets RGB pour que les modificateurs d'opacité Tailwind
+   (bg-slate-950/95, bg-red-950/60, …) continuent de fonctionner après le
+   remap de tailwind.config.js. Valeurs sémantiques en hex pour usage CSS
+   direct (dégradés, ombres, code-editor). */
+:root {
+  color-scheme: light;
+
+  /* Neutres (remplace slate) — 950=fond crème, 900=carte blanche, 100/50=encre */
+  --n-50: 20 18 16;      --n-100: 26 24 20;     --n-200: 46 42 36;
+  --n-300: 74 69 60;     --n-400: 107 101 90;   --n-500: 122 116 105;
+  --n-600: 163 157 146;  --n-700: 204 200 191;  --n-800: 226 221 214;
+  --n-900: 255 255 255;  --n-950: 240 238 232;
+
+  /* Bleu finance (remplace blue/brand) */
+  --a-50: 244 248 253;   --a-100: 232 240 251;  --a-200: 215 229 247;
+  --a-300: 28 79 128;    --a-400: 26 95 160;    --a-500: 37 99 235;
+  --a-600: 29 92 158;    --a-700: 22 74 128;    --a-800: 185 210 238;
+  --a-900: 215 229 247;  --a-950: 232 240 251;
+
+  /* Rouge (remplace red) — négatif / erreurs */
+  --neg-50: 253 236 234; --neg-100: 253 236 234; --neg-200: 253 236 234;
+  --neg-300: 160 46 34;  --neg-400: 192 57 43;   --neg-500: 210 68 53;
+  --neg-600: 192 57 43;  --neg-700: 156 45 33;   --neg-800: 245 198 194;
+  --neg-900: 251 220 216; --neg-950: 253 236 234;
+
+  /* Vert (remplace emerald ET green, unifiés) — positif / P&L+ */
+  --grn-50: 232 245 238; --grn-100: 232 245 238; --grn-200: 232 245 238;
+  --grn-300: 20 96 58;   --grn-400: 26 122 74;   --grn-500: 31 148 89;
+  --grn-600: 26 122 74;  --grn-700: 20 96 58;    --grn-800: 192 232 208;
+  --grn-900: 214 239 225; --grn-950: 232 245 238;
+
+  /* Or (remplace amber ET yellow, unifiés) — warnings / démo */
+  --gld-50: 253 246 227; --gld-100: 253 246 227; --gld-200: 122 89 8;
+  --gld-300: 150 112 10; --gld-400: 184 134 11;  --gld-500: 209 156 20;
+  --gld-600: 184 134 11; --gld-700: 150 112 10;  --gld-800: 237 223 184;
+  --gld-900: 246 236 208; --gld-950: 253 246 227;
+
+  /* Alias sémantiques — usage direct en CSS (hors utilities Tailwind) */
+  --bg: #f0eee8;             --surface: #ffffff;        --surface2: #f7f5f0;
+  --border: #e2ddd6;         --border2: #ccc8bf;
+  --text: #1a1814;           --muted: #7a7469;          --subtle: #9a9488;
+  --accent: #1a5fa0;         --accent-vivid: #2563eb;   --accent-light: #e8f0fb;
+  --positive: #1a7a4a;       --positive-light: #e8f5ee;
+  --negative: #c0392b;       --negative-light: #fdecea;
+  --gold: #b8860b;           --gold-light: #fdf6e3;
+  --grad-accent: linear-gradient(135deg, #1a5fa0 0%, #2563eb 100%);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, .06);
+  --shadow: 0 4px 20px rgba(0, 0, 0, .08);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, .12);
+  --radius: 16px;
+  --radius-sm: 10px;
+}
+
 @layer base {
   body { @apply bg-slate-950 text-slate-100; }
+
+  /* Anneau de focus visible global — accessibilité clavier, cohérent partout
+     (les .input/.select gardent en plus leur propre traitement de bordure). */
+  :focus-visible {
+    outline: 2px solid var(--accent-vivid);
+    outline-offset: 2px;
+  }
 }
 
 @layer components {
+  /* ── Boutons ── */
   .btn-primary {
-    @apply px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg
-           text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-4 py-2 text-white font-semibold rounded-[10px] text-sm
+           transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+    background: var(--grad-accent);
+    box-shadow: 0 2px 10px rgba(26, 95, 160, .25);
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(26, 95, 160, .35);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(.97);
   }
   .btn-secondary {
-    @apply px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium
-           rounded-md text-sm transition-colors;
+    @apply px-3 py-1.5 font-medium rounded-[10px] text-sm transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border2);
   }
+  .btn-secondary:hover:not(:disabled) { background: var(--border); }
+  .btn-ghost {
+    @apply px-3 py-1.5 rounded-[10px] text-sm font-medium transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    background: transparent;
+    color: var(--muted);
+    border: 1.5px solid var(--border2);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-light);
+  }
+  .btn-danger {
+    @apply px-3 py-1.5 rounded-[10px] text-sm font-medium transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    background: transparent;
+    color: var(--negative);
+    border: 1.5px solid rgba(192, 57, 43, .35);
+  }
+  .btn-danger:hover:not(:disabled) { background: var(--negative-light); }
+  .btn-sm { @apply px-2.5 py-1 text-xs; }
+  .btn-icon { @apply p-2 rounded-[8px]; }
+
+  /* ── Cartes ── */
   .card {
-    @apply bg-slate-900 bg-gradient-to-b from-slate-900 to-slate-950/40
-           border border-slate-800 rounded-xl p-5 shadow-lg shadow-black/20;
+    @apply rounded-[16px] p-5 transition-shadow;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
   }
+  .card:hover { box-shadow: var(--shadow); }
+  .card-title {
+    @apply font-display font-bold text-lg mb-3;
+    color: var(--text);
+  }
+
+  /* ── Champs de formulaire ── */
   .label {
-    @apply block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1;
+    @apply block text-xs font-semibold uppercase tracking-wider mb-1;
+    color: var(--muted);
   }
   .input {
-    @apply w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm
-           text-slate-100 focus:outline-none focus:border-blue-500 transition-colors;
+    @apply w-full rounded-[10px] px-3 py-2 text-sm transition-colors focus:outline-none;
+    background: var(--surface2);
+    border: 1.5px solid var(--border);
+    color: var(--text);
   }
+  .input::placeholder { color: var(--subtle); }
+  .input:focus { border-color: var(--accent); background: var(--surface); }
+  .input:disabled { opacity: .6; cursor: not-allowed; }
   .select {
-    @apply w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm
-           text-slate-100 focus:outline-none focus:border-blue-500 transition-colors cursor-pointer;
+    @apply w-full rounded-[10px] py-2 text-sm transition-colors cursor-pointer
+           focus:outline-none appearance-none;
+    background-color: var(--surface2);
+    border: 1.5px solid var(--border);
+    color: var(--text);
+    padding-left: .75rem;
+    padding-right: 2.2rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%237a7469' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right .65rem center;
+    background-size: 14px;
   }
+  .select:focus { border-color: var(--accent); background-color: var(--surface); }
+
+  /* ── Stat-box (tuiles denses — grilles de Greeks, paramètres…) ── */
   .stat-box {
-    @apply bg-slate-800 rounded-lg p-4 border border-slate-700;
+    @apply rounded-[10px] p-4;
+    background: var(--surface2);
+    border: 1px solid var(--border);
   }
+
+  /* ── Éditeur PayScript — îlot volontairement sombre (bloc de code dans
+     un document clair), jamais rethémé par le remap des rampes Tailwind. ── */
   .code-editor {
-    @apply w-full bg-slate-950 border border-slate-700 rounded-lg p-4
-           font-mono text-sm text-slate-200 resize-y focus:outline-none
-           focus:border-blue-500 leading-relaxed;
+    @apply w-full rounded-[10px] p-4 font-mono text-sm resize-y
+           focus:outline-none leading-relaxed;
+    background: #1e1b16;
+    color: #e8e5df;
+    border: 1px solid #3a362e;
+    caret-color: var(--accent-vivid);
     min-height: 280px;
     tab-size: 2;
+  }
+  .code-editor:focus { border-color: var(--accent-vivid); }
+
+  /* ── Badges (pilules sémantiques) ── */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold;
+  }
+  .badge-positive { background: var(--positive-light); color: var(--positive); border: 1px solid rgba(26, 122, 74, .25); }
+  .badge-negative { background: var(--negative-light); color: var(--negative); border: 1px solid rgba(192, 57, 43, .25); }
+  .badge-gold     { background: var(--gold-light);     color: var(--gold);     border: 1px solid rgba(184, 134, 11, .25); }
+  .badge-accent   { background: var(--accent-light);   color: var(--accent);   border: 1px solid rgba(26, 95, 160, .25); }
+  .badge-muted    { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+  /* ── Tabs segmentées ── */
+  .tabs {
+    @apply inline-flex gap-0.5 rounded-[12px];
+    padding: 3px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+  }
+  .tab-btn {
+    @apply px-3.5 py-1.5 rounded-[8px] text-sm font-semibold transition-all;
+    color: var(--muted);
+    background: transparent;
+  }
+  .tab-btn.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, .08);
+  }
+
+  /* ── Filtres (pilules cliquables) ── */
+  .filter-btn {
+    @apply px-3 py-1 rounded-full text-xs font-bold transition-colors;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    color: var(--muted);
+  }
+  .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .filter-btn.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+
+  /* ── Progression ── */
+  .progress-track {
+    @apply h-2 rounded-full overflow-hidden;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+  }
+  .progress-fill {
+    @apply h-full rounded-full;
+    background: var(--grad-accent);
+    transition: width .4s ease;
+  }
+
+  /* ── Tables (adoption progressive — Phase 5) ── */
+  .table-shell {
+    @apply overflow-auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .table-shell table { @apply w-full text-xs border-collapse; }
+  .table-shell thead th {
+    @apply sticky top-0 text-left py-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider;
+    background: var(--surface);
+    color: var(--muted);
+    border-bottom: 2px solid var(--border2);
+  }
+  .table-shell tbody td {
+    @apply py-1.5 px-2;
+    border-bottom: 1px solid var(--border);
+  }
+  .table-shell tbody tr:last-child td { border-bottom: none; }
+  .table-shell tbody tr:hover td { background: var(--surface2); }
+  .table-shell td.num, .table-shell th.num { @apply text-right; }
+
+  /* ── Numérique tabulaire (chiffres alignés — tableaux, KPI) ── */
+  .num { @apply font-mono; font-variant-numeric: tabular-nums; }
+
+  /* ── En-tête de page (remplace les headers dupliqués — Phase 3) ── */
+  .page-header { @apply flex items-start justify-between gap-4 flex-wrap mb-6; }
+  .page-title {
+    @apply font-display font-black tracking-tight text-xl;
+    color: var(--text);
+  }
+  .page-subtitle { @apply text-sm mt-1; color: var(--muted); }
+  .page-actions { @apply flex items-center gap-2 flex-wrap; }
+
+  /* ── Micro-label (séparateurs de section, hors formulaires) ── */
+  .micro-label {
+    @apply text-[10px] font-bold uppercase tracking-wider;
+    color: var(--muted);
   }
 }
 
@@ -63,16 +289,22 @@
   .category-switch-leave-to {
     transform: none;
   }
+  .btn-primary:hover:not(:disabled),
+  .btn-primary:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 /* Dégradé de marque — réservé aux chiffres/éléments qu'on veut mettre en
    évidence (ex. MtM), distinct des couleurs fonctionnelles de navigation. */
 .text-brand-gradient {
-  @apply bg-gradient-to-r from-indigo-400 to-purple-500 bg-clip-text text-transparent;
+  @apply bg-clip-text text-transparent;
+  background-image: linear-gradient(90deg, #1a5fa0, #2563eb);
 }
 
-/* Halo diagonal subtil pour une tuile de chiffres clés (KPI) — à combiner
-   avec .card : class="card kpi-tile". */
+/* Halo diagonal + barre d'accent 3px en haut, pour une tuile KPI phare —
+   à combiner avec .card : class="card kpi-tile" (usage volontairement
+   réservé aux quelques chiffres-clés headline, pas aux grilles denses). */
 .kpi-tile {
   @apply relative overflow-hidden;
 }
@@ -80,8 +312,25 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.10) 0%, transparent 60%);
+  background: linear-gradient(135deg, rgba(26, 95, 160, .05) 0%, transparent 60%);
   pointer-events: none;
+}
+.kpi-tile::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--ac, var(--grad-accent));
+  pointer-events: none;
+}
+.stat-value {
+  @apply font-display font-black leading-none;
+  font-size: 1.9rem;
+  color: var(--ac-text, var(--accent));
+}
+.stat-label {
+  @apply text-[11px] font-semibold uppercase tracking-wider mt-1;
+  color: var(--muted);
 }
 
 /* Anneau pulsant — signale un élément "vivant"/en attente d'attention

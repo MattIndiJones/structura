@@ -284,14 +284,14 @@
       <!-- ── Dates d'observation ──────────────────────────────────── -->
       <div v-if="observationRows.length" class="flex flex-col gap-2">
         <div class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Dates d'observation</div>
-        <div class="max-h-56 overflow-y-auto border border-slate-800 rounded">
+        <div class="max-h-56 overflow-y-auto border border-slate-800 rounded table-shell" tabindex="0" role="region">
           <table class="w-full text-xs border-collapse">
             <thead class="sticky top-0 bg-slate-900">
               <tr class="border-b border-slate-700">
                 <th class="text-left py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">#</th>
                 <th class="text-left py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">Label</th>
                 <th class="text-left py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">Date</th>
-                <th class="text-right py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">T (Y)</th>
+                <th class="text-right py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase num">T (Y)</th>
                 <th class="text-right py-1 px-2 text-slate-500 font-semibold text-[10px] uppercase">Statut</th>
               </tr>
             </thead>
@@ -300,7 +300,7 @@
                 <td class="py-1 px-2 text-slate-500">{{ i + 1 }}</td>
                 <td class="py-1 px-2 text-slate-300">{{ ev.label }}</td>
                 <td class="py-1 px-2 font-mono text-slate-300"><SensitiveValue>{{ ev.date }}</SensitiveValue></td>
-                <td class="py-1 px-2 font-mono text-right text-slate-400">{{ ev.t.toFixed(2) }}</td>
+                <td class="py-1 px-2 font-mono text-right num text-slate-400">{{ ev.t.toFixed(2) }}</td>
                 <td class="py-1 px-2 text-right text-[10px]"
                     :class="ev.isFuture ? 'text-slate-500' : 'text-amber-400'">
                   {{ ev.isFuture ? 'à venir' : 'passé' }}
@@ -367,7 +367,7 @@
       </div>
 
       <!-- Table -->
-      <div class="card overflow-x-auto">
+      <div class="card overflow-x-auto table-shell" tabindex="0" role="region">
         <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
           💰 Décomposition des flux — PV par composante
         </div>
@@ -377,18 +377,18 @@
         <table class="w-full text-xs border-collapse">
           <thead>
             <tr class="bg-slate-800/60 border-b-2 border-slate-700">
-              <th class="text-left py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">Date</th>
-              <th class="text-left py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide">Expression</th>
-              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">P(actif)
+              <th class="text-left py-1.5 px-2 whitespace-nowrap">Date</th>
+              <th class="text-left py-1.5 px-2">Expression</th>
+              <th class="text-right py-1.5 px-2 whitespace-nowrap num">P(actif)
                 <HelpTip align="right" text="Fraction des chemins simulés où cette instruction PAY a effectivement produit un flux (ex : condition IF vraie, produit pas encore rappelé). 100% = flux systématique." />
               </th>
-              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">E[CF]
+              <th class="text-right py-1.5 px-2 whitespace-nowrap num">E[CF]
                 <HelpTip align="right" text="Espérance du flux brut, non actualisé, moyennée sur tous les chemins (y compris ceux où il vaut 0). C'est le montant avant application du facteur d'actualisation DF." />
               </th>
-              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">DF
+              <th class="text-right py-1.5 px-2 whitespace-nowrap num">DF
                 <HelpTip align="right" text="Facteur d'actualisation implicite = PV ÷ E[CF]. Sous taux déterministes c'est exp(−r·t) ; sous taux stochastiques c'est l'espérance conditionnelle E[B(0,t) | ce flux se déclenche], donc peut différer légèrement de exp(−r·t)." />
               </th>
-              <th class="text-right py-1.5 px-2 text-slate-500 font-semibold text-[10px] uppercase tracking-wide whitespace-nowrap">Contrib. PV
+              <th class="text-right py-1.5 px-2 whitespace-nowrap num">Contrib. PV
                 <HelpTip align="right" text="Contribution actualisée de cette ligne au prix total = E[CF] × DF. La somme de toutes les lignes de toutes les dates redonne exactement le Prix équitable de l'onglet Résultats." />
               </th>
             </tr>
@@ -405,15 +405,15 @@
                 </td>
                 <td class="py-1.5 px-2 font-mono text-[11px]"
                     :class="row.pv < 0 ? 'text-red-400' : 'text-slate-500'">{{ row.lbl }}</td>
-                <td class="py-1.5 px-2 text-right text-slate-400"><SensitiveValue>{{ row.pAct }}%</SensitiveValue></td>
-                <td class="py-1.5 px-2 text-right font-semibold font-mono"
+                <td class="py-1.5 px-2 text-right num text-slate-400"><SensitiveValue>{{ row.pAct }}%</SensitiveValue></td>
+                <td class="py-1.5 px-2 text-right num font-semibold font-mono"
                     :class="row.eCF >= 0 ? 'text-slate-300' : 'text-red-400'">
                   <SensitiveValue>{{ row.eCF >= 0 ? '+' : '' }}{{ row.eCFStr }}%</SensitiveValue>
                 </td>
-                <td class="py-1.5 px-2 text-right font-mono text-slate-400">
+                <td class="py-1.5 px-2 text-right num font-mono text-slate-400">
                   <SensitiveValue>{{ row.dfStr }}</SensitiveValue>
                 </td>
-                <td class="py-1.5 px-2 text-right font-bold font-mono"
+                <td class="py-1.5 px-2 text-right num font-bold font-mono"
                     :class="row.pv >= 0 ? 'text-green-400' : 'text-red-400'">
                   <SensitiveValue>{{ row.pv >= 0 ? '+' : '' }}{{ row.pvStr }}%</SensitiveValue>
                 </td>
@@ -423,7 +423,7 @@
           <tfoot>
             <tr class="bg-slate-800/60 border-t-2 border-slate-600">
               <td colspan="5" class="py-2 px-2 font-black text-slate-200">= Prix total</td>
-              <td class="py-2 px-2 text-right font-black text-blue-400 text-sm">
+              <td class="py-2 px-2 text-right num font-black text-blue-400 text-sm">
                 <SensitiveValue>{{ fluxTotal.toFixed(2) }}%</SensitiveValue>
               </td>
             </tr>
@@ -463,12 +463,12 @@
           </div>
         </div>
       </div>
-      <div class="card overflow-x-auto">
+      <div class="card overflow-x-auto table-shell" tabindex="0" role="region">
         <table class="w-full text-xs">
           <thead>
             <tr class="border-b border-slate-700 text-slate-500">
               <th class="pb-2 pr-4 text-left font-semibold">Greek</th>
-              <th class="pb-2 pr-4 text-right font-semibold">Valeur</th>
+              <th class="pb-2 pr-4 text-right font-semibold num">Valeur</th>
               <th class="pb-2 text-left font-semibold">Interprétation</th>
             </tr>
           </thead>
@@ -476,7 +476,7 @@
             <tr v-for="(val, name) in store.result.greeks" :key="name"
                 class="border-b border-slate-800/50">
               <td class="py-1.5 pr-4 font-mono font-semibold text-slate-300">{{ gLabel(name) }}</td>
-              <td class="py-1.5 pr-4 font-mono text-right"
+              <td class="py-1.5 pr-4 font-mono num text-right"
                   :class="val > 0 ? 'text-green-400' : val < 0 ? 'text-red-400' : 'text-slate-400'">
                 <SensitiveValue>{{ fmtG(val) }}</SensitiveValue>
               </td>
@@ -500,6 +500,7 @@ import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import { Chart, BarElement, BarController, CategoryScale, LinearScale, Tooltip } from 'chart.js'
 import ProfileTab  from './ProfileTab.vue'
 import PathsTab    from './PathsTab.vue'
@@ -513,6 +514,7 @@ import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
 
 Chart.register(BarElement, BarController, CategoryScale, LinearScale, Tooltip)
+applyChartTheme(Chart)
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -646,8 +648,8 @@ async function drawHist() {
       labels,
       datasets: [{
         data: counts,
-        backgroundColor: labels.map(l => parseFloat(l) + w >= price ? 'rgba(59,130,246,.55)' : 'rgba(100,116,139,.35)'),
-        borderColor:     labels.map(l => parseFloat(l) + w >= price ? 'rgba(59,130,246,.9)'  : 'rgba(100,116,139,.5)'),
+        backgroundColor: labels.map(l => parseFloat(l) + w >= price ? chartTheme.primaryFill : 'rgba(122,116,105,.35)'),
+        borderColor:     labels.map(l => parseFloat(l) + w >= price ? chartTheme.primary : 'rgba(122,116,105,.5)'),
         borderWidth: 1, borderRadius: 2,
       }],
     },
@@ -662,8 +664,8 @@ async function drawHist() {
           label: i => `${i.raw} chemins`,
         } } },
       scales: {
-        x: { ticks: { color: '#475569', maxTicksLimit: 8, font: { size: 10 } }, grid: { color: '#1e293b' } },
-        y: { ticks: { color: '#475569', font: { size: 10 } }, grid: { color: '#1e293b' } },
+        x: { ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+        y: { ticks: { font: { size: 10 } } },
       },
     }, demo.enabled),
   })

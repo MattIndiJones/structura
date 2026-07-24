@@ -1,37 +1,27 @@
 ﻿<template>
-  <div class="min-h-screen bg-slate-950 flex flex-col">
+  <div class="flex-1 flex flex-col min-h-0">
 
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-5 py-3 flex items-center gap-4 bg-slate-950/95 sticky top-0 z-20">
-      <RouterLink to="/" class="flex items-center gap-2.5 shrink-0 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-      </RouterLink>
-      <span class="text-slate-600 text-xs">/ Analyse AMC</span>
-      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5 shrink-0">← Accueil</RouterLink>
-      <!-- Main tab switcher -->
-      <div class="flex gap-1 ml-4">
-        <button @click="mainTab = 'classic'"
-          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
-          :class="mainTab === 'classic' ? 'bg-slate-700 text-slate-100' : 'text-slate-500 hover:text-slate-300'">
+    <!-- Barre d'outils : titre + switch de mode (reste local, pas d'état
+         cross-vue dans le shell) -->
+    <div class="border-b px-5 py-2.5 flex items-center gap-4 shrink-0" style="border-color: var(--border);">
+      <h1 class="page-title text-lg shrink-0">Analyse AMC</h1>
+      <div class="tabs shrink-0">
+        <button @click="mainTab = 'classic'" class="tab-btn" :class="{ active: mainTab === 'classic' }">
           Analyse FF classique
         </button>
-        <button @click="mainTab = 'study'"
-          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
-          :class="mainTab === 'study' ? 'bg-blue-700 text-white' : 'text-slate-500 hover:text-slate-300'">
+        <button @click="mainTab = 'study'" class="tab-btn" :class="{ active: mainTab === 'study' }">
           Étude complète A/B/C/D
         </button>
       </div>
       <div class="ml-auto flex items-center gap-2">
-        <span v-if="mainTab === 'classic' && result" class="text-xs text-slate-500">
+        <span v-if="mainTab === 'classic' && result" class="text-xs" style="color: var(--muted);">
           {{ result.ff_series }} · {{ result.benchmark }} · {{ result.regression?.n_obs }} obs.
         </span>
-        <span v-if="mainTab === 'study' && studyResult" class="text-xs text-slate-500">
+        <span v-if="mainTab === 'study' && studyResult" class="text-xs" style="color: var(--muted);">
           {{ demo.enabled ? '••• AMC' : studyResult.meta?.isin }} · {{ studyResult.meta?.currency }}
         </span>
-        <DemoModeToggle />
       </div>
-    </header>
+    </div>
 
     <!-- Main 2-col -->
     <main class="flex-1 grid grid-cols-[380px_1fr] min-h-0">
@@ -763,7 +753,7 @@
               <!-- Regression table -->
               <div class="card">
                 <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Coefficients OLS</h3>
-                <div class="overflow-x-auto">
+                <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                 <table class="w-full text-xs border-collapse">
                   <thead>
                     <tr class="border-b border-slate-700 text-slate-500 text-left">
@@ -1002,7 +992,7 @@
                   <strong class="text-slate-400">RF</strong> = taux sans risque ·
                   <strong class="text-slate-400">bm_ret</strong> = rendement benchmark (si disponible)
                 </div>
-                <div class="overflow-auto max-h-[500px] rounded border border-slate-800">
+                <div class="overflow-auto max-h-[500px] rounded border border-slate-800 table-shell" tabindex="0" role="region">
                   <table class="w-full text-[10px] border-collapse">
                     <thead class="sticky top-0 bg-slate-900 z-10">
                       <tr>
@@ -1509,7 +1499,7 @@
                     <div v-if="!studyResult.termsheet_basket?.length" class="text-xs text-slate-500 italic py-4 text-center">
                       Aucune position TS configurée — renseignez <code>termsheet_positions</code> dans le manifest.
                     </div>
-                    <div v-else class="overflow-x-auto">
+                    <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
                       <table class="w-full text-[10px]">
                         <thead>
                           <tr class="text-slate-600 border-b border-slate-800">
@@ -1557,7 +1547,7 @@
                     <div v-if="!studyResult.current_basket?.length" class="text-xs text-slate-500 italic py-4 text-center">
                       Composition non disponible.
                     </div>
-                    <div v-else class="overflow-x-auto">
+                    <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
                       <table class="w-full text-[10px]">
                         <thead>
                           <tr class="text-slate-600 border-b border-slate-800">
@@ -1612,7 +1602,7 @@
                   <div class="mt-3 text-[10px] text-slate-500 mb-2">
                     BUY synthétiques injectés à T0 = {{ studyResult.meta.nav_start_date }}. Prix source : yfinance close ou proxy ordre. Non auditoriables — à titre de diagnostic uniquement.
                   </div>
-                  <div class="overflow-x-auto">
+                  <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                     <table class="w-full text-[10px]">
                       <thead>
                         <tr class="text-slate-600 border-b border-slate-800">
@@ -2155,7 +2145,7 @@
 
                 <div class="card">
                   <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">P&L par sous-jacent</div>
-                  <div class="overflow-x-auto">
+                  <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                   <table class="w-full text-xs min-w-[600px]">
                     <thead>
                       <tr class="text-slate-500 border-b border-slate-700">
@@ -2599,7 +2589,7 @@
                     <div class="text-xs font-semibold text-slate-300 mb-3">
                       Référentiel Inertiel — composition initiale ({{ studyResult.block_e.n_positions }} sous-jacents)
                     </div>
-                    <div class="overflow-x-auto">
+                    <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                       <table class="w-full text-xs">
                         <thead>
                           <tr class="text-[10px] text-slate-500 uppercase tracking-wider border-b border-slate-700">
@@ -2803,7 +2793,7 @@
                           ({{ (studyResult.block_h.trades || []).filter(t => t.available).length }} avec prix disponibles)
                         </span>
                       </div>
-                      <div class="overflow-x-auto">
+                      <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                         <table class="w-full text-[10px]">
                           <thead>
                             <tr class="text-slate-600 border-b border-slate-800">
@@ -2931,7 +2921,7 @@
                     <!-- Per-horizon stats table -->
                     <div class="card">
                       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Alpha par horizon</div>
-                      <div class="overflow-x-auto">
+                      <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                         <table class="w-full text-xs">
                           <thead>
                             <tr class="text-slate-600 text-[10px] border-b border-slate-800">
@@ -3044,7 +3034,7 @@
                           ({{ (studyResult.block_i.trades || []).filter(t => t.available).length }} avec prix disponibles)
                         </span>
                       </div>
-                      <div class="overflow-x-auto">
+                      <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                         <table class="w-full text-[10px]">
                           <thead>
                             <tr class="text-slate-600 border-b border-slate-800">
@@ -3557,7 +3547,7 @@
                     Aucun choc de marché du calendrier ne chevauche l'historique de ce fonds.
                   </div>
 
-                  <div v-else class="card overflow-x-auto">
+                  <div v-else class="card overflow-x-auto table-shell" tabindex="0" role="region">
                     <table class="w-full text-xs">
                       <thead>
                         <tr class="border-b border-slate-800 text-slate-500">
@@ -3734,7 +3724,7 @@
 
                 <div class="card">
                   <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Tableau de confiance par dimension</div>
-                  <div class="overflow-x-auto">
+                  <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                   <table class="w-full text-xs min-w-[700px]">
                     <thead>
                       <tr class="text-slate-500 border-b border-slate-700">
@@ -4212,7 +4202,7 @@
                   </div>
 
                   <!-- Sector table -->
-                  <div class="card overflow-x-auto">
+                  <div class="card overflow-x-auto table-shell" tabindex="0" role="region">
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                       Détail par secteur GICS
                       <span title="w_p = poids portefeuille, w_b = poids benchmark, Δw = poids actif (excès). r_p = rendement portefeuille dans ce secteur, r_b = rendement benchmark dans ce secteur (proxy ETF SPDR)." class="cursor-help text-[8px] text-slate-600 hover:text-slate-400 border border-slate-700 rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">?</span>
@@ -4329,14 +4319,15 @@
 
 <script setup>
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { Chart, registerables } from 'chart.js'
 import { apiFetch } from '../utils/api.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from '../components/SensitiveValue.vue'
-import DemoModeToggle from '../components/DemoModeToggle.vue'
 
 Chart.register(...registerables)
+applyChartTheme(Chart)
 
 const demo = useDemoModeStore()
 
@@ -4571,7 +4562,7 @@ async function analyze() {
 }
 
 // ── Charts ────────────────────────────────────────────────────────────
-const FACTOR_COLORS = ['#60a5fa','#34d399','#f59e0b','#f472b6','#a78bfa','#fb923c']
+const FACTOR_COLORS = chartTheme.series
 
 function destroyAll() {
   Object.values(charts).forEach(c => c?.destroy())
@@ -4587,14 +4578,14 @@ function buildCharts() {
   if (perfChartRef.value) {
     const datasets = [{
       label: 'AMC', data: perf.cum_amc.map(v => +(v * 100).toFixed(2)),
-      borderColor: '#60a5fa', backgroundColor: 'transparent',
+      borderColor: chartTheme.primary, backgroundColor: 'transparent',
       borderWidth: 2, pointRadius: 0, tension: 0.3,
     }]
     if (perf.cum_bm?.length) {
       datasets.push({
         label: result.value.benchmark,
         data: perf.cum_bm.map(v => +(v * 100).toFixed(2)),
-        borderColor: '#fb923c', backgroundColor: 'transparent',
+        borderColor: chartTheme.gold, backgroundColor: 'transparent',
         borderWidth: 1.5, borderDash: [4,2], pointRadius: 0, tension: 0.3,
       })
     }
@@ -4613,7 +4604,7 @@ function buildCharts() {
         labels: perf.dates,
         datasets: [{
           label: 'Drawdown', data: perf.drawdown.map(v => +(v * 100).toFixed(2)),
-          borderColor: '#f87171', backgroundColor: 'rgba(239,68,68,0.1)',
+          borderColor: chartTheme.negative, backgroundColor: chartTheme.negativeFill,
           borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.2,
         }]
       },
@@ -4656,7 +4647,7 @@ function buildRollingCharts() {
         labels: rolling.map(r => r.date),
         datasets: [{
           label: 'R²', data: rolling.map(r => +(r.r2 * 100).toFixed(1)),
-          borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.1)',
+          borderColor: chartTheme.series[4], backgroundColor: 'rgba(124,92,214,0.1)',
           borderWidth: 2, pointRadius: 0, fill: true, tension: 0.3,
         }]
       },
@@ -4669,18 +4660,15 @@ function chartOpts(unit, label, invertY = false) {
   return {
     responsive: true, maintainAspectRatio: true,
     plugins: {
-      legend: { display: true, labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 12 } },
+      legend: { display: true, labels: { font: { size: 10 }, boxWidth: 12 } },
       tooltip: {
-        backgroundColor: '#1e293b', titleColor: '#94a3b8', bodyColor: '#e2e8f0',
-        borderColor: '#334155', borderWidth: 1, cornerRadius: 6,
         callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y}${unit}` },
       },
     },
     scales: {
-      x: { ticks: { color: '#475569', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
+      x: { ticks: { font: { size: 9 }, maxTicksLimit: 8 } },
       y: {
-        ticks: { color: '#475569', font: { size: 9 }, callback: v => v + unit },
-        grid: { color: '#1e293b' },
+        ticks: { font: { size: 9 }, callback: v => v + unit },
         reverse: invertY,
         title: { display: false },
       },
@@ -5401,12 +5389,12 @@ function renderStudyRolling() {
     studyRollingChart?.destroy()
     const rolling = blockA.rolling
     const factors = (blockA.factors_used || []).filter(f => studyRollingVisible.value.includes(f))
-    const COLORS = ['#60a5fa','#34d399','#f59e0b','#f87171','#a78bfa','#fb923c']
+    const COLORS = chartTheme.series
     const datasets = [
       {
         label: 'Alpha ann. (%)', yAxisID: 'y',
         data: rolling.map(r => r.alpha_ann_pct ?? null),
-        borderColor: '#fbbf24', backgroundColor: '#fbbf2420',
+        borderColor: chartTheme.gold, backgroundColor: 'rgba(184,134,11,.12)',
         borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3,
       },
       ...factors.map((f, i) => ({
@@ -5422,13 +5410,13 @@ function renderStudyRolling() {
       options: {
         responsive: true,
         interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } } },
+        plugins: { legend: { labels: { font: { size: 10 } } } },
         scales: {
-          x: { ticks: { color: '#64748b', maxRotation: 0, maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
-          y: { position: 'left', title: { display: true, text: 'Alpha %', color: '#fbbf24', font: { size: 9 } },
-               ticks: { color: '#fbbf24' }, grid: { color: '#1e293b' } },
-          y2: { position: 'right', title: { display: true, text: 'Beta', color: '#60a5fa', font: { size: 9 } },
-                ticks: { color: '#60a5fa' }, grid: { display: false } },
+          x: { ticks: { maxRotation: 0, maxTicksLimit: 8 } },
+          y: { position: 'left', title: { display: true, text: 'Alpha %', color: chartTheme.gold, font: { size: 9 } },
+               ticks: { color: chartTheme.gold } },
+          y2: { position: 'right', title: { display: true, text: 'Beta', color: chartTheme.primary, font: { size: 9 } },
+                ticks: { color: chartTheme.primary }, grid: { display: false } },
         },
       },
     })
@@ -5443,12 +5431,12 @@ function renderStudyPerf() {
     studyPerfChart?.destroy()
     const datasets = [
       { label: 'AMC (net)', data: perf.cum_amc.map(v => +(v * 100).toFixed(2)),
-        borderColor: '#60a5fa', borderWidth: 2, pointRadius: 0, tension: 0.2, fill: false },
+        borderColor: chartTheme.primary, borderWidth: 2, pointRadius: 0, tension: 0.2, fill: false },
     ]
     if (perf.cum_bm?.length) {
       datasets.push({
         label: 'Benchmark', data: perf.cum_bm.map(v => +(v * 100).toFixed(2)),
-        borderColor: '#94a3b8', borderWidth: 1.5, borderDash: [4, 3],
+        borderColor: chartTheme.ticks, borderWidth: 1.5, borderDash: [4, 3],
         pointRadius: 0, tension: 0.2, fill: false,
       })
     }
@@ -5458,10 +5446,10 @@ function renderStudyPerf() {
       options: {
         responsive: true,
         interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } } },
+        plugins: { legend: { labels: { font: { size: 10 } } } },
         scales: {
-          x: { ticks: { color: '#64748b', maxRotation: 0, maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
-          y: { ticks: { color: '#94a3b8', callback: v => v + '%' }, grid: { color: '#1e293b' } },
+          x: { ticks: { maxRotation: 0, maxTicksLimit: 8 } },
+          y: { ticks: { callback: v => v + '%' } },
         },
       },
     })

@@ -2,7 +2,7 @@
   <!-- The Pricer is mounted fresh every navigation (no keep-alive).
        If a script ID is in the route, we load it before showing the pricer. -->
   <Pricer v-if="ready" />
-  <div v-else class="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500 text-sm">
+  <div v-else class="flex-1 flex items-center justify-center text-slate-500 text-sm">
     Chargement…
   </div>
 </template>

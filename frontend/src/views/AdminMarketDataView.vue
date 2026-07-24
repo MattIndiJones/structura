@@ -1,30 +1,21 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col">
-
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 sticky top-0 z-20 bg-slate-950/95 backdrop-blur">
-      <RouterLink to="/" class="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-        <span class="text-slate-600 text-xs">/ Données de marché</span>
-      </RouterLink>
-      <RouterLink to="/admin" class="btn-secondary text-xs px-3 py-1.5">← Administration</RouterLink>
-      <span class="text-xs text-slate-500 ml-auto">{{ auth.user?.username }}</span>
-    </header>
+  <div class="flex-1 flex flex-col min-h-0">
 
     <main class="flex-1 p-6 max-w-5xl w-full mx-auto flex flex-col gap-5">
 
       <!-- Top bar -->
-      <div class="flex flex-wrap items-start gap-3">
-        <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-slate-100">Données de marché</h1>
-          <p class="text-xs text-slate-500 mt-0.5">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Données de marché</h1>
+          <p class="page-subtitle">
             Cache de prix historiques Yahoo Finance — ajustés dividendes &amp; splits.
-            <span v-if="!loading" class="ml-2 text-slate-600">
+            <span v-if="!loading" class="ml-2" style="color: var(--subtle);">
               {{ okCount }}/{{ items.length }} séries OK
             </span>
           </p>
         </div>
-        <div class="flex gap-2 flex-shrink-0">
+        <div class="page-actions">
+          <RouterLink to="/admin" class="btn-ghost btn-sm">← Administration</RouterLink>
           <button class="btn-secondary text-xs px-3 py-1.5" :disabled="running || loading" @click="doLoadAll">
             Charger tout
           </button>
@@ -36,7 +27,7 @@
       </div>
 
       <!-- Error -->
-      <div v-if="error" class="bg-red-950/60 border border-red-800 rounded px-3 py-2 text-xs text-red-300">{{ error }}</div>
+      <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
 
       <!-- Progress -->
       <div v-if="running" class="card py-3 flex flex-col gap-2">
@@ -44,14 +35,13 @@
           <span class="text-slate-300 truncate max-w-xs">{{ progress.current }}</span>
           <span class="text-slate-500 flex-shrink-0 ml-4">{{ progress.done }} / {{ progress.total }}</span>
         </div>
-        <div class="w-full bg-slate-800 rounded-full h-1.5">
-          <div class="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
-               :style="{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }"></div>
+        <div class="progress-track">
+          <div class="progress-fill" :style="{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }"></div>
         </div>
       </div>
 
       <!-- Loading skeleton -->
-      <div v-if="loading" class="text-xs text-slate-600 py-10 text-center">Chargement du catalogue…</div>
+      <LoadingSpinner v-if="loading" label="Chargement du catalogue…" class="py-10" />
 
       <!-- Catalog by category -->
       <template v-else>
@@ -116,10 +106,9 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
-
-const auth = useAuthStore()
+import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
+import AlertMessage from '../components/ui/AlertMessage.vue'
 
 const items    = ref([])
 const loading  = ref(true)

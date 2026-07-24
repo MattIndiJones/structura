@@ -1,22 +1,20 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col">
-
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 sticky top-0 z-20 bg-slate-950/95 backdrop-blur">
-      <RouterLink to="/" class="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-        <span class="text-slate-600 text-xs">/ Fournisseurs RFQ</span>
-      </RouterLink>
-      <RouterLink to="/admin" class="btn-secondary text-xs px-3 py-1.5">← Administration</RouterLink>
-      <span class="text-xs text-slate-500 ml-auto">{{ auth.user?.username }}</span>
-    </header>
+  <div class="flex-1 flex flex-col min-h-0">
 
     <main class="flex-1 p-6 max-w-3xl w-full mx-auto flex flex-col gap-4">
-      <div v-if="error" class="bg-red-950/60 border border-red-800 rounded px-3 py-2 text-xs text-red-300">{{ error }}</div>
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Fournisseurs RFQ</h1>
+        </div>
+        <div class="page-actions">
+          <RouterLink to="/admin" class="btn-ghost btn-sm">← Administration</RouterLink>
+        </div>
+      </div>
+
+      <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
 
       <div class="card overflow-x-auto">
-        <div v-if="loading" class="text-xs text-slate-600 py-6 text-center">Chargement…</div>
+        <LoadingSpinner v-if="loading" class="py-6" />
         <table v-else class="w-full text-xs">
           <thead>
             <tr class="text-left text-slate-500 border-b border-slate-800">
@@ -72,11 +70,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
+import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
+import AlertMessage from '../components/ui/AlertMessage.vue'
+import { useToastsStore } from '../stores/toasts.js'
 
-const auth = useAuthStore()
-
+const toasts = useToastsStore()
 const providers = ref([])
 const loading   = ref(true)
 const error     = ref('')
@@ -115,6 +114,7 @@ async function createProvider() {
     providers.value.sort((a, b) => a.label.localeCompare(b.label))
     newLabel.value = ''
     newMode.value = 'manual'
+    toasts.success('Fournisseur ajouté')
   } catch (e) {
     error.value = e.message
   } finally {

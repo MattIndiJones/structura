@@ -1,17 +1,14 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col">
+  <div class="flex-1 flex flex-col min-h-0">
 
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 sticky top-0 z-20 bg-slate-950/95 backdrop-blur">
-      <RouterLink to="/" class="flex items-center gap-2.5 mr-auto hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-        <span class="text-slate-600 text-xs">/ Mes Scripts</span>
-      </RouterLink>
-      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Accueil</RouterLink>
-      <span class="text-xs text-slate-500">{{ auth.user?.username }}</span>
-      <RouterLink to="/pricer" class="btn-primary text-xs px-3 py-1.5">+ Nouveau script</RouterLink>
-    </header>
+    <div class="page-header px-6 pt-6 pb-0 mb-0">
+      <div>
+        <h1 class="page-title">Mes Scripts</h1>
+      </div>
+      <div class="page-actions">
+        <RouterLink to="/pricer" class="btn-primary text-xs px-3 py-1.5">+ Nouveau script</RouterLink>
+      </div>
+    </div>
 
     <div class="flex flex-1 min-h-0">
 
@@ -78,17 +75,13 @@
         </div>
 
         <!-- Loading -->
-        <div v-if="loading" class="flex items-center justify-center py-16 text-slate-600 text-sm">
-          Chargement…
-        </div>
+        <LoadingSpinner v-if="loading" class="py-16" />
 
         <!-- Empty -->
-        <div v-else-if="filteredScripts.length === 0"
-             class="flex flex-col items-center justify-center py-16 gap-3 text-slate-600">
-          <div class="text-4xl">📄</div>
-          <div class="text-sm">Aucun script{{ search ? ' correspondant' : ' dans ce dossier' }}</div>
-          <RouterLink to="/pricer" class="btn-primary text-xs mt-1">Créer mon premier script</RouterLink>
-        </div>
+        <EmptyState v-else-if="filteredScripts.length === 0"
+             icon="📄" :title="`Aucun script${search ? ' correspondant' : ' dans ce dossier'}`">
+          <RouterLink to="/pricer" class="btn-primary text-xs">Créer mon premier script</RouterLink>
+        </EmptyState>
 
         <!-- Grid -->
         <div v-else class="flex-1 overflow-y-auto p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 content-start">
@@ -105,8 +98,8 @@
                 </div>
                 <div v-if="s.description" class="text-xs text-slate-500 truncate mt-0.5">{{ s.description }}</div>
               </div>
-              <span v-if="s.is_shared" class="shrink-0 text-[9px] bg-green-900/50 text-green-400 border border-green-800 rounded px-1.5 py-0.5">Partagé</span>
-              <span v-if="s.user_id !== auth.user?.id" class="shrink-0 text-[9px] bg-slate-800 text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{ s.owner }}</span>
+              <span v-if="s.is_shared" class="badge badge-positive shrink-0">Partagé</span>
+              <span v-if="s.user_id !== auth.user?.id" class="badge badge-muted shrink-0">{{ s.owner }}</span>
             </div>
 
             <!-- Tags -->
@@ -134,19 +127,14 @@
     </div>
 
     <!-- Rename modal -->
-    <div v-if="renameFolder.active"
-         class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4"
-         @click.self="renameFolder.active = false">
-      <div class="card w-full max-w-xs flex flex-col gap-3">
-        <div class="text-sm font-bold text-slate-200">Renommer le dossier</div>
-        <input ref="renameFolderInput" v-model="renameFolder.name" type="text" class="input"
-               @keyup.enter="saveRename" @keyup.esc="renameFolder.active = false" />
-        <div class="flex gap-2">
-          <button class="btn-primary text-xs flex-1" @click="saveRename">Renommer</button>
-          <button class="btn-secondary text-xs flex-1" @click="renameFolder.active = false">Annuler</button>
-        </div>
-      </div>
-    </div>
+    <BaseModal v-model="renameFolder.active" title="Renommer le dossier" max-width="360px">
+      <input ref="renameFolderInput" v-model="renameFolder.name" type="text" class="input"
+             @keyup.enter="saveRename" @keyup.esc="renameFolder.active = false" />
+      <template #footer>
+        <button class="btn-secondary text-xs" @click="renameFolder.active = false">Annuler</button>
+        <button class="btn-primary text-xs" @click="saveRename">Renommer</button>
+      </template>
+    </BaseModal>
   </div>
 </template>
 
@@ -155,9 +143,14 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
+import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import BaseModal from '../components/ui/BaseModal.vue'
+import { useToastsStore } from '../stores/toasts.js'
 
 const auth   = useAuthStore()
 const router = useRouter()
+const toasts = useToastsStore()
 
 // ── State ──────────────────────────────────────────────────────────
 const folders         = ref([])
@@ -246,6 +239,7 @@ async function saveRename() {
   })
   renameFolder.value.active = false
   await fetchFolders()
+  toasts.success('Dossier renommé')
 }
 
 async function deleteFolder(id) {
@@ -253,6 +247,7 @@ async function deleteFolder(id) {
   await apiFetch(`/api/folders/${id}`, { method: 'DELETE', headers: auth.authHeaders() })
   if (selectedFolderId.value === id) selectedFolderId.value = null
   await fetchFolders()
+  toasts.success('Dossier supprimé')
 }
 
 // ── Scripts actions ────────────────────────────────────────────────
@@ -264,6 +259,7 @@ async function deleteScript(id) {
   if (!confirm('Supprimer ce script ?')) return
   await apiFetch(`/api/db/scripts/${id}`, { method: 'DELETE', headers: auth.authHeaders() })
   scripts.value = scripts.value.filter(s => s.id !== id)
+  toasts.success('Script supprimé')
 }
 
 async function toggleShare(s) {
@@ -276,6 +272,7 @@ async function toggleShare(s) {
     const updated = await res.json()
     const idx = scripts.value.findIndex(x => x.id === s.id)
     if (idx !== -1) scripts.value[idx] = updated
+    toasts.success(updated.is_shared ? 'Script partagé avec votre entité' : 'Script rendu privé')
   }
 }
 

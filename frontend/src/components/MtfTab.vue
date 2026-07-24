@@ -146,6 +146,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -155,6 +156,7 @@ import {
 } from 'chart.js'
 
 Chart.register(LineElement, LineController, PointElement, CategoryScale, LinearScale, Filler, Tooltip, Legend)
+applyChartTheme(Chart)
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -208,28 +210,28 @@ async function renderChart() {
     data: {
       labels,
       datasets: [
-        { label: 'P95', data: mk('p95'), fill: false, borderColor: 'rgba(59,130,246,.25)', borderWidth: 1, pointRadius: 0, tension: .3, borderDash: [3, 3] },
-        { label: 'P05', data: mk('p05'), fill: '-1', backgroundColor: 'rgba(59,130,246,.08)', borderColor: 'rgba(59,130,246,.25)', borderWidth: 1, pointRadius: 0, tension: .3, borderDash: [3, 3] },
-        { label: 'P75', data: mk('p75'), fill: false, borderColor: 'rgba(59,130,246,.5)', borderWidth: 1.5, pointRadius: 0, tension: .3 },
-        { label: 'P25', data: mk('p25'), fill: '-1', backgroundColor: 'rgba(59,130,246,.16)', borderColor: 'rgba(59,130,246,.5)', borderWidth: 1.5, pointRadius: 0, tension: .3 },
-        { label: 'Médiane', data: mk('p50'), fill: false, borderColor: '#3b82f6', borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: '#3b82f6', tension: .3 },
-        { label: 'Moyenne', data: mk('mean'), fill: false, borderColor: '#f59e0b', borderWidth: 1.5, pointRadius: 0, tension: .3, borderDash: [5, 3] },
-        { label: 'P99', data: mk('p99'), fill: false, borderColor: 'rgba(239,68,68,.35)', borderWidth: 1, pointRadius: 0, tension: .3, borderDash: [2, 4] },
-        { label: 'P01', data: mk('p01'), fill: false, borderColor: 'rgba(239,68,68,.35)', borderWidth: 1, pointRadius: 0, tension: .3, borderDash: [2, 4] },
+        { label: 'P95', data: mk('p95'), fill: false, borderColor: 'rgba(37,99,235,.25)', borderWidth: 1, pointRadius: 0, tension: .3, borderDash: [3, 3] },
+        { label: 'P05', data: mk('p05'), fill: '-1', backgroundColor: 'rgba(37,99,235,.08)', borderColor: 'rgba(37,99,235,.25)', borderWidth: 1, pointRadius: 0, tension: .3, borderDash: [3, 3] },
+        { label: 'P75', data: mk('p75'), fill: false, borderColor: 'rgba(37,99,235,.5)', borderWidth: 1.5, pointRadius: 0, tension: .3 },
+        { label: 'P25', data: mk('p25'), fill: '-1', backgroundColor: 'rgba(37,99,235,.16)', borderColor: 'rgba(37,99,235,.5)', borderWidth: 1.5, pointRadius: 0, tension: .3 },
+        { label: 'Médiane', data: mk('p50'), fill: false, borderColor: chartTheme.primary, borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: chartTheme.primary, tension: .3 },
+        { label: 'Moyenne', data: mk('mean'), fill: false, borderColor: chartTheme.gold, borderWidth: 1.5, pointRadius: 0, tension: .3, borderDash: [5, 3] },
+        { label: 'P99', data: mk('p99'), fill: false, borderColor: 'rgba(192,57,43,.35)', borderWidth: 1, pointRadius: 0, tension: .3, borderDash: [2, 4] },
+        { label: 'P01', data: mk('p01'), fill: false, borderColor: 'rgba(192,57,43,.35)', borderWidth: 1, pointRadius: 0, tension: .3, borderDash: [2, 4] },
       ],
     },
     options: demoChartOptions({
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 12 } },
+        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } },
         tooltip: {
           mode: 'index', intersect: false,
           callbacks: { label: it => `${it.dataset.label}: ${it.raw?.toFixed?.(2)}%` },
         },
       },
       scales: {
-        x: { ticks: { color: '#475569', font: { size: 10 } }, grid: { color: '#1e293b' } },
-        y: { ticks: { color: '#475569', font: { size: 9 }, callback: v => v + '%' }, grid: { color: '#1e293b' } },
+        x: { ticks: { font: { size: 10 } } },
+        y: { ticks: { font: { size: 9 }, callback: v => v + '%' } },
       },
       animation: { duration: 250 },
     }, demo.enabled),

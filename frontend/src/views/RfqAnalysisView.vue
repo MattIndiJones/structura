@@ -1,18 +1,15 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col">
-
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 sticky top-0 z-20 bg-slate-950/95 backdrop-blur">
-      <RouterLink to="/" class="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-        <span class="text-slate-600 text-xs">/ Analyse Contreparties</span>
-      </RouterLink>
-      <RouterLink to="/rfq" class="btn-secondary text-xs px-3 py-1.5">← Retour aux RFQ</RouterLink>
-      <span class="text-xs text-slate-500 ml-auto">{{ auth.user?.username }}</span>
-    </header>
+  <div class="flex-1 flex flex-col min-h-0">
 
     <main class="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Analyse Contreparties</h1>
+        </div>
+        <div class="page-actions">
+          <RouterLink to="/rfq" class="btn-ghost btn-sm">← Retour aux RFQ</RouterLink>
+        </div>
+      </div>
 
       <div v-if="loading" class="text-xs text-slate-600 py-8 text-center">Chargement…</div>
 
@@ -104,15 +101,14 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Chart, registerables } from 'chart.js'
-import { useAuthStore } from '../stores/auth.js'
 import { useRfqStore } from '../stores/rfq.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import { templateMeta } from '../data/payscriptTemplates.js'
 
 Chart.register(...registerables)
-
-const auth = useAuthStore()
+applyChartTheme(Chart)
 const rfq  = useRfqStore()
 const demo = useDemoModeStore()
 
@@ -153,7 +149,7 @@ const filteredHistory = computed(() => {
   })
 })
 
-const FACTOR_COLORS = ['#60a5fa', '#34d399', '#f59e0b', '#f472b6', '#a78bfa', '#fb923c']
+const FACTOR_COLORS = chartTheme.series
 
 function providerLabel(id) {
   return rfq.providers.find(p => p.id === id)?.label || id
@@ -181,16 +177,14 @@ function chartOpts() {
   return {
     responsive: true, maintainAspectRatio: true,
     plugins: {
-      legend: { display: true, labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 12 } },
+      legend: { display: true, labels: { font: { size: 10 }, boxWidth: 12 } },
       tooltip: {
-        backgroundColor: '#1e293b', titleColor: '#94a3b8', bodyColor: '#e2e8f0',
-        borderColor: '#334155', borderWidth: 1, cornerRadius: 6,
         callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y} bps` },
       },
     },
     scales: {
-      x: { ticks: { color: '#475569', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
-      y: { ticks: { color: '#475569', font: { size: 9 }, callback: v => `${v} bps` }, grid: { color: '#1e293b' } },
+      x: { ticks: { font: { size: 9 }, maxTicksLimit: 8 } },
+      y: { ticks: { font: { size: 9 }, callback: v => `${v} bps` } },
     },
   }
 }

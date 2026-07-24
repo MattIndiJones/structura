@@ -1,27 +1,22 @@
 <template>
-  <div class="h-screen bg-slate-950 flex flex-col overflow-hidden">
+  <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
 
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 shrink-0 bg-slate-950/95 backdrop-blur">
-      <RouterLink to="/" class="flex items-center gap-2.5 mr-auto hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-        <span class="text-slate-600 text-xs">/ RFQ Fournisseurs</span>
-      </RouterLink>
-      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Accueil</RouterLink>
-      <RouterLink to="/rfq/analyse" class="text-xs text-slate-500 hover:text-slate-300">📈 Analyse</RouterLink>
-      <span class="text-xs text-slate-500">{{ auth.user?.username }}</span>
-      <button class="btn-primary text-xs px-3 py-1.5" @click="openCreateForm">+ Nouvelle RFQ</button>
-    </header>
+    <div class="page-header px-6 pt-6 pb-0 mb-0">
+      <div>
+        <h1 class="page-title">RFQ Fournisseurs</h1>
+      </div>
+      <div class="page-actions">
+        <RouterLink to="/rfq/analyse" class="btn-ghost btn-sm">📈 Analyse</RouterLink>
+        <button class="btn-primary text-xs px-3 py-1.5" @click="openCreateForm">+ Nouvelle RFQ</button>
+      </div>
+    </div>
 
     <div class="flex flex-1 min-h-0">
 
       <!-- ── Liste RFQ ──────────────────────────────────────────── -->
       <aside class="w-80 shrink-0 border-r border-slate-800 overflow-y-auto p-3 flex flex-col gap-2">
-        <div v-if="loadingList" class="text-xs text-slate-600 px-2 py-4">Chargement…</div>
-        <div v-else-if="!rfq.list.length" class="text-xs text-slate-600 px-2 py-4">
-          Aucune RFQ pour l'instant.
-        </div>
+        <LoadingSpinner v-if="loadingList" class="py-4" />
+        <EmptyState v-else-if="!rfq.list.length" icon="📨" title="Aucune RFQ pour l'instant" />
         <div v-for="r in rfq.list" :key="r.id"
              :class="['card p-3 flex flex-col gap-1.5 cursor-pointer transition-all duration-200 hover:shadow-lg hover:shadow-black/20',
                       selectedId === r.id ? 'border-blue-600 shadow-lg shadow-blue-950/30' : 'hover:border-slate-700']"
@@ -48,9 +43,7 @@
         <div v-if="showCreateForm" class="max-w-2xl flex flex-col gap-4">
           <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider">Nouvelle RFQ</h2>
 
-          <div v-if="createError" class="bg-red-950/60 border border-red-800 rounded px-3 py-2 text-xs text-red-300">
-            {{ createError }}
-          </div>
+          <AlertMessage v-if="createError" kind="error">{{ createError }}</AlertMessage>
 
           <div class="card flex flex-col gap-3">
             <div class="grid grid-cols-2 gap-3">
@@ -228,9 +221,7 @@
               {{ computing ? 'Calcul…' : 'Calculer prix modèle' }}
             </button>
           </div>
-          <div v-if="computeError" class="bg-red-950/60 border border-red-800 rounded px-3 py-2 text-xs text-red-300">
-            {{ computeError }}
-          </div>
+          <AlertMessage v-if="computeError" kind="error">{{ computeError }}</AlertMessage>
 
           <!-- Script (collapsible) -->
           <details class="card text-xs text-slate-400">
@@ -249,13 +240,14 @@
               Aucun fournisseur sollicité pour l'instant.
             </div>
 
-            <table v-else class="w-full text-xs">
+            <div v-else class="table-shell" tabindex="0" role="region">
+            <table class="w-full text-xs">
               <thead>
                 <tr class="text-left text-slate-500 border-b border-slate-800">
                   <th class="py-1.5 pr-2 font-medium">Fournisseur</th>
                   <th class="py-1.5 pr-2 font-medium">Contact</th>
-                  <th class="py-1.5 pr-2 font-medium">Prix</th>
-                  <th class="py-1.5 pr-2 font-medium">Écart</th>
+                  <th class="py-1.5 pr-2 font-medium num">Prix</th>
+                  <th class="py-1.5 pr-2 font-medium num">Écart</th>
                   <th class="py-1.5 pr-2 font-medium">Statut</th>
                   <th class="py-1.5 pr-2 font-medium">Date réponse</th>
                   <th class="py-1.5 pr-2 font-medium"></th>
@@ -270,7 +262,7 @@
                            :value="q.price ?? ''"
                            @change="onQuotePriceChange(q, $event.target.value)" />
                   </td>
-                  <td class="py-1.5 pr-2" :class="spreadClass(q)">{{ spreadBps(q) }}</td>
+                  <td class="py-1.5 pr-2 num" :class="spreadClass(q)">{{ spreadBps(q) }}</td>
                   <td class="py-1.5 pr-2">
                     <select class="select py-1 px-2" :value="q.status" @change="updateQuoteField(q, 'status', $event.target.value)">
                       <option value="en_attente">En attente</option>
@@ -290,6 +282,7 @@
                 </tr>
               </tbody>
             </table>
+            </div>
 
             <!-- Add quote inline form -->
             <div v-if="addingQuote" class="flex items-end gap-2 pt-2 border-t border-slate-800">
@@ -327,14 +320,17 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useAuthStore } from '../stores/auth.js'
 import { useRfqStore } from '../stores/rfq.js'
 import { apiFetch } from '../utils/api.js'
 import { templateMeta, examples } from '../data/payscriptTemplates.js'
 import { underlyingGroups } from '../data/commonUnderlyings.js'
+import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import AlertMessage from '../components/ui/AlertMessage.vue'
+import { useToastsStore } from '../stores/toasts.js'
 
-const auth = useAuthStore()
-const rfq  = useRfqStore()
+const rfq    = useRfqStore()
+const toasts = useToastsStore()
 
 const loadingList    = ref(true)
 const selectedId     = ref(null)
@@ -579,6 +575,7 @@ async function submitCreate() {
     })
     showCreateForm.value = false
     await selectRfq(rfqObj.id)
+    toasts.success('RFQ créée')
   } catch (e) {
     createError.value = e.message
   } finally {
@@ -590,6 +587,7 @@ async function deleteRfq(id) {
   if (!confirm('Supprimer cette RFQ ?')) return
   await rfq.remove(id)
   if (selectedId.value === id) selectedId.value = null
+  toasts.success('RFQ supprimée')
 }
 
 async function computeModelPrice() {

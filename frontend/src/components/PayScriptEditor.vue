@@ -48,49 +48,39 @@
     </div>
 
     <!-- Save modal -->
-    <Teleport to="body">
-      <div v-if="saveModal.open"
-           class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4"
-           @click.self="saveModal.open = false">
-        <div class="card w-full max-w-sm flex flex-col gap-4">
-          <div class="text-sm font-bold text-slate-200">Sauvegarder le script</div>
+    <BaseModal v-model="saveModal.open" title="Sauvegarder le script" max-width="420px">
+      <div class="flex flex-col gap-4">
+        <AlertMessage v-if="saveModal.error" kind="error">{{ saveModal.error }}</AlertMessage>
 
-          <div v-if="saveModal.error"
-               class="bg-red-950/60 border border-red-800 rounded px-3 py-2 text-xs text-red-300">
-            {{ saveModal.error }}
-          </div>
-
-          <div class="flex flex-col gap-1">
-            <label class="label">Nom *</label>
-            <input ref="saveNameInput" v-model="saveModal.name" type="text" class="input"
-                   placeholder="Mon autocall 3Y…"
-                   @keyup.enter="doSave" />
-          </div>
-          <div class="flex flex-col gap-1">
-            <label class="label">Description</label>
-            <input v-model="saveModal.description" type="text" class="input"
-                   placeholder="Description courte (optionnel)" />
-          </div>
-          <div class="flex flex-col gap-1">
-            <label class="label">Tags</label>
-            <input v-model="saveModal.tags" type="text" class="input"
-                   placeholder="autocall, 3Y, EUR…" />
-          </div>
-          <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
-            <input type="checkbox" v-model="saveModal.isShared" class="accent-blue-500" />
-            Partager avec mon entité
-          </label>
-
-          <div class="flex gap-2">
-            <button class="btn-primary text-xs flex-1" :disabled="saving" @click="doSave">
-              <span v-if="saving" class="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin inline-block mr-1.5"></span>
-              Sauvegarder
-            </button>
-            <button class="btn-secondary text-xs flex-1" @click="saveModal.open = false">Annuler</button>
-          </div>
+        <div class="flex flex-col gap-1">
+          <label class="label">Nom *</label>
+          <input ref="saveNameInput" v-model="saveModal.name" type="text" class="input"
+                 placeholder="Mon autocall 3Y…"
+                 @keyup.enter="doSave" />
         </div>
+        <div class="flex flex-col gap-1">
+          <label class="label">Description</label>
+          <input v-model="saveModal.description" type="text" class="input"
+                 placeholder="Description courte (optionnel)" />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="label">Tags</label>
+          <input v-model="saveModal.tags" type="text" class="input"
+                 placeholder="autocall, 3Y, EUR…" />
+        </div>
+        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+          <input type="checkbox" v-model="saveModal.isShared" class="accent-blue-500" />
+          Partager avec mon entité
+        </label>
       </div>
-    </Teleport>
+      <template #footer>
+        <button class="btn-secondary text-xs" @click="saveModal.open = false">Annuler</button>
+        <button class="btn-primary text-xs flex items-center gap-1.5" :disabled="saving" @click="doSave">
+          <span v-if="saving" class="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin"></span>
+          Sauvegarder
+        </button>
+      </template>
+    </BaseModal>
 
     <!-- Editor -->
     <div class="card p-0 overflow-hidden">
@@ -205,11 +195,15 @@
 <script setup>
 import { ref, reactive, computed, nextTick } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
+import { useToastsStore } from '../stores/toasts.js'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
+import BaseModal from './ui/BaseModal.vue'
+import AlertMessage from './ui/AlertMessage.vue'
 import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
 
 const store = usePricingStore()
+const toasts = useToastsStore()
 
 const groupedTemplates = computed(() => {
   const groups = {}
@@ -241,6 +235,7 @@ async function quickSave() {
   saving.value = true
   try {
     await store.updateScript()
+    toasts.success('Script mis à jour')
   } catch (e) {
     openSaveModal()
     saveModal.error = e.message
@@ -262,6 +257,7 @@ async function doSave() {
       isShared: saveModal.isShared,
     })
     saveModal.open = false
+    toasts.success('Script sauvegardé')
   } catch (e) {
     saveModal.error = e.message
   } finally {

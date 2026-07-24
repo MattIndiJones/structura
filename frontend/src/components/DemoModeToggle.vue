@@ -38,18 +38,18 @@ const demo = useDemoModeStore()
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.1em;
-  color: #fbbf24;
-  background: rgba(120, 53, 15, 0.4);
-  border: 1px solid rgba(217, 119, 6, 0.5);
+  color: var(--gold);
+  background: var(--gold-light);
+  border: 1px solid rgba(184, 134, 11, 0.35);
   border-radius: 5px;
   padding: 3px 8px;
   white-space: nowrap;
   animation: demo-pulse 2.5s ease-in-out infinite;
 }
 .demo-banner-linkedin {
-  color: #38bdf8;
-  background: rgba(7, 89, 133, 0.4);
-  border-color: rgba(14, 165, 233, 0.5);
+  color: var(--accent);
+  background: var(--accent-light);
+  border-color: rgba(26, 95, 160, 0.3);
 }
 @keyframes demo-pulse {
   0%, 100% { opacity: 1; }
@@ -67,15 +67,15 @@ const demo = useDemoModeStore()
   width: 30px;
   height: 16px;
   border-radius: 999px;
-  background: #334155;
-  border: 1px solid #475569;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
   position: relative;
   transition: background-color 0.15s ease;
   flex-shrink: 0;
 }
 .demo-switch-track-on {
-  background: #b45309;
-  border-color: #d97706;
+  background: var(--gold);
+  border-color: var(--gold);
 }
 .demo-switch-thumb {
   position: absolute;
@@ -84,11 +84,11 @@ const demo = useDemoModeStore()
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #cbd5e1;
+  background: #ffffff;
   transition: transform 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,.25);
 }
 .demo-switch-thumb-on {
   transform: translateX(14px);
-  background: #fef3c7;
 }
 </style>

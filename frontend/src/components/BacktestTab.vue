@@ -153,6 +153,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import ComparatorTab from './ComparatorTab.vue'
@@ -164,6 +165,7 @@ import {
 
 Chart.register(BarElement, BarController, LineElement, LineController, PointElement,
                CategoryScale, LinearScale, Tooltip, Legend)
+applyChartTheme(Chart)
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -240,7 +242,7 @@ async function renderCharts() {
     const b = Math.min(binCount - 1, Math.floor((v - minV) / bw))
     counts[b]++
   })
-  const bcolors = bins.map(v => v >= 0 ? 'rgba(16,185,129,.7)' : 'rgba(239,68,68,.7)')
+  const bcolors = bins.map(v => v >= 0 ? chartTheme.positive : chartTheme.negative)
   const blabels = bins.map(v => (v * 100).toFixed(1) + '%')
 
   histChart = new Chart(histCanvas.value, {
@@ -251,8 +253,8 @@ async function renderCharts() {
       plugins: { legend: { display: false },
         tooltip: { callbacks: { label: it => `${it.raw} fenêtres` } } },
       scales: {
-        x: { ticks: { color: '#475569', font: { size: 8 }, maxRotation: 45 }, grid: { color: '#1e293b' } },
-        y: { ticks: { color: '#475569', font: { size: 9 } }, grid: { color: '#1e293b' }, min: 0 },
+        x: { ticks: { font: { size: 8 }, maxRotation: 45 } },
+        y: { ticks: { font: { size: 9 } }, min: 0 },
       },
       animation: { duration: 200 },
     }, demo.enabled),
@@ -269,8 +271,8 @@ async function renderCharts() {
       datasets: [{
         label: 'TRI (%)',
         data: lineIrrs,
-        borderColor: 'rgba(59,130,246,.8)',
-        backgroundColor: 'rgba(59,130,246,.08)',
+        borderColor: chartTheme.primary,
+        backgroundColor: chartTheme.primarySoft,
         borderWidth: 1.5,
         pointRadius: 0,
         fill: true,
@@ -278,7 +280,7 @@ async function renderCharts() {
       }, {
         label: 'TRI=0',
         data: lineDates.map(() => 0),
-        borderColor: 'rgba(239,68,68,.4)',
+        borderColor: 'rgba(192,57,43,.4)',
         borderWidth: 1,
         borderDash: [5, 4],
         pointRadius: 0,
@@ -290,8 +292,8 @@ async function renderCharts() {
       plugins: { legend: { display: false },
         tooltip: { callbacks: { label: it => `TRI: ${it.raw.toFixed(2)}%` } } },
       scales: {
-        x: { ticks: { color: '#475569', font: { size: 8 }, maxTicksLimit: 8, maxRotation: 30 }, grid: { color: '#1e293b' } },
-        y: { ticks: { color: '#475569', font: { size: 9 }, callback: v => v + '%' }, grid: { color: '#1e293b' } },
+        x: { ticks: { font: { size: 8 }, maxTicksLimit: 8, maxRotation: 30 } },
+        y: { ticks: { font: { size: 9 }, callback: v => v + '%' } },
       },
       animation: { duration: 200 },
     }, demo.enabled),

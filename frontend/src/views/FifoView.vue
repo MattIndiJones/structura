@@ -1,21 +1,16 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col text-slate-100">
+  <div class="flex-1 flex flex-col min-h-0 text-slate-100">
 
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 shrink-0">
-      <RouterLink to="/" class="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-      </RouterLink>
-      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Accueil</RouterLink>
-      <span class="text-slate-700">|</span>
-      <span class="font-bold text-slate-100 tracking-tight">Carnet d'ordres — FIFO</span>
-      <div class="ml-auto flex items-center gap-3">
-        <span v-if="result" class="text-xs text-slate-500">{{ result.meta.order_count }} ordres · {{ result.meta.isin_count }} ISINs · {{ result.meta.as_of }}</span>
+    <div class="page-header px-6 pt-6 pb-0 mb-0">
+      <div>
+        <h1 class="page-title">Carnet d'ordres — FIFO</h1>
       </div>
-    </header>
+      <div class="page-actions">
+        <span v-if="result" class="text-xs" style="color: var(--muted);">{{ result.meta.order_count }} ordres · {{ result.meta.isin_count }} ISINs · {{ result.meta.as_of }}</span>
+      </div>
+    </div>
 
-    <div class="flex flex-1 overflow-hidden">
+    <div class="flex flex-1 min-h-0 overflow-hidden">
 
       <!-- Sidebar config -->
       <aside class="w-72 border-r border-slate-800 flex flex-col gap-4 p-4 shrink-0 overflow-y-auto">
@@ -137,16 +132,16 @@
           </div>
 
           <!-- Open Positions -->
-          <div v-if="tab === 'open'" class="overflow-auto">
+          <div v-if="tab === 'open'" class="overflow-auto table-shell" tabindex="0" role="region">
             <table class="w-full text-xs text-left border-collapse">
               <thead>
                 <tr class="text-slate-500 border-b border-slate-800">
                   <th class="py-2 pr-4 font-medium">Instrument</th>
-                  <th class="py-2 pr-4 font-medium text-right">Qté ouverte</th>
-                  <th class="py-2 pr-4 font-medium text-right">Coût moy.</th>
-                  <th class="py-2 pr-4 font-medium text-right">Mark</th>
-                  <th class="py-2 pr-4 font-medium text-right">Coût total</th>
-                  <th class="py-2 font-medium text-right">Latent</th>
+                  <th class="py-2 pr-4 font-medium text-right num">Qté ouverte</th>
+                  <th class="py-2 pr-4 font-medium text-right num">Coût moy.</th>
+                  <th class="py-2 pr-4 font-medium text-right num">Mark</th>
+                  <th class="py-2 pr-4 font-medium text-right num">Coût total</th>
+                  <th class="py-2 font-medium text-right num">Latent</th>
                 </tr>
               </thead>
               <tbody>
@@ -172,17 +167,17 @@
           </div>
 
           <!-- Round Trips -->
-          <div v-if="tab === 'trips'" class="overflow-auto">
+          <div v-if="tab === 'trips'" class="overflow-auto table-shell" tabindex="0" role="region">
             <table class="w-full text-xs text-left border-collapse">
               <thead>
                 <tr class="text-slate-500 border-b border-slate-800">
                   <th class="py-2 pr-4 font-medium">Instrument</th>
                   <th class="py-2 pr-4 font-medium">Achat</th>
                   <th class="py-2 pr-4 font-medium">Vente</th>
-                  <th class="py-2 pr-4 font-medium text-right">Qté</th>
-                  <th class="py-2 pr-4 font-medium text-right">Px achat</th>
-                  <th class="py-2 pr-4 font-medium text-right">Px vente</th>
-                  <th class="py-2 font-medium text-right">P&L réalisé</th>
+                  <th class="py-2 pr-4 font-medium text-right num">Qté</th>
+                  <th class="py-2 pr-4 font-medium text-right num">Px achat</th>
+                  <th class="py-2 pr-4 font-medium text-right num">Px vente</th>
+                  <th class="py-2 font-medium text-right num">P&L réalisé</th>
                 </tr>
               </thead>
               <tbody>
@@ -207,7 +202,7 @@
           </div>
 
           <!-- Synthetics -->
-          <div v-if="tab === 'synth'" class="overflow-auto">
+          <div v-if="tab === 'synth'" class="overflow-auto table-shell" tabindex="0" role="region">
             <div class="text-xs text-slate-500 mb-3">
               Injections synthétiques T0 : BUYs injectés à la date d'inception pour couvrir des ventes sans achat préalable dans le carnet.
             </div>
@@ -215,9 +210,9 @@
               <thead>
                 <tr class="text-slate-500 border-b border-slate-800">
                   <th class="py-2 pr-4 font-medium">Instrument</th>
-                  <th class="py-2 pr-4 font-medium text-right">Excès vente</th>
+                  <th class="py-2 pr-4 font-medium text-right num">Excès vente</th>
                   <th class="py-2 pr-4 font-medium">Date T0</th>
-                  <th class="py-2 pr-4 font-medium text-right">Prix injecté</th>
+                  <th class="py-2 pr-4 font-medium text-right num">Prix injecté</th>
                   <th class="py-2 pr-4 font-medium">Source</th>
                   <th class="py-2 font-medium text-center">Injecté</th>
                 </tr>
@@ -247,11 +242,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { RouterLink } from 'vue-router'
-import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
-
-const auth = useAuthStore()
 
 const folder     = ref('')
 const qtyMode    = ref('auto')

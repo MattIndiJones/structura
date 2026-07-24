@@ -1,34 +1,28 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col text-slate-100">
-
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 shrink-0">
-      <RouterLink to="/" class="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-      </RouterLink>
-      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Accueil</RouterLink>
-      <span class="text-slate-700">|</span>
-      <span class="font-bold text-slate-100 tracking-tight">Booking — produits bookés</span>
-      <div class="ml-auto flex items-center gap-3">
-        <span v-if="refreshBookStatus" class="text-xs text-slate-500">{{ refreshBookStatus }}</span>
-        <button class="btn-secondary text-xs px-3 py-1.5" :disabled="refreshingBook" @click="refreshBook">
-          {{ refreshingBook ? '⏳ Rafraîchissement…' : '🔄 Rafraîchir le book' }}
-        </button>
-        <span v-if="dealsStore.deals.length" class="text-xs text-slate-500">
-          {{ filteredDeals.length }} / {{ dealsStore.deals.length }} deal(s)
-        </span>
-      </div>
-    </header>
+  <div class="flex-1 flex flex-col min-h-0 text-slate-100">
 
     <main class="flex-1 overflow-y-auto p-6">
       <div class="max-w-[1600px] mx-auto flex flex-col gap-3">
 
-        <div v-if="dealsStore.loading && !dealsStore.deals.length" class="text-sm text-slate-500">Chargement…</div>
-
-        <div v-else-if="!dealsStore.deals.length" class="card text-sm text-slate-500">
-          Aucun deal booké pour l'instant. Un deal se book depuis l'onglet Deal du Pricer, une fois un pricing lancé.
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Booking — produits bookés</h1>
+          </div>
+          <div class="page-actions">
+            <span v-if="refreshBookStatus" class="text-xs" style="color: var(--muted);">{{ refreshBookStatus }}</span>
+            <button class="btn-secondary text-xs px-3 py-1.5" :disabled="refreshingBook" @click="refreshBook">
+              {{ refreshingBook ? '⏳ Rafraîchissement…' : '🔄 Rafraîchir le book' }}
+            </button>
+            <span v-if="dealsStore.deals.length" class="text-xs" style="color: var(--muted);">
+              {{ filteredDeals.length }} / {{ dealsStore.deals.length }} deal(s)
+            </span>
+          </div>
         </div>
+
+        <LoadingSpinner v-if="dealsStore.loading && !dealsStore.deals.length" class="py-10" />
+
+        <EmptyState v-else-if="!dealsStore.deals.length" icon="📒" title="Aucun deal booké pour l'instant"
+          hint="Un deal se book depuis l'onglet Deal du Pricer, une fois un pricing lancé." />
 
         <template v-else>
 
@@ -58,19 +52,19 @@
           <div class="card kpi-tile">
             <div class="flex flex-wrap gap-x-6 gap-y-3 relative">
               <div>
-                <div class="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Deals</div>
-                <div class="font-mono text-lg font-bold text-slate-100">{{ stats.total }}</div>
+                <div class="stat-value num" style="font-size:1.4rem;">{{ stats.total }}</div>
+                <div class="stat-label">Deals</div>
               </div>
               <div>
-                <div class="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Nominal total</div>
-                <div class="font-mono text-lg font-bold text-slate-100">{{ formatNominal(stats.nominalTotal) }}</div>
+                <div class="stat-value num" style="font-size:1.4rem;">{{ formatNominal(stats.nominalTotal) }}</div>
+                <div class="stat-label">Nominal total</div>
               </div>
               <div>
                 <div class="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Par statut</div>
                 <div class="flex gap-1.5 flex-wrap">
                   <span v-for="s in statusOptions" :key="s"
                     v-show="stats.byStatus[s]"
-                    :class="statusClass(s)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold">
+                    :class="statusClass(s)" class="badge">
                     {{ s }} {{ stats.byStatus[s] }} ({{ pct(stats.byStatus[s], stats.total) }})
                   </span>
                 </div>
@@ -81,20 +75,20 @@
                   <HelpTip text="Répartition des deals arrivés au bout de leur vie (callé, ou échu à maturité en KI ou en remboursement normal). Les deals encore actifs ne comptent pas dans ce ratio." />
                 </div>
                 <div class="flex gap-1.5 flex-wrap">
-                  <span v-if="stats.byOutcome.callé" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-900/40 text-amber-400">
+                  <span v-if="stats.byOutcome.callé" class="badge badge-gold">
                     callé {{ stats.byOutcome.callé }} ({{ pct(stats.byOutcome.callé, stats.resolved) }})
                   </span>
-                  <span v-if="stats.byOutcome.final" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-900/40 text-emerald-400">
+                  <span v-if="stats.byOutcome.final" class="badge badge-positive">
                     final {{ stats.byOutcome.final }} ({{ pct(stats.byOutcome.final, stats.resolved) }})
                   </span>
-                  <span v-if="stats.byOutcome.ki" class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-900/40 text-red-400">
+                  <span v-if="stats.byOutcome.ki" class="badge badge-negative">
                     ki {{ stats.byOutcome.ki }} ({{ pct(stats.byOutcome.ki, stats.resolved) }})
                   </span>
                 </div>
               </div>
               <div v-if="stats.avgRealizedPayout != null">
-                <div class="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Remboursement moyen réalisé</div>
-                <div class="font-mono text-lg font-bold text-slate-100">{{ (stats.avgRealizedPayout * 100).toFixed(1) }}%</div>
+                <div class="stat-value num" style="font-size:1.4rem;">{{ (stats.avgRealizedPayout * 100).toFixed(1) }}%</div>
+                <div class="stat-label">Remboursement moyen réalisé</div>
               </div>
             </div>
           </div>
@@ -135,7 +129,7 @@
 
             <div v-if="watchlistError" class="text-xs text-amber-400">⚠ {{ watchlistError }}</div>
 
-            <div v-else class="overflow-x-auto">
+            <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
               <table class="w-full text-xs border-collapse">
                 <thead>
                   <tr class="border-b border-slate-700">
@@ -198,7 +192,7 @@
                       </template>
                       <span v-else class="text-slate-600">—</span>
                     </td>
-                    <td class="py-2 pr-3 font-mono whitespace-nowrap">
+                    <td class="py-2 pr-3 font-mono num whitespace-nowrap">
                       <template v-if="w.wof != null">
                         <span :class="w.wof >= 1 ? 'text-emerald-400' : 'text-red-400'">
                           {{ (w.wof * 100).toFixed(1) }}%
@@ -305,7 +299,7 @@
                 <span v-if="d.product_type" class="text-slate-500 text-[10px] border border-slate-700 rounded px-1.5 py-0.5">
                   {{ d.product_type }}
                 </span>
-                <span :class="statusClass(d.status)" class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase">
+                <span :class="statusClass(d.status)" class="badge uppercase">
                   {{ d.status }}
                 </span>
                 <select class="select text-[10px] py-0.5" :value="d.portfolio_id ? String(d.portfolio_id) : ''"
@@ -668,7 +662,7 @@
                   <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
                     Constatations ({{ details[d.id].events?.length ?? 0 }})
                   </div>
-                  <div class="overflow-x-auto">
+                  <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                     <table class="w-full text-xs border-collapse">
                       <thead>
                         <tr class="border-b border-slate-700 text-left text-slate-500">
@@ -883,7 +877,7 @@
                   </div>
 
                   <template v-else>
-                    <div class="overflow-x-auto">
+                    <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                       <table class="w-full text-xs border-collapse">
                         <thead>
                           <tr class="border-b border-slate-700 text-slate-500">
@@ -985,14 +979,14 @@
                 <div v-if="!portfolioMembers.length" class="text-xs text-slate-500">
                   Aucun deal actif dans cette sélection.
                 </div>
-                <div v-else class="overflow-x-auto">
+                <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
                   <table class="w-full text-xs border-collapse">
                     <thead>
                       <tr class="border-b border-slate-700 text-slate-500">
                         <th class="text-left py-1.5 pr-3 font-semibold">Réf</th>
                         <th class="text-left py-1.5 pr-3 font-semibold">Contrepartie</th>
                         <th class="text-left py-1.5 pr-3 font-semibold">Type</th>
-                        <th class="text-right py-1.5 pr-3 font-semibold">Nominal</th>
+                        <th class="text-right py-1.5 pr-3 font-semibold num">Nominal</th>
                         <th class="text-left py-1.5 font-semibold">Greeks calculés le
                           <HelpTip text="Date du dernier calcul de Greeks de ce deal (POST .../greeks) — c'est ce qui nourrit l'agrégat du sous-onglet Risque. Cliquez la ligne pour ouvrir la fiche et lancer un recalcul individuel." /></th>
                       </tr>
@@ -1004,7 +998,7 @@
                         <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400">{{ d.reference }}</td>
                         <td class="py-1.5 pr-3 text-slate-300">{{ d.contrepartie }}</td>
                         <td class="py-1.5 pr-3 text-slate-500 text-[10px]">{{ d.product_type || '—' }}</td>
-                        <td class="py-1.5 pr-3 text-right font-mono text-slate-300">{{ formatNominal(d.nominal) }} {{ d.devise }}</td>
+                        <td class="py-1.5 pr-3 text-right font-mono num text-slate-300">{{ formatNominal(d.nominal) }} {{ d.devise }}</td>
                         <td class="py-1.5 text-slate-500">
                           <span v-if="d.greeks_computed_at">{{ new Date(d.greeks_computed_at).toLocaleDateString('fr-FR') }}</span>
                           <span v-else class="text-amber-400">jamais calculé</span>
@@ -1113,14 +1107,14 @@
                   — deal(s) non choqués (résolution en attente ou erreur de pricing)
                 </div>
 
-                <div class="overflow-x-auto">
+                <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                   <table class="w-full text-xs border-collapse">
                     <thead>
                       <tr class="border-b border-slate-700 text-slate-500">
                         <th class="text-left py-1.5 pr-3 font-semibold">Deal</th>
-                        <th class="text-right py-1.5 pr-3 font-semibold">MtM avant</th>
-                        <th class="text-right py-1.5 pr-3 font-semibold">MtM après</th>
-                        <th class="text-right py-1.5 font-semibold">ΔMtM (EUR)</th>
+                        <th class="text-right py-1.5 pr-3 font-semibold num">MtM avant</th>
+                        <th class="text-right py-1.5 pr-3 font-semibold num">MtM après</th>
+                        <th class="text-right py-1.5 font-semibold num">ΔMtM (EUR)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1143,7 +1137,8 @@
               <div class="pt-2 border-t border-slate-800">
                 <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Historique</div>
                 <div v-if="!currentShockHistory.length" class="text-xs text-slate-500">Aucun choc joué sur cette sélection.</div>
-                <table v-else class="w-full text-xs border-collapse">
+                <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
+                <table class="w-full text-xs border-collapse">
                   <tbody>
                     <tr v-for="h in currentShockHistory" :key="h.id" class="border-b border-slate-800/50">
                       <td class="py-1 pr-3 text-slate-500 whitespace-nowrap">{{ new Date(h.created_at).toLocaleString('fr-FR') }}</td>
@@ -1157,6 +1152,7 @@
                     </tr>
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           </div>
@@ -1174,6 +1170,8 @@ import { RouterLink } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
 import { apiFetch } from '../utils/api.js'
 import HelpTip from '../components/HelpTip.vue'
+import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 
 const dealsStore = useDealsStore()
 
@@ -1760,12 +1758,12 @@ function pct(n, total) {
 
 function statusClass(s) {
   const map = {
-    actif: 'bg-emerald-900/40 text-emerald-400',
-    'callé': 'bg-amber-900/40 text-amber-400',
-    'échu': 'bg-slate-700 text-slate-400',
-    'résilié': 'bg-red-900/40 text-red-400',
+    actif: 'badge-positive',
+    'callé': 'badge-gold',
+    'échu': 'badge-muted',
+    'résilié': 'badge-negative',
   }
-  return map[s] || 'bg-slate-800 text-slate-500'
+  return map[s] || 'badge-muted'
 }
 
 function formatNominal(n) {

@@ -1,24 +1,18 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col text-slate-100">
-
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-6 py-3 flex items-center gap-4 shrink-0">
-      <RouterLink to="/" class="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-      </RouterLink>
-      <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Accueil</RouterLink>
-      <span class="text-slate-700">|</span>
-      <span class="font-bold text-slate-100 tracking-tight">Réinvestissement — alternatives à un produit en vie</span>
-    </header>
+  <div class="flex-1 flex flex-col min-h-0 text-slate-100">
 
     <main class="flex-1 overflow-y-auto p-6">
       <div class="max-w-4xl mx-auto flex flex-col gap-4">
 
-        <div class="text-xs text-slate-500">
-          Espace de travail interne, pas montré au client : partez d'un deal en vie et cherchez le meilleur
-          sous-jacent de remplacement pour la même structure. Pour du sur-mesure au niveau du script, utilisez
-          l'onglet Script.
+        <div class="page-header mb-0">
+          <div>
+            <h1 class="page-title">Réinvestissement — alternatives à un produit en vie</h1>
+            <p class="page-subtitle">
+              Espace de travail interne, pas montré au client : partez d'un deal en vie et cherchez le meilleur
+              sous-jacent de remplacement pour la même structure. Pour du sur-mesure au niveau du script, utilisez
+              l'onglet Script.
+            </p>
+          </div>
         </div>
 
         <!-- ── 1. Sélecteur de produit ─────────────────────────── -->
@@ -346,11 +340,11 @@
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick } from 'vue'
-import { RouterLink } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
 import { apiFetch } from '../utils/api.js'
 import { underlyingGroups } from '../data/commonUnderlyings.js'
 import HelpTip from '../components/HelpTip.vue'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import {
   Chart, LineElement, LineController, PointElement, BarElement, BarController,
   CategoryScale, LinearScale, Tooltip, Legend,
@@ -358,6 +352,7 @@ import {
 
 Chart.register(LineElement, LineController, PointElement, BarElement, BarController,
   CategoryScale, LinearScale, Tooltip, Legend)
+applyChartTheme(Chart)
 
 const dealsStore = useDealsStore()
 dealsStore.loadDeals()
@@ -605,14 +600,14 @@ watch(proposalData, async () => {
       .map(cf => dateIdx.get(cf.date)).filter(i => i != null))
 
     const datasets = [{
-      label: proposalFor.value, data: values, borderColor: '#3b82f6',
-      backgroundColor: 'rgba(59,130,246,.1)', borderWidth: 1.3, tension: 0.1,
+      label: proposalFor.value, data: values, borderColor: chartTheme.primary,
+      backgroundColor: chartTheme.primarySoft, borderWidth: 1.3, tension: 0.1,
       pointRadius: (ctx) => cfIdxSet.has(ctx.dataIndex) ? 4 : 0,
-      pointBackgroundColor: '#f59e0b', pointBorderColor: '#f59e0b',
+      pointBackgroundColor: chartTheme.gold, pointBorderColor: chartTheme.gold,
     }]
     for (const b of prod?.barriers || []) {
       if (b.level == null) continue
-      const col = b.direction === 'up' ? 'rgba(16,185,129,.7)' : 'rgba(239,68,68,.7)'
+      const col = b.direction === 'up' ? 'rgba(26,122,74,.7)' : 'rgba(192,57,43,.7)'
       datasets.push({
         label: `${b.name} ${(b.level * 100).toFixed(0)}%`, data: hist.dates.map(() => b.level * 100),
         borderColor: col, borderWidth: 1, borderDash: [5, 4], pointRadius: 0,
@@ -624,13 +619,13 @@ watch(proposalData, async () => {
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
-          legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 8 }, boxWidth: 10 } },
+          legend: { position: 'bottom', labels: { font: { size: 8 }, boxWidth: 10 } },
           tooltip: { callbacks: { label: it => (it.datasetIndex === 0 && cfIdxSet.has(it.dataIndex))
             ? `${it.dataset.label}: ${it.raw}% (flux versé)` : `${it.dataset.label}: ${it.raw}%` } },
         },
         scales: {
-          x: { ticks: { color: '#475569', font: { size: 8 }, maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
-          y: { ticks: { color: '#475569', font: { size: 8 }, callback: v => v + '%' }, grid: { color: '#1e293b' } },
+          x: { ticks: { font: { size: 8 }, maxTicksLimit: 8 } },
+          y: { ticks: { font: { size: 8 }, callback: v => v + '%' } },
         },
         animation: { duration: 150 },
       },
@@ -651,7 +646,7 @@ watch(proposalData, async () => {
         datasets: [{
           label: 'TRI par fenêtre',
           data: windows.map(w => +(w.irr * 100).toFixed(2)),
-          backgroundColor: windows.map(w => w.irr >= 0 ? 'rgba(16,185,129,.6)' : 'rgba(239,68,68,.6)'),
+          backgroundColor: windows.map(w => w.irr >= 0 ? 'rgba(26,122,74,.6)' : 'rgba(192,57,43,.6)'),
         }],
       },
       options: {
@@ -661,8 +656,8 @@ watch(proposalData, async () => {
           tooltip: { callbacks: { label: it => `TRI: ${it.raw}%${windows[it.dataIndex].early_recall ? ' (rappel anticipé)' : ''}` } },
         },
         scales: {
-          x: { ticks: { color: '#475569', font: { size: 8 }, maxTicksLimit: 8 }, grid: { display: false } },
-          y: { ticks: { color: '#475569', font: { size: 8 }, callback: v => v + '%' }, grid: { color: '#1e293b' } },
+          x: { ticks: { font: { size: 8 }, maxTicksLimit: 8 }, grid: { display: false } },
+          y: { ticks: { font: { size: 8 }, callback: v => v + '%' } },
         },
         animation: { duration: 150 },
       },

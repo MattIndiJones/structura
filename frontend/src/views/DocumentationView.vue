@@ -1,21 +1,11 @@
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col">
+  <div class="flex-1 flex flex-col min-h-0">
 
-    <!-- Header -->
-    <header class="border-b border-slate-800 px-5 py-3 flex items-center gap-4 bg-slate-950/95 backdrop-blur sticky top-0 z-20">
-      <RouterLink to="/" class="flex items-center gap-2.5 shrink-0 hover:opacity-80 transition-opacity">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
-        <span class="font-bold text-slate-100 tracking-tight">Structura</span>
-      </RouterLink>
-      <span class="text-slate-600 text-xs hidden sm:block">— Documentation</span>
-      <div class="flex-1" />
-      <RouterLink to="/pricer" class="btn-secondary text-xs px-3 py-1.5">← Pricer</RouterLink>
-    </header>
-
-    <div class="flex-1 flex">
+    <div class="flex-1 flex min-h-0">
 
       <!-- Sidebar -->
       <aside class="w-52 shrink-0 border-r border-slate-800 p-4 flex flex-col gap-1">
+        <RouterLink to="/pricer" class="btn-ghost btn-sm mb-2 text-center">← Pricer</RouterLink>
         <button v-for="s in sections" :key="s.id"
           @click="activeSection = s.id"
           :class="[
@@ -36,7 +26,7 @@
         <div v-if="activeSection === 'library'">
           <div class="flex items-center justify-between mb-6">
             <div>
-              <h1 class="text-xl font-bold text-slate-100">Bibliothèque de documents</h1>
+              <h1 class="text-xl font-display font-bold text-slate-100">Bibliothèque de documents</h1>
               <p class="text-sm text-slate-500 mt-0.5">Tous vos documents générés, classés par deal</p>
             </div>
             <div class="flex items-center gap-2">
@@ -96,7 +86,7 @@
 
         <!-- ── GÉNÉRATEUR ──────────────────────────────────── -->
         <div v-if="activeSection === 'generator'">
-          <h1 class="text-xl font-bold text-slate-100 mb-1">Générateur de documents</h1>
+          <h1 class="text-xl font-display font-bold text-slate-100 mb-1">Générateur de documents</h1>
           <p class="text-sm text-slate-500 mb-6">
             Sélectionnez un type de document, configurez-le et générez.
           </p>
@@ -187,7 +177,7 @@
 
         <!-- ── TEMPLATES ────────────────────────────────────── -->
         <div v-if="activeSection === 'templates'">
-          <h1 class="text-xl font-bold text-slate-100 mb-1">Templates</h1>
+          <h1 class="text-xl font-display font-bold text-slate-100 mb-1">Templates</h1>
           <p class="text-sm text-slate-500 mb-6">
             Personnalisez les modèles de documents par entité.
           </p>

@@ -78,6 +78,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
+import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import {
@@ -86,6 +87,7 @@ import {
 } from 'chart.js'
 
 Chart.register(LineElement, LineController, PointElement, LinearScale, Filler, Tooltip)
+applyChartTheme(Chart)
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -155,11 +157,11 @@ async function renderChart() {
     data: {
       datasets: [{
         data,
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59,130,246,0.07)',
+        borderColor: chartTheme.primary,
+        backgroundColor: chartTheme.primarySoft,
         borderWidth: 1.8,
         pointRadius: 3,
-        pointBackgroundColor: '#3b82f6',
+        pointBackgroundColor: chartTheme.primary,
         tension: 0.35,
         fill: true,
       }],
@@ -177,13 +179,11 @@ async function renderChart() {
       scales: {
         x: {
           type: 'linear', min: 0, max: 30,
-          ticks: { color: '#475569', font: { size: 8 }, callback: v => v + 'Y',
+          ticks: { font: { size: 8 }, callback: v => v + 'Y',
                    values: [0.25, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30] },
-          grid: { color: '#1e293b' },
         },
         y: {
-          ticks: { color: '#475569', font: { size: 8 }, callback: v => v + '%' },
-          grid: { color: '#1e293b' },
+          ticks: { font: { size: 8 }, callback: v => v + '%' },
         },
       },
     }, demo.enabled),
