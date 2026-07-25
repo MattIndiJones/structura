@@ -105,16 +105,11 @@
               class="px-5 py-2.5 text-sm font-medium transition-colors">
               Deals ({{ filteredDeals.length }})
             </button>
-            <button @click="activeTab = 'portfolios'"
-              :class="activeTab === 'portfolios' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
-              class="px-5 py-2.5 text-sm font-medium transition-colors">
-              Portefeuilles
-            </button>
-            <button @click="activeTab = 'chocs'"
-              :class="activeTab === 'chocs' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
-              class="px-5 py-2.5 text-sm font-medium transition-colors">
-              Chocs
-            </button>
+            <RouterLink to="/risk"
+              class="ml-auto self-center text-xs text-slate-500 hover:text-slate-300 transition-colors px-3"
+              title="Portefeuilles, Greeks agrégés, chocs et P&L explain ont déménagé dans le module Risk Management">
+              Portefeuilles &amp; chocs → Risk Management ↗
+            </RouterLink>
           </div>
 
           <!-- ── Onglet Surveillance : watchlist barrières ──────── -->
@@ -786,377 +781,7 @@
 
           </template><!-- /deals tab -->
 
-          <!-- ── Onglet Portefeuilles : books + risque agrégé ──── -->
-          <template v-if="activeTab === 'portfolios'">
-          <div class="flex gap-4 flex-wrap items-start">
 
-            <!-- Gestion des portefeuilles -->
-            <div class="card flex flex-col gap-1 w-full sm:w-64 shrink-0">
-              <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 px-0.5">Mes portefeuilles</div>
-              <button class="flex items-center gap-2 text-left px-2.5 py-2 rounded-lg text-xs font-medium transition-colors"
-                :class="portfolioView === 'global' ? 'bg-blue-600/15 text-blue-300 ring-1 ring-blue-600/40' : 'text-slate-400 hover:bg-slate-800/60'"
-                @click="selectPortfolioView('global')">
-                <span class="text-sm">📊</span>
-                <span class="flex-1">Tous portefeuilles</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">{{ activeDealsCount }}</span>
-              </button>
-              <div class="border-t border-slate-800 my-1"></div>
-              <div v-for="p in portfolios" :key="p.id" class="flex items-center gap-0.5 group">
-                <button class="flex-1 flex items-center gap-2 text-left px-2.5 py-2 rounded-lg text-xs font-medium transition-colors min-w-0"
-                  :class="portfolioView === p.id ? 'bg-blue-600/15 text-blue-300 ring-1 ring-blue-600/40' : 'text-slate-400 hover:bg-slate-800/60'"
-                  @click="selectPortfolioView(p.id)">
-                  <span class="text-sm shrink-0">{{ p.is_default ? '⭐' : '📁' }}</span>
-                  <span class="flex-1 truncate">{{ p.name }}</span>
-                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 shrink-0">{{ p.deal_count }}</span>
-                </button>
-                <button class="text-slate-600 hover:text-slate-300 text-xs px-1 opacity-0 group-hover:opacity-100 shrink-0"
-                  title="Renommer" @click="renamePortfolio(p)">✎</button>
-                <button v-if="!p.is_default" class="text-slate-600 hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 shrink-0"
-                  title="Supprimer (les deals sont déplacés vers le portefeuille par défaut)" @click="deletePortfolio(p)">✕</button>
-                <span v-else class="text-slate-700 text-xs px-1 shrink-0" title="Portefeuille par défaut — ne peut pas être supprimé, chaque deal doit toujours être surveillé">🔒</span>
-              </div>
-              <div class="flex gap-1.5 mt-2 pt-2 border-t border-slate-800">
-                <input v-model="newPortfolioName" type="text" placeholder="Nouveau portefeuille…"
-                  class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 placeholder-slate-600 flex-1 min-w-0 focus:outline-none focus:border-blue-600"
-                  @keyup.enter="createPortfolio" />
-                <button class="btn-secondary text-xs px-2 py-1 shrink-0" :disabled="!newPortfolioName.trim()" @click="createPortfolio">＋</button>
-              </div>
-            </div>
-
-            <!-- Panneau principal -->
-            <div class="card kpi-tile flex-1 min-w-0 flex flex-col gap-3">
-              <div class="flex items-center gap-3 flex-wrap">
-                <div class="text-sm font-bold text-slate-100">
-                  {{ portfolioView === 'global' ? '📊 Tous portefeuilles' : `${portfolioIsDefault ? '⭐' : '📁'} ${portfolioLabel}` }}
-                </div>
-                <button class="btn-secondary text-xs px-3 py-1.5 ml-auto" :disabled="portfolioRecomputing || !portfolioMembers.length"
-                  @click="recomputePortfolio">
-                  <span v-if="portfolioRecomputing"
-                    class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
-                  🔄 Recalculer{{ portfolioRecomputing ? ` (${portfolioRecomputeDone}/${portfolioRecomputeTotal})` : '' }}
-                </button>
-              </div>
-
-              <!-- Sous-onglets Risque / Deals -->
-              <div class="flex border-b border-slate-800 -mb-1">
-                <button @click="portfolioSubTab = 'risk'"
-                  :class="portfolioSubTab === 'risk' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
-                  class="px-4 py-2 text-xs font-medium transition-colors">
-                  Risque
-                </button>
-                <button @click="portfolioSubTab = 'deals'"
-                  :class="portfolioSubTab === 'deals' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
-                  class="px-4 py-2 text-xs font-medium transition-colors">
-                  Deals ({{ portfolioMembers.length }})
-                </button>
-              </div>
-
-              <!-- ── Sous-onglet Risque ─────────────────────────── -->
-              <template v-if="portfolioSubTab === 'risk'">
-                <div class="text-[10px] text-slate-500 -mt-1">
-                  Somme des Greeks déjà calculés par deal (nominal × sensibilité % × taux de change vers EUR), regroupés par sous-jacent — lecture pure, aucun recalcul Monte Carlo ici.
-                  <HelpTip text="Utilisez le bouton Recalculer pour rafraîchir les Greeks des deals sous-jacents avant de lire cet écran." />
-                </div>
-
-                <div v-if="portfolioRiskLoading" class="text-xs text-slate-500">Chargement…</div>
-
-                <template v-else-if="portfolioRisk">
-                  <div v-if="portfolioRisk.deals_missing_greeks.length"
-                    class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
-                    ⚠ {{ portfolioRisk.deals_missing_greeks.length }} deal(s) sans Greeks calculés — chiffres incomplets
-                    ({{ portfolioRisk.deals_missing_greeks.map(d => d.reference).join(', ') }})
-                  </div>
-                  <div v-if="portfolioRisk.deals_stale.length"
-                    class="text-xs text-slate-400 bg-slate-800/40 border border-slate-700/60 rounded-lg px-3 py-2">
-                    ⏱ {{ portfolioRisk.deals_stale.length }} deal(s) avec des Greeks vieux de plus de 7 jours
-                    ({{ portfolioRisk.deals_stale.map(d => d.reference).join(', ') }})
-                  </div>
-
-                  <div v-if="!portfolioRisk.deals_included.length" class="text-xs text-slate-500">
-                    Aucun deal avec des Greeks calculés dans cette sélection.
-                  </div>
-
-                  <template v-else>
-                    <div class="overflow-x-auto table-shell" tabindex="0" role="region">
-                      <table class="w-full text-xs border-collapse">
-                        <thead>
-                          <tr class="border-b border-slate-700 text-slate-500">
-                            <th class="text-left py-1.5 pr-3 font-semibold">Sous-jacent
-                              <HelpTip text="Sous-jacent canonique (regroupe les deals qui le nomment différemment, via le catalogue Admin market-data) — cliquez la ligne pour voir le détail par deal." /></th>
-                            <th class="text-right py-1.5 pr-3 font-semibold">Delta (EUR)
-                              <HelpTip align="right" text="Exposition nette en EUR pour un mouvement de 100% du sous-jacent : Σ(delta% du deal × nominal × taux de change), sommée sur tous les deals qui le contiennent. Vert = exposition longue, rouge = short." /></th>
-                            <th class="text-right py-1.5 pr-3 font-semibold">Gamma (EUR)
-                              <HelpTip align="right" text="Variation du delta net (EUR) pour un mouvement de 100% du sous-jacent. Peut être très élevé et bruité près d'une barrière autocall/KI (payoff quasi-digital) — vérifiez le détail par deal si un chiffre paraît disproportionné." /></th>
-                            <th class="text-right py-1.5 font-semibold">Vega (EUR)
-                              <HelpTip align="right" text="Sensibilité nette en EUR à une hausse de 100 points de volatilité implicite du sous-jacent, sommée sur tous les deals concernés." /></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <template v-for="(g, key) in portfolioRisk.per_underlying" :key="key">
-                            <tr class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
-                              @click="expandedUnderlying = expandedUnderlying === key ? null : key">
-                              <td class="py-1.5 pr-3 text-slate-300 font-semibold">
-                                <span class="text-slate-600 mr-1">{{ expandedUnderlying === key ? '▾' : '▸' }}</span>{{ g.label }}
-                              </td>
-                              <td class="py-1.5 pr-3 text-right font-mono"
-                                :class="g.delta_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">{{ formatNominal(g.delta_eur) }}</td>
-                              <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ formatNominal(g.gamma_eur) }}</td>
-                              <td class="py-1.5 text-right font-mono text-slate-400">{{ formatNominal(g.vega_eur) }}</td>
-                            </tr>
-                            <tr v-if="expandedUnderlying === key" class="bg-slate-900/60">
-                              <td colspan="4" class="py-2 pl-6 pr-3">
-                                <table class="w-full text-[11px] border-collapse">
-                                  <thead>
-                                    <tr class="text-slate-600">
-                                      <th class="text-left py-1 pr-3 font-medium">Deal</th>
-                                      <th class="text-right py-1 pr-3 font-medium">Delta (EUR / %)
-                                        <HelpTip align="right" text="% = part de ce deal dans le delta net de la ligne — peut dépasser 100% ou être négatif si des deals se compensent entre eux." /></th>
-                                      <th class="text-right py-1 pr-3 font-medium">Gamma (EUR / %)</th>
-                                      <th class="text-right py-1 font-medium">Vega (EUR / %)</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    <tr v-for="c in g.contributions" :key="c.deal_id"
-                                      class="hover:bg-slate-800/40 cursor-pointer" @click.stop="openDealDetail(c.deal_id)">
-                                      <td class="py-1 pr-3 font-mono font-semibold text-blue-400">{{ c.reference }}</td>
-                                      <td class="py-1 pr-3 text-right font-mono text-slate-400">
-                                        {{ formatNominal(c.delta_eur) }} <span class="text-slate-600">({{ sharePct(c.delta_eur, g.delta_eur) }})</span>
-                                      </td>
-                                      <td class="py-1 pr-3 text-right font-mono text-slate-400">
-                                        {{ formatNominal(c.gamma_eur) }} <span class="text-slate-600">({{ sharePct(c.gamma_eur, g.gamma_eur) }})</span>
-                                      </td>
-                                      <td class="py-1 text-right font-mono text-slate-400">
-                                        {{ formatNominal(c.vega_eur) }} <span class="text-slate-600">({{ sharePct(c.vega_eur, g.vega_eur) }})</span>
-                                      </td>
-                                    </tr>
-                                  </tbody>
-                                </table>
-                              </td>
-                            </tr>
-                          </template>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                      <div class="stat-box">
-                        <div class="text-xs text-slate-500 mb-1">Nominal total
-                          <HelpTip text="Somme des nominaux de tous les deals actifs de cette sélection, convertis en EUR au taux de change courant (get_fx_series) — inclut aussi les deals sans Greeks calculés, contrairement aux autres tuiles de cette rangée." /></div>
-                        <div class="text-lg font-bold font-mono text-slate-200">{{ formatNominal(portfolioRisk.nominal_total_eur) }}</div>
-                        <div class="text-[10px] text-slate-600">EUR</div>
-                      </div>
-                      <div class="stat-box">
-                        <div class="text-xs text-slate-500 mb-1">Theta net
-                          <HelpTip text="Décroissance temporelle nette du book, en EUR par jour calendaire — somme des theta par deal (nominal × taux de change), déjà scalaire donc pas de regroupement par sous-jacent nécessaire." /></div>
-                        <div class="text-lg font-bold font-mono text-slate-200">{{ formatNominal(portfolioRisk.scalar.theta) }}</div>
-                        <div class="text-[10px] text-slate-600">EUR / jour</div>
-                      </div>
-                      <div class="stat-box">
-                        <div class="text-xs text-slate-500 mb-1">Rho net
-                          <HelpTip text="Sensibilité nette du book à une hausse de 100 points de base (1pt) du taux sans risque, en EUR — le moteur calcule la dérivée brute par rapport au taux (par unité de r, soit par 100pt), rescalée ×0.01 ici pour lire un impact par 1pt réellement, puis sommée par deal (nominal × taux de change)." /></div>
-                        <div class="text-lg font-bold font-mono text-slate-200">{{ formatNominal(portfolioRisk.scalar.rho) }}</div>
-                        <div class="text-[10px] text-slate-600">EUR / 1pt taux</div>
-                      </div>
-                      <div class="stat-box">
-                        <div class="text-xs text-slate-500 mb-1">Deals inclus
-                          <HelpTip text="Nombre de deals dont les Greeks ont pu être sommés dans cet écran — exclut les deals sans Greeks jamais calculés (voir l'avertissement au-dessus)." /></div>
-                        <div class="text-lg font-bold font-mono text-slate-200">{{ portfolioRisk.deals_included.length }}</div>
-                      </div>
-                      <div class="stat-box">
-                        <div class="text-xs text-slate-500 mb-1">Plus ancien calcul
-                          <HelpTip text="Date du calcul de Greeks le plus ancien parmi les deals inclus — l'agrégat n'est fiable que si cette date est récente ; utilisez Recalculer sinon." /></div>
-                        <div class="text-sm font-bold font-mono text-slate-200">
-                          {{ portfolioRisk.oldest_computed_at ? new Date(portfolioRisk.oldest_computed_at).toLocaleDateString('fr-FR') : '—' }}
-                        </div>
-                      </div>
-                    </div>
-                  </template>
-                </template>
-              </template>
-
-              <!-- ── Sous-onglet Deals ──────────────────────────── -->
-              <template v-else>
-                <div v-if="!portfolioMembers.length" class="text-xs text-slate-500">
-                  Aucun deal actif dans cette sélection.
-                </div>
-                <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
-                  <table class="w-full text-xs border-collapse">
-                    <thead>
-                      <tr class="border-b border-slate-700 text-slate-500">
-                        <th class="text-left py-1.5 pr-3 font-semibold">Réf</th>
-                        <th class="text-left py-1.5 pr-3 font-semibold">Contrepartie</th>
-                        <th class="text-left py-1.5 pr-3 font-semibold">Type</th>
-                        <th class="text-right py-1.5 pr-3 font-semibold num">Nominal</th>
-                        <th class="text-left py-1.5 font-semibold">Greeks calculés le
-                          <HelpTip text="Date du dernier calcul de Greeks de ce deal (POST .../greeks) — c'est ce qui nourrit l'agrégat du sous-onglet Risque. Cliquez la ligne pour ouvrir la fiche et lancer un recalcul individuel." /></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="d in portfolioMembers" :key="d.id"
-                        class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
-                        @click="openDealDetail(d.id)">
-                        <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400">{{ d.reference }}</td>
-                        <td class="py-1.5 pr-3 text-slate-300">{{ d.contrepartie }}</td>
-                        <td class="py-1.5 pr-3 text-slate-500 text-[10px]">{{ d.product_type || '—' }}</td>
-                        <td class="py-1.5 pr-3 text-right font-mono num text-slate-300">{{ formatNominal(d.nominal) }} {{ d.devise }}</td>
-                        <td class="py-1.5 text-slate-500">
-                          <span v-if="d.greeks_computed_at">{{ new Date(d.greeks_computed_at).toLocaleDateString('fr-FR') }}</span>
-                          <span v-else class="text-amber-400">jamais calculé</span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </template>
-            </div>
-          </div>
-          </template><!-- /portfolios tab -->
-
-          <!-- ── Onglet Chocs : scénarios de marché sur un portefeuille ── -->
-          <template v-if="activeTab === 'chocs'">
-          <div class="flex gap-4 flex-wrap items-start">
-
-            <!-- Même sélecteur de portefeuille que l'onglet Portefeuilles —
-                 portfolioView est partagé, la sélection reste cohérente. -->
-            <div class="card flex flex-col gap-1 w-full sm:w-64 shrink-0">
-              <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 px-0.5">Cible du choc</div>
-              <button class="flex items-center gap-2 text-left px-2.5 py-2 rounded-lg text-xs font-medium transition-colors"
-                :class="portfolioView === 'global' ? 'bg-blue-600/15 text-blue-300 ring-1 ring-blue-600/40' : 'text-slate-400 hover:bg-slate-800/60'"
-                @click="selectPortfolioView('global'); loadShockHistory('global', null)">
-                <span class="text-sm">📊</span>
-                <span class="flex-1">Tous portefeuilles</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">{{ activeDealsCount }}</span>
-              </button>
-              <div class="border-t border-slate-800 my-1"></div>
-              <button v-for="p in portfolios" :key="p.id"
-                class="flex items-center gap-2 text-left px-2.5 py-2 rounded-lg text-xs font-medium transition-colors min-w-0"
-                :class="portfolioView === p.id ? 'bg-blue-600/15 text-blue-300 ring-1 ring-blue-600/40' : 'text-slate-400 hover:bg-slate-800/60'"
-                @click="selectPortfolioView(p.id); loadShockHistory('portfolio', p.id)">
-                <span class="text-sm shrink-0">{{ p.is_default ? '⭐' : '📁' }}</span>
-                <span class="flex-1 truncate">{{ p.name }}</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 shrink-0">{{ p.deal_count }}</span>
-              </button>
-            </div>
-
-            <!-- Formulaire + résultat -->
-            <div class="card kpi-tile flex-1 min-w-0 flex flex-col gap-3">
-              <div class="text-sm font-bold text-slate-100">
-                ⚡ Choc — {{ portfolioView === 'global' ? 'Tous portefeuilles' : portfolioLabel }}
-                <HelpTip width="w-72" text="Full reprice Monte Carlo sous le scénario choqué, deal par deal — pas une approximation par les Greeks (les payoffs à barrière sont trop non-linéaires pour ça). Chaque run est conservé en historique." />
-              </div>
-
-              <div class="flex items-center gap-2">
-                <select class="select text-xs py-1.5" @change="applyPortfolioShockPreset($event.target.value)">
-                  <option value="">Preset…</option>
-                  <option v-for="p in shockPresets" :key="p.label" :value="p.label">{{ p.label }}</option>
-                </select>
-              </div>
-              <div class="flex flex-wrap gap-3">
-                <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Spot %
-                  <input v-model.number="portfolioShockForm.spot_shock_pct" type="number" step="1" class="input text-xs py-1 w-24" />
-                </label>
-                <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Vol (pts)
-                  <input v-model.number="portfolioShockForm.vol_shock_pts" type="number" step="1" class="input text-xs py-1 w-24" />
-                </label>
-                <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Taux (bp)
-                  <input v-model.number="portfolioShockForm.rate_shock_bp" type="number" step="10" class="input text-xs py-1 w-24" />
-                </label>
-                <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Corr (pts)
-                  <input v-model.number="portfolioShockForm.corr_shock_pts" type="number" step="5" class="input text-xs py-1 w-24" />
-                </label>
-                <button class="btn-primary text-xs px-4 py-1.5 self-end" :disabled="portfolioShockLoading"
-                  @click="runPortfolioShock">
-                  <span v-if="portfolioShockLoading"
-                    class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
-                  Lancer le choc
-                </button>
-              </div>
-
-              <template v-if="portfolioShockResult">
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div class="stat-box">
-                    <div class="text-xs text-slate-500 mb-1">ΔMtM total</div>
-                    <div class="text-lg font-bold font-mono" :class="portfolioShockResult.total_delta_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                      {{ formatNominal(portfolioShockResult.total_delta_eur) }}
-                    </div>
-                    <div class="text-[10px] text-slate-600">EUR</div>
-                  </div>
-                  <div class="stat-box">
-                    <div class="text-xs text-slate-500 mb-1">Impact / nominal
-                      <HelpTip text="ΔMtM total ÷ nominal total (EUR) du périmètre choqué — même dénominateur que la tuile Nominal total de l'onglet Portefeuilles (inclut les deals ignorés/en erreur, pas seulement ceux effectivement repricés)." /></div>
-                    <div class="text-lg font-bold font-mono" :class="(portfolioShockResult.pct_impact ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                      {{ portfolioShockResult.pct_impact != null ? portfolioShockResult.pct_impact.toFixed(2) + '%' : '—' }}
-                    </div>
-                    <div class="text-[10px] text-slate-600">vs {{ formatNominal(portfolioShockResult.nominal_total_eur) }} EUR</div>
-                  </div>
-                  <div class="stat-box">
-                    <div class="text-xs text-slate-500 mb-1">Deals choqués</div>
-                    <div class="text-lg font-bold font-mono text-slate-200">{{ portfolioShockResult.contributions.length }}</div>
-                  </div>
-                  <div class="stat-box">
-                    <div class="text-xs text-slate-500 mb-1">Ignorés / erreurs</div>
-                    <div class="text-lg font-bold font-mono text-slate-200">
-                      {{ portfolioShockResult.skipped.length }} / {{ portfolioShockResult.errors.length }}
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="portfolioShockResult.skipped.length || portfolioShockResult.errors.length"
-                  class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
-                  ⚠ {{ [...portfolioShockResult.skipped.map(s => s.reference), ...portfolioShockResult.errors.map(e => e.reference)].join(', ') }}
-                  — deal(s) non choqués (résolution en attente ou erreur de pricing)
-                </div>
-
-                <div class="overflow-x-auto table-shell" tabindex="0" role="region">
-                  <table class="w-full text-xs border-collapse">
-                    <thead>
-                      <tr class="border-b border-slate-700 text-slate-500">
-                        <th class="text-left py-1.5 pr-3 font-semibold">Deal</th>
-                        <th class="text-right py-1.5 pr-3 font-semibold num">MtM avant</th>
-                        <th class="text-right py-1.5 pr-3 font-semibold num">MtM après</th>
-                        <th class="text-right py-1.5 font-semibold num">ΔMtM (EUR)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="c in portfolioShockResult.contributions" :key="c.deal_id"
-                        class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
-                        @click="openDealDetail(c.deal_id)">
-                        <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400">{{ c.reference }}</td>
-                        <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ (c.mtm_before * 100).toFixed(2) }}%</td>
-                        <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ (c.mtm_after * 100).toFixed(2) }}%</td>
-                        <td class="py-1.5 text-right font-mono" :class="c.delta_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                          {{ formatNominal(c.delta_eur) }}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </template>
-
-              <!-- Historique -->
-              <div class="pt-2 border-t border-slate-800">
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Historique</div>
-                <div v-if="!currentShockHistory.length" class="text-xs text-slate-500">Aucun choc joué sur cette sélection.</div>
-                <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
-                <table class="w-full text-xs border-collapse">
-                  <tbody>
-                    <tr v-for="h in currentShockHistory" :key="h.id" class="border-b border-slate-800/50">
-                      <td class="py-1 pr-3 text-slate-500 whitespace-nowrap">{{ new Date(h.created_at).toLocaleString('fr-FR') }}</td>
-                      <td class="py-1 pr-3 text-slate-300">{{ h.label }}</td>
-                      <td class="py-1 pr-3 text-right font-mono" :class="(h.result.total_delta_eur ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-500'">
-                        {{ formatNominal(h.result.total_delta_eur) }} EUR
-                      </td>
-                      <td class="py-1 text-right font-mono" :class="(h.result.pct_impact ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-500'">
-                        {{ h.result.pct_impact != null ? h.result.pct_impact.toFixed(2) + '%' : '—' }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-                </div>
-              </div>
-            </div>
-          </div>
-          </template><!-- /chocs tab -->
 
         </template>
       </div>
@@ -1166,14 +791,27 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
+import { usePortfoliosStore, shockPresets, blankShockForm } from '../stores/portfolios.js'
 import { apiFetch } from '../utils/api.js'
 import HelpTip from '../components/HelpTip.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 
+const route = useRoute()
 const dealsStore = useDealsStore()
+const portfoliosStore = usePortfoliosStore()
+
+// Portfolio list & deal→portfolio assignment live in the shared store (the
+// Risk Management module is the primary owner) — Booking only reads the list
+// for its filter/assignment dropdowns.
+const portfolios = computed(() => portfoliosStore.portfolios)
+const shockHistory = portfoliosStore.shockHistory
+
+function assignDealPortfolio(dealId, rawValue) {
+  return portfoliosStore.assignDeal(dealId, rawValue)
+}
 
 const activeTab = ref('watchlist')
 
@@ -1388,26 +1026,13 @@ async function runGreeks(id) {
 }
 
 // ── Choc de marché (deal seul) ───────────────────────────────────────
-// Presets are plain prefill data (spot%/vol pts/rate bp/corr pts) — no
-// backend catalog, easy to tweak here without touching the API.
-const shockPresets = [
-  { label: 'Crash actions -20%', spot_shock_pct: -20, vol_shock_pts: 10, rate_shock_bp: 0, corr_shock_pts: 0 },
-  { label: 'Rally actions +20%', spot_shock_pct: 20, vol_shock_pts: -5, rate_shock_bp: 0, corr_shock_pts: 0 },
-  { label: 'Choc vol +10pts', spot_shock_pct: 0, vol_shock_pts: 10, rate_shock_bp: 0, corr_shock_pts: 0 },
-  { label: 'Choc taux +100bp', spot_shock_pct: 0, vol_shock_pts: 0, rate_shock_bp: 100, corr_shock_pts: 0 },
-  { label: 'Choc taux -100bp', spot_shock_pct: 0, vol_shock_pts: 0, rate_shock_bp: -100, corr_shock_pts: 0 },
-  { label: 'Crise systémique', spot_shock_pct: -30, vol_shock_pts: 20, rate_shock_bp: -100, corr_shock_pts: 20 },
-]
-
-function _blankShockForm() {
-  return { spot_shock_pct: 0, vol_shock_pts: 0, rate_shock_bp: 0, corr_shock_pts: 0 }
-}
-
+// Presets, history and the shock runner live in the shared portfolios store
+// (also used by Risk Management's Chocs tab) — only the per-deal panel UI
+// state stays here.
 const shockPanelOpen = reactive({})
 const shockForm = reactive({})
 const shockLoading = reactive({})
 const shockResults = reactive({})
-const shockHistory = reactive({})
 
 function applyShockPreset(id, label) {
   const preset = shockPresets.find(p => p.label === label)
@@ -1419,31 +1044,16 @@ function applyShockPreset(id, label) {
 async function toggleShockPanel(id) {
   shockPanelOpen[id] = !shockPanelOpen[id]
   if (shockPanelOpen[id]) {
-    if (!shockForm[id]) shockForm[id] = _blankShockForm()
-    await loadShockHistory('deal', id)
+    if (!shockForm[id]) shockForm[id] = blankShockForm()
+    await portfoliosStore.loadShockHistory('deal', id)
   }
-}
-
-async function loadShockHistory(scope, id) {
-  const key = scope === 'deal' ? id : `${scope}:${id ?? ''}`
-  const params = scope === 'deal' ? `deal_id=${id}` : (id ? `portfolio_id=${id}` : 'scope=global')
-  const res = await apiFetch(`/api/shocks?${params}&limit=5`)
-  shockHistory[key] = await res.json()
 }
 
 async function runDealShock(id) {
   shockLoading[id] = true
   shockResults[id] = null
   try {
-    const res = await apiFetch(`/api/deals/${id}/shock`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(shockForm[id]),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || 'Erreur choc')
-    shockResults[id] = data
-    await loadShockHistory('deal', id)
+    shockResults[id] = await portfoliosStore.runShock('deal', id, shockForm[id])
   } catch (e) {
     shockResults[id] = { error: e.message }
   } finally {
@@ -1794,179 +1404,14 @@ async function refresh(dealId) {
   }
 }
 
-// ── Portefeuilles (risk buckets) ─────────────────────────────────────
-const portfolios = ref([])
-const newPortfolioName = ref('')
-const portfolioView = ref('global')   // 'global' | portfolio id
-const portfolioRisk = ref(null)
-const portfolioRiskLoading = ref(false)
-const portfolioRecomputing = ref(false)
-const portfolioRecomputeDone = ref(0)
-const portfolioRecomputeTotal = ref(0)
-const portfolioSubTab = ref('risk')   // 'risk' | 'deals'
-const expandedUnderlying = ref(null)   // per_underlying key currently drilled into
-
-function sharePct(contribution, bucketTotal) {
-  if (contribution == null || !bucketTotal) return '—'
-  return `${Math.round((contribution / bucketTotal) * 100)}%`
-}
-
-const portfolioLabel = computed(() => {
-  const p = portfolios.value.find(p => p.id === portfolioView.value)
-  return p ? p.name : ''
-})
-
-const portfolioIsDefault = computed(() => {
-  const p = portfolios.value.find(p => p.id === portfolioView.value)
-  return !!(p && p.is_default)
-})
-
-const activeDealsCount = computed(() => dealsStore.deals.filter(d => d.status === 'actif').length)
-
-const portfolioMembers = computed(() => {
-  if (portfolioView.value === 'global') return dealsStore.deals.filter(d => d.status === 'actif')
-  return dealsStore.deals.filter(d => d.status === 'actif' && d.portfolio_id === portfolioView.value)
-})
-
-async function loadPortfolios() {
-  const res = await apiFetch('/api/portfolios')
-  portfolios.value = await res.json()
-}
-
-async function createPortfolio() {
-  const name = newPortfolioName.value.trim()
-  if (!name) return
-  await apiFetch('/api/portfolios', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
-  })
-  newPortfolioName.value = ''
-  await loadPortfolios()
-}
-
-async function renamePortfolio(p) {
-  const name = prompt('Nouveau nom du portefeuille :', p.name)
-  if (!name || !name.trim() || name.trim() === p.name) return
-  await apiFetch(`/api/portfolios/${p.id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name.trim() }),
-  })
-  await loadPortfolios()
-}
-
-async function deletePortfolio(p) {
-  if (!confirm(`Supprimer "${p.name}" ? Les deals qu'il contient seront déplacés vers le portefeuille par défaut.`)) return
-  await apiFetch(`/api/portfolios/${p.id}`, { method: 'DELETE' })
-  if (portfolioView.value === p.id) portfolioView.value = 'global'
+onMounted(async () => {
   await dealsStore.loadDeals()
-  await loadPortfolios()
-  await loadPortfolioRisk()
-}
-
-async function assignDealPortfolio(dealId, rawValue) {
-  await apiFetch(`/api/deals/${dealId}/portfolio`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ portfolio_id: Number(rawValue) }),
-  })
-  await dealsStore.loadDeals()
-  await loadPortfolios()
-  if (portfolioRisk.value) await loadPortfolioRisk()
-}
-
-async function loadPortfolioRisk() {
-  portfolioRiskLoading.value = true
-  try {
-    const url = portfolioView.value === 'global'
-      ? '/api/portfolios/risk-global'
-      : `/api/portfolios/${portfolioView.value}/risk`
-    const res = await apiFetch(url)
-    portfolioRisk.value = await res.json()
-  } finally {
-    portfolioRiskLoading.value = false
-  }
-}
-
-function selectPortfolioView(view) {
-  portfolioView.value = view
-  expandedUnderlying.value = null
-  loadPortfolioRisk()
-}
-
-async function recomputePortfolio() {
-  const memberIds = portfolioMembers.value.map(d => d.id)
-  if (!memberIds.length) return
-  portfolioRecomputing.value = true
-  portfolioRecomputeDone.value = 0
-  portfolioRecomputeTotal.value = memberIds.length
-  try {
-    for (const id of memberIds) {
-      try {
-        await apiFetch(`/api/deals/${id}/greeks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recalibrate: 'none' }),
-        })
-      } catch { /* one deal's failure shouldn't stop the batch */ }
-      portfolioRecomputeDone.value++
-      await new Promise(r => setTimeout(r, 400))   // same pacing as Admin market-data's batch fetch
-    }
-  } finally {
-    portfolioRecomputing.value = false
-    await dealsStore.loadDeals()
-    await loadPortfolioRisk()
-  }
-}
-
-// ── Choc de marché (portefeuille / global) ───────────────────────────
-const portfolioShockForm = reactive(_blankShockForm())
-const portfolioShockLoading = ref(false)
-const portfolioShockResult = ref(null)
-
-const currentShockHistory = computed(() => {
-  const key = portfolioView.value === 'global' ? 'global:' : `portfolio:${portfolioView.value}`
-  return shockHistory[key] || []
-})
-
-function applyPortfolioShockPreset(label) {
-  const preset = shockPresets.find(p => p.label === label)
-  if (!preset) return
-  Object.assign(portfolioShockForm, {
-    spot_shock_pct: preset.spot_shock_pct, vol_shock_pts: preset.vol_shock_pts,
-    rate_shock_bp: preset.rate_shock_bp, corr_shock_pts: preset.corr_shock_pts,
-  })
-}
-
-async function runPortfolioShock() {
-  portfolioShockLoading.value = true
-  portfolioShockResult.value = null
-  try {
-    const global = portfolioView.value === 'global'
-    const url = global ? '/api/portfolios/shock-global' : `/api/portfolios/${portfolioView.value}/shock`
-    const res = await apiFetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(portfolioShockForm),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || 'Erreur choc')
-    portfolioShockResult.value = data
-    await loadShockHistory(global ? 'global' : 'portfolio', global ? null : portfolioView.value)
-  } catch (e) {
-    portfolioShockResult.value = { error: e.message, contributions: [], skipped: [], errors: [], total_delta_eur: 0 }
-  } finally {
-    portfolioShockLoading.value = false
-  }
-}
-
-onMounted(() => {
-  dealsStore.loadDeals()
   loadWatchlist()
   loadAlerts()
-  loadPortfolios()
-  loadPortfolioRisk()
-  loadShockHistory('global', null)
+  portfoliosStore.load()
+  // Deep link from Risk Management ("/booking?deal=<id>") — open the deal's
+  // detail card directly instead of landing on the watchlist.
+  const dealId = Number(route.query.deal)
+  if (dealId) openDealDetail(dealId)
 })
 </script>

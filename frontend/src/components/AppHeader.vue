@@ -38,15 +38,17 @@ const auth = useAuthStore()
 // Regroupement par domaine métier — un lien par grande zone fonctionnelle,
 // actif dès qu'on est sur une de ses sous-pages (préfixe de route).
 const navItems = [
-  { label: 'Accueil',    to: '/',              prefixes: [] },
-  { label: 'Pricing',    to: '/scripts',       prefixes: ['/scripts', '/pricer', '/documentation'] },
-  { label: 'Life Cycle', to: '/booking',       prefixes: ['/booking', '/reinvest'] },
-  { label: 'Études',     to: '/amc',           prefixes: ['/amc', '/fifo'] },
-  { label: 'RFQ',        to: '/rfq',           prefixes: ['/rfq'] },
+  { label: 'Accueil',    to: '/', prefixes: [] },
+  { label: 'Pricing',    to: { path: '/', query: { category: 'pricing' } },             prefixes: ['/scripts', '/pricer', '/documentation'], category: 'pricing' },
+  { label: 'Life Cycle', to: { path: '/', query: { category: 'life_cycle' } },           prefixes: ['/booking', '/reinvest'],                 category: 'life_cycle' },
+  { label: 'Risk Mgmt',  to: { path: '/', query: { category: 'risk_management' } },      prefixes: ['/risk'],                                 category: 'risk_management' },
+  { label: 'Études',     to: { path: '/', query: { category: 'studies' } },              prefixes: ['/amc', '/fifo'],                         category: 'studies' },
+  { label: 'RFQ',        to: { path: '/', query: { category: 'competitive_bidding' } },  prefixes: ['/rfq'],                                  category: 'competitive_bidding' },
 ]
 
 function isActive(item) {
-  if (item.to === '/') return route.path === '/'
+  if (item.to === '/') return route.path === '/' && !route.query.category
+  if (route.path === '/') return !!item.category && route.query.category === item.category
   return item.prefixes.some(p => route.path.startsWith(p))
 }
 

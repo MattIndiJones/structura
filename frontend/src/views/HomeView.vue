@@ -57,6 +57,21 @@
             </div>
 
             <div class="card flex flex-col gap-3
+                       border-t-2 border-t-red-700 hover:border-red-700 hover:bg-red-950/20
+                       hover:shadow-xl hover:shadow-black/30 hover:-translate-y-0.5 transition-all duration-200
+                       cursor-pointer group"
+              @click="openCategory('risk_management')">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-red-900/50 flex items-center justify-center text-xl">🛡️</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-red-300 transition-colors">Risk Management</div>
+                  <div class="text-xs text-slate-500">Portefeuilles · Chocs · P&amp;L</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Créez vos portefeuilles et analysez leur risque : Greeks agrégés, stress-tests et P&amp;L explain.</p>
+            </div>
+
+            <div class="card flex flex-col gap-3
                        border-t-2 border-t-amber-600 hover:border-amber-600 hover:bg-amber-950/20
                        hover:shadow-xl hover:shadow-black/30 hover:-translate-y-0.5 transition-all duration-200
                        cursor-pointer group"
@@ -177,6 +192,55 @@
 
           </div>
 
+          <div v-else-if="selectedCategory === 'risk_management'" class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl">
+
+            <!-- Création de portefeuille -->
+            <RouterLink to="/risk?tab=portfolios"
+              class="card flex flex-col gap-3
+                     hover:border-red-700 hover:bg-red-950/20 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-red-900/50 flex items-center justify-center text-xl">📁</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-red-300 transition-colors">Création de portefeuille</div>
+                  <div class="text-xs text-slate-500">Gestion des books &amp; composition</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Créez, renommez et organisez vos portefeuilles ; affectez chaque deal à son book.</p>
+            </RouterLink>
+
+            <!-- Chocs -->
+            <RouterLink to="/risk?tab=chocs"
+              class="card flex flex-col gap-3
+                     hover:border-orange-700 hover:bg-orange-950/20 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-orange-900/50 flex items-center justify-center text-xl">⚡</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-orange-300 transition-colors">Chocs</div>
+                  <div class="text-xs text-slate-500">Stress-tests spot / vol / taux / corrélation</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Full reprice du portefeuille sous scénario choqué — pas une approximation par les Greeks.</p>
+            </RouterLink>
+
+            <!-- Explication de P&L -->
+            <RouterLink to="/risk?tab=pnl"
+              class="card flex flex-col gap-3
+                     hover:border-emerald-700 hover:bg-emerald-950/20 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-emerald-900/50 flex items-center justify-center text-xl">📊</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-emerald-300 transition-colors">Explication de P&amp;L</div>
+                  <div class="text-xs text-slate-500">Waterfall temps · spot · vol · corrélation</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Expliquez le P&amp;L du portefeuille entre deux dates, agrégé en EUR deal par deal.</p>
+            </RouterLink>
+
+          </div>
+
           <div v-else-if="selectedCategory === 'studies'" class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl">
 
             <!-- Étude Fama-French -->
@@ -276,12 +340,13 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { ref, computed, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
 
 const auth   = useAuthStore()
+const route  = useRoute()
 const router = useRouter()
 
 const recentStudies        = ref([])
@@ -316,11 +381,18 @@ function openStudy(id) {
 const CATEGORY_TITLES = {
   pricing: 'Pricing',
   life_cycle: 'Life Cycle',
+  risk_management: 'Risk Management',
   studies: 'Studies',
   competitive_bidding: 'Competitive Bidding',
 }
-const selectedCategory = ref(null)
+const selectedCategory = ref(route.query.category || null)
 const categoryTitle = computed(() => CATEGORY_TITLES[selectedCategory.value] || '')
+
+// L'onglet de navigation du haut route vers /?category=... — permet d'arriver
+// directement sur le menu de la catégorie plutôt que sur une sous-page précise.
+watch(() => route.query.category, (cat) => {
+  selectedCategory.value = cat || null
+})
 
 function openCategory(key) {
   selectedCategory.value = key

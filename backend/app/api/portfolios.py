@@ -10,7 +10,7 @@ per-deal Greeks fresh, which stays an explicit action (see the frontend's
 from __future__ import annotations
 import json
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -18,6 +18,7 @@ from ..db.database import get_session
 from ..db.models import Portfolio, Deal, User
 from .auth import get_current_user
 from .admin import _CATALOG
+from .deals import MtmExplainRequest
 from ..core.amc_prices import get_fx_series
 
 router = APIRouter(prefix="/api/portfolios", tags=["portfolios"])
@@ -221,6 +222,139 @@ def risk_global(
     payload = _aggregate_risk(list(deals), session)
     payload["scope"] = "global"
     return payload
+
+
+# ── P&L explain aggregation ──────────────────────────────────────────
+#
+# Portfolio-level P&L explain: the per-deal waterfall (_explain_core, api/
+# deals.py — temps/spot/vol/corr revaluations at identical seed, CRN) run
+# over every active deal of the scope, each line converted from points of
+# that deal's nominal into EUR and summed. Same book-traversal conventions
+# as shocks._run_shock_on_book: non-repriceable deals (called between the
+# two dates, booked after date 2...) land in `skipped` with the 422 detail
+# as reason instead of aborting the whole book; the EUR totals telescope
+# per construction since each deal's chain does.
+
+_STEP_KEYS = {"Effet temps": "temps", "Effet spot": "spot",
+              "Effet volatilité": "vol", "Effet corrélation": "corr"}
+
+
+def _run_explain_on_book(deals: list[Deal], session: Session, n_paths: int,
+                         body: MtmExplainRequest) -> dict:
+    from .deals import _explain_core
+
+    steps = {"temps": 0.0, "spot": 0.0, "vol": 0.0, "corr": 0.0}
+    has_corr = False
+    contributions, skipped, errors = [], [], []
+    delta_mtm_eur = flows_eur = residual_eur = 0.0
+    nominal_total_eur = 0.0
+
+    for d in deals:
+        fx = get_fx_series(d.devise, "EUR")
+        fx_rate = float(fx.iloc[-1]) if not fx.empty else 1.0
+        nominal_total_eur += d.nominal * fx_rate
+        to_eur = d.nominal * fx_rate / 100.0   # pts of nominal → EUR
+
+        try:
+            payload, _c1, _c2 = _explain_core(d, session, n_paths, body)
+        except HTTPException as e:
+            skipped.append({"deal_id": d.id, "reference": d.reference,
+                            "reason": e.detail})
+            continue
+        except Exception as e:
+            errors.append({"deal_id": d.id, "reference": d.reference,
+                           "error": str(e)})
+            continue
+
+        contrib_steps = {}
+        for s in payload["steps"]:
+            key = _STEP_KEYS.get(s["label"])
+            if key is None:
+                continue
+            eur = s["delta_pts"] * to_eur
+            steps[key] += eur
+            contrib_steps[key] = round(eur, 2)
+            if key == "corr":
+                has_corr = True
+        residual_eur += payload["residual_pts"] * to_eur
+        flows_eur += payload["flows_total_pts"] * to_eur
+        delta_mtm_eur += payload["delta_pts"] * to_eur
+
+        contributions.append({
+            "deal_id": d.id, "reference": d.reference,
+            "date1": payload["date1"], "date2": payload["date2"],
+            "mtm1": payload["mtm1"], "mtm2": payload["mtm2"],
+            "delta_mtm_eur": round(payload["delta_pts"] * to_eur, 2),
+            "flows_eur": round(payload["flows_total_pts"] * to_eur, 2),
+            "pnl_eur": round(payload["pnl_total_pts"] * to_eur, 2),
+            "residual_eur": round(payload["residual_pts"] * to_eur, 2),
+            "steps_eur": contrib_steps,
+        })
+
+    pnl_total_eur = delta_mtm_eur + flows_eur
+    pct = (pnl_total_eur / nominal_total_eur * 100.0) if nominal_total_eur else None
+    waterfall = [
+        {"key": "temps", "label": "Effet temps", "delta_eur": round(steps["temps"], 2)},
+        {"key": "spot", "label": "Effet spot", "delta_eur": round(steps["spot"], 2)},
+        {"key": "vol", "label": "Effet volatilité", "delta_eur": round(steps["vol"], 2)},
+    ]
+    if has_corr:
+        waterfall.append({"key": "corr", "label": "Effet corrélation",
+                          "delta_eur": round(steps["corr"], 2)})
+    return {
+        "nominal_total_eur": round(nominal_total_eur, 2),
+        "steps": waterfall,
+        "residual_eur": round(residual_eur, 2),
+        "flows_total_eur": round(flows_eur, 2),
+        "delta_mtm_eur": round(delta_mtm_eur, 2),
+        "pnl_total_eur": round(pnl_total_eur, 2),
+        "pct_impact": round(pct, 3) if pct is not None else None,
+        "contributions": contributions,
+        "skipped": skipped,
+        "errors": errors,
+        "reporting_ccy": "EUR",
+    }
+
+
+@router.post("/pnl-explain-global")
+def pnl_explain_global(
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    n_paths: int = 20000,
+    body: Optional[MtmExplainRequest] = None,
+):
+    """P&L explain aggregated across every active deal of the user. date1
+    omitted means each deal explains from its own value date (P&L depuis
+    l'origine) ; date2 omitted means today."""
+    deals = session.exec(
+        select(Deal).where(Deal.user_id == current.id, Deal.status == "actif")
+    ).all()
+    result = _run_explain_on_book(list(deals), session, n_paths,
+                                  body or MtmExplainRequest())
+    result["scope"] = "global"
+    return result
+
+
+@router.post("/{portfolio_id}/pnl-explain")
+def pnl_explain_portfolio(
+    portfolio_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    n_paths: int = 20000,
+    body: Optional[MtmExplainRequest] = None,
+):
+    p = session.get(Portfolio, portfolio_id)
+    if not p or p.user_id != current.id:
+        raise HTTPException(404, "Portefeuille introuvable")
+    deals = session.exec(
+        select(Deal).where(Deal.portfolio_id == portfolio_id, Deal.status == "actif")
+    ).all()
+    result = _run_explain_on_book(list(deals), session, n_paths,
+                                  body or MtmExplainRequest())
+    result["scope"] = "portfolio"
+    result["portfolio_id"] = portfolio_id
+    result["name"] = p.name
+    return result
 
 
 @router.get("/{portfolio_id}/risk")

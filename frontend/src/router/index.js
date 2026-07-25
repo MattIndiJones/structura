@@ -38,6 +38,11 @@ const routes = [
     meta: { title: 'Booking — produits bookés' },
   },
   {
+    path: '/risk',
+    component: () => import('../views/RiskManagementView.vue'),
+    meta: { title: 'Risk Management' },
+  },
+  {
     path: '/reinvest',
     component: () => import('../views/ReinvestView.vue'),
     meta: { title: 'Réinvestissement' },
