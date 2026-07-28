@@ -30,8 +30,11 @@ backend/data/underlying_prices/
 backend/data/fx_rates/
 backend/data/ff_data/
 
-# Claude memory
-.claude/
+# Claude memory (local session state, worktrees...) — but agent definitions
+# under .claude/agents/ are meant to be shared with the team, keep those.
+.claude/*
+!.claude/agents/
+!.claude/agents/**
 
 # Temp / debug files at root
 debug_*.py
