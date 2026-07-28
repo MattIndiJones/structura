@@ -200,6 +200,7 @@ import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
 import { useDealsStore } from '../stores/deals.js'
+import { formatDate } from '../utils/format.js'
 
 const dealsStore = useDealsStore()
 
@@ -247,10 +248,7 @@ function openTermSheetFinal() {
   window.open(`#/documentation/termsheet/${selectedDealForTs.value}`, '_blank')
 }
 
-// ── Formatting ────────────────────────────────────────────
-function fmtDate(iso) {
-  return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
+const fmtDate = formatDate
 
 function docTypeLabel(t) {
   const m = {

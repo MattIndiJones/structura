@@ -124,12 +124,12 @@
             <tbody>
               <tr v-for="row in store.backtest.rows" :key="row.date"
                   class="border-b border-slate-800 hover:bg-slate-800/40 transition-colors">
-                <td class="py-1 pr-3 text-slate-400">{{ row.date }}</td>
+                <td class="py-1 pr-3 text-slate-400">{{ formatDate(row.date) }}</td>
                 <td class="py-1 pr-3 text-right font-mono"
                     :class="row.irr > 0 ? 'text-green-400' : row.irr < 0 ? 'text-red-400' : 'text-slate-400'">
-                  <SensitiveValue>{{ row.irr != null ? (row.irr * 100).toFixed(2) + '%' : '—' }}</SensitiveValue>
+                  <SensitiveValue>{{ row.irr != null ? formatPercent(row.irr * 100, 2) : '—' }}</SensitiveValue>
                 </td>
-                <td class="py-1 pr-3 text-right text-slate-400"><SensitiveValue>{{ row.T_actual?.toFixed(2) ?? '—' }}</SensitiveValue></td>
+                <td class="py-1 pr-3 text-right text-slate-400"><SensitiveValue>{{ formatNumber(row.T_actual, 2) }}</SensitiveValue></td>
                 <td class="py-1">
                   <span class="px-1.5 py-0.5 rounded text-xs font-medium"
                         :class="row.early_recall
@@ -158,6 +158,7 @@ import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import ComparatorTab from './ComparatorTab.vue'
 import HelpTip from './HelpTip.vue'
+import { formatPercent, formatNumber, formatInt, formatDate } from '../utils/format.js'
 import {
   Chart, BarElement, BarController, LineElement, LineController, PointElement,
   CategoryScale, LinearScale, Tooltip, Legend
@@ -199,7 +200,7 @@ function launchBacktest() {
 const stats = computed(() => {
   if (!store.backtest) return []
   const { mean_irr, median_irr, sharpe, p10, p90, pct_positive, n_windows, overlap_pct } = store.backtest
-  const fmt = v => v != null ? (v * 100).toFixed(2) + '%' : '—'
+  const fmt = v => v != null ? formatPercent(v * 100, 2) : '—'
   const sharpeOverlapWarn = overlap_pct != null && overlap_pct >= 50
   return [
     { label: 'TRI moyen', val: fmt(mean_irr), cls: mean_irr > 0 ? 'text-green-400' : 'text-red-400',
@@ -208,13 +209,13 @@ const stats = computed(() => {
       tip: "Valeur centrale (50e percentile) — plus robuste que la moyenne aux fenêtres extrêmes." },
     { label: 'P10 / P90', val: `${fmt(p10)} / ${fmt(p90)}`, cls: 'text-slate-300',
       tip: "10e et 90e percentiles du TRI — l'intervalle qui contient 80% des fenêtres." },
-    { label: 'Sharpe (vs Rf)', val: sharpe != null ? sharpe.toFixed(2) : '—', cls: 'text-blue-400',
+    { label: 'Sharpe (vs Rf)', val: sharpe != null ? formatNumber(sharpe, 2) : '—', cls: 'text-blue-400',
       tip: "(TRI moyen − taux sans risque) ÷ écart-type des TRI entre fenêtres. À lire avec précaution : les fenêtres se chevauchent (elles rejouent en grande partie le même historique) donc ne sont pas des observations indépendantes, et un payoff à barrières digitales (pas de participation continue) ne prend que quelques valeurs discrètes — les deux effets compriment artificiellement l'écart-type et gonflent ce Sharpe. Ce n'est pas un Sharpe de trajectoire de marché comparable à un actif coté."
         + (overlap_pct != null ? ` Chevauchement estimé des fenêtres : ${overlap_pct}%.` : ''),
       warn: sharpeOverlapWarn ? `Fenêtres chevauchées à ${overlap_pct}% — Sharpe peu fiable, à ne pas comparer à un actif coté` : null },
-    { label: '% TRI positif', val: pct_positive != null ? pct_positive.toFixed(1) + '%' : '—', cls: 'text-slate-300',
+    { label: '% TRI positif', val: pct_positive != null ? formatPercent(pct_positive, 1) : '—', cls: 'text-slate-300',
       tip: "Part des fenêtres où le TRI est strictement positif (rappel anticipé avec coupon, ou remboursement à l'échéance avec gain)." },
-    { label: 'Fenêtres', val: n_windows?.toLocaleString() ?? '—', cls: 'text-slate-500',
+    { label: 'Fenêtres', val: formatInt(n_windows), cls: 'text-slate-500',
       tip: "Nombre de dates de départ testées entre la date de début et (date de fin − maturité du produit), espacées de la fréquence de relance choisie." },
   ]
 })
@@ -243,7 +244,7 @@ async function renderCharts() {
     counts[b]++
   })
   const bcolors = bins.map(v => v >= 0 ? chartTheme.positive : chartTheme.negative)
-  const blabels = bins.map(v => (v * 100).toFixed(1) + '%')
+  const blabels = bins.map(v => (v * 100).toFixed(1).replace('.', ',') + '%')
 
   histChart = new Chart(histCanvas.value, {
     type: 'bar',
@@ -261,7 +262,7 @@ async function renderCharts() {
   })
 
   // TRI over time
-  const lineDates = rows.filter(r => r.irr != null).map(r => r.date)
+  const lineDates = rows.filter(r => r.irr != null).map(r => formatDate(r.date))
   const lineIrrs  = rows.filter(r => r.irr != null).map(r => +(r.irr * 100).toFixed(3))
 
   lineChart = new Chart(lineCanvas.value, {
@@ -290,7 +291,7 @@ async function renderCharts() {
     options: demoChartOptions({
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: it => `TRI: ${it.raw.toFixed(2)}%` } } },
+        tooltip: { callbacks: { label: it => `TRI: ${it.raw.toFixed(2).replace('.', ',')}%` } } },
       scales: {
         x: { ticks: { font: { size: 8 }, maxTicksLimit: 8, maxRotation: 30 } },
         y: { ticks: { font: { size: 9 }, callback: v => v + '%' } },

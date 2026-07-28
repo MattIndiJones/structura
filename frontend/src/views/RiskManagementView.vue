@@ -60,15 +60,30 @@
                 class="px-4 py-2 text-xs font-medium transition-colors">
                 Greeks
               </button>
+              <button @click="activeTab = 'contreparties'"
+                :class="activeTab === 'contreparties' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
+                class="px-4 py-2 text-xs font-medium transition-colors">
+                🏦 Contreparties
+              </button>
               <button @click="activeTab = 'chocs'"
                 :class="activeTab === 'chocs' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
                 class="px-4 py-2 text-xs font-medium transition-colors">
                 ⚡ Chocs
               </button>
+              <button @click="activeTab = 'var'"
+                :class="activeTab === 'var' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
+                class="px-4 py-2 text-xs font-medium transition-colors">
+                📉 VaR
+              </button>
               <button @click="activeTab = 'pnl'"
                 :class="activeTab === 'pnl' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
                 class="px-4 py-2 text-xs font-medium transition-colors">
                 P&L
+              </button>
+              <button @click="activeTab = 'barrieres'"
+                :class="activeTab === 'barrieres' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
+                class="px-4 py-2 text-xs font-medium transition-colors">
+                📍 Barrières
               </button>
             </div>
 
@@ -159,6 +174,54 @@
                       </table>
                     </div>
 
+                    <template v-if="Object.keys(pf.risk.corr_pairs || {}).length">
+                      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                        Corrélation par paire
+                        <HelpTip width="w-72" text="Sensibilité du book à une hausse de corrélation entre deux sous-jacents (cross-gamma), uniquement pour les paires qui apparaissent ensemble dans au moins un deal worst-of/basket — jamais visible deal par deal, un book peut être concentré sur une paire sans qu'aucun deal ne la montre grosse à lui seul." />
+                      </div>
+                      <div class="overflow-x-auto table-shell" tabindex="0" role="region">
+                        <table class="w-full text-xs border-collapse">
+                          <thead>
+                            <tr class="border-b border-slate-700 text-slate-500">
+                              <th class="text-left py-1.5 pr-3 font-semibold">Paire de sous-jacents</th>
+                              <th class="text-right py-1.5 font-semibold">Corr (EUR / 1pt)
+                                <HelpTip align="right" text="Σ(sensibilité corrélation du deal × nominal × taux de change), rescalée pour lire un impact par 1 point de corrélation — même convention que corr_shock_pts dans l'onglet Chocs (le moteur calcule la dérivée brute par 100pts, d'où le ×0.01)." /></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template v-for="(g, key) in pf.risk.corr_pairs" :key="key">
+                              <tr class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
+                                @click="expandedCorrPair = expandedCorrPair === key ? null : key">
+                                <td class="py-1.5 pr-3 text-slate-300 font-semibold">
+                                  <span class="text-slate-600 mr-1">{{ expandedCorrPair === key ? '▾' : '▸' }}</span>{{ g.label }}
+                                </td>
+                                <td class="py-1.5 text-right font-mono" :class="g.corr_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">{{ formatNominal(g.corr_eur) }}</td>
+                              </tr>
+                              <tr v-if="expandedCorrPair === key" class="bg-slate-900/60">
+                                <td colspan="2" class="py-2 pl-6 pr-3">
+                                  <table class="w-full text-[11px] border-collapse">
+                                    <thead>
+                                      <tr class="text-slate-600">
+                                        <th class="text-left py-1 pr-3 font-medium">Deal</th>
+                                        <th class="text-right py-1 font-medium">Corr (EUR / 1pt)</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      <tr v-for="c in g.contributions" :key="c.deal_id"
+                                        class="hover:bg-slate-800/40 cursor-pointer" @click.stop="openDealDetail(c.deal_id)">
+                                        <td class="py-1 pr-3 font-mono font-semibold text-blue-400">{{ c.reference }}</td>
+                                        <td class="py-1 text-right font-mono text-slate-400">{{ formatNominal(c.corr_eur) }}</td>
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+
                     <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
                       <div class="stat-box">
                         <div class="text-xs text-slate-500 mb-1">Nominal total
@@ -190,6 +253,107 @@
                           {{ pf.risk.oldest_computed_at ? new Date(pf.risk.oldest_computed_at).toLocaleDateString('fr-FR') : '—' }}
                         </div>
                       </div>
+                    </div>
+                  </template>
+                </template>
+              </template>
+
+            <!-- ══ Onglet Contreparties : concentration & limites ═ -->
+            <template v-else-if="activeTab === 'contreparties'">
+                <div class="text-[10px] text-slate-500 -mt-1">
+                  Nominal (converti en EUR) par contrepartie sur les deals actifs de cette sélection — pas de recalcul Monte Carlo, lecture directe.
+                  <HelpTip text="Base nominal, pas MtM courant : une note structurée est une créance non sécurisée sur l'émetteur pour le remboursement promis — c'est le nominal qui est en jeu en cas de défaut, pas la valeur de marché du jour." />
+                </div>
+
+                <div v-if="pf.exposureLoading" class="text-xs text-slate-500">Chargement…</div>
+
+                <template v-else-if="pf.exposure">
+                  <div v-if="!pf.exposure.by_counterparty.length" class="text-xs text-slate-500">
+                    Aucun deal actif dans cette sélection.
+                  </div>
+
+                  <template v-else>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div class="stat-box">
+                        <div class="text-xs text-slate-500 mb-1">Nominal total
+                          <HelpTip text="Somme des nominaux de tous les deals actifs de cette sélection, convertis en EUR." /></div>
+                        <div class="text-lg font-bold font-mono text-slate-200">{{ formatNominal(pf.exposure.nominal_total_eur) }}</div>
+                        <div class="text-[10px] text-slate-600">EUR</div>
+                      </div>
+                      <div class="stat-box">
+                        <div class="text-xs text-slate-500 mb-1">Contreparties
+                          <HelpTip text="Nombre de contreparties distinctes portant au moins un deal actif de cette sélection." /></div>
+                        <div class="text-lg font-bold font-mono text-slate-200">{{ pf.exposure.by_counterparty.length }}</div>
+                      </div>
+                      <div class="stat-box">
+                        <div class="text-xs text-slate-500 mb-1">N effectif (1/HHI)
+                          <HelpTip text="Indice de concentration Herfindahl-Hirschman (Σ part²) retourné en 'nombre de contreparties équivalent' — un book réparti sur 10 banques à parts égales donne 10 ; un book concentré sur 2-3 banques donne un chiffre bas même s'il y a nominalement plus de 10 contreparties au total." /></div>
+                        <div class="text-lg font-bold font-mono"
+                          :class="pf.exposure.effective_n != null && pf.exposure.effective_n < 3 ? 'text-amber-400' : 'text-slate-200'">
+                          {{ pf.exposure.effective_n ?? '—' }}
+                        </div>
+                      </div>
+                      <div class="stat-box">
+                        <div class="text-xs text-slate-500 mb-1">Top 3 contreparties
+                          <HelpTip text="Part du nominal total portée par les 3 plus grosses contreparties de cette sélection." /></div>
+                        <div class="text-lg font-bold font-mono text-slate-200">
+                          {{ pf.exposure.top3_pct != null ? Math.round(pf.exposure.top3_pct * 100) + '%' : '—' }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="overflow-x-auto table-shell" tabindex="0" role="region">
+                      <table class="w-full text-xs border-collapse">
+                        <thead>
+                          <tr class="border-b border-slate-700 text-slate-500">
+                            <th class="text-left py-1.5 pr-3 font-semibold">Contrepartie</th>
+                            <th class="text-right py-1.5 pr-3 font-semibold">Nominal (EUR)</th>
+                            <th class="text-right py-1.5 pr-3 font-semibold">% du book</th>
+                            <th class="text-right py-1.5 pr-3 font-semibold">Deals</th>
+                            <th class="text-right py-1.5 pr-3 font-semibold">Limite (EUR)
+                              <HelpTip align="right" text="Configurée par un admin dans Administration → Contreparties. Vide = pas de limite définie, jamais de dépassement signalé." /></th>
+                            <th class="text-left py-1.5 font-semibold"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template v-for="c in pf.exposure.by_counterparty" :key="c.contrepartie">
+                            <tr class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
+                              @click="expandedCounterparty = expandedCounterparty === c.contrepartie ? null : c.contrepartie">
+                              <td class="py-1.5 pr-3 text-slate-300 font-semibold">
+                                <span class="text-slate-600 mr-1">{{ expandedCounterparty === c.contrepartie ? '▾' : '▸' }}</span>{{ c.contrepartie }}
+                              </td>
+                              <td class="py-1.5 pr-3 text-right font-mono text-slate-200">{{ formatNominal(c.nominal_eur) }}</td>
+                              <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ c.pct_of_book != null ? Math.round(c.pct_of_book * 100) + '%' : '—' }}</td>
+                              <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ c.deal_count }}</td>
+                              <td class="py-1.5 pr-3 text-right font-mono" :class="c.limit_breached ? 'text-red-400 font-bold' : 'text-slate-500'">
+                                {{ c.limit_eur != null ? formatNominal(c.limit_eur) : '—' }}
+                              </td>
+                              <td class="py-1.5 text-right">
+                                <span v-if="c.limit_breached" class="text-[10px] text-red-400 bg-red-950/40 border border-red-900/50 rounded-full px-2 py-0.5">⚠ limite dépassée</span>
+                              </td>
+                            </tr>
+                            <tr v-if="expandedCounterparty === c.contrepartie" class="bg-slate-900/60">
+                              <td colspan="6" class="py-2 pl-6 pr-3">
+                                <table class="w-full text-[11px] border-collapse">
+                                  <thead>
+                                    <tr class="text-slate-600">
+                                      <th class="text-left py-1 pr-3 font-medium">Deal</th>
+                                      <th class="text-right py-1 font-medium">Nominal (EUR)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr v-for="dl in c.deals" :key="dl.id"
+                                      class="hover:bg-slate-800/40 cursor-pointer" @click.stop="openDealDetail(dl.id)">
+                                      <td class="py-1 pr-3 font-mono font-semibold text-blue-400">{{ dl.reference }}</td>
+                                      <td class="py-1 text-right font-mono text-slate-400">{{ formatNominal(dl.nominal_eur) }}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
                     </div>
                   </template>
                 </template>
@@ -301,7 +465,7 @@
                   <table class="w-full text-xs border-collapse">
                     <tbody>
                       <tr v-for="h in pf.currentShockHistory" :key="h.id" class="border-b border-slate-800/50">
-                        <td class="py-1 pr-3 text-slate-500 whitespace-nowrap">{{ new Date(h.created_at).toLocaleString('fr-FR') }}</td>
+                        <td class="py-1 pr-3 text-slate-500 whitespace-nowrap">{{ formatDateTime(h.created_at) }}</td>
                         <td class="py-1 pr-3 text-slate-300">{{ h.label }}</td>
                         <td class="py-1 pr-3 text-right font-mono" :class="(h.result.total_delta_eur ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-500'">
                           {{ formatNominal(h.result.total_delta_eur) }} EUR
@@ -312,6 +476,161 @@
                       </tr>
                     </tbody>
                   </table>
+                  </div>
+                </div>
+            </template>
+
+            <!-- ══ Onglet VaR/ES ═════════════════════════════════ -->
+            <template v-else-if="activeTab === 'var'">
+                <div class="text-sm font-bold text-slate-100">
+                  📉 VaR/ES — {{ pf.view === 'global' ? 'Tous portefeuilles' : pf.label }}
+                  <HelpTip width="w-80" text="Rejoue le book sous des centaines de scénarios de marché (historique ET paramétrique, affichés côte à côte, jamais fusionnés en un seul chiffre) via le module de calcul générique — asynchrone : rien ne s'exécute tant que le worker de calcul n'est pas démarré (voir l'avertissement ci-dessous)." />
+                </div>
+
+                <div class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
+                  ⚠ Nécessite que <code class="font-mono">backend\scripts\run_compute_worker.py</code> tourne en parallèle du serveur — sinon l'étude reste "en attente" indéfiniment.
+                </div>
+
+                <div class="flex flex-wrap gap-3 items-end">
+                  <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Méthode
+                    <select v-model="varForm.method" class="select text-xs py-1 w-32">
+                      <option value="both">Les deux</option>
+                      <option value="historical">Historique</option>
+                      <option value="parametric">Paramétrique</option>
+                    </select>
+                  </label>
+                  <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Confiance
+                    <select v-model.number="varForm.confidence" class="select text-xs py-1 w-24">
+                      <option :value="0.95">95%</option>
+                      <option :value="0.99">99%</option>
+                      <option :value="0.90">90%</option>
+                    </select>
+                  </label>
+                  <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Horizon (j)
+                    <input v-model.number="varForm.horizon_days" type="number" min="1" class="input text-xs py-1 w-20" />
+                  </label>
+                  <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Lookback (ans)
+                    <input v-model.number="varForm.lookback_years" type="number" min="0.5" step="0.5" class="input text-xs py-1 w-20" />
+                  </label>
+                  <button class="text-[10px] text-slate-500 hover:text-slate-300 underline self-end pb-1"
+                    @click="varAdvancedOpen = !varAdvancedOpen">
+                    {{ varAdvancedOpen ? 'masquer' : 'options avancées' }}
+                  </button>
+                  <button class="btn-primary text-xs px-4 py-1.5 self-end" :disabled="pf.varLaunching || pf.varPolling"
+                    @click="launchVarStudy">
+                    <span v-if="pf.varLaunching || pf.varPolling"
+                      class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
+                    Lancer l'étude
+                  </button>
+                </div>
+
+                <div v-if="varLaunchError" class="text-xs text-red-400 bg-red-950/30 border border-red-900/50 rounded-lg px-3 py-2">
+                  ⚠ {{ varLaunchError }}
+                </div>
+
+                <div v-if="varAdvancedOpen" class="flex flex-wrap gap-3">
+                  <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Tirages paramétriques
+                    <input v-model.number="varForm.n_parametric" type="number" min="100" step="100" class="input text-xs py-1 w-28" />
+                  </label>
+                  <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Paths / scénario
+                    <HelpTip text="Moins de précision par scénario qu'un choc unique (défaut du panneau Chocs : 20000) — le bruit se moyenne sur des centaines de scénarios, contrairement à un choc isolé où on veut la précision max." />
+                    <input v-model.number="varForm.n_paths_per_scenario" type="number" min="500" step="500" class="input text-xs py-1 w-28" />
+                  </label>
+                  <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Workers parallèles
+                    <input v-model.number="varForm.max_workers" type="number" min="1" max="16" class="input text-xs py-1 w-20" />
+                  </label>
+                </div>
+
+                <template v-if="pf.varStudy">
+                  <div v-if="pf.varStudy.status === 'queued' || pf.varStudy.status === 'running'"
+                    class="flex flex-col gap-1.5">
+                    <div class="text-xs text-slate-400">
+                      {{ pf.varStudy.status === 'queued' ? 'En file d\'attente…' : 'En cours…' }}
+                      {{ pf.varStudy.completed_jobs + pf.varStudy.failed_jobs }} / {{ pf.varStudy.total_jobs }} scénario(s)
+                    </div>
+                    <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div class="h-full bg-blue-500 transition-all"
+                        :style="{ width: (pf.varStudy.total_jobs ? (pf.varStudy.completed_jobs + pf.varStudy.failed_jobs) / pf.varStudy.total_jobs * 100 : 0) + '%' }"></div>
+                    </div>
+                  </div>
+
+                  <template v-else>
+                    <div v-if="pf.varStudy.failed_jobs" class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
+                      ⚠ {{ pf.varStudy.failed_jobs }} / {{ pf.varStudy.total_jobs }} scénario(s) en erreur — chiffres calculés sur les autres.
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div v-for="m in ['historical', 'parametric']" :key="m" v-show="pf.varStudy.result?.[m]"
+                        class="card flex flex-col gap-2">
+                        <div class="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                          {{ m === 'historical' ? 'Historique' : 'Paramétrique' }}
+                          <span class="text-slate-600 font-normal normal-case">— {{ pf.varStudy.result?.[m]?.n_scenarios }} scénario(s)</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                          <div class="stat-box">
+                            <div class="text-xs text-slate-500 mb-1">VaR {{ Math.round((pf.varStudy.params.confidence ?? 0.95) * 100) }}%</div>
+                            <div class="text-lg font-bold font-mono text-red-400">{{ formatNominal(pf.varStudy.result?.[m]?.var_eur) }}</div>
+                            <div class="text-[10px] text-slate-600">EUR</div>
+                          </div>
+                          <div class="stat-box">
+                            <div class="text-xs text-slate-500 mb-1">Expected Shortfall
+                              <HelpTip text="Perte moyenne au-delà du seuil VaR — la queue au-delà du pire (confiance)%, pas juste le point de coupure." /></div>
+                            <div class="text-lg font-bold font-mono text-red-400">{{ formatNominal(pf.varStudy.result?.[m]?.es_eur) }}</div>
+                            <div class="text-[10px] text-slate-600">EUR</div>
+                          </div>
+                        </div>
+                        <div class="text-[10px] text-slate-500 font-mono flex flex-wrap gap-x-3">
+                          <span v-for="(v, p) in pf.varStudy.result?.[m]?.distribution_summary" :key="p">{{ p }}: {{ formatNominal(v) }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div v-if="pf.varStudy.result?.worst_scenarios?.length" class="overflow-x-auto table-shell" tabindex="0" role="region">
+                      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 mt-1">Pires scénarios</div>
+                      <table class="w-full text-xs border-collapse">
+                        <thead>
+                          <tr class="border-b border-slate-700 text-slate-500">
+                            <th class="text-left py-1.5 pr-3 font-semibold">Scénario</th>
+                            <th class="text-left py-1.5 pr-3 font-semibold">Méthode</th>
+                            <th class="text-right py-1.5 font-semibold">ΔMtM (EUR)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="w in pf.varStudy.result.worst_scenarios" :key="w.scenario_key"
+                            class="border-b border-slate-800/50">
+                            <td class="py-1 pr-3 font-mono text-slate-300">{{ w.scenario_key }}</td>
+                            <td class="py-1 pr-3 text-slate-500">{{ w.method === 'historical' ? 'Historique' : 'Paramétrique' }}</td>
+                            <td class="py-1 text-right font-mono text-red-400">{{ formatNominal(w.delta_eur) }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div v-if="varDealsSkipped.length" class="text-xs text-slate-500">
+                      Deals ignorés au lancement : {{ varDealsSkipped.map(d => d.reference).join(', ') }}
+                    </div>
+                  </template>
+                </template>
+
+                <!-- Études passées -->
+                <div class="pt-2 border-t border-slate-800">
+                  <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Études passées</div>
+                  <div v-if="!pf.varHistory.length" class="text-xs text-slate-500">Aucune étude VaR lancée pour l'instant.</div>
+                  <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
+                    <table class="w-full text-xs border-collapse">
+                      <tbody>
+                        <tr v-for="b in pf.varHistory" :key="b.id" class="border-b border-slate-800/50 hover:bg-slate-800/20 cursor-pointer"
+                          @click="pf.openVarBatch(b.id)">
+                          <td class="py-1 pr-3 text-slate-500 whitespace-nowrap">{{ formatDateTime(b.created_at) }}</td>
+                          <td class="py-1 pr-3 text-slate-300">{{ b.label }}</td>
+                          <td class="py-1 pr-3 text-slate-500">{{ b.completed_jobs }}/{{ b.total_jobs }}</td>
+                          <td class="py-1 text-right"
+                            :class="{ completed: 'text-emerald-500', completed_with_failures: 'text-amber-500', failed: 'text-red-500', running: 'text-blue-400', queued: 'text-slate-500' }[b.status]">
+                            {{ b.status }}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
             </template>
@@ -451,6 +770,115 @@
               </template>
             </template>
 
+            <!-- ══ Onglet Barrières : proximité aux barrières ═══════ -->
+            <template v-else-if="activeTab === 'barrieres'">
+              <div class="flex items-center gap-3 flex-wrap">
+                <div class="text-sm font-bold text-slate-100">
+                  📍 Proximité aux barrières — {{ pf.view === 'global' ? 'Tous portefeuilles' : pf.label }}
+                  <HelpTip width="w-80" text="Classe tous les deals actifs de la sélection par écart entre le worst-of actuel et leur prochaine barrière (autocall, KI) détectée dans le script — pour repérer en un coup d'œil ce qui mérite un suivi cette semaine. Réutilise la même détection que la Surveillance de Booking (convention PARAM M_)." />
+                </div>
+                <button class="btn-secondary text-xs px-3 py-1.5 ml-auto" :disabled="pf.barriersLoading || !pf.members.length"
+                  @click="pf.loadBarriers">
+                  <span v-if="pf.barriersLoading"
+                    class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
+                  🔄 Actualiser
+                </button>
+              </div>
+
+              <div v-if="!pf.barriers && !pf.barriersLoading" class="text-xs text-slate-500 text-center py-8">
+                <button class="btn-primary text-xs px-4 py-1.5" :disabled="!pf.members.length" @click="pf.loadBarriers">
+                  ▶ Charger la proximité aux barrières
+                </button>
+                <div v-if="!pf.members.length" class="mt-2 text-slate-600">Aucun deal actif dans cette sélection.</div>
+              </div>
+
+              <div v-else-if="pf.barriersLoading" class="text-xs text-slate-500 text-center py-8">
+                Calcul en cours — un appel de marché par deal, cela peut prendre quelques secondes…
+              </div>
+
+              <template v-else-if="pf.barriers">
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div class="stat-box">
+                    <div class="text-xs text-slate-500 mb-1">Critique — ≤ 5 pts (KI)</div>
+                    <div class="text-lg font-bold font-mono text-red-400">{{ pf.barriers.counts.critique }}</div>
+                    <div class="text-[10px] text-slate-600">deal(s)</div>
+                  </div>
+                  <div class="stat-box">
+                    <div class="text-xs text-slate-500 mb-1">Attention — zone intermédiaire</div>
+                    <div class="text-lg font-bold font-mono text-amber-400">{{ pf.barriers.counts.attention }}</div>
+                    <div class="text-[10px] text-slate-600">deal(s)</div>
+                  </div>
+                  <div class="stat-box">
+                    <div class="text-xs text-slate-500 mb-1">Sous contrôle</div>
+                    <div class="text-lg font-bold font-mono text-emerald-400">{{ pf.barriers.counts.ok }}</div>
+                    <div class="text-[10px] text-slate-600">deal(s)</div>
+                  </div>
+                </div>
+
+                <div v-if="pf.barriers.errors.length"
+                  class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
+                  ⚠ Deal(s) non évalués (erreur marché) :
+                  <span v-for="(e, i) in pf.barriers.errors" :key="e.deal_id">
+                    {{ i > 0 ? ' · ' : '' }}{{ e.reference }} <span class="text-amber-600">({{ e.error }})</span>
+                  </span>
+                </div>
+
+                <div v-if="!pf.barriers.rows.length" class="text-xs text-slate-500">
+                  Aucune barrière PARAM (convention M_) détectée sur les deals actifs de cette sélection.
+                </div>
+
+                <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
+                  <table class="w-full text-xs border-collapse">
+                    <thead>
+                      <tr class="border-b border-slate-700 text-slate-500">
+                        <th class="text-left py-1.5 pr-3 font-semibold">Deal</th>
+                        <th class="text-left py-1.5 pr-3 font-semibold">Sous-jacent</th>
+                        <th class="text-left py-1.5 pr-3 font-semibold">Prochaine obs</th>
+                        <th class="text-right py-1.5 pr-3 font-semibold num">WOF</th>
+                        <th class="text-left py-1.5 pr-3 font-semibold">Barrières</th>
+                        <th class="text-right py-1.5 font-semibold num">Nominal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="w in pf.barriers.rows" :key="w.deal_id"
+                        class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
+                        @click="openDealDetail(w.deal_id)">
+                        <td class="py-2 pr-3 font-mono font-semibold text-blue-400 whitespace-nowrap">{{ w.reference }}</td>
+                        <td class="py-2 pr-3 text-slate-400 whitespace-nowrap">
+                          {{ (w.underlyings || []).map(u => u.ticker || u.name).join(' / ') || '—' }}
+                        </td>
+                        <td class="py-2 pr-3 font-mono whitespace-nowrap">
+                          <template v-if="w.next_event">
+                            <span class="text-slate-300">{{ w.next_event.date }}</span>
+                            <span class="ml-1.5 text-[10px]" :class="w.days_to_next <= 30 ? 'text-amber-400 font-semibold' : 'text-slate-500'">
+                              J−{{ w.days_to_next }}
+                            </span>
+                          </template>
+                          <span v-else class="text-slate-600">—</span>
+                        </td>
+                        <td class="py-2 pr-3 font-mono num whitespace-nowrap text-right">
+                          <template v-if="w.wof != null">
+                            <span :class="w.wof >= 1 ? 'text-emerald-400' : 'text-red-400'">{{ formatPercent(w.wof * 100, 1) }}</span>
+                          </template>
+                          <span v-else class="text-slate-600" title="S₀ manquant">n/d</span>
+                        </td>
+                        <td class="py-2 pr-3">
+                          <div class="flex gap-1.5 flex-wrap">
+                            <span v-for="b in w.barriers" :key="b.name"
+                              :class="barrierChipClass(b)"
+                              class="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap">
+                              {{ b.name }} {{ formatPercent(b.level * 100, 0) }}<template v-if="b.observable && b.observable !== 'WOF'"> vs {{ b.observable }}</template> · {{ barrierGapLabel(b) }}
+                            </span>
+                          </div>
+                        </td>
+                        <td class="py-2 text-right font-mono num text-slate-300 whitespace-nowrap">{{ formatNominal(w.nominal) }} {{ w.devise }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+            </template>
+
             <!-- ══ Onglet Portefeuilles : création, gestion, composition ══ -->
             <template v-else>
 
@@ -470,9 +898,10 @@
                     <span class="flex-1 truncate text-xs text-slate-300">{{ p.name }}</span>
                     <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 shrink-0">{{ p.deal_count }} deal(s)</span>
                     <button class="text-slate-600 hover:text-slate-300 text-xs px-1 shrink-0"
-                      title="Renommer" @click="renamePortfolio(p)">✎</button>
+                      title="Renommer" aria-label="Renommer le portefeuille" @click="renamePortfolio(p)">✎</button>
                     <button v-if="!p.is_default" class="text-slate-600 hover:text-red-400 text-xs px-1 shrink-0"
-                      title="Supprimer (les deals sont déplacés vers le portefeuille par défaut)" @click="deletePortfolio(p)">✕</button>
+                      title="Supprimer (les deals sont déplacés vers le portefeuille par défaut)"
+                      aria-label="Supprimer le portefeuille" @click="deletePortfolio(p)">✕</button>
                     <span v-else class="text-slate-700 text-xs px-1 shrink-0" title="Portefeuille par défaut — ne peut pas être supprimé, chaque deal doit toujours être surveillé">🔒</span>
                   </div>
                 </div>
@@ -534,11 +963,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
-import { usePortfoliosStore, shockPresets, blankShockForm } from '../stores/portfolios.js'
+import { usePortfoliosStore, shockPresets, blankShockForm, blankVarForm } from '../stores/portfolios.js'
 import { apiFetch } from '../utils/api.js'
+import { formatInt, formatDateTime, formatPercent } from '../utils/format.js'
+import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
 import HelpTip from '../components/HelpTip.vue'
 
 const route = useRoute()
@@ -549,17 +980,23 @@ const pf = usePortfoliosStore()
 // Le sous-menu Risk Management de l'accueil route vers /risk?tab=... — chaque
 // entrée (Création de portefeuille / Chocs / Explication de P&L) atterrit
 // directement sur sa section.
-const VALID_TABS = ['portfolios', 'greeks', 'chocs', 'pnl']
+const VALID_TABS = ['portfolios', 'greeks', 'contreparties', 'chocs', 'var', 'pnl', 'barrieres']
 const activeTab = ref(VALID_TABS.includes(route.query.tab) ? route.query.tab : 'portfolios')
 watch(() => route.query.tab, (t) => {
   if (VALID_TABS.includes(t)) activeTab.value = t
 })
+
+// Barrières is lazy (see stores/portfolios.js loadBarriers doc) — fetch once
+// when the tab is first opened, not on every portfolio switch.
+watch(activeTab, (t) => {
+  if (t === 'barrieres' && !pf.barriers && !pf.barriersLoading) pf.loadBarriers()
+})
 const expandedUnderlying = ref(null)
+const expandedCorrPair = ref(null)
+const expandedCounterparty = ref(null)
 const newPortfolioName = ref('')
 
-function formatNominal(n) {
-  return (n ?? 0).toLocaleString('fr-FR')
-}
+const formatNominal = formatInt
 
 function sharePct(contribution, bucketTotal) {
   if (contribution == null || !bucketTotal) return '—'
@@ -648,6 +1085,27 @@ async function runPortfolioShock() {
   }
 }
 
+// ── VaR/ES study (portefeuille / global) ─────────────────────────────
+const varForm = reactive(blankVarForm())
+const varAdvancedOpen = ref(false)
+// deals_skipped only comes back on the launch (POST) response, never on a
+// later poll of GET /var/{id} — kept in its own ref (rather than stashed
+// onto pf.varStudy) since the poll loop overwrites pf.varStudy.value
+// asynchronously and could otherwise race with this assignment.
+const varDealsSkipped = ref([])
+const varLaunchError = ref('')
+
+async function launchVarStudy() {
+  varDealsSkipped.value = []
+  varLaunchError.value = ''
+  try {
+    const launched = await pf.launchVar(varForm)
+    varDealsSkipped.value = launched.deals_skipped || []
+  } catch (e) {
+    varLaunchError.value = e.message
+  }
+}
+
 // ── P&L explain (portefeuille / global) ──────────────────────────────
 const todayIso = new Date().toISOString().slice(0, 10)
 const pnlD1 = ref('')                  // vide = origine de chaque deal
@@ -678,7 +1136,16 @@ onMounted(() => {
   dealsStore.loadDeals()
   pf.load()
   pf.loadRisk()
+  pf.loadExposure()
+  pf.loadVarHistory()
   pf.loadShockHistory(pf.view === 'global' ? 'global' : 'portfolio',
                       pf.view === 'global' ? null : pf.view)
+})
+
+// A VaR study's poll loop uses setTimeout, not a Vue-managed watcher — must
+// be stopped explicitly on unmount or it keeps polling (and holds a
+// reference to this closed-over component) after the user navigates away.
+onUnmounted(() => {
+  pf.stopVarPolling()
 })
 </script>

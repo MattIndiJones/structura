@@ -28,10 +28,11 @@ def scenarios_endpoint(req: ScenarioRequest):
     T_eff = effective_T_max(compiled, req.T)
     try:
         return compute_scenario_grid(
-            compiled, uls, corr, req.r, T_eff, req.model, req.seed, req.user_params,
+            req.script, uls, corr, req.r, T_eff, req.model, req.seed, req.user_params,
             req.spot_shocks, req.vol_shocks, N=req.N,
             yield_curve=req.yield_curve or [], sigma_r=req.sigma_r, a_r=req.a_r,
             barrier_monitoring=req.barrier_monitoring,
+            constat_values=req.constats or None,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

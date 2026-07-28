@@ -5,6 +5,8 @@
     <div class="sticky top-0 z-30 border-b px-5 py-2.5 flex items-center gap-4 shrink-0"
          style="background: rgba(255,255,255,.95); backdrop-filter: blur(6px); border-color: var(--border);">
 
+      <RouterLink :to="{ path: '/', query: { category: 'pricing' } }" class="btn-secondary text-xs px-3 py-1.5 shrink-0">← Retour</RouterLink>
+
       <!-- Progress bar / résumé prix / erreur -->
       <div class="flex-1 min-w-0">
         <div v-if="store.progress > 0" class="progress-track">

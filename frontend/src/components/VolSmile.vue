@@ -161,7 +161,7 @@ async function renderChart() {
         tooltip: {
           mode: 'index',
           intersect: false,
-          callbacks: { label: it => `${it.dataset.label}: ${it.raw.toFixed(1)}%` },
+          callbacks: { label: it => `${it.dataset.label}: ${it.raw.toFixed(1).replace('.', ',')}%` },
         },
       },
       scales: {

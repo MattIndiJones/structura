@@ -106,6 +106,7 @@ import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import { templateMeta } from '../data/payscriptTemplates.js'
+import { formatBps as centralFormatBps } from '../utils/format.js'
 
 Chart.register(...registerables)
 applyChartTheme(Chart)
@@ -156,7 +157,8 @@ function providerLabel(id) {
 }
 
 function fmtBps(v) {
-  return v === null || v === undefined ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(0)} bps`
+  if (v === null || v === undefined) return '—'
+  return (v >= 0 ? '+' : '') + centralFormatBps(v, 0)
 }
 
 const summaryRows = computed(() => {

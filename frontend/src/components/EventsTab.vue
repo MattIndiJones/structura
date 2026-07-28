@@ -34,19 +34,19 @@
           </div>
           <div>
             <div class="text-slate-500 mb-0.5">Trade date</div>
-            <div class="font-mono text-slate-300">{{ deal.trade_date }}</div>
+            <div class="font-mono text-slate-300">{{ formatDate(deal.trade_date) }}</div>
           </div>
           <div>
             <div class="text-slate-500 mb-0.5">Strike date</div>
-            <div class="font-mono text-slate-300">{{ deal.strike_date }}</div>
+            <div class="font-mono text-slate-300">{{ formatDate(deal.strike_date) }}</div>
           </div>
           <div>
             <div class="text-slate-500 mb-0.5">Value date</div>
-            <div class="font-mono text-slate-300">{{ deal.value_date }}</div>
+            <div class="font-mono text-slate-300">{{ formatDate(deal.value_date) }}</div>
           </div>
           <div>
             <div class="text-slate-500 mb-0.5">Maturité</div>
-            <div class="font-mono text-slate-300">{{ deal.maturity_date }}</div>
+            <div class="font-mono text-slate-300">{{ formatDate(deal.maturity_date) }}</div>
           </div>
         </div>
 
@@ -171,7 +171,7 @@
                   </span>
                 </td>
                 <td class="py-2 pr-3 font-mono text-slate-300 whitespace-nowrap">
-                  {{ ev.event_date }}
+                  {{ formatDate(ev.event_date) }}
                   <span v-if="ev.event_date === today" class="ml-1 text-amber-400 text-[10px]">aujourd'hui</span>
                 </td>
                 <td class="py-2 pr-3 font-mono num text-slate-400">{{ ev.t_years.toFixed(2) }}</td>
@@ -310,6 +310,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useDealsStore } from '../stores/deals.js'
 import { usePricingStore } from '../stores/pricing.js'
 import HelpTip from './HelpTip.vue'
+import { formatDate } from '../utils/format.js'
 
 const props = defineProps({ initialDealId: { type: Number, default: null } })
 

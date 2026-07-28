@@ -12,6 +12,7 @@
       </div>
 
       <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
+      <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
       <div class="card overflow-x-auto">
         <LoadingSpinner v-if="loading" class="py-6" />
@@ -28,7 +29,7 @@
                 <input class="input py-1 px-2" :value="e.name"
                        @change="updateEntity(e, $event.target.value)" />
               </td>
-              <td class="py-1.5 pr-3 text-slate-500">{{ new Date(e.created_at).toLocaleDateString('fr-FR') }}</td>
+              <td class="py-1.5 pr-3 text-slate-500">{{ formatDate(e.created_at) }}</td>
             </tr>
           </tbody>
         </table>
@@ -51,12 +52,12 @@ import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
-import { useToastsStore } from '../stores/toasts.js'
+import { formatDate } from '../utils/format.js'
 
-const toasts = useToastsStore()
 const entities = ref([])
 const loading  = ref(true)
 const error    = ref('')
+const notice   = ref('')
 const creating = ref(false)
 const newName  = ref('')
 
@@ -79,6 +80,7 @@ async function createEntity() {
   if (!name) return
   creating.value = true
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch('/api/admin/entities', {
       method: 'POST',
@@ -89,7 +91,7 @@ async function createEntity() {
     entities.value.push(await res.json())
     entities.value.sort((a, b) => a.name.localeCompare(b.name))
     newName.value = ''
-    toasts.success('Entité ajoutée')
+    notice.value = 'Entité ajoutée'
   } catch (e) {
     error.value = e.message
   } finally {
@@ -99,6 +101,7 @@ async function createEntity() {
 
 async function updateEntity(e, name) {
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/entities/${e.id}`, {
       method: 'PATCH',

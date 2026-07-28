@@ -47,6 +47,8 @@
       </button>
     </div>
 
+    <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
+
     <!-- Save modal -->
     <BaseModal v-model="saveModal.open" title="Sauvegarder le script" max-width="420px">
       <div class="flex flex-col gap-4">
@@ -195,7 +197,6 @@
 <script setup>
 import { ref, reactive, computed, nextTick } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
-import { useToastsStore } from '../stores/toasts.js'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
 import BaseModal from './ui/BaseModal.vue'
@@ -203,7 +204,7 @@ import AlertMessage from './ui/AlertMessage.vue'
 import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
 
 const store = usePricingStore()
-const toasts = useToastsStore()
+const notice = ref('')
 
 const groupedTemplates = computed(() => {
   const groups = {}
@@ -227,15 +228,17 @@ function openSaveModal() {
   saveModal.tags        = ''
   saveModal.isShared    = false
   saveModal.error       = ''
+  notice.value          = ''
   saveModal.open        = true
   nextTick(() => saveNameInput.value?.focus())
 }
 
 async function quickSave() {
   saving.value = true
+  notice.value = ''
   try {
     await store.updateScript()
-    toasts.success('Script mis à jour')
+    notice.value = 'Script mis à jour'
   } catch (e) {
     openSaveModal()
     saveModal.error = e.message
@@ -249,6 +252,7 @@ async function doSave() {
   if (!name) { saveModal.error = 'Le nom est requis'; return }
   saving.value = true
   saveModal.error = ''
+  notice.value = ''
   try {
     await store.saveScript({
       name,
@@ -257,7 +261,7 @@ async function doSave() {
       isShared: saveModal.isShared,
     })
     saveModal.open = false
-    toasts.success('Script sauvegardé')
+    notice.value = 'Script sauvegardé'
   } catch (e) {
     saveModal.error = e.message
   } finally {

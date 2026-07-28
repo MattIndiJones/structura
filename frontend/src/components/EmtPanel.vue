@@ -88,7 +88,7 @@
               <div class="text-slate-500 mb-1">Durée de détention recommandée
                 <HelpTip text="Identique au T_rhp du KID (maturité du produit) — cohérence intentionnelle entre les deux documents." />
               </div>
-              <div class="font-semibold text-slate-100">{{ emt.T_rhp.toFixed(1) }} an(s)</div>
+              <div class="font-semibold text-slate-100">{{ formatNumber(emt.T_rhp, 1) }} an(s)</div>
             </div>
           </div>
 
@@ -265,6 +265,7 @@ import { ref, computed } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { apiFetch } from '../utils/api.js'
 import HelpTip from './HelpTip.vue'
+import { formatNumber } from '../utils/format.js'
 
 const store = usePricingStore()
 
@@ -546,7 +547,7 @@ function printEmt() {
     <tr><td>Indicateur de risque (SRI)</td><td>${e.sri} / 7</td></tr>
     <tr><td>Tolérance au risque</td><td>${escapeHtml(e.risk_tolerance)}</td></tr>
     <tr><td>Objectifs &amp; besoins</td><td>${escapeHtml(e.objective)}</td></tr>
-    <tr><td>Durée de détention recommandée</td><td>${e.T_rhp.toFixed(1)} an(s)</td></tr>
+    <tr><td>Durée de détention recommandée</td><td>${formatNumber(e.T_rhp, 1)} an(s)</td></tr>
   </table>
 
   <h2>Caractéristiques du produit</h2>

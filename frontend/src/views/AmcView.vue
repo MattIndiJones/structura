@@ -4,6 +4,7 @@
     <!-- Barre d'outils : titre + switch de mode (reste local, pas d'état
          cross-vue dans le shell) -->
     <div class="border-b px-5 py-2.5 flex items-center gap-4 shrink-0" style="border-color: var(--border);">
+      <RouterLink :to="{ path: '/', query: { category: 'studies' } }" class="btn-secondary text-xs px-3 py-1.5 shrink-0">← Retour</RouterLink>
       <h1 class="page-title text-lg shrink-0">Analyse AMC</h1>
       <div class="tabs shrink-0">
         <button @click="mainTab = 'classic'" class="tab-btn" :class="{ active: mainTab === 'classic' }">
@@ -457,7 +458,7 @@
                   <span v-if="manifestData.manifest?.params?.termsheet_positions?.length"
                     class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/50 border border-emerald-800/50 text-emerald-500">
                     {{ manifestData.manifest.params.termsheet_positions.length }} lignes ·
-                    {{ manifestData.manifest.params.termsheet_positions.reduce((s,p) => s+(p.weight_pct||0), 0).toFixed(1) }}%
+                    {{ formatPercent(manifestData.manifest.params.termsheet_positions.reduce((s,p) => s+(p.weight_pct||0), 0), 1) }}
                   </span>
                   <span v-else class="text-[9px] text-amber-500">⚠ non configuré</span>
                   <button class="ml-auto text-[9px] text-slate-500 hover:text-slate-300 underline"
@@ -639,8 +640,8 @@
                 </div>
                 <div class="text-[10px] text-slate-600 text-center grid grid-cols-3 mb-2">
                   <div></div>
-                  <div>{{ result.performance.full_nav_start }} → {{ result.performance.full_nav_end }}</div>
-                  <div>{{ result.period?.overlap_start }} → {{ result.period?.overlap_end }}</div>
+                  <div>{{ formatDate(result.performance.full_nav_start) }} → {{ formatDate(result.performance.full_nav_end) }}</div>
+                  <div>{{ formatDate(result.period?.overlap_start) }} → {{ formatDate(result.period?.overlap_end) }}</div>
                 </div>
                 <div v-for="row in [
                   ['Rendement total', result.performance.full_total_ret_pct, result.performance.total_ret_pct, true, 'NAV_fin / NAV_début − 1. ⚠ La colonne «Vie entière» couvre tout le timeseries, la colonne «Période étudiée» est tronquée à la fin des données Ken French. Un écart important entre les deux indique une forte performance hors fenêtre FF.'],
@@ -654,16 +655,16 @@
                   </div>
                   <div class="text-center font-mono font-semibold"
                     :class="row[1] != null ? (row[2] !== false && row[1] >= 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-600'">
-                    {{ row[1] != null ? ((row[1] >= 0 && row[2] !== false ? '+' : '') + row[1] + '%') : '—' }}
+                    {{ row[1] != null ? ((row[1] >= 0 && row[2] !== false ? '+' : '') + formatPercentRaw(row[1])) : '—' }}
                   </div>
                   <div class="text-center font-mono font-semibold"
                     :class="row[2] != null ? (row[2] !== false && row[2] >= 0 ? 'text-emerald-300' : 'text-red-300') : 'text-slate-600'">
-                    {{ row[2] != null ? ((row[2] >= 0 && row[2] !== false ? '+' : '') + row[2] + (row[0]==='Sharpe' ? '' : '%')) : '—' }}
+                    {{ row[2] != null ? ((row[2] >= 0 && row[2] !== false ? '+' : '') + (row[0]==='Sharpe' ? formatNumber(row[2], 2) : formatPercentRaw(row[2]))) : '—' }}
                   </div>
                 </div>
                 <div v-if="result.performance.full_total_ret_pct !== result.performance.total_ret_pct"
                   class="mt-2 text-[10px] text-amber-500/80 italic">
-                  ⚠ L'écart entre les deux colonnes est dû à la troncature de la période au {{ result.period?.overlap_end }}
+                  ⚠ L'écart entre les deux colonnes est dû à la troncature de la période au {{ formatDate(result.period?.overlap_end) }}
                   (fin des données FF disponibles). La vie entière du fonds est la référence correcte pour la performance client.
                 </div>
               </div>
@@ -676,17 +677,17 @@
                     <div class="text-slate-500 flex items-center justify-center gap-1">R²
                       <span class="group relative inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700/80 text-slate-400 text-[8px] cursor-help">?<span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2.5 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Coefficient de détermination : part de la variance du fonds expliquée par les facteurs. R² = 80% → les facteurs expliquent 80% des mouvements. R² faible = forte composante gérant.</span></span>
                     </div>
-                    <div class="text-2xl font-black text-blue-400">{{ (result.regression.r2 * 100).toFixed(1) }}%</div>
-                    <div class="text-slate-600">Adj. R² = {{ (result.regression.adj_r2 * 100).toFixed(1) }}%</div>
+                    <div class="text-2xl font-black text-blue-400">{{ formatPercent(result.regression.r2 * 100, 1) }}</div>
+                    <div class="text-slate-600">Adj. R² = {{ formatPercent(result.regression.adj_r2 * 100, 1) }}</div>
                   </div>
                   <div class="text-center">
                     <div class="text-slate-500 flex items-center justify-center gap-1">Alpha ann.
                       <span class="group relative inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700/80 text-slate-400 text-[8px] cursor-help">?<span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2.5 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Rendement excédentaire annualisé non expliqué par les facteurs (constante de la régression × 252). Représente la création ou destruction de valeur propre du gérant. Statistiquement significatif si p &lt; 0.05.</span></span>
                     </div>
                     <div class="text-2xl font-black" :class="result.regression.alpha_ann_pct >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                      {{ result.regression.alpha_ann_pct >= 0 ? '+' : '' }}{{ result.regression.alpha_ann_pct }}%
+                      {{ result.regression.alpha_ann_pct >= 0 ? '+' : '' }}{{ formatPercent(result.regression.alpha_ann_pct, 2) }}
                     </div>
-                    <div class="text-slate-600">t = {{ result.regression.alpha_tstat }} · p = {{ fmtPVal(result.regression.alpha_pvalue) }}</div>
+                    <div class="text-slate-600">t = {{ formatNumber(result.regression.alpha_tstat, 2) }} · p = {{ fmtPVal(result.regression.alpha_pvalue) }}</div>
                     <div class="text-[10px] font-semibold mt-0.5" :class="alphaSignifClass(result.regression.alpha_pvalue)">
                       {{ alphaSignifLabel(result.regression.alpha_pvalue) }}
                     </div>
@@ -695,7 +696,7 @@
                     <div class="text-slate-500 flex items-center justify-center gap-1">Risque idio.
                       <span class="group relative inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700/80 text-slate-400 text-[8px] cursor-help">?<span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2.5 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Part de la variance (1 − R²) non capturée par les facteurs systématiques. Reflète le risque spécifique lié aux décisions du gérant. Élevé = forte dépendance au gérant, diversification factorielle insuffisante.</span></span>
                     </div>
-                    <div class="text-2xl font-black text-amber-400">{{ ((1 - result.regression.r2) * 100).toFixed(1) }}%</div>
+                    <div class="text-2xl font-black text-amber-400">{{ formatPercent((1 - result.regression.r2) * 100, 1) }}</div>
                     <div class="text-slate-600">de la variance</div>
                   </div>
                 </div>
@@ -722,9 +723,9 @@
                     <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help">?<span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-56 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Rendement annualisé sur la période de régression (FF overlap). ⚠ Période tronquée à la fin des données Ken French — peut différer significativement de la performance totale vie entière.</span></span>
                   </div>
                   <div class="font-bold text-base" :class="result.performance.ann_ret_pct >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                    {{ result.performance.ann_ret_pct >= 0 ? '+' : '' }}{{ result.performance.ann_ret_pct }}%
+                    {{ result.performance.ann_ret_pct >= 0 ? '+' : '' }}{{ formatPercentRaw(result.performance.ann_ret_pct) }}
                   </div>
-                  <div class="text-[10px] text-slate-600 mt-0.5">{{ result.period?.overlap_start }} → {{ result.period?.overlap_end }}</div>
+                  <div class="text-[10px] text-slate-600 mt-0.5">{{ formatDate(result.period?.overlap_start) }} → {{ formatDate(result.period?.overlap_end) }}</div>
                 </div>
                 <div class="card text-center">
                   <div class="text-slate-500 mb-1 flex items-center justify-center gap-1">Tracking Error
@@ -773,10 +774,10 @@
                       <td class="py-3 pr-4 font-semibold text-amber-400">Alpha (ann.)</td>
                       <td class="py-3 px-3 font-mono text-right font-bold"
                         :class="result.regression.alpha_ann_pct >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                        {{ result.regression.alpha_ann_pct >= 0 ? '+' : '' }}{{ result.regression.alpha_ann_pct }}%
+                        {{ result.regression.alpha_ann_pct >= 0 ? '+' : '' }}{{ formatPercentRaw(result.regression.alpha_ann_pct) }}
                       </td>
-                      <td class="py-3 px-3 font-mono text-right text-slate-500">{{ result.regression.alpha_ci_low != null ? result.regression.alpha_ci_low + '%' : '—' }}</td>
-                      <td class="py-3 px-3 font-mono text-right text-slate-500">{{ result.regression.alpha_ci_high != null ? result.regression.alpha_ci_high + '%' : '—' }}</td>
+                      <td class="py-3 px-3 font-mono text-right text-slate-500">{{ formatPercentRaw(result.regression.alpha_ci_low) }}</td>
+                      <td class="py-3 px-3 font-mono text-right text-slate-500">{{ formatPercentRaw(result.regression.alpha_ci_high) }}</td>
                       <td class="py-3 px-3 font-mono text-right text-slate-300">{{ result.regression.alpha_tstat }}</td>
                       <td class="py-3 px-3 font-mono text-right" :class="pvalClass(result.regression.alpha_pvalue)">{{ fmtPVal(result.regression.alpha_pvalue) }}</td>
                       <td class="py-3 px-3 text-center font-bold" :class="pvalClass(result.regression.alpha_pvalue)">{{ sigStars(result.regression.alpha_pvalue) }}</td>
@@ -805,12 +806,12 @@
                 </table>
                 </div>
                 <div class="mt-3 pt-3 border-t border-slate-800 flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500 items-center">
-                  <span class="inline-flex items-center gap-1">R² = <strong class="text-slate-300">{{ (result.regression.r2 * 100).toFixed(2) }}%</strong>
+                  <span class="inline-flex items-center gap-1">R² = <strong class="text-slate-300">{{ formatPercent(result.regression.r2 * 100, 2) }}</strong>
                     <span class="text-slate-600 text-[10px]">(variance expliquée)</span></span>
-                  <span>Adj. R² = <strong class="text-slate-300">{{ (result.regression.adj_r2 * 100).toFixed(2) }}%</strong></span>
-                  <span class="inline-flex items-center gap-1">N = <strong class="text-slate-300">{{ result.regression.n_obs }}</strong>
+                  <span>Adj. R² = <strong class="text-slate-300">{{ formatPercent(result.regression.adj_r2 * 100, 2) }}</strong></span>
+                  <span class="inline-flex items-center gap-1">N = <strong class="text-slate-300">{{ formatInt(result.regression.n_obs) }}</strong>
                     <span class="text-slate-600 text-[10px]">(observations)</span></span>
-                  <span class="inline-flex items-center gap-1">Durbin-Watson = <strong class="text-slate-300">{{ result.regression.dw }}</strong>
+                  <span class="inline-flex items-center gap-1">Durbin-Watson = <strong class="text-slate-300">{{ formatNumber(result.regression.dw, 2) }}</strong>
                     <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help">?<span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-56 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Test d'autocorrélation des résidus. Valeur ≈ 2 = pas d'autocorrélation (idéal). &lt; 1.5 ou &gt; 2.5 signale une autocorrélation pouvant biaiser les erreurs standard et donc les p-values.</span></span>
                   </span>
                 </div>
@@ -878,7 +879,7 @@
                   </div>
                   <div class="text-xl font-black"
                     :class="act.turnover_rate > 1 ? 'text-amber-400' : 'text-slate-200'">
-                    {{ (act.turnover_rate * 100).toFixed(1) }}%
+                    {{ formatPercent(act.turnover_rate * 100, 1) }}
                   </div>
                   <div class="text-slate-600 text-[10px]">depuis lancement</div>
                 </div>
@@ -930,10 +931,10 @@
               <div v-if="result.concentration?.top_holdings?.length" class="card">
                 <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2 flex-wrap">
                   Composition actuelle
-                  <span class="flex items-center gap-1">· HHI = {{ result.concentration.hhi }}
+                  <span class="flex items-center gap-1">· HHI = {{ formatNumber(result.concentration.hhi, 3) }}
                     <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help">?<span class="pointer-events-none absolute bottom-full left-0 mb-1.5 w-64 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Indice Herfindahl-Hirschman (somme des carrés des poids). Mesure la concentration du portefeuille. 0 = diversification parfaite, 1 = une seule ligne. HHI &gt; 0.15 = portefeuille concentré. HHI &gt; 0.25 = très concentré (risque de ligne directrice).</span></span>
                   </span>
-                  <span class="flex items-center gap-1">· Top-5 = {{ (result.concentration.top5_weight * 100).toFixed(1) }}%
+                  <span class="flex items-center gap-1">· Top-5 = {{ formatPercent(result.concentration.top5_weight * 100, 1) }}
                     <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help">?<span class="pointer-events-none absolute bottom-full left-0 mb-1.5 w-56 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Poids cumulé des 5 premières positions. Un portefeuille concentré a souvent Top-5 &gt; 50-60%. Indicateur de risque de concentration réglementaire (UCITS 5/10/40 rule).</span></span>
                   </span>
                 </h3>
@@ -945,7 +946,7 @@
                       <div class="h-full bg-blue-500 rounded"
                         :style="{ width: (h.weight * 100 / result.concentration.top_holdings[0].weight) + '%' }"></div>
                     </div>
-                    <span class="text-slate-300 w-10 text-right">{{ (h.weight * 100).toFixed(1) }}%</span>
+                    <span class="text-slate-300 w-10 text-right">{{ formatPercent(h.weight * 100, 1) }}</span>
                   </div>
                 </div>
               </div>
@@ -956,21 +957,21 @@
                   <h4 class="text-xs font-bold text-slate-500 mb-2">Secteurs</h4>
                   <div v-for="s in result.concentration.sectors" :key="s.name" class="flex justify-between text-xs py-0.5">
                     <span class="text-slate-400 truncate">{{ s.name }}</span>
-                    <span class="text-slate-300 ml-2">{{ (s.weight * 100).toFixed(1) }}%</span>
+                    <span class="text-slate-300 ml-2">{{ formatPercent(s.weight * 100, 1) }}</span>
                   </div>
                 </div>
                 <div class="card">
                   <h4 class="text-xs font-bold text-slate-500 mb-2">Pays</h4>
                   <div v-for="c in result.concentration.countries" :key="c.name" class="flex justify-between text-xs py-0.5">
                     <span class="text-slate-400">{{ c.name }}</span>
-                    <span class="text-slate-300">{{ (c.weight * 100).toFixed(1) }}%</span>
+                    <span class="text-slate-300">{{ formatPercent(c.weight * 100, 1) }}</span>
                   </div>
                 </div>
                 <div class="card">
                   <h4 class="text-xs font-bold text-slate-500 mb-2">Devises</h4>
                   <div v-for="c in result.concentration.currencies" :key="c.name" class="flex justify-between text-xs py-0.5">
                     <span class="text-slate-400">{{ c.name }}</span>
-                    <span class="text-slate-300">{{ (c.weight * 100).toFixed(1) }}%</span>
+                    <span class="text-slate-300">{{ formatPercent(c.weight * 100, 1) }}</span>
                   </div>
                 </div>
               </div>
@@ -983,7 +984,7 @@
                   <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Données de régression</h3>
                   <div class="text-[10px] text-slate-500">
                     {{ result.data_used?.length || 0 }} observations ·
-                    {{ result.period?.overlap_start }} → {{ result.period?.overlap_end }}
+                    {{ formatDate(result.period?.overlap_start) }} → {{ formatDate(result.period?.overlap_end) }}
                   </div>
                 </div>
                 <div class="text-[10px] text-slate-500 mb-3">
@@ -1010,7 +1011,7 @@
                           :class="col === 'date' ? 'text-slate-400' :
                                   col === 'amc_ret' ? (row[col] >= 0 ? 'text-emerald-400' : 'text-red-400') :
                                   'text-slate-300'">
-                          {{ col === 'date' ? row[col] : (row[col] != null ? (row[col] * 100).toFixed(4) + '%' : '—') }}
+                          {{ col === 'date' ? formatDate(row[col]) : (row[col] != null ? formatPercent(row[col] * 100, 4) : '—') }}
                         </td>
                       </tr>
                     </tbody>
@@ -1024,25 +1025,25 @@
                   <div class="bg-slate-800/40 rounded-lg p-3">
                     <div class="text-slate-500 mb-1">Rendement moy. / jour</div>
                     <div class="font-mono font-bold text-slate-200">
-                      {{ result.data_used?.length ? ((result.data_used.reduce((s,r)=>s+(r.amc_ret||0),0)/result.data_used.length)*100).toFixed(4) + '%' : '—' }}
+                      {{ result.data_used?.length ? formatPercent((result.data_used.reduce((s,r)=>s+(r.amc_ret||0),0)/result.data_used.length)*100, 4) : '—' }}
                     </div>
                   </div>
                   <div class="bg-slate-800/40 rounded-lg p-3">
                     <div class="text-slate-500 mb-1">Jours positifs</div>
                     <div class="font-mono font-bold text-emerald-400">
-                      {{ result.data_used?.length ? Math.round(result.data_used.filter(r=>r.amc_ret>0).length/result.data_used.length*100) + '%' : '—' }}
+                      {{ result.data_used?.length ? formatPercent(result.data_used.filter(r=>r.amc_ret>0).length/result.data_used.length*100, 0) : '—' }}
                     </div>
                   </div>
                   <div class="bg-slate-800/40 rounded-lg p-3">
                     <div class="text-slate-500 mb-1">Meilleur jour</div>
                     <div class="font-mono font-bold text-emerald-400">
-                      {{ result.data_used?.length ? '+' + (Math.max(...result.data_used.map(r=>r.amc_ret||0))*100).toFixed(2) + '%' : '—' }}
+                      {{ result.data_used?.length ? '+' + formatPercent(Math.max(...result.data_used.map(r=>r.amc_ret||0))*100, 2) : '—' }}
                     </div>
                   </div>
                   <div class="bg-slate-800/40 rounded-lg p-3">
                     <div class="text-slate-500 mb-1">Pire jour</div>
                     <div class="font-mono font-bold text-red-400">
-                      {{ result.data_used?.length ? (Math.min(...result.data_used.map(r=>r.amc_ret||0))*100).toFixed(2) + '%' : '—' }}
+                      {{ result.data_used?.length ? formatPercent(Math.min(...result.data_used.map(r=>r.amc_ret||0))*100, 2) : '—' }}
                     </div>
                   </div>
                 </div>
@@ -1358,8 +1359,8 @@
                         NAV de départ
                         <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700 text-slate-400 text-[9px] cursor-help ml-0.5" title="Première valeur de NAV disponible dans le fichier timeseries. Base de calcul de la performance totale.">?</span>
                       </div>
-                      <div class="font-bold text-slate-200">{{ studyResult.meta?.nav_start_value ?? '—' }}</div>
-                      <div class="text-slate-600 mt-0.5">{{ studyResult.meta?.nav_start_date || '—' }}</div>
+                      <div class="font-bold text-slate-200">{{ formatNumber(studyResult.meta?.nav_start_value, 2) }}</div>
+                      <div class="text-slate-600 mt-0.5">{{ formatDate(studyResult.meta?.nav_start_date) }}</div>
                     </div>
                     <div class="bg-slate-900 rounded p-3">
                       <div class="flex items-center gap-1 text-slate-500 mb-1">
@@ -1367,9 +1368,9 @@
                         <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700 text-slate-400 text-[9px] cursor-help ml-0.5" title="Dernière valeur de NAV dans le timeseries (peut être antérieure au snapshot si le fichier n'est pas à jour).">?</span>
                       </div>
                       <div class="font-bold" :class="(studyResult.meta?.nav_current_value ?? 0) >= (studyResult.meta?.nav_start_value ?? 0) ? 'text-emerald-400' : 'text-red-400'">
-                        {{ studyResult.meta?.nav_current_value ?? '—' }}
+                        {{ formatNumber(studyResult.meta?.nav_current_value, 2) }}
                       </div>
-                      <div class="text-slate-600 mt-0.5">{{ studyResult.meta?.nav_current_date || '—' }}</div>
+                      <div class="text-slate-600 mt-0.5">{{ formatDate(studyResult.meta?.nav_current_date) }}</div>
                     </div>
                     <div class="bg-slate-900 rounded p-3">
                       <div class="flex items-center gap-1 text-slate-500 mb-1">
@@ -1378,10 +1379,10 @@
                       </div>
                       <div v-if="studyResult.meta?.nav_start_value && studyResult.meta?.nav_current_value" class="font-bold"
                         :class="studyResult.meta.nav_current_value >= studyResult.meta.nav_start_value ? 'text-emerald-400' : 'text-red-400'">
-                        {{ ((studyResult.meta.nav_current_value / studyResult.meta.nav_start_value - 1) * 100).toFixed(2) }}%
+                        {{ formatPercent((studyResult.meta.nav_current_value / studyResult.meta.nav_start_value - 1) * 100, 2) }}
                       </div>
                       <div v-else class="text-slate-600">—</div>
-                      <div class="text-[10px] text-slate-600 mt-0.5">vie entière · {{ studyResult.meta?.nav_start_date }} → {{ studyResult.meta?.nav_current_date }}</div>
+                      <div class="text-[10px] text-slate-600 mt-0.5">vie entière · {{ formatDate(studyResult.meta?.nav_start_date) }} → {{ formatDate(studyResult.meta?.nav_current_date) }}</div>
                     </div>
                   </div>
                   <div class="grid grid-cols-2 gap-2 text-xs">
@@ -1411,7 +1412,7 @@
                         Date snapshot
                         <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700 text-slate-400 text-[9px] cursor-help ml-0.5" title="Date de la NAV dans le fichier Def.txt. C'est la date à laquelle les poids et positions sont arrêtés.">?</span>
                       </div>
-                      <div class="font-mono text-slate-300">{{ studyResult.meta?.nav_snapshot_date || '—' }}</div>
+                      <div class="font-mono text-slate-300">{{ formatDate(studyResult.meta?.nav_snapshot_date) }}</div>
                     </div>
                     <div class="bg-slate-900 rounded p-3">
                       <div class="flex items-center gap-1 text-slate-500 mb-1">
@@ -1432,7 +1433,7 @@
                         Certificats en circulation
                         <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700 text-slate-400 text-[9px] cursor-help ml-0.5" title="Nombre de certificats (outstandingQuantity) du Def.txt. Multiplicateur entre NAV unitaire et AUM total.">?</span>
                       </div>
-                      <div class="font-bold text-slate-200"><SensitiveValue>{{ studyResult.meta?.outstanding != null ? studyResult.meta.outstanding.toLocaleString('fr-CH') : '—' }}</SensitiveValue></div>
+                      <div class="font-bold text-slate-200"><SensitiveValue>{{ formatInt(studyResult.meta?.outstanding) }}</SensitiveValue></div>
                     </div>
                     <div class="bg-slate-900 rounded p-3 col-span-2">
                       <div class="flex items-center gap-1 text-slate-500 mb-1">
@@ -1493,7 +1494,7 @@
                       <span class="text-emerald-400 text-sm">📋</span>
                       <div class="text-xs font-bold text-slate-300 uppercase tracking-wider">Basket T0 — Term Sheet</div>
                       <span class="ml-auto text-[10px] px-2 py-0.5 rounded bg-emerald-950/40 border border-emerald-800/40 text-emerald-400">
-                        {{ studyResult.meta?.nav_start_date }}
+                        {{ formatDate(studyResult.meta?.nav_start_date) }}
                       </span>
                     </div>
                     <div v-if="!studyResult.termsheet_basket?.length" class="text-xs text-slate-500 italic py-4 text-center">
@@ -1514,10 +1515,10 @@
                           <tr v-for="p in studyResult.termsheet_basket" :key="p.isin"
                             class="border-b border-slate-900 hover:bg-slate-800/30">
                             <td class="py-1 pr-2 text-slate-300"><SensitiveValue mode="blur">{{ p.name }}</SensitiveValue></td>
-                            <td class="py-1 pr-2 text-right font-mono text-emerald-400">{{ p.weight_pct?.toFixed(2) }}%</td>
-                            <td class="py-1 pr-2 text-right font-mono text-slate-400">{{ p.qty_per_cert?.toFixed(4) }}</td>
+                            <td class="py-1 pr-2 text-right font-mono text-emerald-400">{{ formatPercent(p.weight_pct, 2) }}</td>
+                            <td class="py-1 pr-2 text-right font-mono text-slate-400">{{ formatNumber(p.qty_per_cert, 4) }}</td>
                             <td class="py-1 pr-2 text-right font-mono text-slate-300">
-                              {{ p.fixing_price > 0 ? p.fixing_price.toFixed(3) : '—' }}
+                              {{ p.fixing_price > 0 ? formatNumber(p.fixing_price, 3) : '—' }}
                             </td>
                             <td class="py-1 text-right text-slate-500">{{ p.ccy }}</td>
                           </tr>
@@ -1526,7 +1527,7 @@
                           <tr class="border-t border-slate-700">
                             <td class="pt-1.5 text-slate-500 text-[10px]">{{ studyResult.termsheet_basket.length }} titres</td>
                             <td class="pt-1.5 text-right font-mono font-bold text-emerald-400">
-                              {{ studyResult.termsheet_basket.reduce((s, p) => s + (p.weight_pct || 0), 0).toFixed(2) }}%
+                              {{ formatPercent(studyResult.termsheet_basket.reduce((s, p) => s + (p.weight_pct || 0), 0), 2) }}
                             </td>
                             <td colspan="3"></td>
                           </tr>
@@ -1541,7 +1542,7 @@
                       <span class="text-blue-400 text-sm">📊</span>
                       <div class="text-xs font-bold text-slate-300 uppercase tracking-wider">Basket actuel — Composition</div>
                       <span class="ml-auto text-[10px] px-2 py-0.5 rounded bg-blue-950/40 border border-blue-800/40 text-blue-400">
-                        {{ studyResult.meta?.nav_snapshot_date }}
+                        {{ formatDate(studyResult.meta?.nav_snapshot_date) }}
                       </span>
                     </div>
                     <div v-if="!studyResult.current_basket?.length" class="text-xs text-slate-500 italic py-4 text-center">
@@ -1563,13 +1564,13 @@
                             class="border-b border-slate-900 hover:bg-slate-800/30">
                             <td class="py-1 pr-2 text-slate-300"><SensitiveValue mode="blur">{{ c.name }}</SensitiveValue></td>
                             <td class="py-1 pr-2 text-right font-mono text-blue-400">
-                              {{ c.weight != null ? (c.weight * 100).toFixed(2) + '%' : '—' }}
+                              {{ c.weight != null ? formatPercent(c.weight * 100, 2) : '—' }}
                             </td>
                             <td class="py-1 pr-2 text-right font-mono text-slate-400">
-                              {{ c.position != null ? c.position.toLocaleString('fr-CH', {maximumFractionDigits: 0}) : '—' }}
+                              {{ formatInt(c.position) }}
                             </td>
                             <td class="py-1 pr-2 text-right font-mono text-slate-300">
-                              {{ c.value_prod != null ? c.value_prod.toLocaleString('fr-CH', {maximumFractionDigits: 0}) : '—' }}
+                              {{ formatInt(c.value_prod) }}
                             </td>
                             <td class="py-1 text-right text-slate-500">{{ c.currency }}</td>
                           </tr>
@@ -1578,7 +1579,7 @@
                           <tr class="border-t border-slate-700">
                             <td class="pt-1.5 text-slate-500 text-[10px]">{{ studyResult.current_basket.length }} titres</td>
                             <td class="pt-1.5 text-right font-mono font-bold text-blue-400">
-                              {{ (studyResult.current_basket.reduce((s,c) => s + (c.weight||0), 0) * 100).toFixed(2) }}%
+                              {{ formatPercent(studyResult.current_basket.reduce((s,c) => s + (c.weight||0), 0) * 100, 2) }}
                             </td>
                             <td colspan="3"></td>
                           </tr>
@@ -1600,7 +1601,7 @@
                     </span>
                   </summary>
                   <div class="mt-3 text-[10px] text-slate-500 mb-2">
-                    BUY synthétiques injectés à T0 = {{ studyResult.meta.nav_start_date }}. Prix source : yfinance close ou proxy ordre. Non auditoriables — à titre de diagnostic uniquement.
+                    BUY synthétiques injectés à T0 = {{ formatDate(studyResult.meta.nav_start_date) }}. Prix source : yfinance close ou proxy ordre. Non auditoriables — à titre de diagnostic uniquement.
                   </div>
                   <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                     <table class="w-full text-[10px]">
@@ -1621,13 +1622,13 @@
                           <td class="py-1 pr-2 text-slate-300"><SensitiveValue mode="blur">{{ r.name }}</SensitiveValue></td>
                           <td class="py-1 pr-2 text-right font-mono text-slate-400">{{ r.excess_qty }}</td>
                           <td class="py-1 pr-2 text-right font-mono text-slate-300">
-                            {{ r.price_local != null ? r.price_local.toFixed(3) : '—' }}
+                            {{ formatNumber(r.price_local, 3) }}
                           </td>
                           <td class="py-1 pr-2 text-right font-mono text-slate-500">
-                            {{ r.fx != null ? r.fx.toFixed(4) : '—' }}
+                            {{ formatNumber(r.fx, 4) }}
                           </td>
                           <td class="py-1 pr-2 text-right font-mono text-amber-300">
-                            {{ r.price_prod != null ? r.price_prod.toFixed(3) : '—' }}
+                            {{ formatNumber(r.price_prod, 3) }}
                           </td>
                           <td class="py-1 text-slate-500">
                             <span v-if="!r.injected" class="text-red-500">✗ indisponible</span>
@@ -1685,7 +1686,7 @@
                     <span>Série FF : <strong class="text-slate-300">{{ studyResult.block_a.ff_series }}</strong></span>
                     <span v-if="studyResult.block_a.fee_drag_pct">·</span>
                     <span v-if="studyResult.block_a.fee_drag_pct">
-                      Frais gross add-back : <strong class="text-slate-300">{{ studyResult.block_a.fee_drag_pct }}% p.a.</strong>
+                      Frais gross add-back : <strong class="text-slate-300">{{ formatPercentRaw(studyResult.block_a.fee_drag_pct) }} p.a.</strong>
                     </span>
                   </div>
 
@@ -1704,7 +1705,7 @@
                         class="flex items-center gap-1.5 bg-slate-800/60 rounded px-2 py-1">
                         <span class="text-[10px] font-mono font-bold text-indigo-300">{{ c.ticker }}</span>
                         <span class="text-[10px] text-slate-400">{{ c.label }}</span>
-                        <span class="text-[10px] font-bold text-slate-200">{{ (c.weight * 100).toFixed(0) }}%</span>
+                        <span class="text-[10px] font-bold text-slate-200">{{ formatPercent(c.weight * 100, 0) }}</span>
                       </div>
                     </div>
                   </div>
@@ -1718,15 +1719,15 @@
                   <!-- KPIs performance -->
                   <div class="grid grid-cols-4 gap-3">
                     <div v-for="([label, val, cls, tip]) in [
-                      ['Rendement ann.', (studyResult.block_a.net?.performance?.ann_ret_pct ?? 0).toFixed(1)+'%',
+                      ['Rendement ann.', formatPercent(studyResult.block_a.net?.performance?.ann_ret_pct ?? 0, 1),
                         (studyResult.block_a.net?.performance?.ann_ret_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400',
                         'Rendement annualisé sur la période de recouvrement FF (tronquée à la fin des données Ken French). Peut différer de la performance totale vie entière.'],
-                      ['Volatilité ann.', (studyResult.block_a.net?.performance?.ann_vol_pct ?? 0).toFixed(1)+'%', 'text-slate-300',
+                      ['Volatilité ann.', formatPercent(studyResult.block_a.net?.performance?.ann_vol_pct ?? 0, 1), 'text-slate-300',
                         'Écart-type des rendements journaliers × √252. Mesure la dispersion des performances. >25% = produit très concentré ou à levier.'],
-                      ['Sharpe', (studyResult.block_a.net?.performance?.sharpe ?? 0).toFixed(2),
+                      ['Sharpe', formatNumber(studyResult.block_a.net?.performance?.sharpe ?? 0, 2),
                         (studyResult.block_a.net?.performance?.sharpe ?? 0) >= 1 ? 'text-emerald-400' : 'text-amber-400',
                         '(Rendement ann. − taux sans risque) / Volatilité ann. Mesure le rendement par unité de risque. >1 = bon, >2 = excellent, <0 = sous le taux sans risque.'],
-                      ['Max Drawdown', (studyResult.block_a.net?.performance?.max_dd_pct ?? 0).toFixed(1)+'%', 'text-red-400',
+                      ['Max Drawdown', formatPercent(studyResult.block_a.net?.performance?.max_dd_pct ?? 0, 1), 'text-red-400',
                         'Perte maximale pic-à-creux sur la période analysée. Représente le pire scénario pour un investisseur entré au plus haut.'],
                     ]" :key="label" class="bg-slate-800/60 rounded-lg p-3 text-center">
                       <div class="text-xs text-slate-500 mb-1 flex items-center justify-center gap-1">{{ label }}
@@ -1767,26 +1768,26 @@
                           <td class="py-1.5 px-2 text-slate-400">Alpha ann.</td>
                           <td class="py-1.5 px-2 text-right font-mono"
                             :class="(studyResult.block_a.net.regression.alpha_ann_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                            {{ (studyResult.block_a.net.regression.alpha_ann_pct ?? 0) >= 0 ? '+' : '' }}{{ studyResult.block_a.net.regression.alpha_ann_pct }}%
+                            {{ (studyResult.block_a.net.regression.alpha_ann_pct ?? 0) >= 0 ? '+' : '' }}{{ formatPercent(studyResult.block_a.net.regression.alpha_ann_pct, 2) }}
                           </td>
                           <td class="py-1.5 px-2 text-right font-mono"
                             :class="(studyResult.block_a.gross.regression.alpha_ann_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                            {{ (studyResult.block_a.gross.regression.alpha_ann_pct ?? 0) >= 0 ? '+' : '' }}{{ studyResult.block_a.gross.regression.alpha_ann_pct }}%
+                            {{ (studyResult.block_a.gross.regression.alpha_ann_pct ?? 0) >= 0 ? '+' : '' }}{{ formatPercent(studyResult.block_a.gross.regression.alpha_ann_pct, 2) }}
                           </td>
                           <td class="py-1.5 px-2 text-right font-mono text-amber-400">
-                            +{{ ((studyResult.block_a.gross.regression.alpha_ann_pct ?? 0) - (studyResult.block_a.net.regression.alpha_ann_pct ?? 0)).toFixed(2) }}%
+                            +{{ formatPercent((studyResult.block_a.gross.regression.alpha_ann_pct ?? 0) - (studyResult.block_a.net.regression.alpha_ann_pct ?? 0), 2) }}
                           </td>
                         </tr>
                         <tr class="border-b border-slate-800/50">
                           <td class="py-1.5 px-2 text-slate-400">t-stat α</td>
-                          <td class="py-1.5 px-2 text-right font-mono text-slate-300">{{ studyResult.block_a.net.regression.alpha_tstat }}</td>
-                          <td class="py-1.5 px-2 text-right font-mono text-slate-300">{{ studyResult.block_a.gross.regression.alpha_tstat }}</td>
+                          <td class="py-1.5 px-2 text-right font-mono text-slate-300">{{ formatNumber(studyResult.block_a.net.regression.alpha_tstat, 2) }}</td>
+                          <td class="py-1.5 px-2 text-right font-mono text-slate-300">{{ formatNumber(studyResult.block_a.gross.regression.alpha_tstat, 2) }}</td>
                           <td class="py-1.5 px-2 text-right font-mono text-slate-500">—</td>
                         </tr>
                         <tr>
                           <td class="py-1.5 px-2 text-slate-400">R²</td>
-                          <td class="py-1.5 px-2 text-right font-mono text-blue-400">{{ ((studyResult.block_a.net.regression.r2 ?? 0)*100).toFixed(2) }}%</td>
-                          <td class="py-1.5 px-2 text-right font-mono text-blue-400">{{ ((studyResult.block_a.gross.regression.r2 ?? 0)*100).toFixed(2) }}%</td>
+                          <td class="py-1.5 px-2 text-right font-mono text-blue-400">{{ formatPercent((studyResult.block_a.net.regression.r2 ?? 0)*100, 2) }}</td>
+                          <td class="py-1.5 px-2 text-right font-mono text-blue-400">{{ formatPercent((studyResult.block_a.gross.regression.r2 ?? 0)*100, 2) }}</td>
                           <td class="py-1.5 px-2 text-right font-mono text-slate-500">—</td>
                         </tr>
                       </tbody>
@@ -1801,8 +1802,8 @@
                         <div class="text-slate-500 mb-1 flex items-center gap-1">R² / Adj. R²
                           <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help shrink-0">?<span class="pointer-events-none absolute bottom-full left-0 mb-1.5 w-60 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Part de la variance du fonds expliquée par les facteurs FF. R² = 80% → les facteurs expliquent 80% des mouvements. Adj. R² pénalise les facteurs superflus.</span></span>
                         </div>
-                        <div class="font-bold text-blue-400 text-base">{{ ((studyResult.block_a.net.regression.r2 ?? 0)*100).toFixed(1) }}%</div>
-                        <div class="text-slate-500 text-[10px]">Adj. {{ ((studyResult.block_a.net.regression.adj_r2 ?? 0)*100).toFixed(1) }}%</div>
+                        <div class="font-bold text-blue-400 text-base">{{ formatPercent((studyResult.block_a.net.regression.r2 ?? 0)*100, 1) }}</div>
+                        <div class="text-slate-500 text-[10px]">Adj. {{ formatPercent((studyResult.block_a.net.regression.adj_r2 ?? 0)*100, 1) }}</div>
                       </div>
                       <div class="bg-slate-900 rounded p-3">
                         <div class="text-slate-500 mb-1 flex items-center gap-1">Alpha ann.
@@ -1810,19 +1811,19 @@
                         </div>
                         <div class="font-bold text-base"
                           :class="(studyResult.block_a.net.regression.alpha_ann_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                          {{ (studyResult.block_a.net.regression.alpha_ann_pct ?? 0) >= 0 ? '+' : '' }}{{ studyResult.block_a.net.regression.alpha_ann_pct }}%
+                          {{ (studyResult.block_a.net.regression.alpha_ann_pct ?? 0) >= 0 ? '+' : '' }}{{ formatPercent(studyResult.block_a.net.regression.alpha_ann_pct, 2) }}
                         </div>
                         <div class="text-slate-500 text-[10px]">
-                          t = {{ studyResult.block_a.net.regression.alpha_tstat }}
-                          · p = {{ studyResult.block_a.net.regression.alpha_pvalue }}
+                          t = {{ formatNumber(studyResult.block_a.net.regression.alpha_tstat, 2) }}
+                          · p = {{ formatNumber(studyResult.block_a.net.regression.alpha_pvalue, 4) }}
                         </div>
                       </div>
                       <div class="bg-slate-900 rounded p-3">
                         <div class="text-slate-500 mb-1 flex items-center gap-1">Risque idiosync.
                           <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help shrink-0">?<span class="pointer-events-none absolute bottom-full left-0 mb-1.5 w-60 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Part de la variance (1 − R²) non captée par les facteurs systématiques. Élevée = forte dépendance aux décisions du gérant. DW = Durbin-Watson (autocorrélation résidus, idéal ≈ 2). N = observations.</span></span>
                         </div>
-                        <div class="font-bold text-amber-400 text-base">{{ (100 - (studyResult.block_a.net.regression.r2 ?? 0)*100).toFixed(1) }}%</div>
-                        <div class="text-slate-500 text-[10px]">DW = {{ studyResult.block_a.net.regression.dw }} · N = {{ studyResult.block_a.net.regression.n_obs }}</div>
+                        <div class="font-bold text-amber-400 text-base">{{ formatPercent(100 - (studyResult.block_a.net.regression.r2 ?? 0)*100, 1) }}</div>
+                        <div class="text-slate-500 text-[10px]">DW = {{ formatNumber(studyResult.block_a.net.regression.dw, 2) }} · N = {{ formatInt(studyResult.block_a.net.regression.n_obs) }}</div>
                       </div>
                     </div>
 
@@ -1845,11 +1846,11 @@
                           <td class="py-1.5 px-2 font-bold text-amber-400">Alpha (ann.)</td>
                           <td class="py-1.5 px-2 text-right font-mono font-bold"
                             :class="(studyResult.block_a.net.regression.alpha_ann_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                            {{ (studyResult.block_a.net.regression.alpha_ann_pct ?? 0) >= 0 ? '+' : '' }}{{ studyResult.block_a.net.regression.alpha_ann_pct }}%
+                            {{ (studyResult.block_a.net.regression.alpha_ann_pct ?? 0) >= 0 ? '+' : '' }}{{ formatPercentRaw(studyResult.block_a.net.regression.alpha_ann_pct) }}
                           </td>
-                          <td class="py-1.5 px-2 text-right font-mono text-slate-400">{{ studyResult.block_a.net.regression.alpha_ci_low ?? '—' }}%</td>
-                          <td class="py-1.5 px-2 text-right font-mono text-slate-400">{{ studyResult.block_a.net.regression.alpha_ci_high ?? '—' }}%</td>
-                          <td class="py-1.5 px-2 text-right font-mono text-slate-300">{{ studyResult.block_a.net.regression.alpha_tstat }}</td>
+                          <td class="py-1.5 px-2 text-right font-mono text-slate-400">{{ formatPercentRaw(studyResult.block_a.net.regression.alpha_ci_low) }}</td>
+                          <td class="py-1.5 px-2 text-right font-mono text-slate-400">{{ formatPercentRaw(studyResult.block_a.net.regression.alpha_ci_high) }}</td>
+                          <td class="py-1.5 px-2 text-right font-mono text-slate-300">{{ formatNumber(studyResult.block_a.net.regression.alpha_tstat, 2) }}</td>
                           <td class="py-1.5 px-2 text-right font-mono" :class="pvalClass(studyResult.block_a.net.regression.alpha_pvalue)">
                             {{ fmtPVal(studyResult.block_a.net.regression.alpha_pvalue) }}
                           </td>
@@ -1888,10 +1889,10 @@
                         <div class="text-xs text-slate-500 mb-2">Bêta MOM</div>
                         <div class="text-2xl font-black"
                           :class="momFactor.beta >= 0 ? 'text-violet-400' : 'text-orange-400'">
-                          {{ momFactor.beta >= 0 ? '+' : '' }}{{ momFactor.beta.toFixed(3) }}
+                          {{ momFactor.beta >= 0 ? '+' : '' }}{{ formatNumber(momFactor.beta, 3) }}
                         </div>
                         <div class="text-[10px] text-slate-600 mt-1">
-                          IC 95% [{{ momFactor.ci_low }} ; {{ momFactor.ci_high }}]
+                          IC 95% [{{ formatNumber(momFactor.ci_low, 3) }} ; {{ formatNumber(momFactor.ci_high, 3) }}]
                         </div>
                       </div>
                       <!-- Significativité -->
@@ -1952,7 +1953,7 @@
 
                   <!-- Période -->
                   <div class="text-xs text-slate-600">
-                    Période analysée : {{ studyResult.block_a.net?.period?.overlap_start }} → {{ studyResult.block_a.net?.period?.overlap_end }}
+                    Période analysée : {{ formatDate(studyResult.block_a.net?.period?.overlap_start) }} → {{ formatDate(studyResult.block_a.net?.period?.overlap_end) }}
                     · {{ studyResult.block_a.net?.period?.n_obs }} observations
                   </div>
 
@@ -1988,9 +1989,9 @@
                         ['Score global', studyResult.block_a.net.dependency_score.score + '/10',
                           studyResult.block_a.net.dependency_score.score >= 7 ? 'text-emerald-400' : studyResult.block_a.net.dependency_score.score >= 4 ? 'text-amber-400' : 'text-red-400',
                           'Score composite 0-10 mesurant la dépendance aux décisions du gérant vs les facteurs de marché.'],
-                        ['R²', ((studyResult.block_a.net.regression.r2||0)*100).toFixed(1)+'%', 'text-blue-400',
+                        ['R²', formatPercent((studyResult.block_a.net.regression.r2||0)*100, 1), 'text-blue-400',
                           'Part de variance expliquée par les facteurs FF. 1 − R² = risque idiosyncratique entrant dans le score.'],
-                        ['Turnover ann.', studyResult.block_a.net.activity?.turnover_ann_pct != null ? studyResult.block_a.net.activity.turnover_ann_pct.toFixed(0)+'%' : '—', 'text-slate-300',
+                        ['Turnover ann.', studyResult.block_a.net.activity?.turnover_ann_pct != null ? formatPercent(studyResult.block_a.net.activity.turnover_ann_pct, 0) : '—', 'text-slate-300',
                           'Turnover annualisé : notionnel brut échangé / AUM moyen × (252 / N jours). 100% = l\'équivalent du portefeuille rebalancé une fois par an.'],
                         ['Trades total', studyResult.block_a.net.activity?.total_trades ?? '—', 'text-slate-300',
                           'Nombre d\'ordres exécutés (état Done) dans le(s) fichier(s) JSON du carnet d\'ordres.'],
@@ -2009,8 +2010,8 @@
                   <!-- Concentration -->
                   <div v-if="studyResult.block_a.net?.concentration?.top_holdings?.length" class="card">
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-                      Composition actuelle · HHI = {{ studyResult.block_a.net.concentration.hhi }}
-                      · Top-5 = {{ ((studyResult.block_a.net.concentration.top5_weight||0)*100).toFixed(1) }}%
+                      Composition actuelle · HHI = {{ formatNumber(studyResult.block_a.net.concentration.hhi, 3) }}
+                      · Top-5 = {{ formatPercent((studyResult.block_a.net.concentration.top5_weight||0)*100, 1) }}
                     </div>
                     <div class="space-y-1 mb-4">
                       <div v-for="h in studyResult.block_a.net.concentration.top_holdings" :key="h.name"
@@ -2020,7 +2021,7 @@
                           <div class="h-full bg-blue-600 rounded"
                             :style="{ width: (h.weight * 100 / studyResult.block_a.net.concentration.top_holdings[0].weight) + '%' }"></div>
                         </div>
-                        <div class="text-slate-300 w-12 text-right font-mono">{{ ((h.weight||0)*100).toFixed(1) }}%</div>
+                        <div class="text-slate-300 w-12 text-right font-mono">{{ formatPercent((h.weight||0)*100, 1) }}</div>
                       </div>
                     </div>
                     <div v-if="studyResult.block_a.net.concentration.sectors?.length" class="grid grid-cols-3 gap-3 text-xs">
@@ -2029,7 +2030,7 @@
                         <div v-for="s in studyResult.block_a.net.concentration.sectors" :key="s.name"
                           class="flex justify-between text-xs py-0.5 border-b border-slate-800">
                           <span class="text-slate-400 truncate w-28">{{ s.name }}</span>
-                          <span class="text-slate-300 font-mono">{{ ((s.weight||0)*100).toFixed(1) }}%</span>
+                          <span class="text-slate-300 font-mono">{{ formatPercent((s.weight||0)*100, 1) }}</span>
                         </div>
                       </div>
                       <div>
@@ -2037,7 +2038,7 @@
                         <div v-for="c in studyResult.block_a.net.concentration.countries" :key="c.name"
                           class="flex justify-between text-xs py-0.5 border-b border-slate-800">
                           <span class="text-slate-400 w-28">{{ c.name }}</span>
-                          <span class="text-slate-300 font-mono">{{ ((c.weight||0)*100).toFixed(1) }}%</span>
+                          <span class="text-slate-300 font-mono">{{ formatPercent((c.weight||0)*100, 1) }}</span>
                         </div>
                       </div>
                       <div>
@@ -2045,7 +2046,7 @@
                         <div v-for="c in studyResult.block_a.net.concentration.currencies" :key="c.name"
                           class="flex justify-between text-xs py-0.5 border-b border-slate-800">
                           <span class="text-slate-400 w-28">{{ c.name }}</span>
-                          <span class="text-slate-300 font-mono">{{ ((c.weight||0)*100).toFixed(1) }}%</span>
+                          <span class="text-slate-300 font-mono">{{ formatPercent((c.weight||0)*100, 1) }}</span>
                         </div>
                       </div>
                     </div>
@@ -2059,7 +2060,7 @@
               <div v-if="activeStudyTab === 'attribution' && studyResult.block_b" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
-                  Période d'étude : {{ studyResult.meta.nav_start_date }} → {{ studyResult.meta.nav_current_date }}
+                  Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
                   · {{ studyResult.meta.nav_n_obs }} observations NAV
                 </div>
                 <div v-if="studyResult.meta?.recon_mode === 't0_synthetic'" class="flex items-start gap-3 rounded-lg bg-amber-950/30 border border-amber-500/30 px-4 py-3 text-sm text-amber-200">
@@ -2074,7 +2075,7 @@
                       'Plus/moins-value non réalisée sur les positions encore ouvertes. Valorisée au prix du snapshot (Def.txt). Ne tient pas compte de l\'évolution du prix depuis le snapshot.'],
                     ['P&L total', fmtPnl(studyResult.block_b.totals?.total_pnl, studyResult.meta?.currency), studyResult.block_b.totals?.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400',
                       'P&L réalisé + P&L latent. Couvre l\'intégralité du carnet d\'ordres (pas uniquement la période FF). Exprimé dans la devise du produit.'],
-                    ['Part FX', studyResult.block_b.totals?.fx_share_of_realized_pct != null ? studyResult.block_b.totals.fx_share_of_realized_pct.toFixed(1)+'%' : '—', 'text-amber-400',
+                    ['Part FX', studyResult.block_b.totals?.fx_share_of_realized_pct != null ? formatPercent(studyResult.block_b.totals.fx_share_of_realized_pct, 1) : '—', 'text-amber-400',
                       'Fraction du P&L réalisé attribuable à la variation des taux de change (effet FX), calculée sur les aller-retours clôturés avec conversion de devise.'],
                   ]" :key="label" class="bg-slate-800/60 rounded-lg p-3 text-center">
                     <div class="text-xs text-slate-500 mb-1 flex items-center justify-center gap-1">{{ label }}
@@ -2090,7 +2091,7 @@
                 <div v-if="studyResult.block_b.totals?.reconciliation" class="card">
                   <div class="flex items-center justify-between mb-3">
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Réconciliation NAV</div>
-                    <div class="text-[10px] text-slate-600 font-mono">as of {{ studyResult.block_b.totals.reconciliation.as_of }}</div>
+                    <div class="text-[10px] text-slate-600 font-mono">as of {{ formatDate(studyResult.block_b.totals.reconciliation.as_of) }}</div>
                   </div>
                   <div class="grid grid-cols-5 gap-2">
                     <div v-for="([label, val, cls, tip]) in [
@@ -2102,7 +2103,7 @@
                         'P&L FIFO brut moins les frais de gestion cumulés estimés — comparable à la performance NAV publiée.'],
                       ['P&L implicite NAV', fmtPnl(studyResult.block_b.totals.reconciliation.nav_implied_pnl_prod, studyResult.meta?.currency), 'text-emerald-400',
                         'P&L réel du fonds calculé directement depuis la NAV quotidienne et les flux de souscription/rachat (Δ Outstanding × NAV à chaque mouvement). Indépendant du carnet d\'ordres et du FIFO.'],
-                      ['Écart résiduel', studyResult.block_b.totals.reconciliation.gap_pct != null ? (studyResult.block_b.totals.reconciliation.gap_pct >= 0 ? '+' : '') + studyResult.block_b.totals.reconciliation.gap_pct.toFixed(1) + '%' : '—',
+                      ['Écart résiduel', studyResult.block_b.totals.reconciliation.gap_pct != null ? (studyResult.block_b.totals.reconciliation.gap_pct >= 0 ? '+' : '') + formatPercent(studyResult.block_b.totals.reconciliation.gap_pct, 1) : '—',
                         Math.abs(studyResult.block_b.totals.reconciliation.gap_pct || 0) > 15 ? 'text-amber-400' : 'text-emerald-400',
                         'Écart entre le P&L net estimé et le P&L implicite NAV, en % du P&L implicite NAV. Un écart résiduel traduit des opérations sur titre non résolues, un cash drag non modélisé, ou des différences de source de valorisation (yfinance vs valorisateur du fonds).'],
                     ]" :key="label" class="bg-slate-800/60 rounded-lg p-3 text-center">
@@ -2171,7 +2172,7 @@
                           :class="(r.total_pnl||0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
                           <SensitiveValue>{{ fmtPnl(r.total_pnl) }}</SensitiveValue>
                         </td>
-                        <td class="py-1.5 px-2 text-right text-slate-400">{{ ((r.weight||0)*100).toFixed(2) }}%</td>
+                        <td class="py-1.5 px-2 text-right text-slate-400">{{ formatPercent((r.weight||0)*100, 2) }}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -2219,7 +2220,7 @@
               <div v-if="activeStudyTab === 'trading' && studyResult.block_c" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
-                  Période d'étude : {{ studyResult.meta.nav_start_date }} → {{ studyResult.meta.nav_current_date }}
+                  Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
                   · {{ studyResult.meta.nav_n_obs }} observations NAV
                   · {{ studyResult.block_c.turnover?.period_days ?? '—' }} jours
                 </div>
@@ -2231,11 +2232,11 @@
                   <div v-for="([label, val, cls, tip]) in [
                     ['Round-trips', studyResult.block_c.round_trips?.count ?? '—', 'text-slate-300',
                       'Nombre d\'aller-retours complets (achat + vente) identifiés par appariement FIFO. Chaque round-trip clôturé génère un P&L réalisé.'],
-                    ['Hit ratio', (studyResult.block_c.round_trips?.win_rate_pct ?? 0).toFixed(1)+'%', studyResult.block_c.round_trips?.win_rate_pct >= 50 ? 'text-emerald-400' : 'text-amber-400',
+                    ['Hit ratio', formatPercent(studyResult.block_c.round_trips?.win_rate_pct ?? 0, 1), studyResult.block_c.round_trips?.win_rate_pct >= 50 ? 'text-emerald-400' : 'text-amber-400',
                       'Pourcentage de round-trips gagnants (P&L réalisé > 0). 50% = autant de gains que de pertes. >60% = bonne qualité de sélection.'],
-                    ['Profit factor', (studyResult.block_c.round_trips?.profit_factor ?? 0).toFixed(2), studyResult.block_c.round_trips?.profit_factor >= 1 ? 'text-emerald-400' : 'text-red-400',
+                    ['Profit factor', formatNumber(studyResult.block_c.round_trips?.profit_factor ?? 0, 2), studyResult.block_c.round_trips?.profit_factor >= 1 ? 'text-emerald-400' : 'text-red-400',
                       'Somme des P&L gagnants / valeur absolue des P&L perdants. >1 = l\'argent gagné dépasse l\'argent perdu. >2 = excellent. <1 = destruction de valeur.'],
-                    ['Durée médiane', (studyResult.block_c.round_trips?.median_holding_days ?? 0).toFixed(0)+'j', 'text-blue-400',
+                    ['Durée médiane', formatNumber(studyResult.block_c.round_trips?.median_holding_days ?? 0, 0)+'j', 'text-blue-400',
                       'Durée médiane de détention des positions clôturées (en jours calendaires). Distingue les paris de conviction long terme des positions tactiques courtes.'],
                   ]" :key="label" class="bg-slate-800/60 rounded-lg p-3 text-center">
                     <div class="text-xs text-slate-500 mb-1 flex items-center justify-center gap-1">{{ label }}
@@ -2252,7 +2253,7 @@
                         ['P&L moyen (gain)', fmtPnl(studyResult.block_c.round_trips?.avg_win, studyResult.meta?.currency), 'P&L réalisé moyen des round-trips gagnants (P&L > 0). Indicateur de l\'ampleur typique des gains.'],
                         ['P&L moyen (perte)', fmtPnl(studyResult.block_c.round_trips?.avg_loss, studyResult.meta?.currency), 'P&L réalisé moyen des round-trips perdants (en valeur absolue). Indicateur de l\'ampleur typique des pertes.'],
                         ['P&L réalisé total', fmtPnl(studyResult.block_c.round_trips?.realized_pnl, studyResult.meta?.currency), 'Somme du P&L réalisé sur tous les round-trips clôturés, dans la devise du produit.'],
-                        ['Durée moy.', (studyResult.block_c.round_trips?.avg_holding_days ?? 0).toFixed(1)+' j', 'Durée moyenne de détention de toutes les positions clôturées en jours calendaires. Complément de la durée médiane (sensible aux extrêmes).'],
+                        ['Durée moy.', formatNumber(studyResult.block_c.round_trips?.avg_holding_days ?? 0, 1)+' j', 'Durée moyenne de détention de toutes les positions clôturées en jours calendaires. Complément de la durée médiane (sensible aux extrêmes).'],
                       ]" :key="k" class="border-b border-slate-800/50">
                         <td class="py-1.5 text-slate-500">
                           <span class="inline-flex items-center gap-1">{{ k }}
@@ -2272,8 +2273,8 @@
                       <tr v-for="([k,v,tip]) in [
                         ['Gross traded', fmtPnl(studyResult.block_c.turnover?.gross_traded_prod, studyResult.meta?.currency), 'Notionnel brut total échangé (achats + ventes) sur toute la période du carnet d\'ordres, dans la devise du produit.'],
                         ['AUM moyen', fmtPnl(studyResult.block_c.turnover?.avg_aum_prod, studyResult.meta?.currency), 'AUM moyen estimé sur la période : NAV × certificats en circulation, moyenné sur les observations disponibles.'],
-                        ['Turnover (période)', ((studyResult.block_c.turnover?.turnover_rate ?? 0)*100).toFixed(1)+'%', 'Gross traded / AUM moyen sur toute la période du carnet d\'ordres. Non annualisé — dépend de la durée couverte.'],
-                        ['Turnover annualisé', ((studyResult.block_c.turnover?.turnover_annualized ?? 0)*100).toFixed(1)+'%', 'Turnover rapporté à une année (× 252 / N jours). Permet la comparaison entre produits de durées différentes. 100% = l\'équivalent du portefeuille rebalancé 1× par an.'],
+                        ['Turnover (période)', formatPercent((studyResult.block_c.turnover?.turnover_rate ?? 0)*100, 1), 'Gross traded / AUM moyen sur toute la période du carnet d\'ordres. Non annualisé — dépend de la durée couverte.'],
+                        ['Turnover annualisé', formatPercent((studyResult.block_c.turnover?.turnover_annualized ?? 0)*100, 1), 'Turnover rapporté à une année (× 252 / N jours). Permet la comparaison entre produits de durées différentes. 100% = l\'équivalent du portefeuille rebalancé 1× par an.'],
                         ['Période', (studyResult.block_c.turnover?.period_days ?? '—')+' jours', 'Nombre de jours calendaires couverts par le carnet d\'ordres (du premier au dernier ordre exécuté).'],
                       ]" :key="k" class="border-b border-slate-800/50">
                         <td class="py-1.5 text-slate-500">
@@ -2298,7 +2299,7 @@
               <div v-if="activeStudyTab === 'behaviour' && studyResult.block_d" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
-                  Période d'étude : {{ studyResult.meta.nav_start_date }} → {{ studyResult.meta.nav_current_date }}
+                  Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
                   · {{ studyResult.meta.n_orders }} ordres
                 </div>
 
@@ -2306,7 +2307,7 @@
                 <div class="card border border-slate-700/50 text-xs text-slate-400 leading-5">
                   <div class="font-semibold text-slate-300 mb-1">💡 Lecture du Bloc D</div>
                   Ce bloc classe chaque position clôturée selon <strong class="text-slate-200">deux axes</strong> :
-                  <span class="text-violet-300">la conviction</span> (poids &gt; {{ studyResult.block_d.conviction_matrix?.params?.conviction_weight_pct }}% du portefeuille
+                  <span class="text-violet-300">la conviction</span> (poids &gt; {{ formatPercentRaw(studyResult.block_d.conviction_matrix?.params?.conviction_weight_pct) }} du portefeuille
                   ET durée &gt; {{ studyResult.block_d.conviction_matrix?.params?.long_term_days }}j) et
                   <span class="text-violet-300">le résultat</span> (P&L positif ou négatif).
                   Un bon gérant a un maximum de positions en haut à gauche (conviction → profit) et un minimum en bas à droite (incertitude → pertes).
@@ -2323,11 +2324,11 @@
                       'Tactique', 'court terme',
                       'text-amber-400',
                       'Positions clôturées avant le seuil long terme. Repositionnements rapides ou opérations de court terme.'],
-                    [(studyResult.block_d.order_hygiene?.discarded_ratio_pct ?? 0).toFixed(1)+'%',
+                    [formatPercent(studyResult.block_d.order_hygiene?.discarded_ratio_pct ?? 0, 1),
                       'Ordres annulés', 'taux Discarded',
                       studyResult.block_d.order_hygiene?.discarded_ratio_pct > 15 ? 'text-amber-400' : 'text-slate-300',
                       'Discarded / (Done + Discarded). > 15% : signal d\'hésitation ou difficultés d\'exécution.'],
-                    [(studyResult.block_d.holding_distribution?.avg_holding_days ?? 0).toFixed(0)+'j',
+                    [formatNumber(studyResult.block_d.holding_distribution?.avg_holding_days ?? 0, 0)+'j',
                       'Durée moy.', 'positions clôturées',
                       'text-blue-400',
                       'Durée moyenne de détention de toutes les positions clôturées en jours calendaires.'],
@@ -2346,7 +2347,7 @@
                   <div class="text-xs font-bold text-slate-300 mb-1 flex items-center gap-2">
                     Matrice conviction × résultat
                     <span class="font-normal text-slate-600 text-[10px]">
-                      seuil poids {{ studyResult.block_d.conviction_matrix.params?.conviction_weight_pct }}% · seuil durée {{ studyResult.block_d.conviction_matrix.params?.long_term_days }}j
+                      seuil poids {{ formatPercentRaw(studyResult.block_d.conviction_matrix.params?.conviction_weight_pct) }} · seuil durée {{ studyResult.block_d.conviction_matrix.params?.long_term_days }}j
                     </span>
                   </div>
                   <div class="text-[10px] text-slate-600 mb-4">
@@ -2477,7 +2478,7 @@
                       <tr v-for="([k,v,tip]) in [
                         ['Done', studyResult.block_d.order_hygiene?.n_done ?? '—', 'Ordres avec état Done (exécutés). Seuls ceux-ci entrent dans les calculs de P&L et de turnover.'],
                         ['Discarded', studyResult.block_d.order_hygiene?.n_discarded ?? '—', 'Ordres annulés ou rejetés. Ils ne génèrent pas de P&L mais signalent de l\'hésitation ou des difficultés d\'exécution.'],
-                        ['Ratio annulation', (studyResult.block_d.order_hygiene?.discarded_ratio_pct ?? 0).toFixed(1)+'%', 'Discarded / (Done + Discarded). >15% est un signal d\'alerte de qualité d\'exécution ou d\'indécision.'],
+                        ['Ratio annulation', formatPercent(studyResult.block_d.order_hygiene?.discarded_ratio_pct ?? 0, 1), 'Discarded / (Done + Discarded). >15% est un signal d\'alerte de qualité d\'exécution ou d\'indécision.'],
                         ['Fills partiels', studyResult.block_d.order_hygiene?.n_partial_fills ?? '—', 'Ordres partiellement exécutés. Indique des difficultés de liquidité ou des ordres à limite non totalement remplis.'],
                       ]" :key="k" class="border-b border-slate-800/50">
                         <td class="py-1.5 text-slate-500">
@@ -2504,7 +2505,7 @@
               <div v-if="activeStudyTab === 'bh'" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
-                  Période B&amp;H : {{ studyResult.meta.nav_start_date }} → {{ studyResult.meta.nav_current_date }}
+                  Période B&amp;H : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
                   · {{ studyResult.meta.nav_n_obs }} observations NAV
                 </div>
 
@@ -2529,7 +2530,7 @@
                       <div class="font-semibold text-slate-300">💡 Référentiel Inertiel (Bloc E)</div>
                       <span v-if="studyResult.block_e.source === 'termsheet'"
                         class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-400 border border-emerald-700/40">
-                        ✓ Term sheet · {{ studyResult.block_e.n_certs?.toLocaleString('fr-FR') }} certificats
+                        ✓ Term sheet · {{ formatInt(studyResult.block_e.n_certs) }} certificats
                       </span>
                       <span v-else
                         class="text-[10px] px-2 py-0.5 rounded-full bg-amber-900/40 text-amber-400 border border-amber-700/40">
@@ -2553,18 +2554,18 @@
                     <div class="card border border-blue-800/40 text-center">
                       <div class="text-2xl font-bold"
                         :class="studyResult.block_e.bh_perf_pct >= 0 ? 'text-blue-400' : 'text-red-400'">
-                        {{ studyResult.block_e.bh_perf_pct >= 0 ? '+' : '' }}{{ studyResult.block_e.bh_perf_pct?.toFixed(1) }}%
+                        {{ studyResult.block_e.bh_perf_pct >= 0 ? '+' : '' }}{{ formatPercent(studyResult.block_e.bh_perf_pct, 1) }}
                       </div>
                       <div class="text-[10px] text-slate-500 mt-1">Référentiel Inertiel</div>
-                      <div class="text-xs text-slate-400 font-mono mt-0.5">{{ studyResult.block_e.bh_nav?.toFixed(2) }}</div>
+                      <div class="text-xs text-slate-400 font-mono mt-0.5">{{ formatNumber(studyResult.block_e.bh_nav, 2) }}</div>
                     </div>
                     <div class="card border border-slate-700/40 text-center">
                       <div class="text-2xl font-bold"
                         :class="studyResult.block_e.actual_perf_pct >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                        {{ studyResult.block_e.actual_perf_pct >= 0 ? '+' : '' }}{{ studyResult.block_e.actual_perf_pct?.toFixed(1) }}%
+                        {{ studyResult.block_e.actual_perf_pct >= 0 ? '+' : '' }}{{ formatPercent(studyResult.block_e.actual_perf_pct, 1) }}
                       </div>
                       <div class="text-[10px] text-slate-500 mt-1">NAV réelle (gestion active)</div>
-                      <div class="text-xs text-slate-400 font-mono mt-0.5">{{ studyResult.block_e.actual_nav?.toFixed(2) }}</div>
+                      <div class="text-xs text-slate-400 font-mono mt-0.5">{{ formatNumber(studyResult.block_e.actual_nav, 2) }}</div>
                     </div>
                     <div class="card text-center"
                       :class="studyResult.block_e.value_added_pct >= 0
@@ -2572,7 +2573,7 @@
                         : 'border border-red-800/50 bg-red-950/20'">
                       <div class="text-2xl font-bold"
                         :class="studyResult.block_e.value_added_pct >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                        {{ studyResult.block_e.value_added_pct >= 0 ? '+' : '' }}{{ studyResult.block_e.value_added_pct?.toFixed(2) }}%
+                        {{ studyResult.block_e.value_added_pct >= 0 ? '+' : '' }}{{ formatPercent(studyResult.block_e.value_added_pct, 2) }}
                       </div>
                       <div class="text-[10px] text-slate-500 mt-1">Valeur ajoutée par la gestion</div>
                       <div class="text-[10px] mt-1"
@@ -2614,15 +2615,15 @@
                               </div>
                               <div class="text-[10px] text-slate-600 font-mono">{{ pos.isin }}</div>
                             </td>
-                            <td class="text-right px-2 text-slate-300 font-mono">{{ pos.initial_weight_pct?.toFixed(1) }}%</td>
+                            <td class="text-right px-2 text-slate-300 font-mono">{{ formatPercent(pos.initial_weight_pct, 1) }}</td>
                             <td class="text-right px-2 font-mono font-semibold"
                               :class="pos.coherence_warning ? 'text-amber-400' : pos.total_return_pct >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                              {{ pos.total_return_pct >= 0 ? '+' : '' }}{{ pos.total_return_pct?.toFixed(1) }}%
+                              {{ pos.total_return_pct >= 0 ? '+' : '' }}{{ formatPercent(pos.total_return_pct, 1) }}
                               <span v-if="pos.coherence_warning" class="text-[9px] text-amber-600/80 ml-0.5">⚠</span>
                             </td>
                             <td class="text-right px-2 font-mono"
                               :class="pos.bh_contribution_pts >= 0 ? 'text-emerald-300' : 'text-red-300'">
-                              {{ pos.bh_contribution_pts >= 0 ? '+' : '' }}{{ pos.bh_contribution_pts?.toFixed(2) }} pts
+                              {{ pos.bh_contribution_pts >= 0 ? '+' : '' }}{{ formatNumber(pos.bh_contribution_pts, 2) }} pts
                             </td>
                             <td class="text-right pl-2 text-slate-600 text-[10px]">{{ pos.initial_price_source }}</td>
                           </tr>
@@ -2643,9 +2644,9 @@
               <div v-if="activeStudyTab === 'timing'" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
-                  Période d'étude : {{ studyResult.meta.nav_start_date }} → {{ studyResult.meta.nav_current_date }}
-                  · {{ studyResult.block_h?.n_trades_total ?? studyResult.meta.n_orders }} ordres
-                  · couverture {{ studyResult.block_h?.coverage_pct?.toFixed(0) ?? 0 }}%
+                  Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
+                  · {{ formatInt(studyResult.block_h?.n_trades_total ?? studyResult.meta.n_orders) }} ordres
+                  · couverture {{ formatPercent(studyResult.block_h?.coverage_pct ?? 0, 0) }}
                 </div>
                 <template v-if="studyResult.block_h">
 
@@ -2662,7 +2663,7 @@
                       <div class="text-[10px] text-slate-600 mb-1">Ordres sans données de prix :</div>
                       <div v-for="t in studyResult.block_h.trades.slice(0,8)" :key="t.date+t.name"
                         class="text-[10px] text-slate-700 font-mono">
-                        {{ t.date }} {{ t.side }} {{ t.name }} — {{ t.reason }}
+                        {{ formatDate(t.date) }} {{ t.side }} {{ t.name }} — {{ t.reason }}
                       </div>
                     </div>
                   </div>
@@ -2682,7 +2683,7 @@
                           tip: 'Exit Score (ventes). 1.0 = vendu exactement au plus haut local sur ±30 j. 0.5 = trader aléatoire. Formule : (prix_vente − min_local) / (max_local − min_local).' },
                         { label: 'Score Global',  value: studyResult.block_h.global_score_mean, sub: 'baseline = 0.50',
                           tip: 'Moyenne de tous les scores (achats + ventes). Baseline aléatoire = 0.50. Un t-test (one-sample, µ₀=0.5) évalue si l\'écart est statistiquement significatif.' },
-                        { label: 'Couverture',    value: null, raw: studyResult.block_h.coverage_pct?.toFixed(0) + '%', sub: studyResult.block_h.n_trades_analyzed + '/' + studyResult.block_h.n_trades_total + ' trades',
+                        { label: 'Couverture',    value: null, raw: formatPercent(studyResult.block_h.coverage_pct, 0), sub: studyResult.block_h.n_trades_analyzed + '/' + studyResult.block_h.n_trades_total + ' trades',
                           tip: '% des ordres pour lesquels un historique de prix était disponible dans le Price Store. Couverture faible = résultats indicatifs uniquement. Chargez les prix via l\'onglet Sous-jacents.' },
                       ]" :key="kpi.label"
                         class="card text-center py-4">
@@ -2690,7 +2691,7 @@
                           :class="kpi.value === null ? 'text-slate-400'
                             : kpi.value >= 0.60 ? 'text-emerald-400'
                             : kpi.value >= 0.45 ? 'text-amber-400' : 'text-red-400'">
-                          {{ kpi.raw ?? kpi.value?.toFixed(3) ?? '—' }}
+                          {{ kpi.raw ?? formatNumber(kpi.value, 3) }}
                         </div>
                         <div class="text-[10px] text-slate-500 uppercase tracking-wider flex items-center justify-center gap-1">
                           {{ kpi.label }}
@@ -2715,36 +2716,36 @@
                         <tbody class="text-slate-300">
                           <tr class="border-b border-slate-900">
                             <td class="py-1.5 text-slate-500" title="Score moyen de timing sur la dimension. 1.0 = timing parfait, 0.5 = trader aléatoire, 0.0 = pire timing possible.">Score moyen</td>
-                            <td class="text-right font-mono">{{ studyResult.block_h.entry_score_mean?.toFixed(3) ?? '—' }}</td>
-                            <td class="text-right font-mono">{{ studyResult.block_h.exit_score_mean?.toFixed(3) ?? '—' }}</td>
-                            <td class="text-right font-mono">{{ studyResult.block_h.global_score_mean?.toFixed(3) ?? '—' }}</td>
+                            <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.entry_score_mean, 3) }}</td>
+                            <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.exit_score_mean, 3) }}</td>
+                            <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.global_score_mean, 3) }}</td>
                           </tr>
                           <tr class="border-b border-slate-900">
                             <td class="py-1.5 text-slate-500" title="Score moyen − 0.500. Positif = meilleur que le hasard, négatif = moins bon. Un écart de 0.05+ peut être significatif si l'échantillon est suffisant.">vs hasard (0.500)</td>
                             <td class="text-right font-mono"
                               :class="(studyResult.block_h.entry_score_mean ?? 0.5) >= 0.5 ? 'text-emerald-400' : 'text-red-400'">
-                              {{ studyResult.block_h.entry_score_mean != null ? ((studyResult.block_h.entry_score_mean - 0.5) >= 0 ? '+' : '') + (studyResult.block_h.entry_score_mean - 0.5).toFixed(3) : '—' }}
+                              {{ studyResult.block_h.entry_score_mean != null ? ((studyResult.block_h.entry_score_mean - 0.5) >= 0 ? '+' : '') + formatNumber(studyResult.block_h.entry_score_mean - 0.5, 3) : '—' }}
                             </td>
                             <td class="text-right font-mono"
                               :class="(studyResult.block_h.exit_score_mean ?? 0.5) >= 0.5 ? 'text-emerald-400' : 'text-red-400'">
-                              {{ studyResult.block_h.exit_score_mean != null ? ((studyResult.block_h.exit_score_mean - 0.5) >= 0 ? '+' : '') + (studyResult.block_h.exit_score_mean - 0.5).toFixed(3) : '—' }}
+                              {{ studyResult.block_h.exit_score_mean != null ? ((studyResult.block_h.exit_score_mean - 0.5) >= 0 ? '+' : '') + formatNumber(studyResult.block_h.exit_score_mean - 0.5, 3) : '—' }}
                             </td>
                             <td class="text-right font-mono"
                               :class="(studyResult.block_h.global_score_mean ?? 0.5) >= 0.5 ? 'text-emerald-400' : 'text-red-400'">
-                              {{ studyResult.block_h.global_score_mean != null ? ((studyResult.block_h.global_score_mean - 0.5) >= 0 ? '+' : '') + (studyResult.block_h.global_score_mean - 0.5).toFixed(3) : '—' }}
+                              {{ studyResult.block_h.global_score_mean != null ? ((studyResult.block_h.global_score_mean - 0.5) >= 0 ? '+' : '') + formatNumber(studyResult.block_h.global_score_mean - 0.5, 3) : '—' }}
                             </td>
                           </tr>
                           <tr class="border-b border-slate-900">
                             <td class="py-1.5 text-slate-500" title="One-sample t-test vs µ₀=0.5 (baseline aléatoire). |t| > 1.96 = significatif à 5%. Positif = score supérieur à 0.5. Puissance faible si n < 20 trades.">t-stat (vs µ₀=0.5)</td>
-                            <td class="text-right font-mono">{{ studyResult.block_h.tstat_entry?.toFixed(3) ?? '—' }}</td>
-                            <td class="text-right font-mono">{{ studyResult.block_h.tstat_exit?.toFixed(3) ?? '—' }}</td>
-                            <td class="text-right font-mono">{{ studyResult.block_h.tstat_global?.toFixed(3) ?? '—' }}</td>
+                            <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.tstat_entry, 3) }}</td>
+                            <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.tstat_exit, 3) }}</td>
+                            <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.tstat_global, 3) }}</td>
                           </tr>
                           <tr>
                             <td class="py-1.5 text-slate-500" title="Probabilité d'obtenir ce score si le gérant n'avait aucune compétence de timing (H₀ : µ = 0.5). p &lt; 0.05 = rejet de H₀ à 5%. Calculé uniquement sur le score global (tous trades).">p-value global</td>
                             <td class="text-right text-slate-600">—</td>
                             <td class="text-right text-slate-600">—</td>
-                            <td class="text-right font-mono">{{ studyResult.block_h.pvalue_global?.toFixed(4) ?? '—' }}</td>
+                            <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.pvalue_global, 4) }}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -2775,11 +2776,11 @@
                           class="text-slate-700 text-xs">Aucun</div>
                         <div v-for="t in (studyResult.block_h[pattern.key] || []).slice(0,5)" :key="t.date+t.name"
                           class="flex justify-between text-[10px] py-0.5 border-b border-slate-900 last:border-0">
-                          <span class="text-slate-500 font-mono shrink-0 mr-2">{{ t.date }}</span>
+                          <span class="text-slate-500 font-mono shrink-0 mr-2">{{ formatDate(t.date) }}</span>
                           <span class="text-slate-400 truncate flex-1"><SensitiveValue mode="blur">{{ t.name }}</SensitiveValue></span>
                           <span class="font-mono ml-2"
                             :class="t.score >= 0.60 ? 'text-emerald-400' : t.score < 0.40 ? 'text-red-400' : 'text-amber-400'">
-                            {{ t.score?.toFixed(3) }}
+                            {{ formatNumber(t.score, 3) }}
                           </span>
                         </div>
                       </div>
@@ -2811,18 +2812,18 @@
                             <tr v-for="t in (studyResult.block_h.trades || []).filter(t => t.available)"
                               :key="t.date+t.isin"
                               class="border-b border-slate-900 hover:bg-slate-800/30">
-                              <td class="py-1 pr-2 font-mono text-slate-500">{{ t.date }}</td>
+                              <td class="py-1 pr-2 font-mono text-slate-500">{{ formatDate(t.date) }}</td>
                               <td class="py-1 pr-2"
                                 :class="t.side === 'BUY' ? 'text-blue-400' : 'text-orange-400'">
                                 {{ t.side }}
                               </td>
                               <td class="py-1 pr-2 text-slate-300 max-w-[140px] truncate"><SensitiveValue mode="blur">{{ t.name }}</SensitiveValue></td>
-                              <td class="py-1 pr-2 text-right font-mono text-slate-400">{{ t.price_local?.toFixed(3) }}</td>
-                              <td class="py-1 pr-2 text-right font-mono text-slate-600">{{ t.price_min_window?.toFixed(3) }}</td>
-                              <td class="py-1 pr-2 text-right font-mono text-slate-600">{{ t.price_max_window?.toFixed(3) }}</td>
+                              <td class="py-1 pr-2 text-right font-mono text-slate-400">{{ formatNumber(t.price_local, 3) }}</td>
+                              <td class="py-1 pr-2 text-right font-mono text-slate-600">{{ formatNumber(t.price_min_window, 3) }}</td>
+                              <td class="py-1 pr-2 text-right font-mono text-slate-600">{{ formatNumber(t.price_max_window, 3) }}</td>
                               <td class="py-1 pr-2 text-right font-mono font-bold"
                                 :class="t.score >= 0.60 ? 'text-emerald-400' : t.score < 0.40 ? 'text-red-400' : 'text-amber-400'">
-                                {{ t.score?.toFixed(3) }}
+                                {{ formatNumber(t.score, 3) }}
                               </td>
                               <td class="py-1 text-right"
                                 :class="t.score >= 0.60 ? 'text-emerald-400' : t.score < 0.40 ? 'text-red-400' : 'text-amber-400'">
@@ -2833,7 +2834,7 @@
                             <tr v-for="t in (studyResult.block_h.trades || []).filter(t => !t.available)"
                               :key="t.date+t.isin+'na'"
                               class="border-b border-slate-900 opacity-40">
-                              <td class="py-1 pr-2 font-mono text-slate-600">{{ t.date }}</td>
+                              <td class="py-1 pr-2 font-mono text-slate-600">{{ formatDate(t.date) }}</td>
                               <td class="py-1 pr-2 text-slate-600">{{ t.side }}</td>
                               <td class="py-1 pr-2 text-slate-600 max-w-[140px] truncate">{{ t.name }}</td>
                               <td colspan="5" class="py-1 text-right text-slate-700 italic">{{ t.reason }}</td>
@@ -2854,9 +2855,9 @@
               <div v-if="activeStudyTab === 'stockpicking'" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
-                  Période d'étude : {{ studyResult.meta.nav_start_date }} → {{ studyResult.meta.nav_current_date }}
+                  Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
                   · {{ studyResult.block_i?.n_buys_analyzed ?? '—' }} achats analysés
-                  · couverture {{ studyResult.block_i?.coverage_pct?.toFixed(0) ?? 0 }}%
+                  · couverture {{ formatPercent(studyResult.block_i?.coverage_pct ?? 0, 0) }}
                 </div>
                 <template v-if="studyResult.block_i">
 
@@ -2872,7 +2873,7 @@
                       <div class="text-[10px] text-slate-600 mb-1">Achats sans données de prix :</div>
                       <div v-for="t in studyResult.block_i.trades.slice(0,8)" :key="t.date+t.name"
                         class="text-[10px] text-slate-700 font-mono">
-                        {{ t.date }} BUY {{ t.name }} — {{ t.reason }}
+                        {{ formatDate(t.date) }} BUY {{ t.name }} — {{ t.reason }}
                       </div>
                     </div>
                   </div>
@@ -2898,11 +2899,11 @@
                         <div class="text-[9px] text-slate-600 mt-0.5">{{ studyResult.block_i.score_label }}</div>
                       </div>
                       <div v-for="kpi in [
-                        { label: 'Alpha moyen', value: null, raw: ((studyResult.block_i.global_alpha_mean ?? 0) * 100).toFixed(2) + '%', sub: 'benchmark-adjusted', positive: (studyResult.block_i.global_alpha_mean ?? 0) >= 0,
+                        { label: 'Alpha moyen', value: null, raw: formatPercent((studyResult.block_i.global_alpha_mean ?? 0) * 100, 2), sub: 'benchmark-adjusted', positive: (studyResult.block_i.global_alpha_mean ?? 0) >= 0,
                           tip: 'Alpha moyen global pondéré par horizon (poids : 1M×15%, 3M×25%, 6M×30%, 12M×30%). Positif = sélection surperforme le benchmark en moyenne post-achat.' },
-                        { label: 'Taux de succès', value: null, raw: ((studyResult.block_i.global_success_rate ?? 0) * 100).toFixed(0) + '%', sub: '% achats α > 0', positive: (studyResult.block_i.global_success_rate ?? 0) >= 0.5,
+                        { label: 'Taux de succès', value: null, raw: formatPercent((studyResult.block_i.global_success_rate ?? 0) * 100, 0), sub: '% achats α > 0', positive: (studyResult.block_i.global_success_rate ?? 0) >= 0.5,
                           tip: '% des achats pour lesquels le titre a surperformé le benchmark sur au moins un horizon. 50% = aléatoire. >60% = compétence de sélection.' },
-                        { label: 'Couverture', value: null, raw: (studyResult.block_i.coverage_pct ?? 0).toFixed(0) + '%', sub: studyResult.block_i.n_buys_analyzed + '/' + studyResult.block_i.n_buys_total + ' achats', positive: true,
+                        { label: 'Couverture', value: null, raw: formatPercent(studyResult.block_i.coverage_pct ?? 0, 0), sub: studyResult.block_i.n_buys_analyzed + '/' + studyResult.block_i.n_buys_total + ' achats', positive: true,
                           tip: '% des ordres BUY pour lesquels un historique de prix était disponible dans le Price Store.' },
                       ]" :key="kpi.label"
                         class="card text-center py-4">
@@ -2941,18 +2942,18 @@
                                 <td class="text-right font-mono">{{ studyResult.block_i.stats_by_horizon[h].n }}</td>
                                 <td class="text-right font-mono font-bold"
                                   :class="studyResult.block_i.stats_by_horizon[h].alpha_mean >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                                  {{ ((studyResult.block_i.stats_by_horizon[h].alpha_mean ?? 0) * 100).toFixed(2) }}%
+                                  {{ formatPercent((studyResult.block_i.stats_by_horizon[h].alpha_mean ?? 0) * 100, 2) }}
                                 </td>
                                 <td class="text-right font-mono"
                                   :class="studyResult.block_i.stats_by_horizon[h].alpha_median >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                                  {{ ((studyResult.block_i.stats_by_horizon[h].alpha_median ?? 0) * 100).toFixed(2) }}%
+                                  {{ formatPercent((studyResult.block_i.stats_by_horizon[h].alpha_median ?? 0) * 100, 2) }}
                                 </td>
                                 <td class="text-right font-mono"
                                   :class="studyResult.block_i.stats_by_horizon[h].success_rate >= 0.5 ? 'text-emerald-400' : 'text-red-400'">
-                                  {{ ((studyResult.block_i.stats_by_horizon[h].success_rate ?? 0) * 100).toFixed(0) }}%
+                                  {{ formatPercent((studyResult.block_i.stats_by_horizon[h].success_rate ?? 0) * 100, 0) }}
                                 </td>
                                 <td class="text-right font-mono text-slate-500">
-                                  {{ ((studyResult.block_i.stats_by_horizon[h].alpha_std ?? 0) * 100).toFixed(2) }}%
+                                  {{ formatPercent((studyResult.block_i.stats_by_horizon[h].alpha_std ?? 0) * 100, 2) }}
                                 </td>
                               </template>
                               <template v-else>
@@ -2963,26 +2964,26 @@
                             <!-- Global row -->
                             <tr class="border-t border-slate-700 font-semibold">
                               <td class="py-1.5 text-slate-300">Global pondéré</td>
-                              <td class="text-right font-mono text-slate-400">{{ studyResult.block_i.n_buys_analyzed }}</td>
+                              <td class="text-right font-mono text-slate-400">{{ formatInt(studyResult.block_i.n_buys_analyzed) }}</td>
                               <td class="text-right font-mono font-bold"
                                 :class="(studyResult.block_i.global_alpha_mean ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                                {{ ((studyResult.block_i.global_alpha_mean ?? 0) * 100).toFixed(2) }}%
+                                {{ formatPercent((studyResult.block_i.global_alpha_mean ?? 0) * 100, 2) }}
                               </td>
                               <td class="text-right text-slate-600">—</td>
                               <td class="text-right font-mono text-blue-400">
-                                {{ ((studyResult.block_i.global_success_rate ?? 0) * 100).toFixed(0) }}%
+                                {{ formatPercent((studyResult.block_i.global_success_rate ?? 0) * 100, 0) }}
                               </td>
                               <td class="text-right font-mono text-slate-500"
                                 title="Information Ratio = alpha moyen / écart-type alpha. IR > 0.5 est considéré bon.">
-                                IR={{ (studyResult.block_i.information_ratio ?? 0).toFixed(2) }}
+                                IR={{ formatNumber(studyResult.block_i.information_ratio ?? 0, 2) }}
                               </td>
                             </tr>
                             <!-- t-stat row -->
                             <tr>
                               <td class="py-1.5 text-slate-600 text-[10px]" title="Test t one-sample vs µ₀=0 (H₀ : alpha moyen = 0). |t| > 1.96 = significatif à 5%.">t-stat / p-value</td>
                               <td colspan="5" class="text-right font-mono text-[10px] text-slate-600">
-                                t={{ (studyResult.block_i.tstat_alpha ?? 0).toFixed(3) }}
-                                · p={{ (studyResult.block_i.pvalue_alpha ?? 1).toFixed(4) }}
+                                t={{ formatNumber(studyResult.block_i.tstat_alpha ?? 0, 3) }}
+                                · p={{ formatNumber(studyResult.block_i.pvalue_alpha ?? 1, 4) }}
                                 · benchmark : {{ studyResult.block_i.benchmark_ticker }}
                                 <span v-if="!studyResult.block_i.benchmark_available" class="text-amber-600 ml-1">(indisponible — retour brut)</span>
                               </td>
@@ -3016,11 +3017,11 @@
                         <div v-for="t in (studyResult.block_i[section.key] || []).slice(0,5)"
                           :key="t.date+t.name"
                           class="flex justify-between items-center text-[10px] py-0.5 border-b border-slate-900 last:border-0">
-                          <span class="text-slate-500 font-mono shrink-0 mr-2">{{ t.date }}</span>
+                          <span class="text-slate-500 font-mono shrink-0 mr-2">{{ formatDate(t.date) }}</span>
                           <span class="text-slate-400 truncate flex-1"><SensitiveValue mode="blur">{{ t.name }}</SensitiveValue></span>
                           <span class="font-mono ml-2 font-bold"
                             :class="(t.alpha_weighted ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                            {{ ((t.alpha_weighted ?? 0) * 100).toFixed(1) }}%
+                            {{ formatPercent((t.alpha_weighted ?? 0) * 100, 1) }}
                           </span>
                         </div>
                       </div>
@@ -3051,7 +3052,7 @@
                             <tr v-for="t in (studyResult.block_i.trades || []).filter(t => t.available)"
                               :key="t.date+t.isin"
                               class="border-b border-slate-900 hover:bg-slate-800/30">
-                              <td class="py-1 pr-2 font-mono text-slate-500">{{ t.date }}</td>
+                              <td class="py-1 pr-2 font-mono text-slate-500">{{ formatDate(t.date) }}</td>
                               <td class="py-1 pr-2 text-slate-300 max-w-[140px] truncate"><SensitiveValue mode="blur">{{ t.name }}</SensitiveValue></td>
                               <template v-for="h in ['1M','3M','6M','12M']" :key="h">
                                 <td class="py-1 pr-2 text-right font-mono"
@@ -3059,20 +3060,20 @@
                                     ? (t.horizons[h].alpha >= 0 ? 'text-emerald-400' : 'text-red-400')
                                     : 'text-slate-700'">
                                   {{ t.horizons?.[h]?.available
-                                    ? ((t.horizons[h].alpha ?? 0) * 100).toFixed(1) + '%'
+                                    ? formatPercent((t.horizons[h].alpha ?? 0) * 100, 1)
                                     : '—' }}
                                 </td>
                               </template>
                               <td class="py-1 text-right font-mono font-bold"
                                 :class="(t.alpha_weighted ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                                {{ ((t.alpha_weighted ?? 0) * 100).toFixed(1) }}%
+                                {{ formatPercent((t.alpha_weighted ?? 0) * 100, 1) }}
                               </td>
                             </tr>
                             <!-- Unavailable -->
                             <tr v-for="t in (studyResult.block_i.trades || []).filter(t => !t.available)"
                               :key="t.date+t.isin+'na'"
                               class="border-b border-slate-900 opacity-40">
-                              <td class="py-1 pr-2 font-mono text-slate-600">{{ t.date }}</td>
+                              <td class="py-1 pr-2 font-mono text-slate-600">{{ formatDate(t.date) }}</td>
                               <td class="py-1 pr-2 text-slate-600 max-w-[140px] truncate">{{ t.name }}</td>
                               <td colspan="5" class="py-1 text-right text-slate-700 italic">{{ t.reason }}</td>
                             </tr>
@@ -3094,7 +3095,7 @@
               <div v-if="activeStudyTab === 'riskmanagement'" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
-                  Période d'étude : {{ studyResult.meta.nav_start_date }} → {{ studyResult.meta.nav_current_date }}
+                  Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
                   · {{ studyResult.block_j?.n_obs ?? studyResult.meta.nav_n_obs }} observations NAV
                 </div>
                 <template v-if="studyResult.block_j && studyResult.block_j.available">
@@ -3149,7 +3150,7 @@
                       </div>
                       <div class="text-xs text-slate-400">{{ label }}</div>
                       <div class="text-xs text-slate-500 mt-0.5">
-                        {{ ((studyResult.block_j.weights[key] ?? 0) * 100).toFixed(0) }}%
+                        {{ formatPercent((studyResult.block_j.weights[key] ?? 0) * 100, 0) }}
                       </div>
                     </div>
                   </div>
@@ -3163,7 +3164,7 @@
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.risk_adjusted.sharpe_ratio?.toFixed(3) ?? '—' }}
+                          {{ formatNumber(studyResult.block_j.sub_scores.risk_adjusted.sharpe_ratio, 3) }}
                         </div>
                         <div class="text-xs text-slate-400 flex items-center justify-center gap-1">
                           Sharpe Ratio
@@ -3177,13 +3178,13 @@
                       </div>
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.risk_adjusted.sortino_ratio?.toFixed(3) ?? '—' }}
+                          {{ formatNumber(studyResult.block_j.sub_scores.risk_adjusted.sortino_ratio, 3) }}
                         </div>
                         <div class="text-xs text-slate-400">Sortino Ratio</div>
                       </div>
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.risk_adjusted.calmar_ratio?.toFixed(3) ?? '—' }}
+                          {{ formatNumber(studyResult.block_j.sub_scores.risk_adjusted.calmar_ratio, 3) }}
                         </div>
                         <div class="text-xs text-slate-400 flex items-center justify-center gap-1">
                           Calmar Ratio
@@ -3197,7 +3198,7 @@
                       </div>
                       <div v-if="studyResult.block_j.sub_scores.risk_adjusted.information_ratio != null">
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.risk_adjusted.information_ratio?.toFixed(3) }}
+                          {{ formatNumber(studyResult.block_j.sub_scores.risk_adjusted.information_ratio, 3) }}
                         </div>
                         <div class="text-xs text-slate-400">Information Ratio</div>
                       </div>
@@ -3206,7 +3207,7 @@
                          v-if="studyResult.block_j.sub_scores.risk_adjusted.upside_capture_pct != null">
                       <div>
                         <div class="text-lg font-bold text-emerald-400">
-                          {{ studyResult.block_j.sub_scores.risk_adjusted.upside_capture_pct?.toFixed(1) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.risk_adjusted.upside_capture_pct, 1) }}
                         </div>
                         <div class="text-xs text-slate-400 flex items-center justify-center gap-1">
                           Capture hausse
@@ -3220,13 +3221,13 @@
                       </div>
                       <div>
                         <div class="text-lg font-bold text-red-400">
-                          {{ studyResult.block_j.sub_scores.risk_adjusted.downside_capture_pct?.toFixed(1) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.risk_adjusted.downside_capture_pct, 1) }}
                         </div>
                         <div class="text-xs text-slate-400">Capture baisse</div>
                       </div>
                       <div v-if="studyResult.block_j.sub_scores.risk_adjusted.tracking_error_pct != null">
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.risk_adjusted.tracking_error_pct?.toFixed(2) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.risk_adjusted.tracking_error_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400">Tracking Error</div>
                       </div>
@@ -3245,13 +3246,13 @@
                     <div class="grid grid-cols-3 md:grid-cols-5 gap-3 text-center">
                       <div>
                         <div class="text-lg font-bold text-red-400">
-                          {{ studyResult.block_j.sub_scores.drawdown.max_drawdown_pct?.toFixed(2) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.drawdown.max_drawdown_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400">Max Drawdown</div>
                       </div>
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.drawdown.ulcer_index_pct?.toFixed(2) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.drawdown.ulcer_index_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400 flex items-center justify-center gap-1">
                           Ulcer Index
@@ -3277,7 +3278,7 @@
                       </div>
                       <div v-if="studyResult.block_j.benchmark_available">
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.drawdown.benchmark_max_dd_pct?.toFixed(2) ?? '—' }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.drawdown.benchmark_max_dd_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400">Max DD bench.</div>
                       </div>
@@ -3297,7 +3298,7 @@
                           <tr v-for="(ep, idx) in studyResult.block_j.sub_scores.drawdown.worst_episodes"
                               :key="idx" class="border-b border-slate-800">
                             <td class="py-1 text-slate-400">#{{ idx + 1 }}</td>
-                            <td class="py-1 text-right text-red-400">{{ ep.depth_pct?.toFixed(2) }}%</td>
+                            <td class="py-1 text-right text-red-400">{{ formatPercent(ep.depth_pct, 2) }}</td>
                             <td class="py-1 text-right text-slate-300">{{ ep.duration_days ?? '—' }}</td>
                           </tr>
                         </tbody>
@@ -3317,7 +3318,7 @@
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
                       <div>
                         <div class="text-lg font-bold text-red-400">
-                          {{ studyResult.block_j.sub_scores.downside_risk.var_95_pct?.toFixed(2) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.downside_risk.var_95_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400 flex items-center justify-center gap-1">
                           VaR 95%
@@ -3331,7 +3332,7 @@
                       </div>
                       <div>
                         <div class="text-lg font-bold text-red-400">
-                          {{ studyResult.block_j.sub_scores.downside_risk.es_95_pct?.toFixed(2) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.downside_risk.es_95_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400 flex items-center justify-center gap-1">
                           ES 95%
@@ -3345,13 +3346,13 @@
                       </div>
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.downside_risk.semi_deviation_pct?.toFixed(2) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.downside_risk.semi_deviation_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400">Semi-déviation</div>
                       </div>
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.downside_risk.sortino_ratio?.toFixed(3) ?? '—' }}
+                          {{ formatNumber(studyResult.block_j.sub_scores.downside_risk.sortino_ratio, 3) }}
                         </div>
                         <div class="text-xs text-slate-400">Sortino</div>
                       </div>
@@ -3360,19 +3361,19 @@
                          v-if="studyResult.block_j.sub_scores.downside_risk.worst_day_pct != null">
                       <div>
                         <div class="text-lg font-bold text-red-400">
-                          {{ studyResult.block_j.sub_scores.downside_risk.worst_day_pct?.toFixed(2) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.downside_risk.worst_day_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400">Pire jour</div>
                       </div>
                       <div>
                         <div class="text-lg font-bold text-red-400">
-                          {{ studyResult.block_j.sub_scores.downside_risk.worst_week_pct?.toFixed(2) ?? '—' }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.downside_risk.worst_week_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400">Pire semaine</div>
                       </div>
                       <div>
                         <div class="text-lg font-bold text-red-400">
-                          {{ studyResult.block_j.sub_scores.downside_risk.worst_month_pct?.toFixed(2) ?? '—' }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.downside_risk.worst_month_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400">Pire mois</div>
                       </div>
@@ -3397,19 +3398,19 @@
                       </div>
                       <div>
                         <div class="text-lg font-bold text-amber-400">
-                          {{ studyResult.block_j.sub_scores.concentration.max_weight_pct?.toFixed(1) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.concentration.max_weight_pct, 1) }}
                         </div>
                         <div class="text-xs text-slate-400">Max poids</div>
                       </div>
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.concentration.hhi?.toFixed(4) }}
+                          {{ formatNumber(studyResult.block_j.sub_scores.concentration.hhi, 4) }}
                         </div>
                         <div class="text-xs text-slate-400">HHI</div>
                       </div>
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.concentration.effective_n?.toFixed(1) }}
+                          {{ formatNumber(studyResult.block_j.sub_scores.concentration.effective_n, 1) }}
                         </div>
                         <div class="text-xs text-slate-400 flex items-center justify-center gap-1">
                           Neff
@@ -3436,7 +3437,7 @@
                           <tr v-for="pos in studyResult.block_j.sub_scores.concentration.top5_holdings"
                               :key="pos.name" class="border-b border-slate-800">
                             <td class="py-1 text-slate-300">{{ pos.name }}</td>
-                            <td class="py-1 text-right text-amber-400">{{ pos.weight_pct?.toFixed(2) }}%</td>
+                            <td class="py-1 text-right text-amber-400">{{ formatPercent(pos.weight_pct, 2) }}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -3455,7 +3456,7 @@
                     <div v-if="studyResult.block_j.sub_scores.factor_risk.available" class="grid grid-cols-3 gap-3 text-center">
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.factor_risk.r2_pct?.toFixed(1) }}%
+                          {{ formatPercent(studyResult.block_j.sub_scores.factor_risk.r2_pct, 1) }}
                         </div>
                         <div class="text-xs text-slate-400">R²</div>
                       </div>
@@ -3467,7 +3468,7 @@
                       </div>
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ studyResult.block_j.sub_scores.factor_risk.alpha_tstat?.toFixed(2) ?? '—' }}
+                          {{ formatNumber(studyResult.block_j.sub_scores.factor_risk.alpha_tstat, 2) }}
                         </div>
                         <div class="text-xs text-slate-400">Alpha t-stat</div>
                       </div>
@@ -3525,7 +3526,7 @@
 
                   <div class="flex items-center justify-between">
                     <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500">
-                      Période d'étude : {{ studyResult.meta.nav_start_date }} → {{ studyResult.meta.nav_current_date }}
+                      Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
                     </div>
                     <button
                       class="text-[10px] border border-slate-700 text-slate-500 hover:text-blue-300 hover:border-blue-700 px-2 py-1 rounded transition-colors"
@@ -3573,14 +3574,14 @@
                               :class="e.activity_ratio == null ? 'text-slate-500'
                                      : e.activity_ratio > 1.8 ? 'text-amber-400'
                                      : e.activity_ratio < 0.4 ? 'text-slate-500' : 'text-slate-300'">
-                            {{ e.activity_ratio != null ? 'x' + e.activity_ratio.toFixed(2) : '—' }}
+                            {{ e.activity_ratio != null ? 'x' + formatNumber(e.activity_ratio, 2) : '—' }}
                           </td>
                           <td class="py-2 px-2 text-right font-mono"
                               :class="e.net_flow > 0 ? 'text-emerald-400' : e.net_flow < 0 ? 'text-red-400' : 'text-slate-500'">
-                            {{ e.net_flow > 0 ? '+' : '' }}{{ e.net_flow.toLocaleString('fr-CH', {maximumFractionDigits:0}) }}
+                            {{ e.net_flow > 0 ? '+' : '' }}{{ formatInt(e.net_flow) }}
                           </td>
                           <td class="py-2 px-2 text-right font-mono text-slate-400">
-                            {{ e.avg_timing_score != null ? e.avg_timing_score.toFixed(2) : '—' }}
+                            {{ formatNumber(e.avg_timing_score, 2) }}
                           </td>
                           <td class="py-2 px-2 text-slate-300">{{ e.reaction_label }}</td>
                         </tr>
@@ -3642,19 +3643,19 @@
                             {{ dim.label }}
                             <span v-if="dim.key === 'vag' && dim.vag_ann_pct != null"
                                   class="block text-[10px] text-slate-500">
-                              VAG {{ dim.vag_ann_pct > 0 ? '+' : '' }}{{ dim.vag_ann_pct.toFixed(1) }}%/an vs B&H passif
+                              VAG {{ dim.vag_ann_pct > 0 ? '+' : '' }}{{ formatNumber(dim.vag_ann_pct, 1) }}%/an vs B&H passif
                             </span>
                           </td>
-                          <td class="py-1.5 text-right text-slate-400">{{ dim.weight_effective_pct.toFixed(0) }}%</td>
+                          <td class="py-1.5 text-right text-slate-400">{{ formatPercent(dim.weight_effective_pct, 0) }}</td>
                           <td class="py-1.5 text-right font-semibold"
                               :class="!dim.available ? 'text-slate-600'
                                      : dim.score >= 65 ? 'text-emerald-400'
                                      : dim.score >= 50 ? 'text-amber-400'
                                      : 'text-red-400'">
-                            {{ dim.available ? dim.score?.toFixed(0) : 'N/A' }}
+                            {{ dim.available ? formatNumber(dim.score, 0) : 'N/A' }}
                           </td>
                           <td class="py-1.5 text-right text-slate-300">
-                            {{ dim.weighted_contribution != null ? dim.weighted_contribution.toFixed(1) : '—' }}
+                            {{ formatNumber(dim.weighted_contribution, 1) }}
                           </td>
                         </tr>
                         <!-- Total row -->
@@ -3680,7 +3681,7 @@
                         <div class="flex justify-between text-xs mb-0.5">
                           <span class="text-slate-400">{{ dim.label }}</span>
                           <span :class="dim.score >= 65 ? 'text-emerald-400' : dim.score >= 50 ? 'text-amber-400' : 'text-red-400'">
-                            {{ dim.score?.toFixed(0) }}/100
+                            {{ formatNumber(dim.score, 0) }}/100
                           </span>
                         </div>
                         <div class="h-2 bg-slate-700 rounded-full overflow-hidden">
@@ -3714,7 +3715,7 @@
                 <div class="card text-center">
                   <div class="text-5xl font-black mb-2"
                     :class="studyResult.confidence.overall_pct >= 80 ? 'text-emerald-400' : studyResult.confidence.overall_pct >= 60 ? 'text-amber-400' : 'text-red-400'">
-                    {{ studyResult.confidence.overall_pct?.toFixed(0) }}%
+                    {{ formatPercent(studyResult.confidence.overall_pct, 0) }}
                   </div>
                   <div class="text-xs text-slate-400">Confiance globale dans les résultats</div>
                   <p class="text-xs text-slate-500 mt-3 max-w-lg mx-auto leading-5">
@@ -3774,7 +3775,7 @@
                         <td class="py-1.5 px-2 text-slate-500 text-[10px]">
                           Retour actif =
                           <span :class="(brinsonResult.active_return_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                            {{ (brinsonResult.active_return_pct >= 0 ? '+' : '') }}{{ brinsonResult.active_return_pct }}%
+                            {{ (brinsonResult.active_return_pct >= 0 ? '+' : '') }}{{ formatPercentRaw(brinsonResult.active_return_pct) }}
                           </span>
                           · {{ brinsonResult.n_holdings }} titres · {{ brinsonResult.sector_rows?.length }} secteurs
                         </td>
@@ -3894,7 +3895,7 @@
                       / {{ priceStatusList.length }} séries disponibles
                     </span>
                     <span class="text-slate-600">
-                      Couverture : {{ priceStatusList.length ? Math.round(priceStatusList.filter(u => u.available).length / priceStatusList.length * 100) : 0 }}%
+                      Couverture : {{ formatPercent(priceStatusList.length ? priceStatusList.filter(u => u.available).length / priceStatusList.length * 100 : 0, 0) }}
                     </span>
                   </div>
                 </div>
@@ -3919,7 +3920,7 @@
                 <template v-else>
                   <!-- Période -->
                   <div class="text-[10px] text-slate-500">
-                    Période : {{ studyResult.block_f.period_start }} → {{ studyResult.block_f.period_end }}
+                    Période : {{ formatDate(studyResult.block_f.period_start) }} → {{ formatDate(studyResult.block_f.period_end) }}
                     · {{ studyResult.block_f.n_obs }} observations
                     · Facteurs : {{ (studyResult.block_f.factors_used || []).join(' · ') }}
                   </div>
@@ -3965,9 +3966,9 @@
                       </div>
                       <div class="text-[9px] text-amber-600/80 mb-2">⚙ Score STRUCTURA interne</div>
                       <div v-for="(item, key) in {
-                        'R² (variance expliquée) × 40%': studyResult.block_f.score_components?.r2_component?.toFixed(1),
-                        'Couverture performance × 35%': studyResult.block_f.score_components?.perf_coverage?.toFixed(1),
-                        'Alpha non-significatif × 25%': studyResult.block_f.score_components?.alpha_insig?.toFixed(1),
+                        'R² (variance expliquée) × 40%': formatNumber(studyResult.block_f.score_components?.r2_component, 1),
+                        'Couverture performance × 35%': formatNumber(studyResult.block_f.score_components?.perf_coverage, 1),
+                        'Alpha non-significatif × 25%': formatNumber(studyResult.block_f.score_components?.alpha_insig, 1),
                       }" :key="key" class="flex items-center gap-2">
                         <div class="text-[10px] text-slate-400 flex-1">{{ key }}</div>
                         <div class="text-[10px] font-bold text-slate-300">{{ item }}/100</div>
@@ -4005,9 +4006,9 @@
                       <span class="text-base">{{ Math.abs(studyResult.block_f.alpha_tstat) >= 2 ? '✅' : '⚠' }}</span>
                       <div>
                         <span class="font-bold" :class="Math.abs(studyResult.block_f.alpha_tstat) >= 2 ? 'text-emerald-400' : 'text-amber-400'">
-                          Alpha annualisé : {{ studyResult.block_f.alpha_ann_pct >= 0 ? '+' : '' }}{{ studyResult.block_f.alpha_ann_pct }}%
+                          Alpha annualisé : {{ studyResult.block_f.alpha_ann_pct >= 0 ? '+' : '' }}{{ formatPercentRaw(studyResult.block_f.alpha_ann_pct) }}
                         </span>
-                        <span class="text-slate-500 ml-2">t = {{ studyResult.block_f.alpha_tstat }}</span>
+                        <span class="text-slate-500 ml-2">t = {{ formatNumber(studyResult.block_f.alpha_tstat, 2) }}</span>
                         <span class="text-slate-600 ml-2">·</span>
                         <span class="ml-2" :class="Math.abs(studyResult.block_f.alpha_tstat) >= 2 ? 'text-emerald-500' : 'text-amber-500'">
                           {{ Math.abs(studyResult.block_f.alpha_tstat) >= 2 ? 'Statistiquement significatif (|t| ≥ 2)' : 'Non significatif (|t| < 2) — bruit possible' }}
@@ -4026,7 +4027,7 @@
                       <div v-for="fc in studyResult.block_f.factor_contributions" :key="fc.name"
                         class="flex items-center gap-3">
                         <div class="text-xs font-mono text-slate-400 w-16 shrink-0">{{ fc.name }}</div>
-                        <div class="text-[10px] text-slate-600 w-16 shrink-0 text-right">β = {{ fc.beta }}</div>
+                        <div class="text-[10px] text-slate-600 w-16 shrink-0 text-right">β = {{ formatNumber(fc.beta, 3) }}</div>
                         <div class="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
                           <div class="h-full rounded-full"
                             :class="fc.contribution_pct >= 0 ? 'bg-emerald-500' : 'bg-red-500'"
@@ -4038,7 +4039,7 @@
                         </div>
                         <div class="text-xs font-mono font-bold shrink-0 w-16 text-right"
                           :class="fc.contribution_pct >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                          {{ fc.contribution_pct >= 0 ? '+' : '' }}{{ fc.contribution_pct }}%
+                          {{ fc.contribution_pct >= 0 ? '+' : '' }}{{ formatPercentRaw(fc.contribution_pct) }}
                         </div>
                       </div>
                     </div>
@@ -4092,9 +4093,9 @@
                     </div>
                     <div class="mt-3 pt-3 border-t border-slate-800 text-[10px] text-slate-500">
                       <strong class="text-slate-400">Interprétation recommandée :</strong> "Un panier d'ETFs factoriels aux mêmes expositions aurait réalisé
-                      {{ (studyResult.block_f.replicant_total_pct >= 0 ? '+' : '') + studyResult.block_f.replicant_total_pct }}% —
+                      {{ (studyResult.block_f.replicant_total_pct >= 0 ? '+' : '') + formatPercentRaw(studyResult.block_f.replicant_total_pct) }} —
                       le gérant a {{ studyResult.block_f.alpha_gap_pct >= 0 ? 'ajouté' : 'détruit' }}
-                      {{ Math.abs(studyResult.block_f.alpha_gap_pct) }}% au-delà
+                      {{ formatPercentRaw(Math.abs(studyResult.block_f.alpha_gap_pct)) }} au-delà
                       {{ Math.abs(studyResult.block_f.alpha_tstat) >= 2 ? '(statistiquement significatif)' : '(non significatif statistiquement)' }}."
                     </div>
                   </div>
@@ -4142,7 +4143,7 @@
                   <!-- Header -->
                   <div class="flex items-center justify-between">
                     <div class="text-[10px] text-slate-500">
-                      {{ brinsonResult.n_obs }} obs · {{ brinsonResult.period_start }} → {{ brinsonResult.period_end }}
+                      {{ formatInt(brinsonResult.n_obs) }} obs · {{ formatDate(brinsonResult.period_start) }} → {{ formatDate(brinsonResult.period_end) }}
                       · Benchmark : <span class="font-mono text-blue-400">{{ brinsonResult.benchmark_ticker }}</span>
                       · {{ brinsonResult.n_holdings }} titres
                     </div>
@@ -4195,7 +4196,7 @@
                         </div>
                         <div class="text-xs font-mono font-bold w-14 text-right shrink-0"
                           :style="{ color: val >= 0 ? color : '#ef4444' }">
-                          {{ val >= 0 ? '+' : '' }}{{ val.toFixed(2) }}%
+                          {{ val >= 0 ? '+' : '' }}{{ formatPercent(val, 2) }}
                         </div>
                       </div>
                     </div>
@@ -4229,28 +4230,28 @@
                             {{ row.sector }}
                             <span class="text-slate-600 font-normal text-[10px] ml-1">({{ row.n_holdings }} titres)</span>
                           </td>
-                          <td class="py-1.5 px-2 text-right font-mono text-slate-400">{{ row.w_p }}</td>
-                          <td class="py-1.5 px-2 text-right font-mono text-slate-500">{{ row.w_b }}</td>
+                          <td class="py-1.5 px-2 text-right font-mono text-slate-400">{{ formatNumber(row.w_p, 2) }}</td>
+                          <td class="py-1.5 px-2 text-right font-mono text-slate-500">{{ formatNumber(row.w_b, 2) }}</td>
                           <td class="py-1.5 px-2 text-right font-mono font-bold"
                             :class="row.active_w > 0 ? 'text-blue-400' : row.active_w < 0 ? 'text-orange-400' : 'text-slate-500'">
-                            {{ row.active_w > 0 ? '+' : '' }}{{ row.active_w }}</td>
+                            {{ row.active_w > 0 ? '+' : '' }}{{ formatNumber(row.active_w, 2) }}</td>
                           <td class="py-1.5 px-2 text-right font-mono"
                             :class="row.r_p >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                            {{ row.r_p >= 0 ? '+' : '' }}{{ row.r_p }}%</td>
+                            {{ row.r_p >= 0 ? '+' : '' }}{{ formatNumber(row.r_p, 2) }}%</td>
                           <td class="py-1.5 px-2 text-right font-mono text-slate-500">
-                            {{ row.r_b >= 0 ? '+' : '' }}{{ row.r_b }}%</td>
+                            {{ row.r_b >= 0 ? '+' : '' }}{{ formatNumber(row.r_b, 2) }}%</td>
                           <td class="py-1.5 px-2 text-right font-mono"
                             :class="row.allocation > 0 ? 'text-blue-400' : row.allocation < 0 ? 'text-red-400' : 'text-slate-600'">
-                            {{ row.allocation > 0 ? '+' : '' }}{{ row.allocation }}%</td>
+                            {{ row.allocation > 0 ? '+' : '' }}{{ formatPercentRaw(row.allocation) }}</td>
                           <td class="py-1.5 px-2 text-right font-mono"
                             :class="row.selection > 0 ? 'text-emerald-400' : row.selection < 0 ? 'text-red-400' : 'text-slate-600'">
-                            {{ row.selection > 0 ? '+' : '' }}{{ row.selection }}%</td>
+                            {{ row.selection > 0 ? '+' : '' }}{{ formatPercentRaw(row.selection) }}</td>
                           <td class="py-1.5 px-2 text-right font-mono"
                             :class="row.interaction > 0 ? 'text-amber-400' : row.interaction < 0 ? 'text-red-400' : 'text-slate-600'">
-                            {{ row.interaction > 0 ? '+' : '' }}{{ row.interaction }}%</td>
+                            {{ row.interaction > 0 ? '+' : '' }}{{ formatPercentRaw(row.interaction) }}</td>
                           <td class="py-1.5 px-2 text-right font-mono font-black"
                             :class="row.total > 0 ? 'text-emerald-400' : row.total < 0 ? 'text-red-400' : 'text-slate-500'">
-                            {{ row.total > 0 ? '+' : '' }}{{ row.total }}%</td>
+                            {{ row.total > 0 ? '+' : '' }}{{ formatPercentRaw(row.total) }}</td>
                         </tr>
                       </tbody>
                     </table>
@@ -4265,10 +4266,10 @@
                         <div class="text-slate-600 text-[10px] w-3 shrink-0">{{ i + 1 }}</div>
                         <div class="flex-1 min-w-0">
                           <div class="text-xs text-slate-200 font-semibold truncate">{{ item.name }}</div>
-                          <div class="text-[10px] text-slate-500">{{ item.sector }} · w: {{ item.weight_pct }}% · r: {{ item.return_pct >= 0 ? '+' : '' }}{{ item.return_pct }}%</div>
+                          <div class="text-[10px] text-slate-500">{{ item.sector }} · w: {{ formatPercentRaw(item.weight_pct) }} · r: {{ item.return_pct >= 0 ? '+' : '' }}{{ formatPercentRaw(item.return_pct) }}</div>
                         </div>
                         <div class="text-sm font-black font-mono text-emerald-400 shrink-0">
-                          +{{ item.contribution_pct }}%
+                          +{{ formatPercentRaw(item.contribution_pct) }}
                         </div>
                       </div>
                     </div>
@@ -4279,10 +4280,10 @@
                         <div class="text-slate-600 text-[10px] w-3 shrink-0">{{ i + 1 }}</div>
                         <div class="flex-1 min-w-0">
                           <div class="text-xs text-slate-200 font-semibold truncate">{{ item.name }}</div>
-                          <div class="text-[10px] text-slate-500">{{ item.sector }} · w: {{ item.weight_pct }}% · r: {{ item.return_pct >= 0 ? '+' : '' }}{{ item.return_pct }}%</div>
+                          <div class="text-[10px] text-slate-500">{{ item.sector }} · w: {{ formatPercentRaw(item.weight_pct) }} · r: {{ item.return_pct >= 0 ? '+' : '' }}{{ formatPercentRaw(item.return_pct) }}</div>
                         </div>
                         <div class="text-sm font-black font-mono text-red-400 shrink-0">
-                          {{ item.contribution_pct }}%
+                          {{ formatPercentRaw(item.contribution_pct) }}
                         </div>
                       </div>
                     </div>
@@ -4325,6 +4326,7 @@ import { apiFetch } from '../utils/api.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from '../components/SensitiveValue.vue'
+import { formatPercent, formatPercentRaw, formatNumber, formatInt, formatMoneyRound, formatDate } from '../utils/format.js'
 
 Chart.register(...registerables)
 applyChartTheme(Chart)
@@ -4622,7 +4624,7 @@ function buildRollingCharts() {
   // Rolling betas
   if (rollingChartRef.value) {
     charts.rolling?.destroy()
-    const dates = rolling.map(r => r.date)
+    const dates = rolling.map(r => formatDate(r.date))
     const datasets = result.value.factors_used
       .filter(f => rollingVisible.value.includes(f))
       .map((f, i) => ({
@@ -4644,7 +4646,7 @@ function buildRollingCharts() {
     charts.r2 = new Chart(r2ChartRef.value, {
       type: 'line',
       data: {
-        labels: rolling.map(r => r.date),
+        labels: rolling.map(r => formatDate(r.date)),
         datasets: [{
           label: 'R²', data: rolling.map(r => +(r.r2 * 100).toFixed(1)),
           borderColor: chartTheme.series[4], backgroundColor: 'rgba(124,92,214,0.1)',
@@ -5406,7 +5408,7 @@ function renderStudyRolling() {
     ]
     studyRollingChart = new Chart(studyRollingChartRef, {
       type: 'line',
-      data: { labels: rolling.map(r => r.date), datasets },
+      data: { labels: rolling.map(r => formatDate(r.date)), datasets },
       options: {
         responsive: true,
         interaction: { mode: 'index', intersect: false },
@@ -5505,9 +5507,9 @@ function fmtPnl(v, ccy) {
   if (v == null) return '—'
   const abs = Math.abs(v)
   const s = v >= 0 ? '+' : ''
-  if (abs >= 1e6) return `${s}${(v/1e6).toFixed(2)}M ${ccy||''}`
-  if (abs >= 1e3) return `${s}${(v/1e3).toFixed(1)}k ${ccy||''}`
-  return `${s}${v.toFixed(0)} ${ccy||''}`
+  if (abs >= 1e6) return `${s}${formatNumber(v/1e6, 2)}M ${ccy||''}`
+  if (abs >= 1e3) return `${s}${formatNumber(v/1e3, 1)}k ${ccy||''}`
+  return `${s}${formatNumber(v, 0)} ${ccy||''}`
 }
 
 loadStudyDoc()
@@ -5600,9 +5602,8 @@ function sigStars(p) {
 
 function fmtPVal(p) {
   if (p == null) return '—'
-  if (p < 0.0001) return '< 0.0001'
-  if (p < 0.001)  return p.toFixed(4)
-  return p.toFixed(4)
+  if (p < 0.0001) return '< 0,0001'
+  return formatNumber(p, 4)
 }
 
 function pvalClass(p) {
@@ -5636,16 +5637,16 @@ function ffDataAge(dateMax) {
 
 function fmtUSD(n) {
   if (!n) return '$0'
-  if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M'
-  if (n >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'k'
-  return '$' + Math.round(n)
+  if (n >= 1e6) return '$' + formatNumber(n / 1e6, 2) + 'M'
+  if (n >= 1e3) return '$' + formatNumber(n / 1e3, 1) + 'k'
+  return '$' + formatInt(n)
 }
 
 function fmtCompValue(key, val) {
-  if (key === 'idiosyncratic') return `R² = ${((1 - val) * 100).toFixed(1)}%`
-  if (key === 'turnover')      return `Turnover = ${(val * 100).toFixed(1)}%`
-  if (key === 'concentration') return `HHI = ${val}`
-  if (key === 'alpha_signif')  return `|t| = ${Math.abs(val).toFixed(2)}`
+  if (key === 'idiosyncratic') return `R² = ${formatPercent((1 - val) * 100, 1)}`
+  if (key === 'turnover')      return `Turnover = ${formatPercent(val * 100, 1)}`
+  if (key === 'concentration') return `HHI = ${formatNumber(val, 3)}`
+  if (key === 'alpha_signif')  return `|t| = ${formatNumber(Math.abs(val), 2)}`
   return val
 }
 </script>

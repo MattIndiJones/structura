@@ -12,11 +12,26 @@ export const shockPresets = [
   { label: 'Choc vol +10pts', spot_shock_pct: 0, vol_shock_pts: 10, rate_shock_bp: 0, corr_shock_pts: 0 },
   { label: 'Choc taux +100bp', spot_shock_pct: 0, vol_shock_pts: 0, rate_shock_bp: 100, corr_shock_pts: 0 },
   { label: 'Choc taux -100bp', spot_shock_pct: 0, vol_shock_pts: 0, rate_shock_bp: -100, corr_shock_pts: 0 },
+  // Isole le risque de corrélation seul — les worst-of (Athena/Phoenix) perdent
+  // de la valeur de "dispersion" quand les sous-jacents se corrèlent plus,
+  // exactement la dynamique d'une crise (cf. Crise systémique ci-dessous, qui
+  // la bundle avec spot/vol/taux) mais ici isolée pour voir l'effet seul.
+  { label: 'Choc corrélation +20pts', spot_shock_pct: 0, vol_shock_pts: 0, rate_shock_bp: 0, corr_shock_pts: 20 },
   { label: 'Crise systémique', spot_shock_pct: -30, vol_shock_pts: 20, rate_shock_bp: -100, corr_shock_pts: 20 },
 ]
 
 export function blankShockForm() {
   return { spot_shock_pct: 0, vol_shock_pts: 0, rate_shock_bp: 0, corr_shock_pts: 0 }
+}
+
+// VaR study defaults — mirrors backend/app/api/var.py's VarRequest defaults
+// exactly, so a freshly-opened form already reflects what the API would do
+// on its own if these fields were omitted.
+export function blankVarForm() {
+  return {
+    method: 'both', confidence: 0.95, horizon_days: 1, lookback_years: 5.0,
+    n_parametric: 2000, n_paths_per_scenario: 3000, max_workers: 4,
+  }
 }
 
 // Shared data backbone of the portfolio world: the portfolio list itself, the
@@ -31,6 +46,8 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   const view = ref('global')            // 'global' | portfolio id
   const risk = ref(null)
   const riskLoading = ref(false)
+  const exposure = ref(null)
+  const exposureLoading = ref(false)
   const shockHistory = reactive({})     // deal id | 'portfolio:<id>' | 'global:' → runs
 
   const label = computed(() => {
@@ -106,10 +123,50 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
     }
   }
 
+  async function loadExposure() {
+    exposureLoading.value = true
+    try {
+      const url = view.value === 'global'
+        ? '/api/portfolios/exposure-by-counterparty'
+        : `/api/portfolios/${view.value}/exposure-by-counterparty`
+      const res = await apiFetch(url)
+      exposure.value = await res.json()
+    } finally {
+      exposureLoading.value = false
+    }
+  }
+
+  // Barrier proximity — unlike loadRisk/loadExposure (cheap reads over
+  // already-persisted data), this calls out to live market data per deal
+  // (backend's build_watchlist_row, no caching) so it is NOT auto-loaded on
+  // every portfolio switch — only when the Barrières tab is actually opened
+  // (see RiskManagementView.vue), same "expensive, explicit" treatment as
+  // the VaR study and P&L explain below.
+  const barriers = ref(null)
+  const barriersLoading = ref(false)
+
+  async function loadBarriers() {
+    barriersLoading.value = true
+    try {
+      const url = view.value === 'global'
+        ? '/api/portfolios/barriers-global'
+        : `/api/portfolios/${view.value}/barriers`
+      const res = await apiFetch(url)
+      barriers.value = await res.json()
+    } finally {
+      barriersLoading.value = false
+    }
+  }
+
   function selectView(v) {
     view.value = v
     loadRisk()
+    loadExposure()
     loadShockHistory(v === 'global' ? 'global' : 'portfolio', v === 'global' ? null : v)
+    // Barrières is lazy (see loadBarriers) — just drop the stale scope's
+    // result so the tab shows a fresh "à charger" state, not another
+    // portfolio's rows, if it's already been opened once.
+    barriers.value = null
   }
 
   // History keys: a bare deal id for deal scope, '<scope>:<id or empty>'
@@ -161,10 +218,83 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
     return data
   }
 
+  // ── VaR/ES study (async — see core/compute/ and api/var.py) ──────────
+  // Launching returns a batch id immediately; nothing actually runs until
+  // the compute worker daemon (started separately by Philippe, see
+  // backend/scripts/run_compute_worker.py) drains it, so the UI polls
+  // GET /var/{id} every few seconds until the batch reaches a terminal
+  // status — same status vocabulary as any ComputeBatch (queued/running/
+  // completed/completed_with_failures/failed).
+  const varStudy = ref(null)
+  const varLaunching = ref(false)
+  const varPolling = ref(false)
+  const varHistory = ref([])
+  let varPollTimer = null
+
+  function stopVarPolling() {
+    if (varPollTimer) clearTimeout(varPollTimer)
+    varPollTimer = null
+    varPolling.value = false
+  }
+
+  async function pollVarBatch(batchId) {
+    const res = await apiFetch(`/api/portfolios/var/${batchId}`)
+    const data = await res.json()
+    varStudy.value = data
+    if (data.status === 'queued' || data.status === 'running') {
+      varPollTimer = setTimeout(() => pollVarBatch(batchId), 3000)
+    } else {
+      varPolling.value = false
+      loadVarHistory()
+    }
+  }
+
+  async function launchVar(form) {
+    stopVarPolling()
+    varLaunching.value = true
+    varStudy.value = null
+    try {
+      const url = view.value === 'global'
+        ? '/api/portfolios/var-global'
+        : `/api/portfolios/${view.value}/var`
+      const res = await apiFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Erreur au lancement de l\'étude VaR')
+      varPolling.value = true
+      pollVarBatch(data.batch_id)
+      return data
+    } finally {
+      varLaunching.value = false
+    }
+  }
+
+  // Past studies (any status) — reuses the generic compute batches list,
+  // filtered client-side to this one kind, so reopening a finished study
+  // never needs re-running it.
+  async function loadVarHistory() {
+    const res = await apiFetch('/api/compute/batches')
+    const all = await res.json()
+    varHistory.value = all.filter(b => b.kind === 'var_scenario').slice(0, 10)
+  }
+
+  function openVarBatch(batchId) {
+    stopVarPolling()
+    varStudy.value = null
+    varPolling.value = true
+    pollVarBatch(batchId)
+  }
+
   return {
-    portfolios, view, risk, riskLoading, shockHistory,
+    portfolios, view, risk, riskLoading, exposure, exposureLoading, shockHistory,
+    barriers, barriersLoading,
+    varStudy, varLaunching, varPolling, varHistory,
     label, isDefaultView, activeDealsCount, members, currentShockHistory,
     load, create, rename, remove, assignDeal,
-    loadRisk, selectView, loadShockHistory, runShock, runPnlExplain,
+    loadRisk, loadExposure, loadBarriers, selectView, loadShockHistory, runShock, runPnlExplain,
+    launchVar, loadVarHistory, openVarBatch, stopVarPolling,
   }
 })

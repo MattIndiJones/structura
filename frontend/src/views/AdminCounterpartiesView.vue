@@ -17,6 +17,7 @@
       </div>
 
       <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
+      <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
       <div class="card overflow-x-auto">
         <LoadingSpinner v-if="loading" class="py-6" />
@@ -26,6 +27,7 @@
               <th class="py-1.5 pr-3 font-medium">Nom</th>
               <th class="py-1.5 pr-3 font-medium">Pays</th>
               <th class="py-1.5 pr-3 font-medium">Actif</th>
+              <th class="py-1.5 pr-3 font-medium">Limite (EUR)</th>
               <th class="py-1.5 pr-3 font-medium"></th>
             </tr>
           </thead>
@@ -44,8 +46,14 @@
                 <input type="checkbox" class="accent-blue-500" :checked="c.active"
                        @change="updateCpty(c, { active: $event.target.checked })" />
               </td>
+              <td class="py-1.5 pr-3">
+                <input type="number" step="100000" class="input py-1 px-2 w-28 font-mono" :value="c.limit_eur"
+                       placeholder="illimité"
+                       title="Limite de concentration (nominal EUR) — utilisée par Risk Management → Contreparties pour signaler un dépassement. Vide = pas de limite."
+                       @change="updateCpty(c, { limit_eur: $event.target.value === '' ? null : Number($event.target.value) })" />
+              </td>
               <td class="py-1.5 pr-3 text-right">
-                <button class="text-slate-600 hover:text-red-400" title="Supprimer" @click="deleteCpty(c)">🗑</button>
+                <button class="text-slate-600 hover:text-red-400" title="Supprimer" aria-label="Supprimer la contrepartie" @click="deleteCpty(c)">🗑</button>
               </td>
             </tr>
           </tbody>
@@ -73,12 +81,11 @@ import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
-import { useToastsStore } from '../stores/toasts.js'
 
-const toasts = useToastsStore()
 const counterparties = ref([])
 const loading    = ref(true)
 const error      = ref('')
+const notice     = ref('')
 const creating   = ref(false)
 const newName    = ref('')
 const newCountry = ref('')
@@ -103,6 +110,7 @@ async function createCpty() {
   if (!name) return
   creating.value = true
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch('/api/admin/counterparties', {
       method: 'POST',
@@ -114,7 +122,7 @@ async function createCpty() {
     counterparties.value.sort((a, b) => a.name.localeCompare(b.name))
     newName.value = ''
     newCountry.value = ''
-    toasts.success('Contrepartie ajoutée')
+    notice.value = 'Contrepartie ajoutée'
   } catch (e) {
     error.value = e.message
   } finally {
@@ -124,6 +132,7 @@ async function createCpty() {
 
 async function updateCpty(c, payload) {
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/counterparties/${c.id}`, {
       method: 'PATCH',
@@ -140,6 +149,7 @@ async function updateCpty(c, payload) {
 async function deleteCpty(c) {
   if (!confirm(`Supprimer "${c.name}" ? Les deals existants gardent leur contrepartie en texte.`)) return
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/counterparties/${c.id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')

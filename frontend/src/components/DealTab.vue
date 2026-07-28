@@ -105,7 +105,7 @@
             </span>
             <span class="font-mono font-bold text-sm"
               :class="margin >= 0 ? 'text-emerald-400' : 'text-red-400'">
-              {{ margin >= 0 ? '+' : '' }}{{ margin.toFixed(2) }}%
+              {{ margin >= 0 ? '+' : '' }}{{ formatPercent(margin, 2) }}
               <span class="text-slate-500 font-normal ml-1 text-xs">
                 ({{ nominalValue > 0 ? formatCcy(nominalValue * margin / 100) : '–' }})
               </span>
@@ -368,8 +368,8 @@
                   :class="ev.t === 0 ? 'text-amber-400 font-semibold' : 'text-slate-300'">
                   {{ ev.label }}
                 </td>
-                <td class="py-1.5 pr-3 font-mono text-slate-300 whitespace-nowrap">{{ ev.date }}</td>
-                <td class="py-1.5 pr-3 font-mono num text-slate-400">{{ ev.t.toFixed(2) }}</td>
+                <td class="py-1.5 pr-3 font-mono text-slate-300 whitespace-nowrap">{{ formatDate(ev.date) }}</td>
+                <td class="py-1.5 pr-3 font-mono num text-slate-400">{{ formatNumber(ev.t, 2) }}</td>
                 <td v-for="u in store.underlyings" :key="u.name" class="py-1.5 pr-2">
                   <span class="text-slate-600 font-mono text-[10px]">–</span>
                 </td>
@@ -429,6 +429,7 @@ import { apiFetch } from '../utils/api.js'
 import HelpTip from './HelpTip.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import { underlyingGroups } from '../data/commonUnderlyings.js'
+import { formatPercent, formatNumber, formatInt, formatMoneyRound, formatDate } from '../utils/format.js'
 
 const emit = defineEmits(['go-events'])
 
@@ -548,7 +549,7 @@ const nominalValue = computed(() => {
 
 function formatNominal() {
   const n = nominalValue.value
-  if (n) nominalRaw.value = n.toLocaleString('fr-FR').replace(/,/g, ' ')
+  if (n) nominalRaw.value = formatInt(n)
 }
 function unformatNominal() {
   nominalRaw.value = String(nominalValue.value || '')
@@ -556,9 +557,7 @@ function unformatNominal() {
 onMounted(() => formatNominal())
 
 function formatCcy(val) {
-  return val.toLocaleString('fr-FR', {
-    style: 'currency', currency: store.globalParams.deal_ccy, maximumFractionDigits: 0,
-  })
+  return formatMoneyRound(val, store.globalParams.deal_ccy)
 }
 
 // ── Computed ─────────────────────────────────────────────
@@ -626,7 +625,7 @@ const previewEvents = computed(() => {
     const date = addDays(form.value_date || todayStr, t * 365.25)
     const isLast = idx === observationTimes.value.length - 1
     events.push({
-      label: isLast ? 'Maturité' : `Obs. ${idx + 1} (${t.toFixed(2)}Y)`,
+      label: isLast ? 'Maturité' : `Obs. ${idx + 1} (${formatNumber(t, 2)}Y)`,
       date,
       t,
       isFuture: date > todayStr,

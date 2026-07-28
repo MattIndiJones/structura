@@ -103,6 +103,11 @@ const routes = [
     meta: { requiresAdmin: true, title: 'Données de marché' },
   },
   {
+    path: '/admin/compute',
+    component: () => import('../views/AdminComputeView.vue'),
+    meta: { requiresAdmin: true, title: 'Files de calcul' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },

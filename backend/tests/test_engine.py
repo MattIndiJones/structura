@@ -111,6 +111,37 @@ def test_runtime_error_in_script_raises_instead_of_silently_pricing_zero():
         run_mc(cs, two_underlyings, corr, r=0.03, T_max=1.0, N=100, model='constant', user_params={})
 
 
+def test_bare_basket_keyword_prices_without_nameerror():
+    """Regression: bare BASKET() (equal-weighted, as opposed to the weighted
+    BASKET(w1, w2, ...) form) used to raise 'name sum is not defined' at
+    EVAL time — _transpile_expr emits it as raw inline Python
+    ("(sum(_c['spots'])/max(1,len(_c['spots'])))", see parser.py), but the
+    sandboxed exec namespace (_SAFE_MATH) didn't list sum/len among its
+    whitelisted names (__builtins__ is deliberately {} there, no fallback).
+    parse_script() never executes the body, only compiles it, so this was
+    invisible until a script using bare BASKET() actually priced — found
+    while writing the cross-gamma test below, on a 2-underlying basket call."""
+    cs = parse_script("PARAM K = 1.0\n\nAT MATURITY\n  PAY MAX(0, BASKET() - K)\n")
+    two = [CALL_PARAMS[0], CALL_PARAMS[0]]
+    corr = [[1.0, 0.3], [0.3, 1.0]]
+    res = run_mc(cs, two, corr, r=0.03, T_max=1.0, N=2000, model='constant',
+                 seed=42, user_params={'K': 1.0})
+    assert res['price'] > 0
+
+
+def test_bare_n_keyword_prices_without_nameerror():
+    """Same root cause as the BASKET() regression above — the N keyword
+    (number of underlyings) transpiles to the equally bare 'len(_c["spots"])'
+    (see the BV table in _transpile_expr), broken by the same missing
+    sum/len whitelist entry."""
+    cs = parse_script("AT MATURITY\n  PAY N\n")
+    two = [CALL_PARAMS[0], CALL_PARAMS[0]]
+    corr = [[1.0, 0.0], [0.0, 1.0]]
+    res = run_mc(cs, two, corr, r=0.03, T_max=1.0, N=100, model='constant', user_params={})
+    ref = 2 * math.exp(-0.03)   # PAY N=2 at every path, discounted
+    assert abs(res['price'] - ref) < 1e-5
+
+
 def test_antithetic_reduces_variance():
     """Antithetic variates should produce tighter IC than plain MC."""
     kw = dict(r=0.03, T_max=1.0, N=10000, model='constant', seed=42)
@@ -662,6 +693,35 @@ def test_greeks_accept_yield_curve():
                            yield_curve=[[1.0, 0.03], [3.0, 0.03]])
     assert abs(flat["delta_1"] - curve["delta_1"]) < 1e-9
     assert abs(flat["gamma_1"] - curve["gamma_1"]) < 1e-9
+
+
+def test_corr_greek_positive_for_basket_call():
+    """Cross-gamma (correlation sensitivity) sign check — none of the
+    existing greeks tests exercise it (all single-underlying), and it's
+    about to be turned on by default for every multi-underlying deal (see
+    api/deals.py:deal_greeks), so its sign/direction needs an independent
+    check before that, not just "doesn't crash".
+
+    Standard basket-option fact, not script-specific: for an equally-
+    weighted basket average with fixed per-leg vols, Var(basket) =
+    (σ1² + σ2² + 2·ρ·σ1·σ2) / 4 — strictly increasing in ρ. More basket
+    variance means more optionality for a call, so a basket call's price
+    (and compute_greeks' one-sided corr_1_2 finite difference) must be
+    POSITIVE in ρ. (The opposite holds for a spread option — this is a
+    basket/average payoff specifically.)"""
+    script = """
+PARAM K = 1.0
+
+AT MATURITY
+  PAY MAX(0, (S[1] + S[2]) / 2 - K)
+"""
+    cs = parse_script(script)
+    two = [CALL_PARAMS[0], CALL_PARAMS[0]]
+    corr = [[1.0, 0.3], [0.3, 1.0]]
+    greeks = compute_greeks(cs, two, corr, r=0.03, T=1.0, N=40000, model='constant',
+                            seed=42, user_params={'K': 1.0}, selected=["corr"])
+    assert greeks["corr_1_2"] > 0, \
+        f"basket call must gain value as correlation rises, got {greeks['corr_1_2']}"
 
 
 def test_proba_ki_classification_is_discount_independent():

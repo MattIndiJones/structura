@@ -512,6 +512,7 @@ import ScenarioGrid from './ScenarioGrid.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
+import { formatGreek } from '../utils/format.js'
 
 Chart.register(BarElement, BarController, CategoryScale, LinearScale, Tooltip)
 applyChartTheme(Chart)
@@ -729,7 +730,7 @@ const hasGreeks = computed(() => {
   return g && Object.keys(g).length > 0
 })
 
-const fmtG = v => v == null ? '—' : Math.abs(v) < 0.0001 ? v.toExponential(2) : v.toFixed(4)
+const fmtG = formatGreek
 
 const GREEK_SYM = { delta: 'Δ', gamma: 'Γ', vega: 'ν', theta: 'Θ', rho: 'ρ', corr: 'ρᵢⱼ' }
 const gLabel = name => {

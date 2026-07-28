@@ -5,7 +5,7 @@ from sqlmodel import SQLModel, Session, create_engine
 from .models import (
     Entity, User, Folder, Script, Deal, DealEvent, Document, AmcStudy,
     Indicative, KidRecord, EmtRecord, RfqRequest, RfqQuote, RfqProvider,
-    Counterparty, Alert, Portfolio, ShockRun,
+    Counterparty, Alert, Portfolio, ShockRun, ComputeBatch, ComputeJob,
 )
 
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
@@ -75,6 +75,11 @@ def _migrate():
         portfolio_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(portfolios)"))}
         if portfolio_cols and "is_default" not in portfolio_cols:
             conn.execute(text("ALTER TABLE portfolios ADD COLUMN is_default BOOLEAN DEFAULT 0"))
+            conn.commit()
+
+        cpty_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(counterparties)"))}
+        if cpty_cols and "limit_eur" not in cpty_cols:
+            conn.execute(text("ALTER TABLE counterparties ADD COLUMN limit_eur REAL"))
             conn.commit()
 
 

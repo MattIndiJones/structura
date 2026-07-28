@@ -453,6 +453,8 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
         "reference": deal.reference,
         "contrepartie": deal.contrepartie,
         "product_type": deal.product_type,
+        "nominal": deal.nominal,
+        "devise": deal.devise,
         "next_event": {"date": next_ev.event_date, "label": next_ev.label} if next_ev else None,
         "days_to_next": days_to_next,
         "underlyings": spots_out,
@@ -1590,25 +1592,41 @@ def deal_greeks(
     if ctx is None:
         return mtm_payload   # resolved_pending short-circuit — nothing to bump
 
+    names = [u["name"] for u in ctx["underlyings_json"]]
+    # Cross-gamma (correlation sensitivity) is meaningless for a single
+    # underlying and left out of DealGreeksRequest's default selection (it
+    # doesn't sum across deals with different baskets — see the class
+    # docstring) — but for a worst-of/basket deal it's exactly the risk a
+    # family-office user won't intuit on their own, so force it on here
+    # rather than requiring an explicit opt-in every time.
+    selected = list(body.selected)
+    if len(names) >= 2 and "corr" not in selected:
+        selected.append("corr")
+
     raw = compute_greeks(
         ctx["residual_script"], ctx["engine_uls"], ctx["corr"],
         ctx["r_frac"], ctx["T_remaining"], ctx["N_used"], ctx["model_used"],
-        seed=42, user_params=ctx["user_params"], selected=body.selected,
+        seed=42, user_params=ctx["user_params"], selected=selected,
         sigma_r=ctx["sigma_r"], a_r=ctx["a_r"], yield_curve=ctx["yc"],
         barrier_monitoring=ctx["barrier_monitoring"],
     )
 
-    names = [u["name"] for u in ctx["underlyings_json"]]
     per_underlying: dict[str, dict] = {}
     scalar: dict[str, float | None] = {}
+    # Keyed by the underlying pair's own names ("AAPL / MSFT"), not the raw
+    # corr_1_2 index form compute_greeks returns — readable directly in the
+    # UI without the caller having to re-resolve indices against names.
     corr_pairs: dict[str, float] = {}
     for key, val in raw.items():
         m = re.match(r"^(delta|gamma|vega)_(\d+)$", key)
         if m:
             greek, idx = m.group(1), int(m.group(2)) - 1
             per_underlying.setdefault(names[idx], {})[greek] = val
-        elif key.startswith("corr_"):
-            corr_pairs[key] = val
+            continue
+        m = re.match(r"^corr_(\d+)_(\d+)$", key)
+        if m:
+            i1, i2 = int(m.group(1)) - 1, int(m.group(2)) - 1
+            corr_pairs[f"{names[i1]} / {names[i2]}"] = val
         else:
             scalar[key] = val   # theta, rho
 

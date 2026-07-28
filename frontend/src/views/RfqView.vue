@@ -2,7 +2,8 @@
   <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
 
     <div class="page-header px-6 pt-6 pb-0 mb-0">
-      <div>
+      <div class="flex items-center gap-3">
+        <RouterLink :to="{ path: '/', query: { category: 'competitive_bidding' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
         <h1 class="page-title">RFQ Fournisseurs</h1>
       </div>
       <div class="page-actions">
@@ -10,6 +11,8 @@
         <button class="btn-primary text-xs px-3 py-1.5" @click="openCreateForm">+ Nouvelle RFQ</button>
       </div>
     </div>
+    <AlertMessage v-if="listError" kind="error" dismissible class="mx-6 mt-3" @dismiss="listError = ''">{{ listError }}</AlertMessage>
+    <AlertMessage v-if="notice" kind="success" dismissible class="mx-6 mt-3" @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
     <div class="flex flex-1 min-h-0">
 
@@ -25,7 +28,7 @@
             <span class="font-semibold text-slate-200 text-sm truncate">{{ r.name || r.reference }}</span>
             <div class="flex items-center gap-1.5 shrink-0">
               <span :class="['text-[9px] rounded px-1.5 py-0.5 border', statusBadge(r.status)]">{{ statusLabel(r.status) }}</span>
-              <button class="text-slate-600 hover:text-red-400" title="Supprimer" @click.stop="deleteRfq(r.id)">🗑</button>
+              <button class="text-slate-600 hover:text-red-400" title="Supprimer" aria-label="Supprimer la RFQ" @click.stop="deleteRfq(r.id)">🗑</button>
             </div>
           </div>
           <div class="text-[10px] text-slate-600 font-mono">{{ r.reference }} · AO {{ fmtDateOnly(r.ao_date) }}</div>
@@ -173,7 +176,7 @@
             <div class="flex items-center gap-2 shrink-0">
               <button class="btn-secondary text-xs px-3 py-1.5" title="Créer une nouvelle RFQ à partir de celle-ci"
                       @click="duplicateRfq(rfq.current)">⎘ Dupliquer</button>
-              <button class="text-slate-500 hover:text-red-400" title="Supprimer" @click="deleteRfq(rfq.current.id)">🗑</button>
+              <button class="text-slate-500 hover:text-red-400" title="Supprimer" aria-label="Supprimer la RFQ" @click="deleteRfq(rfq.current.id)">🗑</button>
             </div>
           </div>
 
@@ -327,12 +330,13 @@ import { underlyingGroups } from '../data/commonUnderlyings.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
-import { useToastsStore } from '../stores/toasts.js'
+import { formatDate, formatDateTime, formatPercent, formatInt, formatBps } from '../utils/format.js'
 
-const rfq    = useRfqStore()
-const toasts = useToastsStore()
+const rfq = useRfqStore()
 
 const loadingList    = ref(true)
+const listError      = ref('')
+const notice         = ref('')
 const selectedId     = ref(null)
 const showCreateForm = ref(false)
 const creating       = ref(false)
@@ -458,6 +462,7 @@ function openCreateForm() {
   selectedId.value = null
   rfq.current = null
   createError.value = ''
+  notice.value = ''
   duplicateSourceScript.value = null
   Object.assign(form, {
     name: '', ao_date: todayIso(), source: 'template', template_type: '', script_id: null,
@@ -527,14 +532,12 @@ async function refreshDetailParams() {
 
 const underlyingSummary = computed(() => (rfq.current?.params?.underlyings || [])[0] || {})
 
-function fmtNominal(v) {
-  return v === null || v === undefined ? '—' : Math.round(v).toLocaleString('fr-FR').replace(/,/g, ' ')
-}
+const fmtNominal = formatInt
 
 function fmtParamValue(p) {
   const raw = rfq.current?.params?.user_params?.[p.name]
   const v = raw ?? (p.is_pct ? p.raw_default / 100 : p.raw_default)
-  return p.is_pct ? `${(v * 100).toFixed(2)}%` : v
+  return p.is_pct ? formatPercent(v * 100) : v
 }
 
 async function submitCreate() {
@@ -575,7 +578,7 @@ async function submitCreate() {
     })
     showCreateForm.value = false
     await selectRfq(rfqObj.id)
-    toasts.success('RFQ créée')
+    notice.value = 'RFQ créée'
   } catch (e) {
     createError.value = e.message
   } finally {
@@ -585,9 +588,15 @@ async function submitCreate() {
 
 async function deleteRfq(id) {
   if (!confirm('Supprimer cette RFQ ?')) return
-  await rfq.remove(id)
-  if (selectedId.value === id) selectedId.value = null
-  toasts.success('RFQ supprimée')
+  listError.value = ''
+  notice.value = ''
+  try {
+    await rfq.remove(id)
+    if (selectedId.value === id) selectedId.value = null
+    notice.value = 'RFQ supprimée'
+  } catch (e) {
+    listError.value = e.message || 'Erreur suppression'
+  }
 }
 
 async function computeModelPrice() {
@@ -644,31 +653,22 @@ function toDatetimeLocal(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// Plain "YYYY-MM-DD" strings (ao_date) are reformatted directly, never
-// through Date(), which would parse them as UTC midnight and can shift the
-// displayed day by one in negative-offset timezones.
-function fmtDateOnly(iso) {
-  if (!iso) return '—'
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : new Date(iso).toLocaleDateString('fr-FR')
-}
+const fmtDateOnly = formatDate
 
 function providerLabel(id) {
   return rfq.providers.find(p => p.id === id)?.label || id
 }
 
 function fmtPrice(v) {
-  return v === null || v === undefined ? '—' : `${v.toFixed(2)}%`
+  return formatPercent(v)
 }
 
-function fmtDate(iso) {
-  return new Date(iso).toLocaleString('fr-FR')
-}
+const fmtDate = formatDateTime
 
 function spreadBps(q) {
   const model = rfq.current?.model_price
   if (q.price === null || q.price === undefined || model === null || model === undefined) return '—'
-  return `${Math.round((q.price - model) / model * 10000)} bps`
+  return formatBps((q.price - model) / model * 10000, 0)
 }
 
 function spreadClass(q) {

@@ -40,10 +40,10 @@
         </div>
       </SensitiveChart>
       <div class="flex gap-4 flex-wrap mt-3 pt-3 border-t border-slate-800 text-xs text-slate-500">
-        <span>ATM: <strong class="text-slate-300"><SensitiveValue>{{ atmValue }}{{ unit }}</SensitiveValue></strong></span>
-        <span>Min: <strong class="text-slate-300"><SensitiveValue>{{ minValue }}{{ unit }}</SensitiveValue></strong></span>
-        <span>Max: <strong class="text-slate-300"><SensitiveValue>{{ maxValue }}{{ unit }}</SensitiveValue></strong></span>
-        <span v-if="store.result && viewMode === 'payoff'">Prix MC: <strong class="text-blue-400"><SensitiveValue>{{ pricePct }}%</SensitiveValue></strong>
+        <span>ATM: <strong class="text-slate-300"><SensitiveValue>{{ fmtSeries(atmValue) }}</SensitiveValue></strong></span>
+        <span>Min: <strong class="text-slate-300"><SensitiveValue>{{ fmtSeries(minValue) }}</SensitiveValue></strong></span>
+        <span>Max: <strong class="text-slate-300"><SensitiveValue>{{ fmtSeries(maxValue) }}</SensitiveValue></strong></span>
+        <span v-if="store.result && viewMode === 'payoff'">Prix MC: <strong class="text-blue-400"><SensitiveValue>{{ formatPercent(pricePct, 2) }}</SensitiveValue></strong>
           <HelpTip text="Ligne pointillée horizontale sur le graphique — le prix équitable actualisé issu du dernier pricing MC, pour comparer visuellement où se situe le payoff déterministe par rapport au prix réel du produit." />
         </span>
       </div>
@@ -62,8 +62,8 @@
             <tbody>
               <tr v-for="row in tableRows" :key="row.level"
                   :class="['border-b border-slate-800/60', row.level === 100 ? 'bg-slate-800/50' : '']">
-                <td class="py-1 px-2 font-mono num text-slate-400">{{ row.level.toFixed(1) }}%</td>
-                <td class="py-1 px-2 font-mono text-right num text-slate-300">{{ row.value.toFixed(2) }}{{ unit }}</td>
+                <td class="py-1 px-2 font-mono num text-slate-400">{{ formatPercent(row.level, 1) }}</td>
+                <td class="py-1 px-2 font-mono text-right num text-slate-300">{{ fmtSeries(row.value) }}</td>
               </tr>
             </tbody>
           </table>
@@ -82,6 +82,7 @@ import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
+import { formatPercent, formatNumber } from '../utils/format.js'
 import {
   Chart, LineElement, LineController, PointElement,
   CategoryScale, LinearScale, Tooltip, Legend
@@ -103,17 +104,23 @@ const activeSeries = computed(() => {
 })
 
 const atmValue = computed(() => {
-  if (!store.profile) return '—'
+  if (!store.profile) return null
   const idx = store.profile.levels.indexOf(100)
-  return idx >= 0 ? activeSeries.value[idx].toFixed(2) : '—'
+  return idx >= 0 ? activeSeries.value[idx] : null
 })
-const minValue = computed(() => activeSeries.value.length ? Math.min(...activeSeries.value).toFixed(2) : '—')
-const maxValue = computed(() => activeSeries.value.length ? Math.max(...activeSeries.value).toFixed(2) : '—')
+const minValue = computed(() => activeSeries.value.length ? Math.min(...activeSeries.value) : null)
+const maxValue = computed(() => activeSeries.value.length ? Math.max(...activeSeries.value) : null)
 const tableRows = computed(() => {
   if (!store.profile) return []
   return store.profile.levels.map((level, i) => ({ level, value: activeSeries.value[i] }))
 })
-const pricePct  = computed(() => store.result ? (store.result.price * 100).toFixed(2) : null)
+const pricePct  = computed(() => store.result ? store.result.price * 100 : null)
+
+// viewMode drives the unit: '%' (payoff, raw performance) or '%/an' (annualized coupon)
+function fmtSeries(v) {
+  if (v === null || v === undefined) return '—'
+  return viewMode.value === 'payoff' ? formatPercent(v, 2) : `${formatNumber(v, 2)} %/an`
+}
 
 async function renderChart() {
   await nextTick()
@@ -162,8 +169,8 @@ async function renderChart() {
           callbacks: {
             title: items => `Spot final: ${items[0].label}`,
             label: item => item.datasetIndex === 0
-              ? `${seriesLabel}: ${item.raw.toFixed(2)}${unit.value}`
-              : `Prix MC: ${item.raw.toFixed(2)}%`,
+              ? `${seriesLabel}: ${item.raw.toFixed(2).replace('.', ',')}${unit.value}`
+              : `Prix MC: ${item.raw.toFixed(2).replace('.', ',')}%`,
           },
         },
       },

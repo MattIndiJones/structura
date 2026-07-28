@@ -8,7 +8,7 @@
             <HelpTip text="Lance sa propre simulation à 5 000 chemins, indépendante du N configuré dans Marché &amp; Paramètres pour le pricing principal — un échantillon dédié pour ces statistiques, pas un recyclage du dernier pricing." />
           </div>
           <div v-if="store.proba" class="text-xs text-slate-600 mt-0.5 italic">
-            <SensitiveValue>{{ store.proba.total.toLocaleString() }} chemins analysés</SensitiveValue>
+            <SensitiveValue>{{ formatInt(store.proba.total) }} chemins analysés</SensitiveValue>
           </div>
         </div>
         <div class="ml-auto">
@@ -85,19 +85,19 @@
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div class="text-center p-2 bg-red-950/30 rounded-lg border border-red-900/30">
             <div class="text-red-400 font-bold text-slate-500 mb-1">P5</div>
-            <div class="text-red-400 font-bold text-base"><SensitiveValue>{{ store.proba.percentiles.p5 }}%</SensitiveValue></div>
+            <div class="text-red-400 font-bold text-base"><SensitiveValue>{{ formatPercent(store.proba.percentiles.p5) }}</SensitiveValue></div>
           </div>
           <div class="text-center p-2 bg-slate-800/50 rounded-lg border border-slate-700">
             <div class="text-slate-500 mb-1">P25</div>
-            <div class="text-slate-300 font-bold text-base"><SensitiveValue>{{ store.proba.percentiles.p25 }}%</SensitiveValue></div>
+            <div class="text-slate-300 font-bold text-base"><SensitiveValue>{{ formatPercent(store.proba.percentiles.p25) }}</SensitiveValue></div>
           </div>
           <div class="text-center p-2 bg-slate-800/50 rounded-lg border border-slate-700">
             <div class="text-slate-500 mb-1">P75</div>
-            <div class="text-slate-300 font-bold text-base"><SensitiveValue>{{ store.proba.percentiles.p75 }}%</SensitiveValue></div>
+            <div class="text-slate-300 font-bold text-base"><SensitiveValue>{{ formatPercent(store.proba.percentiles.p75) }}</SensitiveValue></div>
           </div>
           <div class="text-center p-2 bg-green-950/30 rounded-lg border border-green-900/30">
             <div class="text-slate-500 mb-1">P95</div>
-            <div class="text-green-400 font-bold text-base"><SensitiveValue>{{ store.proba.percentiles.p95 }}%</SensitiveValue></div>
+            <div class="text-green-400 font-bold text-base"><SensitiveValue>{{ formatPercent(store.proba.percentiles.p95) }}</SensitiveValue></div>
           </div>
         </div>
       </div>
@@ -114,6 +114,7 @@ import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
+import { formatPercent, formatInt, formatNumber } from '../utils/format.js'
 import {
   Chart, DoughnutController, ArcElement,
   BarElement, BarController,
@@ -132,22 +133,22 @@ let donutChart = null
 let barChart   = null
 
 function pct(n, total) {
-  return total > 0 ? (n / total * 100).toFixed(1) : '0'
+  return total > 0 ? formatPercent(n / total * 100, 1) : formatPercent(0, 1)
 }
 
 const acStats = computed(() => {
   if (!store.proba) return []
   const { autocall_count, ki_count, normal_count, total, expected_life } = store.proba
   return [
-    { label: 'P(rappel autocall)', val: pct(autocall_count, total) + '%', cls: 'text-green-400',
+    { label: 'P(rappel autocall)', val: pct(autocall_count, total), cls: 'text-green-400',
       tip: "Fraction des chemins où le produit a été rappelé anticipativement à l'une des dates d'observation (condition d'autocall remplie avant l'échéance)." },
-    { label: 'P(KI / perte)',      val: pct(ki_count, total) + '%',       cls: 'text-red-400',
+    { label: 'P(KI / perte)',      val: pct(ki_count, total),       cls: 'text-red-400',
       tip: "Fraction des chemins qui atteignent l'échéance ET franchissent la barrière de perte en capital (jamais rappelés avant, barrière KI touchée)." },
-    { label: 'P(remb. normal)',    val: pct(normal_count, total) + '%',   cls: 'text-slate-300',
+    { label: 'P(remb. normal)',    val: pct(normal_count, total),   cls: 'text-slate-300',
       tip: "Fraction des chemins qui atteignent l'échéance sans jamais avoir été rappelés ni avoir franchi la barrière de perte — remboursement du capital sans coupon additionnel à ce stade." },
-    { label: 'Durée espérée',      val: expected_life.toFixed(2) + ' Y',  cls: 'text-blue-400',
+    { label: 'Durée espérée',      val: `${formatNumber(expected_life, 2)} Y`,  cls: 'text-blue-400',
       tip: "Même quantité que le Fugit affiché dans l'onglet Résultats (E[τ]) — durée de vie moyenne pondérée par probabilité, ici recalculée sur l'échantillon dédié à 5 000 chemins de cet onglet." },
-    { label: 'Chemins',            val: total.toLocaleString(),            cls: 'text-slate-400' },
+    { label: 'Chemins',            val: formatInt(total),            cls: 'text-slate-400' },
   ]
 })
 
@@ -155,13 +156,13 @@ const vanillaStats = computed(() => {
   if (!store.proba) return []
   const { normal_count, ki_count, total, price } = store.proba
   return [
-    { label: 'P(ITM)', val: pct(normal_count, total) + '%', cls: 'text-green-400',
+    { label: 'P(ITM)', val: pct(normal_count, total), cls: 'text-green-400',
       tip: "Fraction des chemins où le payoff final est strictement positif (in-the-money à l'échéance)." },
-    { label: 'P(OTM)', val: pct(ki_count, total) + '%',     cls: 'text-slate-400',
+    { label: 'P(OTM)', val: pct(ki_count, total),     cls: 'text-slate-400',
       tip: "Fraction des chemins où le payoff final est nul (out-of-the-money à l'échéance — perte totale de la prime pour une option vanille)." },
-    { label: 'Prix MC', val: (price * 100).toFixed(2) + '%', cls: 'text-blue-400',
+    { label: 'Prix MC', val: formatPercent(price * 100, 2), cls: 'text-blue-400',
       tip: "Prix recalculé sur l'échantillon dédié de cet onglet (5 000 chemins) — peut différer légèrement du prix de référence de l'onglet Résultats (bruit MC, échantillon différent)." },
-    { label: 'Chemins', val: total.toLocaleString(),          cls: 'text-slate-400' },
+    { label: 'Chemins', val: formatInt(total),          cls: 'text-slate-400' },
   ]
 })
 
@@ -202,7 +203,7 @@ async function renderCharts() {
         plugins: {
           legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 12 } },
           tooltip: { callbacks: {
-            label: it => `${it.label}: ${(it.raw/total*100).toFixed(1)}% (${it.raw})`,
+            label: it => `${it.label}: ${(it.raw/total*100).toFixed(1).replace('.', ',')}% (${it.raw})`,
           }},
         },
         animation: { duration: 250 },
@@ -219,7 +220,7 @@ async function renderCharts() {
       options: demoChartOptions({
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false },
-          tooltip: { callbacks: { label: it => `${it.raw.toFixed(1)}%` } } },
+          tooltip: { callbacks: { label: it => `${it.raw.toFixed(1).replace('.', ',')}%` } } },
         scales: {
           x: { ticks: { font: { size: 10 } } },
           y: { ticks: { font: { size: 9 }, callback: v => v + '%' }, min: 0 },
@@ -240,7 +241,7 @@ async function renderCharts() {
         responsive: true, maintainAspectRatio: false, cutout: '62%',
         plugins: {
           legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 14 } },
-          tooltip: { callbacks: { label: it => `${it.label}: ${(it.raw/total*100).toFixed(1)}% (${it.raw})` } },
+          tooltip: { callbacks: { label: it => `${it.label}: ${(it.raw/total*100).toFixed(1).replace('.', ',')}% (${it.raw})` } },
         },
         animation: { duration: 250 },
       }, demo.enabled),
@@ -264,7 +265,7 @@ async function renderCharts() {
       options: demoChartOptions({
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false },
-          tooltip: { callbacks: { label: it => `${it.raw.toFixed(1)}% des chemins` } } },
+          tooltip: { callbacks: { label: it => `${it.raw.toFixed(1).replace('.', ',')}% des chemins` } } },
         scales: {
           x: { ticks: { font: { size: 9 }, maxRotation: 45 } },
           y: { ticks: { font: { size: 9 }, callback: v => v + '%' }, min: 0 },

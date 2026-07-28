@@ -51,7 +51,7 @@
                class="input bg-slate-800/40 text-slate-500 cursor-not-allowed flex items-center justify-between">
             <span>Calendrier (CONSTAT)</span>
             <span v-if="store.result?.t_max_effective" class="font-mono text-slate-400">
-              {{ store.result.t_max_effective.toFixed(2) }} Y
+              {{ formatNumber(store.result.t_max_effective, 2) }} Y
             </span>
           </div>
           <input v-else v-model.number="store.globalParams.T" type="number" step="0.25" class="input" />
@@ -356,6 +356,7 @@ import VolSmile from './VolSmile.vue'
 import YieldCurveCard from './YieldCurveCard.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
+import { formatNumber } from '../utils/format.js'
 
 const store = usePricingStore()
 const demo = useDemoModeStore()

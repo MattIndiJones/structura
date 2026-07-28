@@ -12,6 +12,7 @@
       </div>
 
       <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
+      <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
       <div class="card overflow-x-auto">
         <LoadingSpinner v-if="loading" class="py-6" />
@@ -42,7 +43,7 @@
                        @change="updateProvider(p, { active: $event.target.checked })" />
               </td>
               <td class="py-1.5 pr-3 text-right">
-                <button class="text-slate-600 hover:text-red-400" title="Supprimer" @click="deleteProvider(p)">🗑</button>
+                <button class="text-slate-600 hover:text-red-400" title="Supprimer" aria-label="Supprimer le fournisseur" @click="deleteProvider(p)">🗑</button>
               </td>
             </tr>
           </tbody>
@@ -73,12 +74,11 @@ import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
-import { useToastsStore } from '../stores/toasts.js'
 
-const toasts = useToastsStore()
 const providers = ref([])
 const loading   = ref(true)
 const error     = ref('')
+const notice    = ref('')
 const creating  = ref(false)
 const newLabel  = ref('')
 const newMode   = ref('manual')
@@ -103,6 +103,7 @@ async function createProvider() {
   if (!label) return
   creating.value = true
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch('/api/admin/rfq-providers', {
       method: 'POST',
@@ -114,7 +115,7 @@ async function createProvider() {
     providers.value.sort((a, b) => a.label.localeCompare(b.label))
     newLabel.value = ''
     newMode.value = 'manual'
-    toasts.success('Fournisseur ajouté')
+    notice.value = 'Fournisseur ajouté'
   } catch (e) {
     error.value = e.message
   } finally {
@@ -124,6 +125,7 @@ async function createProvider() {
 
 async function updateProvider(p, payload) {
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/rfq-providers/${p.id}`, {
       method: 'PATCH',
@@ -140,6 +142,7 @@ async function updateProvider(p, payload) {
 async function deleteProvider(p) {
   if (!confirm(`Supprimer "${p.label}" ?`)) return
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/rfq-providers/${p.id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')

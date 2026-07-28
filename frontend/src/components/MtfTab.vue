@@ -49,7 +49,7 @@
       <div class="text-xs text-slate-600">
         <SensitiveValue>
           Coût ≈ N<sub>outer</sub> × N<sub>dates</sub> × N<sub>inner</sub> évaluations de pricer
-          ({{ (form.n_outer * form.n_dates * form.n_inner).toLocaleString() }} au total).
+          ({{ formatInt(form.n_outer * form.n_dates * form.n_inner) }} au total).
         </SensitiveValue>
       </div>
       <div v-if="!store.result" class="text-xs text-amber-500 mt-2">
@@ -111,7 +111,7 @@
           </thead>
           <tbody>
             <tr v-for="r in store.mtf.results" :key="r.t" class="border-b border-slate-800/50">
-              <td class="py-1.5 pr-3 text-slate-300 font-semibold whitespace-nowrap">{{ r.t.toFixed(2) }}Y</td>
+              <td class="py-1.5 pr-3 text-slate-300 font-semibold whitespace-nowrap">{{ formatNumber(r.t, 2) }}Y</td>
               <td class="py-1.5 pr-3 text-right font-mono text-blue-400"><SensitiveValue>{{ pf(r.stats.mean) }}</SensitiveValue></td>
               <td class="py-1.5 pr-3 text-right font-mono text-slate-400"><SensitiveValue>{{ pf(r.stats.std) }}</SensitiveValue></td>
               <td class="py-1.5 pr-3 text-right font-mono text-red-400"><SensitiveValue>{{ pf(r.stats.p05) }}</SensitiveValue></td>
@@ -121,11 +121,11 @@
               <td class="py-1.5 pr-3 text-right font-mono text-green-400"><SensitiveValue>{{ pf(r.stats.p95) }}</SensitiveValue></td>
               <td class="py-1.5 pr-3 text-right font-mono"
                   :class="r.stats.p_above_100 >= 50 ? 'text-green-400' : 'text-red-400'">
-                <SensitiveValue>{{ r.stats.p_above_100.toFixed(1) }}%</SensitiveValue>
+                <SensitiveValue>{{ formatPercent(r.stats.p_above_100, 1) }}</SensitiveValue>
               </td>
               <td class="py-1.5 text-right font-mono"
                   :class="r.stats.p_above_p0 >= 50 ? 'text-green-400' : 'text-red-400'">
-                <SensitiveValue>{{ r.stats.p_above_p0.toFixed(1) }}%</SensitiveValue>
+                <SensitiveValue>{{ formatPercent(r.stats.p_above_p0, 1) }}</SensitiveValue>
               </td>
             </tr>
           </tbody>
@@ -150,6 +150,7 @@ import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
+import { formatPercent, formatNumber, formatInt } from '../utils/format.js'
 import {
   Chart, LineElement, LineController, PointElement,
   CategoryScale, LinearScale, Filler, Tooltip, Legend,
@@ -169,7 +170,7 @@ function launch() {
   store.runMtf({ ...form.value })
 }
 
-const pf = v => v.toFixed(2) + '%'
+const pf = v => formatPercent(v, 2)
 
 // Sanity-check tiles for the furthest MTM date — the 4 diagnostics a quant would
 // check first: tail risk above par, probability of beating the entry price, and
@@ -179,12 +180,12 @@ const scalarTiles = computed(() => {
   const res = store.mtf?.results
   if (!res?.length) return []
   const last = res[res.length - 1]
-  const lbl = last.t.toFixed(1) + 'Y'
+  const lbl = `${formatNumber(last.t, 1)}Y`
   return [
-    { label: `P(MTM>100%) @ ${lbl}`, val: last.stats.p_above_100.toFixed(1) + '%',
+    { label: `P(MTM>100%) @ ${lbl}`, val: formatPercent(last.stats.p_above_100, 1),
       cls: last.stats.p_above_100 >= 50 ? 'text-green-400' : 'text-red-400',
       tip: "Probabilité que le produit vaille plus que 100% du notionnel à la dernière date MTM — gain brut, sans référence au prix payé." },
-    { label: `P(MTM≥P₀) @ ${lbl}`, val: last.stats.p_above_p0.toFixed(1) + '%',
+    { label: `P(MTM≥P₀) @ ${lbl}`, val: formatPercent(last.stats.p_above_p0, 1),
       cls: last.stats.p_above_p0 >= 50 ? 'text-green-400' : 'text-red-400',
       tip: "Probabilité que la valeur future dépasse le prix de pricing initial P₀ — la vraie question 'suis-je gagnant par rapport à mon prix d'entrée', à distinguer de P(>100%)." },
     { label: `E(MTM) @ ${lbl}`, val: pf(last.stats.e_mtm), cls: 'text-blue-400',
@@ -201,7 +202,7 @@ async function renderChart() {
 
   const p0 = store.mtf.main_price ?? 100
   const results = store.mtf.results
-  const labels = ['t₀', ...results.map(r => r.t.toFixed(2) + 'Y')]
+  const labels = ['t₀', ...results.map(r => r.t.toFixed(2).replace('.', ',') + 'Y')]
   const mk = key => [p0, ...results.map(r => r.stats[key])]
 
   // Dataset order matters for fill:'-1' (fills toward the previous dataset).
@@ -226,7 +227,7 @@ async function renderChart() {
         legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } },
         tooltip: {
           mode: 'index', intersect: false,
-          callbacks: { label: it => `${it.dataset.label}: ${it.raw?.toFixed?.(2)}%` },
+          callbacks: { label: it => `${it.dataset.label}: ${it.raw?.toFixed?.(2)?.replace('.', ',')}%` },
         },
       },
       scales: {

@@ -2,6 +2,9 @@
   <div class="flex-1 flex flex-col min-h-0">
 
     <main class="flex-1 flex flex-col items-center gap-10 px-6 py-16">
+      <div class="w-full max-w-xl">
+        <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
+      </div>
       <div class="text-center">
         <h1 class="page-title text-2xl">Administration</h1>
         <p class="page-subtitle">Réglages accessibles aux administrateurs</p>
@@ -78,6 +81,18 @@
             </div>
           </div>
           <p class="text-xs text-slate-600">Chargez ou rafraîchissez les historiques de prix des sous-jacents majeurs.</p>
+        </RouterLink>
+
+        <RouterLink to="/admin/compute"
+          class="card flex flex-col gap-3 hover:border-indigo-700 hover:bg-indigo-950/20 hover:shadow-xl hover:shadow-black/30 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-indigo-900/50 flex items-center justify-center text-xl">⚙️</div>
+            <div>
+              <div class="font-bold text-slate-100 group-hover:text-indigo-300 transition-colors">Files de calcul</div>
+              <div class="text-xs text-slate-500">Batches VaR &amp; repricing</div>
+            </div>
+          </div>
+          <p class="text-xs text-slate-600">Supprimez, arrêtez ou relancez un batch de calcul, pour tous les comptes.</p>
         </RouterLink>
       </div>
     </main>

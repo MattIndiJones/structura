@@ -37,7 +37,7 @@
         <span v-for="lg in legend" :key="lg.key" class="inline-flex items-center gap-1.5">
           <span class="w-4 h-0.5 inline-block rounded" :style="{ background: lg.solid }"></span>
           <span class="text-slate-400">{{ lg.label }}</span>
-          <strong :style="{ color: lg.solid }"><SensitiveValue>{{ lg.pct }}%</SensitiveValue></strong>
+          <strong :style="{ color: lg.solid }"><SensitiveValue>{{ formatPercent(lg.pct, 1) }}</SensitiveValue></strong>
           <span class="text-slate-600"><SensitiveValue>({{ lg.count }}/{{ store.paths.total }})</SensitiveValue></span>
         </span>
       </div>
@@ -54,6 +54,7 @@ import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
+import { formatPercent } from '../utils/format.js'
 import {
   Chart, LineElement, LineController, PointElement,
   LinearScale, Tooltip
@@ -84,7 +85,7 @@ const COLORS = {
 const legend = computed(() => {
   if (!store.paths) return []
   const { autocall_count, ki_count, normal_count, total } = store.paths
-  const pct = n => total > 0 ? (n / total * 100).toFixed(1) : '0'
+  const pct = n => total > 0 ? n / total * 100 : 0
   return [
     { key: 'autocall', ...COLORS.autocall, count: autocall_count, pct: pct(autocall_count) },
     { key: 'ki',       ...COLORS.ki,       count: ki_count,       pct: pct(ki_count) },
@@ -141,7 +142,7 @@ async function renderChart() {
         legend: { display: false },
         tooltip: {
           mode: 'nearest', intersect: false,
-          callbacks: { label: it => `${it.raw.y.toFixed(1)}% à T=${it.raw.x.toFixed(2)}Y` },
+          callbacks: { label: it => `${it.raw.y.toFixed(1).replace('.', ',')}% à T=${it.raw.x.toFixed(2).replace('.', ',')}Y` },
         },
       },
       scales: {

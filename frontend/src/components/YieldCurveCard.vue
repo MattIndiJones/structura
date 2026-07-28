@@ -20,7 +20,7 @@
           <span v-for="k in keyRates" :key="k.label"
             class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700">
             <span class="text-slate-500">{{ k.label }}</span>
-            <span class="text-blue-400 font-mono font-semibold"><SensitiveValue>{{ k.rate.toFixed(2) }}%</SensitiveValue></span>
+            <span class="text-blue-400 font-mono font-semibold"><SensitiveValue>{{ formatPercent(k.rate, 2) }}</SensitiveValue></span>
           </span>
         </div>
       </template>
@@ -81,6 +81,7 @@ import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
+import { formatPercent } from '../utils/format.js'
 import {
   Chart, LineElement, LineController, PointElement,
   LinearScale, Filler, Tooltip,
@@ -173,7 +174,7 @@ async function renderChart() {
       plugins: {
         legend: { display: false },
         tooltip: {
-          callbacks: { label: it => `${it.raw.y.toFixed(2)}% @ ${it.raw.x}Y` },
+          callbacks: { label: it => `${it.raw.y.toFixed(2).replace('.', ',')}% @ ${it.raw.x}Y` },
         },
       },
       scales: {

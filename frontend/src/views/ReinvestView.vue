@@ -6,7 +6,10 @@
 
         <div class="page-header mb-0">
           <div>
-            <h1 class="page-title">Réinvestissement — alternatives à un produit en vie</h1>
+            <div class="flex items-center gap-3">
+              <RouterLink :to="{ path: '/', query: { category: 'life_cycle' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
+              <h1 class="page-title">Réinvestissement — alternatives à un produit en vie</h1>
+            </div>
             <p class="page-subtitle">
               Espace de travail interne, pas montré au client : partez d'un deal en vie et cherchez le meilleur
               sous-jacent de remplacement pour la même structure. Pour du sur-mesure au niveau du script, utilisez
@@ -32,9 +35,9 @@
           <div class="card">
             <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">2. Économique</div>
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs mb-4">
-              <div><div class="text-slate-500 mb-0.5">Value date</div><div class="font-mono text-slate-200">{{ deal.value_date }}</div></div>
-              <div><div class="text-slate-500 mb-0.5">Maturité bookée</div><div class="font-mono text-slate-200">{{ deal.maturity_date }} ({{ deal.T.toFixed(2) }} an(s))</div></div>
-              <div><div class="text-slate-500 mb-0.5">Nominal</div><div class="font-mono text-slate-200">{{ deal.nominal.toLocaleString('fr-FR') }} {{ deal.devise }}</div></div>
+              <div><div class="text-slate-500 mb-0.5">Value date</div><div class="font-mono text-slate-200">{{ formatDate(deal.value_date) }}</div></div>
+              <div><div class="text-slate-500 mb-0.5">Maturité bookée</div><div class="font-mono text-slate-200">{{ formatDate(deal.maturity_date) }} ({{ deal.T.toFixed(2) }} an(s))</div></div>
+              <div><div class="text-slate-500 mb-0.5">Nominal</div><div class="font-mono text-slate-200">{{ formatInt(deal.nominal) }} {{ deal.devise }}</div></div>
             </div>
 
             <div v-if="deal.underlyings.length !== 1" class="text-xs text-amber-500">
@@ -344,6 +347,7 @@ import { useDealsStore } from '../stores/deals.js'
 import { apiFetch } from '../utils/api.js'
 import { underlyingGroups } from '../data/commonUnderlyings.js'
 import HelpTip from '../components/HelpTip.vue'
+import { formatInt, formatDate } from '../utils/format.js'
 import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import {
   Chart, LineElement, LineController, PointElement, BarElement, BarController,

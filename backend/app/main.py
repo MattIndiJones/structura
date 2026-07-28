@@ -33,6 +33,8 @@ from .api.fifo import router as fifo_router
 from .api.rfq import router as rfq_router
 from .api.admin import router as admin_router
 from .api.alerts import router as alerts_router
+from .api.compute import router as compute_router
+from .api.var import router as var_router
 from .db.database import init_db
 from .services.lifecycle_alerts import run_scheduled_refresh
 
@@ -89,6 +91,8 @@ app.include_router(fifo_router)
 app.include_router(rfq_router)
 app.include_router(admin_router)
 app.include_router(alerts_router)
+app.include_router(compute_router)
+app.include_router(var_router)
 app.include_router(pricing_router)
 app.include_router(market_data_router)
 app.include_router(simulation_router)

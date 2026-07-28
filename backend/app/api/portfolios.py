@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import Portfolio, Deal, User
+from ..db.models import Portfolio, Deal, User, Counterparty
 from .auth import get_current_user
 from .admin import _CATALOG
 from .deals import MtmExplainRequest
@@ -133,8 +133,23 @@ def delete_portfolio(
 
 # ── Risk aggregation ─────────────────────────────────────────────────
 
+def _canonical_pair(name_to_ticker: dict, n1: str, n2: str) -> tuple[str, str]:
+    """Turn a deal-local corr_pairs key ("Amazon / LVMH") into a (bucket_key,
+    label) pair that's the same across deals regardless of index ordering or
+    how that deal happened to name its underlyings — same ticker->catalog
+    resolution as the per_underlying bucketing above, just applied to both
+    sides and sorted so {A,B} and {B,A} land in the same bucket."""
+    t1, t2 = name_to_ticker.get(n1, ""), name_to_ticker.get(n2, "")
+    k1, k2 = _TICKER_TO_KEY.get(t1, t1 or n1), _TICKER_TO_KEY.get(t2, t2 or n2)
+    l1, l2 = _TICKER_TO_LABEL.get(t1, n1), _TICKER_TO_LABEL.get(t2, n2)
+    if k1 <= k2:
+        return f"{k1}|{k2}", f"{l1} / {l2}"
+    return f"{k2}|{k1}", f"{l2} / {l1}"
+
+
 def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
     per_underlying: dict[str, dict] = {}
+    corr_pairs: dict[str, dict] = {}
     scalar = {"theta": 0.0, "rho": 0.0}
     deals_included, deals_missing_greeks, deals_stale = [], [], []
     oldest_computed_at = None
@@ -174,6 +189,26 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
                     contrib[out_key] = amt
             bucket["contributions"].append(contrib)
 
+        # Correlation Greek (compute_greeks' corr_i_j, cross-gamma to a rise
+        # in the correlation between two of a basket's underlyings) — the
+        # one sensitivity a family-office user can't intuit on their own
+        # (see deals.py's per-deal computation), but never before summed
+        # across the book: a worst-of-heavy book's biggest correlation
+        # exposure might be a pair that no single deal shows large on its
+        # own. Same *0.01 rescale as rho and for the same reason: the raw
+        # Greek is "per 1.0 (100pts) of correlation", nobody reads a risk
+        # number in units that large — per 1pt matches the Chocs tab's own
+        # corr_shock_pts convention, so the two numbers are comparable.
+        for pair_key, v in (greeks.get("corr_pairs") or {}).items():
+            parts = pair_key.split(" / ")
+            if len(parts) != 2 or v is None:
+                continue
+            key, label = _canonical_pair(name_to_ticker, parts[0], parts[1])
+            bucket = corr_pairs.setdefault(key, {"label": label, "corr_eur": 0.0, "contributions": []})
+            amt = v * 0.01 * d.nominal * fx_rate
+            bucket["corr_eur"] += amt
+            bucket["contributions"].append({"deal_id": d.id, "reference": d.reference, "corr_eur": amt})
+
         # theta is already "per calendar day" out of compute_greeks (its finite
         # difference divides by 7 days, not by an artificial bump size — see
         # engine.py). rho is NOT: it's (price(dr=+1pt) - price(dr=-1pt)) / 0.02,
@@ -202,6 +237,7 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
         "deals_stale": deals_stale,
         "nominal_total_eur": nominal_total_eur,
         "per_underlying": per_underlying,
+        "corr_pairs": corr_pairs,
         "scalar": scalar,
         "oldest_computed_at": oldest_computed_at.isoformat() if oldest_computed_at else None,
         "reporting_ccy": "EUR",
@@ -370,6 +406,211 @@ def portfolio_risk(
         select(Deal).where(Deal.portfolio_id == portfolio_id, Deal.status == "actif")
     ).all()
     payload = _aggregate_risk(list(deals), session)
+    payload["scope"] = "portfolio"
+    payload["portfolio_id"] = portfolio_id
+    payload["name"] = p.name
+    return payload
+
+
+# ── Counterparty exposure & concentration ────────────────────────────
+#
+# Nominal-EUR concentration by contrepartie — same cheap "sum over already-
+# known deal fields" philosophy as _aggregate_risk (no Monte Carlo, no
+# dependency on Greeks ever having been computed): Deal.contrepartie is a
+# free string, not a FK (see models.py:Counterparty), so grouping is a direct
+# string group-by. Nominal, not live MtM, is the exposure basis on purpose —
+# for a family office or a small desk with no dedicated risk function, "what
+# nominal am I facing this bank for" is the number that actually gets acted
+# on (a structured note is an unsecured claim on the issuer for the promised
+# redemption, not today's secondary MtM), and unlike a live reprice it's
+# always available with zero compute cost.
+def _aggregate_exposure_by_counterparty(deals: list[Deal], session: Session) -> dict:
+    by_cpty: dict[str, dict] = {}
+    nominal_total_eur = 0.0
+
+    for d in deals:
+        fx = get_fx_series(d.devise, "EUR")
+        fx_rate = float(fx.iloc[-1]) if not fx.empty else 1.0
+        nom_eur = d.nominal * fx_rate
+        nominal_total_eur += nom_eur
+
+        key = d.contrepartie or "(non renseignée)"
+        bucket = by_cpty.setdefault(key, {"nominal_eur": 0.0, "deals": []})
+        bucket["nominal_eur"] += nom_eur
+        bucket["deals"].append({"id": d.id, "reference": d.reference, "nominal_eur": round(nom_eur, 2)})
+
+    limits = {c.name: c.limit_eur for c in session.exec(select(Counterparty)).all()}
+
+    rows = []
+    for name, bucket in by_cpty.items():
+        limit = limits.get(name)
+        pct = (bucket["nominal_eur"] / nominal_total_eur) if nominal_total_eur else None
+        rows.append({
+            "contrepartie": name,
+            "nominal_eur": round(bucket["nominal_eur"], 2),
+            "pct_of_book": round(pct, 4) if pct is not None else None,
+            "deal_count": len(bucket["deals"]),
+            "limit_eur": limit,
+            "limit_breached": bool(limit is not None and bucket["nominal_eur"] > limit),
+            "deals": sorted(bucket["deals"], key=lambda x: -x["nominal_eur"]),
+        })
+    rows.sort(key=lambda r: -r["nominal_eur"])
+
+    # HHI (Herfindahl-Hirschman) on nominal shares — standard concentration
+    # read: close to 1/n for an evenly split book of n counterparties, 1.0
+    # for a book facing a single one. effective_n = 1/HHI is the "equivalent
+    # number of equally-sized counterparties" this book behaves like — more
+    # intuitive to read than a raw HHI for someone without a risk background.
+    hhi = sum((r["pct_of_book"] or 0.0) ** 2 for r in rows) if nominal_total_eur else None
+    effective_n = round(1 / hhi, 2) if hhi else None
+    top3_pct = round(sum(r["pct_of_book"] or 0.0 for r in rows[:3]), 4) if nominal_total_eur else None
+
+    return {
+        "nominal_total_eur": round(nominal_total_eur, 2),
+        "by_counterparty": rows,
+        "hhi": round(hhi, 4) if hhi else None,
+        "effective_n": effective_n,
+        "top3_pct": top3_pct,
+        "reporting_ccy": "EUR",
+    }
+
+
+# ── Barrier proximity ─────────────────────────────────────────────────
+#
+# Ranks every active deal of the scope by how close its worst-of is to the
+# next barrier-looking PARAM in its booked script — reuses build_watchlist_row
+# (api/deals.py, shared with Booking's Surveillance tab and the daily alert
+# scheduler) so barrier detection and gap computation never diverge across
+# the three call sites. Unlike _aggregate_risk (pure arithmetic over already-
+# persisted greeks_json), build_watchlist_row calls out to live market data
+# per deal (services/market_data.load_hist_prices, no caching) — bucket
+# unexpected failures into `errors` rather than aborting the whole book,
+# same discipline as _run_explain_on_book above.
+def _barrier_severity(b: dict) -> str:
+    """Mirrors frontend/src/utils/barriers.js barrierChipClass exactly (kept
+    in sync by hand — small enough, and duplicating it here avoids a
+    round-trip just for a KPI count): direction-aware, not a naive distance
+    read. A KI hurts as WOF falls TO it; an autocall is favorable once WOF
+    has risen above it — a green (already-called) autocall is NOT 'critique'
+    even though its gap is small in absolute value."""
+    g = b["gap_pts"]
+    if b["kind"] == "ki":
+        if g <= 5:
+            return "critique"
+        if g <= 15:
+            return "attention"
+        return "ok"
+    if b["kind"] == "autocall":
+        if -5 <= g < 0:
+            return "attention"
+        return "ok"
+    return "ok"
+
+
+_SEVERITY_RANK = {"critique": 0, "attention": 1, "ok": 2}
+
+
+def _deal_severity(barriers: list[dict]) -> str:
+    if not barriers:
+        return "ok"
+    return min((_barrier_severity(b) for b in barriers), key=lambda s: _SEVERITY_RANK[s])
+
+
+def _aggregate_barriers(deals: list[Deal], session: Session) -> dict:
+    from datetime import date
+    from .deals import build_watchlist_row
+
+    today = date.today()
+    rows, errors = [], []
+    for d in deals:
+        try:
+            row = build_watchlist_row(d, session, today)
+        except Exception as e:
+            errors.append({"deal_id": d.id, "reference": d.reference, "error": str(e)})
+            continue
+        if row["barriers"]:
+            rows.append(row)
+
+    rows.sort(key=lambda r: (
+        r["min_gap"] if r["min_gap"] is not None else 1e9,
+        r["days_to_next"] if r["days_to_next"] is not None else 1e9,
+    ))
+
+    counts = {"critique": 0, "attention": 0, "ok": 0}
+    for r in rows:
+        counts[_deal_severity(r["barriers"])] += 1
+
+    return {
+        "rows": rows,
+        "errors": errors,
+        "counts": counts,
+    }
+
+
+@router.get("/barriers-global")
+def barriers_global(
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Barrier proximity ranked across every active deal of the user, across
+    all of their portfolios — same 'always the true total' contract as
+    /risk-global."""
+    deals = session.exec(
+        select(Deal).where(Deal.user_id == current.id, Deal.status == "actif")
+    ).all()
+    payload = _aggregate_barriers(list(deals), session)
+    payload["scope"] = "global"
+    return payload
+
+
+@router.get("/{portfolio_id}/barriers")
+def portfolio_barriers(
+    portfolio_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    p = session.get(Portfolio, portfolio_id)
+    if not p or p.user_id != current.id:
+        raise HTTPException(404, "Portefeuille introuvable")
+    deals = session.exec(
+        select(Deal).where(Deal.portfolio_id == portfolio_id, Deal.status == "actif")
+    ).all()
+    payload = _aggregate_barriers(list(deals), session)
+    payload["scope"] = "portfolio"
+    payload["portfolio_id"] = portfolio_id
+    payload["name"] = p.name
+    return payload
+
+
+@router.get("/exposure-by-counterparty")
+def exposure_by_counterparty_global(
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Concentration by counterparty across every active deal of the user,
+    across all of their portfolios — same 'always the true total' contract
+    as /risk-global."""
+    deals = session.exec(
+        select(Deal).where(Deal.user_id == current.id, Deal.status == "actif")
+    ).all()
+    payload = _aggregate_exposure_by_counterparty(list(deals), session)
+    payload["scope"] = "global"
+    return payload
+
+
+@router.get("/{portfolio_id}/exposure-by-counterparty")
+def exposure_by_counterparty_portfolio(
+    portfolio_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    p = session.get(Portfolio, portfolio_id)
+    if not p or p.user_id != current.id:
+        raise HTTPException(404, "Portefeuille introuvable")
+    deals = session.exec(
+        select(Deal).where(Deal.portfolio_id == portfolio_id, Deal.status == "actif")
+    ).all()
+    payload = _aggregate_exposure_by_counterparty(list(deals), session)
     payload["scope"] = "portfolio"
     payload["portfolio_id"] = portfolio_id
     payload["name"] = p.name

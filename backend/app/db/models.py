@@ -293,12 +293,19 @@ class Counterparty(SQLModel, table=True):
     """Admin-managed catalog of counterparties eligible to face a booked
     deal. Deal.contrepartie stores the name directly (free string, not a FK)
     — same rationale as RfqProvider: booked history stays readable if a
-    counterparty is later renamed or removed from the eligible list."""
+    counterparty is later renamed or removed from the eligible list.
+
+    limit_eur is an optional soft concentration limit (nominal EUR-converted
+    across every active deal facing this counterparty) — set by an admin,
+    read by the Risk Management "Contreparties" exposure view
+    (api/portfolios.py:exposure-by-counterparty) to flag a breach. None means
+    no limit configured (no breach ever flagged), not a zero limit."""
     __tablename__ = "counterparties"
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     country: str = Field(default="")
     active: bool = Field(default=True)
+    limit_eur: Optional[float] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -364,3 +371,55 @@ class ShockRun(SQLModel, table=True):
     params_json: str = Field(default="{}", sa_column=Column(Text))
     result_json: str = Field(default="{}", sa_column=Column(Text))
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ComputeBatch(SQLModel, table=True):
+    """One submission to the generic parallel compute module
+    (core/compute/) — a set of independent jobs, all processed by the same
+    pricer (`kind`), executed by a worker daemon (scripts/run_compute_worker.py)
+    that polls this table. Mirrors ShockRun's persistence intent (a run's
+    inputs/outputs stay reconstructable) but adds a full queued → running →
+    terminal lifecycle instead of append-only, since a batch (unlike a
+    single shock) can take long enough to need polling from the caller.
+
+    First consumer in mind: a VaR/ES study (chantier #2) submits one batch
+    per method (historical/parametric), one job per market scenario — but
+    nothing here is VaR-specific; `kind` + each job's own payload_json is
+    where the actual meaning lives (see core/compute/pricers/)."""
+    __tablename__ = "compute_batches"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    kind: str = Field(default="")   # selects the pricer in core/compute/pricers/PRICERS
+    label: str = Field(default="")
+    status: str = Field(default="queued")  # queued | running | completed | completed_with_failures | failed
+    total_jobs: int = Field(default=0)
+    completed_jobs: int = Field(default=0)
+    failed_jobs: int = Field(default=0)
+    params_json: str = Field(default="{}", sa_column=Column(Text))            # batch-level config (max_workers, executor kind...)
+    result_summary_json: str = Field(default="{}", sa_column=Column(Text))    # kind-specific aggregation, filled by the caller once every job is in a terminal state
+    worker_name: Optional[str] = Field(default=None)   # host-pid of whichever worker last claimed this batch
+    claimed_at: Optional[datetime] = Field(default=None)
+    started_at: Optional[datetime] = Field(default=None)
+    finished_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ComputeJob(SQLModel, table=True):
+    """One independent unit of work inside a ComputeBatch — payload_json is
+    pure data (never a live Python object): on ProcessPoolExecutor (the
+    default — see core/compute/executor.py for why threads don't help the
+    PayScript engine), a job payload crosses a real process boundary via
+    pickle, so anything not JSON-plain (a CompiledScript's exec()-produced
+    closures, in particular) can never be part of it — only script TEXT and
+    market data, recompiled fresh in the worker."""
+    __tablename__ = "compute_jobs"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    batch_id: int = Field(foreign_key="compute_batches.id", index=True)
+    job_index: int = Field(default=0)      # order within the batch, stable regardless of completion order
+    label: str = Field(default="")         # human-readable (e.g. a historical scenario's date, a deal reference)
+    payload_json: str = Field(default="{}", sa_column=Column(Text))
+    status: str = Field(default="queued")  # queued | done | failed
+    result_json: str = Field(default="{}", sa_column=Column(Text))
+    error: Optional[str] = Field(default=None)
+    started_at: Optional[datetime] = Field(default=None)
+    finished_at: Optional[datetime] = Field(default=None)

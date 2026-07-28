@@ -110,12 +110,14 @@ def delete_rfq_provider(
 class CounterpartyCreate(BaseModel):
     name: str
     country: str = ""
+    limit_eur: Optional[float] = None
 
 
 class CounterpartyUpdate(BaseModel):
     name: Optional[str] = None
     country: Optional[str] = None
     active: Optional[bool] = None
+    limit_eur: Optional[float] = None
 
 
 def _cpty_row(c: Counterparty) -> dict:
@@ -124,6 +126,7 @@ def _cpty_row(c: Counterparty) -> dict:
         "name": c.name,
         "country": c.country,
         "active": c.active,
+        "limit_eur": c.limit_eur,
         "created_at": c.created_at.isoformat(),
         "updated_at": c.updated_at.isoformat(),
     }
@@ -149,7 +152,7 @@ def create_counterparty(
         raise HTTPException(422, "Le nom de la contrepartie est requis")
     if session.exec(select(Counterparty).where(Counterparty.name == name)).first():
         raise HTTPException(400, "Cette contrepartie existe déjà")
-    c = Counterparty(name=name, country=body.country.strip())
+    c = Counterparty(name=name, country=body.country.strip(), limit_eur=body.limit_eur)
     session.add(c)
     session.commit()
     session.refresh(c)

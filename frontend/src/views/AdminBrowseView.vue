@@ -24,6 +24,7 @@
         </div>
 
         <AlertMessage v-if="error" kind="error" class="mb-4">{{ error }}</AlertMessage>
+        <AlertMessage v-if="notice" kind="success" dismissible class="mb-4" @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
         <div class="card overflow-x-auto table-shell" tabindex="0" role="region">
           <LoadingSpinner v-if="loading" class="py-6" />
@@ -41,7 +42,7 @@
                   {{ fmtCell(row[col]) }}
                 </td>
                 <td class="py-1.5 pr-3 text-right">
-                  <button class="text-slate-600 hover:text-red-400" title="Supprimer" @click="deleteRow(row)">🗑</button>
+                  <button class="text-slate-600 hover:text-red-400" title="Supprimer" aria-label="Supprimer l'enregistrement" @click="deleteRow(row)">🗑</button>
                 </td>
               </tr>
             </tbody>
@@ -59,15 +60,15 @@ import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
-import { useToastsStore } from '../stores/toasts.js'
+import { formatDateTime } from '../utils/format.js'
 
-const toasts = useToastsStore()
 const route = useRoute()
 
 const tables  = ref([])
 const rows    = ref([])
 const loading = ref(true)
 const error   = ref('')
+const notice  = ref('')
 
 const activeTable = computed(() => route.params.table || tables.value[0]?.key || '')
 
@@ -87,6 +88,7 @@ async function fetchRows() {
   if (!activeTable.value) return
   loading.value = true
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/browse/${activeTable.value}`)
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur chargement')
@@ -109,11 +111,12 @@ watch(() => route.params.table, fetchRows)
 async function deleteRow(row) {
   if (!confirm(`Supprimer l'enregistrement #${row.id} ?`)) return
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/browse/${activeTable.value}/${row.id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')
     rows.value = rows.value.filter(r => r.id !== row.id)
-    toasts.success('Enregistrement supprimé')
+    notice.value = 'Enregistrement supprimé'
   } catch (e) {
     error.value = e.message
   }
@@ -122,7 +125,7 @@ async function deleteRow(row) {
 function fmtCell(v) {
   if (v === null || v === undefined) return '—'
   if (typeof v === 'boolean') return v ? '✓' : '—'
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) return new Date(v).toLocaleString('fr-FR')
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) return formatDateTime(v)
   return v
 }
 </script>

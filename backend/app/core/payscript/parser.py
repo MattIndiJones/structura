@@ -43,6 +43,16 @@ _SAFE_MATH = {
     'sqrt': math.sqrt, 'exp': math.exp, 'log': math.log,
     'floor': math.floor, 'ceil': math.ceil,
     'round': round,
+    # sum/len: needed by the RAW transpiled code of two built-in keywords —
+    # bare BASKET() ("(sum(_c['spots'])/max(1,len(_c['spots'])))", see
+    # _transpile_expr below) and N ("len(_c['spots'])", the BV table below) —
+    # not just by script-callable functions. __builtins__ is deliberately {}
+    # above (no sandbox escape via e.g. __import__), so anything the
+    # transpiler emits by name must be listed here explicitly or it's a
+    # NameError at eval time, not at parse time (parse_script never executes
+    # the body, only compiles it — this class of bug is invisible until a
+    # script using the keyword actually prices).
+    'sum': sum, 'len': len,
 }
 
 

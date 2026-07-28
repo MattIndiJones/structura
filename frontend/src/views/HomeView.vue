@@ -209,6 +209,21 @@
               <p class="text-xs text-slate-600">Créez, renommez et organisez vos portefeuilles ; affectez chaque deal à son book.</p>
             </RouterLink>
 
+            <!-- Contreparties -->
+            <RouterLink to="/risk?tab=contreparties"
+              class="card flex flex-col gap-3
+                     hover:border-sky-700 hover:bg-sky-950/20 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-sky-900/50 flex items-center justify-center text-xl">🏦</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-sky-300 transition-colors">Contreparties</div>
+                  <div class="text-xs text-slate-500">Concentration &amp; limites par émetteur</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Nominal par contrepartie, indice de concentration (HHI) et alerte de dépassement de limite.</p>
+            </RouterLink>
+
             <!-- Chocs -->
             <RouterLink to="/risk?tab=chocs"
               class="card flex flex-col gap-3
@@ -224,6 +239,21 @@
               <p class="text-xs text-slate-600">Full reprice du portefeuille sous scénario choqué — pas une approximation par les Greeks.</p>
             </RouterLink>
 
+            <!-- VaR / Expected Shortfall -->
+            <RouterLink to="/risk?tab=var"
+              class="card flex flex-col gap-3
+                     hover:border-fuchsia-700 hover:bg-fuchsia-950/20 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-fuchsia-900/50 flex items-center justify-center text-xl">📉</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-fuchsia-300 transition-colors">VaR / Expected Shortfall</div>
+                  <div class="text-xs text-slate-500">Historique &amp; paramétrique, côte à côte</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Rejoue le book sous des centaines de scénarios de marché — étude asynchrone via le module de calcul.</p>
+            </RouterLink>
+
             <!-- Explication de P&L -->
             <RouterLink to="/risk?tab=pnl"
               class="card flex flex-col gap-3
@@ -237,6 +267,21 @@
                 </div>
               </div>
               <p class="text-xs text-slate-600">Expliquez le P&amp;L du portefeuille entre deux dates, agrégé en EUR deal par deal.</p>
+            </RouterLink>
+
+            <!-- Proximité aux barrières -->
+            <RouterLink to="/risk?tab=barrieres"
+              class="card flex flex-col gap-3
+                     hover:border-amber-700 hover:bg-amber-950/20 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-amber-900/50 flex items-center justify-center text-xl">📍</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-amber-300 transition-colors">Proximité aux barrières</div>
+                  <div class="text-xs text-slate-500">Autocall &amp; KI classés par urgence</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Classe les deals actifs par écart entre le worst-of actuel et leur prochaine barrière.</p>
             </RouterLink>
 
           </div>

@@ -104,19 +104,19 @@
               <td class="py-1.5 pr-3 text-slate-200 font-medium">
                 <span :class="i === 0 ? 'text-amber-400' : ''">{{ i === 0 ? '🏆 ' : '' }}{{ row.tickers.map(labelFor).join(' / ') }}</span>
               </td>
-              <td class="py-1.5 pr-3 text-right font-mono text-green-400">{{ (row.median_irr * 100).toFixed(2) }}%</td>
-              <td class="py-1.5 pr-3 text-right font-mono text-slate-300">{{ (row.mean_irr * 100).toFixed(2) }}%</td>
+              <td class="py-1.5 pr-3 text-right font-mono text-green-400">{{ formatPercent(row.median_irr * 100, 2) }}</td>
+              <td class="py-1.5 pr-3 text-right font-mono text-slate-300">{{ formatPercent(row.mean_irr * 100, 2) }}</td>
               <td class="py-1.5 pr-3 text-right font-mono" :class="row.worst_irr < 0 ? 'text-red-400' : 'text-slate-400'">
-                {{ (row.p10_irr * 100).toFixed(2) }}% / {{ (row.worst_irr * 100).toFixed(2) }}%
+                {{ formatPercent(row.p10_irr * 100, 2) }} / {{ formatPercent(row.worst_irr * 100, 2) }}
               </td>
-              <td class="py-1.5 pr-3 text-right text-slate-400">{{ row.pct_positive.toFixed(1) }}%</td>
-              <td class="py-1.5 pr-3 text-right text-slate-400">{{ row.early_recall_pct.toFixed(1) }}%</td>
-              <td class="py-1.5 pr-3 text-right text-slate-500">{{ row.n_windows }}</td>
+              <td class="py-1.5 pr-3 text-right text-slate-400">{{ formatPercent(row.pct_positive, 1) }}</td>
+              <td class="py-1.5 pr-3 text-right text-slate-400">{{ formatPercent(row.early_recall_pct, 1) }}</td>
+              <td class="py-1.5 pr-3 text-right text-slate-500">{{ formatInt(row.n_windows) }}</td>
               <td class="py-1.5 text-right whitespace-nowrap">
                 <button class="text-[10px] px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded mr-1"
                         :disabled="rowState(row).pricing" @click="quotePrice(row)">
                   <span v-if="rowState(row).pricing">…</span>
-                  <span v-else-if="rowState(row).price != null">{{ (rowState(row).price * 100).toFixed(2) }}%</span>
+                  <span v-else-if="rowState(row).price != null">{{ formatPercent(rowState(row).price * 100, 2) }}</span>
                   <span v-else>💰 Prix indicatif</span>
                 </button>
                 <button class="text-[10px] px-2 py-1 bg-blue-700 hover:bg-blue-600 text-white rounded"
@@ -138,6 +138,7 @@ import { reactive, ref, computed } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { apiFetch } from '../utils/api.js'
 import { underlyingGroups } from '../data/commonUnderlyings.js'
+import { formatPercent, formatInt } from '../utils/format.js'
 import HelpTip from './HelpTip.vue'
 
 const store = usePricingStore()

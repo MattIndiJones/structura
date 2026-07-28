@@ -20,7 +20,7 @@ CORR = [[1.0]]
 
 
 def test_grid_shape_and_base_price():
-    grid = compute_scenario_grid(parse_script(CALL_SCRIPT), CALL_PARAMS, CORR,
+    grid = compute_scenario_grid(CALL_SCRIPT, CALL_PARAMS, CORR,
                                   r=0.03, T=1.0, model='constant', seed=42,
                                   user_params={'K': 1.0},
                                   spot_shocks=[-0.1, 0.0, 0.1], vol_shocks=[0.05, 0.0, -0.05],
@@ -40,7 +40,7 @@ def test_grid_shape_and_base_price():
 
 def test_base_price_independent_of_shock_lists():
     """base_price should be computed even if 0.0 isn't in either shock list."""
-    grid = compute_scenario_grid(parse_script(CALL_SCRIPT), CALL_PARAMS, CORR,
+    grid = compute_scenario_grid(CALL_SCRIPT, CALL_PARAMS, CORR,
                                   r=0.03, T=1.0, model='constant', seed=42,
                                   user_params={'K': 1.0},
                                   spot_shocks=[-0.2, -0.1], vol_shocks=[0.1, 0.2], N=2000)
@@ -54,7 +54,7 @@ def test_call_price_increases_with_spot_and_vol_shocks():
     """Sanity check on known monotonicity: a call's price increases with spot
     (each row left-to-right) and increases with vol (rows ordered by decreasing
     vol_shock, so price should decrease top-to-bottom for a fixed column)."""
-    grid = compute_scenario_grid(parse_script(CALL_SCRIPT), CALL_PARAMS, CORR,
+    grid = compute_scenario_grid(CALL_SCRIPT, CALL_PARAMS, CORR,
                                   r=0.03, T=1.0, model='constant', seed=42,
                                   user_params={'K': 1.0},
                                   spot_shocks=[-0.2, -0.1, 0.0, 0.1, 0.2],
@@ -72,7 +72,7 @@ def test_grid_runs_on_every_model(model):
     no crash, and the grid stays internally consistent (base price matches a
     direct run_mc call) for heston/sabr/localvol too, not just constant."""
     params = [dict(CALL_PARAMS[0], skew=-0.1, curvature=0.05)]
-    grid = compute_scenario_grid(parse_script(CALL_SCRIPT), params, CORR,
+    grid = compute_scenario_grid(CALL_SCRIPT, params, CORR,
                                   r=0.03, T=1.0, model=model, seed=42,
                                   user_params={'K': 1.0},
                                   spot_shocks=[-0.1, 0.0, 0.1], vol_shocks=[0.05, 0.0, -0.05],

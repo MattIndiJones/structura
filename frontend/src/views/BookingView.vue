@@ -5,7 +5,8 @@
       <div class="max-w-[1600px] mx-auto flex flex-col gap-3">
 
         <div class="page-header">
-          <div>
+          <div class="flex items-center gap-3">
+            <RouterLink :to="{ path: '/', query: { category: 'life_cycle' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
             <h1 class="page-title">Booking — produits bookés</h1>
           </div>
           <div class="page-actions">
@@ -87,7 +88,7 @@
                 </div>
               </div>
               <div v-if="stats.avgRealizedPayout != null">
-                <div class="stat-value num" style="font-size:1.4rem;">{{ (stats.avgRealizedPayout * 100).toFixed(1) }}%</div>
+                <div class="stat-value num" style="font-size:1.4rem;">{{ formatPercent(stats.avgRealizedPayout * 100, 1) }}</div>
                 <div class="stat-label">Remboursement moyen réalisé</div>
               </div>
             </div>
@@ -362,11 +363,11 @@
               </div>
               <div>
                 <div class="text-slate-500 mb-0.5">Strike / Value</div>
-                <div class="font-mono text-slate-300">{{ d.strike_date }} → {{ d.value_date }}</div>
+                <div class="font-mono text-slate-300">{{ formatDate(d.strike_date) }} → {{ formatDate(d.value_date) }}</div>
               </div>
               <div>
                 <div class="text-slate-500 mb-0.5">Maturité</div>
-                <div class="font-mono text-slate-300">{{ d.maturity_date }}</div>
+                <div class="font-mono text-slate-300">{{ formatDate(d.maturity_date) }}</div>
               </div>
             </div>
 
@@ -465,6 +466,16 @@
                     ρ {{ greeksFor(d).scalar.rho.toFixed(4) }}
                   </span>
                 </div>
+                <div v-if="greeksFor(d).corr_pairs && Object.keys(greeksFor(d).corr_pairs).length"
+                  class="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <span class="text-slate-500">Risque de corrélation :
+                    <HelpTip text="Sensibilité du prix à une hausse de 5pts de la corrélation entre chaque paire de sous-jacents (bump-and-reprice, même convention CRN que les autres Greeks) — calculée automatiquement dès qu'un deal a ≥2 sous-jacents, c'est le risque le moins intuitif d'un worst-of : une baisse de corrélation en crise peut coûter cher même si chaque sous-jacent pris seul se comporte bien." />
+                  </span>
+                  <span v-for="(v, pair) in greeksFor(d).corr_pairs" :key="pair" class="font-mono">
+                    <span class="text-slate-500">{{ pair }}</span>
+                    <span class="ml-1" :class="v >= 0 ? 'text-emerald-400' : 'text-red-400'">{{ v?.toFixed(3) }}</span>
+                  </span>
+                </div>
                 <span class="text-slate-600 font-mono text-[10px]">
                   calculé le {{ new Date(greeksFor(d).computed_at).toLocaleString('fr-FR') }}
                 </span>
@@ -545,10 +556,10 @@
                   </span>
                 </span>
                 <span class="text-slate-500">
-                  nouvelle value date <span class="font-mono text-slate-300">{{ rollResults[d.id].value_date }}</span>
+                  nouvelle value date <span class="font-mono text-slate-300">{{ formatDate(rollResults[d.id].value_date) }}</span>
                 </span>
                 <span class="text-slate-500">
-                  nouvelle échéance <span class="font-mono text-slate-300">{{ rollResults[d.id].maturity_date }}</span>
+                  nouvelle échéance <span class="font-mono text-slate-300">{{ formatDate(rollResults[d.id].maturity_date) }}</span>
                 </span>
                 <span v-if="!rollResults[d.id].vol_refreshed" class="text-amber-400 text-[10px]" title="Yahoo Finance indisponible — vol du booking d'origine réutilisée">
                   ⚠ vol non rafraîchie
@@ -564,11 +575,11 @@
                 <!-- Barre de vie du produit -->
                 <div>
                   <div class="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-                    <span>{{ d.value_date }}</span>
+                    <span>{{ formatDate(d.value_date) }}</span>
                     <span v-if="lifePct(d) !== null" class="text-slate-400">
-                      {{ lifePct(d) }}% écoulé
+                      {{ formatPercent(lifePct(d), 0) }} écoulé
                     </span>
-                    <span>{{ d.maturity_date }}</span>
+                    <span>{{ formatDate(d.maturity_date) }}</span>
                   </div>
                   <div class="relative h-2.5 bg-slate-800 rounded-full">
                     <div class="absolute inset-y-0 left-0 rounded-full"
@@ -597,11 +608,11 @@
 
                 <!-- Dates complètes -->
                 <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
-                  <div><div class="text-slate-500 mb-0.5">Trade</div><div class="font-mono text-slate-300">{{ d.trade_date }}</div></div>
-                  <div><div class="text-slate-500 mb-0.5">Strike</div><div class="font-mono text-slate-300">{{ d.strike_date }}</div></div>
-                  <div><div class="text-slate-500 mb-0.5">Value</div><div class="font-mono text-slate-300">{{ d.value_date }}</div></div>
-                  <div><div class="text-slate-500 mb-0.5">Maturité</div><div class="font-mono text-slate-300">{{ d.maturity_date }}</div></div>
-                  <div><div class="text-slate-500 mb-0.5">Payment</div><div class="font-mono text-slate-300">{{ d.payment_date || '–' }}</div></div>
+                  <div><div class="text-slate-500 mb-0.5">Trade</div><div class="font-mono text-slate-300">{{ formatDate(d.trade_date) }}</div></div>
+                  <div><div class="text-slate-500 mb-0.5">Strike</div><div class="font-mono text-slate-300">{{ formatDate(d.strike_date) }}</div></div>
+                  <div><div class="text-slate-500 mb-0.5">Value</div><div class="font-mono text-slate-300">{{ formatDate(d.value_date) }}</div></div>
+                  <div><div class="text-slate-500 mb-0.5">Maturité</div><div class="font-mono text-slate-300">{{ formatDate(d.maturity_date) }}</div></div>
+                  <div><div class="text-slate-500 mb-0.5">Payment</div><div class="font-mono text-slate-300">{{ formatDate(d.payment_date) }}</div></div>
                 </div>
 
                 <!-- Termes économiques (PARAM figés au booking) -->
@@ -798,6 +809,8 @@ import { apiFetch } from '../utils/api.js'
 import HelpTip from '../components/HelpTip.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import { formatInt, formatPercent, formatDate } from '../utils/format.js'
+import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
 
 const route = useRoute()
 const dealsStore = useDealsStore()
@@ -1230,33 +1243,9 @@ async function openDealDetail(id) {
   document.getElementById(`deal-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-// Chip color = how close the worst-of currently is to that barrier, read in
-// the direction the barrier bites: a KI hurts when WOF falls TO it (small
-// positive gap = danger), an autocall triggers when WOF rises ABOVE it.
-function barrierChipClass(b) {
-  const g = b.gap_pts
-  if (b.kind === 'ki') {
-    if (g <= 0) return 'bg-red-900/60 text-red-300 border border-red-700'
-    if (g <= 5) return 'bg-red-900/40 text-red-400'
-    if (g <= 15) return 'bg-amber-900/40 text-amber-400'
-    return 'bg-slate-800 text-slate-500'
-  }
-  if (b.kind === 'autocall') {
-    if (g >= 0) return 'bg-emerald-900/40 text-emerald-400'
-    if (g >= -5) return 'bg-amber-900/40 text-amber-400'
-    return 'bg-slate-800 text-slate-500'
-  }
-  // 'neutral' — M_ param whose usage in the script is ambiguous: the gap is
-  // shown but not color-read, we don't know which way the barrier bites.
-  return 'bg-slate-800 text-slate-400 border border-slate-600'
-}
-
-function barrierGapLabel(b) {
-  const g = b.gap_pts
-  if (b.kind === 'ki' && g <= 0) return `franchie (${g.toFixed(1)} pts)`
-  if (b.kind === 'autocall' && g >= 0) return `≥ barrière (+${g.toFixed(1)} pts)`
-  return `${g >= 0 ? '+' : ''}${g.toFixed(1)} pts`
-}
+// barrierChipClass/barrierGapLabel now live in utils/barriers.js — shared
+// with Risk Management's Barrières tab so the color/label convention can't
+// diverge between the two.
 
 const statusOptions = ['actif', 'callé', 'échu', 'résilié']
 
@@ -1376,9 +1365,7 @@ function statusClass(s) {
   return map[s] || 'badge-muted'
 }
 
-function formatNominal(n) {
-  return (n ?? 0).toLocaleString('fr-FR')
-}
+const formatNominal = formatInt
 
 function describeOutcome(ev) {
   if (!ev) return null

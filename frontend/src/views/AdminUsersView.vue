@@ -12,6 +12,7 @@
       </div>
 
       <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
+      <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
       <div class="card overflow-x-auto">
         <LoadingSpinner v-if="loading" class="py-6" />
@@ -95,13 +96,12 @@ import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
-import { useToastsStore } from '../stores/toasts.js'
 
-const toasts = useToastsStore()
 const users    = ref([])
 const entities = ref([])
 const loading  = ref(true)
 const error    = ref('')
+const notice   = ref('')
 const creating = ref(false)
 
 const form = reactive({ username: '', email: '', password: '', role: 'user', entity_id: null })
@@ -133,6 +133,7 @@ async function createUser() {
   }
   creating.value = true
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch('/api/admin/users', {
       method: 'POST',
@@ -143,7 +144,7 @@ async function createUser() {
     users.value.push(await res.json())
     users.value.sort((a, b) => a.username.localeCompare(b.username))
     form.username = ''; form.email = ''; form.password = ''; form.role = 'user'
-    toasts.success('Utilisateur créé')
+    notice.value = 'Utilisateur créé'
   } catch (e) {
     error.value = e.message
   } finally {
@@ -153,6 +154,7 @@ async function createUser() {
 
 async function updateUser(u, payload) {
   error.value = ''
+  notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/users/${u.id}`, {
       method: 'PATCH',

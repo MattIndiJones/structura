@@ -2,13 +2,16 @@
   <div class="flex-1 flex flex-col min-h-0">
 
     <div class="page-header px-6 pt-6 pb-0 mb-0">
-      <div>
+      <div class="flex items-center gap-3">
+        <RouterLink :to="{ path: '/', query: { category: 'pricing' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
         <h1 class="page-title">Mes Scripts</h1>
       </div>
       <div class="page-actions">
         <RouterLink to="/pricer" class="btn-primary text-xs px-3 py-1.5">+ Nouveau script</RouterLink>
       </div>
     </div>
+    <AlertMessage v-if="error" kind="error" dismissible class="mx-5 mt-3" @dismiss="error = ''">{{ error }}</AlertMessage>
+    <AlertMessage v-if="notice" kind="success" dismissible class="mx-5 mt-3" @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
     <div class="flex flex-1 min-h-0">
 
@@ -16,7 +19,7 @@
       <aside class="w-56 shrink-0 border-r border-slate-800 flex flex-col overflow-y-auto">
         <div class="px-3 py-3 flex items-center justify-between">
           <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Dossiers</span>
-          <button class="text-slate-500 hover:text-blue-400 text-xs" title="Nouveau dossier" @click="startNewFolder(null)">+</button>
+          <button class="text-slate-500 hover:text-blue-400 text-xs" title="Nouveau dossier" aria-label="Nouveau dossier racine" @click="startNewFolder(null)">+</button>
         </div>
 
         <!-- Tous les scripts -->
@@ -41,9 +44,9 @@
               </button>
               <!-- Folder actions -->
               <div class="hidden group-hover:flex items-center gap-1 pr-2 shrink-0">
-                <button class="text-slate-600 hover:text-blue-400 text-[10px]" title="Sous-dossier" @click.stop="startNewFolder(node.id)">+</button>
-                <button class="text-slate-600 hover:text-amber-400 text-[10px]" title="Renommer" @click.stop="startRename(node)">✎</button>
-                <button class="text-slate-600 hover:text-red-400 text-[10px]" title="Supprimer" @click.stop="deleteFolder(node.id)">✕</button>
+                <button class="text-slate-600 hover:text-blue-400 text-[10px]" title="Sous-dossier" aria-label="Nouveau sous-dossier" @click.stop="startNewFolder(node.id)">+</button>
+                <button class="text-slate-600 hover:text-amber-400 text-[10px]" title="Renommer" aria-label="Renommer le dossier" @click.stop="startRename(node)">✎</button>
+                <button class="text-slate-600 hover:text-red-400 text-[10px]" title="Supprimer" aria-label="Supprimer le dossier" @click.stop="deleteFolder(node.id)">✕</button>
               </div>
             </div>
           </template>
@@ -146,11 +149,11 @@ import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import BaseModal from '../components/ui/BaseModal.vue'
-import { useToastsStore } from '../stores/toasts.js'
+import AlertMessage from '../components/ui/AlertMessage.vue'
+import { formatDate } from '../utils/format.js'
 
 const auth   = useAuthStore()
 const router = useRouter()
-const toasts = useToastsStore()
 
 // ── State ──────────────────────────────────────────────────────────
 const folders         = ref([])
@@ -158,6 +161,8 @@ const scripts         = ref([])
 const loading         = ref(false)
 const selectedFolderId = ref(null)
 const search          = ref('')
+const error           = ref('')
+const notice          = ref('')
 
 // New folder inline
 const newFolderInput = ref(null)
@@ -215,13 +220,19 @@ function startNewFolder(parentId) {
 async function saveNewFolder() {
   const name = newFolder.value.name.trim()
   if (!name) return
-  const res = await apiFetch('/api/folders', {
-    method: 'POST',
-    headers: { ...auth.authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, parent_id: newFolder.value.parentId }),
-  })
-  if (res.ok) { await fetchFolders() }
-  newFolder.value.active = false
+  error.value = ''
+  try {
+    const res = await apiFetch('/api/folders', {
+      method: 'POST',
+      headers: { ...auth.authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, parent_id: newFolder.value.parentId }),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur création dossier')
+    await fetchFolders()
+    newFolder.value.active = false
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 function startRename(node) {
@@ -232,22 +243,36 @@ function startRename(node) {
 async function saveRename() {
   const { id, name } = renameFolder.value
   if (!name.trim()) return
-  await apiFetch(`/api/folders/${id}`, {
-    method: 'PUT',
-    headers: { ...auth.authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name.trim() }),
-  })
-  renameFolder.value.active = false
-  await fetchFolders()
-  toasts.success('Dossier renommé')
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await apiFetch(`/api/folders/${id}`, {
+      method: 'PUT',
+      headers: { ...auth.authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur renommage')
+    renameFolder.value.active = false
+    await fetchFolders()
+    notice.value = 'Dossier renommé'
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 async function deleteFolder(id) {
   if (!confirm('Supprimer ce dossier ? Les sous-dossiers seront remontés.')) return
-  await apiFetch(`/api/folders/${id}`, { method: 'DELETE', headers: auth.authHeaders() })
-  if (selectedFolderId.value === id) selectedFolderId.value = null
-  await fetchFolders()
-  toasts.success('Dossier supprimé')
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await apiFetch(`/api/folders/${id}`, { method: 'DELETE', headers: auth.authHeaders() })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')
+    if (selectedFolderId.value === id) selectedFolderId.value = null
+    await fetchFolders()
+    notice.value = 'Dossier supprimé'
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 // ── Scripts actions ────────────────────────────────────────────────
@@ -257,27 +282,37 @@ function openScript(id) {
 
 async function deleteScript(id) {
   if (!confirm('Supprimer ce script ?')) return
-  await apiFetch(`/api/db/scripts/${id}`, { method: 'DELETE', headers: auth.authHeaders() })
-  scripts.value = scripts.value.filter(s => s.id !== id)
-  toasts.success('Script supprimé')
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await apiFetch(`/api/db/scripts/${id}`, { method: 'DELETE', headers: auth.authHeaders() })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')
+    scripts.value = scripts.value.filter(s => s.id !== id)
+    notice.value = 'Script supprimé'
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 async function toggleShare(s) {
-  const res = await apiFetch(`/api/db/scripts/${s.id}`, {
-    method: 'PUT',
-    headers: { ...auth.authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ is_shared: !s.is_shared }),
-  })
-  if (res.ok) {
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await apiFetch(`/api/db/scripts/${s.id}`, {
+      method: 'PUT',
+      headers: { ...auth.authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_shared: !s.is_shared }),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur mise à jour')
     const updated = await res.json()
     const idx = scripts.value.findIndex(x => x.id === s.id)
     if (idx !== -1) scripts.value[idx] = updated
-    toasts.success(updated.is_shared ? 'Script partagé avec votre entité' : 'Script rendu privé')
+    notice.value = updated.is_shared ? 'Script partagé avec votre entité' : 'Script rendu privé'
+  } catch (e) {
+    error.value = e.message
   }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-function fmtDate(iso) {
-  return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })
-}
+const fmtDate = formatDate
 </script>

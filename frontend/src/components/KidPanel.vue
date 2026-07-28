@@ -93,19 +93,19 @@
               <span class="text-slate-500 w-36">VEV (équiv. vol)
                 <HelpTip text="Volatility Equivalent Value — la volatilité annualisée implicite qui, dans un modèle log-normal simple, produirait le même percentile 1% de perte à l'échéance que celui observé en simulation Monte Carlo sur ce produit précis. Une façon de résumer le risque de queue en un seul chiffre comparable entre produits." />
               </span>
-              <span class="font-mono font-bold text-slate-200">{{ kid.vev.toFixed(1) }}%</span>
+              <span class="font-mono font-bold text-slate-200">{{ formatPercent(kid.vev, 1) }}</span>
             </div>
             <div class="flex items-center gap-2 text-xs">
               <span class="text-slate-500 w-36">Durée recommandée
                 <HelpTip text="Recommended Holding Period (T_rhp) — fixée ici à la maturité du produit. Toute la lecture du SRI et des scénarios de performance suppose que vous conservez le produit jusque-là ; une sortie anticipée expose à un profil de risque différent, non capturé par ces chiffres." />
               </span>
-              <span class="font-mono font-bold text-slate-200">{{ kid.T_rhp.toFixed(1) }} ans</span>
+              <span class="font-mono font-bold text-slate-200">{{ formatNumber(kid.T_rhp, 1) }} ans</span>
             </div>
           </div>
         </div>
 
         <p class="text-[10px] text-slate-600 mt-4 pt-3 border-t border-slate-800">
-          L'indicateur de risque part de l'hypothèse que vous conservez le produit {{ kid.T_rhp.toFixed(1) }} an(s).
+          L'indicateur de risque part de l'hypothèse que vous conservez le produit {{ formatNumber(kid.T_rhp, 1) }} an(s).
           Si vous le vendez avant cette date, le risque réel peut être très différent.
           PRIIPs Règlement (UE) 1286/2014 — calcul interne MC, non officiel.
         </p>
@@ -127,8 +127,8 @@
                 <th class="text-left text-slate-500 font-medium pb-2 pr-4">Scénario</th>
                 <th v-for="h in kid.horizons" :key="h.T"
                   class="text-right text-slate-500 font-medium pb-2 px-3 whitespace-nowrap">
-                  {{ h.T >= kid.T_rhp ? 'Maturité' : h.T.toFixed(0) + ' an' + (h.T > 1 ? 's' : '') }}
-                  <span class="block font-normal text-slate-600">{{ h.T.toFixed(2) }}Y</span>
+                  {{ h.T >= kid.T_rhp ? 'Maturité' : formatNumber(h.T, 0) + ' an' + (h.T > 1 ? 's' : '') }}
+                  <span class="block font-normal text-slate-600">{{ formatNumber(h.T, 2) }}Y</span>
                 </th>
               </tr>
             </thead>
@@ -151,7 +151,7 @@
                   </div>
                   <div class="font-mono text-[10px] mt-0.5"
                     :class="h[sc.key].ann_return >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                    {{ h[sc.key].ann_return >= 0 ? '+' : '' }}{{ h[sc.key].ann_return.toFixed(2) }}% / an
+                    {{ h[sc.key].ann_return >= 0 ? '+' : '' }}{{ formatPercent(h[sc.key].ann_return, 2) }} / an
                   </div>
                 </td>
               </tr>
@@ -172,17 +172,17 @@
         <div class="grid grid-cols-3 gap-4 text-xs">
           <div class="bg-slate-800/40 rounded-lg px-4 py-3 text-center">
             <div class="text-slate-500 mb-1">Frais d'entrée</div>
-            <div class="font-mono font-bold text-slate-200 text-sm">{{ kid.costs.entry.toFixed(2) }}%</div>
+            <div class="font-mono font-bold text-slate-200 text-sm">{{ formatPercent(kid.costs.entry, 2) }}</div>
             <div class="text-slate-600 text-[10px] mt-1">{{ fmtAmount(10000 * kid.costs.entry / 100) }} € / 10 k€</div>
           </div>
           <div class="bg-slate-800/40 rounded-lg px-4 py-3 text-center">
             <div class="text-slate-500 mb-1">Frais courants / an</div>
-            <div class="font-mono font-bold text-slate-200 text-sm">{{ kid.costs.ongoing.toFixed(2) }}%</div>
+            <div class="font-mono font-bold text-slate-200 text-sm">{{ formatPercent(kid.costs.ongoing, 2) }}</div>
             <div class="text-slate-600 text-[10px] mt-1">{{ fmtAmount(10000 * kid.costs.ongoing / 100) }} € / 10 k€</div>
           </div>
           <div class="bg-slate-800/40 rounded-lg px-4 py-3 text-center">
             <div class="text-slate-500 mb-1">Frais de sortie</div>
-            <div class="font-mono font-bold text-slate-200 text-sm">{{ kid.costs.exit.toFixed(2) }}%</div>
+            <div class="font-mono font-bold text-slate-200 text-sm">{{ formatPercent(kid.costs.exit, 2) }}</div>
             <div class="text-slate-600 text-[10px] mt-1">{{ fmtAmount(10000 * kid.costs.exit / 100) }} € / 10 k€</div>
           </div>
         </div>
@@ -216,6 +216,7 @@
 import { ref, computed } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { apiFetch } from '../utils/api.js'
+import { formatInt, formatNumber, formatPercent } from '../utils/format.js'
 import HelpTip from './HelpTip.vue'
 
 const store = usePricingStore()
@@ -258,16 +259,14 @@ function sriLabel(n) {
 }
 
 // ── Formatting ───────────────────────────────────────────
-function fmtAmount(n) {
-  return Math.round(n).toLocaleString('fr-FR')
-}
+const fmtAmount = formatInt
 
 const totalCostImpact = computed(() => {
   if (!kid.value) return '—'
   const T = kid.value.T_rhp
   const c = kid.value.costs
   const impact = (c.entry + c.exit) / 100 + c.ongoing / 100 * T
-  return `-${(impact * 100).toFixed(2)}%`
+  return `-${formatPercent(impact * 100, 2)}`
 })
 
 // ── Compute KID ──────────────────────────────────────────

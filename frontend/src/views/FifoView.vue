@@ -2,7 +2,8 @@
   <div class="flex-1 flex flex-col min-h-0 text-slate-100">
 
     <div class="page-header px-6 pt-6 pb-0 mb-0">
-      <div>
+      <div class="flex items-center gap-3">
+        <RouterLink :to="{ path: '/', query: { category: 'studies' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
         <h1 class="page-title">Carnet d'ordres — FIFO</h1>
       </div>
       <div class="page-actions">
@@ -243,6 +244,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { apiFetch } from '../utils/api.js'
+import { formatNumber, formatInt } from '../utils/format.js'
 
 const folder     = ref('')
 const qtyMode    = ref('auto')
@@ -314,17 +316,12 @@ async function run() {
   }
 }
 
-const fmtNum = new Intl.NumberFormat('fr-CH', { maximumFractionDigits: 0 })
-const fmtPxN = new Intl.NumberFormat('fr-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
 function fmt(v) {
   if (v == null) return '—'
-  return (v >= 0 ? '+' : '') + fmtNum.format(v)
+  return (v >= 0 ? '+' : '') + formatNumber(v, 0)
 }
 function fmtPx(v) {
-  return v != null ? fmtPxN.format(v) : '—'
+  return formatNumber(v, 2)
 }
-function fmtQty(v) {
-  return v != null ? fmtNum.format(v) : '—'
-}
+const fmtQty = formatInt
 </script>

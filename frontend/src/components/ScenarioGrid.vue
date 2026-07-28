@@ -65,8 +65,8 @@
               <div class="w-[70px] h-11 flex flex-col items-center justify-center rounded-sm text-slate-100"
                    :class="isBase(s, v) ? 'ring-2 ring-blue-400' : ''"
                    :style="{ background: cellColor(store.scenarios.prices[j][i]) }"
-                   :title="demo.enabled ? '' : `Δspot=${fmtPct(s)} · Δvol=${fmtPp(v)} -> ${(store.scenarios.prices[j][i] * 100).toFixed(2)}%`">
-                <div class="font-mono font-bold text-[11px]"><SensitiveValue>{{ (store.scenarios.prices[j][i] * 100).toFixed(1) }}%</SensitiveValue></div>
+                   :title="demo.enabled ? '' : `Δspot=${fmtPct(s)} · Δvol=${fmtPp(v)} -> ${formatPercent(store.scenarios.prices[j][i] * 100, 2)}`">
+                <div class="font-mono font-bold text-[11px]"><SensitiveValue>{{ formatPercent(store.scenarios.prices[j][i] * 100, 1) }}</SensitiveValue></div>
                 <div class="font-mono text-[10px]" :class="deltaCls(store.scenarios.prices[j][i])">
                   <SensitiveValue>{{ fmtDelta(store.scenarios.prices[j][i]) }}</SensitiveValue>
                 </div>
@@ -76,8 +76,8 @@
         </tbody>
       </table>
       <div class="text-xs text-slate-600 mt-3 text-center">
-        Base (cadre bleu) : <strong class="text-slate-300"><SensitiveValue>{{ (store.scenarios.base_price * 100).toFixed(2) }}%</SensitiveValue></strong>
-        · N = <SensitiveValue>{{ N }}</SensitiveValue> chemins/cellule · même seed que le pricing principal
+        Base (cadre bleu) : <strong class="text-slate-300"><SensitiveValue>{{ formatPercent(store.scenarios.base_price * 100, 2) }}</SensitiveValue></strong>
+        · N = <SensitiveValue>{{ formatInt(N) }}</SensitiveValue> chemins/cellule · même seed que le pricing principal
       </div>
     </div>
   </div>
@@ -89,6 +89,7 @@ import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
+import { formatPercent, formatNumber, formatInt } from '../utils/format.js'
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -119,7 +120,7 @@ const delta = price => price - basePrice.value
 
 function fmtDelta(price) {
   const d = delta(price) * 100
-  return (d >= 0 ? '+' : '') + d.toFixed(1) + 'pp'
+  return (d >= 0 ? '+' : '') + formatNumber(d, 1) + 'pp'
 }
 function deltaCls(price) {
   const d = delta(price)

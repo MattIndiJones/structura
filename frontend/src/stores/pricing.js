@@ -665,7 +665,17 @@ export const usePricingStore = defineStore('pricing', () => {
   async function runScenarios({ spot_shocks_pct, vol_shocks_pct, N }) {
     loading.value = true; error.value = null
     const cells = (spot_shocks_pct.length || 9) * (vol_shocks_pct.length || 5)
-    _startProgress(cells * (N || 2000) / (45 * 2000) * 3000)
+    // Cells now reprice in parallel across up to 4 worker processes (see
+    // core/payscript/scenarios.py) instead of one sequential loop. Measured
+    // live (45 cells, N=2000): ~4.2s sequential -> ~2.3-2.4s parallel, a real
+    // but sub-linear ~1.8x speedup (process-pool spawn is per-request on
+    // Windows `spawn`, so it doesn't scale 4x) — EFFECTIVE_SPEEDUP and
+    // POOL_SPAWN_OVERHEAD_MS below are fit to that measurement, not the
+    // naive worker count.
+    const EFFECTIVE_SPEEDUP = 2
+    const POOL_SPAWN_OVERHEAD_MS = 500
+    const sequentialMs = cells * (N || 2000) / (45 * 2000) * 3000
+    _startProgress(POOL_SPAWN_OVERHEAD_MS + sequentialMs / EFFECTIVE_SPEEDUP)
     try {
       const res = await fetch('/api/scenarios', {
         method: 'POST',
