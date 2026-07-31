@@ -68,7 +68,7 @@
           </div>
           <div v-else class="mt-3 pt-3 border-t border-slate-700">
             <p class="text-xs text-amber-500/80">
-              S₀ à renseigner — saisissez les spots dans la 1ʳᵉ ligne (Strike / Fixing S₀) ci-dessous.
+              S₀ à renseigner — un Ops Maker doit soumettre le fixing Strike avec sa preuve officielle.
             </p>
           </div>
         </template>
@@ -103,7 +103,7 @@
               Sous-jacents figés au booking · {{ deal.underlyings.map(u => u.ticker || u.name).join(', ') }}
             </p>
           </div>
-          <button class="btn-secondary text-xs px-3 py-1.5"
+          <button v-if="isDealOwner" class="btn-secondary text-xs px-3 py-1.5"
             :disabled="dealsStore.loading" @click="doRefresh">
             <span v-if="dealsStore.loading"
               class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -118,7 +118,7 @@
               <span class="font-semibold text-amber-300">Résolution proposée : {{ proposal.proposed_outcome }}</span>
               <span class="ml-2 text-slate-500">{{ proposal.status }} · source {{ proposal.data_source }}</span>
               <div class="text-[10px] text-slate-500 mt-0.5">
-                {{ proposal.result?.event_date || 'date inconnue' }} · aucune application automatique
+                {{ proposal.result?.event_date || 'date inconnue' }} · l’autorisation Checker applique atomiquement le résultat officiel
               </div>
               <div v-if="proposal.comparison_status" class="text-[10px] mt-0.5"
                    :class="proposal.comparison_status === 'MATCH' ? 'text-emerald-400' : 'text-amber-400'">
@@ -129,10 +129,8 @@
               </div>
             </div>
             <div class="flex gap-2 shrink-0">
-              <button v-if="proposal.status === 'PROPOSED'" class="btn-secondary text-xs px-2 py-1"
-                      @click="validateProposal(proposal)">Valider</button>
-              <button v-if="proposal.status === 'VALIDATED'" class="btn-primary text-xs px-2 py-1"
-                      @click="applyProposal(proposal)">Appliquer</button>
+              <button v-if="isOpsChecker && proposal.status === 'PROPOSED'" class="btn-secondary text-xs px-2 py-1"
+                      @click="validateProposal(proposal)">Autoriser et appliquer</button>
             </div>
           </div>
         </div>
@@ -149,7 +147,7 @@
         </div>
 
         <!-- Bandeau sauvegarde spot -->
-        <div v-if="saveMsg" class="mb-3 px-3 py-2 rounded-lg text-xs bg-blue-950/40 border border-blue-800/50 text-blue-300">
+        <div v-if="saveMsg" class="mb-3 px-3 py-2 rounded-lg text-xs whitespace-pre-line bg-blue-950/40 border border-blue-800/50 text-blue-300">
           {{ saveMsg }}
         </div>
 
@@ -167,7 +165,7 @@
                   <span class="text-slate-600 font-normal ml-1">officiel / indicatif</span>
                 </th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3">Fixing
-                  <HelpTip text="Yahoo est uniquement indicatif. Un fixing officiel doit être saisi manuellement, complet, puis validé avant toute résolution." />
+                  <HelpTip text="Yahoo est uniquement indicatif. Un Ops Maker soumet un fixing candidat avec sa preuve ; un Ops Checker distinct le valide avant toute résolution." />
                 </th>
                 <th class="text-left text-slate-500 font-medium pb-2">Statut
                   <HelpTip text="futur = date pas encore atteinte. observé = spot constaté normalement. callé = ce constat a déclenché le rappel anticipé du produit. ki = barrière de knock-in franchie à ce constat. final = constat de maturité." />
@@ -201,13 +199,10 @@
                 <td class="py-2 pr-3 font-mono num text-slate-400">{{ ev.t_years.toFixed(2) }}</td>
                 <td v-for="u in deal.underlyings" :key="u.name" class="py-2 pr-3">
                   <div class="flex items-center gap-1.5">
-                    <input :value="ev.spots[u.name] ?? ''"
-                      @blur="patchSpot(ev, u.name, $event.target.value)"
-                      type="number" step="any"
-                      :disabled="['VALIDATED', 'APPLIED'].includes(ev.fixing_status)"
-                      class="input w-24 text-xs py-0.5 font-mono"
-                      :class="ev.spots[u.name] ? 'text-slate-200' : 'text-slate-600'"
-                      placeholder="–" />
+                    <span class="w-24 text-xs font-mono"
+                          :class="ev.spots[u.name] ? 'text-slate-200' : 'text-slate-600'">
+                      {{ ev.spots[u.name] != null ? formatSpot(ev.spots[u.name]) : '—' }}
+                    </span>
                     <span v-if="perf(ev, u)" class="text-[10px] font-mono shrink-0"
                       :class="perfClass(ev, u)">
                       {{ perf(ev, u) }}
@@ -220,11 +215,64 @@
                 <td class="py-2 pr-3">
                   <span :class="sourceClass(ev.source)"
                     class="px-1.5 py-0.5 rounded text-[10px] font-medium">
-                    {{ ev.fixing_status }}
+                    {{ ev.fixing_status }}<span v-if="ev.fixing_version"> · v{{ ev.fixing_version }}</span>
                   </span>
-                  <button v-if="['RECEIVED', 'PARTIAL', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)"
+                  <div v-if="ev.fixing_provider" class="text-[10px] text-slate-500 mt-1">
+                    {{ ev.fixing_provider }} · {{ ev.fixing_external_reference }}
+                  </div>
+                  <details v-if="ev.current_fixing_version_id" class="mt-1 text-[10px] text-slate-500 max-w-80">
+                    <summary class="cursor-pointer text-cyan-400 hover:text-cyan-300">
+                      Contrôler la provenance et l’historique
+                    </summary>
+                    <div class="mt-1.5 rounded border border-slate-700 bg-slate-950/70 p-2 space-y-1">
+                      <div><span class="text-slate-600">Source :</span> {{ ev.fixing_provider }} / {{ ev.fixing_source_type }}</div>
+                      <div><span class="text-slate-600">Référence :</span> {{ ev.fixing_external_reference }}</div>
+                      <div><span class="text-slate-600">Observation :</span> {{ ev.fixing_observed_at }} · {{ ev.fixing_timezone }}</div>
+                      <div><span class="text-slate-600">Convention :</span> {{ ev.fixing_venue }} · {{ ev.fixing_calendar }}</div>
+                      <div>
+                        <span class="text-slate-600">Instruments / unités :</span>
+                        <span v-for="(underlying, index) in deal.underlyings" :key="underlying.name">
+                          {{ index ? ' · ' : '' }}{{ underlying.name }}
+                          ({{ underlying.ticker || 'identifiant contractuel' }}, {{ underlying.ccy || deal.devise }})
+                          = {{ ev.spots?.[underlying.name] }}
+                        </span>
+                      </div>
+                      <div><span class="text-slate-600">Maker :</span> utilisateur #{{ ev.fixing_entered_by }} · {{ ev.fixing_entered_at }}</div>
+                      <div><span class="text-slate-600">Motif :</span> {{ ev.fixing_reason }}</div>
+                      <template v-if="currentFixingVersion(ev)">
+                        <div>
+                          <span class="text-slate-600">Pièce :</span>
+                          {{ currentFixingVersion(ev).evidence_filename }}
+                          ({{ formatEvidenceSize(currentFixingVersion(ev).evidence_size_bytes) }})
+                        </div>
+                        <button class="text-blue-400 hover:text-blue-300"
+                                @click="downloadEvidence(ev, currentFixingVersion(ev))">
+                          Télécharger et contrôler la pièce archivée
+                        </button>
+                      </template>
+                      <div class="break-all font-mono"><span class="text-slate-600">SHA preuve :</span> {{ ev.fixing_evidence_sha256 }}</div>
+                      <div class="break-all font-mono"><span class="text-slate-600">SHA record :</span> {{ ev.fixing_record_sha256 }}</div>
+                      <div v-if="ev.fixing_versions?.length" class="pt-1 border-t border-slate-800">
+                        <div class="text-slate-600 mb-0.5">Historique immuable :</div>
+                        <div v-for="version in ev.fixing_versions" :key="version.id" class="font-mono">
+                          v{{ version.version }} · {{ version.status }} · Maker #{{ version.entered_by }}
+                          <span v-if="version.validated_by"> · Checker #{{ version.validated_by }}</span>
+                          <span v-if="version.rejected_by"> · rejetée par #{{ version.rejected_by }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                  <button v-if="canSubmitFixing(ev)"
+                          class="block mt-1 text-[10px] text-blue-400 hover:text-blue-300"
+                          @click="openFixingForm(ev)">
+                    {{ ev.fixing_version ? `Corriger la v${ev.fixing_version}` : 'Saisir avec preuve' }}
+                  </button>
+                  <button v-if="canValidateFixing(ev)"
                           class="block mt-1 text-[10px] text-emerald-400 hover:text-emerald-300"
                           @click="validateEventFixing(ev)">Valider le fixing</button>
+                  <button v-if="canValidateFixing(ev)"
+                          class="block mt-1 text-[10px] text-red-400 hover:text-red-300"
+                          @click="rejectEventFixing(ev)">Rejeter le fixing</button>
                 </td>
                 <td class="py-2">
                   <span class="text-[10px] bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-300">
@@ -236,9 +284,95 @@
           </table>
         </div>
 
+        <div v-if="fixingEvent" class="mt-4 rounded-lg border border-blue-800/50 bg-blue-950/20 p-4">
+          <div class="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <h3 class="text-xs font-semibold text-blue-300">
+                {{ fixingEvent.fixing_version ? `Correction du fixing v${fixingEvent.fixing_version}` : 'Nouveau fixing candidat' }}
+              </h3>
+              <p class="text-[10px] text-slate-500 mt-0.5">
+                {{ fixingEvent.label }} · {{ fixingEvent.event_date }} · la saisie restera candidate jusqu’au contrôle d’un Checker distinct
+              </p>
+            </div>
+            <button class="btn-ghost text-xs" @click="closeFixingForm">Fermer</button>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div v-for="u in deal.underlyings" :key="u.name" class="flex flex-col gap-1">
+              <label class="label">Fixing {{ u.ticker || u.name }}</label>
+              <input v-model.number="fixingForm.spots[u.name]" type="number" step="any"
+                     class="input" placeholder="Valeur strictement positive" />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="label">Fournisseur officiel</label>
+              <select v-model="fixingForm.provider" class="select">
+                <option v-for="provider in fixingProviders" :key="provider" :value="provider">
+                  {{ provider }}
+                </option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="label">Type de source</label>
+              <select v-model="fixingForm.source_type" class="select">
+                <option value="MESSAGE">Message</option>
+                <option value="FILE">Fichier</option>
+                <option value="API">API</option>
+                <option value="PLATFORM">Plateforme</option>
+                <option value="CALCULATION_AGENT">Agent de calcul</option>
+                <option value="OTHER">Autre</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="label">Référence externe</label>
+              <input v-model="fixingForm.external_reference" class="input" placeholder="Message, fichier ou batch" />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="label">Observation avec timezone</label>
+              <input v-model="fixingForm.observed_at" class="input font-mono"
+                     placeholder="2026-07-31T17:30:00+02:00" />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="label">Timezone de marché</label>
+              <input v-model="fixingForm.timezone" class="input" placeholder="Europe/Zurich" />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="label">Place / convention</label>
+              <input v-model="fixingForm.venue" class="input" placeholder="Official close" />
+            </div>
+            <div class="flex flex-col gap-1">
+              <label class="label">Calendrier</label>
+              <input v-model="fixingForm.calendar" class="input" placeholder="TARGET, SIX…" />
+            </div>
+            <div class="flex flex-col gap-1 sm:col-span-2">
+              <label class="label">Pièce source officielle (5 Mo maximum)</label>
+              <input type="file" class="input" @change="captureEvidence" />
+              <div v-if="fixingForm.evidence_filename" class="text-[10px] text-slate-500">
+                {{ fixingForm.evidence_filename }} · {{ formatEvidenceSize(fixingForm.evidence_size_bytes) }}
+              </div>
+            </div>
+            <div class="flex flex-col gap-1 sm:col-span-2 lg:col-span-3">
+              <label class="label">SHA-256 calculé depuis la pièce archivée</label>
+              <input v-model="fixingForm.evidence_sha256" class="input font-mono" readonly
+                     placeholder="Sélectionnez une pièce source" />
+            </div>
+            <div class="flex flex-col gap-1 sm:col-span-2 lg:col-span-3">
+              <label class="label">Motif de capture / correction</label>
+              <textarea v-model="fixingForm.reason" class="input min-h-20"
+                        placeholder="Décrivez l’origine de la donnée et la raison de la saisie"></textarea>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2">
+            <button class="btn-primary text-xs px-3 py-1.5" :disabled="savingEventId === fixingEvent.id"
+                    @click="submitFixing">
+              {{ fixingEvent.fixing_version ? 'Soumettre la correction' : 'Soumettre au Checker' }}
+            </button>
+            <span class="text-[10px] text-slate-500">Tous les champs de provenance sont obligatoires.</span>
+          </div>
+        </div>
+
         <p v-if="allEventsFuture && deal.events?.length" class="mt-3 text-[11px] text-slate-600 italic">
-          Tous les événements sont futurs — saisissez les spots manuellement dans les cellules, ou
-          cliquez "Actualiser spots Yahoo" après les dates de constatation.
+          Tous les événements sont futurs — le formulaire de fixing officiel sera disponible pour
+          l’Ops Maker après chaque date de constatation.
         </p>
       </div>
 
@@ -251,6 +385,7 @@
             </p>
           </div>
         </div>
+
         <div v-if="isDealOwner" class="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
           <select v-model="amendmentForm.field_name" class="select text-xs">
             <option value="nominal">Nominal</option>
@@ -426,6 +561,7 @@ import { usePricingStore } from '../stores/pricing.js'
 import { useAuthStore } from '../stores/auth.js'
 import HelpTip from './HelpTip.vue'
 import { formatDate } from '../utils/format.js'
+import { apiFetch } from '../utils/api.js'
 
 const props = defineProps({ initialDealId: { type: Number, default: null } })
 
@@ -440,12 +576,31 @@ const savingEventId = ref(null)
 const saveMsg = ref('')
 const auditResult = ref('')
 const amendmentForm = reactive({ field_name: 'nominal', new_value: '', reason: '' })
+const fixingEventId = ref(null)
+const fixingProviders = [
+  'BLOOMBERG', 'REFINITIV', 'OFFICIAL_EXCHANGE',
+  'CALCULATION_AGENT', 'ISSUER_AGENT', 'CUSTODIAN',
+]
+const fixingForm = reactive({
+  spots: {}, provider: 'BLOOMBERG', source_type: 'MESSAGE', external_reference: '',
+  observed_at: '', venue: '', calendar: '', timezone: 'UTC',
+  evidence_sha256: '', evidence_filename: '',
+  evidence_content_type: 'application/octet-stream', evidence_payload_b64: '',
+  evidence_size_bytes: 0, reason: '', supersedes_version: null,
+})
 let saveMsgTimer = null
 
 const deal = computed(() => dealsStore.currentDeal)
 const strikeEvent = computed(() => deal.value?.events?.find(e => e.t_years === 0) ?? null)
 const hasS0 = computed(() => !!strikeEvent.value && Object.keys(strikeEvent.value.spots).length > 0)
 const isDealOwner = computed(() => deal.value?.user_id === authStore.user?.id)
+const isOpsMaker = computed(() => authStore.user?.role === 'ops_maker' &&
+  deal.value?.entity_id === authStore.user?.entity_id)
+const isOpsChecker = computed(() => authStore.user?.role === 'checker' &&
+  deal.value?.entity_id === authStore.user?.entity_id &&
+  deal.value?.user_id !== authStore.user?.id)
+const fixingEvent = computed(() => deal.value?.events?.find(
+  event => event.id === fixingEventId.value) ?? null)
 
 const allEventsFuture = computed(() => {
   const evs = deal.value?.events
@@ -567,16 +722,129 @@ function showSaveMsg(text) {
   saveMsgTimer = setTimeout(() => { saveMsg.value = '' }, 2500)
 }
 
-async function patchSpot(ev, underlyingName, rawVal) {
-  const val = parseFloat(rawVal)
-  if (isNaN(val) || val <= 0) return
+function canSubmitFixing(ev) {
+  return isOpsMaker.value && deal.value?.user_id !== authStore.user?.id &&
+    ev.event_date <= today && ev.fixing_status !== 'APPLIED'
+}
+
+function canValidateFixing(ev) {
+  return isOpsChecker.value &&
+    ['RECEIVED', 'PARTIAL', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status) &&
+    ev.fixing_entered_by !== authStore.user?.id
+}
+
+function currentFixingVersion(ev) {
+  return ev.fixing_versions?.find(
+    version => version.id === ev.current_fixing_version_id) ?? null
+}
+
+function formatEvidenceSize(size) {
+  if (!size) return '0 octet'
+  if (size < 1024) return `${size} octets`
+  return `${(size / 1024).toFixed(size < 1024 * 1024 ? 1 : 0)} Ko`
+}
+
+async function captureEvidence(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  if (file.size > 5 * 1024 * 1024) {
+    event.target.value = ''
+    showSaveMsg('⚠ Pièce refusée : taille supérieure à 5 Mo. Sélectionnez un export plus compact.')
+    return
+  }
+  const buffer = await file.arrayBuffer()
+  const digest = await crypto.subtle.digest('SHA-256', buffer)
+  const evidenceSha = Array.from(new Uint8Array(digest))
+    .map(byte => byte.toString(16).padStart(2, '0')).join('')
+  const reader = new FileReader()
+  const payload = await new Promise((resolve, reject) => {
+    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] || '')
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+  Object.assign(fixingForm, {
+    evidence_sha256: evidenceSha,
+    evidence_filename: file.name,
+    evidence_content_type: file.type || 'application/octet-stream',
+    evidence_payload_b64: payload,
+    evidence_size_bytes: file.size,
+  })
+}
+
+async function downloadEvidence(ev, version) {
+  try {
+    const res = await apiFetch(
+      `/api/deals/${deal.value.id}/events/${ev.id}/fixing-versions/${version.id}/evidence`)
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err?.detail?.message || err?.detail || 'Preuve indisponible')
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = version.evidence_filename || `fixing-v${version.version}`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    showSaveMsg(`⚠ Téléchargement refusé : ${error.message}`)
+  }
+}
+
+function openFixingForm(ev) {
+  fixingEventId.value = ev.id
+  Object.assign(fixingForm, {
+    spots: Object.fromEntries(deal.value.underlyings.map(
+      underlying => [underlying.name, ev.spots?.[underlying.name] ?? ''])),
+    provider: ev.fixing_provider || 'BLOOMBERG',
+    source_type: ev.fixing_source_type || 'MESSAGE',
+    external_reference: '',
+    observed_at: '',
+    venue: ev.fixing_venue || '',
+    calendar: ev.fixing_calendar || '',
+    timezone: ev.fixing_timezone || 'UTC',
+    evidence_sha256: '',
+    evidence_filename: '',
+    evidence_content_type: 'application/octet-stream',
+    evidence_payload_b64: '',
+    evidence_size_bytes: 0,
+    reason: '',
+    supersedes_version: ev.fixing_version || null,
+  })
+}
+
+function closeFixingForm() {
+  fixingEventId.value = null
+}
+
+async function submitFixing() {
+  const ev = fixingEvent.value
+  if (!ev) return
   savingEventId.value = ev.id
   try {
-    const spots = { ...ev.spots, [underlyingName]: val }
-    await dealsStore.updateEvent(deal.value.id, ev.id, { spots, source: 'manuel' })
-    showSaveMsg(`✓ Spot ${underlyingName} sauvegardé (${val.toLocaleString('fr-FR')})`)
+    await dealsStore.updateEvent(deal.value.id, ev.id, {
+      spots: Object.fromEntries(Object.entries(fixingForm.spots)
+        .map(([name, value]) => [name, Number(value)])),
+      source: 'manuel',
+      provider: fixingForm.provider.trim(),
+      source_type: fixingForm.source_type,
+      external_reference: fixingForm.external_reference.trim(),
+      observed_at: fixingForm.observed_at.trim(),
+      venue: fixingForm.venue.trim(),
+      calendar: fixingForm.calendar.trim(),
+      timezone: fixingForm.timezone.trim(),
+      evidence_sha256: fixingForm.evidence_sha256.trim(),
+      evidence_filename: fixingForm.evidence_filename,
+      evidence_content_type: fixingForm.evidence_content_type,
+      evidence_payload_b64: fixingForm.evidence_payload_b64,
+      reason: fixingForm.reason.trim(),
+      supersedes_version: fixingForm.supersedes_version,
+    })
+    showSaveMsg(`✓ Fixing v${(ev.fixing_version || 0) + 1} soumis au Checker avec sa preuve`)
+    closeFixingForm()
+    await loadAudit()
   } catch (e) {
-    showSaveMsg(`⚠ Erreur sauvegarde : ${e.message}`)
+    showSaveMsg(`⚠ Soumission refusée :\n${e.message}`)
   } finally {
     savingEventId.value = null
   }
@@ -590,6 +858,18 @@ async function validateEventFixing(ev) {
     showSaveMsg('✓ Fixing officiel validé')
   } catch (e) {
     showSaveMsg(`⚠ Validation refusée : ${e.message}`)
+  }
+}
+
+async function rejectEventFixing(ev) {
+  const reason = window.prompt('Motif obligatoire du rejet de cette version de fixing :')
+  if (!reason) return
+  try {
+    await dealsStore.rejectFixing(deal.value.id, ev.id, reason)
+    showSaveMsg('✓ Version de fixing rejetée ; la version officielle précédente a été restaurée si nécessaire')
+    await loadAudit()
+  } catch (e) {
+    showSaveMsg(`⚠ Rejet impossible : ${e.message}`)
   }
 }
 
@@ -651,25 +931,21 @@ function exportAudit() {
 }
 
 async function validateProposal(proposal) {
+  const confirmedOutcome = window.prompt(
+    'Confirmez indépendamment le résultat officiel en saisissant exactement : callé, ki ou final')
+  if (!['callé', 'ki', 'final'].includes((confirmedOutcome || '').trim().toLowerCase())) {
+    showSaveMsg('⚠ Confirmation explicite requise : saisissez callé, ki ou final')
+    return
+  }
   const reason = window.prompt('Motif de validation de la résolution :')
   if (!reason) return
   try {
     await dealsStore.transitionProposal(
-      deal.value.id, proposal.id, 'validate', reason, proposal.proposed_outcome)
-    showSaveMsg('✓ Résolution validée, pas encore appliquée')
+      deal.value.id, proposal.id, 'validate', reason,
+      confirmedOutcome.trim().toLowerCase())
+    showSaveMsg('✓ Résolution autorisée et appliquée atomiquement')
   } catch (e) {
     showSaveMsg(`⚠ Validation refusée : ${e.message}`)
-  }
-}
-
-async function applyProposal(proposal) {
-  const reason = window.prompt('Motif d’application définitive de la résolution :')
-  if (!reason) return
-  try {
-    await dealsStore.transitionProposal(deal.value.id, proposal.id, 'apply', reason)
-    showSaveMsg('✓ Résolution appliquée')
-  } catch (e) {
-    showSaveMsg(`⚠ Application refusée : ${e.message}`)
   }
 }
 

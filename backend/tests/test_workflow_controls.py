@@ -5,6 +5,8 @@ must hold without relying on a Vue form or HTTP client behaviour.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -18,13 +20,16 @@ from backend.app.api import deals as deals_api, rfq as rfq_api
 from backend.app.core.rfq_controls import booking_gate_failures, pricing_input_hash
 from backend.app.core.workflow import DataCategory, FixingStatus, LifecycleStatus
 from backend.app.db.models import (
-    Alert, AuditEvent, Deal, DealEvent, LifecycleProposal, RfqQuote, RfqRequest,
-    TradeAmendmentRequest,
+    Alert, AuditEvent, Deal, DealEvent, LifecycleProposal, OfficialFixingVersion,
+    RfqQuote, RfqRequest, TradeAmendmentRequest,
 )
 from backend.app.db import database as database_api
 
 
-USER = SimpleNamespace(id=1, entity_id=None)
+USER = SimpleNamespace(id=1, entity_id=7, role="user")
+OPS_MAKER = SimpleNamespace(id=2, entity_id=7, role="ops_maker")
+CHECKER = SimpleNamespace(id=3, entity_id=7, role="checker")
+OTHER_CHECKER = SimpleNamespace(id=4, entity_id=8, role="checker")
 
 
 def _session() -> Session:
@@ -133,7 +138,8 @@ def test_expired_selected_quote_is_visible_in_business_status():
 def _deal(session: Session) -> Deal:
     today = date.today()
     deal = Deal(
-        reference="DEAL-SAFE-001", user_id=1, script_snapshot="AT MATURITY\n  PAY 1",
+        reference="DEAL-SAFE-001", entity_id=7, user_id=1,
+        script_snapshot="AT MATURITY\n  PAY 1",
         sens="vente", contrepartie="Bank", devise="EUR", nominal=1_000_000,
         fair_value=99.0, price_traded=99.1, trade_date=today.isoformat(),
         strike_date=(today - timedelta(days=1)).isoformat(),
@@ -163,27 +169,59 @@ def _events(session: Session, deal: Deal) -> list[DealEvent]:
                         .order_by(DealEvent.event_index)).all()
 
 
+def _fixing_submission(
+    event: DealEvent,
+    spots: dict,
+    *,
+    supersedes_version: int | None = None,
+) -> deals_api.EventUpdate:
+    evidence_payload = (
+        f"Preuve officielle événement {event.id}, version "
+        f"{(supersedes_version or 0) + 1}"
+    ).encode("utf-8")
+    return deals_api.EventUpdate(
+        spots=spots,
+        provider="BLOOMBERG",
+        source_type="MESSAGE",
+        external_reference=f"MSG-{event.id}-{supersedes_version or 1}",
+        observed_at=f"{event.event_date}T12:00:00+00:00",
+        venue="Official close",
+        calendar="TARGET",
+        timezone="UTC",
+        evidence_sha256=hashlib.sha256(evidence_payload).hexdigest(),
+        evidence_filename=f"fixing-{event.id}.txt",
+        evidence_content_type="text/plain",
+        evidence_payload_b64=base64.b64encode(evidence_payload).decode("ascii"),
+        reason="Capture officielle documentée",
+        supersedes_version=supersedes_version,
+    )
+
+
 def test_manual_fixing_is_received_but_not_automatically_validated():
     session = _session(); deal = _deal(session); event = _events(session, deal)[0]
     row = deals_api.update_event(
-        deal.id, event.id, deals_api.EventUpdate(spots={"UL1": 100.0}), USER, session)
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}), OPS_MAKER, session)
     assert row["fixing_status"] == "RECEIVED"
+    assert row["data_category"] == "FIXING_CANDIDATE"
+    assert row["fixing_entered_by"] == OPS_MAKER.id
     assert row["status"] == "futur"
 
 
 def test_partial_manual_fixing_is_explicit():
     session = _session(); deal = _deal(session); event = _events(session, deal)[0]
     row = deals_api.update_event(
-        deal.id, event.id, deals_api.EventUpdate(spots={}), USER, session)
+        deal.id, event.id, _fixing_submission(event, {}), OPS_MAKER, session)
     assert row["fixing_status"] == "PARTIAL"
 
 
 def test_incomplete_fixing_validation_is_rejected_and_audited():
     session = _session(); deal = _deal(session); event = _events(session, deal)[0]
-    deals_api.update_event(deal.id, event.id, deals_api.EventUpdate(spots={}), USER, session)
+    deals_api.update_event(
+        deal.id, event.id, _fixing_submission(event, {}), OPS_MAKER, session)
     with pytest.raises(HTTPException) as exc:
         deals_api.validate_fixing(
-            deal.id, event.id, deals_api.FixingValidationRequest(reason="contrôle ops"), USER, session)
+            deal.id, event.id, deals_api.FixingValidationRequest(reason="contrôle ops"),
+            CHECKER, session)
     assert exc.value.status_code == 422
     assert session.exec(select(AuditEvent).where(
         AuditEvent.action == "FIXING_VALIDATION_REJECTED")).first()
@@ -192,19 +230,245 @@ def test_incomplete_fixing_validation_is_rejected_and_audited():
 def test_complete_official_fixing_can_be_validated():
     session = _session(); deal = _deal(session); event = _events(session, deal)[0]
     deals_api.update_event(
-        deal.id, event.id, deals_api.EventUpdate(spots={"UL1": 100.0}), USER, session)
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}), OPS_MAKER, session)
     row = deals_api.validate_fixing(
-        deal.id, event.id, deals_api.FixingValidationRequest(reason="source officielle"), USER, session)
+        deal.id, event.id, deals_api.FixingValidationRequest(reason="source officielle"),
+        CHECKER, session)
     assert row["fixing_status"] == "VALIDATED"
     assert row["data_category"] == "FIXING_OFFICIAL"
+
+
+def test_fixing_validation_requires_an_intact_archived_evidence_payload():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    deals_api.update_event(
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    version = session.exec(select(OfficialFixingVersion)).one()
+    version.evidence_payload_b64 = base64.b64encode(
+        "preuve altérée".encode("utf-8")).decode("ascii")
+    session.add(version); session.commit()
+    with pytest.raises(HTTPException) as exc:
+        deals_api.validate_fixing(
+            deal.id, event.id,
+            deals_api.FixingValidationRequest(reason="Contrôle de la pièce source"),
+            CHECKER, session)
+    assert any(failure["code"] == "FIXING_EVIDENCE_ARCHIVE_MISMATCH"
+               for failure in exc.value.detail["failures"])
+
+
+def test_checker_can_download_the_verified_archived_evidence():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    deals_api.update_event(
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    version = session.exec(select(OfficialFixingVersion)).one()
+    response = deals_api.download_fixing_evidence(
+        deal.id, event.id, version.id, CHECKER, session)
+    assert hashlib.sha256(response.body).hexdigest() == version.evidence_sha256
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_user_role_cannot_capture_an_official_fixing_candidate():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    with pytest.raises(HTTPException) as exc:
+        deals_api.update_event(
+            deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+            USER, session)
+    assert exc.value.status_code == 403
+    assert exc.value.detail["failures"][0]["field"] == "user.role"
+    assert not session.exec(select(OfficialFixingVersion)).first()
+
+
+def test_deal_owner_cannot_capture_even_when_role_is_ops_maker():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    deal.user_id = OPS_MAKER.id
+    session.add(deal); session.commit()
+    with pytest.raises(HTTPException) as exc:
+        deals_api.update_event(
+            deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+            OPS_MAKER, session)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["failures"][0]["code"] == \
+        "DEAL_OWNER_CANNOT_CAPTURE_FIXING"
+    assert not session.exec(select(OfficialFixingVersion)).first()
+
+
+def test_fixing_capture_requires_complete_actionable_provenance():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    with pytest.raises(HTTPException) as exc:
+        deals_api.update_event(
+            deal.id, event.id, deals_api.EventUpdate(spots={"UL1": 100.0}),
+            OPS_MAKER, session)
+    fields = {failure["field"] for failure in exc.value.detail["failures"]}
+    assert {"provider", "external_reference", "observed_at", "evidence_sha256"} <= fields
+    assert all(failure.get("action") for failure in exc.value.detail["failures"])
+    assert not session.exec(select(OfficialFixingVersion)).first()
+
+
+def test_fixing_provider_must_belong_to_the_controlled_registry():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    submission = _fixing_submission(event, {"UL1": 100.0})
+    submission.provider = "Source libre non homologuée"
+    with pytest.raises(HTTPException) as exc:
+        deals_api.update_event(deal.id, event.id, submission, OPS_MAKER, session)
+    failure = next(row for row in exc.value.detail["failures"]
+                   if row["code"] == "FIXING_PROVIDER_NOT_AUTHORIZED")
+    assert failure["field"] == "provider"
+    assert "référentiel" in failure["message"]
+
+
+def test_fixing_timestamp_offset_must_match_the_market_timezone():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    submission = _fixing_submission(event, {"UL1": 100.0})
+    submission.observed_at = f"{event.event_date}T12:00:00+01:00"
+    submission.timezone = "UTC"
+    with pytest.raises(HTTPException) as exc:
+        deals_api.update_event(deal.id, event.id, submission, OPS_MAKER, session)
+    failure = next(row for row in exc.value.detail["failures"]
+                   if row["code"] == "FIXING_TIMEZONE_OFFSET_MISMATCH")
+    assert failure["field"] == "observed_at"
+    assert failure["action"]
+
+
+def test_fixing_maker_cannot_validate_own_submission():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    deals_api.update_event(
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    same_person_checker = SimpleNamespace(id=OPS_MAKER.id, entity_id=7, role="checker")
+    with pytest.raises(HTTPException) as exc:
+        deals_api.validate_fixing(
+            deal.id, event.id,
+            deals_api.FixingValidationRequest(reason="Auto-validation interdite"),
+            same_person_checker, session)
+    assert any(failure["code"] == "FOUR_EYES_VIOLATION"
+               for failure in exc.value.detail["failures"])
+    assert session.get(DealEvent, event.id).fixing_status == "RECEIVED"
+
+
+def test_fixing_checker_is_scoped_to_the_deal_entity():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    deals_api.update_event(
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    with pytest.raises(HTTPException) as exc:
+        deals_api.validate_fixing(
+            deal.id, event.id,
+            deals_api.FixingValidationRequest(reason="Mauvaise entité juridique"),
+            OTHER_CHECKER, session)
+    assert exc.value.status_code == 404
+
+
+def test_fixing_correction_creates_a_new_immutable_version():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    deals_api.update_event(
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    deals_api.validate_fixing(
+        deal.id, event.id,
+        deals_api.FixingValidationRequest(reason="Validation version initiale"),
+        CHECKER, session)
+    corrected = deals_api.update_event(
+        deal.id, event.id,
+        _fixing_submission(event, {"UL1": 101.0}, supersedes_version=1),
+        OPS_MAKER, session)
+    assert corrected["fixing_version"] == 2
+    assert corrected["fixing_status"] == "RECEIVED"
+    assert corrected["data_category"] == "FIXING_CANDIDATE"
+    versions = session.exec(select(OfficialFixingVersion).where(
+        OfficialFixingVersion.deal_event_id == event.id)
+        .order_by(OfficialFixingVersion.version)).all()
+    assert [row.status for row in versions] == ["CONTESTED", "RECEIVED"]
+
+    deals_api.validate_fixing(
+        deal.id, event.id,
+        deals_api.FixingValidationRequest(reason="Validation correction officielle"),
+        CHECKER, session)
+    versions = session.exec(select(OfficialFixingVersion).where(
+        OfficialFixingVersion.deal_event_id == event.id)
+        .order_by(OfficialFixingVersion.version)).all()
+    assert [row.status for row in versions] == ["SUPERSEDED", "VALIDATED"]
+    assert json.loads(versions[0].spots_json) == {"UL1": 100.0}
+    assert json.loads(versions[1].spots_json) == {"UL1": 101.0}
+    deal_row = deals_api.get_deal(deal.id, USER, session)
+    history = deal_row["events"][0]["fixing_versions"]
+    assert [row["version"] for row in history] == [2, 1]
+    assert history[1]["status"] == "SUPERSEDED"
+
+
+def test_checker_can_reject_an_initial_fixing_candidate():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    deals_api.update_event(
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    row = deals_api.reject_fixing(
+        deal.id, event.id,
+        deals_api.FixingValidationRequest(reason="La pièce ne correspond pas au contrat"),
+        CHECKER, session)
+    version = session.exec(select(OfficialFixingVersion)).one()
+    assert row["fixing_status"] == "REJECTED"
+    assert version.status == "REJECTED"
+    assert version.rejected_by == CHECKER.id
+    assert version.rejection_reason == "La pièce ne correspond pas au contrat"
+
+
+def test_rejecting_a_correction_restores_the_previous_official_version():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    deals_api.update_event(
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    deals_api.validate_fixing(
+        deal.id, event.id,
+        deals_api.FixingValidationRequest(reason="Validation version initiale"),
+        CHECKER, session)
+    deals_api.update_event(
+        deal.id, event.id,
+        _fixing_submission(event, {"UL1": 101.0}, supersedes_version=1),
+        OPS_MAKER, session)
+    row = deals_api.reject_fixing(
+        deal.id, event.id,
+        deals_api.FixingValidationRequest(reason="Correction non justifiée par la pièce"),
+        CHECKER, session)
+    versions = session.exec(select(OfficialFixingVersion).where(
+        OfficialFixingVersion.deal_event_id == event.id)
+        .order_by(OfficialFixingVersion.version)).all()
+    assert [version.status for version in versions] == ["VALIDATED", "REJECTED"]
+    assert row["fixing_version"] == 1
+    assert row["fixing_status"] == "VALIDATED"
+    assert row["data_category"] == "FIXING_OFFICIAL"
+    assert row["spots"] == {"UL1": 100.0}
+
+
+def test_a_second_correction_waits_for_the_checker_decision():
+    session = _session(); deal = _deal(session); event = _events(session, deal)[0]
+    deals_api.update_event(
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    deals_api.validate_fixing(
+        deal.id, event.id,
+        deals_api.FixingValidationRequest(reason="Validation version initiale"),
+        CHECKER, session)
+    deals_api.update_event(
+        deal.id, event.id,
+        _fixing_submission(event, {"UL1": 101.0}, supersedes_version=1),
+        OPS_MAKER, session)
+    with pytest.raises(HTTPException) as exc:
+        deals_api.update_event(
+            deal.id, event.id,
+            _fixing_submission(event, {"UL1": 102.0}, supersedes_version=2),
+            OPS_MAKER, session)
+    assert any(failure["code"] == "FIXING_CORRECTION_DECISION_PENDING"
+               for failure in exc.value.detail["failures"])
+    assert session.exec(select(OfficialFixingVersion)).all().__len__() == 2
 
 
 def test_fixing_audit_contains_before_after_reason_and_source():
     session = _session(); deal = _deal(session); event = _events(session, deal)[0]
     deals_api.update_event(
-        deal.id, event.id, deals_api.EventUpdate(spots={"UL1": 100.0}), USER, session)
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}), OPS_MAKER, session)
     deals_api.validate_fixing(
-        deal.id, event.id, deals_api.FixingValidationRequest(reason="source officielle"), USER, session)
+        deal.id, event.id, deals_api.FixingValidationRequest(reason="source officielle"),
+        CHECKER, session)
     audit = session.exec(select(AuditEvent).where(
         AuditEvent.action == "FIXING_VALIDATED")).one()
     assert json.loads(audit.before_json)["fixing_status"] == "RECEIVED"
@@ -220,7 +484,8 @@ def test_audit_failure_prevents_fixing_persistence(monkeypatch):
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("audit unavailable")))
     with pytest.raises(RuntimeError, match="audit unavailable"):
         deals_api.update_event(
-            deal.id, event.id, deals_api.EventUpdate(spots={"UL1": 100.0}), USER, session)
+            deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+            OPS_MAKER, session)
     session.rollback()
     persisted = session.get(DealEvent, event.id)
     assert persisted.spots_json == "{}"
@@ -230,12 +495,14 @@ def test_audit_failure_prevents_fixing_persistence(monkeypatch):
 def test_validated_fixing_cannot_be_overwritten_and_creates_alert():
     session = _session(); deal = _deal(session); event = _events(session, deal)[0]
     deals_api.update_event(
-        deal.id, event.id, deals_api.EventUpdate(spots={"UL1": 100.0}), USER, session)
+        deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}), OPS_MAKER, session)
     deals_api.validate_fixing(
-        deal.id, event.id, deals_api.FixingValidationRequest(reason="source officielle"), USER, session)
+        deal.id, event.id, deals_api.FixingValidationRequest(reason="source officielle"),
+        CHECKER, session)
     with pytest.raises(HTTPException) as exc:
         deals_api.update_event(
-            deal.id, event.id, deals_api.EventUpdate(spots={"UL1": 101.0}), USER, session)
+            deal.id, event.id, _fixing_submission(event, {"UL1": 101.0}),
+            OPS_MAKER, session)
     assert exc.value.status_code == 409
     assert session.get(DealEvent, event.id).spots_json == json.dumps({"UL1": 100.0}, sort_keys=True)
     assert session.exec(select(Alert).where(Alert.kind == "fixing_overwrite_rejected")).first()
@@ -312,17 +579,19 @@ def test_resolution_validation_requires_all_official_validated_fixings():
         deals_api.validate_lifecycle_proposal(
             deal.id, proposal.id,
             deals_api.LifecycleValidationRequest(
-                reason="revue ops", confirmed_outcome="final"), USER, session)
+                reason="revue ops", confirmed_outcome="final"), CHECKER, session)
     assert exc.value.status_code == 422
 
 
 def _validate_all_fixings(session: Session, deal: Deal) -> None:
     for event in _events(session, deal):
         deals_api.update_event(
-            deal.id, event.id, deals_api.EventUpdate(spots={"UL1": 100.0}), USER, session)
+            deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
+            OPS_MAKER, session)
         deals_api.validate_fixing(
             deal.id, event.id,
-            deals_api.FixingValidationRequest(reason="source officielle"), USER, session)
+            deals_api.FixingValidationRequest(reason="source officielle"),
+            CHECKER, session)
 
 
 def test_resolution_validation_requires_explicit_outcome_confirmation():
@@ -331,26 +600,26 @@ def test_resolution_validation_requires_explicit_outcome_confirmation():
     with pytest.raises(HTTPException) as exc:
         deals_api.validate_lifecycle_proposal(
             deal.id, proposal.id,
-            deals_api.LifecycleValidationRequest(reason="revue payoff"), USER, session)
+            deals_api.LifecycleValidationRequest(reason="revue payoff"), CHECKER, session)
     failures = exc.value.detail["failures"]
     assert any(failure["code"] == "OUTCOME_CONFIRMATION_REQUIRED" for failure in failures)
 
 
-def test_resolution_has_separate_validate_and_apply_transitions():
+def test_resolution_authorization_and_application_are_atomic():
     session = _session(); deal = _deal(session); proposal = _proposal(session, deal)
     _validate_all_fixings(session, deal)
     validated = deals_api.validate_lifecycle_proposal(
         deal.id, proposal.id,
         deals_api.LifecycleValidationRequest(
-            reason="revue payoff", confirmed_outcome="final"), USER, session)
+            reason="revue payoff", confirmed_outcome="final"), CHECKER, session)
     session.refresh(deal)
-    assert validated["status"] == "VALIDATED"
-    assert deal.status == "actif"
-    applied = deals_api.apply_lifecycle_proposal(
-        deal.id, proposal.id,
-        deals_api.LifecycleValidationRequest(reason="application ops"), USER, session)
-    assert applied["proposal"]["status"] == "APPLIED"
-    assert applied["deal"]["status"] == "échu"
+    assert validated["proposal"]["status"] == "APPLIED"
+    assert validated["deal"]["status"] == "échu"
+    assert deal.status == "échu"
+    assert session.exec(select(AuditEvent).where(
+        AuditEvent.action == "RESOLUTION_VALIDATED")).first()
+    assert session.exec(select(AuditEvent).where(
+        AuditEvent.action == "RESOLUTION_APPLIED")).first()
 
 
 def test_resolution_application_is_exactly_once():
@@ -359,16 +628,69 @@ def test_resolution_application_is_exactly_once():
     deals_api.validate_lifecycle_proposal(
         deal.id, proposal.id,
         deals_api.LifecycleValidationRequest(
-            reason="revue payoff", confirmed_outcome="final"), USER, session)
-    deals_api.apply_lifecycle_proposal(
-        deal.id, proposal.id, deals_api.LifecycleValidationRequest(reason="application ops"), USER, session)
+            reason="revue payoff", confirmed_outcome="final"), CHECKER, session)
     with pytest.raises(HTTPException) as exc:
         deals_api.apply_lifecycle_proposal(
             deal.id, proposal.id,
-            deals_api.LifecycleValidationRequest(reason="seconde application"), USER, session)
+            deals_api.LifecycleValidationRequest(reason="seconde application"),
+            CHECKER, session)
     assert exc.value.status_code == 409
     assert session.exec(select(AuditEvent).where(
         AuditEvent.action == "RESOLUTION_APPLICATION_REJECTED")).first()
+
+
+def test_resolution_rolls_back_authorization_and_application_if_audit_fails(monkeypatch):
+    session = _session(); deal = _deal(session); proposal = _proposal(session, deal)
+    _validate_all_fixings(session, deal)
+    original_record_audit = deals_api.record_audit_event
+
+    def fail_on_resolution_applied(*args, **kwargs):
+        if kwargs.get("action") == "RESOLUTION_APPLIED":
+            raise RuntimeError("audit unavailable")
+        return original_record_audit(*args, **kwargs)
+
+    monkeypatch.setattr(deals_api, "record_audit_event", fail_on_resolution_applied)
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        deals_api.validate_lifecycle_proposal(
+            deal.id, proposal.id,
+            deals_api.LifecycleValidationRequest(
+                reason="autorisation avec audit obligatoire",
+                confirmed_outcome="final"),
+            CHECKER, session)
+    session.rollback()
+    assert session.get(Deal, deal.id).status == "actif"
+    assert session.get(LifecycleProposal, proposal.id).status == "PROPOSED"
+    assert all(event.fixing_status == "VALIDATED" for event in _events(session, deal))
+
+
+def test_resolution_rejection_rolls_back_the_intermediate_authorization(monkeypatch):
+    session = _session(); deal = _deal(session); proposal = _proposal(session, deal)
+    _validate_all_fixings(session, deal)
+    original_hash = deals_api.official_input_hash
+    hash_calls = 0
+
+    def changing_hash(*args, **kwargs):
+        nonlocal hash_calls
+        hash_calls += 1
+        if hash_calls == 1:
+            return original_hash(*args, **kwargs)
+        return "inputs-modifiés-entre-autorisation-et-application"
+
+    monkeypatch.setattr(deals_api, "official_input_hash", changing_hash)
+    with pytest.raises(HTTPException) as exc:
+        deals_api.validate_lifecycle_proposal(
+            deal.id, proposal.id,
+            deals_api.LifecycleValidationRequest(
+                reason="autorisation soumise au contrôle de staleness",
+                confirmed_outcome="final"),
+            CHECKER, session)
+    assert exc.value.detail["code"] == "RESOLUTION_APPLICATION_REJECTED"
+    assert session.get(Deal, deal.id).status == "actif"
+    assert session.get(LifecycleProposal, proposal.id).status == "PROPOSED"
+    assert all(event.fixing_status == "VALIDATED" for event in _events(session, deal))
+    actions = [audit.action for audit in session.exec(select(AuditEvent)).all()]
+    assert "RESOLUTION_VALIDATED" not in actions
+    assert actions.count("RESOLUTION_APPLICATION_REJECTED") == 1
 
 
 @pytest.mark.parametrize("patch", [

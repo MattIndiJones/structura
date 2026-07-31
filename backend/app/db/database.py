@@ -7,6 +7,7 @@ from .models import (
     Indicative, KidRecord, EmtRecord, RfqRequest, RfqQuote, RfqProvider,
     Counterparty, Alert, Portfolio, ShockRun, ComputeBatch, ComputeJob,
     AuditEvent, LifecycleProposal, TradeAmendmentRequest, DealContractVersion,
+    OfficialFixingVersion,
 )
 
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
@@ -150,6 +151,25 @@ def _migrate():
         if event_cols and "applied_at" not in event_cols:
             conn.execute(text("ALTER TABLE deal_events ADD COLUMN applied_at DATETIME"))
             conn.commit()
+        for name, ddl in (
+            ("current_fixing_version_id", "INTEGER"),
+            ("fixing_version", "INTEGER DEFAULT 0"),
+            ("fixing_entered_by", "INTEGER"),
+            ("fixing_entered_at", "DATETIME"),
+            ("fixing_provider", "TEXT"),
+            ("fixing_source_type", "TEXT"),
+            ("fixing_external_reference", "TEXT"),
+            ("fixing_observed_at", "DATETIME"),
+            ("fixing_venue", "TEXT"),
+            ("fixing_calendar", "TEXT"),
+            ("fixing_timezone", "TEXT"),
+            ("fixing_evidence_sha256", "TEXT"),
+            ("fixing_record_sha256", "TEXT"),
+            ("fixing_reason", "TEXT"),
+        ):
+            if event_cols and name not in event_cols:
+                conn.execute(text(f"ALTER TABLE deal_events ADD COLUMN {name} {ddl}"))
+                conn.commit()
 
         proposal_cols = {
             row[1] for row in conn.execute(text("PRAGMA table_info(lifecycle_proposals)"))}
@@ -162,6 +182,20 @@ def _migrate():
             if proposal_cols and name not in proposal_cols:
                 conn.execute(text(
                     f"ALTER TABLE lifecycle_proposals ADD COLUMN {name} {ddl}"))
+                conn.commit()
+
+        fixing_version_cols = {
+            row[1] for row in conn.execute(
+                text("PRAGMA table_info(official_fixing_versions)"))}
+        for name, ddl in (
+            ("evidence_filename", "TEXT DEFAULT ''"),
+            ("evidence_content_type", "TEXT DEFAULT 'application/octet-stream'"),
+            ("evidence_size_bytes", "INTEGER DEFAULT 0"),
+            ("evidence_payload_b64", "TEXT DEFAULT ''"),
+        ):
+            if fixing_version_cols and name not in fixing_version_cols:
+                conn.execute(text(
+                    f"ALTER TABLE official_fixing_versions ADD COLUMN {name} {ddl}"))
                 conn.commit()
 
         amendment_cols = {

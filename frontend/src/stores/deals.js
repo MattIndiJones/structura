@@ -5,11 +5,19 @@ import { apiFetch } from '../utils/api.js'
 function errorMessage(err, fallback) {
   const detail = err?.detail
   if (!detail || typeof detail !== 'object') return detail || fallback
+  const describe = failure => {
+    const field = failure.field ? `Champ « ${failure.field} » — ` : ''
+    const message = failure.message || failure.code || JSON.stringify(failure)
+    const expected = failure.expected ? ` Attendu : ${failure.expected}` : ''
+    const action = failure.action ? ` Action : ${failure.action}` : ''
+    return `${field}${message}${expected}${action}`
+  }
   const failures = (detail.failures || []).flatMap(f => {
-    if (f.message) return `${f.code || 'CONTRÔLE'} — ${f.message}`
-    if (f.failures) return f.failures.map(child =>
-      `${child.code || 'CONTRÔLE'}${f.event_date ? ` (${f.event_date})` : ''}`)
-    return f.code || JSON.stringify(f)
+    if (f.failures) return [
+      f.event_date ? `Événement du ${f.event_date}` : null,
+      ...f.failures.map(describe),
+    ].filter(Boolean)
+    return describe(f)
   })
   return [detail.message || detail.code || fallback, ...failures].join('\n')
 }
@@ -97,10 +105,7 @@ export const useDealsStore = defineStore('deals', () => {
     })
     if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Erreur')) }
     const updated = await res.json()
-    if (currentDeal.value?.events) {
-      const idx = currentDeal.value.events.findIndex(e => e.id === eventId)
-      if (idx >= 0) currentDeal.value.events.splice(idx, 1, updated)
-    }
+    if (currentDeal.value?.id === dealId) await selectDeal(dealId)
     return updated
   }
 
@@ -131,8 +136,19 @@ export const useDealsStore = defineStore('deals', () => {
     })
     if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Validation impossible')) }
     const updated = await res.json()
-    const idx = currentDeal.value?.events?.findIndex(e => e.id === eventId) ?? -1
-    if (idx >= 0) currentDeal.value.events.splice(idx, 1, updated)
+    if (currentDeal.value?.id === dealId) await selectDeal(dealId)
+    return updated
+  }
+
+  async function rejectFixing(dealId, eventId, reason) {
+    const res = await apiFetch(`/api/deals/${dealId}/events/${eventId}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Rejet impossible')) }
+    const updated = await res.json()
+    if (currentDeal.value?.id === dealId) await selectDeal(dealId)
     return updated
   }
 
@@ -209,7 +225,7 @@ export const useDealsStore = defineStore('deals', () => {
   return {
     deals, currentDeal, loading, error, refreshStatus, auditEvents, pendingAmendments,
     loadDeals, nextRef, bookDeal, selectDeal, updateDeal,
-    updateEvent, validateFixing, transitionProposal,
+    updateEvent, validateFixing, rejectFixing, transitionProposal,
     requestAmendment, transitionAmendment, loadPendingAmendments, loadAudit,
     refreshEvents, getRepriceInputs, getWatchlist,
   }

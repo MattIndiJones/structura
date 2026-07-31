@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 from datetime import datetime
+from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Column, Text
 
 
@@ -540,10 +541,74 @@ class DealEvent(SQLModel, table=True):
     status: str = Field(default="futur")   # futur | observé | callé | ki | final | annulé
     fixing_status: str = Field(default="EXPECTED", index=True)
     data_category: str = Field(default="UNKNOWN")
+    # Pointer and denormalised summary of the current governed fixing version.
+    # The immutable history lives in OfficialFixingVersion below; these fields
+    # make the operational event readable without reconstructing its ledger.
+    current_fixing_version_id: Optional[int] = Field(
+        default=None, foreign_key="official_fixing_versions.id", index=True)
+    fixing_version: int = Field(default=0)
+    fixing_entered_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    fixing_entered_at: Optional[datetime] = Field(default=None)
+    fixing_provider: Optional[str] = Field(default=None)
+    fixing_source_type: Optional[str] = Field(default=None)
+    fixing_external_reference: Optional[str] = Field(default=None)
+    fixing_observed_at: Optional[datetime] = Field(default=None)
+    fixing_venue: Optional[str] = Field(default=None)
+    fixing_calendar: Optional[str] = Field(default=None)
+    fixing_timezone: Optional[str] = Field(default=None)
+    fixing_evidence_sha256: Optional[str] = Field(default=None)
+    fixing_record_sha256: Optional[str] = Field(default=None, index=True)
+    fixing_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
     validated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     validated_at: Optional[datetime] = Field(default=None)
     applied_at: Optional[datetime] = Field(default=None)
     label: str = Field(default="")
+
+
+class OfficialFixingVersion(SQLModel, table=True):
+    """Immutable evidence record for one submitted official-fixing candidate.
+
+    A correction always creates a new row.  The event above only points to the
+    current operational version; prior values, evidence and actors are never
+    overwritten or deleted.
+    """
+    __tablename__ = "official_fixing_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "deal_event_id", "version", name="uq_official_fixing_event_version"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    deal_event_id: int = Field(foreign_key="deal_events.id", index=True)
+    version: int = Field(index=True)
+    supersedes_id: Optional[int] = Field(
+        default=None, foreign_key="official_fixing_versions.id", index=True)
+    status: str = Field(default="RECEIVED", index=True)
+    spots_json: str = Field(default="{}", sa_column=Column(Text))
+    provider: str
+    source_type: str
+    external_reference: str
+    observed_at: datetime
+    received_at: datetime = Field(default_factory=datetime.utcnow)
+    venue: str
+    calendar: str
+    timezone: str
+    evidence_sha256: str
+    evidence_filename: str = Field(default="")
+    evidence_content_type: str = Field(default="application/octet-stream")
+    evidence_size_bytes: int = Field(default=0)
+    evidence_payload_b64: str = Field(default="", sa_column=Column(Text))
+    record_sha256: str = Field(index=True)
+    capture_reason: str = Field(sa_column=Column(Text))
+    entered_by: int = Field(foreign_key="users.id", index=True)
+    validated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    validation_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+    validated_at: Optional[datetime] = Field(default=None)
+    rejected_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    rejection_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+    rejected_at: Optional[datetime] = Field(default=None)
+    applied_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
 class LifecycleProposal(SQLModel, table=True):

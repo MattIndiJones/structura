@@ -1,8 +1,10 @@
 """Phase 2 controls: official replay, semantic outcome and maker-checker."""
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -17,7 +19,7 @@ from backend.app.core.payscript.parser import parse_script
 from backend.app.core.workflow import DataCategory, FixingStatus
 from backend.app.db.models import (
     AuditEvent, Deal, DealContractVersion, DealEvent, LifecycleProposal,
-    TradeAmendmentRequest,
+    OfficialFixingVersion, TradeAmendmentRequest,
 )
 
 
@@ -62,7 +64,9 @@ def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
         (deal.strike_date, 0.0, 100.0),
         (deal.maturity_date, deal.T, 100.0),
     ]):
-        session.add(DealEvent(
+        evidence_payload = f"Preuve officielle {index}".encode("utf-8")
+        evidence_sha256 = hashlib.sha256(evidence_payload).hexdigest()
+        event = DealEvent(
             deal_id=deal.id,
             event_index=index,
             event_date=event_date,
@@ -73,7 +77,52 @@ def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
             source="manuel",
             status="observé",
             label="Strike" if index == 0 else "Maturité",
-        ))
+            fixing_version=1,
+            fixing_entered_by=4,
+            fixing_entered_at=datetime.utcnow(),
+            fixing_provider="BLOOMBERG",
+            fixing_source_type="MESSAGE",
+            fixing_external_reference=f"MSG-{index}",
+            fixing_observed_at=datetime.utcnow(),
+            fixing_venue="Official close",
+            fixing_calendar="TARGET",
+            fixing_timezone="UTC",
+            fixing_evidence_sha256=evidence_sha256,
+            fixing_record_sha256="b" * 64,
+            fixing_reason="Capture officielle documentée",
+            validated_by=2,
+            validated_at=datetime.utcnow(),
+        )
+        session.add(event)
+        session.flush()
+        version = OfficialFixingVersion(
+            deal_id=deal.id,
+            deal_event_id=event.id,
+            version=1,
+            status=FixingStatus.VALIDATED,
+            spots_json=json.dumps({"UL1": spot}),
+            provider="BLOOMBERG",
+            source_type="MESSAGE",
+            external_reference=f"MSG-{index}",
+            observed_at=datetime.utcnow(),
+            venue="Official close",
+            calendar="TARGET",
+            timezone="UTC",
+            evidence_sha256=evidence_sha256,
+            evidence_filename=f"fixing-{index}.txt",
+            evidence_content_type="text/plain",
+            evidence_size_bytes=len(evidence_payload),
+            evidence_payload_b64=base64.b64encode(evidence_payload).decode("ascii"),
+            record_sha256="b" * 64,
+            capture_reason="Capture officielle documentée",
+            entered_by=4,
+            validated_by=2,
+            validated_at=datetime.utcnow(),
+        )
+        session.add(version)
+        session.flush()
+        event.current_fixing_version_id = version.id
+        session.add(event)
     session.commit()
     session.refresh(deal)
     return deal
@@ -84,7 +133,12 @@ def _events(session: Session, deal: Deal) -> list[DealEvent]:
         DealEvent.deal_id == deal.id).order_by(DealEvent.event_index)).all()
 
 
-def _proposal(session: Session, deal: Deal, outcome: str = "final") -> LifecycleProposal:
+def _proposal(
+    session: Session,
+    deal: Deal,
+    outcome: str = "final",
+    payout: float = 1.0,
+) -> LifecycleProposal:
     maturity = _events(session, deal)[-1]
     proposal = LifecycleProposal(
         deal_id=deal.id,
@@ -96,7 +150,7 @@ def _proposal(session: Session, deal: Deal, outcome: str = "final") -> Lifecycle
             "outcome": outcome,
             "event_id": maturity.id,
             "event_date": maturity.event_date,
-            "realized_payout": 1.0,
+            "realized_payout": payout,
         }),
         data_source=DataCategory.INDICATIVE,
     )
@@ -134,28 +188,81 @@ def test_path_dependent_official_replay_fails_closed():
 def test_validation_freezes_official_replay_and_application_uses_it():
     session = _session()
     deal = _deal(session)
-    proposal = _proposal(session, deal)
+    proposal = _proposal(session, deal, payout=0.25)
     validated = deals_api.validate_lifecycle_proposal(
         deal.id,
         proposal.id,
         deals_api.LifecycleValidationRequest(
             reason="Rejeu officiel contrôlé", confirmed_outcome="final"),
-        MAKER,
+        CHECKER,
         session,
     )
-    assert validated["comparison_status"] == "OUTCOME_MATCH_PAYOUT_DIFFERENCE"
-    assert validated["official_result"]["realized_payout"] == 0.25
-    assert validated["official_input_hash"]
+    assert validated["proposal"]["comparison_status"] == "MATCH"
+    assert validated["proposal"]["official_result"]["realized_payout"] == 0.25
+    assert validated["proposal"]["official_input_hash"]
+    assert validated["proposal"]["status"] == "APPLIED"
+    assert validated["deal"]["realized_payout"] == 0.25
+    assert validated["deal"]["resolution_outcome"] == "final"
 
-    applied = deals_api.apply_lifecycle_proposal(
-        deal.id,
-        proposal.id,
-        deals_api.LifecycleValidationRequest(reason="Application officielle"),
-        MAKER,
-        session,
-    )
-    assert applied["deal"]["realized_payout"] == 0.25
-    assert applied["deal"]["resolution_outcome"] == "final"
+
+def test_payout_difference_above_currency_tolerance_blocks_authorization():
+    session = _session()
+    deal = _deal(session)
+    proposal = _proposal(session, deal, payout=1.0)
+    with pytest.raises(HTTPException) as exc:
+        deals_api.validate_lifecycle_proposal(
+            deal.id,
+            proposal.id,
+            deals_api.LifecycleValidationRequest(
+                reason="Réconciliation payout officielle",
+                confirmed_outcome="final"),
+            CHECKER,
+            session,
+        )
+    failure = next(row for row in exc.value.detail["failures"]
+                   if row["code"] == "OFFICIAL_INDICATIVE_PAYOUT_MISMATCH")
+    assert failure["field"] == "proposal.result.realized_payout"
+    assert "EUR" in failure["expected"]
+    assert failure["action"]
+
+
+def test_deal_owner_cannot_authorize_own_lifecycle_resolution():
+    session = _session()
+    deal = _deal(session)
+    proposal = _proposal(session, deal)
+    owner_as_checker = SimpleNamespace(id=deal.user_id, entity_id=7, role="checker")
+    with pytest.raises(HTTPException) as exc:
+        deals_api.validate_lifecycle_proposal(
+            deal.id,
+            proposal.id,
+            deals_api.LifecycleValidationRequest(
+                reason="Auto-validation propriétaire interdite",
+                confirmed_outcome="final"),
+            owner_as_checker,
+            session,
+        )
+    assert exc.value.detail["failures"][0]["code"] == \
+        "DEAL_OWNER_CANNOT_VALIDATE_LIFECYCLE"
+
+
+def test_fixing_maker_cannot_authorize_resolution_that_consumes_own_fixing():
+    session = _session()
+    deal = _deal(session)
+    proposal = _proposal(session, deal)
+    fixing_maker_as_checker = SimpleNamespace(id=4, entity_id=7, role="checker")
+    with pytest.raises(HTTPException) as exc:
+        deals_api.validate_lifecycle_proposal(
+            deal.id,
+            proposal.id,
+            deals_api.LifecycleValidationRequest(
+                reason="Contrôle indépendant obligatoire",
+                confirmed_outcome="final"),
+            fixing_maker_as_checker,
+            session,
+        )
+    nested = [child for failure in exc.value.detail["failures"]
+              for child in failure.get("failures", [])]
+    assert any(row["code"] == "FOUR_EYES_VIOLATION" for row in nested)
 
 
 def test_official_indicative_outcome_mismatch_blocks_validation():
@@ -176,7 +283,7 @@ def test_official_indicative_outcome_mismatch_blocks_validation():
             proposal.id,
             deals_api.LifecycleValidationRequest(
                 reason="Contrôle divergence", confirmed_outcome="final"),
-            MAKER,
+                CHECKER,
             session,
         )
     assert any(row["code"] == "OFFICIAL_INDICATIVE_OUTCOME_MISMATCH"

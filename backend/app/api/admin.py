@@ -292,13 +292,13 @@ class UserCreate(BaseModel):
     username: str
     email: str
     password: str
-    role: Literal["user", "checker", "admin"] = "user"
+    role: Literal["user", "ops_maker", "checker", "admin"] = "user"
     entity_id: Optional[int] = None
 
 
 class UserUpdate(BaseModel):
     email: Optional[str] = None
-    role: Optional[Literal["user", "checker", "admin"]] = None
+    role: Optional[Literal["user", "ops_maker", "checker", "admin"]] = None
     entity_id: Optional[int] = None
     is_active: Optional[bool] = None
 

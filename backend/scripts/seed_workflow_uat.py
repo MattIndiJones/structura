@@ -11,6 +11,9 @@ Usage from the repository root:
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import hashlib
 import json
 import sys
 from datetime import date, datetime, timedelta
@@ -27,10 +30,10 @@ from backend.app.core.audit import record_audit_event
 from backend.app.core.lifecycle_controls import official_input_hash
 from backend.app.core.rfq_controls import booking_gate_failures
 from backend.app.core.workflow import DataCategory, FixingStatus, LifecycleStatus
-from backend.app.db.database import engine, init_db
+from backend.app.db.database import _hash_pw, engine, init_db
 from backend.app.db.models import (
-    Alert, AuditEvent, Deal, DealEvent, LifecycleProposal, RfqQuote, RfqRequest,
-    TradeAmendmentRequest, User,
+    Alert, AuditEvent, Deal, DealEvent, LifecycleProposal, OfficialFixingVersion,
+    RfqQuote, RfqRequest, TradeAmendmentRequest, User,
 )
 
 
@@ -279,7 +282,96 @@ def _base_lifecycle_deal(
     return deal
 
 
-def _create_lifecycle_scenarios(session: Session, user: User) -> None:
+def _attach_fixing_version(
+    session: Session,
+    deal: Deal,
+    event: DealEvent,
+    *,
+    entered_by: User,
+    status: str,
+    validated_by: User | None = None,
+) -> OfficialFixingVersion:
+    observed_at = f"{event.event_date}T12:00:00+00:00"
+    evidence_payload = (
+        f"UAT evidence deal={deal.id} event={event.event_index} version=1"
+    ).encode("utf-8")
+    body = deals_api.EventUpdate(
+        spots=json.loads(event.spots_json or "{}"),
+        provider="BLOOMBERG",
+        source_type="MESSAGE",
+        external_reference=f"UAT-FIX-{deal.id}-{event.event_index}-V1",
+        observed_at=observed_at,
+        venue="Official close UAT",
+        calendar="TARGET",
+        timezone="UTC",
+        evidence_sha256=hashlib.sha256(evidence_payload).hexdigest(),
+        evidence_filename=f"uat-fixing-{deal.id}-{event.event_index}.txt",
+        evidence_content_type="text/plain",
+        evidence_payload_b64=base64.b64encode(evidence_payload).decode("ascii"),
+        reason="Fixture UAT de provenance officielle",
+    )
+    payload = deals_api._fixing_record_payload(
+        deal, event, body, version=1, supersedes_id=None)
+    now = datetime.utcnow()
+    version = OfficialFixingVersion(
+        deal_id=deal.id,
+        deal_event_id=event.id,
+        version=1,
+        status=status,
+        spots_json=event.spots_json,
+        provider=body.provider,
+        source_type=body.source_type,
+        external_reference=body.external_reference,
+        observed_at=datetime.fromisoformat(observed_at).replace(tzinfo=None),
+        venue=body.venue,
+        calendar=body.calendar,
+        timezone=body.timezone,
+        evidence_sha256=body.evidence_sha256,
+        evidence_filename=body.evidence_filename,
+        evidence_content_type=body.evidence_content_type,
+        evidence_size_bytes=len(evidence_payload),
+        evidence_payload_b64=body.evidence_payload_b64,
+        record_sha256=deals_api._fixing_record_hash(payload),
+        capture_reason=body.reason,
+        entered_by=entered_by.id,
+        validated_by=validated_by.id if validated_by else None,
+        validation_reason="Validation UAT indépendante" if validated_by else None,
+        validated_at=now if validated_by else None,
+        applied_at=now if status == FixingStatus.APPLIED else None,
+    )
+    session.add(version)
+    session.flush()
+    event.current_fixing_version_id = version.id
+    event.fixing_version = version.version
+    event.fixing_entered_by = entered_by.id
+    event.fixing_entered_at = now
+    event.fixing_provider = version.provider
+    event.fixing_source_type = version.source_type
+    event.fixing_external_reference = version.external_reference
+    event.fixing_observed_at = version.observed_at
+    event.fixing_venue = version.venue
+    event.fixing_calendar = version.calendar
+    event.fixing_timezone = version.timezone
+    event.fixing_evidence_sha256 = version.evidence_sha256
+    event.fixing_record_sha256 = version.record_sha256
+    event.fixing_reason = version.capture_reason
+    event.data_category = (
+        DataCategory.FIXING_OFFICIAL
+        if status in {FixingStatus.VALIDATED, FixingStatus.APPLIED}
+        else DataCategory.FIXING_CANDIDATE
+    )
+    event.validated_by = validated_by.id if validated_by else None
+    event.validated_at = now if validated_by else None
+    session.add(event)
+    return version
+
+
+def _create_lifecycle_scenarios(
+    session: Session,
+    user: User,
+    ops_maker: User,
+    checker: User,
+) -> None:
     today = date.today()
 
     proposed = _base_lifecycle_deal(
@@ -290,7 +382,7 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
         spots_json=json.dumps({"Euro Stoxx 50": 5000.0}),
         indicative_spots_json=json.dumps({"Euro Stoxx 50": 5012.0}),
         source="manuel", status="futur", fixing_status=FixingStatus.RECEIVED,
-        data_category=DataCategory.FIXING_OFFICIAL, label="Strike / Fixing S₀",
+        data_category=DataCategory.FIXING_CANDIDATE, label="Strike / Fixing S₀",
     )
     observation = DealEvent(
         deal_id=proposed.id, event_index=1,
@@ -298,7 +390,7 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
         spots_json=json.dumps({"Euro Stoxx 50": 5150.0}),
         indicative_spots_json=json.dumps({"Euro Stoxx 50": 5165.0}),
         source="manuel", status="futur", fixing_status=FixingStatus.RECEIVED,
-        data_category=DataCategory.FIXING_OFFICIAL, label="Observation 1Y",
+        data_category=DataCategory.FIXING_CANDIDATE, label="Observation 1Y",
     )
     maturity = DealEvent(
         deal_id=proposed.id, event_index=2,
@@ -308,6 +400,12 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
     )
     session.add(strike); session.add(observation); session.add(maturity)
     session.flush()
+    _attach_fixing_version(
+        session, proposed, strike, entered_by=ops_maker,
+        status=FixingStatus.RECEIVED)
+    _attach_fixing_version(
+        session, proposed, observation, entered_by=ops_maker,
+        status=FixingStatus.RECEIVED)
     proposal = LifecycleProposal(
         deal_id=proposed.id,
         event_id=observation.id,
@@ -344,20 +442,25 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
 
     partial = _base_lifecycle_deal(
         session, user, reference="UAT-LC-002-FIXING-PARTIEL")
-    session.add(DealEvent(
+    partial_event = DealEvent(
         deal_id=partial.id, event_index=0,
         event_date=(today - timedelta(days=30)).isoformat(), t_years=0.0,
         spots_json="{}",
         indicative_spots_json=json.dumps({"Euro Stoxx 50": 5080.0}),
         source="manuel", status="futur", fixing_status=FixingStatus.PARTIAL,
-        data_category=DataCategory.FIXING_OFFICIAL, label="Strike incomplet",
-    ))
+        data_category=DataCategory.FIXING_CANDIDATE, label="Strike incomplet",
+    )
+    session.add(partial_event)
     session.add(DealEvent(
         deal_id=partial.id, event_index=1,
         event_date=(today + timedelta(days=335)).isoformat(), t_years=1.0,
         source="pending", status="futur", fixing_status=FixingStatus.EXPECTED,
         data_category=DataCategory.UNKNOWN, label="Maturité",
     ))
+    session.flush()
+    _attach_fixing_version(
+        session, partial, partial_event, entered_by=ops_maker,
+        status=FixingStatus.PARTIAL)
 
     applied = _base_lifecycle_deal(
         session, user, reference="UAT-LC-003-APPLIQUE",
@@ -368,7 +471,7 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
         spots_json=json.dumps({"Euro Stoxx 50": 5000.0}), source="manuel",
         status="observé", fixing_status=FixingStatus.APPLIED,
         data_category=DataCategory.FIXING_OFFICIAL,
-        validated_by=user.id, validated_at=datetime.utcnow(),
+        validated_by=checker.id, validated_at=datetime.utcnow(),
         applied_at=datetime.utcnow(), label="Strike / Fixing S₀",
     )
     applied_call = DealEvent(
@@ -377,7 +480,7 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
         spots_json=json.dumps({"Euro Stoxx 50": 5200.0}), source="manuel",
         status="callé", fixing_status=FixingStatus.APPLIED,
         data_category=DataCategory.FIXING_OFFICIAL,
-        validated_by=user.id, validated_at=datetime.utcnow(),
+        validated_by=checker.id, validated_at=datetime.utcnow(),
         applied_at=datetime.utcnow(), label="Observation 1Y",
     )
     applied_future = DealEvent(
@@ -388,6 +491,12 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
     )
     session.add(applied_strike); session.add(applied_call); session.add(applied_future)
     session.flush()
+    _attach_fixing_version(
+        session, applied, applied_strike, entered_by=ops_maker,
+        validated_by=checker, status=FixingStatus.APPLIED)
+    _attach_fixing_version(
+        session, applied, applied_call, entered_by=ops_maker,
+        validated_by=checker, status=FixingStatus.APPLIED)
     applied_proposal = LifecycleProposal(
         deal_id=applied.id,
         event_id=applied_call.id,
@@ -408,10 +517,10 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
             applied, [applied_strike, applied_call]),
         official_replayed_at=datetime.utcnow(),
         comparison_status="MATCH",
-        validated_by=user.id,
+        validated_by=checker.id,
         validation_reason="UAT : fixings officiels contrôlés.",
         validated_at=datetime.utcnow(),
-        applied_by=user.id,
+        applied_by=checker.id,
         applied_at=datetime.utcnow(),
     )
     session.add(applied_proposal)
@@ -421,7 +530,7 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
         action="RESOLUTION_APPLIED",
         object_type="LIFECYCLE_PROPOSAL",
         object_id=applied_proposal.id,
-        actor_user_id=user.id,
+        actor_user_id=checker.id,
         result="SUCCESS",
         before={"status": "VALIDATED"},
         after={"status": "APPLIED", "deal_status": "callé"},
@@ -448,6 +557,7 @@ def _summary(session: Session) -> dict:
         "quotes": len(session.exec(select(RfqQuote)).all()),
         "deals": len(session.exec(select(Deal)).all()),
         "events": len(session.exec(select(DealEvent)).all()),
+        "fixing_versions": len(session.exec(select(OfficialFixingVersion)).all()),
         "lifecycle_proposals": len(session.exec(select(LifecycleProposal)).all()),
         "audit_events": len(session.exec(select(AuditEvent)).all()),
         "amendment_requests": len(session.exec(select(TradeAmendmentRequest)).all()),
@@ -530,6 +640,28 @@ def _verify_uat_dataset(session: Session) -> list[str]:
     if len(session.exec(select(AuditEvent)).all()) < 25:
         raise RuntimeError("La piste d'audit UAT est insuffisante.")
     checks.append("piste d'audit persistante")
+    unproven = [event for event in session.exec(select(DealEvent)).all()
+                if event.fixing_status in {"RECEIVED", "PARTIAL", "VALIDATED", "APPLIED"}
+                and not event.current_fixing_version_id]
+    if unproven:
+        raise RuntimeError("Le jeu UAT contient des fixings sans preuve versionnée.")
+    versions = session.exec(select(OfficialFixingVersion)).all()
+    corrupt_evidence = []
+    for version in versions:
+        try:
+            payload = base64.b64decode(version.evidence_payload_b64, validate=True)
+        except (ValueError, binascii.Error):
+            payload = b""
+        if (
+            not payload
+            or len(payload) != version.evidence_size_bytes
+            or hashlib.sha256(payload).hexdigest() != version.evidence_sha256
+        ):
+            corrupt_evidence.append(version.id)
+    if corrupt_evidence:
+        raise RuntimeError(
+            f"Pièces UAT absentes ou incohérentes : {corrupt_evidence}")
+    checks.append("provenance versionnée et pièces archivées vérifiées")
     return checks
 
 
@@ -586,14 +718,34 @@ def main() -> None:
         user = session.exec(select(User).where(User.username == "test")).first()
         if not user:
             raise SystemExit("Utilisateur de test introuvable après init_db().")
+        ops_maker = User(
+            username="uat.ops.maker",
+            email="uat.ops.maker@structura.local",
+            password_hash=_hash_pw("uatmaker123"),
+            role="ops_maker",
+            entity_id=user.entity_id,
+        )
+        checker = User(
+            username="uat.ops.checker",
+            email="uat.ops.checker@structura.local",
+            password_hash=_hash_pw("uatchecker123"),
+            role="checker",
+            entity_id=user.entity_id,
+        )
+        session.add(ops_maker); session.add(checker); session.commit()
+        session.refresh(ops_maker); session.refresh(checker)
 
         booked = _book_valid_rfq(session, user)
         _create_rfq_scenarios(session, user)
-        _create_lifecycle_scenarios(session, user)
+        _create_lifecycle_scenarios(session, user, ops_maker, checker)
         checks = _verify_uat_dataset(session)
         print(json.dumps({
             "status": "ok",
-            "login": "test / test123",
+            "logins": {
+                "deal_owner": "test / test123",
+                "ops_maker": "uat.ops.maker / uatmaker123",
+                "ops_checker": "uat.ops.checker / uatchecker123",
+            },
             "booked_reference": booked["reference"],
             "summary": _summary(session),
             "checks": checks,

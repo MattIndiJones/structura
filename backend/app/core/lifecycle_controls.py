@@ -48,6 +48,15 @@ def official_input_hash(deal, events: list) -> str:
                 "spots": json.loads(event.spots_json or "{}"),
                 "fixing_status": event.fixing_status,
                 "data_category": event.data_category,
+                "fixing_version_id": getattr(event, "current_fixing_version_id", None),
+                "fixing_version": getattr(event, "fixing_version", 0),
+                "fixing_record_sha256": getattr(event, "fixing_record_sha256", None),
+                "fixing_evidence_sha256": getattr(event, "fixing_evidence_sha256", None),
+                "fixing_provider": getattr(event, "fixing_provider", None),
+                "fixing_external_reference": getattr(
+                    event, "fixing_external_reference", None),
+                "fixing_entered_by": getattr(event, "fixing_entered_by", None),
+                "validated_by": getattr(event, "validated_by", None),
             }
             for event in sorted(events, key=lambda row: (row.t_years, row.event_index))
         ],
