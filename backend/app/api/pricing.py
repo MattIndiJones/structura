@@ -71,7 +71,7 @@ def price_endpoint(req: PricingRequest):
     # MC-driven endpoint in this file.
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -139,7 +139,7 @@ def profile_endpoint(req: ProfileRequest):
     """Payoff profile — sweep spot 40%–200%, quasi-deterministic."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -161,7 +161,7 @@ def paths_endpoint(req: PathsRequest):
     """Monte Carlo sample paths for visualization."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -191,7 +191,7 @@ def proba_endpoint(req: ProbaRequest):
     """Probability analysis — P(autocall), P(KI), expected life, percentiles."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -222,7 +222,7 @@ def mtf_endpoint(req: MtfRequest):
     values of the product, under the risk-neutral measure with frozen market params."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -257,7 +257,7 @@ def backtest_endpoint(req: BacktestRequest):
     """Historical backtest — replay script on actual Yahoo Finance price history."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -435,7 +435,7 @@ def _realized_corr(prices: dict, tickers: list) -> list:
 def backtest_compare_endpoint(req: BacktestCompareRequest):
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

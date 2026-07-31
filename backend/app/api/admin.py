@@ -26,25 +26,39 @@ def _hash_pw(password: str) -> str:
 class RfqProviderCreate(BaseModel):
     label: str
     mode: str = "manual"
+    counterparty_id: Optional[int] = None
 
 
 class RfqProviderUpdate(BaseModel):
     label: Optional[str] = None
     mode: Optional[str] = None
     active: Optional[bool] = None
+    # Explicitly nullable: sending null unlinks the provider from its
+    # counterparty (the update loop below sets whatever was sent, unset
+    # fields excluded).
+    counterparty_id: Optional[int] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
-def _row(p: RfqProvider) -> dict:
+def _row(p: RfqProvider, cpty_names: dict | None = None) -> dict:
     return {
         "id": p.id,
         "label": p.label,
         "mode": p.mode,
         "active": p.active,
+        # The counterparty a deal booked out of this provider's quote faces —
+        # see models.py:RfqProvider.counterparty_id. Name resolved here so the
+        # admin screen doesn't have to join two catalogs itself.
+        "counterparty_id": p.counterparty_id,
+        "counterparty_name": (cpty_names or {}).get(p.counterparty_id),
         "created_at": p.created_at.isoformat(),
         "updated_at": p.updated_at.isoformat(),
     }
+
+
+def _cpty_names(session: Session) -> dict:
+    return {c.id: c.name for c in session.exec(select(Counterparty)).all()}
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────
@@ -55,7 +69,8 @@ def list_rfq_providers(
     session: Annotated[Session, Depends(get_session)],
 ):
     providers = session.exec(select(RfqProvider).order_by(RfqProvider.label)).all()
-    return [_row(p) for p in providers]
+    names = _cpty_names(session)
+    return [_row(p, names) for p in providers]
 
 
 @router.post("/rfq-providers", status_code=201)
@@ -67,11 +82,11 @@ def create_rfq_provider(
     label = body.label.strip()
     if not label:
         raise HTTPException(422, "Le nom du fournisseur est requis")
-    p = RfqProvider(label=label, mode=body.mode)
+    p = RfqProvider(label=label, mode=body.mode, counterparty_id=body.counterparty_id)
     session.add(p)
     session.commit()
     session.refresh(p)
-    return _row(p)
+    return _row(p, _cpty_names(session))
 
 
 @router.patch("/rfq-providers/{provider_id}")
@@ -89,7 +104,7 @@ def update_rfq_provider(
     p.updated_at = datetime.utcnow()
     session.add(p)
     session.commit()
-    return _row(p)
+    return _row(p, _cpty_names(session))
 
 
 @router.delete("/rfq-providers/{provider_id}", status_code=204)
@@ -169,10 +184,25 @@ def update_counterparty(
     c = session.get(Counterparty, cpty_id)
     if not c:
         raise HTTPException(404, "Contrepartie introuvable")
+    former_name = c.name
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(c, field, value)
     c.updated_at = datetime.utcnow()
     session.add(c)
+
+    # Un renommage cassait en silence le rapprochement par nom identique :
+    # « BNP Paribas » devenu « BNP Paribas SA » et le fournisseur RFQ du même
+    # nom ne résolvait plus rien, découvert au booking suivant. Les
+    # fournisseurs qui tenaient par ce nom sont rattachés par id avant que le
+    # nom ne change — le lien explicite, lui, survit à tout renommage.
+    if c.name != former_name:
+        orphans = session.exec(
+            select(RfqProvider).where(RfqProvider.label == former_name,
+                                       RfqProvider.counterparty_id == None)  # noqa: E711
+        ).all()
+        for p in orphans:
+            p.counterparty_id = c.id
+            session.add(p)
     session.commit()
     return _cpty_row(c)
 
@@ -206,6 +236,16 @@ def browse_table_rows(
     return admin_registry.list_rows(table_key, session)
 
 
+@router.get("/browse/{table_key}/{row_id}")
+def browse_get_row(
+    table_key: str,
+    row_id: int,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    return admin_registry.get_row(table_key, row_id, session)
+
+
 @router.delete("/browse/{table_key}/{row_id}", status_code=204)
 def browse_delete_row(
     table_key: str,
@@ -214,6 +254,36 @@ def browse_delete_row(
     session: Annotated[Session, Depends(get_session)],
 ):
     admin_registry.delete_row(table_key, row_id, session)
+
+
+class BrowseDelete(BaseModel):
+    ids: list[int]
+
+
+@router.post("/browse/{table_key}/delete")
+def browse_delete_rows(
+    table_key: str,
+    body: BrowseDelete,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Suppression en lot. POST et non DELETE : la liste d'ids voyage dans le
+    corps, qu'un DELETE ne transporte pas de façon fiable. Renvoie le détail
+    par ligne — supprimées d'un côté, bloquées avec leur raison de l'autre."""
+    if not body.ids:
+        raise HTTPException(422, "Aucun enregistrement sélectionné.")
+    return admin_registry.delete_rows(table_key, body.ids, session)
+
+
+@router.patch("/browse/{table_key}/{row_id}")
+def browse_update_row(
+    table_key: str,
+    row_id: int,
+    patch: dict,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    return admin_registry.update_row(table_key, row_id, patch, session, actor_id=admin.id)
 
 
 # ── Users (full CRUD except delete — soft-delete via is_active) ───────

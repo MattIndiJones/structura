@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import Portfolio, Deal, User, Counterparty
+from ..db.models import Portfolio, Deal, User, Counterparty, position_sign
 from .auth import get_current_user
 from .admin import _CATALOG
 from .deals import MtmExplainRequest
@@ -152,6 +152,7 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
     corr_pairs: dict[str, dict] = {}
     scalar = {"theta": 0.0, "rho": 0.0}
     deals_included, deals_missing_greeks, deals_stale = [], [], []
+    deals_missing_theta: list[dict] = []
     oldest_computed_at = None
     nominal_total_eur = 0.0
     now = datetime.utcnow()
@@ -161,11 +162,18 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
         # unlike the sensitivities below, it must not wait on deals_missing_greeks.
         fx = get_fx_series(d.devise, "EUR")
         fx_rate = float(fx.iloc[-1]) if not fx.empty else 1.0
+        # Unsigned on purpose: this is the book's gross size, the denominator
+        # of every percentage below. A long and a short of the same size are
+        # two positions to fund, not zero.
         nominal_total_eur += d.nominal * fx_rate
 
         if not d.greeks_computed_at:
             deals_missing_greeks.append({"id": d.id, "reference": d.reference})
             continue
+
+        # Signed exposure factor: a sold product carries the opposite risk of
+        # the same product held. Without it a hedge adds to what it hedges.
+        w = position_sign(d) * d.nominal * fx_rate
 
         greeks = json.loads(d.greeks_json)
         name_to_ticker = {u.get("name"): u.get("ticker", "")
@@ -184,7 +192,7 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
                                          ("vega", "vega_eur")):
                 v = g.get(greek_name)
                 if v is not None:
-                    amt = v * d.nominal * fx_rate
+                    amt = v * w
                     bucket[out_key] += amt
                     contrib[out_key] = amt
             bucket["contributions"].append(contrib)
@@ -205,7 +213,7 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
                 continue
             key, label = _canonical_pair(name_to_ticker, parts[0], parts[1])
             bucket = corr_pairs.setdefault(key, {"label": label, "corr_eur": 0.0, "contributions": []})
-            amt = v * 0.01 * d.nominal * fx_rate
+            amt = v * 0.01 * w
             bucket["corr_eur"] += amt
             bucket["contributions"].append({"deal_id": d.id, "reference": d.reference, "corr_eur": amt})
 
@@ -222,7 +230,17 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
         for greek_name in ("theta", "rho"):
             v = (greeks.get("scalar") or {}).get(greek_name)
             if v is not None:
-                scalar[greek_name] += v * d.nominal * fx_rate * _SCALE[greek_name]
+                scalar[greek_name] += v * w * _SCALE[greek_name]
+
+        # A deal whose theta could not be rolled forward exactly (fixing window
+        # or realized-vol script) reports None rather than a wrong number. The
+        # book total is then a partial sum, and saying so beats letting it pass
+        # for the whole book's decay.
+        if (greeks.get("scalar") or {}).get("theta") is None:
+            deals_missing_theta.append({
+                "id": d.id, "reference": d.reference,
+                "reason": (greeks.get("theta_event") or {}).get("reason"),
+            })
 
         deals_included.append({"id": d.id, "reference": d.reference})
         if oldest_computed_at is None or d.greeks_computed_at < oldest_computed_at:
@@ -234,6 +252,7 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
     return {
         "deals_included": deals_included,
         "deals_missing_greeks": deals_missing_greeks,
+        "deals_missing_theta": deals_missing_theta,
         "deals_stale": deals_stale,
         "nominal_total_eur": nominal_total_eur,
         "per_underlying": per_underlying,
@@ -289,7 +308,10 @@ def _run_explain_on_book(deals: list[Deal], session: Session, n_paths: int,
         fx = get_fx_series(d.devise, "EUR")
         fx_rate = float(fx.iloc[-1]) if not fx.empty else 1.0
         nominal_total_eur += d.nominal * fx_rate
-        to_eur = d.nominal * fx_rate / 100.0   # pts of nominal → EUR
+        # pts of nominal → EUR, signed: a P&L explain on a sold product must
+        # come out the other way round. Signing here covers every term of the
+        # waterfall at once, so no branch of it can be missed.
+        to_eur = position_sign(d) * d.nominal * fx_rate / 100.0
 
         try:
             payload, _c1, _c2 = _explain_core(d, session, n_paths, body)
@@ -494,6 +516,11 @@ def _barrier_severity(b: dict) -> str:
     has risen above it — a green (already-called) autocall is NOT 'critique'
     even though its gap is small in absolute value."""
     g = b["gap_pts"]
+    # No gap computable yet (strike not fixed) — a barrier that cannot be
+    # measured is not a barrier that is safe, but it is not one to raise an
+    # alarm on either.
+    if g is None:
+        return "ok"
     if b["kind"] == "ki":
         if g <= 5:
             return "critique"

@@ -181,3 +181,44 @@ def test_barriers_bucket_unexpected_failure_without_aborting_book(monkeypatch):
         assert res["errors"][0]["reference"] == "BOOM-DEAL"
     finally:
         s.close()
+
+
+# ── Deal à strike futur : les barrières existent, l'écart pas encore ────
+
+def test_barriers_are_listed_before_the_strike_has_happened():
+    """Un deal booké avec un strike dans un mois n'a pas de S₀ fixé, donc pas
+    de WOF. Les barrières du contrat existent pourtant : les masquer affichait
+    « aucune détectée » et envoyait chercher un problème de script inexistant.
+    L'écart, lui, reste None — jamais 0, que `null <= 0` transformerait en
+    barrière « franchie » côté JS."""
+    from datetime import date, timedelta
+    from sqlmodel import SQLModel, Session, create_engine
+    from backend.app.api.deals import build_watchlist_row
+    from backend.app.db.models import Deal
+
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(eng)
+    s = Session(eng)
+    today = date.today()
+    strike = (today + timedelta(days=31)).isoformat()
+    deal = Deal(
+        reference="TEST-FWD-001", user_id=1, status="actif",
+        strike_date=strike, value_date=strike, T=3.0,
+        script_snapshot=("PARAM M_AC_BAR = 100%\nPARAM M_KI_BAR = 60%\n"
+                          "AT MATURITY:\n  SET C = INDIC(WOF >= M_AC_BAR)\n"
+                          "  SET K = INDIC(WOF < M_KI_BAR)\n  PAY C + K * WOF"),
+        underlyings_json='[{"name": "UL1", "ticker": "^GSPC"}]',
+        market_snapshot_json="{}",
+    )
+    s.add(deal)
+    s.commit()
+    s.refresh(deal)
+
+    row = build_watchlist_row(deal, s, today)
+
+    assert row["wof"] is None                       # rien à mesurer avant le strike
+    assert row["strike_pending"] is True            # …et c'est normal, pas un S₀ manquant
+    assert [u["ticker"] for u in row["underlyings"]] == ["^GSPC"]
+    assert {b["name"] for b in row["barriers"]} == {"M_AC_BAR", "M_KI_BAR"}
+    assert all(b["gap_pts"] is None for b in row["barriers"])
+    assert row["min_gap"] is None                   # pas d'écart => pas de tri d'urgence

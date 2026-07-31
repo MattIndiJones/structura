@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import Indicative, Entity, User, Deal
+from ..core.references import next_reference
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api/indicatives", tags=["indicatives"])
@@ -41,11 +42,8 @@ class IndicativeUpdate(BaseModel):
 
 def _gen_ref(entity_name: str | None, session: Session) -> str:
     prefix = ((entity_name or "IND")[:4].upper().replace(" ", "").ljust(4, "X"))
-    today_str = date.today().strftime("%Y%m%d")
-    existing = session.exec(
-        select(Indicative).where(Indicative.reference.startswith(f"{prefix}-IND-{today_str}-"))
-    ).all()
-    return f"{prefix}-IND-{today_str}-{len(existing) + 1:03d}"
+    return next_reference(session, Indicative,
+                          f"{prefix}-IND-{date.today().strftime('%Y%m%d')}-")
 
 
 def _row(i: Indicative) -> dict:

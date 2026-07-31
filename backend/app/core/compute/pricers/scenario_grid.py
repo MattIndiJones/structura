@@ -12,6 +12,8 @@ parallelized cell prices identically to the sequential loop it replaces.
 Payload shape:
     script_text: str
     constat_values: dict | None      — only if the script declares CONSTAT() calendars
+    constat_anchor: str | None       — ISO date the calendar's year-fractions run from
+                                       (the product's value date); None = today
     underlyings: list[dict]
     corr: list[list[float]]
     r: float
@@ -32,12 +34,17 @@ from __future__ import annotations
 
 
 def price_scenario_grid_job(payload: dict) -> dict:
+    from datetime import date
     from ...payscript.parser import parse_script, resolve_constats
     from ...payscript.engine import run_mc
 
     compiled = parse_script(payload["script_text"])
     if payload.get("constat_values"):
-        compiled = resolve_constats(compiled, payload["constat_values"])
+        anchor = payload.get("constat_anchor")
+        compiled = resolve_constats(
+            compiled, payload["constat_values"],
+            anchor=date.fromisoformat(anchor) if anchor else None,
+        )
 
     n = len(payload["underlyings"])
     result = run_mc(

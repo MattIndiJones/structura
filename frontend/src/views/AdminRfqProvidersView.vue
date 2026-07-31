@@ -21,6 +21,10 @@
             <tr class="text-left text-slate-500 border-b border-slate-800">
               <th class="py-1.5 pr-3 font-medium">Nom</th>
               <th class="py-1.5 pr-3 font-medium">Mode</th>
+              <th class="py-1.5 pr-3 font-medium">
+                Contrepartie de booking
+                <HelpTip text="La contrepartie que le deal affronte réellement quand il est booké depuis une réponse de ce fournisseur. À renseigner uniquement si les deux noms diffèrent (ex. « Vontobel (deritrade) » cote, « Vontobel » fait face au trade) : à libellés identiques, le rapprochement se fait tout seul. Non renseignée et sans nom identique dans le catalogue des contreparties, le booking laisse le champ vide plutôt que d'y écrire une contrepartie hors catalogue." />
+              </th>
               <th class="py-1.5 pr-3 font-medium">Actif</th>
               <th class="py-1.5 pr-3 font-medium"></th>
             </tr>
@@ -39,11 +43,24 @@
                 </select>
               </td>
               <td class="py-1.5 pr-3">
+                <select class="select py-1 px-2" :value="p.counterparty_id ?? ''"
+                        @change="updateProvider(p, { counterparty_id: $event.target.value === '' ? null : Number($event.target.value) })">
+                  <option value="">{{ autoMatch(p) ? `— ${autoMatch(p)} (par le nom) —` : '— Aucune —' }}</option>
+                  <option v-for="c in counterparties" :key="c.id" :value="c.id">{{ c.name }}</option>
+                </select>
+                <!-- Sans rapprochement, le booking laisse la contrepartie vide :
+                     autant le dire ici plutôt que de le découvrir au trade. -->
+                <div v-if="!p.counterparty_id && !autoMatch(p) && p.active"
+                     class="text-[10px] text-amber-500/90 mt-0.5">
+                  ⚠ aucune contrepartie — le booking laissera le champ vide
+                </div>
+              </td>
+              <td class="py-1.5 pr-3">
                 <input type="checkbox" class="accent-blue-500" :checked="p.active"
                        @change="updateProvider(p, { active: $event.target.checked })" />
               </td>
               <td class="py-1.5 pr-3 text-right">
-                <button class="text-slate-600 hover:text-red-400" title="Supprimer" aria-label="Supprimer le fournisseur" @click="deleteProvider(p)">🗑</button>
+                <button class="icon-btn-danger" title="Supprimer" aria-label="Supprimer le fournisseur" @click="deleteProvider(p)">🗑</button>
               </td>
             </tr>
           </tbody>
@@ -74,8 +91,10 @@ import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
+import HelpTip from '../components/HelpTip.vue'
 
 const providers = ref([])
+const counterparties = ref([])
 const loading   = ref(true)
 const error     = ref('')
 const notice    = ref('')
@@ -96,7 +115,21 @@ async function fetchProviders() {
   }
 }
 
-onMounted(fetchProviders)
+async function fetchCounterparties() {
+  try {
+    const res = await apiFetch('/api/admin/counterparties')
+    if (res.ok) counterparties.value = (await res.json()).filter(c => c.active)
+  } catch { /* le select se limite alors à « Aucune » */ }
+}
+
+// Le rapprochement automatique par nom identique n'a rien à configurer — on
+// le montre dans l'option vide pour que l'admin voie qu'il est déjà couvert
+// au lieu de croire le fournisseur non rattaché (voir _counterparty_by_provider).
+function autoMatch(p) {
+  return counterparties.value.some(c => c.name === p.label) ? p.label : null
+}
+
+onMounted(() => { fetchProviders(); fetchCounterparties() })
 
 async function createProvider() {
   const label = newLabel.value.trim()

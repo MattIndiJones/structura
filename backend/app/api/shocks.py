@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import Deal, Portfolio, ShockRun, User
+from ..db.models import Deal, Portfolio, ShockRun, User, position_sign
 from .auth import get_current_user
 from .deals import _mtm_core, MtmRequest
 from ..core.amc_prices import get_fx_series
@@ -50,13 +50,21 @@ class ShockRequest(MtmRequest):
     label: str = ""
 
 
-def _build_shock_arrays(underlyings_json: list, shock: ShockRequest) -> tuple[list, list]:
+def _build_shock_arrays(underlyings_json: list, shock: ShockRequest,
+                        norm_spots: list) -> tuple[list, list]:
+    """Shocked spot vector and vol add-on.
+
+    The shock is applied RELATIVE to where the deal actually trades: a live deal
+    at 130% of its strike, shocked -10%, must be repriced at 117%, not at 90%.
+    Building the multiplier from 1.0 instead repriced every live deal as though
+    it were freshly struck at par — so the tab reported a non-zero impact even
+    under a zero shock, because it was subtracting two different products."""
     spot_mult, vol_add = [], []
-    for u in underlyings_json:
+    for u, ns in zip(underlyings_json, norm_spots):
         ov = shock.shock_overrides.get(u.get("name", ""))
         spot_pct = ov.spot_shock_pct if (ov and ov.spot_shock_pct is not None) else shock.spot_shock_pct
         vol_pts = ov.vol_shock_pts if (ov and ov.vol_shock_pts is not None) else shock.vol_shock_pts
-        spot_mult.append(1.0 + spot_pct / 100.0)
+        spot_mult.append(ns * (1.0 + spot_pct / 100.0))
         vol_add.append(vol_pts / 100.0)
     return spot_mult, vol_add
 
@@ -98,17 +106,29 @@ def _run_shock_on_deal(deal: Deal, session: Session, n_paths: int, shock: ShockR
         return {"deal_id": deal.id, "reference": deal.reference, "skipped": True,
                 "reason": mtm_payload.get("message", "résolution en attente")}
 
-    spot_mult, vol_add = _build_shock_arrays(ctx["underlyings_json"], shock)
+    spot_mult, vol_add = _build_shock_arrays(ctx["underlyings_json"], shock,
+                                             ctx["norm_spots"])
     corr_shocked = _shock_corr(ctx["corr"], shock.corr_shock_pts)
     dr = shock.rate_shock_bp / 10000.0
 
+    # The shocked leg must inherit exactly the lifecycle state the MtM it is
+    # compared against was built on — same knock-in status, same accrued
+    # coupons, same observation counter. Repricing without it produced a
+    # `delta_pts` that mostly measured the difference between a live deal and a
+    # brand new one, not the effect of the shock.
+    st = ctx["state"]
     result = run_mc(
         ctx["residual_script"], ctx["engine_uls"], corr_shocked,
         ctx["r_frac"], ctx["T_remaining"], ctx["N_used"], ctx["model_used"],
         seed=42, antithetic=ctx["antithetic"], user_params=ctx["user_params"],
-        spot_mult=spot_mult, vol_add=vol_add, dr=dr,
+        spot_mult=spot_mult, spot_base=ctx["norm_spots"], vol_add=vol_add, dr=dr,
         yield_curve=ctx["yc"], sigma_r=ctx["sigma_r"], a_r=ctx["a_r"],
         barrier_monitoring=ctx["barrier_monitoring"],
+        wof_min_init=st["wof_min"], bof_max_init=st["bof_max"],
+        index_offset=st["index"], memo_init=st["memo"], accum_init=st["accum"],
+        s_min_init=st["s_min"], s_max_init=st["s_max"], s_prev_init=st["s_prev"],
+        wof0_init=min(spot_mult),
+        realvol_state_init=st["realvol_state"], fix_state_init=st["fix_state"],
     )
 
     fx = get_fx_series(deal.devise, "EUR")
@@ -119,7 +139,9 @@ def _run_shock_on_deal(deal: Deal, session: Session, n_paths: int, shock: ShockR
         "deal_id": deal.id, "reference": deal.reference, "skipped": False,
         "mtm_before": mtm_payload["mtm"], "mtm_after": result["price"],
         "delta_pts": round(delta_pts, 4),
-        "delta_eur": round(delta_pts * deal.nominal * fx_rate, 2),
+        # delta_pts stays the raw price move of the product; the sign belongs
+        # on the cash figure, which is the one that gets summed across a book.
+        "delta_eur": round(delta_pts * position_sign(deal) * deal.nominal * fx_rate, 2),
         "n_paths": result["n_paths"],
     }
 

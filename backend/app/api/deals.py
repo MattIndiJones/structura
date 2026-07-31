@@ -5,15 +5,18 @@ import re
 from datetime import datetime, date, timedelta
 from typing import Annotated, Literal, Optional, List
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import Deal, DealEvent, Entity, User, Counterparty, Portfolio
+from ..db.models import (Deal, DealEvent, Entity, User, Counterparty, Portfolio,
+                          RfqQuote, RfqRequest, Script)
 from .auth import get_current_user
 from ..services.market_data import load_hist_prices
 from ..core.payscript.parser import parse_script, resolve_constats, CompiledScript, effective_T_max
 from ..core.payscript.engine import eval_script_on_history
 from ..core.calibration import realized_market
+from ..core.references import next_reference
 from ..core.schemas import ReinvestScanRequest, ReinvestProposalRequest
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
@@ -22,7 +25,7 @@ router = APIRouter(prefix="/api/deals", tags=["deals"])
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
 class DealCreate(BaseModel):
-    sens: str = "vente"
+    sens: Literal["achat", "vente"] = "vente"
     contrepartie: str
     devise: str = "EUR"
     product_type: str = ""
@@ -43,13 +46,16 @@ class DealCreate(BaseModel):
     # Pre-trade opportunity this deal converts from, if any — see
     # db/models.py:Deal.indicative_id.
     indicative_id: Optional[int] = None
+    # Winning RFQ response this deal was booked from, if any — see
+    # db/models.py:Deal.rfq_id.
+    rfq_id: Optional[int] = None
 
 
 class DealUpdate(BaseModel):
-    status: Optional[str] = None
-    contrepartie: Optional[str] = None
-    price_traded: Optional[float] = None
-    nominal: Optional[float] = None
+    status: Optional[Literal["actif", "callé", "échu", "résilié"]] = None
+    contrepartie: Optional[str] = Field(default=None, min_length=1)
+    price_traded: Optional[float] = Field(default=None, gt=0)
+    nominal: Optional[float] = Field(default=None, gt=0)
 
 
 class EventUpdate(BaseModel):
@@ -64,13 +70,234 @@ def _date_plus_years(d: str, years: float) -> str:
     return (date.fromisoformat(d) + timedelta(days=round(years * 365.25))).isoformat()
 
 
+def _years_between(start: str, end: str) -> float:
+    """Inverse of _date_plus_years, same 365.25-day year."""
+    return (date.fromisoformat(end) - date.fromisoformat(start)).days / 365.25
+
+
+def _validate_economics(body) -> None:
+    """Refuse what is not a trade. The booking form checks part of this, but
+    the form is not the boundary — the API is, and it accepted a deal with a
+    negative nominal (which then SUBTRACTS from counterparty exposure in
+    api/portfolios.py), a fair value of zero (every later MtM is measured
+    against it), a settlement before its own strike, or a maturity in 2020.
+
+    Deliberately NOT checked: a counterparty outside the catalog (the field is
+    a free string on purpose — see models.py:Counterparty, booked history must
+    stay readable after a rename), and a strike far in the past (booking an
+    old trade after the fact is legitimate)."""
+    errors = []
+    if not body.contrepartie or not body.contrepartie.strip():
+        errors.append("la contrepartie est obligatoire")
+    if body.nominal is None or body.nominal <= 0:
+        errors.append(f"le nominal doit être strictement positif (reçu : {body.nominal})")
+    if not body.fair_value:
+        errors.append("la fair value est nulle — le P&L du deal se mesurerait contre zéro "
+                      "(lancez ▶ Pricer, ou saisissez-la)")
+    elif body.fair_value < 0:
+        errors.append(f"la fair value ne peut pas être négative (reçu : {body.fair_value})")
+    if not body.price_traded or body.price_traded <= 0:
+        errors.append(f"le prix traité doit être strictement positif (reçu : {body.price_traded})")
+
+    if body.T is None or body.T <= 0:
+        errors.append(f"la maturité en années T doit être strictement positive (reçu : {body.T})")
+    if not body.script_snapshot or not body.script_snapshot.strip():
+        errors.append("le script contractuel est obligatoire")
+    if not body.underlyings:
+        errors.append("au moins un sous-jacent est obligatoire")
+    if len(body.devise or "") != 3 or not body.devise.isalpha():
+        errors.append(f"la devise doit être un code ISO à trois lettres (reçu : {body.devise!r})")
+    body_ul_ids = [
+        (str(u.get("name") or "").strip(), str(u.get("ticker") or "").strip(),
+         str(u.get("ccy") or body.devise).strip().upper())
+        for u in body.underlyings
+    ]
+    if len(set(body_ul_ids)) != len(body_ul_ids):
+        errors.append("la liste des sous-jacents contient des doublons")
+    market_uls = (body.market_snapshot or {}).get("underlyings") or []
+    if market_uls:
+        market_ul_ids = [
+            (str(u.get("name") or "").strip(), str(u.get("ticker") or "").strip(),
+             str(u.get("ccy") or body.devise).strip().upper())
+            for u in market_uls
+        ]
+        if market_ul_ids != body_ul_ids:
+            errors.append("les sous-jacents du deal et du snapshot de marché divergent")
+
+    parsed_dates = {}
+    for label, raw in (("trade", body.trade_date), ("strike", body.strike_date),
+                       ("valeur", body.value_date), ("maturité", body.maturity_date),
+                       ("règlement", body.payment_date)):
+        if not raw and label == "règlement":
+            continue
+        try:
+            parsed_dates[label] = date.fromisoformat(raw)
+        except (TypeError, ValueError):
+            errors.append(f"la date de {label} est invalide ({raw!r})")
+
+    if body.strike_date and body.value_date and body.value_date < body.strike_date:
+        errors.append(f"la date de valeur ({body.value_date}) précède la date de strike "
+                      f"({body.strike_date})")
+    if body.maturity_date and body.value_date and body.maturity_date <= body.value_date:
+        errors.append(f"la maturité ({body.maturity_date}) n'est pas postérieure à la date "
+                      f"de valeur ({body.value_date})")
+    if body.payment_date and body.maturity_date and body.payment_date < body.maturity_date:
+        errors.append(f"le règlement ({body.payment_date}) précède la maturité "
+                      f"({body.maturity_date})")
+    if errors:
+        raise HTTPException(422, "Booking impossible : " + " ; ".join(errors) + ".")
+
+
+def _deal_product_terms(body: DealCreate) -> dict:
+    """Canonical contractual identity presented by a deal booking request."""
+    from .rfq import product_terms
+    market = body.market_snapshot or {}
+    params = {
+        "underlyings": market.get("underlyings") or body.underlyings,
+        "user_params": market.get("user_params") or {},
+        "constats": market.get("constats") or {},
+        "notional": body.nominal,
+        "currency": body.devise,
+        "strike_date": body.strike_date,
+        "value_date": body.value_date,
+        "T": body.T,
+    }
+    return product_terms(body.script_snapshot, params)
+
+
+def _validate_rfq_booking_identity(rfq: RfqRequest, body: DealCreate,
+                                   session: Session) -> None:
+    """Refuse a deal that merely points at an RFQ but is not its product."""
+    from .rfq import (_counterparty_by_provider, product_terms,
+                      superseded_quote_ids)
+
+    quotes = session.exec(select(RfqQuote).where(RfqQuote.rfq_id == rfq.id)).all()
+    selected = next((q for q in quotes if q.id == rfq.selected_quote_id), None)
+    if not selected or selected.price is None:
+        raise HTTPException(422, "La réponse retenue doit porter un prix final avant booking.")
+    if selected.status in {"decline", "expire"}:
+        raise HTTPException(422, "La réponse retenue n'est plus exécutable.")
+    if selected.id in superseded_quote_ids(quotes):
+        raise HTTPException(422, "La réponse retenue a été remplacée par un last look final.")
+    if rfq.status == "sans_suite":
+        raise HTTPException(409, "Une RFQ classée sans suite doit être rouverte avant booking.")
+
+    expected_sens = "vente" if rfq.sens == "achat" else "achat"
+    if body.sens != expected_sens:
+        raise HTTPException(
+            422, f"Le sens du deal ({body.sens}) ne correspond pas au sens de la RFQ "
+                 f"({rfq.sens}, donc deal attendu : {expected_sens}).")
+
+    expected_counterparty = _counterparty_by_provider(session).get(selected.provider)
+    if expected_counterparty and body.contrepartie != expected_counterparty:
+        raise HTTPException(
+            422, f"La contrepartie du deal ({body.contrepartie}) ne correspond pas au "
+                 f"fournisseur retenu ({selected.provider} → {expected_counterparty}).")
+
+    expected = product_terms(rfq.script_snapshot, json.loads(rfq.params_json or "{}"))
+    actual_all = _deal_product_terms(body)
+    actual = {key: actual_all.get(key) for key in expected}
+    if actual != expected:
+        changed = sorted(key for key in expected if actual.get(key) != expected.get(key))
+        raise HTTPException(
+            422, "Le deal ne correspond pas aux termes contractuels figés de la RFQ : "
+                 + ", ".join(changed) + ". Rechargez le booking depuis la RFQ ; "
+                 "pour un autre produit, créez une nouvelle RFQ.")
+
+
+def _derive_observation_times(body) -> List[float]:
+    """The deal's observation schedule, read off the product itself rather than
+    off a pricing run.
+
+    The client derives it from the last Monte Carlo's flux table, which fails
+    in two ways. It is EMPTY when nothing was priced in the session — booking
+    straight from an RFQ prefill (which clears results on purpose) produced a
+    deal whose only event was the strike, so no barrier watchlist, no residual
+    MtM and no automatic resolution, silently. And when it is filled, its times
+    are the simulation's WEEKLY GRID steps (0.9808 = 51/52), not the calendar's
+    (0.9884): a 3-day drift on every observation date the lifecycle then works
+    from.
+
+    Resolving the script's own calendar gives both — the true contractual
+    dates, and no dependency on having clicked ▶ Pricer."""
+    compiled = parse_script(body.script_snapshot)
+    market = body.market_snapshot or {}
+    compiled = resolve_constats(
+        compiled, market.get("constats") or {},
+        anchor=date.fromisoformat(body.value_date) if body.value_date else None,
+    )
+    # AT_MATURITY carries no date of its own: it fires at the end of the
+    # horizon. Which end? The deal's OWN maturity date, not the tenor typed in
+    # the pricing form — the two diverge as soon as a CONSTAT calendar is in
+    # play, since the form keeps a round 3.0 while the calendar ends at 2.9897.
+    # Reading the horizon off body.T put the redemption 4 days AFTER the
+    # maturity the deal itself declares, and added a fifth observation line to
+    # a product that has four. A coupon calendar shorter than the note (2Y of
+    # coupons on a 3Y maturity) stays correct: its maturity date is the 3Y one.
+    horizon = body.T
+    if body.maturity_date and body.value_date:
+        from_maturity = _years_between(body.value_date, body.maturity_date)
+        if from_maturity > 0:
+            horizon = from_maturity
+    T_eff = effective_T_max(compiled, horizon)
+    times = set()
+    for ev in compiled.events:
+        if ev.type == "AT_MATURITY":
+            times.add(round(T_eff, 4))
+        for d in (ev.dates or []):
+            times.add(round(d, 4))
+    # t=0 is the strike/fixing line, added separately by book_deal.
+    return sorted(t for t in times if t > 0)
+
+
+def _rfq_provenance(rfq, price_traded: float, session: Session) -> str:
+    """Freeze the tender's competitive picture onto the deal: the retained
+    response, every rival price it beat, and our own model price at the time.
+    Stored as JSON on the deal (Deal.rfq_provenance_json) rather than looked
+    up through rfq_id on demand, because the RFQ keeps living afterwards —
+    a price corrected or a quote deleted would silently rewrite the
+    justification of a trade already done.
+
+    price_traded is carried alongside the retained quote's price rather than
+    validated against it: the two legitimately differ (last-minute
+    negotiation, fees, rounding). Recording the gap documents it; refusing it
+    would block real bookings."""
+    from .rfq import superseded_quote_ids, product_terms, product_terms_hash
+
+    quotes = session.exec(select(RfqQuote).where(RfqQuote.rfq_id == rfq.id)).all()
+    superseded = superseded_quote_ids(quotes)
+    won = next((q for q in quotes if q.id == rfq.selected_quote_id), None)
+    frozen_terms = product_terms(rfq.script_snapshot, json.loads(rfq.params_json or "{}"))
+    return json.dumps({
+        "rfq_id": rfq.id,
+        "reference": rfq.reference,
+        "sens": rfq.sens,
+        "kind": rfq.kind,
+        "model_price": rfq.model_price,
+        "model_price_at": rfq.model_price_at.isoformat() if rfq.model_price_at else None,
+        "booked_at": datetime.utcnow().isoformat(),
+        "price_traded": price_traded,
+        "product_terms": frozen_terms,
+        "product_terms_sha256": product_terms_hash(frozen_terms),
+        "retained": {
+            "provider": won.provider, "price": won.price,
+            "is_last_look": won.parent_quote_id is not None,
+            "quoted_at": won.quoted_at.isoformat() if won.quoted_at else None,
+        } if won else None,
+        # Only final answers: a superseded quote is the same bank's earlier
+        # price, not a competitor (see rfq.py:superseded_quote_ids).
+        "competition": sorted(
+            [{"provider": q.provider, "price": q.price}
+             for q in quotes
+             if q.id not in superseded and q.id != rfq.selected_quote_id and q.price is not None],
+            key=lambda x: x["price"],
+        ),
+    }, ensure_ascii=False)
+
+
 def _gen_ref(entity_name: str | None, session: Session) -> str:
     prefix = ((entity_name or "DEAL")[:4].upper().replace(" ", "").ljust(4, "X"))
-    today_str = date.today().strftime("%Y%m%d")
-    existing = session.exec(
-        select(Deal).where(Deal.reference.startswith(f"{prefix}-{today_str}-"))
-    ).all()
-    return f"{prefix}-{today_str}-{len(existing) + 1:03d}"
+    return next_reference(session, Deal, f"{prefix}-{date.today().strftime('%Y%m%d')}-")
 
 
 def _deal_row(d: Deal, events: list | None = None) -> dict:
@@ -80,6 +307,10 @@ def _deal_row(d: Deal, events: list | None = None) -> dict:
         "entity_id": d.entity_id,
         "user_id": d.user_id,
         "indicative_id": d.indicative_id,
+        "rfq_id": d.rfq_id,
+        # Frozen best-execution record — see _rfq_provenance. None outside
+        # the tender path.
+        "rfq_provenance": json.loads(d.rfq_provenance_json) if d.rfq_provenance_json else None,
         "portfolio_id": d.portfolio_id,
         "sens": d.sens,
         "contrepartie": d.contrepartie,
@@ -152,9 +383,64 @@ def book_deal(
 ):
     from .portfolios import get_or_create_default_portfolio
 
+    _validate_economics(body)
+
     entity = session.get(Entity, current.entity_id) if current.entity_id else None
     reference = _gen_ref(entity.name if entity else None, session)
     default_portfolio = get_or_create_default_portfolio(session, current.id)
+
+    # Validate the RFQ link BEFORE the deal exists: rfq_id is a best-execution
+    # trail (which tender this trade came out of), so a stale or foreign id
+    # must be refused outright rather than persisted on the deal and merely
+    # skipped when closing the RFQ below.
+    source_rfq = None
+    rfq_provenance = None
+    if body.rfq_id:
+        source_rfq = session.get(RfqRequest, body.rfq_id)
+        if not source_rfq or source_rfq.user_id != current.id:
+            raise HTTPException(404, "RFQ introuvable")
+        # Booking a tender closes it as "Bookée" — doing that without a
+        # retained response would record a trade won by nobody, and leave the
+        # analysis unable to tell who actually won (see api/rfq.py:/history).
+        # One tender, one trade. Booking the same RFQ twice would produce two
+        # deals both claiming to be THE execution of that competition, and
+        # would double-count the winning bank's hit ratio (api/rfq.py:/history).
+        already = session.exec(select(Deal).where(Deal.rfq_id == source_rfq.id)).first()
+        if already:
+            raise HTTPException(
+                409, f"Cette RFQ a déjà été bookée — deal {already.reference}. "
+                     f"Ouvrez-le depuis le Booking plutôt que d'en créer un second.")
+        if source_rfq.selected_quote_id is None:
+            raise HTTPException(
+                422, "Aucune réponse retenue sur cette RFQ — retenez la cotation traitée "
+                     "avant de booker, c'est elle qui documente la best execution.")
+        _validate_rfq_booking_identity(source_rfq, body, session)
+        rfq_provenance = _rfq_provenance(source_rfq, body.price_traded, session)
+
+    # A new deal's script and frozen CONSTAT values are the contract.  Client
+    # Monte-Carlo grid points are never a safe booking fallback.
+    try:
+        times = _derive_observation_times(body)
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(
+            422, f"Le calendrier contractuel du script est inexploitable : {e}. "
+                 "Corrigez les CONSTAT avant de booker.")
+    if not times:
+        # A deal with no observation has no life: no barrier watchlist, no
+        # residual MtM, no automatic resolution. It used to be booked anyway
+        # and stayed silently inert — an incoherent calendar (end before
+        # start) reaches exactly this state.
+        raise HTTPException(
+            422, "Ce deal n'a aucune constatation — il ne pourrait être ni surveillé, "
+                 "ni valorisé, ni dénoué. Vérifiez le calendrier CONSTAT du script.")
+
+    maturity = date.fromisoformat(body.maturity_date)
+    event_dates = [_date_plus_years(body.value_date, t) for t in times]
+    after_maturity = [d for d in event_dates if date.fromisoformat(d) > maturity]
+    if after_maturity:
+        raise HTTPException(
+            422, "Le calendrier contractuel dépasse la maturité du deal "
+                 f"({body.maturity_date}) : {', '.join(after_maturity)}.")
 
     deal = Deal(
         reference=reference,
@@ -162,6 +448,8 @@ def book_deal(
         user_id=current.id,
         portfolio_id=default_portfolio.id,
         indicative_id=body.indicative_id,
+        rfq_id=body.rfq_id,
+        rfq_provenance_json=rfq_provenance,
         script_snapshot=body.script_snapshot,
         script_id=body.script_id,
         sens=body.sens,
@@ -191,6 +479,11 @@ def book_deal(
             ind.updated_at = datetime.utcnow()
             session.add(ind)
 
+    if source_rfq:
+        source_rfq.status = "clos"
+        source_rfq.updated_at = datetime.utcnow()
+        session.add(source_rfq)
+
     today = date.today().isoformat()
 
     # First event is always the strike date (t=0) — S₀ to be filled in Events tab
@@ -205,8 +498,6 @@ def book_deal(
         label="Strike / Fixing S₀",
     ))
 
-    # Subsequent observation events (indexed from 1)
-    times = sorted(set(body.observation_times))
     for idx, t in enumerate(times):
         ev_date = _date_plus_years(body.value_date, t)
         is_maturity = (idx == len(times) - 1)
@@ -222,7 +513,18 @@ def book_deal(
             label=label,
         ))
 
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as e:
+        session.rollback()
+        if body.rfq_id:
+            existing = session.exec(
+                select(Deal).where(Deal.rfq_id == body.rfq_id)).first()
+            if existing:
+                raise HTTPException(
+                    409, f"Cette RFQ a déjà été bookée — deal {existing.reference}.")
+        raise HTTPException(
+            409, "Conflit d'unicité pendant le booking. Rechargez les données et réessayez.") from e
     session.refresh(deal)
     return _deal_row(deal, _get_events(deal.id, session))
 
@@ -326,6 +628,23 @@ def watchlist(
     return rows
 
 
+def _product_name(deal: Deal, session: Session) -> str:
+    """How the desk names this product, as opposed to its reference (an id) or
+    its product_type (a family). A deal has no name column of its own: it
+    inherits the name of what it was built from — the saved script, or the
+    tender it was won on. Empty for an ad-hoc script never saved anywhere,
+    which genuinely has no name to show."""
+    if deal.script_id:
+        script = session.get(Script, deal.script_id)
+        if script:
+            return script.name
+    if deal.rfq_id:
+        rfq = session.get(RfqRequest, deal.rfq_id)
+        if rfq:
+            return rfq.name
+    return ""
+
+
 def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
     """One watchlist entry for an active deal — shared by GET /watchlist and
     the daily scheduler (services/lifecycle_alerts.py), which reads the same
@@ -349,25 +668,48 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
     bof = None
     bof_max = None
     perfs = []
-    spots_out = []
+    # Which underlyings the deal is on is known from the deal itself — it must
+    # not depend on having prices. A deal whose strike is still in the future
+    # has no S₀ fixed and no performance yet, and used to display "—" in the
+    # Sous-jacent column as if the product had none.
+    spots_out = [{"name": u["name"], "ticker": u.get("ticker", ""),
+                  "s0": s0_map.get(u["name"]), "spot": None, "perf": None}
+                 for u in underlyings]
+    by_name = {row["name"]: row for row in spots_out}
     if tickers and s0_map:
-        px = load_hist_prices(tickers, deal.strike_date, today_str)
+        # yfinance's `end` is exclusive — fetching [strike_date, today] when
+        # the deal was booked TODAY (strike_date == today_str) requests a
+        # zero-width window and comes back empty, same failure mode
+        # refresh_deal_core already guards against by starting a week early.
+        fetch_start = (date.fromisoformat(deal.strike_date) - timedelta(days=7)).isoformat()
+        px = load_hist_prices(tickers, fetch_start, today_str)
         if "error" not in px:
+            dates = px.get("dates", [])
             prices = px.get("prices", {})
+            # Since-strike window: wof_min/bof_max must only see closes from
+            # t=0 onward. The wider fetch above is purely to survive a
+            # same-day/weekend strike with no close of its own — the CURRENT
+            # spot still falls back to the latest known price even when that
+            # window is empty (a deal struck today, before the market's
+            # closed, genuinely has no post-strike close yet; the extrema
+            # then degrade to just that one spot, same as "nothing has
+            # happened since inception").
+            since_strike = [i for i, d in enumerate(dates) if d >= deal.strike_date]
             min_perfs, max_perfs = [], []
             for u in underlyings:
                 tk = u.get("ticker", "")
                 name = u["name"]
                 s0 = s0_map.get(name, 0.0)
-                series = [float(p) for p in prices.get(tk, []) if p]
-                if tk and series and s0 > 0:
-                    spot = series[-1]
+                raw = prices.get(tk, [])
+                all_series = [float(p) for p in raw if p]
+                extrema_series = [float(raw[i]) for i in since_strike if i < len(raw) and raw[i]] or all_series[-1:]
+                if tk and all_series and s0 > 0:
+                    spot = all_series[-1]
                     perfs.append(spot / s0)
-                    min_perfs.append(min(series) / s0)
-                    max_perfs.append(max(series) / s0)
-                    spots_out.append({
-                        "name": name, "ticker": tk, "s0": s0,
-                        "spot": round(spot, 4), "perf": round(spot / s0, 4),
+                    min_perfs.append(min(extrema_series) / s0)
+                    max_perfs.append(max(extrema_series) / s0)
+                    by_name[name].update({
+                        "s0": s0, "spot": round(spot, 4), "perf": round(spot / s0, 4),
                     })
             if perfs:
                 wof, bof = min(perfs), max(perfs)
@@ -378,83 +720,95 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
     # the next fixing will actually use, not row 1).
     next_obs_index = next_ev.event_index if next_ev else None
 
+    # Detected whatever the deal's stage: a barrier is a term of the contract,
+    # not a consequence of having a spot. Before the strike there is simply no
+    # gap to show (gap_pts stays None) — "aucune détectée" used to be displayed
+    # instead, sending the reader hunting for a script that parses fine.
     barriers = []
-    if wof is not None:
-        try:
-            compiled = parse_script(deal.script_snapshot)
-            market = json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {}
-            user_params = market.get("user_params", {}) or {}
-            params_by_name = {p.name: p for p in compiled.params}
+    try:
+        compiled = parse_script(deal.script_snapshot)
+        market = json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {}
+        user_params = market.get("user_params", {}) or {}
+        params_by_name = {p.name: p for p in compiled.params}
 
-            def _observable_value(obs: str | None) -> float | None:
-                if obs is None or obs == "WOF":
-                    return wof
-                if obs == "BOF":
-                    return bof
-                if obs == "WOF_MIN":
-                    return wof_min
-                if obs == "BOF_MAX":
-                    return bof_max
-                if obs == "BASKET":
-                    return sum(perfs) / len(perfs) if perfs else None
-                m_s = re.match(r"^S(?:_MIN|_MAX)?\[(\d+)\]$", obs)
-                if m_s:
-                    i_u = int(m_s.group(1)) - 1
-                    return perfs[i_u] if 0 <= i_u < len(perfs) else None
-                return None
+        def _observable_value(obs: str | None) -> float | None:
+            if obs is None or obs == "WOF":
+                return wof
+            if obs == "BOF":
+                return bof
+            if obs == "WOF_MIN":
+                return wof_min
+            if obs == "BOF_MAX":
+                return bof_max
+            if obs == "BASKET":
+                return sum(perfs) / len(perfs) if perfs else None
+            m_s = re.match(r"^S(?:_MIN|_MAX)?\[(\d+)\]$", obs)
+            if m_s:
+                i_u = int(m_s.group(1)) - 1
+                return perfs[i_u] if 0 <= i_u < len(perfs) else None
+            return None
 
-            def _level_for(name: str) -> float | None:
-                v = user_params.get(name, params_by_name[name].stored_val)
-                if isinstance(v, list):
-                    if not v:
-                        return None
-                    idx = (next_obs_index or len(v)) - 1
-                    idx = max(0, idx)
-                    return float(v[idx]) if idx < len(v) else float(v[-1])
-                return float(v)
+        def _level_for(name: str) -> float | None:
+            v = user_params.get(name, params_by_name[name].stored_val)
+            if isinstance(v, list):
+                if not v:
+                    return None
+                idx = (next_obs_index or len(v)) - 1
+                idx = max(0, idx)
+                return float(v[idx]) if idx < len(v) else float(v[-1])
+            return float(v)
 
-            monitors = compiled.monitors or []
-            if monitors:
-                # Explicit M_ contract — trust it exclusively. Direction
-                # and observable come from how the script compares the
-                # param (see parser._analyze_monitors); ambiguous usage
-                # degrades to a neutral, uncolored gap.
-                for mon in monitors:
-                    level = _level_for(mon["name"])
-                    obs_val = _observable_value(mon["observable"])
-                    if level is None or obs_val is None:
-                        continue
-                    kind = {"up": "autocall", "down": "ki"}.get(mon["direction"], "neutral")
+        monitors = compiled.monitors or []
+        if monitors:
+            # Explicit M_ contract — trust it exclusively. Direction
+            # and observable come from how the script compares the
+            # param (see parser._analyze_monitors); ambiguous usage
+            # degrades to a neutral, uncolored gap.
+            for mon in monitors:
+                level = _level_for(mon["name"])
+                if level is None:
+                    continue
+                obs_val = _observable_value(mon["observable"])
+                kind = {"up": "autocall", "down": "ki"}.get(mon["direction"], "neutral")
+                barriers.append({
+                    "name": mon["name"],
+                    "kind": kind,
+                    "observable": mon["observable"] or "WOF",
+                    "level": round(level, 4),
+                    # None = the observable isn't computable yet (strike not
+                    # fixed, prices unavailable). Every consumer must read it
+                    # as "no gap yet", never as zero — see utils/barriers.js
+                    # and portfolios.py:_barrier_severity.
+                    "gap_pts": round((obs_val - level) * 100, 1) if obs_val is not None else None,
+                })
+        else:
+            # Legacy scripts with no M_ params — name heuristic vs WOF.
+            for p in compiled.params:
+                kind = _classify_param_barrier(p.name, p.stored_val)
+                if kind:
                     barriers.append({
-                        "name": mon["name"],
+                        "name": p.name,
                         "kind": kind,
-                        "observable": mon["observable"] or "WOF",
-                        "level": round(level, 4),
-                        "gap_pts": round((obs_val - level) * 100, 1),
+                        "observable": "WOF",
+                        "level": p.stored_val,
+                        "gap_pts": round((wof - p.stored_val) * 100, 1) if wof is not None else None,
                     })
-            else:
-                # Legacy scripts with no M_ params — name heuristic vs WOF.
-                for p in compiled.params:
-                    kind = _classify_param_barrier(p.name, p.stored_val)
-                    if kind:
-                        barriers.append({
-                            "name": p.name,
-                            "kind": kind,
-                            "observable": "WOF",
-                            "level": p.stored_val,
-                            "gap_pts": round((wof - p.stored_val) * 100, 1),
-                        })
-        except ValueError:
-            pass   # unparseable snapshot — leave barriers empty, keep the row
+    except ValueError:
+        pass   # unparseable snapshot — leave barriers empty, keep the row
 
-    min_gap = min((abs(b["gap_pts"]) for b in barriers), default=None)
+    min_gap = min((abs(b["gap_pts"]) for b in barriers
+                   if b["gap_pts"] is not None), default=None)
     return {
         "deal_id": deal.id,
         "reference": deal.reference,
         "contrepartie": deal.contrepartie,
+        "product_name": _product_name(deal, session),
         "product_type": deal.product_type,
         "nominal": deal.nominal,
         "devise": deal.devise,
+        # Forward start: nothing to measure yet, and that's normal — distinct
+        # from an S₀ that should be there and isn't (a Refresh away).
+        "strike_pending": deal.strike_date > today_str,
         "next_event": {"date": next_ev.event_date, "label": next_ev.label} if next_ev else None,
         "days_to_next": days_to_next,
         "underlyings": spots_out,
@@ -1437,7 +1791,7 @@ def _mtm_core(
             N=max(1000, min(100000, n_paths)),
             model=model_used, seed=42,
             antithetic=bool(market.get("antithetic", True)),
-            user_params=user_params, spot_mult=norm_spots,
+            user_params=user_params, spot_mult=norm_spots, spot_base=norm_spots,
             yield_curve=yc, sigma_r=sigma_r, a_r=a_r,
             barrier_monitoring=market.get("barrierMonitoring", "weekly"),
             wof_min_init=state["wof_min"], bof_max_init=state["bof_max"],
@@ -1609,6 +1963,11 @@ def deal_greeks(
         seed=42, user_params=ctx["user_params"], selected=selected,
         sigma_r=ctx["sigma_r"], a_r=ctx["a_r"], yield_curve=ctx["yc"],
         barrier_monitoring=ctx["barrier_monitoring"],
+        # A live deal's sensitivities are those of what it has BECOME — spot
+        # where it stands today, knock-in already touched or not, coupons
+        # already accrued. Repricing it as a brand new product, which is what
+        # omitting this does, answers a question nobody asked.
+        antithetic=ctx["antithetic"], state=_greeks_state(ctx),
     )
 
     per_underlying: dict[str, dict] = {}
@@ -1617,6 +1976,9 @@ def deal_greeks(
     # corr_1_2 index form compute_greeks returns — readable directly in the
     # UI without the caller having to re-resolve indices against names.
     corr_pairs: dict[str, float] = {}
+    # Not a sensitivity: the observation the theta window steps over, and the
+    # cash it detaches. Kept out of `scalar`, which is summed across the book.
+    theta_event = raw.pop("theta_event", None)
     for key, val in raw.items():
         m = re.match(r"^(delta|gamma|vega)_(\d+)$", key)
         if m:
@@ -1637,6 +1999,7 @@ def deal_greeks(
         "mtm_reference": mtm_payload["mtm"],
         "per_underlying": per_underlying,
         "scalar": scalar,
+        "theta_event": theta_event,
         "corr_pairs": corr_pairs,
         "market_used": mtm_payload["market_used"],
     }
@@ -1673,6 +2036,7 @@ def _run_explain_step(cal: dict, spot: dict, uls: list, corr, model: str,
         cal["residual_script"], uls, corr, common["r_frac"], cal["T_remaining"],
         N=common["N"], model=model, seed=42, antithetic=common["antithetic"],
         user_params=common["user_params"], spot_mult=spot["norm_spots"],
+        spot_base=spot["norm_spots"],
         yield_curve=common["yc"], sigma_r=common["sigma_r"], a_r=common["a_r"],
         barrier_monitoring=common["bm"],
         wof_min_init=st["wof_min"], bof_max_init=st["bof_max"],
@@ -1684,48 +2048,56 @@ def _run_explain_step(cal: dict, spot: dict, uls: list, corr, model: str,
     )["price"]
 
 
-def _residual_greeks(ctx: dict, n_paths: int) -> list[dict]:
-    """Residual-deal sensitivities by CRN bump-and-reprice on the same residual
-    setup (state inheritance included). Client-friendly units: MtM impact in
-    points for a +1% spot move (delta), its convexity (gamma, second
-    difference), and +1 vol point (vega). Vega is None on non-GBM models —
-    bumping σ there would be a misleading no-op (Heston ignores it)."""
-    from ..core.payscript.engine import run_mc
-    N_g = max(1000, ctx["N_used"] // 4)
+def _greeks_state(ctx: dict) -> dict:
+    """The lifecycle bundle compute_greeks needs, assembled from _mtm_core's ctx.
+
+    `spot_base` is what "not bumped" means for this deal — today's spot in % of
+    strike. Every bump is taken relative to it, so a deal 30% above its strike
+    is shocked by 1% of where it actually trades, not of its issue level."""
     st = ctx["state"]
+    return {
+        "spot_base": ctx["norm_spots"],
+        "wof_min": st["wof_min"], "bof_max": st["bof_max"],
+        "index": st["index"], "memo": st["memo"], "accum": st["accum"],
+        "s_min": st["s_min"], "s_max": st["s_max"], "s_prev": st["s_prev"],
+        "realvol_state": st["realvol_state"], "fix_state": st["fix_state"],
+    }
 
-    def price(spots=None, uls=None):
-        sp = spots if spots is not None else ctx["norm_spots"]
-        return run_mc(
-            ctx["residual_script"], uls or ctx["engine_uls"], ctx["corr"],
-            ctx["r_frac"], ctx["T_remaining"], N=N_g, model=ctx["model_used"],
-            seed=42, antithetic=ctx["antithetic"], user_params=ctx["user_params"],
-            spot_mult=sp, yield_curve=ctx["yc"], sigma_r=ctx["sigma_r"],
-            a_r=ctx["a_r"], barrier_monitoring=ctx["barrier_monitoring"],
-            wof_min_init=st["wof_min"], bof_max_init=st["bof_max"],
-            index_offset=st["index"], memo_init=st["memo"], accum_init=st["accum"],
-            s_min_init=st["s_min"], s_max_init=st["s_max"], s_prev_init=st["s_prev"],
-            wof0_init=min(sp), realvol_state_init=st["realvol_state"],
-            fix_state_init=st["fix_state"],
-        )["price"]
 
-    base = price()
-    ns = ctx["norm_spots"]
-    gbm = ctx["model_used"] == "constant"
+def _residual_greeks(ctx: dict, n_paths: int) -> list[dict]:
+    """Client-facing presentation of the residual sensitivities, for the PDF
+    valuation notes: MtM impact in points for a +1% spot move (delta), its
+    convexity (gamma) and +1 vol point (vega).
+
+    The maths lives in compute_greeks — this only rescales. Two consequences of
+    that convergence, both improvements: gamma now comes from a ±3% bump rather
+    than ±1% (a second difference over a tiny denominator is dominated by Monte
+    Carlo noise), and vega is no longer None outside GBM, because it bumps the
+    diffusion's vol input rather than a `sigma` field that Heston ignores."""
+    from ..core.payscript.engine import compute_greeks
+
+    raw = compute_greeks(
+        ctx["residual_script"], ctx["engine_uls"], ctx["corr"],
+        ctx["r_frac"], ctx["T_remaining"], ctx["N_used"], ctx["model_used"],
+        seed=42, user_params=ctx["user_params"],
+        selected=["delta", "gamma", "vega"],
+        sigma_r=ctx["sigma_r"], a_r=ctx["a_r"], yield_curve=ctx["yc"],
+        barrier_monitoring=ctx["barrier_monitoring"],
+        antithetic=ctx["antithetic"], state=_greeks_state(ctx),
+    )
     out = []
     for i, u in enumerate(ctx["underlyings_json"]):
-        up = list(ns); up[i] = ns[i] * 1.01
-        dn = list(ns); dn[i] = ns[i] * 0.99
-        pu, pd = price(spots=up), price(spots=dn)
-        vega = None
-        if gbm:
-            uls_v = [dict(x) for x in ctx["engine_uls"]]
-            uls_v[i]["sigma"] = uls_v[i]["sigma"] + 0.01
-            vega = round((price(uls=uls_v) - base) * 100, 2)
-        out.append({"name": u["name"],
-                    "delta_pts": round((pu - pd) / 2 * 100, 2),
-                    "gamma_pts": round((pu + pd - 2 * base) * 100, 3),
-                    "vega_pts": vega})
+        delta = raw.get(f"delta_{i+1}")
+        gamma = raw.get(f"gamma_{i+1}")
+        vega = raw.get(f"vega_{i+1}")
+        out.append({
+            "name": u["name"],
+            # delta is already "price move per 100% of spot", i.e. points per
+            # 1% — the two conventions coincide.
+            "delta_pts": None if delta is None else round(delta, 2),
+            "gamma_pts": None if gamma is None else round(gamma * 0.01, 3),
+            "vega_pts": None if vega is None else round(vega, 2),
+        })
     return out
 
 

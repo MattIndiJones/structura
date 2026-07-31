@@ -58,11 +58,16 @@
           <div v-if="excludedNoModelCount" class="text-[10px] text-amber-500/80">
             {{ excludedNoModelCount }} quote(s) exclue(s) — prix modèle non calculé sur leur RFQ.
           </div>
+          <div v-if="supersededCount" class="text-[10px] text-slate-500">
+            {{ supersededCount }} cotation(s) remplacée(s) par un last look — seule la contre-cote
+            finale du fournisseur est comptée, sinon la même banque pèse deux fois dans l'AO.
+          </div>
 
           <!-- Graphique -->
           <div class="card">
-            <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-              Écart vs prix modèle par fournisseur (bps)
+            <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3"
+                 title="Écart au prix modèle Structura, signé de notre côté : positif = en notre faveur, achats et ventes confondus.">
+              Écart favorable vs prix modèle par fournisseur (bps)
             </div>
             <canvas ref="chartRef" height="90"></canvas>
           </div>
@@ -74,8 +79,11 @@
               <thead>
                 <tr class="text-left text-slate-500 border-b border-slate-800">
                   <th class="py-1.5 pr-4 font-medium">Fournisseur</th>
+                  <th class="py-1.5 pr-4 font-medium"
+                      title="Part des AO tranchés, où ce fournisseur avait coté, qu'il a effectivement gagnés. Les AO encore en cours ne comptent pas ; un AO classé sans suite compte comme non gagné.">Hit ratio</th>
                   <th class="py-1.5 pr-4 font-medium">Nb quotes</th>
-                  <th class="py-1.5 pr-4 font-medium">Écart moyen</th>
+                  <th class="py-1.5 pr-4 font-medium"
+                      title="Moyenne de l'écart favorable : positif = ce fournisseur cote en moyenne du bon côté de notre prix modèle.">Écart favorable moyen</th>
                   <th class="py-1.5 pr-4 font-medium">Min</th>
                   <th class="py-1.5 pr-4 font-medium">Max</th>
                 </tr>
@@ -83,6 +91,7 @@
               <tbody>
                 <tr v-for="row in summaryRows" :key="row.provider" class="border-b border-slate-800/60">
                   <td class="py-1.5 pr-4 text-slate-200">{{ providerLabel(row.provider) }}</td>
+                  <td class="py-1.5 pr-4" :class="row.hitRatio === null ? 'text-slate-600' : 'text-slate-200'">{{ fmtHitRatio(row) }}</td>
                   <td class="py-1.5 pr-4 text-slate-400">{{ row.count }}</td>
                   <td class="py-1.5 pr-4" :class="row.avg >= 0 ? 'text-green-400' : 'text-red-400'">{{ fmtBps(row.avg) }}</td>
                   <td class="py-1.5 pr-4 text-slate-500">{{ fmtBps(row.min) }}</td>
@@ -135,13 +144,23 @@ function toggleProvider(p) {
   else filters.providers.splice(i, 1)
 }
 
+// Everything below ranks providers on edge_bps, not the raw spread: it is
+// signed from our side (positive = in our favour) whichever way each RFQ was
+// traded, so buy and sell tenders can sit in the same average. Raw spreads
+// would cancel each other out — see api/rfq.py:_edge_bps.
 const excludedNoModelCount = computed(() =>
-  rfq.history.filter(h => h.spread_bps === null).length
+  rfq.history.filter(h => h.edge_bps === null || h.edge_bps === undefined).length
 )
+
+const supersededCount = computed(() => rfq.history.filter(h => h.superseded).length)
 
 const filteredHistory = computed(() => {
   return rfq.history.filter(h => {
-    if (h.spread_bps === null) return false
+    if (h.edge_bps === null || h.edge_bps === undefined) return false
+    // Une cotation remplacée par le last look du même fournisseur n'est pas
+    // une réponse de plus : la compter mettrait la banque deux fois dans
+    // l'AO et tirerait sa moyenne vers sa cotation améliorée.
+    if (h.superseded) return false
     if (filters.templateType && h.template_type !== filters.templateType) return false
     if (!filters.providers.includes(h.provider)) return false
     if (filters.from && h.date.slice(0, 10) < filters.from) return false
@@ -161,19 +180,37 @@ function fmtBps(v) {
   return (v >= 0 ? '+' : '') + centralFormatBps(v, 0)
 }
 
+// Hit ratio : gagnés / AO tranchés où la banque a coté. Le dénominateur
+// exclut volontairement les AO encore en cours — une banque qui vient de
+// coter un AO non tranché n'a rien perdu. Un AO classé « sans suite » y
+// reste en revanche : personne ne l'a gagné, c'est un AO où sa cotation
+// n'a pas abouti.
+const DECIDED = new Set(['clos', 'sans_suite'])
+
 const summaryRows = computed(() => {
   const byProvider = {}
   for (const h of filteredHistory.value) {
-    (byProvider[h.provider] ||= []).push(h.spread_bps)
+    const p = (byProvider[h.provider] ||= { edges: [], won: 0, decided: 0 })
+    p.edges.push(h.edge_bps)
+    if (DECIDED.has(h.rfq_status)) p.decided++
+    if (h.won) p.won++
   }
-  return Object.entries(byProvider).map(([provider, values]) => ({
+  return Object.entries(byProvider).map(([provider, p]) => ({
     provider,
-    count: values.length,
-    avg: values.reduce((a, b) => a + b, 0) / values.length,
-    min: Math.min(...values),
-    max: Math.max(...values),
-  })).sort((a, b) => a.provider.localeCompare(b.provider))
+    count: p.edges.length,
+    avg: p.edges.reduce((a, b) => a + b, 0) / p.edges.length,
+    min: Math.min(...p.edges),
+    max: Math.max(...p.edges),
+    won: p.won,
+    decided: p.decided,
+    hitRatio: p.decided ? p.won / p.decided : null,
+  })).sort((a, b) => (b.hitRatio ?? -1) - (a.hitRatio ?? -1) || a.provider.localeCompare(b.provider))
 })
+
+function fmtHitRatio(row) {
+  if (row.hitRatio === null) return '—'
+  return `${Math.round(row.hitRatio * 100)}% (${row.won}/${row.decided})`
+}
 
 function chartOpts() {
   return {
@@ -203,7 +240,7 @@ function rebuildChart() {
   const datasets = filters.providers.map((provider, i) => {
     const byDate = {}
     for (const h of filteredHistory.value) {
-      if (h.provider === provider) byDate[h.date.slice(0, 10)] = h.spread_bps
+      if (h.provider === provider) byDate[h.date.slice(0, 10)] = h.edge_bps
     }
     return {
       label: providerLabel(provider),

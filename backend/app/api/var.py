@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import Deal, Portfolio, ComputeBatch, ComputeJob, User
+from ..db.models import Deal, Portfolio, ComputeBatch, ComputeJob, User, position_sign
 from .auth import get_current_user
 from ..services.market_data import load_hist_prices
 from ..core.amc_prices import get_fx_series
@@ -55,6 +55,11 @@ def _launch_var_study(deals: list[Deal], session: Session, user_id: int,
             continue
         fx = get_fx_series(d.devise, "EUR")
         base["fx_rate"] = float(fx.iloc[-1]) if not fx.empty else 1.0
+        # Carried into each job's _meta so the aggregation, which runs long
+        # after the deal rows are out of scope, still knows which way the
+        # position points. A book of offsetting longs and shorts otherwise
+        # reports the sum of their risks instead of the net.
+        base["position_sign"] = position_sign(d)
         bases.append(base)
         tickers.update(base["tickers"])
 
@@ -93,6 +98,7 @@ def _launch_var_study(deals: list[Deal], session: Session, user_id: int,
                 "scenario_key": scenario.key, "method": scenario.method,
                 "deal_id": base["deal_id"], "mtm_before": base["mtm_before"],
                 "nominal": base["nominal"], "fx_rate": base["fx_rate"],
+                "position_sign": base["position_sign"],
             }
             job_payloads.append(payload)
             job_labels.append(f"{scenario.label} / {base['reference']}")
@@ -192,7 +198,10 @@ def get_var_result(
             continue
         result = json.loads(j.result_json)
         delta_pts = result["price"] - meta["mtm_before"]
-        bucket["delta_eur"] += delta_pts * meta["nominal"] * meta["fx_rate"]
+        # Batches queued before position_sign existed carry no such key; they
+        # were all read as long, so that is the compatible default.
+        bucket["delta_eur"] += (delta_pts * meta["nominal"] * meta["fx_rate"]
+                                * meta.get("position_sign", 1.0))
         bucket["n_deals"] += 1
 
     hist_deltas = [b["delta_eur"] for b in by_scenario.values() if b["method"] == "historical"]

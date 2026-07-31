@@ -115,6 +115,20 @@
   .btn-sm { @apply px-2.5 py-1 text-xs; }
   .btn-icon { @apply p-2 rounded-[8px]; }
 
+  /* ── Bouton icône ligne de tableau (supprimer/modifier) — taille et zone
+     cliquable fixes, indépendantes du text-xs ambiant d'un tableau (sinon
+     l'icône hérite d'une taille minuscule, cf. feedback "icônes trop
+     petites"). Un seul point pour ajuster la taille dans toute l'app. ── */
+  .icon-btn-danger, .icon-btn-neutral {
+    @apply inline-flex items-center justify-center rounded-lg transition-colors shrink-0;
+    width: 28px;
+    height: 28px;
+    font-size: 1rem;
+    color: var(--muted);
+  }
+  .icon-btn-danger:hover { background: var(--negative-light); color: var(--negative); }
+  .icon-btn-neutral:hover { background: var(--accent-light); color: var(--accent); }
+
   /* ── Cartes ── */
   .card {
     @apply rounded-[16px] p-5 transition-shadow;

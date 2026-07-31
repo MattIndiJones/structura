@@ -110,7 +110,7 @@ def emt_compute(
     """Compute an indicative EMT / target-market profile from a KID already run."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(422, str(e))
 

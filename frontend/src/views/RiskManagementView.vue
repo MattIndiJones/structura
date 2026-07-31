@@ -231,9 +231,14 @@
                       </div>
                       <div class="stat-box">
                         <div class="text-xs text-slate-500 mb-1">Theta net
-                          <HelpTip text="Décroissance temporelle nette du book, en EUR par jour calendaire — somme des theta par deal (nominal × taux de change), déjà scalaire donc pas de regroupement par sous-jacent nécessaire." /></div>
+                          <HelpTip text="Décroissance temporelle nette du book, en EUR par jour calendaire — somme des theta par deal (signe de la position × nominal × taux de change), déjà scalaire donc pas de regroupement par sous-jacent nécessaire. Un flux détaché pendant la semaine mesurée n'y entre pas : il est reporté à part sur le deal concerné." /></div>
                         <div class="text-lg font-bold font-mono text-slate-200">{{ formatNominal(pf.risk.scalar.theta) }}</div>
                         <div class="text-[10px] text-slate-600">EUR / jour</div>
+                        <div v-if="pf.risk.deals_missing_theta?.length"
+                          class="text-[10px] text-amber-400/80 mt-0.5">
+                          somme partielle — {{ pf.risk.deals_missing_theta.length }} deal(s) sans theta
+                          <HelpTip text="Ces deals n'ont pas de theta calculable : la semaine franchit une transition contractuelle ou un état réalisé qui ne peut pas être inventé exactement (observation, fixing, mémoire ou volatilité réalisée). Ils sont exclus de la somme plutôt que comptés à zéro." />
+                        </div>
                       </div>
                       <div class="stat-box">
                         <div class="text-xs text-slate-500 mb-1">Rho net

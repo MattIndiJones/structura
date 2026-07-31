@@ -18,7 +18,7 @@ def _parse_and_validate(req) -> tuple:
     every (possibly CONSTAT-resolved) event date, see effective_T_max."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

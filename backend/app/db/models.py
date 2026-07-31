@@ -23,6 +23,26 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ReferenceCounter(SQLModel, table=True):
+    """Atomic allocator state for externally visible business references."""
+    __tablename__ = "reference_counters"
+    prefix: str = Field(primary_key=True)
+    last_value: int = Field(default=0)
+
+
+class AdminAuditLog(SQLModel, table=True):
+    """Append-only trace of privileged corrections made through Admin."""
+    __tablename__ = "admin_audit_logs"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    admin_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    table_key: str = Field(index=True)
+    row_id: int = Field(index=True)
+    action: str = Field(default="update")
+    before_json: str = Field(default="{}", sa_column=Column(Text))
+    after_json: str = Field(default="{}", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
 class Folder(SQLModel, table=True):
     __tablename__ = "folders"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -68,7 +88,12 @@ class Script(SQLModel, table=True):
 class Deal(SQLModel, table=True):
     __tablename__ = "deals"
     id: Optional[int] = Field(default=None, primary_key=True)
-    reference: str = Field(index=True)
+    # Unique: the reference is the trade's business identity (valuation notes,
+    # KID, client correspondence). Handed out by core/references.py, which
+    # numbers off the highest suffix rather than the row count so deleting one
+    # never frees a number for reuse. Existing databases get the constraint as
+    # an index in db/database.py:_migrate.
+    reference: str = Field(index=True, unique=True)
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     user_id: int = Field(foreign_key="users.id")
 
@@ -77,6 +102,22 @@ class Deal(SQLModel, table=True):
     # indicative_id forever (never re-keyed); this is the only link needed
     # to retrieve them alongside the booked deal's own documents.
     indicative_id: Optional[int] = Field(default=None, foreign_key="indicatives.id")
+
+    # Same idea, for a deal booked from a competitive RFQ's winning quote
+    # (see api/rfq.py selected_quote_id) — set at booking time, never re-keyed.
+    # A competitive tender can execute into one and only one deal. SQLite
+    # permits multiple NULLs in a unique index, so non-RFQ bookings are not
+    # affected.
+    rfq_id: Optional[int] = Field(
+        default=None, foreign_key="rfq_requests.id", unique=True)
+
+    # Frozen best-execution record: who was in competition, at what prices,
+    # what our model said, and what we actually traded — captured at booking
+    # (api/deals.py:book_deal). rfq_id alone doesn't survive as evidence: the
+    # RFQ stays editable afterwards (a price corrected, a quote deleted), so
+    # the justification of THIS trade has to be a snapshot, not a live join.
+    # None for a deal booked outside any tender.
+    rfq_provenance_json: Optional[str] = Field(default=None, sa_column=Column(Text))
 
     # Risk-aggregation grouping (api/portfolios.py) — one portfolio at a time,
     # reassignable. Always set going forward (book_deal assigns the user's
@@ -90,6 +131,10 @@ class Deal(SQLModel, table=True):
     script_id: Optional[int] = Field(default=None, foreign_key="scripts.id")
 
     # Deal economics
+    # Written from the COUNTERPARTY's point of view — "vente" means the bank
+    # sells, so we are the buyer and hold the product long. Deliberately the
+    # opposite convention to RfqRequest.sens (our own side); the two are
+    # inverted when a deal is booked from an RFQ. See position_sign().
     sens: str = Field(default="vente")         # "achat" | "vente"
     contrepartie: str = Field(default="")
     devise: str = Field(default="EUR")
@@ -172,7 +217,7 @@ class Indicative(SQLModel, table=True):
     """
     __tablename__ = "indicatives"
     id: Optional[int] = Field(default=None, primary_key=True)
-    reference: str = Field(index=True)
+    reference: str = Field(index=True, unique=True)   # see Deal.reference
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     user_id: int = Field(foreign_key="users.id")
 
@@ -208,7 +253,9 @@ class KidRecord(SQLModel, table=True):
     sri: int = Field(default=0)
     mrm: int = Field(default=0)
     crm: int = Field(default=0)
-    vev: float = Field(default=0.0)
+    # None is meaningful: a total-loss first percentile has no finite VEV,
+    # while its market-risk class is forced to 7.
+    vev: Optional[float] = Field(default=None)
     t_rhp: float = Field(default=0.0)
     horizons_json: str = Field(default="[]", sa_column=Column(Text))
     costs_json: str = Field(default="{}", sa_column=Column(Text))
@@ -255,12 +302,28 @@ class RfqRequest(SQLModel, table=True):
     re-keyed. Individual bank responses live in RfqQuote."""
     __tablename__ = "rfq_requests"
     id: Optional[int] = Field(default=None, primary_key=True)
-    reference: str = Field(index=True)
+    reference: str = Field(index=True, unique=True)   # see Deal.reference
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     user_id: int = Field(foreign_key="users.id")
 
     name: str = Field(default="")
     ao_date: str = Field(default="")  # ISO date — when the tender was actually sent, distinct from created_at
+    # indicatif: quick price check to fine-tune an idea, no trade expected —
+    #   Normal-mode scripts, created from a no-code template or a saved script.
+    # to_trade: meant to actually execute — must parse and reference a real
+    #   CONSTAT calendar (Expert mode) for the precision an actual trade needs;
+    #   see api/rfq.py create_rfq. It may originate from the script library,
+    #   an expert template, or a previously booked deal snapshot.
+    kind: str = Field(default="indicatif")  # indicatif | to_trade
+    # Our own side of the trade — deliberately NOT the same convention as
+    # Deal.sens, which is written from the counterparty's point of view
+    # ("Vente (banque vend)"). Here 'achat' means WE buy from the solicited
+    # providers, the normal direction for this module (they're "fournisseurs"),
+    # hence the default. It decides which response wins the tender — cheapest
+    # when we buy, richest when we sell — so it drives bestQuote and the
+    # favourable/unfavourable colouring in RfqView.vue, and gets INVERTED when
+    # prefilling Deal.sens at booking (see pricing.js:loadFromRfq).
+    sens: str = Field(default="achat")  # achat | vente (côté Structura)
     template_type: str = Field(default="")
     script_id: Optional[int] = Field(default=None, foreign_key="scripts.id")
     script_snapshot: str = Field(default="", sa_column=Column(Text))
@@ -269,7 +332,18 @@ class RfqRequest(SQLModel, table=True):
     model_price: Optional[float] = Field(default=None)
     model_price_at: Optional[datetime] = Field(default=None)
 
-    status: str = Field(default="draft")  # draft | envoye | quote | clos
+    # draft | envoye | quote | retenue | clos | sans_suite.
+    # Derived server-side from the tender's own facts on every mutation (see
+    # api/rfq.py _derive_status) — never posed by the caller, except the two
+    # terminal states: "clos" by book_deal, "sans_suite" (AO abandoned/lost,
+    # the majority of them) by the desk via PATCH.
+    status: str = Field(default="draft")
+
+    # The quote the desk has decided to trade on — set via
+    # PATCH /rfq/{id} {selected_quote_id}, which is what makes the derived
+    # status "retenue". Points at either a top-level quote or a last-look child
+    # (RfqQuote.parent_quote_id) — whichever price/time actually got traded.
+    selected_quote_id: Optional[int] = Field(default=None, foreign_key="rfq_quotes.id")
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -287,6 +361,16 @@ class RfqQuote(SQLModel, table=True):
     note: Optional[str] = Field(default=None)
     quoted_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Last look: this provider (often the one who originated the idea) gets
+    # a chance to match the best competing price, or keep the deal at their
+    # own price if close enough, after seeing the field. Setting this True
+    # spawns a child RfqQuote (same provider, parent_quote_id = this row's
+    # id) with its own fresh price/quoted_at — the re-quote itself. Both
+    # rows stay visible: the original response is kept for the record next
+    # to the last-look counter-quote (see api/rfq.py update_quote).
+    last_look: bool = Field(default=False)
+    parent_quote_id: Optional[int] = Field(default=None, foreign_key="rfq_quotes.id")
 
 
 class Counterparty(SQLModel, table=True):
@@ -319,6 +403,14 @@ class RfqProvider(SQLModel, table=True):
     label: str
     mode: str = Field(default="manual")  # manual | api
     active: bool = Field(default=True)
+    # Which eligible counterparty a deal booked out of this provider's quote
+    # actually faces. Optional and NOT a hard identity: a quoting channel is
+    # not always the legal entity the trade ends up with (a platform such as
+    # deritrade quotes, the issuing bank faces the trade). Left unset, the
+    # booking prefill can only fall back to matching labels between the two
+    # admin catalogs, and refuses to prefill a counterparty it can't find —
+    # see api/rfq.py _counterparty_by_provider and DealTab.vue.
+    counterparty_id: Optional[int] = Field(default=None, foreign_key="counterparties.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -340,6 +432,29 @@ class Alert(SQLModel, table=True):
     dedup_key: str = Field(default="", index=True)
     read: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+def position_sign(deal: "Deal") -> float:
+    """+1 if we hold the product, -1 if we sold it.
+
+    `Deal.sens` is written from the bank's side: "vente" = the bank sells =
+    we bought = long. Every risk aggregate — Greeks, shocked MtM, VaR
+    scenarios — must carry this sign, or a hedge adds to the exposure it was
+    put on to offset instead of cancelling it.
+
+    Raises on anything else rather than defaulting: a silent `else` branch on a
+    mistyped sens is exactly how the RFQ module ended up reading every trade
+    backwards, and a risk number that is merely negated looks entirely
+    plausible."""
+    if deal.sens == "vente":
+        return 1.0
+    if deal.sens == "achat":
+        return -1.0
+    raise ValueError(
+        f"Sens de position inconnu sur le deal {deal.reference!r} : {deal.sens!r} — "
+        f"valeurs admises : 'vente' (la banque vend, nous sommes acheteurs) ou "
+        f"'achat' (la banque achète, nous sommes vendeurs)."
+    )
 
 
 class DealEvent(SQLModel, table=True):

@@ -134,7 +134,7 @@ def kid_compute(
     """Compute PRIIPs KID scenarios and SRI."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(422, str(e))
 
@@ -176,10 +176,19 @@ def kid_compute(
     p1 = sc_full["p1"]
     if p1 > 0.0 and p1 < 1.0:
         vev = math.sqrt(-2.0 * math.log(p1) / T_full)
+        mrm = _mrm_from_vev(vev)
+    elif p1 >= 1.0:
+        # The 1st percentile still repays par: no downside worth measuring.
+        vev, mrm = 0.0, 1
     else:
-        vev = 0.0
+        # p1 <= 0 — at least 1% of scenarios wipe the investment out. The log
+        # is undefined, and a single `else: vev = 0.0` used to route this into
+        # the LOWEST risk class: a product that can lose everything came out at
+        # MRM 1, i.e. safer than a government bond. A total loss is by
+        # construction the top of the scale. The VEV itself has no finite value
+        # here and is reported as absent rather than as a number.
+        vev, mrm = None, 7
 
-    mrm = _mrm_from_vev(vev)
     sri = _sri(mrm, req.crm)
 
     # Build horizons list (ascending T)
@@ -195,7 +204,7 @@ def kid_compute(
         "sri":  sri,
         "mrm":  mrm,
         "crm":  req.crm,
-        "vev":  round(vev * 100, 2),   # expressed in %
+        "vev":  None if vev is None else round(vev * 100, 2),   # expressed in %
         "T_rhp": round(T_full, 4),
         "horizons": horizons,
         "full_price": round(sc_full["price"], 4),
@@ -216,7 +225,9 @@ class KidSaveRequest(BaseModel):
     sri: int
     mrm: int
     crm: int
-    vev: float
+    # A total-loss first percentile has no finite VEV.  The compute endpoint
+    # returns null with MRM 7 and persistence must preserve that fact.
+    vev: Optional[float] = None
     T_rhp: float
     horizons: list = []
     costs: dict = {}

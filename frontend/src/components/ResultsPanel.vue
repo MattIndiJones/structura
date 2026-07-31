@@ -766,11 +766,18 @@ const gUnit = name => {
 }
 
 const gInterp = (name, val) => {
-  const v = (val * 100).toFixed(2)
-  if (name.startsWith('delta')) return `+1% spot → P&L ${v}%`
-  if (name.startsWith('vega'))  return `+1% vol → P&L ${v}%`
-  if (name === 'theta')          return `1 jour → P&L ${v}%`
-  if (name === 'rho')            return `+100bp → P&L ${v}%`
+  // delta/vega/rho are bump-and-reprice ratios of two already-percent-scale
+  // quantities (price fraction / bump fraction) — the raw value IS already
+  // "points of price per 1 unit of bump" (e.g. 0.41 = 0.41pt for +1% spot),
+  // same number shown in the Valeur column. Theta instead divides a price
+  // fraction by a day count, so its raw value is a fraction (e.g. 0.0003 =
+  // 0.03%) that needs the ×100 conversion the other three must NOT get.
+  const vRatio = val.toFixed(2)
+  const vPct   = (val * 100).toFixed(2)
+  if (name.startsWith('delta')) return `+1% spot → P&L ${vRatio}%`
+  if (name.startsWith('vega'))  return `+1% vol → P&L ${vRatio}%`
+  if (name === 'theta')          return `1 jour → P&L ${vPct}%`
+  if (name === 'rho')            return `+100bp → P&L ${vRatio}%`
   return ''
 }
 </script>

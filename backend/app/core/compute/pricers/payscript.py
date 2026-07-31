@@ -45,7 +45,10 @@ def price_payscript_job(payload: dict) -> dict:
 
     compiled = parse_script(payload["script_text"])
     if payload.get("constat_values"):
-        compiled = resolve_constats(compiled, payload["constat_values"])
+        from datetime import date
+        anchor = date.fromisoformat(payload["value_date"]) if payload.get("value_date") else None
+        compiled = resolve_constats(
+            compiled, payload["constat_values"], anchor=anchor)
 
     corr = payload.get("corr_shocked") or payload["corr"]
     result = run_mc(

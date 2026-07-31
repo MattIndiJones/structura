@@ -62,7 +62,7 @@
                   <button v-if="['failed', 'completed_with_failures', 'cancelled'].includes(b.status)"
                           class="btn-secondary text-[10px] px-2 py-1" :disabled="b.busy"
                           @click="relaunchBatch(b)">Relancer</button>
-                  <button class="text-slate-600 hover:text-red-400 px-1" title="Supprimer" aria-label="Supprimer le batch" :disabled="b.busy"
+                  <button class="icon-btn-danger" title="Supprimer" aria-label="Supprimer le batch" :disabled="b.busy"
                           @click="deleteBatch(b)">🗑</button>
                 </div>
               </td>

@@ -96,9 +96,23 @@ export const useRfqStore = defineStore('rfq', () => {
   async function removeQuote(rfqId, quoteId) {
     const res = await apiFetch(`/api/rfq/${rfqId}/quotes/${quoteId}`, { method: 'DELETE' })
     await _json(res, 'Erreur suppression quote')
-    if (current.value?.id === rfqId) {
-      current.value.quotes = current.value.quotes.filter(q => q.id !== quoteId)
-    }
+    // Refetch rather than splice locally: deleting a quote can cascade to
+    // its last-look child and/or clear the RFQ's selected_quote_id
+    // server-side (see api/rfq.py delete_quote) — a local filter would miss
+    // both.
+    if (current.value?.id === rfqId) await fetchOne(rfqId)
+  }
+
+  // Toggling last_look changes the shape of the quotes list (adds/removes a
+  // linked child row) rather than just one field on one row, so refetch the
+  // whole RFQ instead of trying to patch the array in place.
+  async function toggleLastLook(rfqId, quoteId, value) {
+    await updateQuote(rfqId, quoteId, { last_look: value })
+    if (current.value?.id === rfqId) await fetchOne(rfqId)
+  }
+
+  function selectQuote(rfqId, quoteId) {
+    return update(rfqId, { selected_quote_id: quoteId })
   }
 
   // Prices the RFQ's frozen script against Structura's own Monte Carlo engine
@@ -118,6 +132,11 @@ export const useRfqStore = defineStore('rfq', () => {
         model: p.model || 'constant',
         user_params: p.user_params || {},
         constats: p.constats || {},
+        // Value date = the product's t=0, what the CONSTAT calendar's dates
+        // are counted from (see PricingRequest.anchor). Without it the RFQ
+        // prices its calendar from today and the deal booked out of it
+        // reprices from its value date — same product, two prices.
+        anchor: p.value_date || null,
       }),
     })
     const data = await _json(res, 'Erreur calcul du prix modèle')
@@ -130,5 +149,6 @@ export const useRfqStore = defineStore('rfq', () => {
     list, current, providers, history,
     fetchProviders, fetchList, fetchOne, create, update, remove,
     addQuote, updateQuote, removeQuote, computeModelPrice, fetchHistory,
+    toggleLastLook, selectQuote,
   }
 })

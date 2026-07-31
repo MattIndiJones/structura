@@ -12,6 +12,7 @@ from __future__ import annotations
 import bisect
 import math
 import time
+from typing import NamedTuple
 import numpy as np
 from numpy.random import default_rng
 from scipy.special import erfc
@@ -187,8 +188,13 @@ def _dupire_vol(K: float, T: float, sigma0: float, skew: float, curvature: float
     return max(0.005, min(sig, 1.5)) if math.isfinite(sig) else fb
 
 
-def _build_lv_grid(underlyings, r_eff: float, ts: int, dt: float, nK: int = 50):
-    """Precompute local vol grid (ts, nK) for each underlying asset."""
+def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int = 50):
+    """Precompute local vol grid (ts, nK) for each underlying asset.
+
+    Takes the run's rate term rather than a scalar so the Black-Scholes prices
+    the Dupire inversion is built on are discounted at the same curve that
+    discounts the payoff — the calibration is the third place a rate enters a
+    pricing run, and it used to be the one nobody wired to the curve."""
     logKmin, logKmax = math.log(0.20), math.log(3.0)
     Ks = [math.exp(logKmin + i/(nK-1)*(logKmax-logKmin)) for i in range(nK)]
     grids = []
@@ -200,8 +206,11 @@ def _build_lv_grid(underlyings, r_eff: float, ts: int, dt: float, nK: int = 50):
         g = np.zeros((ts, nK), dtype=np.float32)
         for step in range(ts):
             T_s = (step + 1) * dt
+            # Zero rate to this maturity — the right discount for a call
+            # expiring at T_s. Falls back to the scalar when there is no curve.
+            r_s = rates.r_flat if rates.zero is None else float(rates.zero[step + 1])
             for ki, K in enumerate(Ks):
-                lv = _dupire_vol(K, T_s, sig0, skew, curv, r_eff, q)
+                lv = _dupire_vol(K, T_s, sig0, skew, curv, r_s, q)
                 g[step, ki] = lv if math.isfinite(lv) and lv > 0 else sig0
         grids.append(g)
     return grids, nK, logKmin, logKmax
@@ -323,7 +332,14 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
                 vol_out[step, i, :] = sv
 
             q_adj = u.get("sigma_fx", 0.0) * u.get("rho_sfx", 0.0) * sv
-            drift = r_term + u.get("ccyh", 0.0) - u.get("q", 0.02) - q_adj - 0.5 * V_bar
+            # `vol_add` bumps only the independent spot-volatility leg.  The
+            # correlated Heston leg remains driven by sqrt(V_bar), so the
+            # matching quadratic variation is rho^2*V_bar +
+            # (1-rho^2)*sv^2.  Using -0.5*V_bar after changing `sv` breaks the
+            # discounted-spot martingale and creates vega on PAY S[1].
+            bumped_variance = rh*rh * V_bar + rhop*rhop * sv*sv
+            drift = (r_term + u.get("ccyh", 0.0) - u.get("q", 0.02)
+                     - q_adj - 0.5 * bumped_variance)
 
             # Andersen (2007) spot update — see docstring for the martingale
             # derivation, unchanged from the original per-path formula.
@@ -692,6 +708,61 @@ def _stochastic_rate_paths(fwd: np.ndarray, sigma_r: float, a_r: float, sq_dt: f
     cum_integral = np.cumsum(r_path, axis=0) * dt             # (ts, N)
     df = np.vstack([np.ones((1, N)), np.exp(-cum_integral)])
     return r_path, df
+
+
+class _RateTerm(NamedTuple):
+    """Every rate-derived quantity a pricing run needs, all from one curve.
+
+    A pricing run consumes the rate in three unrelated places — the drift of
+    each simulated asset, the discount factor of each cash flow, and the
+    Black-Scholes prices the Dupire calibration inverts. When each place reads
+    its own source, the run is no longer arbitrage-free: a prepaid forward under
+    a flat 1% curve priced 1.0099 instead of exp(-qT)=0.9901, two points of
+    nominal, because the drift used the flat r while the discounting used the
+    curve. Deriving all three from this one object is what makes that
+    impossible rather than merely unlikely.
+
+    df       (ts+1,)  discount factor P(0, s*dt), curve shift included
+    r_flat            r + dr — the scalar short rate, only meaningful flat
+    step_fwd (ts,)    instantaneous forward over step k, or None
+    zero     (ts+1,)  continuously-compounded zero rate, or None
+
+    `step_fwd` and `zero` are None exactly when the caller passed no curve.
+    That is the invariant to branch on — never `not yield_curve` — so the flat
+    case keeps its exact scalar representation. Re-deriving a flat rate through
+    the forward machinery would agree mathematically but differ in the last
+    ulps, and every price on the dominant code path would shift.
+    """
+    df: np.ndarray
+    r_flat: float
+    step_fwd: np.ndarray | None
+    zero: np.ndarray | None
+
+
+def _build_rate_term(yield_curve, ts: int, dt: float, r: float,
+                     dr: float = 0.0) -> _RateTerm:
+    """Assemble the run's rate term. `dr` is a parallel shift of the whole zero
+    curve — it moves discounting, drift and smile calibration together, which is
+    what makes Rho a true derivative rather than a partial one."""
+    r_flat = r + dr
+    if not yield_curve:
+        return _RateTerm(df=_build_df_arr([], ts, dt, r_flat), r_flat=r_flat,
+                         step_fwd=None, zero=None)
+
+    t = np.arange(ts + 1, dtype=np.float64) * dt
+    df = _build_df_arr(yield_curve, ts, dt, r_flat)
+    if dr != 0.0:
+        df = df * np.exp(-dr * t)
+
+    # Deriving the forwards FROM df (rather than re-reading the pillars) makes
+    # exp(-cumsum(step_fwd)*dt) == df an identity of construction: the cumsum of
+    # the logs telescopes exactly. Drift and discounting then cannot drift apart
+    # by an interpolation residual.
+    step_fwd = _forward_rate_arr(df, dt)
+    zero = np.empty(ts + 1, dtype=np.float64)
+    zero[1:] = -np.log(np.maximum(df[1:], 1e-300)) / t[1:]
+    zero[0] = step_fwd[0]
+    return _RateTerm(df=df, r_flat=r_flat, step_fwd=step_fwd, zero=zero)
 
 
 def _blend_rate_factor(z_i, Z_r_val, rho_rS: float):
@@ -1105,6 +1176,7 @@ def run_mc(script: CompiledScript,
            antithetic: bool = True,
            user_params=None,
            spot_mult=None,
+           spot_base=None,
            vol_add=None,
            dr: float = 0.0,
            dt_add: float = 0.0,
@@ -1179,18 +1251,27 @@ def run_mc(script: CompiledScript,
     Zv = rng.standard_normal((ts, n, N_pairs)) if (use_heston or use_lsv) else None
     Za = rng.standard_normal((ts, n, N_pairs)) if use_sabr   else None
 
+    # One rate term for the whole run: discounting, drift and smile calibration
+    # all read from it, so they cannot disagree. Built after every rng draw
+    # above and before the local-vol grid below, which now consumes it — it
+    # touches no random state, so the stream is unchanged.
+    rates = _build_rate_term(yield_curve or [], ts, dt, r, dr)
+    df_arr = rates.df
+
+    # Deterministic drift term, shaped (ts,1): broadcasts against (ts,N) in
+    # _simulate_gbm, and reduces to a scalar under the [step] indexing the four
+    # step-wise simulators use. None when there is no curve, in which case the
+    # simulators fall back on the scalar r_eff exactly as before.
+    r_det = None if rates.step_fwd is None else rates.step_fwd[:, None]
+
     lv_data = None
     if use_lv or use_lsv:
-        lv_data = _build_lv_grid(underlyings, r_eff, ts, dt)
-
-    # Discount factor array: yield curve or flat rate
-    df_arr = _build_df_arr(yield_curve or [], ts, dt, r_eff)
+        lv_data = _build_lv_grid(underlyings, rates, ts, dt)
 
     # Optional stochastic short rate: a single shared Gaussian factor (ABM when
     # a_r=0, Hull-White when a_r>0 — see _stochastic_rate_paths). sigma_r=0 is
-    # the default and skips this entirely — discounting/drift then use the
-    # deterministic df_arr/r_eff exactly as before. Each leg (base/anti) gets
-    # its own rate path from Z_r/-Z_r, paired the same way as Z/Zv/Za.
+    # the default and falls through to the deterministic term above. Each leg
+    # (base/anti) gets its own rate path from Z_r/-Z_r, paired like Z/Zv/Za.
     use_stoch_rate = sigma_r > 0
     Z_r = rng.standard_normal((ts, N_pairs)) if use_stoch_rate else None
     if use_stoch_rate:
@@ -1198,28 +1279,38 @@ def run_mc(script: CompiledScript,
         r_path_base, df_base = _stochastic_rate_paths(fwd, sigma_r, a_r, sq_dt, dt, Z_r)
         r_path_anti, df_anti = _stochastic_rate_paths(fwd, sigma_r, a_r, sq_dt, dt, -Z_r)
     else:
-        r_path_base = r_path_anti = None
+        # The drift follows the same curve that discounts the payoff. r_det is
+        # None without a curve, so the simulators keep using the scalar r_eff.
+        r_path_base = r_path_anti = r_det
         df_base = df_anti = df_arr
 
     flux_map: dict[str, dict] = {}
 
-    # A Greeks delta/gamma bump passes spot_mult != [1]*n to shock one asset's
-    # spot. Feeding that straight into the simulator scales the WHOLE path
-    # from t=0 — including a STRIKE_FIX window, if the script has one — so
-    # REF gets shocked in lockstep with WOF and the bump cancels out of
-    # PERF=WOF/REF (delta/gamma come back ~0, the bug this fixes). Instead,
-    # simulate at the neutral level and apply the requested bump only to the
-    # segment AFTER the fixing window closes — exact for GBM/Heston (their
-    # log-return dynamics don't depend on the absolute spot level), an
-    # approximation for SABR (beta!=1) and Local Vol (genuinely level-
-    # dependent vol), but a good one at the small bump sizes Greeks use.
-    # No-op (falls through to the plain spot_mult path) when the script has
-    # no STRIKE_FIX, so every other script is unaffected.
+    # A Greeks delta/gamma bump passes a spot_mult that differs from the
+    # baseline to shock one asset's spot. Feeding that straight into the
+    # simulator scales the WHOLE path from t=0 — including a STRIKE_FIX window,
+    # if the script has one — so REF gets shocked in lockstep with WOF and the
+    # bump cancels out of PERF=WOF/REF (delta/gamma come back ~0, the bug this
+    # fixes). Instead, simulate at the baseline level and apply only the bump
+    # RATIO to the segment after the fixing window closes — exact for
+    # GBM/Heston (their log-return dynamics don't depend on the absolute spot
+    # level), an approximation for SABR (beta!=1) and Local Vol (genuinely
+    # level-dependent vol), but a good one at the small bump sizes Greeks use.
+    #
+    # spot_base is what the caller considers "not bumped": [1]*n pre-trade, the
+    # live deal's norm_spots on a residual reprice. Comparing against it rather
+    # than against 1.0 is what keeps a live deal whose spot has merely moved
+    # (norm_spots != 1, no bump at all) out of this branch — otherwise its MtM
+    # would be simulated from 1.0 instead of from today's spot, which is the
+    # bug this baseline fixes. A 2-D spot_mult is Mark-to-Future's per-scenario
+    # seeding, never a bump: excluded outright.
+    _base_vec = list(spot_base) if spot_base is not None else [1.0] * n
     _bump_needs_delay = (
         bool(script.strike_fix_dates) and spot_mult is not None
-        and any(abs(m - 1.0) > 1e-12 for m in spot_mult)
+        and np.ndim(spot_mult) == 1
+        and any(abs(m - b) > 1e-12 for m, b in zip(spot_mult, _base_vec))
     )
-    _sim_spot_mult = [1.0] * n if _bump_needs_delay else spot_mult
+    _sim_spot_mult = _base_vec if _bump_needs_delay else spot_mult
 
     def _apply_delayed_bump(S: np.ndarray) -> np.ndarray:
         if not _bump_needs_delay:
@@ -1227,9 +1318,9 @@ def run_mc(script: CompiledScript,
         fix_steps = _strike_fix_steps(script, ts)
         fix_end_step = max(fix_steps) if fix_steps else 0
         S = S.copy()
-        for i, m in enumerate(spot_mult):
-            if abs(m - 1.0) > 1e-12:
-                S[fix_end_step + 1:, i, :] *= m
+        for i, (m, b) in enumerate(zip(spot_mult, _base_vec)):
+            if abs(m - b) > 1e-12:
+                S[fix_end_step + 1:, i, :] *= m / b
         return S
 
     vol_base = np.empty((ts, n, N_pairs), dtype=np.float64) if use_bridge else None
@@ -1387,7 +1478,8 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
                    r: float, T: float, N: int, model: str, seed: int,
                    user_params,
                    selected: list | None = None, sigma_r: float = 0.0, a_r: float = 0.0,
-                   yield_curve=None, barrier_monitoring: str = "weekly"):
+                   yield_curve=None, barrier_monitoring: str = "weekly",
+                   antithetic: bool = True, state: dict | None = None):
     """CRN bump-and-reprice greeks.
 
     Every term of every finite difference — including the CENTER of gamma/
@@ -1395,36 +1487,76 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
     common Monte Carlo noise cancels. (An earlier version reused the main
     run's full-N price as the center: a different estimator whose sampling
     error does NOT cancel against the bumped legs, and gets amplified by the
-    tiny FD denominators — gamma divides by 9e-4.)"""
+    tiny FD denominators — gamma divides by 9e-4.)
+
+    `state` carries a live deal's lifecycle position: spot in % of strike
+    (`spot_base`), realized extrema, observation counter, memory coupons,
+    accumulator, last fixings and realized variance — the same bundle
+    api/deals.py:_mtm_core feeds to run_mc. Without it every bumped leg
+    reprices a BRAND NEW product, so the sensitivities of a deal whose
+    knock-in has already triggered, or whose coupon memory has accrued, have
+    nothing to do with the ones reported. `state=None` is the pre-trade case
+    and reproduces the previous behaviour exactly.
+
+    How a bump interacts with that state, deliberately:
+      - the spot vector is bumped MULTIPLICATIVELY around `spot_base`, so a
+        deal 30% above its strike is shocked by 1% of where it actually is;
+      - `wof0` is derived from the bumped vector rather than passed in, which
+        is what makes it impossible to forget — leaving it at the unbumped
+        level books a phantom first log-return into REALVOL;
+      - realized extrema, memory and fixings do NOT move. They are facts, not
+        model outputs. (And the running extrema accumulate over S[1:], so the
+        bumped t=0 slice never enters them in the first place.)
+    """
     if selected is None:
         selected = ["delta", "gamma", "vega", "theta", "rho"]
     sel = set(selected)
     N_g = max(1000, N // 4)
     greeks: dict = {}
-
-    def price(**kwargs) -> float:
-        res = run_mc(script, underlyings, corr_matrix, r, T, N_g, model, seed,
-                     antithetic=True, user_params=user_params, sigma_r=sigma_r, a_r=a_r,
-                     yield_curve=yield_curve or [], barrier_monitoring=barrier_monitoring,
-                     **kwargs)
-        return res["price"]
-
     n = len(underlyings)
 
-    base_g = price() if sel & {"gamma", "theta", "corr"} else None
+    st = state or {}
+    base_spots = list(st.get("spot_base") or [1.0] * n)
+
+    def reprice(spot_vec=None, script_=None, T_=None, index_=None, **bumps) -> dict:
+        sv = list(spot_vec) if spot_vec is not None else base_spots
+        return run_mc(
+            script if script_ is None else script_,
+            underlyings, corr_matrix, r, T if T_ is None else T_, N_g, model, seed,
+            antithetic=antithetic, user_params=user_params, sigma_r=sigma_r, a_r=a_r,
+            yield_curve=yield_curve or [], barrier_monitoring=barrier_monitoring,
+            spot_mult=sv, spot_base=base_spots,
+            wof_min_init=st.get("wof_min"), bof_max_init=st.get("bof_max"),
+            index_offset=st.get("index", 0) if index_ is None else index_,
+            memo_init=st.get("memo"), accum_init=st.get("accum", 0.0),
+            s_min_init=st.get("s_min"), s_max_init=st.get("s_max"),
+            s_prev_init=st.get("s_prev"), wof0_init=min(sv),
+            realvol_state_init=st.get("realvol_state"),
+            fix_state_init=st.get("fix_state"),
+            **bumps,
+        )
+
+    def price(**kw) -> float:
+        return reprice(**kw)["price"]
+
+    def _bumped(i: int, mult: float) -> list:
+        v = list(base_spots)
+        v[i] = base_spots[i] * mult
+        return v
+
+    base_res = reprice() if sel & {"gamma", "theta", "corr"} else None
+    base_g = base_res["price"] if base_res is not None else None
 
     for i in range(n):
         if "delta" in sel or "gamma" in sel:
-            sm_up = [1.0]*n; sm_up[i] = 1.01
-            sm_dn = [1.0]*n; sm_dn[i] = 0.99
-            pu = price(spot_mult=sm_up)
-            pd = price(spot_mult=sm_dn)
+            pu = price(spot_vec=_bumped(i, 1.01))
+            pd = price(spot_vec=_bumped(i, 0.99))
             if "delta" in sel:
                 greeks[f"delta_{i+1}"] = round((pu - pd) / 0.02, 4)
             if "gamma" in sel:
-                sm_gu = [1.0]*n; sm_gu[i] = 1.03
-                sm_gd = [1.0]*n; sm_gd[i] = 0.97
-                greeks[f"gamma_{i+1}"] = round((price(spot_mult=sm_gu) - 2*base_g + price(spot_mult=sm_gd)) / 0.0009, 4)
+                greeks[f"gamma_{i+1}"] = round(
+                    (price(spot_vec=_bumped(i, 1.03)) - 2*base_g
+                     + price(spot_vec=_bumped(i, 0.97))) / 0.0009, 4)
 
     if "vega" in sel:
         for i in range(n):
@@ -1433,29 +1565,10 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
             greeks[f"vega_{i+1}"] = round((price(vol_add=va_up) - price(vol_add=va_dn)) / 0.02, 4)
 
     if "theta" in sel:
-        # Age the product by one grid step (1 week): every remaining event
-        # date shifts one week earlier and the horizon shrinks to match, then
-        # the decay is scaled to per-calendar-day. The previous
-        # dt_add=+1/365 bump changed NOTHING on the weekly grid (round(T*SY)
-        # almost never crosses a boundary for +1 day), so theta was pure
-        # sampling noise between two path counts — and on the rare boundary
-        # crossing it EXTENDED the product's life instead of aging it.
-        # One week is the finest decay this grid can represent.
-        dt_step = 1.0 / SY
-        if T > 2 * dt_step:
-            aged_events = _shift_events_for_mtf(script.events, dt_step)
-            aged_sfd = ([round(d - dt_step, 6) for d in script.strike_fix_dates
-                         if d > dt_step + 1e-9] or None) if script.strike_fix_dates else None
-            aged = CompiledScript(events=aged_events, init_fn=script.init_fn,
-                                  params=script.params, constats=script.constats,
-                                  has_stop=script.has_stop, strike_fix_dates=aged_sfd)
-            res_aged = run_mc(aged, underlyings, corr_matrix, r, T - dt_step, N_g, model, seed,
-                              antithetic=True, user_params=user_params,
-                              yield_curve=yield_curve or [], sigma_r=sigma_r, a_r=a_r,
-                              barrier_monitoring=barrier_monitoring)
-            greeks["theta"] = round((res_aged["price"] - base_g) / 7.0, 4)
-        else:
-            greeks["theta"] = None
+        theta, theta_event = _theta_and_event(
+            script, T, st, base_g, base_res, reprice)
+        greeks["theta"] = theta
+        greeks["theta_event"] = theta_event
 
     if "rho" in sel:
         greeks["rho"] = round((price(dr=0.01) - price(dr=-0.01)) / 0.02, 4)
@@ -1467,6 +1580,78 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
                 greeks[f"corr_{ci+1}_{cj+1}"] = round((price(corr_delta=cd) - base_g) / 0.05, 4)
 
     return greeks
+
+
+def _theta_and_event(script: CompiledScript, T: float, st: dict,
+                     base_g: float | None, base_res: dict | None,
+                     reprice) -> tuple[float | None, dict | None]:
+    """Time decay over one grid step when no contractual event is crossed.
+
+    Aging the product by a week is the finest decay this weekly grid can
+    represent, but an observation falling inside that week detaches its cash
+    flow, and a raw price difference then books that detachment as "decay": a
+    5% coupon over 7 days reads as -0.7/day. True at the deal level, useless
+    once summed over a book, where it swamps every genuine theta.
+
+    Crossing an observation requires executing its full state transition. The
+    generic bump-and-reprice layer cannot safely invent that realized outcome,
+    so it returns an explicit reason instead of a misleading scalar theta.
+
+    Returns (theta per calendar day, event descriptor or None). theta is None
+    when rolling the state forward would take a guess: a strike-fixing date
+    inside the window (the fixing would be silently dropped from the average
+    rather than folded into fix_state), or a REALVOL script (the week's
+    realized variance is simulated on one leg and would have to be invented on
+    the other).
+    """
+    eps = 1e-9
+    dt_step = 1.0 / SY
+    if T <= 2 * dt_step:
+        return None, None
+
+    if script.strike_fix_dates and any(d <= dt_step + eps for d in script.strike_fix_dates):
+        return None, {"reason": "fenetre_strike_fix"}
+    if st.get("realvol_state"):
+        return None, {"reason": "realvol"}
+
+    crossed = sorted({round(d, 6) for ev in script.events if ev.type == "AT"
+                      for d in ev.dates if 0 < d <= dt_step + eps})
+
+    if crossed:
+        # Crossing an observation is a state transition, not a mere removal
+        # of one event from the future script.  The event may update coupon
+        # memory, accumulators, fixings, extrema or terminate the product.  A
+        # stripped-script comparison cannot reconstruct that path-dependent
+        # post-event state, so publishing a scalar theta (or a synthetic event
+        # PV) is more dangerous than explicitly declaring it unavailable.
+        return None, {
+            "reason": "observation_transition_required",
+            "t_years": crossed[-1],
+            "terminates": bool(script.has_stop),
+        }
+
+    aged_sfd = ([round(d - dt_step, 6) for d in script.strike_fix_dates
+                 if d > dt_step + eps] or None) if script.strike_fix_dates else None
+
+    def _respan(events, shift: float):
+        out = []
+        for ev in events:
+            if ev.type != "AT":
+                out.append(ev)
+                continue
+            keep = [round(d - shift, 6) for d in ev.dates if d > dt_step + eps]
+            if keep:
+                out.append(CompiledEvent(type=ev.type, dates=keep, fn=ev.fn))
+        return out
+
+    def _variant(shift: float):
+        return CompiledScript(events=_respan(script.events, shift),
+                              init_fn=script.init_fn, params=script.params,
+                              constats=script.constats, has_stop=script.has_stop,
+                              strike_fix_dates=aged_sfd)
+
+    aged = reprice(script_=_variant(dt_step), T_=T - dt_step)["price"]
+    return round((aged - base_g) / 7.0, 4), None
 
 
 # ── Analytics: Payoff Profile ───────────────────────────────────────
@@ -1583,16 +1768,20 @@ def run_mc_paths(script: CompiledScript, underlyings, corr_matrix,
     Z = rng.standard_normal((ts, n, N_stat))
     vol_used = np.empty((ts, n, N_stat), dtype=np.float64) if use_bridge else None
 
+    # Path visualisation takes no yield curve — the displayed trajectories and
+    # their raw (undiscounted) payoffs are flat-rate by construction.
+    _flat = _build_rate_term([], ts, dt, r)
+
     if model == "heston":
         Zv = rng.standard_normal((ts, n, N_stat))
         S = _simulate_heston(ts, n, N_stat, dt, sq_dt, underlyings, r, L, Z, Zv, vol_out=vol_used)
     elif model == "lsv":
         Zv = rng.standard_normal((ts, n, N_stat))
-        lv_grids, nK, lkm, lkx = _build_lv_grid(underlyings, r, ts, dt)
+        lv_grids, nK, lkm, lkx = _build_lv_grid(underlyings, _flat, ts, dt)
         S = _simulate_lsv(ts, n, N_stat, dt, sq_dt, underlyings, r, L, Z, Zv, lv_grids, nK, lkm, lkx,
                           vol_out=vol_used)
     elif model == "localvol":
-        lv_data = _build_lv_grid(underlyings, r, ts, dt)
+        lv_data = _build_lv_grid(underlyings, _flat, ts, dt)
         lv_grids, nK, lkm, lkx = lv_data
         S = _simulate_lv(ts, n, N_stat, dt, sq_dt, underlyings, r, L, Z, lv_grids, nK, lkm, lkx,
                          vol_out=vol_used)
@@ -1682,27 +1871,36 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
     Z = rng.standard_normal((ts, n, N_p))
     vol_used = np.empty((ts, n, N_p), dtype=np.float64) if use_bridge else None
 
+    # Same rate term as run_mc: the probabilities shown next to a price must be
+    # computed under the same measure as that price, or the two panels of the
+    # screen describe different products.
+    rates = _build_rate_term(yield_curve or [], ts, dt, r)
+    r_det = None if rates.step_fwd is None else rates.step_fwd[:, None]
+
     if model == "heston":
         Zv = rng.standard_normal((ts, n, N_p))
-        S = _simulate_heston(ts, n, N_p, dt, sq_dt, underlyings, r, L, Z, Zv, vol_out=vol_used)
+        S = _simulate_heston(ts, n, N_p, dt, sq_dt, underlyings, r, L, Z, Zv,
+                             r_path=r_det, vol_out=vol_used)
     elif model == "lsv":
         Zv = rng.standard_normal((ts, n, N_p))
-        lv_grids, nK, lkm, lkx = _build_lv_grid(underlyings, r, ts, dt)
+        lv_grids, nK, lkm, lkx = _build_lv_grid(underlyings, rates, ts, dt)
         S = _simulate_lsv(ts, n, N_p, dt, sq_dt, underlyings, r, L, Z, Zv, lv_grids, nK, lkm, lkx,
-                          vol_out=vol_used)
+                          r_path=r_det, vol_out=vol_used)
     elif model == "localvol":
-        lv_data = _build_lv_grid(underlyings, r, ts, dt)
+        lv_data = _build_lv_grid(underlyings, rates, ts, dt)
         lv_grids, nK, lkm, lkx = lv_data
         S = _simulate_lv(ts, n, N_p, dt, sq_dt, underlyings, r, L, Z, lv_grids, nK, lkm, lkx,
-                         vol_out=vol_used)
+                         r_path=r_det, vol_out=vol_used)
     elif model == "sabr":
         Za = rng.standard_normal((ts, n, N_p))
-        S = _simulate_sabr(ts, n, N_p, dt, sq_dt, underlyings, r, L, Z, Za, vol_out=vol_used)
+        S = _simulate_sabr(ts, n, N_p, dt, sq_dt, underlyings, r, L, Z, Za,
+                           r_path=r_det, vol_out=vol_used)
     else:
-        S = _simulate_gbm(ts, n, N_p, dt, sq_dt, underlyings, r, L, Z, vol_out=vol_used)
+        S = _simulate_gbm(ts, n, N_p, dt, sq_dt, underlyings, r, L, Z,
+                          r_path=r_det, vol_out=vol_used)
 
     br_min, br_max = _bridge_extrema(S, vol_used, dt, rng) if use_bridge else (None, None)
-    df_arr = _build_df_arr(yield_curve or [], ts, dt, r)
+    df_arr = rates.df
     det = _eval_paths_detailed(script, S, ts, n, N_p, dt, r, user_params, step_map, mat_events,
                                 df_arr=df_arr, bridge_min=br_min, bridge_max=br_max)
 
@@ -1910,7 +2108,11 @@ def run_mark_to_future(script: CompiledScript,
 
         lv_grids = nK = lkm = lkx = None
         if use_lv:
-            lv_grids, nK, lkm, lkx = _build_lv_grid(underlyings, r, ts_eff, dt)
+            # Mark-to-Future is flat-rate throughout (outer, inner and
+            # discounting) — no caller passes it a curve. Wiring it to one is a
+            # new capability, not a fix, and is out of this change's scope.
+            lv_grids, nK, lkm, lkx = _build_lv_grid(
+                underlyings, _build_rate_term([], ts_eff, dt, r), ts_eff, dt)
 
         scenario_pvs = np.empty(n_outer, dtype=np.float64)
 

@@ -55,6 +55,14 @@
       </div>
 
       <!-- ── SRI ───────────────────────────────────────────── -->
+      <div v-if="kid" class="mb-4 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2
+                             text-[11px] leading-relaxed text-amber-200/90">
+        <span class="font-bold">Document indicatif — méthodologie non conforme PRIIPs.</span>
+        Les scénarios de performance sont tirés d'une simulation risque-neutre, alors que le
+        règlement impose pour la Catégorie 3 une distribution historique ; la formule de VEV
+        et les horizons intermédiaires ne suivent pas non plus les prescriptions des RTS.
+        À usage d'analyse interne uniquement — ne pas diffuser comme KID réglementaire.
+      </div>
       <div v-if="kid" class="card">
         <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
           Indicateur Synthétique de Risque (SRI)
@@ -93,7 +101,10 @@
               <span class="text-slate-500 w-36">VEV (équiv. vol)
                 <HelpTip text="Volatility Equivalent Value — la volatilité annualisée implicite qui, dans un modèle log-normal simple, produirait le même percentile 1% de perte à l'échéance que celui observé en simulation Monte Carlo sur ce produit précis. Une façon de résumer le risque de queue en un seul chiffre comparable entre produits." />
               </span>
-              <span class="font-mono font-bold text-slate-200">{{ formatPercent(kid.vev, 1) }}</span>
+              <span v-if="kid.vev != null" class="font-mono font-bold text-slate-200">{{ formatPercent(kid.vev, 1) }}</span>
+              <span v-else class="font-mono font-bold text-red-400">n/d
+                <HelpTip text="Au moins 1% des scénarios perdent la totalité du capital : la VEV, qui passe par le logarithme du 1er percentile, n'a pas de valeur finie ici. Le risque marché est classé au maximum (MRM 7) — c'est le seul classement défendable pour un produit dont le percentile 1% est nul." />
+              </span>
             </div>
             <div class="flex items-center gap-2 text-xs">
               <span class="text-slate-500 w-36">Durée recommandée

@@ -125,6 +125,65 @@ def test_corr_shock_no_op_on_single_underlying(monkeypatch):
         s.close()
 
 
+# ── Deals dont le spot a bougé ─────────────────────────────────────────────
+#
+# Les fixtures ci-dessus laissent le sous-jacent à son niveau de strike, si bien
+# que le spot normalisé vaut 1.0 : le seul cas où un choc absolu et un choc
+# relatif coïncident, et la raison pour laquelle rien ne signalait que la jambe
+# choquée repartait d'un produit neuf.
+
+def _fake_prices_ending_at(level: float):
+    """Historique plat au strike, dernière clôture à `level` : le deal se
+    retrouve à `level`% de son strike, comme n'importe quel deal vivant."""
+    def _prices(tks, start, end):
+        d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
+        days = [d0 + timedelta(days=k) for k in range((d1 - d0).days + 1)]
+        px = [100.0] * len(days)
+        px[-1] = level
+        return {"dates": [d.isoformat() for d in days],
+                "prices": {tk: list(px) for tk in tks}}
+    return _prices
+
+
+def test_choc_nul_ne_bouge_pas_un_deal_dont_le_spot_a_monte(monkeypatch):
+    """Un choc nul doit laisser le MtM strictement identique. C'est la
+    définition même d'un choc nul, et c'était faux.
+
+    La jambe choquée ne transportait aucun état lifecycle et construisait son
+    multiplicateur de spot à partir de 1.0, alors que le MtM auquel elle est
+    soustraite part du spot courant avec tout son état. Sur ce deal à 130 % du
+    strike, l'onglet Chocs affichait donc un impact de -0,30 point (soit
+    -300 000 € sur un nominal d'un million) sans qu'aucun choc n'ait été
+    appliqué."""
+    s = _make_session()
+    deal, tickers = _add_deal(s, "AT MATURITY\n  PAY S[1]", "SHOCK-ZERO")
+    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices_ending_at(130.0))
+    try:
+        res = shocks_api.shock_deal(deal.id, shocks_api.ShockRequest(), USER, s,
+                                    n_paths=8000)
+        assert res["mtm_before"] == pytest.approx(1.3, abs=0.02)
+        assert res["delta_pts"] == 0.0
+        assert res["delta_eur"] == 0.0
+    finally:
+        s.close()
+
+
+def test_le_choc_de_spot_est_relatif_au_niveau_courant(monkeypatch):
+    """Un choc de -20 % sur un deal à 130 % du strike le ramène à 104 %, pas à
+    80 %. Sur `PAY S[1]`, dont le prix vaut le spot, l'impact attendu est donc
+    -0,26 point — et non les -0,50 que donnait un multiplicateur absolu."""
+    s = _make_session()
+    deal, tickers = _add_deal(s, "AT MATURITY\n  PAY S[1]", "SHOCK-REL")
+    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices_ending_at(130.0))
+    try:
+        body = shocks_api.ShockRequest(spot_shock_pct=-20.0)
+        res = shocks_api.shock_deal(deal.id, body, USER, s, n_paths=20000)
+        assert res["mtm_after"] == pytest.approx(1.3 * 0.8, abs=0.02)
+        assert res["delta_pts"] == pytest.approx(-0.26, abs=0.02)
+    finally:
+        s.close()
+
+
 def test_corr_shock_runs_on_basket(monkeypatch):
     """2-underlying worst-of basket: a correlation shock must run without
     error and produce a finite, positive price."""

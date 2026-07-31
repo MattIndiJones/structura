@@ -71,10 +71,16 @@
       <main class="flex-1 flex flex-col overflow-hidden">
 
         <!-- Search + sort bar -->
-        <div class="px-5 py-3 border-b border-slate-800 flex items-center gap-3">
-          <input v-model="search" type="text" class="input text-xs flex-1 max-w-xs"
-                 placeholder="Rechercher un script…" />
-          <span class="text-xs text-slate-600 ml-auto">{{ filteredScripts.length }} script(s)</span>
+        <div class="px-5 py-3 border-b border-slate-800">
+          <DataFilterBar :fields="scriptFilterFields" :state="scriptFilter.state"
+                         :field-options="scriptFilter.fieldOptions.value"
+                         :has-active-filters="scriptFilter.hasActiveFilters.value"
+                         :sorts="scriptSorts" :sort-by="scriptFilter.sortBy.value"
+                         :sort-dir="scriptFilter.sortDir.value"
+                         :count="filteredScripts.length" :total="folderScripts.length" noun="script(s)"
+                         class="border-0 p-0 bg-transparent"
+                         @update:sort-by="scriptFilter.sortBy.value = $event"
+                         @toggle-dir="scriptFilter.toggleSortDir()" @reset="scriptFilter.reset()" />
         </div>
 
         <!-- Loading -->
@@ -82,7 +88,7 @@
 
         <!-- Empty -->
         <EmptyState v-else-if="filteredScripts.length === 0"
-             icon="📄" :title="`Aucun script${search ? ' correspondant' : ' dans ce dossier'}`">
+             icon="📄" :title="`Aucun script${scriptFilter.hasActiveFilters.value ? ' correspondant' : ' dans ce dossier'}`">
           <RouterLink to="/pricer" class="btn-primary text-xs">Créer mon premier script</RouterLink>
         </EmptyState>
 
@@ -148,6 +154,8 @@ import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import DataFilterBar from '../components/ui/DataFilterBar.vue'
+import { useDataFilter } from '../composables/useDataFilter.js'
 import BaseModal from '../components/ui/BaseModal.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
 import { formatDate } from '../utils/format.js'
@@ -160,7 +168,6 @@ const folders         = ref([])
 const scripts         = ref([])
 const loading         = ref(false)
 const selectedFolderId = ref(null)
-const search          = ref('')
 const error           = ref('')
 const notice          = ref('')
 
@@ -178,21 +185,33 @@ const folderTree = computed(() => {
   return [...folders.value].sort((a, b) => a.depth - b.depth || a.name.localeCompare(b.name))
 })
 
-const filteredScripts = computed(() => {
-  let list = scripts.value
-  if (selectedFolderId.value !== null) {
-    list = list.filter(s => s.folder_id === selectedFolderId.value)
-  }
-  if (search.value.trim()) {
-    const q = search.value.toLowerCase()
-    list = list.filter(s =>
-      s.name.toLowerCase().includes(q) ||
-      s.description.toLowerCase().includes(q) ||
-      s.tags.toLowerCase().includes(q)
-    )
-  }
-  return list
-})
+// Le dossier reste la navigation principale (arborescence à gauche) ; les
+// filtres portent sur ce qu'il contient. Même mécanisme que l'onglet Deals du
+// Booking — voir composables/useDataFilter.
+const folderScripts = computed(() =>
+  selectedFolderId.value === null
+    ? scripts.value
+    : scripts.value.filter(s => s.folder_id === selectedFolderId.value))
+
+const scriptFilterFields = [
+  { key: 'q', label: 'Recherche', kind: 'text', width: 'min-w-[200px]',
+    placeholder: 'Nom, description, tag…',
+    get: s => [s.name, s.description, s.tags] },
+  { key: 'category', label: 'Catégorie', kind: 'select' },
+  // Les tags sont stockés en une seule chaîne « a,b,c » : on les éclate pour
+  // que le select en propose un par tag et non une combinaison entière.
+  { key: 'tag', label: 'Tag', kind: 'select',
+    get: s => (s.tags || '').split(',').map(t => t.trim()).filter(Boolean) },
+]
+
+const scriptSorts = [
+  { key: 'name', label: 'Nom' },
+  { key: 'updated_at', label: 'Dernière modification' },
+  { key: 'category', label: 'Catégorie' },
+]
+
+const scriptFilter = useDataFilter(folderScripts, scriptFilterFields, { sorts: scriptSorts })
+const filteredScripts = computed(() => scriptFilter.filtered.value)
 
 // ── Fetch ──────────────────────────────────────────────────────────
 async function fetchFolders() {

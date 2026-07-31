@@ -12,7 +12,7 @@ def scenarios_endpoint(req: ScenarioRequest):
     """2D stress grid — price(spot_shock, vol_shock) plus the unshocked base price."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -33,6 +33,7 @@ def scenarios_endpoint(req: ScenarioRequest):
             yield_curve=req.yield_curve or [], sigma_r=req.sigma_r, a_r=req.a_r,
             barrier_monitoring=req.barrier_monitoring,
             constat_values=req.constats or None,
+            constat_anchor=req.anchor.isoformat() if req.anchor else None,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

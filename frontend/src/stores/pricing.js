@@ -173,6 +173,21 @@ export const usePricingStore = defineStore('pricing', () => {
   // until reset. See db/models.py:Indicative for the full rationale. ──────
   const currentIndicativeId = ref(null)
 
+  // RFQ this pricing session was pre-filled from (see loadFromRfq below) —
+  // sent as Deal.rfq_id at booking time so the winning quote's RFQ can be
+  // traced back from the deal, and so book_deal can close out that RFQ.
+  const currentRfqId = ref(null)
+  // One-shot handoff to DealTab.vue's form (contrepartie/price_traded from
+  // the RFQ's selected quote) — consumed and cleared on mount, since those
+  // fields live in the component, not the store.
+  const pendingDealPrefill = ref(null)
+  // Booked deal this session was reopened from (loadFromDeal). Its commercial
+  // terms are NOT the store's — they live in DealTab's form — so reopening a
+  // deal has to hand them over through pendingDealPrefill like the RFQ path
+  // does. Also what tells DealTab this deal already exists: booking again
+  // from here would silently create a duplicate under a new reference.
+  const openedDeal = ref(null)
+
   // Product title from the script's leading "# comment" line — shared by
   // KidPanel/EmtPanel save actions and the EMT print view.
   const productTitle = computed(() => {
@@ -307,6 +322,45 @@ export const usePricingStore = defineStore('pricing', () => {
     return out
   }
 
+  // Mirrors _buildConstats()'s output shape back into constatOverrides —
+  // shared by loadFromDb (library reload), loadFromRfq (RFQ→Deal booking
+  // prefill) and loadFromDeal (reopening a booked deal), all of which
+  // receive the same {name: value} constats blob.
+  function _restoreConstats(saved) {
+    for (const [k, v] of Object.entries(saved || {})) {
+      if (!(k in constatOverrides)) continue
+      if (typeof v === 'string') {
+        constatOverrides[k] = v
+      } else if (v && typeof v === 'object') {
+        const ov = constatOverrides[k]
+        if (ov && typeof ov === 'object') {
+          ov.start_date = v.start_date || ''
+          ov.end_date   = v.end_date   || ''
+          ov.roll_date  = v.roll_date  || ''
+          ov.stub       = v.stub       || 'short_last'
+          if (v.frequency && ov.frequency) {
+            if (typeof v.frequency === 'object') {
+              ov.frequency.value = v.frequency.value ?? 3
+              ov.frequency.unit  = v.frequency.unit  ?? 'M'
+            } else {
+              const m = String(v.frequency).match(/^(\d+)([DWMY])$/i)
+              if (m) { ov.frequency.value = parseInt(m[1]); ov.frequency.unit = m[2].toUpperCase() }
+            }
+          }
+          if (v.sub_frequency && ov.sub_frequency) {
+            if (typeof v.sub_frequency === 'object') {
+              ov.sub_frequency.value = v.sub_frequency.value ?? 1
+              ov.sub_frequency.unit  = v.sub_frequency.unit  ?? 'M'
+            } else {
+              const m = String(v.sub_frequency).match(/^(\d+)([DWMY])$/i)
+              if (m) { ov.sub_frequency.value = parseInt(m[1]); ov.sub_frequency.unit = m[2].toUpperCase() }
+            }
+          }
+        }
+      }
+    }
+  }
+
   function _baseBody() {
     return {
       script: script.value,
@@ -322,6 +376,12 @@ export const usePricingStore = defineStore('pricing', () => {
         : [],
       barrier_monitoring: globalParams.barrierMonitoring,
       constats: _buildConstats(),
+      // The CONSTAT calendar carries absolute dates; the engine needs year
+      // fractions from the product's t=0, which is its value date — not the
+      // day we happen to click "Pricer". Left unset, a deal priced today and
+      // the same deal replayed after booking (api/deals.py anchors on
+      // deal.value_date) resolve the same calendar differently.
+      anchor: globalParams.value_date || null,
     }
   }
 
@@ -818,6 +878,14 @@ export const usePricingStore = defineStore('pricing', () => {
     kid.value = null
     comparator.value = null
     currentIndicativeId.value = null
+    currentRfqId.value = null
+    openedDeal.value = null
+    // An unconsumed prefill must die with the session it belonged to: it is
+    // applied by whichever DealTab instance mounts NEXT, which — the Deal tab
+    // being v-if'd on a persistent leftTab — can be one created much later,
+    // for a completely unrelated pricing. loadFromRfq sets it AFTER calling
+    // this, so its own handoff survives.
+    pendingDealPrefill.value = null
     rightTab.value = 'empty'
   }
 
@@ -882,6 +950,16 @@ export const usePricingStore = defineStore('pricing', () => {
     _clearResults()
     await parseScript()
 
+    // Restore the CONSTAT calendars frozen at booking (after parseScript, so
+    // the names exist in constatOverrides to be filled). Without this, an
+    // Expert-mode deal reopened here kept the calendar's default EMPTY dates
+    // and the first ▶ Pricer died on "CONSTAT X: champ 'start_date'
+    // manquant" — while the Events tab, which reads the deal's own stored
+    // observation dates, displayed a perfectly complete schedule. Every deal
+    // booked out of a "to trade" RFQ hits this: that kind REQUIRES a CONSTAT
+    // script (api/rfq.py:create_rfq).
+    _restoreConstats(market.constats || {})
+
     // Restore the PARAM overrides frozen at booking. Without this, the
     // params card under the script shows the SCRIPT's seed defaults, not
     // the deal's actual negotiated terms (a degressive PARAM() barrier
@@ -895,6 +973,129 @@ export const usePricingStore = defineStore('pricing', () => {
       } else {
         paramOverrides[name] = fromStoredUnits(name, v)
       }
+    }
+
+    // The deal's commercial terms live in DealTab's own form, not here — so
+    // reopening a booked deal has to hand them over the same way the RFQ path
+    // does. Without this the Deal tab showed an empty booking form
+    // (contrepartie "— Choisir —", fair value and prix traité at 0) on a deal
+    // that carries all of it, and re-booking from there produced a duplicate.
+    openedDeal.value = { id: deal.id, reference: deal.reference }
+    pendingDealPrefill.value = {
+      sens: deal.sens,
+      contrepartie: deal.contrepartie || '',
+      product_type: deal.product_type || '',
+      fair_value: deal.fair_value,
+      price_traded: deal.price_traded,
+      trade_date: deal.trade_date,
+      strike_date: deal.strike_date,
+      value_date: deal.value_date,
+      payment_date: deal.payment_date,
+      nominal: deal.nominal,
+    }
+  }
+
+  // Pre-fill the Pricer from an RFQ's retained ("retenue") quote — script,
+  // underlyings, params from the RFQ itself; contrepartie/price_traded from
+  // the selected quote, handed off to DealTab.vue via pendingDealPrefill
+  // since those live in the component's own form, not this store. Mirrors
+  // loadFromDeal, but the RFQ's params blob is the lighter shape RfqView.vue
+  // builds at creation (single r/T/N/model, no Heston/SABR/curve fields) —
+  // same defensive merge-over-defaults as loadFromDeal handles that fine.
+  async function loadFromRfq(rfqObj) {
+    const p = rfqObj.params || {}
+    currentScriptId.value   = rfqObj.script_id || null
+    currentScriptName.value = rfqObj.reference
+    script.value = rfqObj.script_snapshot
+
+    if (p.underlyings?.length) {
+      // Unlike Deal.market_snapshot (percentage numbers, e.g. 20 for 20% —
+      // straight from underlyings.value, see _snapshotInputs), RfqView.vue
+      // persists sigma/q as raw fractions (advanced.sigma / 100, matching
+      // the backend request-body convention) — convert back to the store's
+      // percentage-number convention or _buildUls() silently divides by 100
+      // a second time (0.2 -> 0.002, a near-zero vol that breaks pricing).
+      underlyings.value = p.underlyings.map((u, i) => {
+        const { sigma, q, ...rest } = u
+        return {
+          ..._defaultUnderlying(i + 1),
+          ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v != null)),
+          ...(sigma != null ? { sigma: sigma * 100 } : {}),
+          ...(q != null ? { q: q * 100 } : {}),
+        }
+      })
+      corrMatrix.value = p.corr_matrix?.length ? p.corr_matrix : [[1.0]]
+      activeUnderlyingIdx.value = 0
+    }
+
+    Object.assign(globalParams, {
+      r: (p.r ?? globalParams.r / 100) * 100,
+      T: p.T ?? globalParams.T,
+      model: p.model || globalParams.model,
+      deal_ccy: p.currency || globalParams.deal_ccy,
+      strike_date: p.strike_date || globalParams.strike_date,
+      value_date: p.value_date || globalParams.value_date,
+      // The whole point of landing in the Pricer is to re-run the price and
+      // check it against the RFQ's — which only means something if the
+      // simulation context matches too, not just the product. rfq.js's
+      // computeModelPrice sends script/underlyings/r/T/N/model/user_params/
+      // constats and nothing else, so its price was produced with the
+      // PricingRequest defaults (core/schemas.py) for everything below.
+      // Inherit those instead of whatever this session was last set to, or a
+      // Pricer left on N=100k with the yield curve enabled reprices a
+      // legitimately different number and the comparison proves nothing.
+      N: p.N ?? 20000,
+      seed: 42,
+      antithetic: true,
+      rateModel: 'deterministic',
+      barrierMonitoring: 'weekly',
+    })
+    yieldCurve.enabled = false
+
+    _clearResults()
+    currentRfqId.value = rfqObj.id
+    await parseScript()
+
+    const up = p.user_params || {}
+    for (const [name, v] of Object.entries(up)) {
+      if (!(name in paramOverrides)) continue
+      paramOverrides[name] = Array.isArray(v)
+        ? v.map(x => fromStoredUnits(name, x))
+        : fromStoredUnits(name, v)
+    }
+
+    _restoreConstats(p.constats || {})
+
+    const selected = (rfqObj.quotes || []).find(q => q.id === rfqObj.selected_quote_id)
+    pendingDealPrefill.value = {
+      // quote.counterparty is the ELIGIBLE counterparty the server resolved
+      // from the provider (explicit link or identical name — see api/rfq.py
+      // _counterparty_by_provider), not the provider label. The two catalogs
+      // are distinct: writing the label straight in booked deals against a
+      // counterparty absent from the eligibility list, invisible in the
+      // <select> that shows it. Unresolved (null) is passed through as such —
+      // DealTab leaves the field empty and says why rather than guessing.
+      ...(selected ? {
+        contrepartie: selected.counterparty ?? '',
+        rfq_provider_label: selected.provider,
+        price_traded: selected.price ?? 0,
+      } : {}),
+      ...(p.notional != null ? { nominal: p.notional } : {}),
+      product_type: rfqObj.template_type || '',
+      // Deal.sens is written from the COUNTERPARTY's side ("Vente (banque
+      // vend)"), the RFQ's from ours — so an RFQ where WE buy books as a deal
+      // whose sens is 'vente'. Inverted here rather than unifying the two
+      // conventions, which would silently re-read every deal already booked.
+      sens: rfqObj.sens === 'vente' ? 'achat' : 'vente',
+      // Seed fair_value from the RFQ's own model price (already in percentage
+      // points, like DealTab's field). _clearResults() just wiped
+      // store.result, so DealTab's fair-value watch has nothing to fire on
+      // and would otherwise leave 0 — booking a deal whose P&L baseline says
+      // the product is worthless. Re-pricing overwrites it with a fresh
+      // number; until then fair_value_at tells DealTab how old this one is.
+      ...(rfqObj.model_price != null
+        ? { fair_value: rfqObj.model_price, fair_value_at: rfqObj.model_price_at }
+        : {}),
     }
   }
 
@@ -911,41 +1112,7 @@ export const usePricingStore = defineStore('pricing', () => {
       }
     }
 
-    if (data.constats_json) {
-      const saved = JSON.parse(data.constats_json)
-      for (const [k, v] of Object.entries(saved)) {
-        if (!(k in constatOverrides)) continue
-        if (typeof v === 'string') {
-          constatOverrides[k] = v
-        } else if (v && typeof v === 'object') {
-          const ov = constatOverrides[k]
-          if (ov && typeof ov === 'object') {
-            ov.start_date = v.start_date || ''
-            ov.end_date   = v.end_date   || ''
-            ov.roll_date  = v.roll_date  || ''
-            ov.stub       = v.stub       || 'short_last'
-            if (v.frequency && ov.frequency) {
-              if (typeof v.frequency === 'object') {
-                ov.frequency.value = v.frequency.value ?? 3
-                ov.frequency.unit  = v.frequency.unit  ?? 'M'
-              } else {
-                const m = String(v.frequency).match(/^(\d+)([DWMY])$/i)
-                if (m) { ov.frequency.value = parseInt(m[1]); ov.frequency.unit = m[2].toUpperCase() }
-              }
-            }
-            if (v.sub_frequency && ov.sub_frequency) {
-              if (typeof v.sub_frequency === 'object') {
-                ov.sub_frequency.value = v.sub_frequency.value ?? 1
-                ov.sub_frequency.unit  = v.sub_frequency.unit  ?? 'M'
-              } else {
-                const m = String(v.sub_frequency).match(/^(\d+)([DWMY])$/i)
-                if (m) { ov.sub_frequency.value = parseInt(m[1]); ov.sub_frequency.unit = m[2].toUpperCase() }
-              }
-            }
-          }
-        }
-      }
-    }
+    if (data.constats_json) _restoreConstats(JSON.parse(data.constats_json))
 
     if (data.global_params_json) {
       const saved = JSON.parse(data.global_params_json)
@@ -1033,6 +1200,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading, error, progress, yfStatus,
     currentScriptId, currentScriptName,
     currentIndicativeId, productTitle, ensureIndicative,
+    currentRfqId, pendingDealPrefill, openedDeal,
     parseScript, runPricing, runGreeks,
     runProfile, runPaths, runProba, runBacktest, runMtf,
     runSolver, runGrid, paramIsPct, fromStoredUnits, runScenarios, fetchSchedulePreview,
@@ -1040,7 +1208,7 @@ export const usePricingStore = defineStore('pricing', () => {
     buildConstats: _buildConstats,
     loadYfOne, loadYfAll, fetchStoredSpot, refreshStoredSpot,
     addUnderlying, removeUnderlying,
-    resetToDefaults, loadFromDb, loadFromDeal, saveScript, updateScript,
+    resetToDefaults, loadFromDb, loadFromDeal, loadFromRfq, saveScript, updateScript,
     pricingBody: () => ({ ..._baseBody(), N: globalParams.N, antithetic: globalParams.antithetic, ..._rateParams() }),
   }
 })

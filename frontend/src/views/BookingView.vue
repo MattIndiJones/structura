@@ -120,12 +120,22 @@
           <div v-if="watchlist.length || watchlistError" class="card">
             <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
               Watchlist — proximité barrières
-              <HelpTip width="w-72" text="Deals actifs triés par urgence : écart du worst-of actuel à chaque barrière détectée dans le script (en points de S₀), et prochaine date d'observation. Détection des barrières par convention de nommage des PARAM (AC_BAR, KI_BAR…) — un script aux noms inhabituels peut passer à travers. Utilise les valeurs par défaut du script, pas les surcharges UI du pricing." />
+              <HelpTip width="w-72" text="Deals actifs triés par urgence : écart du worst-of actuel à chaque barrière détectée dans le script (en points de S₀), et prochaine date d'observation. Détection par convention de nommage des PARAM (AC_BAR, KI_BAR…) — un script aux noms inhabituels peut passer à travers. Les niveaux sont ceux réellement figés au booking ; le défaut du script n'est utilisé qu'en l'absence de surcharge." />
             </h2>
 
             <div v-if="watchlistError" class="text-xs text-amber-400">⚠ {{ watchlistError }}</div>
 
-            <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
+            <template v-else>
+            <DataFilterBar v-if="watchlist.length" class="border-0 p-0 bg-transparent mb-3"
+                           :fields="wlFilterFields" :state="wlFilter.state"
+                           :field-options="wlFilter.fieldOptions.value"
+                           :has-active-filters="wlFilter.hasActiveFilters.value"
+                           :sorts="wlSorts" :sort-by="wlFilter.sortBy.value" :sort-dir="wlFilter.sortDir.value"
+                           :count="sortedWatchlist.length" :total="watchlist.length" noun="deal(s)"
+                           @update:sort-by="wlFilter.sortBy.value = $event"
+                           @toggle-dir="wlFilter.toggleSortDir()" @reset="wlFilter.reset()" />
+
+            <div class="overflow-x-auto table-shell" tabindex="0" role="region">
               <table class="w-full text-xs border-collapse">
                 <thead>
                   <tr class="border-b border-slate-700">
@@ -137,6 +147,9 @@
                     </th>
                     <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Sous-jacent
                       <HelpTip text="Sous-jacent(s) du deal. Pour un worst-of, tous les sous-jacents du panier sont listés." />
+                    </th>
+                    <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Produit
+                      <HelpTip text="Nom du produit — celui du script sauvegardé dont le deal est issu, ou à défaut celui de la RFQ qu'il a remportée. Vide pour un script ad hoc jamais sauvegardé, qui n'a effectivement pas de nom." />
                     </th>
                     <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Type
                       <HelpTip text="Type de produit tel que booké (Autocall Athena, Phoenix Mémoire, Barrier RC…)." />
@@ -172,6 +185,9 @@
                     <td class="py-2 pr-3 text-slate-400 whitespace-nowrap">
                       {{ (w.underlyings || []).map(u => u.ticker || u.name).join(' / ') || '—' }}
                     </td>
+                    <td class="py-2 pr-3 text-slate-300">
+                      {{ w.product_name || '—' }}
+                    </td>
                     <td class="py-2 pr-3 whitespace-nowrap">
                       <span v-if="w.product_type" class="text-slate-500 text-[10px] border border-slate-700 rounded px-1.5 py-0.5">
                         {{ w.product_type }}
@@ -197,6 +213,10 @@
                           (min {{ (w.wof_min * 100).toFixed(1) }}%)
                         </span>
                       </template>
+                      <span v-else-if="w.next_event && w.strike_pending" class="text-slate-600"
+                            title="Le strike n'a pas encore eu lieu — pas de S₀ fixé, donc pas de performance à mesurer">
+                        avant strike
+                      </span>
                       <span v-else class="text-slate-600" title="S₀ manquant — lancez un Refresh sur ce deal">n/d</span>
                     </td>
                     <td class="py-2">
@@ -206,13 +226,14 @@
                           class="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap">
                           {{ b.name }} {{ (b.level * 100).toFixed(0) }}%<template v-if="b.observable && b.observable !== 'WOF'"> vs {{ b.observable }}</template> · {{ barrierGapLabel(b) }}
                         </span>
-                        <span v-if="!w.barriers.length" class="text-slate-600 text-[10px]">aucune détectée</span>
+                        <span v-if="!w.barriers.length" class="text-slate-600 text-[10px]">aucune dans le script</span>
                       </div>
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
+            </template>
           </div>
 
           </template><!-- /watchlist tab -->
@@ -462,8 +483,22 @@
                   <span v-if="greeksFor(d).scalar?.theta != null" class="font-mono text-slate-400">
                     θ {{ greeksFor(d).scalar.theta.toFixed(4) }}
                   </span>
+                  <span v-else-if="greeksFor(d).theta_event?.reason" class="font-mono text-slate-500">
+                    θ n/d
+                    <HelpTip text="Theta non calculé : vieillir ce produit d'une semaine demanderait une transition d'état qui ne peut pas être reconstruite exactement — observation contractuelle, fixing ou volatilité réalisée dans la fenêtre. Mémoire, accumulation, terminaison et nouveaux fixings doivent d'abord être constatés. Un theta absent vaut mieux qu'un theta faux." />
+                  </span>
                   <span v-if="greeksFor(d).scalar?.rho != null" class="font-mono text-slate-400">
                     ρ {{ greeksFor(d).scalar.rho.toFixed(4) }}
+                  </span>
+                </div>
+                <div v-if="greeksFor(d).theta_event?.pv_pts != null"
+                  class="flex flex-wrap items-center gap-x-2 text-xs text-amber-300/80">
+                  <span>Observation dans les 7 jours :
+                    {{ greeksFor(d).theta_event.labels?.join(', ') || 'flux' }}
+                    de {{ greeksFor(d).theta_event.pv_pts.toFixed(2) }} pts</span>
+                  <HelpTip text="Un flux se détache pendant la semaine que mesure le theta. Il est reporté ici plutôt que compté comme de la décroissance temporelle : un coupon de 5% détaché en 7 jours donnerait un theta de -0,7 par jour, exact au niveau du deal mais ininterprétable une fois sommé sur le livre. Le θ affiché ne mesure que la décroissance, hors ce flux." />
+                  <span v-if="greeksFor(d).theta_event.terminates" class="text-slate-500">
+                    (observation de rappel — le produit peut s'arrêter là)
                   </span>
                 </div>
                 <div v-if="greeksFor(d).corr_pairs && Object.keys(greeksFor(d).corr_pairs).length"
@@ -809,6 +844,8 @@ import { apiFetch } from '../utils/api.js'
 import HelpTip from '../components/HelpTip.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import DataFilterBar from '../components/ui/DataFilterBar.vue'
+import { useDataFilter } from '../composables/useDataFilter.js'
 import { formatInt, formatPercent, formatDate } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
 
@@ -1226,11 +1263,31 @@ async function loadWatchlist() {
 
 // Default watchlist order = next observation soonest first (backend sorts by
 // barrier urgency instead — kept for the daily alert scan, not for this view).
-const sortedWatchlist = computed(() =>
+const watchlistByUrgency = computed(() =>
   [...watchlist.value].sort((a, b) =>
     (a.days_to_next ?? Infinity) - (b.days_to_next ?? Infinity)
   )
 )
+
+// Mêmes filtres que l'onglet Deals, sur les axes que porte la watchlist —
+// voir composables/useDataFilter.
+const wlFilterFields = [
+  { key: 'q', label: 'Recherche', kind: 'text', width: 'min-w-[180px]',
+    placeholder: 'Référence, produit, client…',
+    get: w => [w.reference, w.product_name, w.contrepartie] },
+  { key: 'contrepartie', label: 'Client', kind: 'select' },
+  { key: 'ticker', label: 'Sous-jacent', kind: 'select',
+    get: w => (w.underlyings || []).map(u => u.ticker).filter(Boolean) },
+  { key: 'product_type', label: 'Type', kind: 'select' },
+]
+const wlSorts = [
+  { key: 'days_to_next', label: 'Prochaine obs.' },
+  { key: 'reference', label: 'Référence' },
+  { key: 'product_name', label: 'Produit' },
+  { key: 'min_gap', label: 'Barrière la plus proche' },
+]
+const wlFilter = useDataFilter(watchlistByUrgency, wlFilterFields, { sorts: wlSorts })
+const sortedWatchlist = computed(() => wlFilter.filtered.value)
 
 // Reference click in the watchlist → jump to the deal's own card in the
 // Deals tab (expanded + scrolled into view), as an alternative to opening it

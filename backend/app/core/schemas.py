@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
+from datetime import date
 
 
 class UnderlyingParams(BaseModel):
@@ -51,6 +52,14 @@ class PricingRequest(BaseModel):
     # CONSTAT values, keyed by name — see core/payscript/parser.resolve_constats.
     # Empty dict is a no-op (the common/simple-mode case: no AT<ConstatName>:).
     constats: Dict[str, Any] = {}
+    # Date the calendar's year-fractions are measured from — the product's own
+    # t=0, i.e. its value date. None keeps the historic default (today), which
+    # is only right for a same-day settlement. Callers that know the value date
+    # must send it: api/deals.py already anchors a booked deal's replay on
+    # deal.value_date, so a pre-trade price left on today's anchor resolves the
+    # same calendar into different year fractions than the very same deal once
+    # booked — the two prices then differ for no economic reason.
+    anchor: Optional[date] = None
 
 
 class PricingResponse(BaseModel):
@@ -107,6 +116,10 @@ class AnalysisBase(BaseModel):
     a_r: float = Field(default=0.0, ge=0.0, le=2.0)
     barrier_monitoring: str = Field(default="weekly", pattern="^(weekly|continuous)$")
     constats: Dict[str, Any] = {}
+    # See PricingRequest.anchor — every analytic derived from a script must
+    # resolve its calendar the same way the price did, or the profile/probas/
+    # stress grid describe a product on a different schedule than the one priced.
+    anchor: Optional[date] = None
 
 
 class ProfileRequest(AnalysisBase):
@@ -143,6 +156,7 @@ class BacktestCompareRequest(BaseModel):
     model: str = "constant"
     user_params: Dict[str, Any] = {}
     constats: Dict[str, Any] = {}
+    anchor: Optional[date] = None   # see PricingRequest.anchor
     basket_size: int = Field(default=1, ge=1, le=5)
     shortlist_n: int = Field(default=8, ge=2, le=20)
     start_date: str = "2010-01-01"

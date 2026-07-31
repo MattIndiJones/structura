@@ -8,6 +8,23 @@
       </p>
     </div>
 
+    <div v-if="store.currentRfqId"
+         :class="['text-[10px] border rounded-lg px-3 py-1.5 w-fit',
+                  (fairValueFromRfq || rfqUnmatchedProvider) ? 'border-amber-700/60 bg-amber-950/20 text-amber-300' : 'border-slate-700 text-slate-500']">
+      📨 Pré-rempli depuis la RFQ #{{ store.currentRfqId }} — contrepartie et prix traité repris de la réponse retenue.
+      <template v-if="rfqUnmatchedProvider">
+        <br />
+        ⚠ Le fournisseur <b>{{ rfqUnmatchedProvider }}</b> ne correspond à aucune contrepartie éligible —
+        choisissez-la ci-dessous, ou rattachez-la une fois pour toutes dans
+        <b>Administration → Fournisseurs RFQ</b>.
+      </template>
+      <template v-if="fairValueFromRfq">
+        <br />
+        ⚠ La fair value affichée est le prix modèle figé sur la RFQ<span v-if="rfqPriceAgeDays > 0"> (calculé il y a {{ rfqPriceAgeDays }} j)</span> —
+        lancez <b>▶ Pricer</b> pour la recalculer aux conditions du jour avant de booker.
+      </template>
+    </div>
+
     <!-- ── Identité du deal ─────────────────────────────────── -->
     <div class="card">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Identité</h2>
@@ -83,12 +100,15 @@
         </div>
 
         <div>
-          <label class="label">Fair Value (%)
-            <HelpTip text="Prix théorique issu du dernier pricing Monte Carlo (onglet ▶ Pricer) — pas nécessairement le prix auquel le deal est traité. Modifiable ici si vous voulez figer une valeur différente du dernier run." />
+          <label class="label">Fair Value (%) <span class="text-red-400">*</span>
+            <HelpTip text="Prix théorique issu du dernier pricing Monte Carlo (onglet ▶ Pricer) — pas nécessairement le prix auquel le deal est traité. Modifiable ici si vous voulez figer une valeur différente du dernier run. Sert de base au P&L du deal : un deal ne peut pas être booké à 0." />
           </label>
           <input v-model.number="form.fair_value" type="number" step="0.01" class="input"
             :class="!store.result ? 'border-amber-700/50' : ''" />
-          <p v-if="!store.result" class="text-amber-500 text-[10px] mt-0.5">Issu du dernier pricing</p>
+          <p v-if="errors.fair_value" class="text-red-400 text-xs mt-1">{{ errors.fair_value }}</p>
+          <p v-else-if="!store.result" class="text-amber-500 text-[10px] mt-0.5">
+            {{ fairValueFromRfq ? 'Prix modèle de la RFQ — à recalculer' : 'Issu du dernier pricing' }}
+          </p>
         </div>
         <div>
           <label class="label">Prix traité (%) <span class="text-red-400">*</span>
@@ -251,7 +271,9 @@
           <div v-else class="flex flex-col gap-2 text-xs">
             <div class="flex flex-wrap gap-3 items-end">
               <div>
-                <label class="label">Date de début</label>
+                <label class="label">Date de début
+                  <HelpTip text="Début de la première période (typiquement la date de strike) — pas elle-même une date d'observation : le moteur exclut toujours ce premier point généré. Pour N observations réelles à partir d'une date donnée, mets cette date de début un cran AVANT la première observation voulue (ex: date de strike)." />
+                </label>
                 <SensitiveValue mode="input">
                   <input type="date" v-model="store.constatOverrides[c.name].start_date" class="input" />
                 </SensitiveValue>
@@ -314,11 +336,16 @@
               <span v-if="previewErrors[c.name]" class="text-red-400 ml-2">⚠ {{ previewErrors[c.name] }}</span>
               <div v-else-if="previews[c.name]" class="mt-1.5">
                 <div class="text-slate-500 mb-1">
-                  <SensitiveValue>{{ previews[c.name].dates.length }} dates générées</SensitiveValue>
+                  <SensitiveValue>{{ Math.max(previews[c.name].dates.length - 1, 0) }} observation(s) réelle(s)</SensitiveValue>
+                  <span class="text-slate-600"> ({{ previews[c.name].dates.length }} date(s) générée(s), la 1ère est le début de période — non observée)</span>
                 </div>
                 <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 max-h-32 overflow-y-auto pr-1">
-                  <span v-for="(d, i) in previews[c.name].dates" :key="i" class="text-slate-500 font-mono">
-                    <SensitiveValue>{{ d }}</SensitiveValue>
+                  <span v-for="(d, i) in previews[c.name].dates" :key="i" class="font-mono"
+                        :title="i === 0 ? 'Début de période — pas une date d\'observation' : ''">
+                    <span :class="i === 0 ? 'text-slate-700 line-through' : 'text-slate-500'">
+                      <SensitiveValue>{{ d }}</SensitiveValue>
+                    </span>
+                    <span v-if="i === 0" class="text-slate-600"> (début de période)</span>
                   </span>
                 </div>
               </div>
@@ -387,6 +414,15 @@
           {{ previewEvents.length }} constatation(s) · {{ store.underlyings.length }} sous-jacent(s) ·
           Les spots S₀ se saisissent dans Events après booking.
         </p>
+        <!-- Ces dates viennent de la grille hebdomadaire du dernier Monte
+             Carlo (flux_table), à quelques jours des dates contractuelles. Le
+             booking, lui, résout le calendrier du script (deals.py:
+             _derive_observation_times) — d'où l'avertissement plutôt qu'un
+             aperçu qui prétendrait à l'exactitude. -->
+        <p v-if="store.scriptConstats.length" class="text-[10px] text-slate-600">
+          Dates indicatives, alignées sur la grille de simulation — le booking retient
+          celles du calendrier CONSTAT du script.
+        </p>
       </div>
     </div>
 
@@ -407,7 +443,22 @@
           → Voir les Events
         </button>
       </div>
-      <button class="btn-primary w-full py-3 text-sm font-bold"
+      <!-- Une fois le deal booké, le bouton de booking disparaît : re-cliquer
+           créait un second deal identique sous une nouvelle référence, sans
+           rien pour le signaler. Booker deux fois le même produit reste
+           légitime (deux clients), d'où le lien de réarmement explicite
+           plutôt qu'un blocage. -->
+      <template v-if="existingDeal">
+        <RouterLink :to="`/booking?deal=${existingDeal.id}`"
+          class="btn-primary w-full py-3 text-sm font-bold block text-center">
+          📋 Voir le deal {{ existingDeal.reference }}
+        </RouterLink>
+        <button class="text-[11px] text-slate-500 hover:text-slate-300 underline mt-2 w-full text-center"
+          @click="rearmBooking">
+          Booker un autre deal à partir de ce pricing
+        </button>
+      </template>
+      <button v-else class="btn-primary w-full py-3 text-sm font-bold"
         :disabled="dealsStore.loading"
         @click="book">
         <span v-if="dealsStore.loading"
@@ -420,7 +471,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
+import { RouterLink } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDealsStore } from '../stores/deals.js'
 import { useAuthStore } from '../stores/auth.js'
@@ -551,10 +603,54 @@ function formatNominal() {
   const n = nominalValue.value
   if (n) nominalRaw.value = formatInt(n)
 }
-function unformatNominal() {
+function unformatNominal(event) {
   nominalRaw.value = String(nominalValue.value || '')
+  // Select the whole field on focus so typing a new nominal replaces it
+  // instead of inserting at the cursor — without this, clicking into an
+  // already-filled field and typing silently CONCATENATES onto the
+  // existing value (e.g. 1 000 000 + 1000000 -> 10 000 001 000 000).
+  const el = event?.target
+  if (el) nextTick(() => el.select())
 }
 onMounted(() => formatNominal())
+
+// Handoff from RfqView.vue's "Booker cette réponse" (see pricing.js:
+// loadFromRfq) — contrepartie/prix traité de la réponse retenue, nominal/
+// product_type/fair value de la RFQ.
+//
+// A watch, not a read at setup: this component is v-if'd on store.leftTab,
+// which survives navigation. If the Deal tab was already open, DealTab is
+// created BEFORE Pricer.vue's async onMounted has even fetched the RFQ, so a
+// setup-time read finds nothing and the prefill is silently lost. immediate
+// covers the opposite order (prefill already waiting when we mount), and
+// nulling it after applying keeps it from being replayed onto a later deal.
+const rfqPrefillAt = ref(null)
+// Provider whose quote won, when no eligible counterparty could be resolved
+// from it — the field stays empty and the banner names the provider so the
+// desk knows what to pick instead of facing a blank required select.
+const rfqUnmatchedProvider = ref('')
+watch(() => store.pendingDealPrefill, (prefill) => {
+  if (!prefill) return
+  const { nominal, fair_value_at, rfq_provider_label, ...formFields } = prefill
+  Object.assign(form, formFields)
+  if (nominal != null) nominalRaw.value = formatInt(nominal)
+  rfqPrefillAt.value = fair_value_at || null
+  rfqUnmatchedProvider.value = (rfq_provider_label && !formFields.contrepartie)
+    ? rfq_provider_label : ''
+  // A settlement date that came with the deal is a fact, not a default — the
+  // maturity watch below must not overwrite a non-standard one.
+  if (formFields.payment_date) paymentDateDirty.value = true
+  store.pendingDealPrefill = null
+}, { immediate: true })
+
+// True while fair_value is still the RFQ's stored model price rather than a
+// price computed here — cleared by the store.result watch above on the first
+// ▶ Pricer. Drives the "à revérifier" warning in the RFQ banner.
+const fairValueFromRfq = computed(() => !!rfqPrefillAt.value && !store.result)
+const rfqPriceAgeDays = computed(() => {
+  if (!rfqPrefillAt.value) return 0
+  return Math.floor((Date.now() - new Date(rfqPrefillAt.value)) / 86400000)
+})
 
 function formatCcy(val) {
   return formatMoneyRound(val, store.globalParams.deal_ccy)
@@ -640,11 +736,27 @@ const errors = reactive({})
 const bookingError = ref(null)
 const bookedDeal = ref(null)
 
+// Le deal existe déjà — soit on vient de le booker, soit on a rouvert un deal
+// booké (store.openedDeal, voir pricing.js:loadFromDeal). Dans les deux cas le
+// bouton de booking créerait un doublon sous une nouvelle référence.
+const existingDeal = computed(() => bookedDeal.value || store.openedDeal)
+
+// Rebooker le même produit reste légitime (deux clients, deux trades) — mais
+// ça doit être un geste explicite.
+function rearmBooking() {
+  bookedDeal.value = null
+  store.openedDeal = null
+}
+
 function validate() {
   Object.keys(errors).forEach(k => delete errors[k])
   if (!form.contrepartie.trim()) errors.contrepartie = 'Contrepartie requise'
   if (!nominalValue.value || nominalValue.value <= 0) errors.nominal = 'Nominal requis'
   if (!form.price_traded) errors.price_traded = 'Prix traité requis'
+  // A zero fair value is never a real product — it means nothing has been
+  // priced in this session (the RFQ→booking path arrives with the results
+  // cleared). Booking it would set the deal's whole P&L baseline to 0.
+  if (!form.fair_value) errors.fair_value = 'Fair value requise — lancez ▶ Pricer, ou saisissez-la'
   return Object.keys(errors).length === 0
 }
 
@@ -706,6 +818,7 @@ async function book() {
       script_id: store.currentScriptId || null,
       market_snapshot: marketSnapshot,
       indicative_id: store.currentIndicativeId || null,
+      rfq_id: store.currentRfqId || null,
     })
     bookedDeal.value = deal
   } catch (e) {

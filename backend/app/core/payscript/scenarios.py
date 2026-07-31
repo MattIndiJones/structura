@@ -43,6 +43,7 @@ def compute_scenario_grid(script_text: str, underlyings, corr_matrix, r: float, 
                            yield_curve=None, sigma_r: float = 0.0, a_r: float = 0.0,
                            barrier_monitoring: str = "weekly",
                            constat_values: dict | None = None,
+                           constat_anchor: str | None = None,
                            max_workers: int = DEFAULT_MAX_WORKERS) -> dict:
     """2D stress grid: price(spot_shock, vol_shock) for every combination, plus
     the unshocked base price for reference (computed independently of whether
@@ -58,6 +59,7 @@ def compute_scenario_grid(script_text: str, underlyings, corr_matrix, r: float, 
     def _payload(spot_shock: float, vol_shock: float) -> dict:
         return dict(
             script_text=script_text, constat_values=constat_values,
+            constat_anchor=constat_anchor,
             underlyings=underlyings, corr=corr_matrix, r=r, T=T,
             n_paths=N, model=model, seed=seed, user_params=user_params,
             spot_shock=spot_shock, vol_shock=vol_shock,

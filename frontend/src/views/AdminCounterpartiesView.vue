@@ -53,7 +53,7 @@
                        @change="updateCpty(c, { limit_eur: $event.target.value === '' ? null : Number($event.target.value) })" />
               </td>
               <td class="py-1.5 pr-3 text-right">
-                <button class="text-slate-600 hover:text-red-400" title="Supprimer" aria-label="Supprimer la contrepartie" @click="deleteCpty(c)">🗑</button>
+                <button class="icon-btn-danger" title="Supprimer" aria-label="Supprimer la contrepartie" @click="deleteCpty(c)">🗑</button>
               </td>
             </tr>
           </tbody>

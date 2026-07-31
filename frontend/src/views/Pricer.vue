@@ -98,10 +98,12 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDealsStore } from '../stores/deals.js'
+import { useRfqStore } from '../stores/rfq.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 
 const store = usePricingStore()
 const dealsStore = useDealsStore()
+const rfqStore = useRfqStore()
 const demo = useDemoModeStore()
 const route = useRoute()
 
@@ -117,10 +119,23 @@ function goToEvents(dealId) {
 // just Events, then jump straight there instead of landing on Script.
 onMounted(async () => {
   const dealId = route.query.dealId
-  if (!dealId) return
-  const deal = await dealsStore.selectDeal(Number(dealId))
-  if (deal) await store.loadFromDeal(deal)
-  goToEvents(Number(dealId))
+  if (dealId) {
+    const deal = await dealsStore.selectDeal(Number(dealId))
+    if (deal) await store.loadFromDeal(deal)
+    goToEvents(Number(dealId))
+    return
+  }
+
+  // Deep link from RfqView.vue's "Booker cette réponse" (/pricer?fromRfq=…)
+  // — pre-fill script/underlyings/params from the RFQ and contrepartie/
+  // price_traded from its retained quote, then land straight on Deal so
+  // the only thing left to do is complete dates/sens and book.
+  const fromRfq = route.query.fromRfq
+  if (fromRfq) {
+    const rfqObj = await rfqStore.fetchOne(Number(fromRfq))
+    if (rfqObj) await store.loadFromRfq(rfqObj)
+    store.leftTab = 'deal'
+  }
 })
 
 const leftTabs = [

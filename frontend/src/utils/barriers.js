@@ -6,8 +6,17 @@
 // Chip color = how close the worst-of currently is to that barrier, read in
 // the direction the barrier bites: a KI hurts when WOF falls TO it (small
 // positive gap = danger), an autocall triggers when WOF rises ABOVE it.
+// gap_pts null = écart pas encore calculable (strike non fixé, prix
+// indisponibles). Surtout pas traité comme 0 : `null <= 0` est vrai en JS, ce
+// qui afficherait une barrière « franchie » sur un produit qui n'a même pas
+// encore démarré.
+export function barrierPending(b) {
+  return b.gap_pts === null || b.gap_pts === undefined
+}
+
 export function barrierChipClass(b) {
   const g = b.gap_pts
+  if (barrierPending(b)) return 'bg-slate-800 text-slate-500 border border-slate-700 border-dashed'
   if (b.kind === 'ki') {
     if (g <= 0) return 'bg-red-900/60 text-red-300 border border-red-700'
     if (g <= 5) return 'bg-red-900/40 text-red-400'
@@ -26,6 +35,7 @@ export function barrierChipClass(b) {
 
 export function barrierGapLabel(b) {
   const g = b.gap_pts
+  if (barrierPending(b)) return 'en attente du strike'
   if (b.kind === 'ki' && g <= 0) return `franchie (${g.toFixed(1)} pts)`
   if (b.kind === 'autocall' && g >= 0) return `≥ barrière (+${g.toFixed(1)} pts)`
   return `${g >= 0 ? '+' : ''}${g.toFixed(1)} pts`
@@ -37,6 +47,7 @@ export function barrierGapLabel(b) {
 // of one badge per barrier.
 export function barrierSeverity(b) {
   const g = b.gap_pts
+  if (barrierPending(b)) return 'ok'
   if (b.kind === 'ki') {
     if (g <= 5) return 'critique'
     if (g <= 15) return 'attention'
