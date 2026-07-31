@@ -8,6 +8,11 @@ Hors périmètre : AMC, refonte générale du moteur de pricing, moteur complet 
 
 ## 1. Conclusion exécutive
 
+> Mise à jour : les priorités de rejeu officiel, sémantique KI/final,
+> amendement maker-checker et consultation de l’audit ont été traitées dans
+> `IMPLEMENTATION_RFQ_BOOKING_LIFECYCLE_PHASE_2_2026-07-31.md`. Les limites
+> décrites en section 10 restent l’état de la phase 0/1, pas l’état courant.
+
 La tranche Phase 0 + fondations Phase 1 est mise en œuvre.
 
 La chaîne ne repose plus sur la seule cohérence de l’interface : les contrôles critiques sont exécutés côté domaine/backend, les refus sont explicites et persistés, et les décisions lifecycle terminales ne peuvent plus être appliquées à partir de données Yahoo.

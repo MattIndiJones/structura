@@ -20,6 +20,8 @@ export const useDealsStore = defineStore('deals', () => {
   const loading = ref(false)
   const error = ref(null)
   const refreshStatus = ref('')
+  const auditEvents = ref([])
+  const pendingAmendments = ref([])
 
   async function loadDeals() {
     loading.value = true; error.value = null
@@ -147,6 +149,51 @@ export const useDealsStore = defineStore('deals', () => {
     return result
   }
 
+  async function requestAmendment(dealId, payload) {
+    const res = await apiFetch(`/api/deals/${dealId}/amendment-requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Demande impossible')) }
+    const result = await res.json()
+    currentDeal.value = null
+    await selectDeal(dealId)
+    return result
+  }
+
+  async function transitionAmendment(dealId, requestId, action, reason) {
+    const res = await apiFetch(`/api/deals/${dealId}/amendment-requests/${requestId}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Transition impossible')) }
+    const result = await res.json()
+    currentDeal.value = null
+    await selectDeal(dealId)
+    return result
+  }
+
+  async function loadPendingAmendments() {
+    const res = await apiFetch('/api/deals/amendment-requests/pending')
+    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'File checker indisponible')) }
+    pendingAmendments.value = await res.json()
+    return pendingAmendments.value
+  }
+
+  async function loadAudit(dealId, filters = {}) {
+    const params = new URLSearchParams()
+    if (filters.action) params.set('action', filters.action)
+    if (filters.result) params.set('result', filters.result)
+    params.set('limit', String(filters.limit || 250))
+    const res = await apiFetch(`/api/deals/${dealId}/audit?${params}`)
+    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Audit indisponible')) }
+    const data = await res.json()
+    auditEvents.value = data.items || []
+    return data
+  }
+
   async function getRepriceInputs(dealId) {
     const res = await apiFetch(`/api/deals/${dealId}/reprice`)
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur reprice') }
@@ -160,9 +207,10 @@ export const useDealsStore = defineStore('deals', () => {
   }
 
   return {
-    deals, currentDeal, loading, error, refreshStatus,
+    deals, currentDeal, loading, error, refreshStatus, auditEvents, pendingAmendments,
     loadDeals, nextRef, bookDeal, selectDeal, updateDeal,
     updateEvent, validateFixing, transitionProposal,
+    requestAmendment, transitionAmendment, loadPendingAmendments, loadAudit,
     refreshEvents, getRepriceInputs, getWatchlist,
   }
 })

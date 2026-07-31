@@ -11,7 +11,9 @@
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div>
             <div class="text-slate-500 mb-0.5">Référence</div>
-            <div class="font-mono font-semibold text-slate-200">{{ deal.reference }}</div>
+            <div class="font-mono font-semibold text-slate-200">
+              {{ deal.reference }} <span class="text-slate-500">v{{ deal.contract_version || 1 }}</span>
+            </div>
           </div>
           <div>
             <div class="text-slate-500 mb-0.5">Contrepartie</div>
@@ -117,6 +119,13 @@
               <span class="ml-2 text-slate-500">{{ proposal.status }} · source {{ proposal.data_source }}</span>
               <div class="text-[10px] text-slate-500 mt-0.5">
                 {{ proposal.result?.event_date || 'date inconnue' }} · aucune application automatique
+              </div>
+              <div v-if="proposal.comparison_status" class="text-[10px] mt-0.5"
+                   :class="proposal.comparison_status === 'MATCH' ? 'text-emerald-400' : 'text-amber-400'">
+                Rejeu officiel : {{ proposal.comparison_status }}
+                <span v-if="proposal.official_result?.realized_payout != null">
+                  · payout {{ (proposal.official_result.realized_payout * 100).toFixed(4) }}%
+                </span>
               </div>
             </div>
             <div class="flex gap-2 shrink-0">
@@ -233,6 +242,95 @@
         </p>
       </div>
 
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Amendements gouvernés</h2>
+            <p class="text-[10px] text-slate-600 mt-0.5">
+              Maker distinct du checker · version contractuelle · application exactement une fois
+            </p>
+          </div>
+        </div>
+        <div v-if="isDealOwner" class="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
+          <select v-model="amendmentForm.field_name" class="select text-xs">
+            <option value="nominal">Nominal</option>
+            <option value="contrepartie">Contrepartie</option>
+            <option value="price_traded">Prix traité</option>
+            <option value="payment_date">Date de paiement</option>
+          </select>
+          <input v-model="amendmentForm.new_value" class="input text-xs" placeholder="Nouvelle valeur" />
+          <input v-model="amendmentForm.reason" class="input text-xs" placeholder="Motif contractuel détaillé" />
+          <button class="btn-secondary text-xs" @click="createAmendment">Soumettre au checker</button>
+        </div>
+        <div v-if="!deal.amendment_requests?.length" class="text-xs text-slate-600">Aucun amendement.</div>
+        <div v-else class="flex flex-col gap-2">
+          <div v-for="request in deal.amendment_requests" :key="request.id"
+               class="rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 flex items-center justify-between gap-3">
+            <div class="text-xs min-w-0">
+              <span class="font-mono text-slate-300">{{ request.field_name }}</span>
+              <span class="text-slate-500 mx-1">:</span>
+              <span class="text-slate-500">{{ displayValue(request.old_value) }}</span>
+              <span class="text-slate-600 mx-1">→</span>
+              <span class="text-slate-200">{{ displayValue(request.new_value) }}</span>
+              <span class="ml-2 text-[10px]" :class="amendmentStatusClass(request.status)">
+                {{ request.status }} · base v{{ request.base_contract_version }}
+              </span>
+              <div class="text-[10px] text-slate-600 mt-0.5">{{ request.reason }}</div>
+            </div>
+            <div v-if="canCheck(request)" class="flex gap-1 shrink-0">
+              <button v-if="request.status === 'PENDING'" class="btn-secondary text-[10px] px-2 py-1"
+                      @click="transitionAmendment(request, 'approve')">Approuver</button>
+              <button v-if="request.status === 'PENDING'" class="btn-ghost text-[10px] px-2 py-1 text-red-400"
+                      @click="transitionAmendment(request, 'reject')">Rejeter</button>
+              <button v-if="request.status === 'APPROVED'" class="btn-primary text-[10px] px-2 py-1"
+                      @click="transitionAmendment(request, 'apply')">Appliquer</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Piste d’audit</h2>
+            <p class="text-[10px] text-slate-600 mt-0.5">Décisions, refus, sources et motifs persistés</p>
+          </div>
+          <div class="flex gap-2">
+            <select v-model="auditResult" class="select text-xs py-1" @change="loadAudit">
+              <option value="">Tous les résultats</option>
+              <option value="SUCCESS">SUCCESS</option>
+              <option value="REJECTED">REJECTED</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+            <button class="btn-secondary text-xs px-2 py-1" @click="loadAudit">Actualiser</button>
+            <button class="btn-ghost text-xs px-2 py-1" @click="exportAudit">Exporter CSV</button>
+          </div>
+        </div>
+        <div v-if="!dealsStore.auditEvents.length" class="text-xs text-slate-600">Aucun événement d’audit.</div>
+        <div v-else class="overflow-x-auto table-shell max-h-72">
+          <table class="w-full text-[11px]">
+            <thead class="sticky top-0 bg-slate-900">
+              <tr class="text-left text-slate-500 border-b border-slate-800">
+                <th class="py-1.5 pr-3 font-medium">Date</th>
+                <th class="py-1.5 pr-3 font-medium">Action</th>
+                <th class="py-1.5 pr-3 font-medium">Résultat</th>
+                <th class="py-1.5 pr-3 font-medium">Objet</th>
+                <th class="py-1.5 font-medium">Motif</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in dealsStore.auditEvents" :key="row.id" class="border-b border-slate-800/60">
+                <td class="py-1.5 pr-3 font-mono text-slate-500 whitespace-nowrap">{{ formatAuditDate(row.created_at) }}</td>
+                <td class="py-1.5 pr-3 font-mono text-slate-300 whitespace-nowrap">{{ row.action }}</td>
+                <td class="py-1.5 pr-3" :class="auditResultClass(row.result)">{{ row.result }}</td>
+                <td class="py-1.5 pr-3 text-slate-500 whitespace-nowrap">{{ row.object_type }} #{{ row.object_id }}</td>
+                <td class="py-1.5 text-slate-400 min-w-64">{{ row.reason || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </template>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -322,9 +420,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useDealsStore } from '../stores/deals.js'
 import { usePricingStore } from '../stores/pricing.js'
+import { useAuthStore } from '../stores/auth.js'
 import HelpTip from './HelpTip.vue'
 import { formatDate } from '../utils/format.js'
 
@@ -332,17 +431,21 @@ const props = defineProps({ initialDealId: { type: Number, default: null } })
 
 const dealsStore = useDealsStore()
 const store = usePricingStore()
+const authStore = useAuthStore()
 
 const today = new Date().toISOString().split('T')[0]
 const repricing = ref(false)
 const repriceMsg = ref('')
 const savingEventId = ref(null)
 const saveMsg = ref('')
+const auditResult = ref('')
+const amendmentForm = reactive({ field_name: 'nominal', new_value: '', reason: '' })
 let saveMsgTimer = null
 
 const deal = computed(() => dealsStore.currentDeal)
 const strikeEvent = computed(() => deal.value?.events?.find(e => e.t_years === 0) ?? null)
 const hasS0 = computed(() => !!strikeEvent.value && Object.keys(strikeEvent.value.spots).length > 0)
+const isDealOwner = computed(() => deal.value?.user_id === authStore.user?.id)
 
 const allEventsFuture = computed(() => {
   const evs = deal.value?.events
@@ -405,6 +508,7 @@ onMounted(async () => {
 async function selectDeal(id) {
   dealsStore.refreshStatus = ''
   await dealsStore.selectDeal(id)
+  if (dealsStore.currentDeal) await loadAudit()
 }
 
 // ── Formatting ────────────────────────────────────────────
@@ -489,6 +593,63 @@ async function validateEventFixing(ev) {
   }
 }
 
+function displayValue(value) {
+  if (value == null) return '—'
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+function amendmentStatusClass(status) {
+  if (status === 'APPLIED') return 'text-emerald-400'
+  if (status === 'REJECTED') return 'text-red-400'
+  if (status === 'APPROVED') return 'text-blue-400'
+  return 'text-amber-400'
+}
+
+function canCheck(request) {
+  return ['checker', 'admin'].includes(authStore.user?.role) &&
+    request.requested_by !== authStore.user?.id
+}
+
+function auditResultClass(result) {
+  if (result === 'SUCCESS') return 'text-emerald-400'
+  if (result === 'REJECTED') return 'text-amber-400'
+  return 'text-red-400'
+}
+
+function formatAuditDate(raw) {
+  if (!raw) return '—'
+  return new Date(raw).toLocaleString('fr-FR')
+}
+
+async function loadAudit() {
+  if (!deal.value) return
+  try {
+    await dealsStore.loadAudit(deal.value.id, { result: auditResult.value })
+  } catch (e) {
+    showSaveMsg(`⚠ Audit indisponible : ${e.message}`)
+  }
+}
+
+function exportAudit() {
+  const rows = dealsStore.auditEvents
+  if (!rows.length) return
+  const csvCell = value => `"${String(value ?? '').replaceAll('"', '""')}"`
+  const lines = [
+    ['date', 'action', 'resultat', 'objet', 'objet_id', 'acteur', 'source', 'motif']
+      .map(csvCell).join(','),
+    ...rows.map(row => [row.created_at, row.action, row.result, row.object_type,
+      row.object_id, row.actor_user_id, row.data_source, row.reason]
+      .map(csvCell).join(',')),
+  ]
+  const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `audit-${deal.value.reference}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 async function validateProposal(proposal) {
   const reason = window.prompt('Motif de validation de la résolution :')
   if (!reason) return
@@ -509,6 +670,46 @@ async function applyProposal(proposal) {
     showSaveMsg('✓ Résolution appliquée')
   } catch (e) {
     showSaveMsg(`⚠ Application refusée : ${e.message}`)
+  }
+}
+
+async function createAmendment() {
+  if (!deal.value || !amendmentForm.new_value || amendmentForm.reason.trim().length < 10) {
+    showSaveMsg('⚠ Nouvelle valeur et motif détaillé (10 caractères minimum) requis')
+    return
+  }
+  const numeric = ['nominal', 'price_traded'].includes(amendmentForm.field_name)
+  const value = numeric ? Number(amendmentForm.new_value) : amendmentForm.new_value
+  if (numeric && (!Number.isFinite(value) || value <= 0)) {
+    showSaveMsg('⚠ La nouvelle valeur doit être strictement positive')
+    return
+  }
+  try {
+    await dealsStore.requestAmendment(deal.value.id, {
+      field_name: amendmentForm.field_name,
+      new_value: value,
+      reason: amendmentForm.reason.trim(),
+    })
+    amendmentForm.new_value = ''
+    amendmentForm.reason = ''
+    showSaveMsg('✓ Demande transmise au checker')
+    await loadAudit()
+  } catch (e) {
+    showSaveMsg(`⚠ Demande refusée : ${e.message}`)
+  }
+}
+
+async function transitionAmendment(request, action) {
+  const labels = { approve: 'approbation', reject: 'rejet', apply: 'application' }
+  const reason = window.prompt(`Motif de ${labels[action]} de l’amendement :`)
+  if (!reason || reason.trim().length < 10) return
+  try {
+    await dealsStore.transitionAmendment(
+      deal.value.id, request.id, action, reason.trim())
+    showSaveMsg(`✓ Amendement ${action === 'apply' ? 'appliqué' : action === 'approve' ? 'approuvé' : 'rejeté'}`)
+    await loadAudit()
+  } catch (e) {
+    showSaveMsg(`⚠ Transition refusée : ${e.message}`)
   }
 }
 

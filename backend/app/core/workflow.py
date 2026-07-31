@@ -49,6 +49,13 @@ class LifecycleStatus(WorkflowValue):
     MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
 
 
+class AmendmentStatus(WorkflowValue):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    APPLIED = "APPLIED"
+
+
 class RfqBusinessStatus(WorkflowValue):
     DRAFT = "DRAFT"
     READY = "READY"

@@ -192,18 +192,18 @@ class Deal(SQLModel, table=True):
     greeks_computed_at: Optional[datetime] = Field(default=None)
 
     status: str = Field(default="actif")  # actif | callé | échu | résilié
+    # Monotonic version of the operational contract row. Every governed
+    # amendment snapshots both the previous and resulting version in
+    # DealContractVersion; a concurrent/stale request can therefore never
+    # overwrite a newer contractual state.
+    contract_version: int = Field(default=1)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class TradeAmendmentRequest(SQLModel, table=True):
-    """Durable envelope for a future governed amendment workflow.
-
-    Direct Deal edits are refused in this tranche.  No public approval API is
-    exposed yet: this only reserves the append-only shape the next phase will
-    build on without pretending maker/checker already exists.
-    """
+    """Governed maker-checker request against one contract version."""
     __tablename__ = "trade_amendment_requests"
     id: Optional[int] = Field(default=None, primary_key=True)
     deal_id: int = Field(foreign_key="deals.id", index=True)
@@ -213,8 +213,29 @@ class TradeAmendmentRequest(SQLModel, table=True):
     reason: str = Field(default="", sa_column=Column(Text))
     requested_by: Optional[int] = Field(default=None, foreign_key="users.id")
     status: str = Field(default="PENDING", index=True)
+    base_contract_version: int = Field(default=1)
     validated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     validated_at: Optional[datetime] = Field(default=None)
+    decision_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+    rejected_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    rejected_at: Optional[datetime] = Field(default=None)
+    applied_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    applied_at: Optional[datetime] = Field(default=None)
+    applied_contract_version: Optional[int] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class DealContractVersion(SQLModel, table=True):
+    """Immutable snapshot of a booked contract version."""
+    __tablename__ = "deal_contract_versions"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    version: int = Field(index=True)
+    dedup_key: str = Field(unique=True, index=True)
+    snapshot_json: str = Field(default="{}", sa_column=Column(Text))
+    amendment_request_id: Optional[int] = Field(
+        default=None, foreign_key="trade_amendment_requests.id", index=True)
+    created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
@@ -540,6 +561,12 @@ class LifecycleProposal(SQLModel, table=True):
     proposed_outcome: str = Field(index=True)
     result_json: str = Field(default="{}", sa_column=Column(Text))
     data_source: str = Field(default="INDICATIVE")
+    # Replay produced only from validated official inputs. It is frozen at
+    # validation and re-hashed before application.
+    official_result_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+    official_input_hash: Optional[str] = Field(default=None, index=True)
+    official_replayed_at: Optional[datetime] = Field(default=None)
+    comparison_status: Optional[str] = Field(default=None, index=True)
     proposed_by: Optional[int] = Field(default=None, foreign_key="users.id")
     validated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     validation_reason: Optional[str] = Field(default=None, sa_column=Column(Text))

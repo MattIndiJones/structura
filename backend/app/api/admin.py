@@ -4,7 +4,7 @@ and Users/Entities CRUD, all gated by get_current_admin."""
 from __future__ import annotations
 import bcrypt
 from datetime import datetime, date
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -292,13 +292,13 @@ class UserCreate(BaseModel):
     username: str
     email: str
     password: str
-    role: str = "user"
+    role: Literal["user", "checker", "admin"] = "user"
     entity_id: Optional[int] = None
 
 
 class UserUpdate(BaseModel):
     email: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[Literal["user", "checker", "admin"]] = None
     entity_id: Optional[int] = None
     is_active: Optional[bool] = None
 

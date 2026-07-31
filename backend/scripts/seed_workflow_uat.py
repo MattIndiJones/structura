@@ -24,6 +24,7 @@ from backend.app.api import deals as deals_api
 from backend.app.api import rfq as rfq_api
 from backend.app.api.portfolios import get_or_create_default_portfolio
 from backend.app.core.audit import record_audit_event
+from backend.app.core.lifecycle_controls import official_input_hash
 from backend.app.core.rfq_controls import booking_gate_failures
 from backend.app.core.workflow import DataCategory, FixingStatus, LifecycleStatus
 from backend.app.db.database import engine, init_db
@@ -398,6 +399,15 @@ def _create_lifecycle_scenarios(session: Session, user: User) -> None:
             "event_date": applied_call.event_date, "realized_payout": 1.08,
         }),
         data_source=DataCategory.INDICATIVE,
+        official_result_json=json.dumps({
+            "outcome": "callé", "outcome_basis": "SCRIPT_STOP",
+            "event_id": applied_call.id, "event_date": applied_call.event_date,
+            "realized_payout": 1.08, "input_kind": "VALIDATED_EVENT_FIXINGS",
+        }),
+        official_input_hash=official_input_hash(
+            applied, [applied_strike, applied_call]),
+        official_replayed_at=datetime.utcnow(),
+        comparison_status="MATCH",
         validated_by=user.id,
         validation_reason="UAT : fixings officiels contrôlés.",
         validated_at=datetime.utcnow(),
@@ -511,7 +521,11 @@ def _verify_uat_dataset(session: Session) -> list[str]:
         LifecycleProposal.deal_id == applied.id)).one()
     if applied.status != "callé" or applied_proposal.status != "APPLIED":
         raise RuntimeError("Le scénario lifecycle appliqué est incohérent.")
-    checks.append("résolution appliquée")
+    if (not applied_proposal.official_result_json or
+            not applied_proposal.official_input_hash or
+            applied_proposal.comparison_status != "MATCH"):
+        raise RuntimeError("Le rejeu officiel du scénario appliqué est absent.")
+    checks.append("résolution appliquée depuis un rejeu officiel hashé")
 
     if len(session.exec(select(AuditEvent)).all()) < 25:
         raise RuntimeError("La piste d'audit UAT est insuffisante.")

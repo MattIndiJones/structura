@@ -7,13 +7,13 @@ from datetime import datetime, date, timedelta
 from typing import Annotated, Literal, Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import update
+from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import (Alert, Deal, DealEvent, Entity, User, Counterparty, Portfolio,
-                          LifecycleProposal, RfqQuote, RfqRequest, Script,
-                          TradeAmendmentRequest)
+from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent,
+                          Entity, User, Counterparty, Portfolio, LifecycleProposal,
+                          RfqQuote, RfqRequest, Script, TradeAmendmentRequest)
 from .auth import get_current_user
 from ..services.market_data import load_hist_prices
 from ..core.payscript.parser import parse_script, resolve_constats, CompiledScript, effective_T_max
@@ -21,10 +21,15 @@ from ..core.payscript.engine import eval_script_on_history
 from ..core.calibration import realized_market
 from ..core.references import next_reference
 from ..core.audit import commit_rejection, record_audit_event
+from ..core.lifecycle_controls import (
+    official_input_hash, replay_official_fixings, semantic_maturity_outcome,
+)
 from ..core.rfq_controls import (
     booking_gate_failures, failures_payload, product_terms, product_terms_hash,
 )
-from ..core.workflow import DataCategory, FixingStatus, LifecycleStatus
+from ..core.workflow import (
+    AmendmentStatus, DataCategory, FixingStatus, LifecycleStatus,
+)
 from ..core.schemas import ReinvestScanRequest, ReinvestProposalRequest
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
@@ -107,6 +112,10 @@ class AmendmentRequestCreate(BaseModel):
         "payment_date", "script_snapshot", "market_snapshot",
     ]
     new_value: object
+    reason: str = Field(min_length=10, max_length=2000)
+
+
+class AmendmentDecisionRequest(BaseModel):
     reason: str = Field(min_length=10, max_length=2000)
 
 
@@ -377,6 +386,7 @@ def _deal_row(d: Deal, events: list | None = None) -> dict:
         "greeks": json.loads(d.greeks_json) if d.greeks_json else {},
         "greeks_computed_at": d.greeks_computed_at.isoformat() if d.greeks_computed_at else None,
         "status": d.status,
+        "contract_version": d.contract_version,
         "script_id": d.script_id,
         "script_snapshot": d.script_snapshot,
         "created_at": d.created_at.isoformat(),
@@ -423,6 +433,14 @@ def _proposal_row(proposal: LifecycleProposal) -> dict:
         "proposed_outcome": proposal.proposed_outcome,
         "result": json.loads(proposal.result_json or "{}"),
         "data_source": proposal.data_source,
+        "official_result": (
+            json.loads(proposal.official_result_json)
+            if proposal.official_result_json else None),
+        "official_input_hash": proposal.official_input_hash,
+        "official_replayed_at": (
+            proposal.official_replayed_at.isoformat()
+            if proposal.official_replayed_at else None),
+        "comparison_status": proposal.comparison_status,
         "validated_by": proposal.validated_by,
         "validation_reason": proposal.validation_reason,
         "validated_at": proposal.validated_at.isoformat() if proposal.validated_at else None,
@@ -452,10 +470,165 @@ def _amendment_row(request: TradeAmendmentRequest) -> dict:
         "reason": request.reason,
         "requested_by": request.requested_by,
         "status": request.status,
+        "base_contract_version": request.base_contract_version,
         "validated_by": request.validated_by,
         "validated_at": request.validated_at.isoformat() if request.validated_at else None,
+        "decision_reason": request.decision_reason,
+        "rejected_by": request.rejected_by,
+        "rejected_at": request.rejected_at.isoformat() if request.rejected_at else None,
+        "applied_by": request.applied_by,
+        "applied_at": request.applied_at.isoformat() if request.applied_at else None,
+        "applied_contract_version": request.applied_contract_version,
         "created_at": request.created_at.isoformat(),
     }
+
+
+def _audit_row(event: AuditEvent) -> dict:
+    return {
+        "id": event.id,
+        "action": event.action,
+        "object_type": event.object_type,
+        "object_id": event.object_id,
+        "actor_user_id": event.actor_user_id,
+        "actor_type": event.actor_type,
+        "result": event.result,
+        "before": json.loads(event.before_json or "{}"),
+        "after": json.loads(event.after_json or "{}"),
+        "reason": event.reason,
+        "data_source": event.data_source,
+        "correlation_id": event.correlation_id,
+        "metadata": json.loads(event.metadata_json or "{}"),
+        "created_at": event.created_at.isoformat(),
+    }
+
+
+def _contract_snapshot(deal: Deal) -> dict:
+    """Contractual fields only; valuation state is deliberately excluded."""
+    return {
+        "deal_id": deal.id,
+        "reference": deal.reference,
+        "contract_version": deal.contract_version,
+        "sens": deal.sens,
+        "contrepartie": deal.contrepartie,
+        "devise": deal.devise,
+        "nominal": deal.nominal,
+        "fair_value": deal.fair_value,
+        "price_traded": deal.price_traded,
+        "product_type": deal.product_type,
+        "trade_date": deal.trade_date,
+        "strike_date": deal.strike_date,
+        "value_date": deal.value_date,
+        "maturity_date": deal.maturity_date,
+        "payment_date": deal.payment_date,
+        "T": deal.T,
+        "underlyings": json.loads(deal.underlyings_json or "[]"),
+        "script_snapshot": deal.script_snapshot,
+        "market_snapshot": json.loads(deal.market_snapshot_json or "{}"),
+        "status": deal.status,
+    }
+
+
+_IN_PLACE_AMENDMENT_FIELDS = {
+    "nominal", "contrepartie", "price_traded", "payment_date",
+}
+
+
+def _validated_amendment_value(deal: Deal, request: TradeAmendmentRequest):
+    field = request.field_name
+    value = json.loads(request.new_value_json)
+    if field not in _IN_PLACE_AMENDMENT_FIELDS:
+        raise HTTPException(422, {
+            "code": "AMENDMENT_REBOOK_REQUIRED",
+            "message": (
+                "Ce changement affecte le contrat, le pricing ou le calendrier. "
+                "Il doit être traité par annulation/remplacement contrôlé, pas "
+                "par modification en place."
+            ),
+            "field": field,
+        })
+    if field in {"nominal", "price_traded"}:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise HTTPException(422, {
+                "code": "AMENDMENT_VALUE_INVALID", "field": field,
+                "message": "La nouvelle valeur doit être strictement positive.",
+            })
+        return float(value)
+    if field == "contrepartie":
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(422, {
+                "code": "AMENDMENT_VALUE_INVALID", "field": field,
+                "message": "La contrepartie ne peut pas être vide.",
+            })
+        return value.strip()
+    if field == "payment_date":
+        try:
+            parsed = date.fromisoformat(value)
+        except (TypeError, ValueError):
+            raise HTTPException(422, {
+                "code": "AMENDMENT_VALUE_INVALID", "field": field,
+                "message": "La date de paiement doit être au format ISO YYYY-MM-DD.",
+            })
+        if parsed < date.fromisoformat(deal.maturity_date):
+            raise HTTPException(422, {
+                "code": "AMENDMENT_VALUE_INVALID", "field": field,
+                "message": "La date de paiement ne peut pas précéder la maturité.",
+            })
+        return value
+    raise HTTPException(422, {"code": "AMENDMENT_VALUE_INVALID", "field": field})
+
+
+def _deal_entity_id(deal: Deal, session: Session) -> int | None:
+    if deal.entity_id is not None:
+        return deal.entity_id
+    owner = session.get(User, deal.user_id)
+    return owner.entity_id if owner else None
+
+
+def _can_access_deal(deal: Deal, current: User, session: Session) -> bool:
+    if deal.user_id == current.id or getattr(current, "role", None) == "admin":
+        return True
+    return (
+        getattr(current, "role", None) == "checker" and
+        current.entity_id is not None and
+        current.entity_id == _deal_entity_id(deal, session)
+    )
+
+
+def _checker_request(
+    deal_id: int,
+    request_id: int,
+    current: User,
+    session: Session,
+) -> tuple[Deal, TradeAmendmentRequest]:
+    if getattr(current, "role", None) not in {"checker", "admin"}:
+        raise HTTPException(403, {
+            "code": "CHECKER_ROLE_REQUIRED",
+            "message": "Cette action est réservée à un checker ou administrateur.",
+        })
+    deal = session.get(Deal, deal_id)
+    request = session.get(TradeAmendmentRequest, request_id)
+    if not deal or not request or request.deal_id != deal_id:
+        raise HTTPException(404, "Demande d'amendement introuvable")
+    if current.role != "admin" and (
+        current.entity_id is None or current.entity_id != _deal_entity_id(deal, session)
+    ):
+        raise HTTPException(404, "Demande d'amendement introuvable")
+    if request.requested_by == current.id:
+        commit_rejection(
+            session,
+            action="AMENDMENT_FOUR_EYES_REJECTED",
+            object_type="TRADE_AMENDMENT_REQUEST",
+            object_id=request.id,
+            actor_user_id=current.id,
+            before=_amendment_row(request),
+            reason="Le maker ne peut ni approuver ni appliquer sa propre demande.",
+            metadata={"deal_id": deal.id},
+        )
+        raise HTTPException(409, {
+            "code": "FOUR_EYES_VIOLATION",
+            "message": "Le checker doit être distinct du maker.",
+        })
+    return deal, request
 
 
 def _booking_request_summary(body: DealCreate) -> dict:
@@ -727,10 +900,13 @@ def list_deals(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    deals = session.exec(
-        select(Deal).where(Deal.user_id == current.id)
-        .order_by(Deal.created_at.desc())
-    ).all()
+    statement = select(Deal).order_by(Deal.created_at.desc())
+    current_role = getattr(current, "role", "user")
+    if current_role not in {"checker", "admin"}:
+        statement = statement.where(Deal.user_id == current.id)
+    deals = session.exec(statement).all()
+    if current_role == "checker":
+        deals = [deal for deal in deals if _can_access_deal(deal, current, session)]
     return [_deal_row(d) for d in deals]
 
 
@@ -1031,6 +1207,34 @@ def _script_flags(deal: Deal) -> dict:
     }
 
 
+@router.get("/amendment-requests/pending")
+def pending_amendment_requests(
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Checker work queue, restricted to the same legal entity."""
+    if current.role not in {"checker", "admin"}:
+        raise HTTPException(403, "Réservé aux checkers")
+    requests = session.exec(
+        select(TradeAmendmentRequest).where(
+            TradeAmendmentRequest.status.in_([
+                AmendmentStatus.PENDING.value, AmendmentStatus.APPROVED.value])
+        ).order_by(TradeAmendmentRequest.created_at)
+    ).all()
+    rows = []
+    for request in requests:
+        deal = session.get(Deal, request.deal_id)
+        if not deal:
+            continue
+        if current.role != "admin" and _deal_entity_id(deal, session) != current.entity_id:
+            continue
+        row = _amendment_row(request)
+        row.update({"deal_reference": deal.reference,
+                    "contract_version": deal.contract_version})
+        rows.append(row)
+    return rows
+
+
 @router.get("/{deal_id}")
 def get_deal(
     deal_id: int,
@@ -1038,7 +1242,7 @@ def get_deal(
     session: Annotated[Session, Depends(get_session)],
 ):
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     row = _deal_row(deal, _get_events(deal_id, session))
     row["terms"] = _deal_terms(deal)
@@ -1053,6 +1257,59 @@ def get_deal(
         ).all()
     ]
     return row
+
+
+@router.get("/{deal_id}/audit")
+def get_deal_audit(
+    deal_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    action: Optional[str] = None,
+    result: Optional[str] = None,
+    limit: int = 250,
+):
+    """Searchable business timeline for one owned deal and its child objects."""
+    deal = session.get(Deal, deal_id)
+    if not deal or not _can_access_deal(deal, current, session):
+        raise HTTPException(404, "Deal introuvable")
+    events = _get_events(deal_id, session)
+    proposals = _get_lifecycle_proposals(deal_id, session)
+    amendments = session.exec(select(TradeAmendmentRequest).where(
+        TradeAmendmentRequest.deal_id == deal_id)).all()
+    clauses = [
+        (AuditEvent.object_type == "DEAL") & (AuditEvent.object_id == deal_id),
+    ]
+    if deal.rfq_id:
+        clauses.append(
+            (AuditEvent.object_type == "RFQ") & (AuditEvent.object_id == deal.rfq_id))
+    if events:
+        clauses.append(
+            (AuditEvent.object_type == "DEAL_EVENT") &
+            (AuditEvent.object_id.in_([row.id for row in events])))
+    if proposals:
+        clauses.append(
+            (AuditEvent.object_type == "LIFECYCLE_PROPOSAL") &
+            (AuditEvent.object_id.in_([row.id for row in proposals])))
+    if amendments:
+        clauses.append(
+            (AuditEvent.object_type == "TRADE_AMENDMENT_REQUEST") &
+            (AuditEvent.object_id.in_([row.id for row in amendments])))
+    statement = select(AuditEvent).where(or_(*clauses))
+    if action:
+        statement = statement.where(AuditEvent.action == action)
+    if result:
+        statement = statement.where(AuditEvent.result == result)
+    safe_limit = max(1, min(limit, 1000))
+    rows = session.exec(
+        statement.order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        .limit(safe_limit)
+    ).all()
+    return {
+        "deal_id": deal.id,
+        "reference": deal.reference,
+        "count": len(rows),
+        "items": [_audit_row(row) for row in rows],
+    }
 
 
 @router.patch("/{deal_id}")
@@ -1108,10 +1365,7 @@ def request_amendment(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    """Record a request without changing the booked trade.
-
-    Approval/application intentionally belongs to a later maker-checker phase.
-    """
+    """Record a maker request without changing the booked trade."""
     deal = session.get(Deal, deal_id)
     if not deal or deal.user_id != current.id:
         raise HTTPException(404, "Deal introuvable")
@@ -1134,6 +1388,30 @@ def request_amendment(
             "code": "AMENDMENT_NO_CHANGE",
             "message": "La demande d'amendement ne contient aucun changement.",
         })
+    duplicate = session.exec(
+        select(TradeAmendmentRequest).where(
+            TradeAmendmentRequest.deal_id == deal.id,
+            TradeAmendmentRequest.field_name == body.field_name,
+            TradeAmendmentRequest.status.in_([
+                AmendmentStatus.PENDING.value, AmendmentStatus.APPROVED.value]),
+        )
+    ).first()
+    if duplicate:
+        commit_rejection(
+            session,
+            action="AMENDMENT_REQUEST_REJECTED",
+            object_type="DEAL",
+            object_id=deal.id,
+            actor_user_id=current.id,
+            before={body.field_name: old_value},
+            after={body.field_name: body.new_value},
+            reason="Une demande active existe déjà pour ce champ.",
+            metadata={"existing_request_id": duplicate.id},
+        )
+        raise HTTPException(409, {
+            "code": "AMENDMENT_ALREADY_PENDING",
+            "request_id": duplicate.id,
+        })
     request = TradeAmendmentRequest(
         deal_id=deal.id,
         field_name=body.field_name,
@@ -1141,7 +1419,8 @@ def request_amendment(
         new_value_json=json.dumps(body.new_value, ensure_ascii=False, sort_keys=True),
         reason=body.reason,
         requested_by=current.id,
-        status="PENDING",
+        status=AmendmentStatus.PENDING,
+        base_contract_version=deal.contract_version,
     )
     session.add(request)
     session.flush()
@@ -1155,11 +1434,265 @@ def request_amendment(
         before={body.field_name: old_value},
         after={body.field_name: body.new_value},
         reason=body.reason,
-        metadata={"deal_id": deal.id, "status": "PENDING"},
+        metadata={"deal_id": deal.id, "status": "PENDING",
+                  "base_contract_version": deal.contract_version},
     )
     session.commit()
     session.refresh(request)
     return _amendment_row(request)
+
+
+def _amendment_action_rejection(
+    session: Session,
+    request: TradeAmendmentRequest,
+    current: User,
+    action: str,
+    detail: dict,
+) -> None:
+    commit_rejection(
+        session,
+        action=action,
+        object_type="TRADE_AMENDMENT_REQUEST",
+        object_id=request.id,
+        actor_user_id=current.id,
+        before=_amendment_row(request),
+        reason=str(detail.get("message") or detail.get("code")),
+        metadata={"failure": detail, "deal_id": request.deal_id},
+    )
+    raise HTTPException(409, detail)
+
+
+@router.post("/{deal_id}/amendment-requests/{request_id}/approve")
+def approve_amendment(
+    deal_id: int,
+    request_id: int,
+    body: AmendmentDecisionRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    deal, request = _checker_request(deal_id, request_id, current, session)
+    if request.status != AmendmentStatus.PENDING:
+        _amendment_action_rejection(session, request, current,
+            "AMENDMENT_APPROVAL_REJECTED", {
+                "code": "AMENDMENT_STATUS_INVALID", "status": request.status,
+                "message": "Seule une demande PENDING peut être approuvée.",
+            })
+    if deal.contract_version != request.base_contract_version:
+        _amendment_action_rejection(session, request, current,
+            "AMENDMENT_APPROVAL_REJECTED", {
+                "code": "AMENDMENT_VERSION_STALE",
+                "message": "Le contrat a changé depuis la demande.",
+                "base_version": request.base_contract_version,
+                "current_version": deal.contract_version,
+            })
+    old_value = json.loads(request.old_value_json)
+    if getattr(deal, request.field_name, None) != old_value:
+        _amendment_action_rejection(session, request, current,
+            "AMENDMENT_APPROVAL_REJECTED", {
+                "code": "AMENDMENT_BASE_VALUE_CHANGED",
+                "message": "La valeur contractuelle de départ a changé.",
+            })
+    try:
+        normalized = _validated_amendment_value(deal, request)
+    except HTTPException as exc:
+        commit_rejection(
+            session,
+            action="AMENDMENT_APPROVAL_REJECTED",
+            object_type="TRADE_AMENDMENT_REQUEST",
+            object_id=request.id,
+            actor_user_id=current.id,
+            before=_amendment_row(request),
+            reason=exc.detail.get("message", "Amendement non applicable en place"),
+            metadata={"failure": exc.detail, "deal_id": deal.id},
+        )
+        raise
+    before = _amendment_row(request)
+    request.new_value_json = json.dumps(normalized, ensure_ascii=False, sort_keys=True)
+    request.status = AmendmentStatus.APPROVED
+    request.validated_by = current.id
+    request.validated_at = datetime.utcnow()
+    request.decision_reason = body.reason
+    session.add(request)
+    record_audit_event(
+        session,
+        action="AMENDMENT_APPROVED",
+        object_type="TRADE_AMENDMENT_REQUEST",
+        object_id=request.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        before=before,
+        after=_amendment_row(request),
+        reason=body.reason,
+        metadata={"deal_id": deal.id, "base_contract_version": deal.contract_version},
+    )
+    session.commit()
+    session.refresh(request)
+    return _amendment_row(request)
+
+
+@router.post("/{deal_id}/amendment-requests/{request_id}/reject")
+def reject_amendment(
+    deal_id: int,
+    request_id: int,
+    body: AmendmentDecisionRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    deal, request = _checker_request(deal_id, request_id, current, session)
+    if request.status != AmendmentStatus.PENDING:
+        _amendment_action_rejection(session, request, current,
+            "AMENDMENT_REJECTION_REJECTED", {
+                "code": "AMENDMENT_STATUS_INVALID", "status": request.status,
+                "message": "Seule une demande PENDING peut être rejetée.",
+            })
+    before = _amendment_row(request)
+    request.status = AmendmentStatus.REJECTED
+    request.rejected_by = current.id
+    request.rejected_at = datetime.utcnow()
+    request.decision_reason = body.reason
+    session.add(request)
+    record_audit_event(
+        session,
+        action="AMENDMENT_REJECTED",
+        object_type="TRADE_AMENDMENT_REQUEST",
+        object_id=request.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        before=before,
+        after=_amendment_row(request),
+        reason=body.reason,
+        metadata={"deal_id": deal.id},
+    )
+    session.commit()
+    session.refresh(request)
+    return _amendment_row(request)
+
+
+@router.post("/{deal_id}/amendment-requests/{request_id}/apply")
+def apply_amendment(
+    deal_id: int,
+    request_id: int,
+    body: AmendmentDecisionRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    deal, request = _checker_request(deal_id, request_id, current, session)
+    if request.status != AmendmentStatus.APPROVED:
+        _amendment_action_rejection(session, request, current,
+            "AMENDMENT_APPLICATION_REJECTED", {
+                "code": "AMENDMENT_STATUS_INVALID", "status": request.status,
+                "message": "Seule une demande APPROVED peut être appliquée.",
+            })
+    if deal.contract_version != request.base_contract_version:
+        _amendment_action_rejection(session, request, current,
+            "AMENDMENT_APPLICATION_REJECTED", {
+                "code": "AMENDMENT_VERSION_STALE",
+                "message": "Le contrat a changé depuis l'approbation.",
+                "base_version": request.base_contract_version,
+                "current_version": deal.contract_version,
+            })
+    old_value = json.loads(request.old_value_json)
+    if getattr(deal, request.field_name, None) != old_value:
+        _amendment_action_rejection(session, request, current,
+            "AMENDMENT_APPLICATION_REJECTED", {
+                "code": "AMENDMENT_BASE_VALUE_CHANGED",
+                "message": "La valeur contractuelle de départ a changé.",
+            })
+    normalized = _validated_amendment_value(deal, request)
+    before_contract = _contract_snapshot(deal)
+    current_version = deal.contract_version
+    if not session.exec(select(DealContractVersion).where(
+        DealContractVersion.dedup_key == f"{deal.id}:{current_version}")) .first():
+        session.add(DealContractVersion(
+            deal_id=deal.id,
+            version=current_version,
+            dedup_key=f"{deal.id}:{current_version}",
+            snapshot_json=json.dumps(before_contract, ensure_ascii=False, sort_keys=True),
+            amendment_request_id=request.id,
+            created_by=current.id,
+        ))
+        session.flush()
+    applied_at = datetime.utcnow()
+    deal_cas = session.exec(
+        update(Deal).where(
+            Deal.id == deal.id,
+            Deal.contract_version == current_version,
+        ).values(**{
+            request.field_name: normalized,
+            "contract_version": current_version + 1,
+            "updated_at": applied_at,
+        }).execution_options(synchronize_session=False)
+    )
+    if deal_cas.rowcount != 1:
+        session.rollback()
+        request = session.get(TradeAmendmentRequest, request_id)
+        _amendment_action_rejection(session, request, current,
+            "AMENDMENT_APPLICATION_REJECTED", {
+                "code": "AMENDMENT_CONCURRENT_APPLICATION",
+                "message": "Le contrat a été modifié par une autre transaction.",
+            })
+    request_cas = session.exec(
+        update(TradeAmendmentRequest).where(
+            TradeAmendmentRequest.id == request.id,
+            TradeAmendmentRequest.status == AmendmentStatus.APPROVED.value,
+        ).values(
+            status=AmendmentStatus.APPLIED.value,
+            applied_by=current.id,
+            applied_at=applied_at,
+            applied_contract_version=current_version + 1,
+        ).execution_options(synchronize_session=False)
+    )
+    if request_cas.rowcount != 1:
+        session.rollback()
+        request = session.get(TradeAmendmentRequest, request_id)
+        _amendment_action_rejection(session, request, current,
+            "AMENDMENT_APPLICATION_REJECTED", {
+                "code": "AMENDMENT_CONCURRENT_APPLICATION",
+                "message": "La demande a été traitée par une autre transaction.",
+            })
+    session.expire_all()
+    deal = session.get(Deal, deal_id)
+    request = session.get(TradeAmendmentRequest, request_id)
+    after_contract = _contract_snapshot(deal)
+    session.add(DealContractVersion(
+        deal_id=deal.id,
+        version=deal.contract_version,
+        dedup_key=f"{deal.id}:{deal.contract_version}",
+        snapshot_json=json.dumps(after_contract, ensure_ascii=False, sort_keys=True),
+        amendment_request_id=request.id,
+        created_by=current.id,
+    ))
+    _ensure_alert(
+        session,
+        deal,
+        "amendment_applied",
+        (
+            f"Amendement {request.field_name!r} appliqué sur {deal.reference} "
+            f"(v{current_version} → v{deal.contract_version}) : contrôler les "
+            "documents, la valorisation, la comptabilité et le reporting."
+        ),
+        f"amendment-applied:{request.id}",
+    )
+    record_audit_event(
+        session,
+        action="AMENDMENT_APPLIED",
+        object_type="TRADE_AMENDMENT_REQUEST",
+        object_id=request.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        before=before_contract,
+        after=after_contract,
+        reason=body.reason,
+        metadata={"deal_id": deal.id, "field": request.field_name,
+                  "from_version": current_version,
+                  "to_version": deal.contract_version,
+                  "required_follow_up": [
+                      "DOCUMENTS", "VALUATION", "ACCOUNTING", "REPORTING"]},
+    )
+    session.commit()
+    session.refresh(deal)
+    session.refresh(request)
+    return {"deal": _deal_row(deal), "amendment": _amendment_row(request)}
 
 
 @router.patch("/{deal_id}/events/{event_id}")
@@ -1435,14 +1968,15 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
     if today_str >= deal.maturity_date:
         maturity_payout = sum(cf["cf"] for cf in res["cash_flows"] if abs(cf["t"] - deal.T) < 1e-6)
         maturity_event = max(events, key=lambda e: e.t_years)
-        # Heuristic, not a semantic read of the script: a payout materially
-        # below par (nominal = 1.0) is treated as a knock-in. Flags an
-        # unusual script as "ki" incorrectly in principle — the actual
-        # amount is always kept alongside the label so a human can check.
-        outcome = "ki" if maturity_payout < 0.995 else "final"
+        # The label comes from explicit script state (KI/BREACHED variables),
+        # never from the amount paid. A capital-protected or option payoff can
+        # be below par without being a knock-in.
+        outcome, outcome_basis = semantic_maturity_outcome(compiled, res)
         return {"outcome": outcome, "event_id": maturity_event.id,
                 "event_date": maturity_event.event_date,
-                "maturity_payout": round(maturity_payout, 4), "realized_payout": realized_payout}
+                "outcome_basis": outcome_basis,
+                "maturity_payout": round(maturity_payout, 4),
+                "realized_payout": realized_payout}
 
     return {"outcome": "en_cours"}
 
@@ -1798,6 +2332,33 @@ def validate_lifecycle_proposal(
                          "status": conflict.status})
     required_events, fixing_failures = _proposal_fixing_failures(deal, proposal, session)
     failures.extend(fixing_failures)
+    official_result = None
+    current_official_hash = None
+    comparison_status = None
+    if not fixing_failures:
+        official_result, replay_failures = replay_official_fixings(deal, required_events)
+        failures.extend(replay_failures)
+        if official_result:
+            current_official_hash = official_input_hash(deal, required_events)
+            if official_result.get("outcome") != proposal.proposed_outcome:
+                failures.append({
+                    "code": "OFFICIAL_INDICATIVE_OUTCOME_MISMATCH",
+                    "indicative_outcome": proposal.proposed_outcome,
+                    "official_outcome": official_result.get("outcome"),
+                    "message": (
+                        "Le résultat officiel diverge de la proposition indicative. "
+                        "Une nouvelle proposition réconciliée est requise."
+                    ),
+                })
+            else:
+                indicative_result = json.loads(proposal.result_json or "{}")
+                indicative_payout = indicative_result.get("realized_payout")
+                official_payout = official_result.get("realized_payout")
+                if (indicative_payout is not None and official_payout is not None and
+                        abs(float(indicative_payout) - float(official_payout)) > 1e-8):
+                    comparison_status = "OUTCOME_MATCH_PAYOUT_DIFFERENCE"
+                else:
+                    comparison_status = "MATCH"
     if failures:
         _reject_lifecycle(
             session, proposal, current, "RESOLUTION_VALIDATION_REJECTED",
@@ -1808,6 +2369,11 @@ def validate_lifecycle_proposal(
     proposal.validated_by = current.id
     proposal.validated_at = datetime.utcnow()
     proposal.validation_reason = body.reason
+    proposal.official_result_json = json.dumps(
+        official_result, ensure_ascii=False, sort_keys=True)
+    proposal.official_input_hash = current_official_hash
+    proposal.official_replayed_at = datetime.utcnow()
+    proposal.comparison_status = comparison_status
     proposal.updated_at = datetime.utcnow()
     session.add(proposal)
     record_audit_event(
@@ -1822,6 +2388,8 @@ def validate_lifecycle_proposal(
         reason=body.reason,
         data_source=DataCategory.FIXING_OFFICIAL,
         metadata={
+            "comparison_status": comparison_status,
+            "official_result": official_result,
             "official_fixings": [
                 {"event_id": event.id, "event_date": event.event_date,
                  "spots": json.loads(event.spots_json or "{}")}
@@ -1850,6 +2418,16 @@ def apply_lifecycle_proposal(
         failures.append({"code": "PROPOSAL_STATUS_INVALID", "status": proposal.status})
     required_events, fixing_failures = _proposal_fixing_failures(deal, proposal, session)
     failures.extend(fixing_failures)
+    if not proposal.official_result_json or not proposal.official_input_hash:
+        failures.append({"code": "OFFICIAL_REPLAY_MISSING"})
+    elif not fixing_failures:
+        current_official_hash = official_input_hash(deal, required_events)
+        if current_official_hash != proposal.official_input_hash:
+            failures.append({
+                "code": "OFFICIAL_REPLAY_STALE",
+                "validated_hash": proposal.official_input_hash,
+                "current_hash": current_official_hash,
+            })
     if failures:
         _reject_lifecycle(
             session, proposal, current, "RESOLUTION_APPLICATION_REJECTED",
@@ -1882,8 +2460,8 @@ def apply_lifecycle_proposal(
               "status": proposal.status if proposal else "MISSING"}],
         )
 
-    result = json.loads(proposal.result_json or "{}")
-    outcome = proposal.proposed_outcome
+    result = json.loads(proposal.official_result_json or "{}")
+    outcome = result.get("outcome")
     trigger = next(event for event in required_events if event.id == proposal.event_id)
     all_events = _get_events(deal.id, session)
     trigger.status = outcome

@@ -6,7 +6,7 @@ from .models import (
     Entity, User, Folder, Script, Deal, DealEvent, Document, AmcStudy,
     Indicative, KidRecord, EmtRecord, RfqRequest, RfqQuote, RfqProvider,
     Counterparty, Alert, Portfolio, ShockRun, ComputeBatch, ComputeJob,
-    AuditEvent, LifecycleProposal, TradeAmendmentRequest,
+    AuditEvent, LifecycleProposal, TradeAmendmentRequest, DealContractVersion,
 )
 
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
@@ -81,6 +81,11 @@ def _migrate():
         if rfq_cols and "ao_date" not in rfq_cols:
             conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN ao_date TEXT DEFAULT ''"))
             conn.commit()
+
+        if "contract_version" not in cols:
+            conn.execute(text(
+                "ALTER TABLE deals ADD COLUMN contract_version INTEGER DEFAULT 1"))
+            conn.commit()
         if rfq_cols and "model_input_hash" not in rfq_cols:
             # Legacy model prices remain deliberately unproven (NULL hash).
             conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN model_input_hash TEXT"))
@@ -145,6 +150,35 @@ def _migrate():
         if event_cols and "applied_at" not in event_cols:
             conn.execute(text("ALTER TABLE deal_events ADD COLUMN applied_at DATETIME"))
             conn.commit()
+
+        proposal_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(lifecycle_proposals)"))}
+        for name, ddl in (
+            ("official_result_json", "TEXT"),
+            ("official_input_hash", "TEXT"),
+            ("official_replayed_at", "DATETIME"),
+            ("comparison_status", "TEXT"),
+        ):
+            if proposal_cols and name not in proposal_cols:
+                conn.execute(text(
+                    f"ALTER TABLE lifecycle_proposals ADD COLUMN {name} {ddl}"))
+                conn.commit()
+
+        amendment_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(trade_amendment_requests)"))}
+        for name, ddl in (
+            ("base_contract_version", "INTEGER DEFAULT 1"),
+            ("decision_reason", "TEXT"),
+            ("rejected_by", "INTEGER"),
+            ("rejected_at", "DATETIME"),
+            ("applied_by", "INTEGER"),
+            ("applied_at", "DATETIME"),
+            ("applied_contract_version", "INTEGER"),
+        ):
+            if amendment_cols and name not in amendment_cols:
+                conn.execute(text(
+                    f"ALTER TABLE trade_amendment_requests ADD COLUMN {name} {ddl}"))
+                conn.commit()
 
         rfq_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_requests)"))}
         if rfq_cols and "kind" not in rfq_cols:

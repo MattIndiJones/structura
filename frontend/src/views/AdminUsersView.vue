@@ -37,6 +37,7 @@
                 <select class="select py-1 px-2" :value="u.role"
                         @change="updateUser(u, { role: $event.target.value })">
                   <option value="user">Utilisateur</option>
+                  <option value="checker">Checker opérations</option>
                   <option value="admin">Admin</option>
                 </select>
               </td>
@@ -74,6 +75,7 @@
             <label class="label">Rôle</label>
             <select v-model="form.role" class="select">
               <option value="user">Utilisateur</option>
+              <option value="checker">Checker opérations</option>
               <option value="admin">Admin</option>
             </select>
           </div>
