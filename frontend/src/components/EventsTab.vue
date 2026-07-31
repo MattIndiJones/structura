@@ -73,14 +73,10 @@
 
         <!-- Statut + Re-pricer -->
         <div class="mt-3 flex items-center gap-2 flex-wrap">
-          <select :value="deal.status" @change="updateStatus($event.target.value)"
-            class="select text-xs py-1 w-auto">
-            <option value="actif">Actif</option>
-            <option value="callé">Callé</option>
-            <option value="échu">Échu</option>
-            <option value="résilié">Résilié</option>
-          </select>
-          <HelpTip text="Statut du deal, indépendant du statut de chaque constatation individuelle. Actif = en vie. Callé/Échu = terminé normalement (rappel anticipé ou maturité atteinte). Résilié = terminaison anticipée hors mécanisme du produit (défaut, novation…)." />
+          <span class="px-2 py-1 rounded border border-slate-700 bg-slate-800 text-xs text-slate-300">
+            {{ deal.status }}
+          </span>
+          <HelpTip text="Le statut contractuel est en lecture seule. Un résultat terminal passe obligatoirement par proposition, validation humaine puis application auditée." />
           <button class="btn-secondary text-xs px-3 py-1.5" @click="reprice" :disabled="repricing">
             <span v-if="repricing"
               class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -109,8 +105,27 @@
             :disabled="dealsStore.loading" @click="doRefresh">
             <span v-if="dealsStore.loading"
               class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
-            📡 Actualiser spots Yahoo
+            📡 Actualiser monitoring indicatif
           </button>
+        </div>
+
+        <div v-if="deal.lifecycle_proposals?.length" class="mb-3 flex flex-col gap-2">
+          <div v-for="proposal in deal.lifecycle_proposals" :key="proposal.id"
+               class="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 flex items-center justify-between gap-3">
+            <div class="text-xs">
+              <span class="font-semibold text-amber-300">Résolution proposée : {{ proposal.proposed_outcome }}</span>
+              <span class="ml-2 text-slate-500">{{ proposal.status }} · source {{ proposal.data_source }}</span>
+              <div class="text-[10px] text-slate-500 mt-0.5">
+                {{ proposal.result?.event_date || 'date inconnue' }} · aucune application automatique
+              </div>
+            </div>
+            <div class="flex gap-2 shrink-0">
+              <button v-if="proposal.status === 'PROPOSED'" class="btn-secondary text-xs px-2 py-1"
+                      @click="validateProposal(proposal)">Valider</button>
+              <button v-if="proposal.status === 'VALIDATED'" class="btn-primary text-xs px-2 py-1"
+                      @click="applyProposal(proposal)">Appliquer</button>
+            </div>
+          </div>
         </div>
 
         <!-- Bandeau résultat refresh -->
@@ -140,10 +155,10 @@
                 <th v-for="u in deal.underlyings" :key="u.name"
                   class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">
                   {{ u.ticker || u.name }}
-                  <span class="text-slate-600 font-normal ml-1">spot / perf.</span>
+                  <span class="text-slate-600 font-normal ml-1">officiel / indicatif</span>
                 </th>
-                <th class="text-left text-slate-500 font-medium pb-2 pr-3">Source
-                  <HelpTip text="auto = spot récupéré automatiquement depuis Yahoo Finance (bouton Actualiser). manuel = saisi à la main dans le tableau — prioritaire, jamais écrasé par un Actualiser ultérieur." />
+                <th class="text-left text-slate-500 font-medium pb-2 pr-3">Fixing
+                  <HelpTip text="Yahoo est uniquement indicatif. Un fixing officiel doit être saisi manuellement, complet, puis validé avant toute résolution." />
                 </th>
                 <th class="text-left text-slate-500 font-medium pb-2">Statut
                   <HelpTip text="futur = date pas encore atteinte. observé = spot constaté normalement. callé = ce constat a déclenché le rappel anticipé du produit. ki = barrière de knock-in franchie à ce constat. final = constat de maturité." />
@@ -180,6 +195,7 @@
                     <input :value="ev.spots[u.name] ?? ''"
                       @blur="patchSpot(ev, u.name, $event.target.value)"
                       type="number" step="any"
+                      :disabled="['VALIDATED', 'APPLIED'].includes(ev.fixing_status)"
                       class="input w-24 text-xs py-0.5 font-mono"
                       :class="ev.spots[u.name] ? 'text-slate-200' : 'text-slate-600'"
                       placeholder="–" />
@@ -188,23 +204,23 @@
                       {{ perf(ev, u) }}
                     </span>
                   </div>
+                  <div v-if="ev.indicative_spots?.[u.name]" class="text-[10px] text-blue-400 mt-0.5 font-mono">
+                    indic. {{ formatSpot(ev.indicative_spots[u.name]) }}
+                  </div>
                 </td>
                 <td class="py-2 pr-3">
                   <span :class="sourceClass(ev.source)"
                     class="px-1.5 py-0.5 rounded text-[10px] font-medium">
-                    {{ ev.source }}
+                    {{ ev.fixing_status }}
                   </span>
+                  <button v-if="['RECEIVED', 'PARTIAL', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)"
+                          class="block mt-1 text-[10px] text-emerald-400 hover:text-emerald-300"
+                          @click="validateEventFixing(ev)">Valider le fixing</button>
                 </td>
                 <td class="py-2">
-                  <select :value="ev.status"
-                    @change="patchStatus(ev, $event.target.value)"
-                    class="text-[10px] bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-300">
-                    <option value="futur">futur</option>
-                    <option value="observé">observé</option>
-                    <option value="callé">callé</option>
-                    <option value="ki">KI</option>
-                    <option value="final">final</option>
-                  </select>
+                  <span class="text-[10px] bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-300">
+                    {{ ev.status }}
+                  </span>
                 </td>
               </tr>
             </tbody>
@@ -462,12 +478,38 @@ async function patchSpot(ev, underlyingName, rawVal) {
   }
 }
 
-async function patchStatus(ev, status) {
-  await dealsStore.updateEvent(deal.value.id, ev.id, { spots: ev.spots, source: ev.source, status })
+async function validateEventFixing(ev) {
+  const reason = window.prompt('Motif de validation du fixing officiel :')
+  if (!reason) return
+  try {
+    await dealsStore.validateFixing(deal.value.id, ev.id, reason)
+    showSaveMsg('✓ Fixing officiel validé')
+  } catch (e) {
+    showSaveMsg(`⚠ Validation refusée : ${e.message}`)
+  }
 }
 
-async function updateStatus(status) {
-  await dealsStore.updateDeal(deal.value.id, { status })
+async function validateProposal(proposal) {
+  const reason = window.prompt('Motif de validation de la résolution :')
+  if (!reason) return
+  try {
+    await dealsStore.transitionProposal(
+      deal.value.id, proposal.id, 'validate', reason, proposal.proposed_outcome)
+    showSaveMsg('✓ Résolution validée, pas encore appliquée')
+  } catch (e) {
+    showSaveMsg(`⚠ Validation refusée : ${e.message}`)
+  }
+}
+
+async function applyProposal(proposal) {
+  const reason = window.prompt('Motif d’application définitive de la résolution :')
+  if (!reason) return
+  try {
+    await dealsStore.transitionProposal(deal.value.id, proposal.id, 'apply', reason)
+    showSaveMsg('✓ Résolution appliquée')
+  } catch (e) {
+    showSaveMsg(`⚠ Application refusée : ${e.message}`)
+  }
 }
 
 async function doRefresh() {

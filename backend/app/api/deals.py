@@ -1,22 +1,30 @@
 """Deal booking and lifecycle management."""
 from __future__ import annotations
 import json
+import math
 import re
 from datetime import datetime, date, timedelta
 from typing import Annotated, Literal, Optional, List
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import (Deal, DealEvent, Entity, User, Counterparty, Portfolio,
-                          RfqQuote, RfqRequest, Script)
+from ..db.models import (Alert, Deal, DealEvent, Entity, User, Counterparty, Portfolio,
+                          LifecycleProposal, RfqQuote, RfqRequest, Script,
+                          TradeAmendmentRequest)
 from .auth import get_current_user
 from ..services.market_data import load_hist_prices
 from ..core.payscript.parser import parse_script, resolve_constats, CompiledScript, effective_T_max
 from ..core.payscript.engine import eval_script_on_history
 from ..core.calibration import realized_market
 from ..core.references import next_reference
+from ..core.audit import commit_rejection, record_audit_event
+from ..core.rfq_controls import (
+    booking_gate_failures, failures_payload, product_terms, product_terms_hash,
+)
+from ..core.workflow import DataCategory, FixingStatus, LifecycleStatus
 from ..core.schemas import ReinvestScanRequest, ReinvestProposalRequest
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
@@ -52,16 +60,54 @@ class DealCreate(BaseModel):
 
 
 class DealUpdate(BaseModel):
-    status: Optional[Literal["actif", "callé", "échu", "résilié"]] = None
-    contrepartie: Optional[str] = Field(default=None, min_length=1)
-    price_traded: Optional[float] = Field(default=None, gt=0)
-    nominal: Optional[float] = Field(default=None, gt=0)
+    # This endpoint is a refusal boundary, not an edit form. Preserve every
+    # supplied field (including a future/unknown one) so an attempted direct
+    # mutation is audited instead of being silently discarded by Pydantic.
+    model_config = ConfigDict(extra="allow")
+    status: Optional[str] = None
+    contrepartie: Optional[str] = None
+    price_traded: Optional[float] = None
+    nominal: Optional[float] = None
+    devise: Optional[str] = None
+    fair_value: Optional[float] = None
+    sens: Optional[str] = None
+    trade_date: Optional[str] = None
+    strike_date: Optional[str] = None
+    value_date: Optional[str] = None
+    maturity_date: Optional[str] = None
+    payment_date: Optional[str] = None
+    T: Optional[float] = None
+    underlyings: Optional[List[dict]] = None
+    observation_times: Optional[List[float]] = None
+    script_snapshot: Optional[str] = None
+    market_snapshot: Optional[dict] = None
+    rfq_id: Optional[int] = None
+    selected_quote_id: Optional[int] = None
 
 
 class EventUpdate(BaseModel):
     spots: dict
-    source: str = "manuel"
+    source: Literal["manuel"] = "manuel"
     status: Optional[str] = None
+
+
+class FixingValidationRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class LifecycleValidationRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)
+    confirmed_outcome: Optional[Literal["callé", "ki", "final"]] = None
+
+
+class AmendmentRequestCreate(BaseModel):
+    field_name: Literal[
+        "nominal", "devise", "contrepartie", "price_traded", "status",
+        "trade_date", "strike_date", "value_date", "maturity_date",
+        "payment_date", "script_snapshot", "market_snapshot",
+    ]
+    new_value: object
+    reason: str = Field(min_length=10, max_length=2000)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -150,7 +196,6 @@ def _validate_economics(body) -> None:
 
 def _deal_product_terms(body: DealCreate) -> dict:
     """Canonical contractual identity presented by a deal booking request."""
-    from .rfq import product_terms
     market = body.market_snapshot or {}
     params = {
         "underlyings": market.get("underlyings") or body.underlyings,
@@ -168,8 +213,7 @@ def _deal_product_terms(body: DealCreate) -> dict:
 def _validate_rfq_booking_identity(rfq: RfqRequest, body: DealCreate,
                                    session: Session) -> None:
     """Refuse a deal that merely points at an RFQ but is not its product."""
-    from .rfq import (_counterparty_by_provider, product_terms,
-                      superseded_quote_ids)
+    from .rfq import _counterparty_by_provider, superseded_quote_ids
 
     quotes = session.exec(select(RfqQuote).where(RfqQuote.rfq_id == rfq.id)).all()
     selected = next((q for q in quotes if q.id == rfq.selected_quote_id), None)
@@ -262,7 +306,7 @@ def _rfq_provenance(rfq, price_traded: float, session: Session) -> str:
     validated against it: the two legitimately differ (last-minute
     negotiation, fees, rounding). Recording the gap documents it; refusing it
     would block real bookings."""
-    from .rfq import superseded_quote_ids, product_terms, product_terms_hash
+    from .rfq import superseded_quote_ids
 
     quotes = session.exec(select(RfqQuote).where(RfqQuote.rfq_id == rfq.id)).all()
     superseded = superseded_quote_ids(quotes)
@@ -351,8 +395,14 @@ def _event_row(e: DealEvent) -> dict:
         "event_date": e.event_date,
         "t_years": e.t_years,
         "spots": json.loads(e.spots_json),
+        "indicative_spots": json.loads(e.indicative_spots_json or "{}"),
         "source": e.source,
         "status": e.status,
+        "fixing_status": e.fixing_status,
+        "data_category": e.data_category,
+        "validated_by": e.validated_by,
+        "validated_at": e.validated_at.isoformat() if e.validated_at else None,
+        "applied_at": e.applied_at.isoformat() if e.applied_at else None,
         "label": e.label,
     }
 
@@ -362,6 +412,86 @@ def _get_events(deal_id: int, session: Session) -> list:
         select(DealEvent).where(DealEvent.deal_id == deal_id)
         .order_by(DealEvent.event_index)
     ).all()
+
+
+def _proposal_row(proposal: LifecycleProposal) -> dict:
+    return {
+        "id": proposal.id,
+        "deal_id": proposal.deal_id,
+        "event_id": proposal.event_id,
+        "status": proposal.status,
+        "proposed_outcome": proposal.proposed_outcome,
+        "result": json.loads(proposal.result_json or "{}"),
+        "data_source": proposal.data_source,
+        "validated_by": proposal.validated_by,
+        "validation_reason": proposal.validation_reason,
+        "validated_at": proposal.validated_at.isoformat() if proposal.validated_at else None,
+        "applied_by": proposal.applied_by,
+        "applied_at": proposal.applied_at.isoformat() if proposal.applied_at else None,
+        "error_message": proposal.error_message,
+        "correlation_id": proposal.correlation_id,
+        "created_at": proposal.created_at.isoformat(),
+        "updated_at": proposal.updated_at.isoformat(),
+    }
+
+
+def _get_lifecycle_proposals(deal_id: int, session: Session) -> list[LifecycleProposal]:
+    return session.exec(
+        select(LifecycleProposal).where(LifecycleProposal.deal_id == deal_id)
+        .order_by(LifecycleProposal.created_at.desc())
+    ).all()
+
+
+def _amendment_row(request: TradeAmendmentRequest) -> dict:
+    return {
+        "id": request.id,
+        "deal_id": request.deal_id,
+        "field_name": request.field_name,
+        "old_value": json.loads(request.old_value_json),
+        "new_value": json.loads(request.new_value_json),
+        "reason": request.reason,
+        "requested_by": request.requested_by,
+        "status": request.status,
+        "validated_by": request.validated_by,
+        "validated_at": request.validated_at.isoformat() if request.validated_at else None,
+        "created_at": request.created_at.isoformat(),
+    }
+
+
+def _booking_request_summary(body: DealCreate) -> dict:
+    return {
+        "rfq_id": body.rfq_id,
+        "sens": body.sens,
+        "contrepartie": body.contrepartie,
+        "devise": body.devise,
+        "nominal": body.nominal,
+        "fair_value": body.fair_value,
+        "price_traded": body.price_traded,
+        "trade_date": body.trade_date,
+        "strike_date": body.strike_date,
+        "value_date": body.value_date,
+        "maturity_date": body.maturity_date,
+        "payment_date": body.payment_date,
+        "T": body.T,
+    }
+
+
+def _reject_booking(session: Session, current: User, body: DealCreate,
+                    status_code: int, detail) -> None:
+    """Persist the refusal before returning it; audit failure fails closed."""
+    reason = (json.dumps(detail, ensure_ascii=False, sort_keys=True)
+              if isinstance(detail, (dict, list)) else str(detail))
+    commit_rejection(
+        session,
+        action="BOOKING_REJECTED",
+        object_type="RFQ" if body.rfq_id else "DEAL",
+        object_id=body.rfq_id,
+        actor_user_id=current.id,
+        after=_booking_request_summary(body),
+        reason=reason,
+        metadata={"http_status": status_code},
+    )
+    raise HTTPException(status_code, detail)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────
@@ -383,11 +513,10 @@ def book_deal(
 ):
     from .portfolios import get_or_create_default_portfolio
 
-    _validate_economics(body)
-
-    entity = session.get(Entity, current.entity_id) if current.entity_id else None
-    reference = _gen_ref(entity.name if entity else None, session)
-    default_portfolio = get_or_create_default_portfolio(session, current.id)
+    try:
+        _validate_economics(body)
+    except HTTPException as exc:
+        _reject_booking(session, current, body, exc.status_code, exc.detail)
 
     # Validate the RFQ link BEFORE the deal exists: rfq_id is a best-execution
     # trail (which tender this trade came out of), so a stale or foreign id
@@ -398,7 +527,7 @@ def book_deal(
     if body.rfq_id:
         source_rfq = session.get(RfqRequest, body.rfq_id)
         if not source_rfq or source_rfq.user_id != current.id:
-            raise HTTPException(404, "RFQ introuvable")
+            _reject_booking(session, current, body, 404, "RFQ introuvable")
         # Booking a tender closes it as "Bookée" — doing that without a
         # retained response would record a trade won by nobody, and leave the
         # analysis unable to tell who actually won (see api/rfq.py:/history).
@@ -407,14 +536,28 @@ def book_deal(
         # would double-count the winning bank's hit ratio (api/rfq.py:/history).
         already = session.exec(select(Deal).where(Deal.rfq_id == source_rfq.id)).first()
         if already:
-            raise HTTPException(
-                409, f"Cette RFQ a déjà été bookée — deal {already.reference}. "
-                     f"Ouvrez-le depuis le Booking plutôt que d'en créer un second.")
-        if source_rfq.selected_quote_id is None:
-            raise HTTPException(
-                422, "Aucune réponse retenue sur cette RFQ — retenez la cotation traitée "
-                     "avant de booker, c'est elle qui documente la best execution.")
-        _validate_rfq_booking_identity(source_rfq, body, session)
+            _reject_booking(
+                session, current, body, 409,
+                f"Cette RFQ a déjà été bookée — deal {already.reference}. "
+                "Ouvrez-le depuis le Booking plutôt que d'en créer un second.")
+
+        selected = session.get(RfqQuote, source_rfq.selected_quote_id) \
+            if source_rfq.selected_quote_id else None
+        from .rfq import _counterparty_by_provider
+        expected_counterparty = (
+            _counterparty_by_provider(session).get(selected.provider) if selected else None)
+        gate_failures = booking_gate_failures(
+            source_rfq, selected,
+            expected_counterparty=expected_counterparty,
+            requested_counterparty=body.contrepartie,
+        )
+        if gate_failures:
+            _reject_booking(
+                session, current, body, 422, failures_payload(gate_failures))
+        try:
+            _validate_rfq_booking_identity(source_rfq, body, session)
+        except HTTPException as exc:
+            _reject_booking(session, current, body, exc.status_code, exc.detail)
         rfq_provenance = _rfq_provenance(source_rfq, body.price_traded, session)
 
     # A new deal's script and frozen CONSTAT values are the contract.  Client
@@ -422,25 +565,35 @@ def book_deal(
     try:
         times = _derive_observation_times(body)
     except (ValueError, KeyError, TypeError) as e:
-        raise HTTPException(
-            422, f"Le calendrier contractuel du script est inexploitable : {e}. "
-                 "Corrigez les CONSTAT avant de booker.")
+        _reject_booking(
+            session, current, body, 422,
+            f"Le calendrier contractuel du script est inexploitable : {e}. "
+            "Corrigez les CONSTAT avant de booker.")
     if not times:
         # A deal with no observation has no life: no barrier watchlist, no
         # residual MtM, no automatic resolution. It used to be booked anyway
         # and stayed silently inert — an incoherent calendar (end before
         # start) reaches exactly this state.
-        raise HTTPException(
-            422, "Ce deal n'a aucune constatation — il ne pourrait être ni surveillé, "
-                 "ni valorisé, ni dénoué. Vérifiez le calendrier CONSTAT du script.")
+        _reject_booking(
+            session, current, body, 422,
+            "Ce deal n'a aucune constatation — il ne pourrait être ni surveillé, "
+            "ni valorisé, ni dénoué. Vérifiez le calendrier CONSTAT du script.")
 
     maturity = date.fromisoformat(body.maturity_date)
     event_dates = [_date_plus_years(body.value_date, t) for t in times]
     after_maturity = [d for d in event_dates if date.fromisoformat(d) > maturity]
     if after_maturity:
-        raise HTTPException(
-            422, "Le calendrier contractuel dépasse la maturité du deal "
-                 f"({body.maturity_date}) : {', '.join(after_maturity)}.")
+        _reject_booking(
+            session, current, body, 422,
+            "Le calendrier contractuel dépasse la maturité du deal "
+            f"({body.maturity_date}) : {', '.join(after_maturity)}.")
+
+    # Allocate persistent objects only after every rejection-prone validation.
+    # A rejected booking can then commit its audit row without also consuming a
+    # reference or creating a default portfolio as a side effect.
+    entity = session.get(Entity, current.entity_id) if current.entity_id else None
+    reference = _gen_ref(entity.name if entity else None, session)
+    default_portfolio = get_or_create_default_portfolio(session, current.id)
 
     deal = Deal(
         reference=reference,
@@ -484,8 +637,6 @@ def book_deal(
         source_rfq.updated_at = datetime.utcnow()
         session.add(source_rfq)
 
-    today = date.today().isoformat()
-
     # First event is always the strike date (t=0) — S₀ to be filled in Events tab
     session.add(DealEvent(
         deal_id=deal.id,
@@ -494,7 +645,9 @@ def book_deal(
         t_years=0.0,
         spots_json="{}",
         source="pending",
-        status="observé" if body.strike_date <= today else "futur",
+        status="futur",
+        fixing_status=FixingStatus.EXPECTED.value,
+        data_category=DataCategory.UNKNOWN.value,
         label="Strike / Fixing S₀",
     ))
 
@@ -509,22 +662,36 @@ def book_deal(
             t_years=round(t, 4),
             spots_json="{}",
             source="pending",
-            status="observé" if ev_date <= today else "futur",
+            status="futur",
+            fixing_status=FixingStatus.EXPECTED.value,
+            data_category=DataCategory.UNKNOWN.value,
             label=label,
         ))
 
     try:
+        record_audit_event(
+            session,
+            action="BOOKING_ACCEPTED",
+            object_type="DEAL",
+            object_id=deal.id,
+            actor_user_id=current.id,
+            after={**_booking_request_summary(body), "reference": deal.reference},
+            result="SUCCESS",
+            metadata={"rfq_id": body.rfq_id},
+        )
         session.commit()
-    except IntegrityError as e:
+    except IntegrityError:
         session.rollback()
         if body.rfq_id:
             existing = session.exec(
                 select(Deal).where(Deal.rfq_id == body.rfq_id)).first()
             if existing:
-                raise HTTPException(
-                    409, f"Cette RFQ a déjà été bookée — deal {existing.reference}.")
-        raise HTTPException(
-            409, "Conflit d'unicité pendant le booking. Rechargez les données et réessayez.") from e
+                _reject_booking(
+                    session, current, body, 409,
+                    f"Cette RFQ a déjà été bookée — deal {existing.reference}.")
+        _reject_booking(
+            session, current, body, 409,
+            "Conflit d'unicité pendant le booking. Rechargez les données et réessayez.")
     session.refresh(deal)
     return _deal_row(deal, _get_events(deal.id, session))
 
@@ -876,6 +1043,15 @@ def get_deal(
     row = _deal_row(deal, _get_events(deal_id, session))
     row["terms"] = _deal_terms(deal)
     row["flags"] = _script_flags(deal)
+    row["lifecycle_proposals"] = [
+        _proposal_row(p) for p in _get_lifecycle_proposals(deal_id, session)]
+    row["amendment_requests"] = [
+        _amendment_row(request) for request in session.exec(
+            select(TradeAmendmentRequest)
+            .where(TradeAmendmentRequest.deal_id == deal_id)
+            .order_by(TradeAmendmentRequest.created_at.desc())
+        ).all()
+    ]
     return row
 
 
@@ -889,13 +1065,101 @@ def update_deal(
     deal = session.get(Deal, deal_id)
     if not deal or deal.user_id != current.id:
         raise HTTPException(404, "Deal introuvable")
-    for field, value in body.model_dump(exclude_unset=True).items():
-        if value is not None:
-            setattr(deal, field, value)
-    deal.updated_at = datetime.utcnow()
-    session.add(deal)
-    session.commit()
+    requested = body.model_dump(exclude_unset=True)
+    if requested:
+        def current_value(field: str):
+            if field == "underlyings":
+                return json.loads(deal.underlyings_json or "[]")
+            if field == "market_snapshot":
+                return json.loads(deal.market_snapshot_json or "{}")
+            if field == "observation_times":
+                return [event.t_years for event in _get_events(deal.id, session)
+                        if event.t_years > 0]
+            if field == "selected_quote_id":
+                provenance = json.loads(deal.rfq_provenance_json or "{}")
+                return (provenance.get("retained") or {}).get("quote_id")
+            return getattr(deal, field, None)
+
+        before = {field: current_value(field) for field in requested}
+        commit_rejection(
+            session,
+            action="POST_BOOKING_MODIFICATION_REJECTED",
+            object_type="DEAL",
+            object_id=deal.id,
+            actor_user_id=current.id,
+            before=before,
+            after=requested,
+            reason="Les champs contractuels d'un deal booké sont immuables ; "
+                   "utilisez le futur workflow d'amendement.",
+            metadata={"fields": sorted(requested)},
+        )
+        raise HTTPException(409, {
+            "code": "POST_BOOKING_IMMUTABLE",
+            "message": "Modification directe refusée : ce deal est déjà booké.",
+            "fields": sorted(requested),
+        })
     return _deal_row(deal)
+
+
+@router.post("/{deal_id}/amendment-requests", status_code=201)
+def request_amendment(
+    deal_id: int,
+    body: AmendmentRequestCreate,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Record a request without changing the booked trade.
+
+    Approval/application intentionally belongs to a later maker-checker phase.
+    """
+    deal = session.get(Deal, deal_id)
+    if not deal or deal.user_id != current.id:
+        raise HTTPException(404, "Deal introuvable")
+    if body.field_name == "market_snapshot":
+        old_value = json.loads(deal.market_snapshot_json or "{}")
+    else:
+        old_value = getattr(deal, body.field_name)
+    if old_value == body.new_value:
+        commit_rejection(
+            session,
+            action="AMENDMENT_REQUEST_REJECTED",
+            object_type="DEAL",
+            object_id=deal.id,
+            actor_user_id=current.id,
+            before={body.field_name: old_value},
+            after={body.field_name: body.new_value},
+            reason="La valeur demandée est identique à la valeur bookée.",
+        )
+        raise HTTPException(422, {
+            "code": "AMENDMENT_NO_CHANGE",
+            "message": "La demande d'amendement ne contient aucun changement.",
+        })
+    request = TradeAmendmentRequest(
+        deal_id=deal.id,
+        field_name=body.field_name,
+        old_value_json=json.dumps(old_value, ensure_ascii=False, sort_keys=True),
+        new_value_json=json.dumps(body.new_value, ensure_ascii=False, sort_keys=True),
+        reason=body.reason,
+        requested_by=current.id,
+        status="PENDING",
+    )
+    session.add(request)
+    session.flush()
+    record_audit_event(
+        session,
+        action="AMENDMENT_REQUESTED",
+        object_type="TRADE_AMENDMENT_REQUEST",
+        object_id=request.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        before={body.field_name: old_value},
+        after={body.field_name: body.new_value},
+        reason=body.reason,
+        metadata={"deal_id": deal.id, "status": "PENDING"},
+    )
+    session.commit()
+    session.refresh(request)
+    return _amendment_row(request)
 
 
 @router.patch("/{deal_id}/events/{event_id}")
@@ -913,22 +1177,197 @@ def update_event(
     if not ev or ev.deal_id != deal_id:
         raise HTTPException(404, "Événement introuvable")
 
-    ev.spots_json = json.dumps(body.spots)
-    ev.source = body.source
     if body.status:
-        ev.status = body.status
-    elif ev.status == "futur":
-        ev.status = "observé"
+        commit_rejection(
+            session,
+            action="EVENT_STATUS_MODIFICATION_REJECTED",
+            object_type="DEAL_EVENT",
+            object_id=ev.id,
+            actor_user_id=current.id,
+            before={"status": ev.status},
+            after={"status": body.status},
+            reason="Le statut économique d'un événement ne peut être modifié que "
+                   "par le workflow de résolution validé.",
+        )
+        raise HTTPException(409, {
+            "code": "EVENT_STATUS_IMMUTABLE",
+            "message": "Modification directe du statut de l'événement refusée.",
+        })
+
+    before_spots = json.loads(ev.spots_json or "{}")
+    new_spots = body.spots or {}
+    if ev.fixing_status in (FixingStatus.VALIDATED, FixingStatus.APPLIED):
+        if before_spots != new_spots:
+            _ensure_alert(
+                session, deal, "fixing_overwrite_rejected",
+                f"Écrasement refusé du fixing validé de l'événement {ev.event_date}.",
+                f"fixing-overwrite:{deal.id}:{ev.id}",
+            )
+            commit_rejection(
+                session,
+                action="FIXING_OVERWRITE_REJECTED",
+                object_type="DEAL_EVENT",
+                object_id=ev.id,
+                actor_user_id=current.id,
+                before={"spots": before_spots, "fixing_status": ev.fixing_status},
+                after={"spots": new_spots},
+                reason="Un fixing validé ou appliqué est immuable.",
+                data_source=DataCategory.FIXING_OFFICIAL,
+            )
+            raise HTTPException(409, {
+                "code": "VALIDATED_FIXING_IMMUTABLE",
+                "message": "Ce fixing est déjà validé et ne peut pas être écrasé.",
+            })
+        return _event_row(ev)
+
+    failures = _spot_failures(deal, new_spots)
+    ev.spots_json = json.dumps(new_spots, sort_keys=True)
+    ev.source = body.source
+    ev.data_category = DataCategory.FIXING_OFFICIAL
+    ev.fixing_status = FixingStatus.PARTIAL if failures else FixingStatus.RECEIVED
+    ev.validated_by = None
+    ev.validated_at = None
+    ev.applied_at = None
     session.add(ev)
 
     deal.updated_at = datetime.utcnow()
     session.add(deal)
+    record_audit_event(
+        session,
+        action="FIXING_RECEIVED",
+        object_type="DEAL_EVENT",
+        object_id=ev.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        before={"spots": before_spots},
+        after={"spots": new_spots, "fixing_status": ev.fixing_status},
+        reason="Saisie manuelle d'un fixing candidat.",
+        data_source=DataCategory.FIXING_OFFICIAL,
+        metadata={"validation_failures": failures},
+    )
     session.commit()
+    session.refresh(ev)
     return _event_row(ev)
 
 
+def _required_underlying_names(deal: Deal) -> list[str]:
+    underlyings = json.loads(deal.underlyings_json or "[]")
+    return [str(u.get("name") or "").strip() for u in underlyings if str(u.get("name") or "").strip()]
+
+
+def _spot_failures(deal: Deal, spots: dict) -> list[dict]:
+    failures: list[dict] = []
+    required = _required_underlying_names(deal)
+    missing = [name for name in required if name not in spots]
+    extra = [name for name in spots if name not in required]
+    if missing:
+        failures.append({"code": "FIXING_MISSING_UNDERLYING", "underlyings": missing})
+    if extra:
+        failures.append({"code": "FIXING_UNKNOWN_UNDERLYING", "underlyings": extra})
+    for name in required:
+        value = spots.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(float(value)) or float(value) <= 0:
+            failures.append({
+                "code": "FIXING_INVALID_VALUE",
+                "underlying": name,
+                "value": value,
+            })
+    return failures
+
+
+@router.post("/{deal_id}/events/{event_id}/validate")
+def validate_fixing(
+    deal_id: int,
+    event_id: int,
+    body: FixingValidationRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    deal = session.get(Deal, deal_id)
+    if not deal or deal.user_id != current.id:
+        raise HTTPException(404, "Deal introuvable")
+    ev = session.get(DealEvent, event_id)
+    if not ev or ev.deal_id != deal_id:
+        raise HTTPException(404, "Événement introuvable")
+
+    failures = _spot_failures(deal, json.loads(ev.spots_json or "{}"))
+    if ev.event_date > date.today().isoformat():
+        failures.append({"code": "FIXING_DATE_IN_FUTURE", "event_date": ev.event_date})
+    if ev.data_category != DataCategory.FIXING_OFFICIAL:
+        failures.append({"code": "FIXING_NOT_OFFICIAL", "data_category": ev.data_category})
+    if ev.fixing_status not in (
+        FixingStatus.RECEIVED, FixingStatus.PARTIAL,
+        FixingStatus.MANUAL_REVIEW_REQUIRED,
+    ):
+        failures.append({"code": "FIXING_STATUS_INVALID", "fixing_status": ev.fixing_status})
+    if failures:
+        commit_rejection(
+            session,
+            action="FIXING_VALIDATION_REJECTED",
+            object_type="DEAL_EVENT",
+            object_id=ev.id,
+            actor_user_id=current.id,
+            before={"fixing_status": ev.fixing_status, "spots": json.loads(ev.spots_json or "{}")},
+            reason=body.reason,
+            data_source=ev.data_category,
+            metadata={"failures": failures},
+        )
+        raise HTTPException(422, {
+            "code": "FIXING_NOT_VALIDATABLE",
+            "message": "Le fixing ne peut pas être validé.",
+            "failures": failures,
+        })
+
+    before = _event_row(ev)
+    ev.fixing_status = FixingStatus.VALIDATED
+    ev.status = "observé"
+    ev.validated_by = current.id
+    ev.validated_at = datetime.utcnow()
+    session.add(ev)
+    record_audit_event(
+        session,
+        action="FIXING_VALIDATED",
+        object_type="DEAL_EVENT",
+        object_id=ev.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        before=before,
+        after=_event_row(ev),
+        reason=body.reason,
+        data_source=DataCategory.FIXING_OFFICIAL,
+    )
+    session.commit()
+    session.refresh(ev)
+    return _event_row(ev)
+
+
+def _ensure_alert(
+    session: Session,
+    deal: Deal,
+    kind: str,
+    message: str,
+    dedup_key: str,
+) -> Alert:
+    existing = session.exec(
+        select(Alert).where(Alert.dedup_key == dedup_key)
+    ).first()
+    if existing:
+        return existing
+    alert = Alert(
+        user_id=deal.user_id,
+        deal_id=deal.id,
+        deal_reference=deal.reference,
+        kind=kind,
+        message=message,
+        dedup_key=dedup_key,
+    )
+    session.add(alert)
+    return alert
+
+
 def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict,
-                         tickers: list, session: Session) -> dict | None:
+                         tickers: list) -> dict | None:
     """Replay the booked script against the historical prices already loaded
     for events/refresh, to find out whether the product has actually called
     early or reached maturity — vs. just knowing raw spot values without
@@ -937,8 +1376,8 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
     CONSTAT-based script whose calendar overrides aren't persisted on the
     deal — a known gap, not fatal to the spot refresh above).
 
-    Best-effort: a script that fails to parse/evaluate must not break the
-    spot refresh that already succeeded, so callers should catch ValueError."""
+    This function is deliberately pure with respect to persistence: indicative
+    market data may propose a result, but it may never apply it."""
     market = json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {}
     compiled = parse_script(deal.script_snapshot)
     # Expert-mode deals: CONSTAT calendars frozen at booking (market.constats,
@@ -985,17 +1424,8 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
     if res["early_recall"]:
         T_actual = res["T_actual"]
         triggering = min(non_strike, key=lambda e: abs(e.t_years - T_actual))
-        triggering.status = "callé"
-        session.add(triggering)
-        for e in non_strike:
-            if e.t_years > triggering.t_years + 1e-6:
-                e.status = "annulé"
-                session.add(e)
-        deal.status = "callé"
-        deal.realized_payout = realized_payout
-        deal.resolution_outcome = "callé"
-        session.add(deal)
-        return {"outcome": "callé", "event_date": triggering.event_date, "t_years": triggering.t_years,
+        return {"outcome": "callé", "event_id": triggering.id,
+                "event_date": triggering.event_date, "t_years": triggering.t_years,
                 "realized_payout": realized_payout}
 
     # No early recall — only conclude "matured" if today has actually
@@ -1009,13 +1439,9 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
         # below par (nominal = 1.0) is treated as a knock-in. Flags an
         # unusual script as "ki" incorrectly in principle — the actual
         # amount is always kept alongside the label so a human can check.
-        maturity_event.status = "ki" if maturity_payout < 0.995 else "final"
-        session.add(maturity_event)
-        deal.status = "échu"
-        deal.realized_payout = realized_payout
-        deal.resolution_outcome = maturity_event.status
-        session.add(deal)
-        return {"outcome": maturity_event.status, "event_date": maturity_event.event_date,
+        outcome = "ki" if maturity_payout < 0.995 else "final"
+        return {"outcome": outcome, "event_id": maturity_event.id,
+                "event_date": maturity_event.event_date,
                 "maturity_payout": round(maturity_payout, 4), "realized_payout": realized_payout}
 
     return {"outcome": "en_cours"}
@@ -1027,26 +1453,123 @@ def refresh_events(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    """Auto-fetch historical spots from Yahoo Finance for past events, then
-    replay the script against that same history to detect an early recall
-    or maturity outcome and propagate it to event/deal status."""
+    """Load non-binding monitoring data and, when relevant, propose a result."""
     deal = session.get(Deal, deal_id)
     if not deal or deal.user_id != current.id:
         raise HTTPException(404, "Deal introuvable")
     try:
-        return refresh_deal_core(deal, session)
+        return refresh_deal_core(deal, session, actor_user_id=current.id)
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, {
+            "code": "LIFECYCLE_REFRESH_ERROR",
+            "message": str(e),
+        })
 
 
-def refresh_deal_core(deal: Deal, session: Session) -> dict:
-    """Body of POST /events/refresh without the HTTP layer — also called
-    per-deal by the daily scheduler (services/lifecycle_alerts.py). Raises
-    ValueError on data problems; commits on success."""
+def _create_lifecycle_proposal(
+    deal: Deal,
+    evaluation: dict | None,
+    session: Session,
+    actor_user_id: int | None,
+) -> LifecycleProposal | None:
+    if not evaluation or evaluation.get("outcome") == "en_cours":
+        return None
+    outcome = str(evaluation["outcome"])
+    event_id = evaluation.get("event_id")
+    dedup_key = f"lifecycle:{deal.id}:{event_id}:{outcome}"
+    existing = session.exec(
+        select(LifecycleProposal).where(LifecycleProposal.dedup_key == dedup_key)
+    ).first()
+    if existing:
+        return existing
+
+    proposal = LifecycleProposal(
+        deal_id=deal.id,
+        event_id=event_id,
+        dedup_key=dedup_key,
+        status=LifecycleStatus.PROPOSED,
+        proposed_outcome=outcome,
+        result_json=json.dumps(evaluation, ensure_ascii=False, sort_keys=True),
+        data_source=DataCategory.INDICATIVE,
+        proposed_by=actor_user_id,
+    )
+    session.add(proposal)
+    session.flush()
+    _ensure_alert(
+        session,
+        deal,
+        "resolution_proposed",
+        f"Résolution {outcome!r} proposée pour {deal.reference}; validation humaine requise.",
+        f"proposal:{proposal.dedup_key}",
+    )
+    record_audit_event(
+        session,
+        action="RESOLUTION_PROPOSED",
+        object_type="LIFECYCLE_PROPOSAL",
+        object_id=proposal.id,
+        actor_user_id=actor_user_id,
+        actor_type="USER" if actor_user_id else "PROCESS",
+        result="SUCCESS",
+        after=_proposal_row(proposal),
+        reason="Résultat proposé par le monitoring; aucune application automatique.",
+        data_source=DataCategory.INDICATIVE,
+    )
+    return proposal
+
+
+def refresh_deal_core(
+    deal: Deal,
+    session: Session,
+    actor_user_id: int | None = None,
+) -> dict:
+    """Refresh indicative data with persistent, visible error reporting."""
+    deal_id = deal.id
+    reference = deal.reference
+    user_id = deal.user_id
+    try:
+        return _refresh_deal_core(deal, session, actor_user_id)
+    except Exception as exc:
+        session.rollback()
+        current_deal = session.get(Deal, deal_id)
+        if current_deal:
+            _ensure_alert(
+                session,
+                current_deal,
+                "lifecycle_error",
+                f"Erreur de monitoring lifecycle sur {reference}: {exc}",
+                f"lifecycle-error:{deal_id}:{date.today().isoformat()}:{type(exc).__name__}",
+            )
+        record_audit_event(
+            session,
+            action="LIFECYCLE_REFRESH_ERROR",
+            object_type="DEAL",
+            object_id=deal_id,
+            actor_user_id=actor_user_id,
+            actor_type="USER" if actor_user_id else "PROCESS",
+            result="ERROR",
+            reason=str(exc),
+            data_source=DataCategory.INDICATIVE,
+            metadata={"deal_reference": reference, "user_id": user_id,
+                      "exception_type": type(exc).__name__},
+        )
+        session.commit()
+        raise ValueError(str(exc)) from exc
+
+
+def _refresh_deal_core(
+    deal: Deal,
+    session: Session,
+    actor_user_id: int | None,
+) -> dict:
+    """Internal transactional body; callers use ``refresh_deal_core``."""
     underlyings = json.loads(deal.underlyings_json)
-    tickers = [u["ticker"] for u in underlyings if u.get("ticker")]
+    missing_tickers = [u.get("name", "?") for u in underlyings if not u.get("ticker")]
+    if missing_tickers:
+        raise ValueError(
+            "Ticker manquant pour: " + ", ".join(str(name) for name in missing_tickers))
+    tickers = [u["ticker"] for u in underlyings]
     if not tickers:
-        raise ValueError("Aucun ticker défini sur ce deal")
+        raise ValueError("Aucun sous-jacent défini sur ce deal")
 
     today = date.today().isoformat()
     events = _get_events(deal.id, session)
@@ -1071,43 +1594,357 @@ def refresh_deal_core(deal: Deal, session: Session) -> dict:
     # Build a {date: idx} map for fast lookup
     date_idx = {d: i for i, d in enumerate(dates_list)}
 
-    def _closest_price(ticker: str, target_date: str) -> float | None:
+    def _closest_price(ticker: str, target_date: str) -> tuple[float | None, str | None]:
         if ticker not in prices:
-            return None
+            return None, None
         available = [d for d in dates_list if d <= target_date]
         if not available:
-            return None
-        idx = date_idx[available[-1]]
+            return None, None
+        used_date = available[-1]
+        idx = date_idx[used_date]
         val = prices[ticker][idx]
-        return round(float(val), 4) if val is not None else None
+        return (round(float(val), 4), used_date) if val is not None else (None, used_date)
 
     updated = 0
     for ev in past_events:
         spots = {}
+        used_dates = {}
         for u in underlyings:
             tk = u.get("ticker", "")
             name = u["name"]
-            spot = _closest_price(tk, ev.event_date) if tk else None
+            spot, used_date = _closest_price(tk, ev.event_date)
             if spot is not None:
                 spots[name] = spot
+                used_dates[name] = used_date
+        if len(spots) != len(underlyings):
+            missing = [u["name"] for u in underlyings if u["name"] not in spots]
+            raise ValueError(
+                f"Données indicatives partielles au {ev.event_date}; manquantes: {', '.join(missing)}")
         if spots:
-            ev.spots_json = json.dumps(spots)
-            ev.source = "auto"
-            if ev.status == "futur":
-                ev.status = "observé"
+            before = json.loads(ev.indicative_spots_json or "{}")
+            if before == spots:
+                continue
+            ev.indicative_spots_json = json.dumps(spots, sort_keys=True)
             session.add(ev)
             updated += 1
+            fallbacks = {
+                name: used for name, used in used_dates.items() if used != ev.event_date}
+            record_audit_event(
+                session,
+                action="INDICATIVE_DATA_USED",
+                object_type="DEAL_EVENT",
+                object_id=ev.id,
+                actor_user_id=actor_user_id,
+                actor_type="USER" if actor_user_id else "PROCESS",
+                result="SUCCESS",
+                before={"indicative_spots": before},
+                after={"indicative_spots": spots},
+                reason="Mise à jour de données de monitoring non opposables.",
+                data_source=DataCategory.INDICATIVE,
+                metadata={"provider": "Yahoo Finance", "price_dates": used_dates,
+                          "fallback_dates": fallbacks},
+            )
+            if fallbacks:
+                _ensure_alert(
+                    session,
+                    deal,
+                    "data_fallback",
+                    f"Fallback de date de marché au {ev.event_date}: {fallbacks}",
+                    f"data-fallback:{deal.id}:{ev.id}:{json.dumps(fallbacks, sort_keys=True)}",
+                )
+                record_audit_event(
+                    session,
+                    action="DATA_FALLBACK_USED",
+                    object_type="DEAL_EVENT",
+                    object_id=ev.id,
+                    actor_user_id=actor_user_id,
+                    actor_type="USER" if actor_user_id else "PROCESS",
+                    result="SUCCESS",
+                    reason="Dernière clôture disponible antérieure à la date contractuelle.",
+                    data_source=DataCategory.INDICATIVE,
+                    metadata={"fallback_dates": fallbacks},
+                )
 
-    evaluation = None
-    try:
-        evaluation = _evaluate_lifecycle(deal, events, dates_list, prices, tickers, session)
-    except ValueError:
-        pass   # script couldn't be replayed (e.g. unpersisted CONSTAT calendar) — spots still refreshed above
+    evaluation = _evaluate_lifecycle(deal, events, dates_list, prices, tickers)
+    proposal = _create_lifecycle_proposal(
+        deal, evaluation, session, actor_user_id)
 
     deal.updated_at = datetime.utcnow()
     session.add(deal)
     session.commit()
-    return {"updated": updated, "message": f"{updated} événement(s) mis à jour", "evaluation": evaluation}
+    return {
+        "updated": updated,
+        "message": f"{updated} événement(s) indicatif(s) mis à jour",
+        "evaluation": evaluation,
+        "proposal": _proposal_row(proposal) if proposal else None,
+    }
+
+
+def _proposal_required_events(
+    deal: Deal,
+    proposal: LifecycleProposal,
+    session: Session,
+) -> list[DealEvent]:
+    events = _get_events(deal.id, session)
+    trigger = next((event for event in events if event.id == proposal.event_id), None)
+    if not trigger:
+        return []
+    return [event for event in events if event.t_years <= trigger.t_years + 1e-6]
+
+
+def _proposal_fixing_failures(
+    deal: Deal,
+    proposal: LifecycleProposal,
+    session: Session,
+) -> tuple[list[DealEvent], list[dict]]:
+    required_events = _proposal_required_events(deal, proposal, session)
+    failures: list[dict] = []
+    if not required_events or not proposal.event_id:
+        failures.append({"code": "LIFECYCLE_TRIGGER_EVENT_MISSING"})
+        return required_events, failures
+    for event in required_events:
+        event_failures = _spot_failures(deal, json.loads(event.spots_json or "{}"))
+        if event.fixing_status != FixingStatus.VALIDATED:
+            event_failures.append({
+                "code": "FIXING_NOT_VALIDATED",
+                "fixing_status": event.fixing_status,
+            })
+        if event.data_category != DataCategory.FIXING_OFFICIAL:
+            event_failures.append({
+                "code": "FIXING_NOT_OFFICIAL",
+                "data_category": event.data_category,
+            })
+        if event_failures:
+            failures.append({
+                "event_id": event.id,
+                "event_date": event.event_date,
+                "failures": event_failures,
+            })
+    return required_events, failures
+
+
+def _owned_proposal(
+    deal_id: int,
+    proposal_id: int,
+    current: User,
+    session: Session,
+) -> tuple[Deal, LifecycleProposal]:
+    deal = session.get(Deal, deal_id)
+    if not deal or deal.user_id != current.id:
+        raise HTTPException(404, "Deal introuvable")
+    proposal = session.get(LifecycleProposal, proposal_id)
+    if not proposal or proposal.deal_id != deal_id:
+        raise HTTPException(404, "Proposition lifecycle introuvable")
+    return deal, proposal
+
+
+def _reject_lifecycle(
+    session: Session,
+    proposal: LifecycleProposal,
+    current: User,
+    action: str,
+    reason: str,
+    failures: list[dict],
+    status_code: int = 409,
+) -> None:
+    commit_rejection(
+        session,
+        action=action,
+        object_type="LIFECYCLE_PROPOSAL",
+        object_id=proposal.id,
+        actor_user_id=current.id,
+        before=_proposal_row(proposal),
+        reason=reason,
+        data_source=proposal.data_source,
+        metadata={"failures": failures},
+    )
+    raise HTTPException(status_code, {
+        "code": action,
+        "message": reason,
+        "failures": failures,
+    })
+
+
+@router.post("/{deal_id}/lifecycle-proposals/{proposal_id}/validate")
+def validate_lifecycle_proposal(
+    deal_id: int,
+    proposal_id: int,
+    body: LifecycleValidationRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    deal, proposal = _owned_proposal(deal_id, proposal_id, current, session)
+    failures: list[dict] = []
+    if deal.status != "actif":
+        failures.append({"code": "DEAL_NOT_ACTIVE", "status": deal.status})
+    if proposal.status != LifecycleStatus.PROPOSED:
+        failures.append({"code": "PROPOSAL_STATUS_INVALID", "status": proposal.status})
+    if body.confirmed_outcome != proposal.proposed_outcome:
+        failures.append({
+            "code": "OUTCOME_CONFIRMATION_REQUIRED",
+            "proposed_outcome": proposal.proposed_outcome,
+            "confirmed_outcome": body.confirmed_outcome,
+        })
+    conflict = session.exec(
+        select(LifecycleProposal).where(
+            LifecycleProposal.deal_id == deal_id,
+            LifecycleProposal.id != proposal_id,
+            LifecycleProposal.status.in_([
+                LifecycleStatus.VALIDATED.value, LifecycleStatus.APPLIED.value]),
+        )
+    ).first()
+    if conflict:
+        failures.append({"code": "CONFLICTING_RESOLUTION", "proposal_id": conflict.id,
+                         "status": conflict.status})
+    required_events, fixing_failures = _proposal_fixing_failures(deal, proposal, session)
+    failures.extend(fixing_failures)
+    if failures:
+        _reject_lifecycle(
+            session, proposal, current, "RESOLUTION_VALIDATION_REJECTED",
+            "La résolution proposée ne peut pas être validée.", failures, 422)
+
+    before = _proposal_row(proposal)
+    proposal.status = LifecycleStatus.VALIDATED
+    proposal.validated_by = current.id
+    proposal.validated_at = datetime.utcnow()
+    proposal.validation_reason = body.reason
+    proposal.updated_at = datetime.utcnow()
+    session.add(proposal)
+    record_audit_event(
+        session,
+        action="RESOLUTION_VALIDATED",
+        object_type="LIFECYCLE_PROPOSAL",
+        object_id=proposal.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        before=before,
+        after=_proposal_row(proposal),
+        reason=body.reason,
+        data_source=DataCategory.FIXING_OFFICIAL,
+        metadata={
+            "official_fixings": [
+                {"event_id": event.id, "event_date": event.event_date,
+                 "spots": json.loads(event.spots_json or "{}")}
+                for event in required_events
+            ],
+        },
+    )
+    session.commit()
+    session.refresh(proposal)
+    return _proposal_row(proposal)
+
+
+@router.post("/{deal_id}/lifecycle-proposals/{proposal_id}/apply")
+def apply_lifecycle_proposal(
+    deal_id: int,
+    proposal_id: int,
+    body: LifecycleValidationRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    deal, proposal = _owned_proposal(deal_id, proposal_id, current, session)
+    failures: list[dict] = []
+    if deal.status != "actif":
+        failures.append({"code": "DEAL_NOT_ACTIVE", "status": deal.status})
+    if proposal.status != LifecycleStatus.VALIDATED:
+        failures.append({"code": "PROPOSAL_STATUS_INVALID", "status": proposal.status})
+    required_events, fixing_failures = _proposal_fixing_failures(deal, proposal, session)
+    failures.extend(fixing_failures)
+    if failures:
+        _reject_lifecycle(
+            session, proposal, current, "RESOLUTION_APPLICATION_REJECTED",
+            "La résolution validée ne peut pas être appliquée.", failures)
+
+    before_deal = _deal_row(deal)
+    before_proposal = _proposal_row(proposal)
+    applied_at = datetime.utcnow()
+    cas = session.exec(
+        update(LifecycleProposal)
+        .where(
+            LifecycleProposal.id == proposal.id,
+            LifecycleProposal.status == LifecycleStatus.VALIDATED.value,
+        )
+        .values(
+            status=LifecycleStatus.APPLIED.value,
+            applied_by=current.id,
+            applied_at=applied_at,
+            updated_at=applied_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if cas.rowcount != 1:
+        session.rollback()
+        proposal = session.get(LifecycleProposal, proposal_id)
+        _reject_lifecycle(
+            session, proposal, current, "RESOLUTION_APPLICATION_REJECTED",
+            "La résolution a déjà été appliquée ou modifiée par une autre transaction.",
+            [{"code": "CONCURRENT_OR_DUPLICATE_APPLICATION",
+              "status": proposal.status if proposal else "MISSING"}],
+        )
+
+    result = json.loads(proposal.result_json or "{}")
+    outcome = proposal.proposed_outcome
+    trigger = next(event for event in required_events if event.id == proposal.event_id)
+    all_events = _get_events(deal.id, session)
+    trigger.status = outcome
+    if outcome == "callé":
+        deal.status = "callé"
+        for event in all_events:
+            if event.t_years > trigger.t_years + 1e-6:
+                event.status = "annulé"
+                session.add(event)
+    elif outcome in ("ki", "final"):
+        deal.status = "échu"
+    else:
+        session.rollback()
+        proposal = session.get(LifecycleProposal, proposal_id)
+        _reject_lifecycle(
+            session, proposal, current, "RESOLUTION_APPLICATION_REJECTED",
+            "Le résultat proposé n'est pas terminal.",
+            [{"code": "UNSUPPORTED_OUTCOME", "outcome": outcome}], 422)
+
+    deal.realized_payout = result.get("realized_payout")
+    deal.resolution_outcome = outcome
+    deal.updated_at = applied_at
+    session.add(deal)
+    for event in required_events:
+        before_event = _event_row(event)
+        event.fixing_status = FixingStatus.APPLIED
+        event.applied_at = applied_at
+        session.add(event)
+        record_audit_event(
+            session,
+            action="FIXING_APPLIED",
+            object_type="DEAL_EVENT",
+            object_id=event.id,
+            actor_user_id=current.id,
+            result="SUCCESS",
+            before=before_event,
+            after=_event_row(event),
+            reason=body.reason,
+            data_source=DataCategory.FIXING_OFFICIAL,
+            metadata={"proposal_id": proposal_id},
+        )
+
+    session.expire(proposal)
+    proposal = session.get(LifecycleProposal, proposal_id)
+    record_audit_event(
+        session,
+        action="RESOLUTION_APPLIED",
+        object_type="LIFECYCLE_PROPOSAL",
+        object_id=proposal.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        before=before_proposal,
+        after={"proposal": _proposal_row(proposal), "deal": _deal_row(deal)},
+        reason=body.reason,
+        data_source=DataCategory.FIXING_OFFICIAL,
+    )
+    session.commit()
+    session.refresh(deal)
+    session.refresh(proposal)
+    return {"deal": _deal_row(deal, _get_events(deal.id, session)),
+            "proposal": _proposal_row(proposal)}
 
 
 @router.get("/{deal_id}/reprice")

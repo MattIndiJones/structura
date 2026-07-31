@@ -6,6 +6,7 @@ from .models import (
     Entity, User, Folder, Script, Deal, DealEvent, Document, AmcStudy,
     Indicative, KidRecord, EmtRecord, RfqRequest, RfqQuote, RfqProvider,
     Counterparty, Alert, Portfolio, ShockRun, ComputeBatch, ComputeJob,
+    AuditEvent, LifecycleProposal, TradeAmendmentRequest,
 )
 
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
@@ -80,6 +81,10 @@ def _migrate():
         if rfq_cols and "ao_date" not in rfq_cols:
             conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN ao_date TEXT DEFAULT ''"))
             conn.commit()
+        if rfq_cols and "model_input_hash" not in rfq_cols:
+            # Legacy model prices remain deliberately unproven (NULL hash).
+            conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN model_input_hash TEXT"))
+            conn.commit()
 
         portfolio_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(portfolios)"))}
         if portfolio_cols and "is_default" not in portfolio_cols:
@@ -106,6 +111,39 @@ def _migrate():
             conn.commit()
         if quote_cols and "parent_quote_id" not in quote_cols:
             conn.execute(text("ALTER TABLE rfq_quotes ADD COLUMN parent_quote_id INTEGER"))
+            conn.commit()
+        if quote_cols and "firmness" not in quote_cols:
+            # UNKNOWN is the only honest migration for a historical quote whose
+            # firm/indicative nature was never captured.
+            conn.execute(text(
+                "ALTER TABLE rfq_quotes ADD COLUMN firmness TEXT DEFAULT 'UNKNOWN'"))
+            conn.commit()
+        if quote_cols and "valid_until" not in quote_cols:
+            conn.execute(text("ALTER TABLE rfq_quotes ADD COLUMN valid_until DATETIME"))
+            conn.commit()
+
+        event_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deal_events)"))}
+        if event_cols and "indicative_spots_json" not in event_cols:
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN indicative_spots_json TEXT DEFAULT '{}'"))
+            conn.commit()
+        if event_cols and "fixing_status" not in event_cols:
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN fixing_status TEXT "
+                "DEFAULT 'MANUAL_REVIEW_REQUIRED'"))
+            conn.commit()
+        if event_cols and "data_category" not in event_cols:
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN data_category TEXT DEFAULT 'UNKNOWN'"))
+            conn.commit()
+        if event_cols and "validated_by" not in event_cols:
+            conn.execute(text("ALTER TABLE deal_events ADD COLUMN validated_by INTEGER"))
+            conn.commit()
+        if event_cols and "validated_at" not in event_cols:
+            conn.execute(text("ALTER TABLE deal_events ADD COLUMN validated_at DATETIME"))
+            conn.commit()
+        if event_cols and "applied_at" not in event_cols:
+            conn.execute(text("ALTER TABLE deal_events ADD COLUMN applied_at DATETIME"))
             conn.commit()
 
         rfq_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_requests)"))}

@@ -2,7 +2,6 @@
 structured product against Structura's own model price."""
 from __future__ import annotations
 import json
-import hashlib
 from datetime import date, datetime, timezone
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,7 +10,13 @@ from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import RfqRequest, RfqQuote, RfqProvider, Counterparty, Deal, User
 from ..core.references import next_reference
+from ..core.audit import record_audit_event
+from ..core.rfq_controls import (
+    pricing_input_hash, product_terms, product_terms_hash,
+    rfq_readiness_failures,
+)
 from ..core.payscript.parser import parse_script
+from ..core.workflow import RfqBusinessStatus, rfq_business_status
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api/rfq", tags=["rfq"])
@@ -58,6 +63,9 @@ class QuoteUpdate(BaseModel):
         default=None, pattern="^(en_attente|recu|decline|expire)$")
     note: Optional[str] = None
     quoted_at: Optional[str] = None  # ISO datetime string
+    firmness: Optional[str] = Field(
+        default=None, pattern="^(UNKNOWN|INDICATIVE|FIRM)$")
+    valid_until: Optional[str] = None
     last_look: Optional[bool] = None
 
 
@@ -81,6 +89,21 @@ def _utc_iso(dt: datetime | None) -> str | None:
     return dt.isoformat() + "Z" if dt.tzinfo is None else dt.isoformat()
 
 
+def _parse_utc_datetime(raw, field_name: str) -> datetime | None:
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, datetime):
+        parsed = raw
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            raise HTTPException(422, f"{field_name} doit être une date-heure ISO valide.")
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def _edge_bps(price: float | None, model: float | None, sens: str) -> float | None:
     """Quote quality from our own side, in bps — positive is always in our
     favour, whichever way we trade. Buying, the good response is the one BELOW
@@ -92,54 +115,6 @@ def _edge_bps(price: float | None, model: float | None, sens: str) -> float | No
         return None
     diff = (model - price) if sens == "achat" else (price - model)
     return round(diff / model * 10000, 1)
-
-
-def _normalise_term(value):
-    """Canonical JSON-compatible representation of contractual RFQ terms."""
-    if isinstance(value, dict):
-        return {str(k): _normalise_term(value[k]) for k in sorted(value)}
-    if isinstance(value, list):
-        return [_normalise_term(v) for v in value]
-    if isinstance(value, bool) or value is None or isinstance(value, str):
-        return value
-    if isinstance(value, (int, float)):
-        return round(float(value), 12)
-    return str(value)
-
-
-def product_terms(script_snapshot: str, params: dict | None) -> dict:
-    """Only terms that identify the product, excluding pricing assumptions.
-
-    Volatility, rates, model and path count may legitimately change when the
-    desk refreshes its model price.  Script, payoff parameters, contractual
-    calendars, underlying identities, notional, currency and dates may not
-    change once banks have been solicited.
-    """
-    p = params or {}
-    underlyings = [
-        {k: u.get(k) for k in ("name", "ticker", "ccy") if k in u}
-        for u in (p.get("underlyings") or [])
-    ]
-    terms = {
-        "script_snapshot": "\n".join(
-            line.rstrip() for line in (script_snapshot or "").replace("\r\n", "\n").split("\n")
-        ).strip(),
-    }
-    if "underlyings" in p:
-        terms["underlyings"] = underlyings
-    if "user_params" in p:
-        terms["user_params"] = p.get("user_params") or {}
-    if "constats" in p:
-        terms["constats"] = p.get("constats") or {}
-    for key in ("notional", "currency", "strike_date", "value_date", "T"):
-        if key in p:
-            terms[key] = p[key]
-    return _normalise_term(terms)
-
-
-def product_terms_hash(terms: dict) -> str:
-    raw = json.dumps(terms, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _booked_deals_by_rfq(session: Session, user_id: int) -> dict:
@@ -155,6 +130,12 @@ def _booked_deals_by_rfq(session: Session, user_id: int) -> dict:
 
 def _rfq_row(r: RfqRequest, quotes: list | None = None, cpty_map: dict | None = None,
              booked_by_rfq: dict | None = None) -> dict:
+    business_status = rfq_business_status(
+        r.status, ready=not rfq_readiness_failures(r))
+    if r.status == "retenue" and quotes:
+        selected = next((quote for quote in quotes if quote.id == r.selected_quote_id), None)
+        if selected and selected.valid_until and selected.valid_until <= datetime.utcnow():
+            business_status = RfqBusinessStatus.EXPIRED.value
     row = {
         "id": r.id,
         "reference": r.reference,
@@ -171,6 +152,7 @@ def _rfq_row(r: RfqRequest, quotes: list | None = None, cpty_map: dict | None = 
         "model_price": r.model_price,
         "model_price_at": _utc_iso(r.model_price_at),
         "status": r.status,
+        "business_status": business_status,
         "selected_quote_id": r.selected_quote_id,
         # {id, reference} of the deal already booked from this tender, or None.
         "booked_deal": (booked_by_rfq or {}).get(r.id),
@@ -224,9 +206,23 @@ def _quote_row(q: RfqQuote, cpty_map: dict | None = None) -> dict:
         "status": q.status,
         "note": q.note,
         "quoted_at": _utc_iso(q.quoted_at),
+        "firmness": q.firmness,
+        "valid_until": _utc_iso(q.valid_until),
         "created_at": _utc_iso(q.created_at),
         "last_look": q.last_look,
         "parent_quote_id": q.parent_quote_id,
+    }
+
+
+def _rfq_audit_state(rfq: RfqRequest) -> dict:
+    return {
+        "reference": rfq.reference,
+        "kind": rfq.kind,
+        "status": rfq.status,
+        "selected_quote_id": rfq.selected_quote_id,
+        "model_price": rfq.model_price,
+        "model_price_at": _utc_iso(rfq.model_price_at),
+        "model_input_hash": rfq.model_input_hash,
     }
 
 
@@ -439,6 +435,17 @@ def create_rfq(
         params_json=json.dumps(body.params),
     )
     session.add(rfq)
+    session.flush()
+    record_audit_event(
+        session,
+        action="RFQ_CREATED",
+        object_type="RFQ",
+        object_id=rfq.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        after=_rfq_audit_state(rfq),
+        reason="Création de la demande de prix.",
+    )
     session.commit()
     session.refresh(rfq)
     return _rfq_row(rfq, [])
@@ -454,7 +461,13 @@ def list_rfqs(
         .order_by(RfqRequest.created_at.desc())
     ).all()
     booked = _booked_deals_by_rfq(session, current.id)
-    return [_rfq_row(r, booked_by_rfq=booked) for r in rfqs]
+    quotes_by_rfq: dict[int, list[RfqQuote]] = {}
+    if rfqs:
+        for quote in session.exec(select(RfqQuote).where(
+                RfqQuote.rfq_id.in_([rfq.id for rfq in rfqs]))).all():
+            quotes_by_rfq.setdefault(quote.rfq_id, []).append(quote)
+    return [_rfq_row(r, quotes_by_rfq.get(r.id, []), booked_by_rfq=booked)
+            for r in rfqs]
 
 
 @router.get("/history")
@@ -534,7 +547,9 @@ def update_rfq(
     session: Annotated[Session, Depends(get_session)],
 ):
     rfq = _get_owned(rfq_id, current, session)
+    before_audit = _rfq_audit_state(rfq)
     data = body.model_dump(exclude_unset=True)
+    requested_fields = set(data)
     if "params" in data:
         _refuse_if_booked(rfq, session, "les termes et paramètres de l'AO")
         new_params = data.pop("params") or {}
@@ -549,6 +564,13 @@ def update_rfq(
                      + ", ".join(changed) + ".")
         # Non-contractual model inputs (rates, vols, model, path count) may be
         # refreshed while quotes are live; the product identity above may not.
+        new_pricing_hash = pricing_input_hash(rfq.script_snapshot, new_params)
+        if rfq.model_price is not None and rfq.model_input_hash != new_pricing_hash:
+            # A scalar price cannot survive an input change.  The next explicit
+            # model pricing will write a fresh hash and timestamp.
+            rfq.model_price = None
+            rfq.model_price_at = None
+            rfq.model_input_hash = None
         rfq.params_json = json.dumps(new_params)
     if "model_price" in data:
         _refuse_if_booked(rfq, session, "le prix modèle")
@@ -559,6 +581,9 @@ def update_rfq(
                      f"écarts aux cotations en découlent.")
         rfq.model_price = mp
         rfq.model_price_at = datetime.utcnow()
+        rfq.model_input_hash = (
+            pricing_input_hash(rfq.script_snapshot, json.loads(rfq.params_json or "{}"))
+            if mp is not None else None)
     if data.get("sens") is not None and data["sens"] != rfq.sens:
         _refuse_if_booked(rfq, session, "le sens de l'AO")
         if _get_quotes(rfq_id, session):
@@ -601,6 +626,27 @@ def update_rfq(
     _sync_status(rfq, session)
     rfq.updated_at = datetime.utcnow()
     session.add(rfq)
+    critical = requested_fields & {"params", "model_price", "selected_quote_id", "status"}
+    if critical:
+        if "selected_quote_id" in requested_fields:
+            action = "QUOTE_SELECTED" if rfq.selected_quote_id else "QUOTE_DESELECTED"
+        elif "model_price" in requested_fields:
+            action = "MODEL_PRICE_RECORDED"
+        elif "params" in requested_fields:
+            action = "RFQ_INPUTS_UPDATED"
+        else:
+            action = "RFQ_STATUS_CHANGED"
+        record_audit_event(
+            session,
+            action=action,
+            object_type="RFQ",
+            object_id=rfq.id,
+            actor_user_id=current.id,
+            result="SUCCESS",
+            before=before_audit,
+            after=_rfq_audit_state(rfq),
+            reason="Transition RFQ explicite.",
+        )
     session.commit()
     return _rfq_row(rfq, _get_quotes(rfq_id, session), _counterparty_by_provider(session),
                     _booked_deals_by_rfq(session, current.id))
@@ -638,6 +684,14 @@ def add_quote(
 ):
     rfq = _get_owned(rfq_id, current, session)
     _refuse_if_booked(rfq, session, "l'ajout d'un fournisseur")
+    if rfq.kind == "to_trade":
+        readiness = rfq_readiness_failures(rfq)
+        if readiness:
+            raise HTTPException(422, {
+                "code": "RFQ_NOT_READY",
+                "message": "La RFQ to-trade doit être complète avant sollicitation.",
+                "failures": [failure.as_dict() for failure in readiness],
+            })
     # Un fournisseur = une ligne = une réponse. Deux lignes pour la même banque
     # la font peser double dans l'écart moyen et le hit ratio, et rendent le
     # last look ambigu (quelle ligne la contre-cote remplace-t-elle ?). Le
@@ -662,6 +716,16 @@ def add_quote(
     session.add(q)
     session.flush()   # the row must exist before the status is read off it
     _sync_status(rfq, session)
+    record_audit_event(
+        session,
+        action="QUOTE_SOLICITED",
+        object_type="RFQ_QUOTE",
+        object_id=q.id,
+        actor_user_id=current.id,
+        result="SUCCESS",
+        after=_quote_row(q, _counterparty_by_provider(session)),
+        reason="Ajout d'un fournisseur au processus de cotation.",
+    )
     session.commit()
     session.refresh(q)
     return _quote_row(q, _counterparty_by_provider(session))
@@ -679,7 +743,10 @@ def update_quote(
     q = session.get(RfqQuote, quote_id)
     if not q or q.rfq_id != rfq_id:
         raise HTTPException(404, "Quote introuvable")
+    before_audit = _quote_row(q, _counterparty_by_provider(session))
     data = body.model_dump(exclude_unset=True)
+    audited_fields = set(data) & {"price", "currency", "status", "quoted_at",
+                                  "firmness", "valid_until", "last_look"}
     # A note annotates, it doesn't evidence — everything else on a quote is
     # part of the competitive record once the tender has traded.
     if any(k != "note" for k in data):
@@ -704,21 +771,15 @@ def update_quote(
                          f"({data['price']}) doit être {sense} que la cotation d'origine "
                          f"({parent.price}). Si le fournisseur revient moins bien, sa cotation "
                          f"initiale reste sa réponse — annulez le last look.")
-    if "quoted_at" in data and data["quoted_at"]:
-        # Frontend always sends a Z-suffixed UTC ISO string (new Date().toISOString()).
-        # Store explicitly as naive-UTC rather than relying on the SQLite
-        # driver to silently drop tzinfo — see _utc_iso for why this matters.
-        raw_quoted_at = data["quoted_at"]
-        if isinstance(raw_quoted_at, datetime):
-            parsed = raw_quoted_at
-        else:
-            try:
-                parsed = datetime.fromisoformat(raw_quoted_at.replace("Z", "+00:00"))
-            except (AttributeError, TypeError, ValueError):
-                raise HTTPException(422, "quoted_at doit être une date-heure ISO valide.")
-        if parsed.tzinfo is not None:
-            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-        data["quoted_at"] = parsed
+    if "quoted_at" in data:
+        data["quoted_at"] = _parse_utc_datetime(data["quoted_at"], "quoted_at")
+    if "valid_until" in data:
+        data["valid_until"] = _parse_utc_datetime(data["valid_until"], "valid_until")
+        received_at = data.get("quoted_at", q.quoted_at)
+        if data["valid_until"] is not None and received_at is not None \
+                and data["valid_until"] <= received_at:
+            raise HTTPException(
+                422, "valid_until doit être postérieure à l'heure de réception de la quote.")
 
     if "last_look" in data:
         want = data.pop("last_look")
@@ -760,6 +821,19 @@ def update_quote(
     # A price arriving (or being cleared) is what moves the tender from
     # "envoyée" to "cotée" and back.
     _sync_status(rfq, session)
+    if audited_fields:
+        record_audit_event(
+            session,
+            action="QUOTE_UPDATED",
+            object_type="RFQ_QUOTE",
+            object_id=q.id,
+            actor_user_id=current.id,
+            result="SUCCESS",
+            before=before_audit,
+            after=_quote_row(q, _counterparty_by_provider(session)),
+            reason="Mise à jour d'une donnée de cotation.",
+            metadata={"fields": sorted(audited_fields)},
+        )
     session.commit()
     return _quote_row(q, _counterparty_by_provider(session))
 

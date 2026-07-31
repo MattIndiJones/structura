@@ -43,6 +43,25 @@ class AdminAuditLog(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
+class AuditEvent(SQLModel, table=True):
+    """Append-only business audit trail for critical workflow decisions."""
+    __tablename__ = "audit_events"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    action: str = Field(index=True)
+    object_type: str = Field(index=True)
+    object_id: Optional[int] = Field(default=None, index=True)
+    actor_user_id: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
+    actor_type: str = Field(default="USER")       # USER | PROCESS | SYSTEM
+    result: str = Field(default="SUCCESS", index=True)  # SUCCESS | REJECTED | ERROR
+    before_json: str = Field(default="{}", sa_column=Column(Text))
+    after_json: str = Field(default="{}", sa_column=Column(Text))
+    reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+    data_source: Optional[str] = Field(default=None)
+    correlation_id: Optional[str] = Field(default=None, index=True)
+    metadata_json: str = Field(default="{}", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
 class Folder(SQLModel, table=True):
     __tablename__ = "folders"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -176,6 +195,27 @@ class Deal(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class TradeAmendmentRequest(SQLModel, table=True):
+    """Durable envelope for a future governed amendment workflow.
+
+    Direct Deal edits are refused in this tranche.  No public approval API is
+    exposed yet: this only reserves the append-only shape the next phase will
+    build on without pretending maker/checker already exists.
+    """
+    __tablename__ = "trade_amendment_requests"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    field_name: str = Field(index=True)
+    old_value_json: str = Field(default="null", sa_column=Column(Text))
+    new_value_json: str = Field(default="null", sa_column=Column(Text))
+    reason: str = Field(default="", sa_column=Column(Text))
+    requested_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    status: str = Field(default="PENDING", index=True)
+    validated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    validated_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
 class Document(SQLModel, table=True):
@@ -331,6 +371,9 @@ class RfqRequest(SQLModel, table=True):
 
     model_price: Optional[float] = Field(default=None)
     model_price_at: Optional[datetime] = Field(default=None)
+    # NULL on a legacy row means that the scalar price cannot be tied to an
+    # exact input snapshot and is therefore not executable for a new booking.
+    model_input_hash: Optional[str] = Field(default=None, index=True)
 
     # draft | envoye | quote | retenue | clos | sans_suite.
     # Derived server-side from the tender's own facts on every mutation (see
@@ -360,6 +403,10 @@ class RfqQuote(SQLModel, table=True):
     status: str = Field(default="en_attente")  # en_attente | recu | decline | expire
     note: Optional[str] = Field(default=None)
     quoted_at: Optional[datetime] = Field(default=None)
+    # Existing quotes migrate to UNKNOWN and require an explicit desk
+    # qualification before they can be used to execute a trade.
+    firmness: str = Field(default="UNKNOWN")  # UNKNOWN | INDICATIVE | FIRM
+    valid_until: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Last look: this provider (often the one who originated the idea) gets
@@ -464,10 +511,45 @@ class DealEvent(SQLModel, table=True):
     event_index: int = Field(default=0)
     event_date: str = Field(default="")    # ISO calendar date
     t_years: float = Field(default=0.0)    # time from value_date in years
+    # Official/manual candidate fixing. Indicative monitoring data is stored
+    # separately and can never overwrite this value.
     spots_json: str = Field(default="{}")  # {underlying_name: spot_value}
+    indicative_spots_json: str = Field(default="{}", sa_column=Column(Text))
     source: str = Field(default="pending") # pending | auto | manuel
     status: str = Field(default="futur")   # futur | observé | callé | ki | final | annulé
+    fixing_status: str = Field(default="EXPECTED", index=True)
+    data_category: str = Field(default="UNKNOWN")
+    validated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    validated_at: Optional[datetime] = Field(default=None)
+    applied_at: Optional[datetime] = Field(default=None)
     label: str = Field(default="")
+
+
+class LifecycleProposal(SQLModel, table=True):
+    """Non-binding result proposed from monitoring data.
+
+    Validation and application are explicit separate transitions.  The
+    economic result is immutable once proposed.
+    """
+    __tablename__ = "lifecycle_proposals"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    event_id: Optional[int] = Field(default=None, foreign_key="deal_events.id", index=True)
+    dedup_key: str = Field(unique=True, index=True)
+    status: str = Field(default="PROPOSED", index=True)
+    proposed_outcome: str = Field(index=True)
+    result_json: str = Field(default="{}", sa_column=Column(Text))
+    data_source: str = Field(default="INDICATIVE")
+    proposed_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    validated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    validation_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+    validated_at: Optional[datetime] = Field(default=None)
+    applied_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    applied_at: Optional[datetime] = Field(default=None)
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+    correlation_id: Optional[str] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ShockRun(SQLModel, table=True):

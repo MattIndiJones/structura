@@ -2,6 +2,18 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch } from '../utils/api.js'
 
+function errorMessage(err, fallback) {
+  const detail = err?.detail
+  if (!detail || typeof detail !== 'object') return detail || fallback
+  const failures = (detail.failures || []).flatMap(f => {
+    if (f.message) return `${f.code || 'CONTRÔLE'} — ${f.message}`
+    if (f.failures) return f.failures.map(child =>
+      `${child.code || 'CONTRÔLE'}${f.event_date ? ` (${f.event_date})` : ''}`)
+    return f.code || JSON.stringify(f)
+  })
+  return [detail.message || detail.code || fallback, ...failures].join('\n')
+}
+
 export const useDealsStore = defineStore('deals', () => {
   const deals = ref([])
   const currentDeal = ref(null)
@@ -35,7 +47,7 @@ export const useDealsStore = defineStore('deals', () => {
       })
       if (!res.ok) {
         const err = await res.json()
-        throw new Error(err.detail || 'Erreur booking')
+        throw new Error(errorMessage(err, 'Erreur booking'))
       }
       const deal = await res.json()
       deals.value.unshift(deal)
@@ -67,7 +79,7 @@ export const useDealsStore = defineStore('deals', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur') }
+    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Erreur')) }
     const updated = await res.json()
     const idx = deals.value.findIndex(d => d.id === id)
     if (idx >= 0) deals.value[idx] = { ...deals.value[idx], ...updated }
@@ -81,7 +93,7 @@ export const useDealsStore = defineStore('deals', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur') }
+    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Erreur')) }
     const updated = await res.json()
     if (currentDeal.value?.events) {
       const idx = currentDeal.value.events.findIndex(e => e.id === eventId)
@@ -94,7 +106,7 @@ export const useDealsStore = defineStore('deals', () => {
     loading.value = true; refreshStatus.value = 'Chargement spots…'
     try {
       const res = await apiFetch(`/api/deals/${dealId}/events/refresh`, { method: 'POST' })
-      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur refresh') }
+      if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Erreur refresh')) }
       const result = await res.json()
       refreshStatus.value = `✓ ${result.message}`
       // Reload events
@@ -107,6 +119,32 @@ export const useDealsStore = defineStore('deals', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  async function validateFixing(dealId, eventId, reason) {
+    const res = await apiFetch(`/api/deals/${dealId}/events/${eventId}/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Validation impossible')) }
+    const updated = await res.json()
+    const idx = currentDeal.value?.events?.findIndex(e => e.id === eventId) ?? -1
+    if (idx >= 0) currentDeal.value.events.splice(idx, 1, updated)
+    return updated
+  }
+
+  async function transitionProposal(dealId, proposalId, action, reason, confirmedOutcome = null) {
+    const res = await apiFetch(`/api/deals/${dealId}/lifecycle-proposals/${proposalId}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason, confirmed_outcome: confirmedOutcome }),
+    })
+    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Transition impossible')) }
+    const result = await res.json()
+    currentDeal.value = null
+    await selectDeal(dealId)
+    return result
   }
 
   async function getRepriceInputs(dealId) {
@@ -124,6 +162,7 @@ export const useDealsStore = defineStore('deals', () => {
   return {
     deals, currentDeal, loading, error, refreshStatus,
     loadDeals, nextRef, bookDeal, selectDeal, updateDeal,
-    updateEvent, refreshEvents, getRepriceInputs, getWatchlist,
+    updateEvent, validateFixing, transitionProposal,
+    refreshEvents, getRepriceInputs, getWatchlist,
   }
 })

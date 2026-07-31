@@ -1,4 +1,4 @@
-"""Admin data browser — editable_fields allowlist (core/admin_registry.py).
+"""Admin data browser — immutable booked-deal boundary.
 Offline, in-memory SQLite, calling the registry functions directly (same
 pattern as test_rfq.py)."""
 import json
@@ -9,7 +9,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from fastapi import HTTPException
 
 from backend.app.core import admin_registry
-from backend.app.db.models import AdminAuditLog, Deal, RfqRequest
+from backend.app.db.models import AuditEvent, Deal, RfqRequest
 
 
 def _make_session() -> Session:
@@ -35,30 +35,31 @@ def _add_deal(s: Session) -> Deal:
     return deal
 
 
-def test_get_row_includes_editable_fields_missing_from_the_summary_columns():
+def test_get_row_exposes_summary_only_for_immutable_deals():
     s = _make_session()
     deal = _add_deal(s)
 
     detail = admin_registry.get_row("deals", deal.id, s)
 
-    # Only fields safe to correct without rebuilding lifecycle are exposed.
-    assert detail["price_traded"] == 97.5
     assert detail["contrepartie"] == "BNP Paribas"
+    assert "price_traded" not in detail
     assert "trade_date" not in detail
 
 
-def test_deals_table_accepts_a_whitelisted_correction():
+def test_deals_table_refuses_former_admin_correction_path_and_audits_it():
     s = _make_session()
     deal = _add_deal(s)
 
-    result = admin_registry.update_row("deals", deal.id, {"contrepartie": "Goldman Sachs", "nominal": 2_000_000.0}, s)
-
-    assert result["contrepartie"] == "Goldman Sachs"
-    assert result["nominal"] == 2_000_000.0
+    with pytest.raises(HTTPException) as exc:
+        admin_registry.update_row(
+            "deals", deal.id,
+            {"contrepartie": "Goldman Sachs", "nominal": 2_000_000.0},
+            s, actor_id=7)
+    assert exc.value.status_code == 409
     refreshed = s.get(Deal, deal.id)
-    assert refreshed.contrepartie == "Goldman Sachs"
-    assert refreshed.nominal == 2_000_000.0
-    audit = s.exec(select(AdminAuditLog)).one()
+    assert refreshed.contrepartie == "BNP Paribas"
+    assert refreshed.nominal == 1_000_000.0
+    audit = s.exec(select(AuditEvent)).one()
     assert json.loads(audit.before_json)["nominal"] == 1_000_000.0
     assert json.loads(audit.after_json)["nominal"] == 2_000_000.0
 
@@ -70,7 +71,7 @@ def test_deals_table_rejects_a_non_whitelisted_field():
 
     with pytest.raises(HTTPException) as exc:
         admin_registry.update_row("deals", deal.id, {"script_snapshot": "HACKED"}, s)
-    assert exc.value.status_code == 422
+    assert exc.value.status_code == 409
 
     refreshed = s.get(Deal, deal.id)
     assert refreshed.script_snapshot == original_snapshot
@@ -89,7 +90,7 @@ def test_admin_refuse_les_corrections_qui_cassent_le_deal(patch):
     deal = _add_deal(s)
     with pytest.raises(HTTPException) as exc:
         admin_registry.update_row("deals", deal.id, patch, s)
-    assert exc.value.status_code == 422
+    assert exc.value.status_code == 409
 
 
 def test_a_table_without_editable_fields_is_rejected_entirely():
@@ -111,11 +112,9 @@ def test_update_row_404s_on_missing_record():
     assert exc.value.status_code == 404
 
 
-def test_registry_meta_exposes_editable_fields_for_deals_only():
+def test_registry_meta_exposes_no_direct_deal_editor():
     meta = {m["key"]: m["editable_fields"] for m in admin_registry.registry_meta()}
-    assert set(meta["deals"]) == {
-        "contrepartie", "devise", "product_type", "nominal", "price_traded",
-    }
+    assert meta["deals"] == {}
     assert meta["rfq_requests"] == {}
     assert meta["scripts"] == {}
 

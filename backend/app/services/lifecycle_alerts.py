@@ -1,9 +1,8 @@
-"""Daily lifecycle refresh + alert creation.
+"""Daily indicative lifecycle monitoring + alert creation.
 
-One pass over the ACTIVE deals: replay each frozen script on history
-(api/deals.refresh_deal_core) to catch resolutions (callé / échu / ki),
-then, for deals still alive, read the same barrier gaps the watchlist
-shows (api/deals.build_watchlist_row) and raise crossing alerts.
+One pass over ACTIVE deals replays each frozen script on non-binding market
+data. A terminal result is only a proposal: this process never validates a
+fixing and never applies an economic outcome. Barrier alerts are indicative too.
 
 Ran two ways:
 - by the in-process scheduler (main.py) every day at 23:00 local time,
@@ -56,12 +55,12 @@ def refresh_book(session: Session, user_id: int | None = None) -> dict:
 
     today = date.today()
     summary = {"deals": len(deals), "refreshed": 0, "alerts_created": 0,
-               "resolved": [], "errors": []}
+               "proposed": [], "resolved": [], "errors": []}
 
     for deal in deals:
         try:
             res = refresh_deal_core(deal, session)   # commits on success
-        except ValueError as e:
+        except Exception as e:
             summary["errors"].append(f"{deal.reference}: {e}")
             continue
         summary["refreshed"] += 1
@@ -69,19 +68,7 @@ def refresh_book(session: Session, user_id: int | None = None) -> dict:
         ev = (res or {}).get("evaluation") or {}
         outcome = ev.get("outcome")
         if outcome in ("callé", "ki", "final"):
-            when = ev.get("event_date", "?")
-            payout = _pct(ev.get("realized_payout"))
-            msg = {
-                "callé": f"{deal.reference} : rappel anticipé détecté le {when} — remboursement total {payout}",
-                "ki": f"{deal.reference} : échéance en knock-in le {when} — remboursement total {payout}",
-                "final": f"{deal.reference} : arrivé à échéance le {when} — remboursement total {payout}",
-            }[outcome]
-            if _alert_once(session, deal, outcome, msg,
-                           f"deal:{deal.id}:lifecycle:{outcome}"):
-                summary["alerts_created"] += 1
-            summary["resolved"].append({"reference": deal.reference, "outcome": outcome})
-            session.commit()
-            continue
+            summary["proposed"].append({"reference": deal.reference, "outcome": outcome})
 
         # Still active — barrier crossings on the same gaps the watchlist shows.
         try:
@@ -123,9 +110,9 @@ def run_scheduled_refresh() -> None:
         with Session(engine) as session:
             summary = refresh_book(session)
         log.info(
-            "Refresh quotidien : %s deal(s) actifs, %s rafraîchi(s), %s alerte(s), résolus=%s, erreurs=%s",
+            "Refresh quotidien : %s deal(s) actifs, %s rafraîchi(s), %s alerte(s), propositions=%s, erreurs=%s",
             summary["deals"], summary["refreshed"], summary["alerts_created"],
-            summary["resolved"], summary["errors"],
+            summary["proposed"], summary["errors"],
         )
     except Exception:
         log.exception("Refresh quotidien échoué")

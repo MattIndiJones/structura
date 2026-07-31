@@ -455,7 +455,7 @@
             </div>
 
             <div v-else class="table-shell" tabindex="0" role="region">
-            <table class="w-full text-xs min-w-[980px]">
+            <table class="w-full text-xs min-w-[1280px]">
               <thead>
                 <tr class="text-left text-slate-500 border-b border-slate-800">
                   <th class="py-1.5 pr-2 font-medium">Fournisseur</th>
@@ -464,7 +464,9 @@
                   <th class="py-1.5 pr-2 font-medium num"
                       title="Écart au prix modèle Structura, signé de notre côté : positif = en notre faveur (à l'achat, coter sous le modèle ; à la vente, au-dessus).">Écart</th>
                   <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Statut</th>
+                  <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Fermeté</th>
                   <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Date réponse</th>
+                  <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Valide jusqu'au</th>
                   <th class="py-1.5 pr-2 font-medium whitespace-nowrap" title="Le fournisseur voit le meilleur prix du marché et peut s'aligner, ou garder le deal à son propre prix.">Last look</th>
                   <th class="py-1.5 pr-2 font-medium"></th>
                 </tr>
@@ -496,10 +498,25 @@
                     </select>
                   </td>
                   <td class="py-1.5 pr-2">
+                    <select class="select py-1 px-2 min-w-[110px]" :value="q.firmness || 'UNKNOWN'"
+                            :disabled="!!rfq.current.booked_deal"
+                            @change="updateQuoteField(q, 'firmness', $event.target.value)">
+                      <option value="UNKNOWN">À qualifier</option>
+                      <option value="INDICATIVE">Indicative</option>
+                      <option value="FIRM">Ferme</option>
+                    </select>
+                  </td>
+                  <td class="py-1.5 pr-2">
                     <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
                            :disabled="!!rfq.current.booked_deal"
                            :value="toDatetimeLocal(q.quoted_at)"
                            @change="onQuoteDateChange(q, $event.target.value)" />
+                  </td>
+                  <td class="py-1.5 pr-2">
+                    <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
+                           :disabled="!!rfq.current.booked_deal"
+                           :value="toDatetimeLocal(q.valid_until)"
+                           @change="onQuoteValidityChange(q, $event.target.value)" />
                   </td>
                   <td class="py-1.5 pr-2">
                     <select v-if="!q.parent_quote_id" class="select py-1 px-2 min-w-[80px]"
@@ -1301,6 +1318,10 @@ function onQuotePriceChange(q, value) {
 
 function onQuoteDateChange(q, value) {
   rfq.updateQuote(rfq.current.id, q.id, { quoted_at: value ? new Date(value).toISOString() : null })
+}
+
+function onQuoteValidityChange(q, value) {
+  rfq.updateQuote(rfq.current.id, q.id, { valid_until: value ? new Date(value).toISOString() : null })
 }
 
 // <input type="datetime-local"> expects "YYYY-MM-DDTHH:mm" in local time.

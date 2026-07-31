@@ -5,11 +5,8 @@ would corrupt. To add a table, add an entry here; no other code changes
 required.
 
 A table becomes editable (not just delete-able) by adding an
-`editable_fields` list — an explicit whitelist, never "every column", so a
-frozen-at-booking field (script_snapshot, market_snapshot_json...) can never
-be admin-edited by mistake. Only `deals` has this today, and only corrections
-that do not require rebuilding lifecycle are exposed. Dates and status remain
-domain operations, not raw table patches.
+`editable_fields` list. Booked deals deliberately have none: every economic
+correction now goes through the controlled amendment request envelope.
 
 KidRecord/EmtRecord are deliberately absent — they're immutable regulatory
 records (see db/models.py docstrings) and must never be admin-editable or
@@ -25,6 +22,7 @@ from ..db.models import (
     Script, Folder, Deal, DealEvent, Document, AmcStudy, Indicative,
     KidRecord, EmtRecord, RfqRequest, RfqQuote, User, AdminAuditLog,
 )
+from .audit import commit_rejection
 
 _DOCS_DIR = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "documents"
 
@@ -50,19 +48,7 @@ REGISTRY: dict[str, dict] = {
         "columns": ["id", "reference", "contrepartie", "devise", "nominal", "status", "user_id", "created_at"],
         "children": [(DealEvent, "deal_id")],
         "blockers": [(KidRecord, "deal_id"), (EmtRecord, "deal_id")],
-        # field -> input kind, for AdminBrowseView.vue's edit form. Deliberately
-        # excludes fair_value (Structura's own computed price at booking, not
-        # something a client would ask to "correct") and every JSON/frozen
-        # field (script_snapshot, market_snapshot_json, underlyings_json,
-        # greeks_json, realized_payout, resolution_outcome) — those stay
-        # view+delete only, same as every other table in this registry.
-        "editable_fields": {
-            "contrepartie": "text",
-            "devise": "text",
-            "product_type": "text",
-            "nominal": "number",
-            "price_traded": "number",
-        },
+        "editable_fields": {},
     },
     "documents": {
         "model": Document, "label": "Documents",
@@ -190,39 +176,36 @@ def delete_rows(table_key: str, row_ids: list, session: Session) -> dict:
 
 def update_row(table_key: str, row_id: int, patch: dict, session: Session,
                actor_id: int | None = None) -> dict:
-    """Admin-only correction of a handful of whitelisted fields — see the
-    module docstring for why this is an explicit per-table allowlist rather
-    than a generic 'edit any column' endpoint. Bypasses the normal
-    ownership check the user-facing PATCH /api/deals/{id} enforces, since
-    the whole point is fixing another user's booked deal on a client's
-    request."""
+    """Admin correction boundary. Booked deals are immutable here too."""
     cfg = _get_config(table_key)
-    editable = cfg.get("editable_fields")
-    if not editable:
-        raise HTTPException(403, "Cette table n'est pas modifiable depuis l'admin.")
-
     row = session.get(cfg["model"], row_id)
     if not row:
         raise HTTPException(404, "Enregistrement introuvable")
 
+    if table_key == "deals" and patch:
+        before = {field: getattr(row, field, None) for field in patch}
+        commit_rejection(
+            session,
+            action="POST_BOOKING_MODIFICATION_REJECTED",
+            object_type="DEAL",
+            object_id=row.id,
+            actor_user_id=actor_id,
+            actor_type="USER" if actor_id else "SYSTEM",
+            before=before,
+            after=patch,
+            reason="La correction admin directe est interdite; utilisez une demande d'amendement.",
+            metadata={"channel": "ADMIN_REGISTRY", "fields": sorted(patch)},
+        )
+        raise HTTPException(
+            409, "Deal booké immuable : créez une demande d'amendement contrôlée.")
+
+    editable = cfg.get("editable_fields")
+    if not editable:
+        raise HTTPException(403, "Cette table n'est pas modifiable depuis l'admin.")
+
     unknown = set(patch) - set(editable)
     if unknown:
         raise HTTPException(422, f"Champ(s) non modifiable(s) : {', '.join(sorted(unknown))}")
-
-    if table_key == "deals":
-        if "nominal" in patch and (patch["nominal"] is None or patch["nominal"] <= 0):
-            raise HTTPException(422, "Le nominal doit être strictement positif.")
-        if "price_traded" in patch and (
-                patch["price_traded"] is None or patch["price_traded"] <= 0):
-            raise HTTPException(422, "Le prix traité doit être strictement positif.")
-        if "contrepartie" in patch:
-            patch["contrepartie"] = str(patch["contrepartie"] or "").strip()
-            if not patch["contrepartie"]:
-                raise HTTPException(422, "La contrepartie est obligatoire.")
-        if "devise" in patch:
-            patch["devise"] = str(patch["devise"] or "").strip().upper()
-            if len(patch["devise"]) != 3 or not patch["devise"].isalpha():
-                raise HTTPException(422, "La devise doit être un code ISO à trois lettres.")
 
     before = {field: getattr(row, field, None) for field in patch}
     for field, value in patch.items():

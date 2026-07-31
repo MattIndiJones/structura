@@ -10,6 +10,7 @@ features from the 2026-07-29 session:
   3. Selected/"retenue" quote on the RFQ, including cleanup when the
      selected quote is deleted.
 """
+import json
 from datetime import date, datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -24,6 +25,7 @@ from backend.app.api import deals as deals_api
 from backend.app.api import rfq as rfq_api
 from backend.app.db.models import Counterparty, RfqProvider, RfqQuote, RfqRequest
 from backend.app.core.references import next_reference
+from backend.app.core.rfq_controls import pricing_input_hash
 
 USER = SimpleNamespace(id=1, entity_id=1)
 
@@ -235,12 +237,12 @@ def test_booking_from_an_rfq_links_deal_and_closes_the_rfq():
         price_traded=98.0, trade_date=date.today().isoformat(),
         strike_date=date.today().isoformat(), value_date=date.today().isoformat(),
         maturity_date=(date.today() + timedelta(days=1096)).isoformat(), T=3.0,
-        underlyings=[{"name": "UL1", "ticker": "TK1", "s0_abs": 100.0}],
+        underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "s0_abs": 100.0}],
         observation_times=[1.0, 2.0, 3.0],
         script_snapshot="AT MATURITY\n  PAY 1",
         rfq_id=rfq["id"],
     )
-    deal = deals_api.book_deal(body, USER, s)
+    deal = _book_deal(body, USER, s)
 
     assert deal["rfq_id"] == rfq["id"]
     closed_rfq = s.get(RfqRequest, rfq["id"])
@@ -253,12 +255,58 @@ def _booking_body(**over):
         price_traded=98.0, trade_date=date.today().isoformat(),
         strike_date=date.today().isoformat(), value_date=date.today().isoformat(),
         maturity_date=(date.today() + timedelta(days=1096)).isoformat(), T=3.0,
-        underlyings=[{"name": "UL1", "ticker": "TK1", "s0_abs": 100.0}],
+        underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "s0_abs": 100.0}],
         observation_times=[1.0, 2.0, 3.0],
         script_snapshot="AT MATURITY\n  PAY 1",
     )
     base.update(over)
     return deals_api.DealCreate(**base)
+
+
+def _book_deal(body, current, s):
+    """Upgrade legacy success fixtures to the now-explicit execution contract.
+
+    Tests that exercise missing/foreign/unselected RFQs remain untouched: only
+    a retained, owned quote is qualified here. Production code has no fallback.
+    """
+    if body.rfq_id:
+        rfq = s.get(RfqRequest, body.rfq_id)
+        selected = s.get(RfqQuote, rfq.selected_quote_id) \
+            if rfq and rfq.user_id == current.id and rfq.selected_quote_id else None
+        if rfq and selected and rfq.status == "retenue":
+            params = json.loads(rfq.params_json or "{}")
+            if not params.get("underlyings"):
+                params = {
+                    "underlyings": body.underlyings,
+                    "user_params": (body.market_snapshot or {}).get("user_params", {}),
+                    "constats": (body.market_snapshot or {}).get("constats", {}),
+                    "notional": body.nominal, "currency": body.devise,
+                    "strike_date": body.strike_date, "value_date": body.value_date,
+                    "T": body.T, "model": "constant", "r": 0.03,
+                }
+                rfq.params_json = json.dumps(params)
+            rfq.kind = "to_trade"
+            rfq.model_price = rfq.model_price or body.fair_value
+            rfq.model_price_at = datetime.utcnow()
+            rfq.model_input_hash = pricing_input_hash(rfq.script_snapshot, params)
+            selected.firmness = "FIRM"
+            selected.valid_until = datetime.utcnow() + timedelta(minutes=30)
+            selected.status = "recu"
+            cpty = s.exec(select(Counterparty).where(
+                Counterparty.name == body.contrepartie)).first()
+            if not cpty:
+                cpty = Counterparty(name=body.contrepartie, active=True)
+                s.add(cpty); s.flush()
+            provider = s.exec(select(RfqProvider).where(
+                RfqProvider.label == selected.provider)).first()
+            if not provider:
+                provider = RfqProvider(
+                    label=selected.provider, active=True, counterparty_id=cpty.id)
+            else:
+                provider.counterparty_id = cpty.id
+                provider.active = True
+            s.add(provider); s.add(selected); s.add(rfq); s.commit()
+    return deals_api.book_deal(body, current, s)
 
 
 # ── 6. Sens (notre côté) et normalisation de l'écart ────────────────────
@@ -309,7 +357,7 @@ def test_booking_rejects_an_unknown_rfq_id():
     the RFQ close was skipped)."""
     s = _make_session()
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(_booking_body(rfq_id=9999), USER, s)
+        _book_deal(_booking_body(rfq_id=9999), USER, s)
     assert exc.value.status_code == 404
 
 
@@ -320,7 +368,7 @@ def test_booking_rejects_another_users_rfq():
         SimpleNamespace(id=99, entity_id=1), s)
 
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(_booking_body(rfq_id=other_rfq["id"]), USER, s)
+        _book_deal(_booking_body(rfq_id=other_rfq["id"]), USER, s)
     assert exc.value.status_code == 404
     # …and the foreign RFQ is left untouched, not closed by someone else's book.
     assert s.get(RfqRequest, other_rfq["id"]).status == "draft"
@@ -407,7 +455,7 @@ def test_a_booked_rfq_never_falls_back():
     q = _add_quote(s, rfq["id"])
     rfq_api.update_quote(rfq["id"], q["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=q["id"]), USER, s)
-    deals_api.book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
     assert rfq_api.get_rfq(rfq["id"], USER, s)["status"] == "clos"
 
     # Désélectionner après booking ne « rouvre » pas la piste d'audit — depuis
@@ -466,7 +514,7 @@ def test_deleting_an_rfq_a_deal_was_booked_from_is_refused():
     q = _add_quote(s, rfq["id"])
     rfq_api.update_quote(rfq["id"], q["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=q["id"]), USER, s)
-    deals_api.book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
 
     with pytest.raises(HTTPException) as exc:
         rfq_api.delete_rfq(rfq["id"], USER, s)
@@ -594,7 +642,7 @@ def test_history_flags_the_winner_only_once_the_deal_is_booked():
 
     assert all(not r["won"] for r in rfq_api.rfq_history(USER, s))
 
-    deals_api.book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
     rows = {r["quote_id"]: r for r in rfq_api.rfq_history(USER, s)}
     assert rows[winner["id"]]["won"] is True
     assert rows[loser["id"]]["won"] is False
@@ -610,7 +658,7 @@ def test_booking_from_an_rfq_without_a_retained_quote_is_refused():
     rfq_api.update_quote(rfq["id"], q["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
 
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+        _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
     assert exc.value.status_code == 422
     # …et la RFQ n'a pas été close au passage.
     assert s.get(RfqRequest, rfq["id"]).status == "quote"
@@ -626,7 +674,7 @@ def test_booking_freezes_the_competitive_picture_on_the_deal():
     rfq_api.update_quote(rfq["id"], loser["id"], rfq_api.QuoteUpdate(price=98.7), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=winner["id"]), USER, s)
 
-    deal = deals_api.book_deal(_booking_body(rfq_id=rfq["id"], price_traded=98.2), USER, s)
+    deal = _book_deal(_booking_body(rfq_id=rfq["id"], price_traded=98.2), USER, s)
     prov = deal["rfq_provenance"]
     assert prov["reference"] == rfq["reference"]
     assert prov["model_price"] == 97.9
@@ -659,13 +707,13 @@ def test_provenance_keeps_only_final_quotes_as_competition():
     _answered_last_look(s, rfq["id"], rival["id"], 98.4)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=winner["id"]), USER, s)
 
-    deal = deals_api.book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
     assert deal["rfq_provenance"]["competition"] == [{"provider": "BNP Paribas", "price": 98.4}]
 
 
 def test_a_deal_booked_outside_any_tender_has_no_provenance():
     s = _make_session()
-    assert deals_api.book_deal(_booking_body(), USER, s)["rfq_provenance"] is None
+    assert _book_deal(_booking_body(), USER, s)["rfq_provenance"] is None
 
 
 # ── 13. Un AO ne s'exécute qu'une fois ──────────────────────────────────
@@ -675,7 +723,7 @@ def _booked_rfq(s):
     q = _add_quote(s, rfq["id"], "UBS")
     rfq_api.update_quote(rfq["id"], q["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=q["id"]), USER, s)
-    return rfq, deals_api.book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    return rfq, _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
 
 
 def test_an_rfq_cannot_be_booked_twice():
@@ -686,7 +734,7 @@ def test_an_rfq_cannot_be_booked_twice():
     rfq, first = _booked_rfq(s)
 
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+        _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
     assert exc.value.status_code == 409
     assert first["reference"] in exc.value.detail   # l'erreur nomme le deal existant
 
@@ -745,7 +793,7 @@ def test_observations_are_derived_without_any_pricing():
     barrière, pas de MtM résiduel, pas de résolution automatique — en
     silence."""
     s = _make_session()
-    deal = deals_api.book_deal(_expert_booking(), USER, s)
+    deal = _book_deal(_expert_booking(), USER, s)
 
     times = [e["t_years"] for e in deal["events"]]
     assert times[0] == 0.0                      # strike
@@ -758,7 +806,7 @@ def test_the_contractual_calendar_wins_over_the_simulation_grid():
     Monte Carlo (0.9808 = 51/52), pas ceux du calendrier (0.9884) — 3 jours
     d'écart sur chaque date d'observation dont le cycle de vie se sert."""
     s = _make_session()
-    deal = deals_api.book_deal(
+    deal = _book_deal(
         _expert_booking(observation_times=[0.9808, 2.0, 2.9808]), USER, s)
 
     assert [e["t_years"] for e in deal["events"]][1:] == [0.9884, 1.9904, 2.9897]
@@ -770,7 +818,7 @@ def test_an_unresolvable_script_is_refused_even_with_client_times():
     """Une grille Monte-Carlo cliente n'est pas un calendrier contractuel."""
     s = _make_session()
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(
+        _book_deal(
             _expert_booking(market_snapshot={}, observation_times=[1.0, 2.0]), USER, s)
     assert exc.value.status_code == 422
     assert "calendrier contractuel" in exc.value.detail
@@ -798,7 +846,7 @@ def test_maturity_lands_on_the_deals_own_maturity_date():
     la maturité que le deal lui-même déclare, et une 5ᵉ constatation
     apparaissait sur un produit qui en a quatre."""
     s = _make_session()
-    deal = deals_api.book_deal(_expert_booking(
+    deal = _book_deal(_expert_booking(
         script_snapshot=_ATHENA_MATURITY, T=3.0,
         maturity_date="2029-08-30", observation_times=[]), USER, s)
 
@@ -816,7 +864,7 @@ def test_a_coupon_calendar_shorter_than_the_note_keeps_the_notes_maturity():
     c'est la note qui dit quand elle rembourse, pas le calendrier."""
     s = _make_session()
     short_cal = {"OBSERVATIONS": dict(_CALENDAR["OBSERVATIONS"], end_date="2028-08-30")}
-    deal = deals_api.book_deal(_expert_booking(
+    deal = _book_deal(_expert_booking(
         script_snapshot=_ATHENA_MATURITY, T=3.0,
         market_snapshot={"constats": short_cal},
         maturity_date="2029-09-03", observation_times=[]), USER, s)
@@ -833,7 +881,7 @@ def test_a_deal_with_no_observation_at_all_is_refused():
     s = _make_session()
     broken = {"OBSERVATIONS": dict(_CALENDAR["OBSERVATIONS"], end_date="2026-08-01")}
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(_expert_booking(
+        _book_deal(_expert_booking(
             market_snapshot={"constats": broken}, observation_times=[]), USER, s)
     assert exc.value.status_code == 422
     assert "calendrier contractuel" in exc.value.detail
@@ -845,7 +893,7 @@ def test_a_broken_calendar_is_not_rescued_by_pricing_times():
     s = _make_session()
     broken = {"OBSERVATIONS": dict(_CALENDAR["OBSERVATIONS"], end_date="2026-08-01")}
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(_expert_booking(
+        _book_deal(_expert_booking(
             market_snapshot={"constats": broken}, observation_times=[1.0, 2.0]), USER, s)
     assert exc.value.status_code == 422
 
@@ -858,7 +906,7 @@ def _booked_for_freeze(s):
     rfq_api.update_quote(rfq["id"], win["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(model_price=97.9), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=win["id"]), USER, s)
-    deal = deals_api.book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
     return rfq, win, deal
 
 
@@ -927,7 +975,7 @@ def test_booking_refuses_what_is_not_a_trade(label, over, expect):
     l'exposition contrepartie."""
     s = _make_session()
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(_booking_body(**over), USER, s)
+        _book_deal(_booking_body(**over), USER, s)
     assert exc.value.status_code == 422
     assert expect in exc.value.detail
 
@@ -935,7 +983,7 @@ def test_booking_refuses_what_is_not_a_trade(label, over, expect):
 def test_booking_refuses_a_settlement_before_its_own_strike():
     s = _make_session()
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(_booking_body(strike_date="2026-09-03",
+        _book_deal(_booking_body(strike_date="2026-09-03",
                                            value_date="2026-08-30"), USER, s)
     assert exc.value.status_code == 422
     assert "date de valeur" in exc.value.detail
@@ -945,7 +993,7 @@ def test_a_counterparty_outside_the_catalog_stays_accepted():
     """Volontaire : Deal.contrepartie est une chaîne libre pour que l'historique
     reste lisible après un renommage du catalogue."""
     s = _make_session()
-    assert deals_api.book_deal(
+    assert _book_deal(
         _booking_body(contrepartie="Banque Inconnue"), USER, s)["contrepartie"] == "Banque Inconnue"
 
 
@@ -1073,7 +1121,7 @@ def test_booking_refuse_un_autre_produit_sous_le_meme_rfq_id():
     rfq, q, params, body = _rfq_with_contractual_terms(s)
     body.script_snapshot = "AT MATURITY\n  PAY 0.25"
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(body, USER, s)
+        _book_deal(body, USER, s)
     assert exc.value.status_code == 422
     assert "script_snapshot" in exc.value.detail
 
@@ -1081,7 +1129,7 @@ def test_booking_refuse_un_autre_produit_sous_le_meme_rfq_id():
 def test_booking_conforme_fige_un_hash_des_termes_rfq():
     s = _make_session()
     rfq, q, params, body = _rfq_with_contractual_terms(s)
-    deal = deals_api.book_deal(body, USER, s)
+    deal = _book_deal(body, USER, s)
     assert len(deal["rfq_provenance"]["product_terms_sha256"]) == 64
     assert deal["rfq_provenance"]["retained"]["price"] == 98.0
 
@@ -1128,7 +1176,7 @@ def test_datetime_avec_offset_est_normalise_en_utc():
 def test_calendrier_post_maturite_est_refuse():
     s = _make_session()
     with pytest.raises(HTTPException) as exc:
-        deals_api.book_deal(
+        _book_deal(
             _expert_booking(maturity_date="2027-08-30", T=1.0), USER, s)
     assert exc.value.status_code == 422
     assert "dépasse la maturité" in exc.value.detail

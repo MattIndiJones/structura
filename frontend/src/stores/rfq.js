@@ -5,7 +5,13 @@ import { apiFetch } from '../utils/api.js'
 async function _json(res, fallbackMsg) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || fallbackMsg)
+    const detail = err.detail
+    if (detail && typeof detail === 'object') {
+      const failures = (detail.failures || [])
+        .map(f => `${f.code || 'CONTRÔLE'} — ${f.message || JSON.stringify(f)}`)
+      throw new Error([detail.message || detail.code || fallbackMsg, ...failures].join('\n'))
+    }
+    throw new Error(detail || fallbackMsg)
   }
   return res.status === 204 ? null : res.json()
 }
