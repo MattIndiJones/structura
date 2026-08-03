@@ -26,7 +26,7 @@ from ..db.database import get_session
 from ..db.models import Deal, Portfolio, ShockRun, User, position_sign
 from .auth import get_current_user
 from .deals import _mtm_core, MtmRequest
-from ..core.amc_prices import get_fx_series
+from ..core.amc_prices import fx_rate_to
 
 router = APIRouter(tags=["shocks"])
 
@@ -131,8 +131,14 @@ def _run_shock_on_deal(deal: Deal, session: Session, n_paths: int, shock: ShockR
         realvol_state_init=st["realvol_state"], fix_state_init=st["fix_state"],
     )
 
-    fx = get_fx_series(deal.devise, "EUR")
-    fx_rate = float(fx.iloc[-1]) if not fx.empty else 1.0
+    fx_rate = fx_rate_to(deal.devise, "EUR")
+    if fx_rate is None:
+        # delta_pts is currency-free and stays meaningful; delta_eur is not
+        # computable and must not be invented — a shock impact understated by
+        # a missing rate is exactly the number a stress test exists to get right.
+        raise HTTPException(
+            422, f"Taux de change {deal.devise}/EUR indisponible — l'impact en "
+                 f"euros de ce choc ne peut pas être calculé pour {deal.reference}.")
     delta_pts = result["price"] - mtm_payload["mtm"]
 
     return {
@@ -155,8 +161,16 @@ def _run_shock_on_book(deals: list[Deal], session: Session, n_paths: int, shock:
     # not just the subset that happened to reprice cleanly this time.
     nominal_total_eur = 0.0
     for d in deals:
-        fx = get_fx_series(d.devise, "EUR")
-        fx_rate = float(fx.iloc[-1]) if not fx.empty else 1.0
+        fx_rate = fx_rate_to(d.devise, "EUR")
+        if fx_rate is None:
+            # Not folded into the denominator at parity: the "% of book"
+            # figures below would otherwise be measured against a size that
+            # includes a made-up conversion. _run_shock_on_deal raises on the
+            # same condition, so the deal also lands in `errors` with the reason.
+            errors.append({"deal_id": d.id, "reference": d.reference,
+                           "error": f"Taux de change {d.devise}/EUR indisponible — "
+                                    f"position exclue des totaux."})
+            continue
         nominal_total_eur += d.nominal * fx_rate
 
         try:

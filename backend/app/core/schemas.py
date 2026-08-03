@@ -175,6 +175,44 @@ class MtfRequest(AnalysisBase):
     n_dates: int = Field(default=5, ge=2, le=12)
 
 
+class ScriptGenerateRequest(BaseModel):
+    """Assistant de scripting : une description en français -> un script PayScript.
+
+    Le modèle écrit une STRUCTURE. Il ne price pas et ne fixe aucun niveau que
+    l'utilisateur n'a pas donné — le moteur Monte-Carlo reste seul juge du prix.
+    `underlyings` / `r` / `T` ne servent qu'au contexte du prompt et au pricing
+    de contrôle qui vérifie que le script produit tourne vraiment."""
+    description: str = Field(min_length=3, max_length=4000)
+    provider: str = "ollama"
+    model: Optional[str] = None
+    underlyings: List[UnderlyingParams] = []
+    corr_matrix: List[List[float]] = []
+    r: float = 0.03
+    T: float = 3.0
+    user_params: Dict[str, Any] = {}
+    # Affinage : repart du script courant au lieu de tout réécrire.
+    current_script: str = ""
+    refine: bool = False
+
+
+class MtfDrilldownRequest(AnalysisBase):
+    """Explication détaillée de quelques scénarios à UNE date de l'éventail MTF.
+
+    n_outer / n_inner / n_dates / seed doivent reprendre ceux du run à expliquer :
+    ils fixent les tirages (le rang de la date indexe le RNG interne), donc c'est
+    ce qui garantit que le mark du panneau est exactement celui du graphique.
+    scenario_ids sont des indices dans les tableaux `pvs` / `alive` de la réponse
+    /api/mtf — le client sélectionne lui-même ses quantiles, ce qui évite de
+    recalculer tout l'éventail pour en expliquer cinq trajectoires."""
+    main_price: float
+    t: float
+    scenario_ids: List[int] = Field(min_length=1, max_length=12)
+    labels: List[str] = []
+    n_outer: int = Field(default=200, ge=20, le=2000)
+    n_inner: int = Field(default=500, ge=50, le=5000)
+    n_dates: int = Field(default=5, ge=2, le=12)
+
+
 class SolverRequest(AnalysisBase):
     """Solve for the script PARAM value that hits a target price (bisection).
     target_price/lo/hi are in the PARAM's stored units (fraction for % params)."""

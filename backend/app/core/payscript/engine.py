@@ -19,13 +19,58 @@ from scipy.special import erfc
 from .parser import CompiledScript, CompiledEvent
 
 SY = 52       # weekly steps per year
+# Largest coefficient move a nearest-PSD repair may make before the matrix is
+# rejected outright rather than silently used (see cholesky).
+CORR_REPAIR_TOL = 0.02
+MODELS = ("constant", "heston", "sabr", "localvol", "lsv")
 PSI_C = 1.5   # Heston QE switching threshold
 MTF_MAX_BATCH = 20_000   # cap simulated paths per inner Mark-to-Future chunk (memory bound)
+# Below this many surviving contracts a Mark-to-Future date is flagged `thin`:
+# on a highly callable product the late dates can be left with a handful of
+# paths, and a 5th percentile read off them is noise wearing the clothes of a
+# risk figure. The figures are still returned — suppressing them belongs to the
+# display, not to the engine, or a caller running a small deliberate batch gets
+# empty results with no explanation.
+MTF_MIN_ALIVE = 50
 
 
 # ── Cholesky decomposition ──────────────────────────────────────────
 
-def cholesky(corr: list[list[float]], n: int) -> np.ndarray:
+def validate_model(model: str, underlyings) -> None:
+    """Reject an unknown model and out-of-domain diffusion parameters.
+
+    Both used to pass. An unrecognised model name fell through to the GBM
+    branch, so the price was computed under a model nobody asked for and
+    nothing recorded the substitution. And the Heston/SABR parameters were
+    taken at face value: xi=0 divided by zero, while a negative variance or a
+    correlation of -1.5 produced perfectly finite, perfectly meaningless
+    prices — the worst kind, because they look usable."""
+    if model not in MODELS:
+        raise ValueError(
+            f"Modèle inconnu : {model!r} — valeurs admises : {', '.join(MODELS)}.")
+
+    def _check(cond: bool, name: str, got, expected: str) -> None:
+        if not cond:
+            raise ValueError(
+                f"Paramètre {name} invalide pour le modèle {model} "
+                f"sur {u.get('name', '?')} : {got} — attendu {expected}.")
+
+    for u in underlyings:
+        if model in ("heston", "lsv"):
+            _check(u.get("v0", 0.04) > 0, "v0", u.get("v0"), "> 0 (variance initiale)")
+            _check(u.get("theta", 0.04) > 0, "theta", u.get("theta"), "> 0 (variance long terme)")
+            _check(u.get("kappa", 2.0) > 0, "kappa", u.get("kappa"), "> 0 (retour à la moyenne)")
+            _check(u.get("xi", 0.35) > 0, "xi", u.get("xi"), "> 0 (vol de la variance)")
+            _check(abs(u.get("rho_h", 0.0)) <= 1.0, "rho_h", u.get("rho_h"), "dans [-1, 1]")
+        if model == "sabr":
+            _check(u.get("alpha", 0.20) > 0, "alpha", u.get("alpha"), "> 0")
+            _check(0.0 <= u.get("beta", 1.0) <= 1.0, "beta", u.get("beta"), "dans [0, 1]")
+            _check(abs(u.get("rho", 0.0)) <= 1.0, "rho", u.get("rho"), "dans [-1, 1]")
+            _check(u.get("nu", 0.40) >= 0, "nu", u.get("nu"), ">= 0")
+
+
+def cholesky(corr: list[list[float]], n: int,
+             repair_report: dict | None = None) -> np.ndarray:
     C = np.array(corr, dtype=np.float64)
     if not np.allclose(np.diag(C), 1.0, atol=1e-6):
         raise ValueError("Matrice de corrélation invalide : la diagonale doit valoir 1.")
@@ -34,12 +79,33 @@ def cholesky(corr: list[list[float]], n: int) -> np.ndarray:
     if np.abs(C).max() > 1.0 + 1e-9:
         raise ValueError("Matrice de corrélation invalide : les coefficients doivent rester dans [-1, 1].")
     eigvals = np.linalg.eigvalsh(C)
-    if eigvals.min() < 0:
-        C += (-eigvals.min() + 1e-8) * np.eye(n)
+    # `< 0` missed the exactly-singular case: a PSD matrix such as [[1,1],[1,1]]
+    # has a zero eigenvalue, skipped the jitter, and then blew up inside
+    # np.linalg.cholesky as a raw LinAlgError. Jitter on "not comfortably
+    # positive" instead.
+    if eigvals.min() < 1e-10:
+        C_fixed = C + (max(0.0, -eigvals.min()) + 1e-8) * np.eye(n)
         # The jitter pushes the diagonal above 1 (silently inflating every vol
         # by sqrt(1+eps)) — renormalize back to a unit-diagonal correlation.
-        d = np.sqrt(np.diag(C))
-        C = C / np.outer(d, d)
+        d = np.sqrt(np.diag(C_fixed))
+        C_fixed = C_fixed / np.outer(d, d)
+        shift = float(np.abs(C_fixed - C).max())
+        # Repairing a badly non-PSD matrix is not a rounding fix: a 3-asset
+        # book entered at rho=-0.9 projects to rho=-0.5, and the worst-of that
+        # comes out is priced on a dependence nobody asked for. Below the
+        # tolerance the move is numerical noise and is merely reported; above
+        # it, refuse rather than quietly price a different product.
+        if shift > CORR_REPAIR_TOL:
+            raise ValueError(
+                f"Matrice de corrélation non définie positive : la projection la "
+                f"plus proche déplace un coefficient de {shift:.3f} (tolérance "
+                f"{CORR_REPAIR_TOL:.2f}). Le prix porterait sur une structure de "
+                f"dépendance différente de celle saisie — corrigez la matrice.")
+        if repair_report is not None:
+            repair_report["max_shift"] = round(shift, 8)
+            repair_report["matrix_used"] = [[round(float(v), 8) for v in row]
+                                            for row in C_fixed]
+        C = C_fixed
     return np.linalg.cholesky(C)
 
 
@@ -337,6 +403,17 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
             # matching quadratic variation is rho^2*V_bar +
             # (1-rho^2)*sv^2.  Using -0.5*V_bar after changing `sv` breaks the
             # discounted-spot martingale and creates vega on PAY S[1].
+            #
+            # This is deliberate and it has a price: the resulting vega covers
+            # only the independent leg, so it is scaled by (1-rho_h^2) — half
+            # the true sensitivity at rho_h=-0.7, a fifth at -0.9. Scaling
+            # corr_term to reach the correlated leg does NOT fix it: that term
+            # is Andersen's exact substitution for rho/xi*integral(dV) and
+            # carries its own compensator, so rescaling it shifts E[log S] with
+            # nothing to offset it (measured: +40bp on a prepaid forward at
+            # rho_h=-0.7). A genuine Heston vega means bumping the calibrated
+            # parameters, not the diffusion legs — hence `vega_scope` below,
+            # which reports the coverage rather than pretending it is total.
             bumped_variance = rh*rh * V_bar + rhop*rhop * sv*sv
             drift = (r_term + u.get("ccyh", 0.0) - u.get("q", 0.02)
                      - q_adj - 0.5 * bumped_variance)
@@ -680,6 +757,45 @@ def _forward_rate_arr(df_arr: np.ndarray, dt: float) -> np.ndarray:
     return -(log_df[1:] - log_df[:-1]) / dt
 
 
+def _hw_convexity(sigma_r: float, a_r: float, dt: float, ts: int,
+                  phi: float | None = None, step_sd: float | None = None) -> np.ndarray:
+    """Deterministic drift that makes the simulated short rate reprice its own
+    input curve — the property that defines Hull-White and that this model was
+    missing.
+
+    Writing r = f(0,t) + x with x centred looks like it fits the curve for
+    free, but the discount factor is exp(-integral r), and Jensen makes
+    E[exp(-integral x)] = exp(+Var/2) > 1: every bond came out too EXPENSIVE,
+    by 164bp on a 5-year zero at 3% vol. The fix is the classic phi(t): add
+    back exactly the term that cancels that variance.
+
+    The correction is computed on the DISCRETE integral the simulator actually
+    forms — dt * sum of x over steps — rather than on its continuous limit, so
+    the curve is reproduced to machine precision on the grid in use instead of
+    to a discretisation residual.
+
+    Weight of shock Z_i in I_m = dt*sum_{k=i}^{m-1} x_k gives Var(I_m) in closed
+    form for both schemes; psi_k is its increment per unit of time.
+    """
+    m = np.arange(1, ts + 1, dtype=np.float64)
+    if a_r <= 0.0:
+        # x_k = sigma*sqrt(dt)*sum_{i<=k} Z_i  ->  weight of Z_i is
+        # dt*sigma*sqrt(dt)*(m-i), so Var(I_m) = sigma^2 dt^3 sum_{j=1..m} j^2.
+        var_I = sigma_r ** 2 * dt ** 3 * m * (m + 1.0) * (2.0 * m + 1.0) / 6.0
+    else:
+        one_m_phi = 1.0 - phi
+        # weight of Z_i is dt*step_sd*(1-phi^(m-i))/(1-phi)
+        ssum = (m
+                - 2.0 * phi * (1.0 - phi ** m) / one_m_phi
+                + phi * phi * (1.0 - phi ** (2.0 * m)) / (1.0 - phi * phi))
+        var_I = dt * dt * step_sd ** 2 / (one_m_phi ** 2) * ssum
+    half = 0.5 * var_I
+    psi = np.empty(ts, dtype=np.float64)
+    psi[0] = half[0] / dt
+    psi[1:] = (half[1:] - half[:-1]) / dt
+    return psi
+
+
 def _stochastic_rate_paths(fwd: np.ndarray, sigma_r: float, a_r: float, sq_dt: float,
                            dt: float, Z_r: np.ndarray):
     """Build the per-path instantaneous rate and discount factor from a forward
@@ -695,6 +811,7 @@ def _stochastic_rate_paths(fwd: np.ndarray, sigma_r: float, a_r: float, sq_dt: f
     ts, N = Z_r.shape
     if a_r <= 0.0:
         x = sigma_r * sq_dt * np.cumsum(Z_r, axis=0)
+        psi = _hw_convexity(sigma_r, a_r, dt, ts)
     else:
         phi = math.exp(-a_r * dt)
         step_sd = sigma_r * math.sqrt(max(0.0, (1.0 - phi * phi) / (2.0 * a_r)))
@@ -703,8 +820,12 @@ def _stochastic_rate_paths(fwd: np.ndarray, sigma_r: float, a_r: float, sq_dt: f
         for k in range(ts):
             x_prev = phi * x_prev + step_sd * Z_r[k]
             x[k] = x_prev
+        psi = _hw_convexity(sigma_r, a_r, dt, ts, phi=phi, step_sd=step_sd)
 
-    r_path = fwd[:, None] + x                                 # (ts, N)
+    # phi(t) applies to the rate itself, not just to the discounting: the same
+    # path feeds each asset's drift, so correcting one and not the other would
+    # trade a curve-fit error for an arbitrage between forwards and bonds.
+    r_path = fwd[:, None] + x + psi[:, None]                   # (ts, N)
     cum_integral = np.cumsum(r_path, axis=0) * dt             # (ts, N)
     df = np.vstack([np.ones((1, N)), np.exp(-cum_integral)])
     return r_path, df
@@ -766,12 +887,55 @@ def _build_rate_term(yield_curve, ts: int, dt: float, r: float,
 
 
 def _blend_rate_factor(z_i, Z_r_val, rho_rS: float):
-    """Re-blend an asset's own (already inter-asset-correlated) Brownian z_i with
-    the shared rate factor Z_r_val via that asset's rho_rS:
-    z_i_final = rho_rS*Z_r_val + sqrt(1-rho_rS^2)*z_i. No-op when rho_rS == 0."""
+    """Couple an asset's Brownian to the shared rate factor: z_i_final =
+    rho_rS*Z_r_val + z_i, where z_i already carries variance 1 - rho_rS^2
+    because it comes out of the factor built by `_rate_coupled_factor`.
+
+    It used to read rho_rS*Z_r + sqrt(1-rho_rS^2)*z_i, with z_i a unit-variance
+    draw from chol(R). That gives the right asset/rate correlation, but it
+    injects a component every asset shares, so the realized asset/asset
+    correlation came out at rho_i*rho_j + sqrt((1-rho_i^2)(1-rho_j^2))*R_ij
+    instead of R_ij. With three assets entered at 0.30 and rho_rS = 0.9 the
+    effective figure was 0.867, and the worst-of moved 7.6 points of notional
+    on a parameter the user was told described the rate, not the basket.
+
+    Splitting the factorisation instead — chol(R - a a') for the diffusion,
+    a_i*Z_r for the rate leg — reproduces the joint correlation matrix
+    [[1, a'], [a, R]] exactly: unit variance, rho_rS against the rate, and R
+    between assets, all three at once. No-op when rho_rS == 0."""
     if rho_rS == 0.0:
         return z_i
-    return rho_rS * Z_r_val + math.sqrt(max(0.0, 1.0 - rho_rS * rho_rS)) * z_i
+    return rho_rS * Z_r_val + z_i
+
+
+def _rate_coupled_factor(corr: list[list[float]], rho_vec, n: int) -> np.ndarray:
+    """Cholesky factor of R - a·a', the diffusion block of the joint
+    (rate, assets) correlation matrix [[1, a'], [a, R]].
+
+    Its positive-definiteness IS the consistency condition between the
+    correlation matrix and the rate correlations: asking for three assets
+    correlated at 0.30 that are each 0.90 correlated to the same rate factor
+    describes a matrix that does not exist, because going through the rate
+    already forces them to about 0.81 with each other. The old code accepted
+    it and quietly priced the basket it implied. Refusing is the same choice
+    made for a non-PSD correlation matrix a few lines up — the alternative is
+    a plausible price for a product nobody specified."""
+    R = np.array(corr, dtype=np.float64)
+    a = np.array(rho_vec, dtype=np.float64)
+    M = R - np.outer(a, a)
+    eig = np.linalg.eigvalsh(M)
+    if eig.min() < -1e-10:
+        worst = int(np.argmax(np.abs(a)))
+        raise ValueError(
+            f"Corrélations incompatibles : avec la matrice actions fournie, les "
+            f"corrélations taux/action demandées (rho_rS, la plus forte étant "
+            f"{a[worst]:+.2f} sur le sous-jacent {worst + 1}) ne définissent pas "
+            f"une structure de dépendance valide — passer par le facteur de taux "
+            f"imposerait déjà aux actions une corrélation supérieure à celle "
+            f"saisie. Réduisez rho_rS ou augmentez la corrélation actions.")
+    if eig.min() < 1e-12:
+        M = M + (max(0.0, -eig.min()) + 1e-12) * np.eye(n)
+    return np.linalg.cholesky(M)
 
 
 # ── PayScript evaluation ────────────────────────────────────────────
@@ -814,12 +978,25 @@ def _compute_strike_fix(script: CompiledScript, WOF: np.ndarray,
         return window.min(axis=0), window.max(axis=0), window.mean(axis=0)
     p_n, p_sum = fix_state_init["n"], fix_state_init["sum"]
     p_min, p_max = fix_state_init["min"], fix_state_init["max"]
-    if not steps:   # window fully realized — constants across paths
-        return (np.full(N, p_min), np.full(N, p_max), np.full(N, p_sum / p_n))
+
+    def _row(v):
+        """One value per path. A single deal's residual MtM inherits ONE realized
+        reduction shared by every path; Mark-to-Future inherits one PER PATH (each
+        outer scenario fixed its own strike). np.full only handles the first."""
+        return np.broadcast_to(np.asarray(v, dtype=float), (N,)).astype(float, copy=True)
+
+    if not steps:   # window fully realized — no simulated fixing left to combine
+        return (_row(p_min), _row(p_max), _row(np.asarray(p_sum, dtype=float) / p_n))
     window = WOF[[s - 1 for s in steps], :]
     return (np.minimum(window.min(axis=0), p_min),
             np.maximum(window.max(axis=0), p_max),
             (window.sum(axis=0) + p_sum) / (len(steps) + p_n))
+
+
+def _state_by_asset(v, n: int, N: int) -> np.ndarray:
+    """Realized per-asset state, shared by every path (n,) or one per path (n, N)."""
+    a = np.asarray(v, dtype=float)
+    return a.reshape(1, n, 1) if a.ndim == 1 else a.reshape(1, n, N)
 
 
 def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
@@ -828,13 +1005,15 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 record: bool, df_arr: np.ndarray | None = None,
                 wof_min_init=None, bof_max_init=None,
                 stop_times_out: list | None = None,
+                flows_out: list | None = None,
                 bridge_min=None, bridge_max=None,
                 index_offset: int = 0, memo_init: dict | None = None,
                 accum_init: float = 0.0,
                 s_min_init=None, s_max_init=None, s_prev_init=None,
                 wof0_init: float | None = None,
                 realvol_state_init: dict | None = None,
-                fix_state_init: dict | None = None) -> list[float]:
+                fix_state_init: dict | None = None,
+                state_out: list | None = None) -> list[float]:
     """Evaluate PayScript on pre-computed spot paths. Observation-only loop.
 
     wof_min_init / bof_max_init (None, a scalar, or array of shape (N,)) seed the
@@ -860,10 +1039,11 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
     complete the same inheritance for residual deal MtM. All default to
     None/absent = day-0 behavior, bit-identical to before they existed.
 
-    Mark-to-Future (run_mark_to_future) does NOT feed these six — its inner
-    repricing still resets S_MIN/S_MAX/S_PREV/REALVOL/FIX_* to day-0 defaults
-    (extracting per-outer-scenario state would need per-chunk arrays and a
-    per-scenario wof0). Known remaining gap, documented, not addressed.
+    Mark-to-Future (run_mark_to_future) feeds all of them, one value PER PATH:
+    each outer scenario reaches the mark date with its own contractual history,
+    so S_MIN/S_MAX/S_PREV/REALVOL/FIX_* cannot share a state across the batch.
+    fix_state_init was the last one still missing there, and its absence marked
+    an Asian-strike product as if its strike had never been fixed.
 
     bridge_min/bridge_max (ts, n, N), from _bridge_extrema: when provided, the
     RUNNING extrema (WOF_min/BOF_max/S_MIN/S_MAX — the barrier-monitoring
@@ -885,16 +1065,29 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
     # weekly log-returns accumulated since inception (REALVOL).
     S_min = np.minimum.accumulate(bridge_min if bridge_min is not None else S[1:], axis=0)
     S_max = np.maximum.accumulate(bridge_max if bridge_max is not None else S[1:], axis=0)
+    # Every *_init below accepts either one value shared by all paths — the
+    # residual MtM of a single deal — or one value per path. The latter is what
+    # Mark-to-Future needs: each outer scenario reaches the mark date with its
+    # own contractual history, so they cannot share a state.
     if s_min_init is not None:
-        S_min = np.minimum(S_min, np.asarray(s_min_init, dtype=float).reshape(1, n, 1))
+        S_min = np.minimum(S_min, _state_by_asset(s_min_init, n, N))
     if s_max_init is not None:
-        S_max = np.maximum(S_max, np.asarray(s_max_init, dtype=float).reshape(1, n, 1))
-    wof0 = 1.0 if wof0_init is None else float(wof0_init)
-    WOF_full = np.vstack([np.full((1, N), wof0), WOF])   # (ts+1, N) — WOF(t=0)
+        S_max = np.maximum(S_max, _state_by_asset(s_max_init, n, N))
+    if wof0_init is None:
+        wof0_row = np.full((1, N), 1.0)
+    else:
+        wof0_row = np.asarray(wof0_init, dtype=float).reshape(1, -1) * np.ones((1, N))
+    WOF_full = np.vstack([wof0_row, WOF])   # (ts+1, N) — WOF(t=0)
     log_ret = np.diff(np.log(np.maximum(WOF_full, 1e-12)), axis=0)   # (ts, N)
     cum_sq_ret = np.cumsum(log_ret ** 2, axis=0)    # (ts, N)
     rv_sumsq0 = realvol_state_init["sumsq"] if realvol_state_init else 0.0
     rv_t0 = realvol_state_init["t"] if realvol_state_init else 0.0
+    _rv_by_path = np.ndim(rv_sumsq0) > 0
+    _accum_by_path = np.ndim(accum_init) > 0
+    _index_by_path = np.ndim(index_offset) > 0
+    _memo_by_path = isinstance(memo_init, (list, tuple))
+    _sprev = None if s_prev_init is None else np.asarray(s_prev_init, dtype=float)
+    _sprev_by_path = _sprev is not None and _sprev.ndim == 2
 
     obs_steps = sorted(step_map.keys())
     payoffs: list[float] = []
@@ -906,12 +1099,23 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
     full_params.update(user_params)
 
     for path in range(N):
+        # Dated cash flows of THIS path, when the caller asks for them.
+        # `flux_map` aggregates across paths, so it cannot answer "when did
+        # this particular scenario pay" — which is exactly what an internal
+        # rate of return needs. Off by default: it is the only per-path
+        # structure here that grows with the number of flows.
+        path_flows: list | None = [] if flows_out is not None else None
+        if _sprev is None:
+            _spots0 = [1.0] * n
+        else:
+            _spots0 = list(_sprev[:, path]) if _sprev_by_path else list(_sprev)
         ctx = {
             # s_prev_init seeds "spots" (not "s_prev"): the first observation
             # copies spots -> s_prev before overwriting spots, so the real
             # previous fixing lands in S_PREV through the normal mechanics.
-            "spots": [1.0] * n if s_prev_init is None else list(s_prev_init),
-            "accum": accum_init, "index": 0,
+            "spots": _spots0,
+            "accum": float(accum_init[path]) if _accum_by_path else accum_init,
+            "index": 0,
             "wof_min": 1.0, "bof_max": 1.0, "t": 0.0,
             "s_min": [1.0] * n, "s_max": [1.0] * n, "s_prev": [1.0] * n, "realvol": 0.0,
             "fix_min": float(FIX_MIN[path]), "fix_max": float(FIX_MAX[path]),
@@ -923,11 +1127,14 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
         # Residual-MtM state inheritance: applied AFTER init_fn on purpose —
         # the script's own SET statements must not reset memory coupons and
         # other variables the replayed past already accumulated.
-        if memo_init:
-            ctx["memo"].update(memo_init)
+        _memo = memo_init[path] if _memo_by_path else memo_init
+        if _memo:
+            ctx["memo"].update(_memo)
 
         done = False
-        obs_idx = index_offset
+        obs_idx = int(index_offset[path]) if _index_by_path else index_offset
+        _rv_s0 = float(rv_sumsq0[path]) if _rv_by_path else rv_sumsq0
+        _rv_t = float(rv_t0[path]) if _rv_by_path else rv_t0
 
         for step in obs_steps:
             if done:
@@ -944,8 +1151,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             # inherited; the historical formula kept bit-identical otherwise.
             ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[step - 1, path] / step)
                               if realvol_state_init is None else
-                              math.sqrt((rv_sumsq0 + cum_sq_ret[step - 1, path])
-                                        / (rv_t0 + step * dt)))
+                              math.sqrt((_rv_s0 + cum_sq_ret[step - 1, path])
+                                        / (_rv_t + step * dt)))
             ctx["t"] = step * dt
             ctx["wof_min"] = float(WOF_min[step - 1, path])
             ctx["bof_max"] = float(BOF_max[step - 1, path])
@@ -966,6 +1173,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     cf = fl["v"] * disc
                     ctx["total_cf"] += cf
                     ctx["total_cf_raw"] += fl["v"]
+                    if path_flows is not None and fl["v"] != 0:
+                        path_flows.append((ctx["t"], fl["v"]))
                     if record and fl["v"] != 0:
                         key = f"{ctx['t']:.6f}|{fl['lbl']}"
                         if key not in flux_map:
@@ -990,8 +1199,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             ctx["s_max"] = list(S_max[ts - 1, :, path])
             ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[ts - 1, path] / ts)
                               if realvol_state_init is None else
-                              math.sqrt((rv_sumsq0 + cum_sq_ret[ts - 1, path])
-                                        / (rv_t0 + ts * dt)))
+                              math.sqrt((_rv_s0 + cum_sq_ret[ts - 1, path])
+                                        / (_rv_t + ts * dt)))
             ctx["t"] = ts * dt
             ctx["wof_min"] = float(WOF_min[ts - 1, path])
             ctx["bof_max"] = float(BOF_max[ts - 1, path])
@@ -1009,6 +1218,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     cf = fl["v"] * disc
                     ctx["total_cf"] += cf
                     ctx["total_cf_raw"] += fl["v"]
+                    if path_flows is not None and fl["v"] != 0:
+                        path_flows.append((ctx["t"], fl["v"]))
                     if record and fl["v"] != 0:
                         key = f"{ctx['t']:.6f}|{fl['lbl']}"
                         if key not in flux_map:
@@ -1021,8 +1232,30 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
 
         payoffs.append(ctx["total_cf"])
         payoffs_raw.append(ctx["total_cf_raw"])
+        if flows_out is not None:
+            flows_out.append(path_flows)
         if stop_times_out is not None and not ctx["done"]:
             stop_times_out.append(ts * dt)
+        if state_out is not None:
+            # The contractual position this path has reached at the end of the
+            # tensor — everything a residual repricing needs to continue from
+            # here rather than start over. Mark-to-Future replays each outer
+            # scenario up to its mark date and feeds this straight back in.
+            state_out.append({
+                "done": done,
+                "realized_cf": ctx["total_cf"],
+                "index": obs_idx,
+                "memo": dict(ctx["memo"]),
+                "accum": ctx["accum"],
+                "s_prev": list(ctx["spots"]),
+                "wof_min": float(WOF_min[ts - 1, path]),
+                "bof_max": float(BOF_max[ts - 1, path]),
+                "s_min": [float(v) for v in S_min[ts - 1, :, path]],
+                "s_max": [float(v) for v in S_max[ts - 1, :, path]],
+                "realvol_sumsq": float(_rv_s0 + cum_sq_ret[ts - 1, path]),
+                "realvol_t": _rv_t + ts * dt,
+                "wof_last": float(WOF[ts - 1, path]),
+            })
 
     return payoffs, payoffs_raw
 
@@ -1195,7 +1428,8 @@ def run_mc(script: CompiledScript,
            s_prev_init=None,
            wof0_init: float | None = None,
            realvol_state_init: dict | None = None,
-           fix_state_init: dict | None = None):
+           fix_state_init: dict | None = None,
+           per_path_flows: bool = False):
 
     t0 = time.perf_counter()
     if barrier_monitoring not in ("weekly", "continuous"):
@@ -1205,6 +1439,7 @@ def run_mc(script: CompiledScript,
             f"(pont brownien intra-pas)."
         )
     use_bridge = barrier_monitoring == "continuous"
+    validate_model(model, underlyings)
     user_params = user_params or {}
     n = len(underlyings)
     T = T_max + dt_add
@@ -1234,7 +1469,8 @@ def run_mc(script: CompiledScript,
         ci, cj, delta = corr_delta["ci"], corr_delta["cj"], corr_delta["delta"]
         v = max(-0.999, min(0.999, corr[ci][cj] + delta))
         corr[ci][cj] = corr[cj][ci] = v
-    L = cholesky(corr, n)
+    corr_repair: dict = {}
+    L = cholesky(corr, n, repair_report=corr_repair)
 
     use_heston = model == "heston"
     use_lv     = model == "localvol"
@@ -1274,6 +1510,16 @@ def run_mc(script: CompiledScript,
     # (base/anti) gets its own rate path from Z_r/-Z_r, paired like Z/Zv/Za.
     use_stoch_rate = sigma_r > 0
     Z_r = rng.standard_normal((ts, N_pairs)) if use_stoch_rate else None
+
+    # Coupling the assets to the rate factor changes how the diffusion block
+    # must be factorised — see _blend_rate_factor. Only when the factor is
+    # actually live AND at least one asset is correlated to it: otherwise L
+    # stays chol(R) and every existing price is reproduced to the bit.
+    rho_rS_vec = [float(u.get("rho_rS", 0.0) or 0.0) for u in underlyings]
+    if use_stoch_rate and any(v != 0.0 for v in rho_rS_vec):
+        L = _rate_coupled_factor(corr_repair.get("matrix_used") or corr,
+                                 rho_rS_vec, n)
+
     if use_stoch_rate:
         fwd = _forward_rate_arr(df_arr, dt)
         r_path_base, df_base = _stochastic_rate_paths(fwd, sigma_r, a_r, sq_dt, dt, Z_r)
@@ -1355,10 +1601,12 @@ def run_mc(script: CompiledScript,
     br_min_b, br_max_b = _bridge_extrema(S_base, vol_base, dt, rng) if use_bridge else (None, None)
 
     stop_times_base: list[float] | None = [] if script.has_stop else None
+    flows_base: list | None = [] if per_path_flows else None
     payoffs_base, raw_base = _eval_paths(script, S_base, ts, n, N_pairs, dt, r_eff,
                                           user_params, step_map, mat_events, flux_map,
                                           record=True, df_arr=df_base,
                                           stop_times_out=stop_times_base,
+                                          flows_out=flows_base,
                                           bridge_min=br_min_b, bridge_max=br_max_b,
                                           wof_min_init=wof_min_init, bof_max_init=bof_max_init,
                                           index_offset=index_offset, memo_init=memo_init,
@@ -1371,35 +1619,56 @@ def run_mc(script: CompiledScript,
     payoffs_anti: list[float] = []
     raw_anti:     list[float] = []
     if antithetic:
-        Z_r_anti = -Z_r if use_stoch_rate else None
-        vol_anti = np.empty((ts, n, N_pairs), dtype=np.float64) if use_bridge else None
+        # The antithetic leg is the same draw with the sign flipped: it needs no
+        # new randomness, and it should need no new memory either. Two
+        # allocations happened anyway. `-Z` built a full copy of every normal
+        # tensor, and the base leg's paths stayed alive while the antithetic
+        # ones were allocated, so the peak carried two path tensors instead of
+        # one. Flipping in place and releasing the base leg first removes both:
+        # for a 3-year weekly run at 100k paths that is roughly 500 MB back.
+        # Negation is exact in IEEE-754 and nothing below re-reads the base
+        # arrays, so every price is unchanged to the bit.
+        del S_base, br_min_b, br_max_b
+        np.negative(Z, out=Z)
+        if Zv is not None:
+            np.negative(Zv, out=Zv)
+        if Za is not None:
+            np.negative(Za, out=Za)
+        if Z_r is not None:
+            np.negative(Z_r, out=Z_r)
+        Z_r_anti = Z_r if use_stoch_rate else None
+        # Same buffer as the base leg — its bridge extrema were drawn above and
+        # nothing reads it any more.
+        vol_anti = vol_base
         if use_heston:
             S_anti = _simulate_heston(ts, n, N_pairs, dt, sq_dt, underlyings,
-                                       r_eff, L, -Z, -Zv, _sim_spot_mult, vol_add, r_path_anti, Z_r_anti,
+                                       r_eff, L, Z, Zv, _sim_spot_mult, vol_add, r_path_anti, Z_r_anti,
                                        vol_out=vol_anti)
         elif use_lsv:
             S_anti = _simulate_lsv(ts, n, N_pairs, dt, sq_dt, underlyings,
-                                    r_eff, L, -Z, -Zv, lv_grids, nK, lkm, lkx, _sim_spot_mult, vol_add,
+                                    r_eff, L, Z, Zv, lv_grids, nK, lkm, lkx, _sim_spot_mult, vol_add,
                                     r_path_anti, Z_r_anti, vol_out=vol_anti)
         elif use_lv:
             S_anti = _simulate_lv(ts, n, N_pairs, dt, sq_dt, underlyings,
-                                   r_eff, L, -Z, lv_grids, nK, lkm, lkx, _sim_spot_mult, vol_add,
+                                   r_eff, L, Z, lv_grids, nK, lkm, lkx, _sim_spot_mult, vol_add,
                                    r_path_anti, Z_r_anti, vol_out=vol_anti)
         elif use_sabr:
             S_anti = _simulate_sabr(ts, n, N_pairs, dt, sq_dt, underlyings,
-                                     r_eff, L, -Z, -Za, _sim_spot_mult, vol_add, r_path_anti, Z_r_anti,
+                                     r_eff, L, Z, Za, _sim_spot_mult, vol_add, r_path_anti, Z_r_anti,
                                      vol_out=vol_anti)
         else:
             S_anti = _simulate_gbm(ts, n, N_pairs, dt, sq_dt, underlyings,
-                                    r_eff, L, -Z, _sim_spot_mult, vol_add, r_path_anti, Z_r_anti,
+                                    r_eff, L, Z, _sim_spot_mult, vol_add, r_path_anti, Z_r_anti,
                                     vol_out=vol_anti)
         S_anti = _apply_delayed_bump(S_anti)
         br_min_a, br_max_a = _bridge_extrema(S_anti, vol_anti, dt, rng) if use_bridge else (None, None)
         stop_times_anti: list[float] | None = [] if script.has_stop else None
+        flows_anti = [] if per_path_flows else None
         payoffs_anti, raw_anti = _eval_paths(script, S_anti, ts, n, N_pairs, dt, r_eff,
                                               user_params, step_map, mat_events, {},
                                               record=False, df_arr=df_anti,
                                               stop_times_out=stop_times_anti,
+                                              flows_out=flows_anti,
                                               bridge_min=br_min_a, bridge_max=br_max_a,
                                               wof_min_init=wof_min_init, bof_max_init=bof_max_init,
                                               index_offset=index_offset, memo_init=memo_init,
@@ -1464,11 +1733,35 @@ def run_mc(script: CompiledScript,
         "pv_p95": round(float(pv_all[min(N_hist - 1, int(N_hist * 0.95))]), 6),
         "prob_gt100": round(float(prob_gt100), 6),
         "payoffs": [round(p, 4) for p in raw_all],   # undiscounted, for histogram
+        # Dated cash flows, one list of (t, montant) per path — opt-in, since
+        # this is the only output that grows with the number of flows.
+        # `payoffs` above is a plain sum: it says a path paid 1.08 but not
+        # that it paid it after one year, so nothing downstream can work out
+        # the return the investor actually earned. `flux_table` aggregates
+        # across paths and cannot answer it either. This can.
+        **({"path_flows": (flows_base + flows_anti) if flows_anti else flows_base}
+           if per_path_flows else {}),
         "flux_table": flux_map,
         "elapsed_ms": round(elapsed, 1),
         "n_paths": N,
         "n_eff": N_eff,
         "fugit": fugit,
+        # Present only when the correlation matrix had to be projected onto the
+        # nearest PSD one. Small moves are numerical noise, but the caller is
+        # entitled to know the price used a matrix it did not supply.
+        "corr_repair": corr_repair or None,
+        # The bridge is an approximation of continuous monitoring, and a biased
+        # one: measured against Merton's closed form on a down-and-out call
+        # struck at the money with a 95% barrier, it prices 14.3% low, while
+        # the weekly path matches an independent simulation to 1.5bp. It kills
+        # too many paths, so every knock-out is undervalued and every knock-in
+        # overvalued. Flagged rather than silently trusted.
+        "barrier_monitoring": barrier_monitoring,
+        "barrier_monitoring_note": (
+            "Monitoring continu approché par pont brownien — biais mesuré "
+            "d'environ -14% sur une barrière proche de la monnaie (référence : "
+            "formule de Merton). Le mode hebdomadaire, lui, est exact."
+        ) if use_bridge else None,
     }
 
 
@@ -1563,6 +1856,22 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
             va_up = [0.0]*n; va_up[i] = 0.01
             va_dn = [0.0]*n; va_dn[i] = -0.01
             greeks[f"vega_{i+1}"] = round((price(vol_add=va_up) - price(vol_add=va_dn)) / 0.02, 4)
+        # Under Heston (and LSV, which inherits its variance process) the vol
+        # bump reaches only the leg independent of the variance Brownian, so
+        # the figure above covers a fraction (1-rho_h^2) of the true volatility
+        # sensitivity — half of it at the usual equity skew, a fifth at -0.9.
+        # It is a real sensitivity, just not the one the bare word "vega"
+        # implies, and a book aggregate that mixes it with GBM vegas is adding
+        # quantities of different scope. Say so rather than let the label pass.
+        if model in ("heston", "lsv"):
+            greeks["vega_scope"] = {
+                "type": "leg_independante",
+                "coverage": {u.get("name", f"S{i+1}"):
+                             round(1.0 - float(u.get("rho_h", 0.0))**2, 4)
+                             for i, u in enumerate(underlyings)},
+            }
+        else:
+            greeks["vega_scope"] = {"type": "total", "coverage": None}
 
     if "theta" in sel:
         theta, theta_event = _theta_and_event(
@@ -1651,7 +1960,14 @@ def _theta_and_event(script: CompiledScript, T: float, st: dict,
                               strike_fix_dates=aged_sfd)
 
     aged = reprice(script_=_variant(dt_step), T_=T - dt_step)["price"]
-    return round((aged - base_g) / 7.0, 4), None
+    # Per calendar day: the product was aged by dt_step YEARS, which is
+    # 365.25*dt_step days on the engine's own day-count — 7.02 on the weekly
+    # grid, not 7. Hard-coding 7 was right only by coincidence of SY=52, and
+    # would have silently rescaled every theta by SY/52 the day the grid
+    # changed: at 252 steps the product ages 1.45 days while the result would
+    # still be divided by 7, understating decay almost fivefold.
+    per_day = 365.25 * dt_step
+    return round((aged - base_g) / per_day, 4), None
 
 
 # ── Analytics: Payoff Profile ───────────────────────────────────────
@@ -1975,56 +2291,205 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
 
 def build_mtf_dates(T_max: float, n_dates: int) -> list[float]:
     """Evenly-spaced MTM date grid. The last date is T_max minus one week, which
-    avoids re-pricing a degenerate near-zero-maturity residual product."""
+    avoids re-pricing a degenerate near-zero-maturity residual product. Dates are
+    floored at one weekly step: the replay of the realized past indexes a path
+    tensor of `round(t0 * SY)` steps, and that tensor is empty below half a
+    step — a mark "3 days from now" has no grid to stand on."""
     t_last = round(T_max - 1 / SY, 6)
-    return [round(t_last * (i + 1) / n_dates, 4) for i in range(n_dates)]
+    floor = round(1 / SY, 6)
+    out: list[float] = []
+    for i in range(n_dates):
+        d = max(floor, round(t_last * (i + 1) / n_dates, 4))
+        # Two marks landing on the same weekly step are the same mark: identical
+        # replay, identical spot, identical inherited state. Only a product too
+        # short to carry n_dates distinct steps gets here, and it gets fewer
+        # dates rather than a row repeated under two labels.
+        if out and _mtf_step(d) <= _mtf_step(out[-1]):
+            continue
+        out.append(d)
+    return out
+
+
+def _mtf_step(t0: float) -> int:
+    """The weekly step a Mark-to-Future date snaps to. Single source of truth:
+    the outer replay, the past/future split of the event calendar and the
+    residual horizon must all agree on it, or an event lands on both sides."""
+    return round(t0 * SY)
 
 
 def _shift_events_for_mtf(events: list[CompiledEvent], t0: float) -> list[CompiledEvent]:
-    """Re-anchor a script's events at t0 for residual pricing: AT event dates at or
-    before t0 are already resolved by the outer scenario and dropped; remaining dates
-    are shifted by -t0. AT_MATURITY is left untouched — it always fires at the end of
-    the residual horizon, whatever that horizon is."""
-    eps = 1e-9
+    """Re-anchor a script's events at t0 for residual pricing: AT event dates already
+    resolved by the outer scenario are dropped; remaining dates are shifted by -t0.
+    AT_MATURITY is left untouched — it always fires at the end of the residual
+    horizon, whatever that horizon is.
+
+    The past/future split is made on the SNAPPED WEEKLY STEP, not on the raw date.
+    The outer replay resolves every event whose step is <= step_k; testing `d > t0`
+    here instead made the two criteria non-complementary, and an observation falling
+    between t0 and its own step boundary (up to half a week, i.e. any date in
+    (t0, (step_k + 0.5) / SY]) was replayed by the outer scenario AND repriced by
+    the inner one. A phoenix coupon was then paid twice — once into `realized_flows`,
+    once into the mark — and the autocall barrier was tested twice a week apart.
+    On a realistic CONSTAT calendar (year-fractions in ACT/365.25, so almost never
+    exactly on the weekly lattice) this hit ~17% of MTM dates and moved the mark by
+    several hundred basis points."""
+    step_k = _mtf_step(t0)
     shifted = []
     for ev in events:
         if ev.type != "AT":
             shifted.append(ev)
             continue
-        future_dates = [round(d - t0, 6) for d in ev.dates if d > t0 + eps]
+        future_dates = [round(d - t0, 6) for d in ev.dates
+                        if max(1, round(d * SY)) > step_k]
         if future_dates:
             shifted.append(CompiledEvent(type=ev.type, dates=future_dates, fn=ev.fn))
     return shifted
 
 
+def _mtf_past_step_map(script: CompiledScript, step_k: int) -> dict[int, list]:
+    """AT events the outer scenario has already resolved by the mark date, keyed
+    by weekly step. Complement of _shift_events_for_mtf by construction — same
+    `max(1, round(d * SY)) <= step_k` test on both sides, one written once."""
+    past: dict[int, list] = {}
+    for ev in script.events:
+        if ev.type == "AT_MATURITY":
+            continue
+        for d in ev.dates:
+            s = max(1, round(d * SY))
+            if s <= step_k:
+                past.setdefault(s, []).append(ev)
+    return past
+
+
+def _mtf_residual_script(script: CompiledScript, t0: float, T_max: float) -> tuple:
+    """Residual contract seen from the mark date: (script, step_map, mat_events,
+    ts_eff). Shared by the fan and the drill-down — the panel that explains a
+    mark must reprice the very same residual product the fan marked."""
+    residual_events = _shift_events_for_mtf(script.events, t0)
+    step_k = _mtf_step(t0)
+    residual_fix = [round(d - t0, 6) for d in (script.strike_fix_dates or [])
+                    if max(1, round(d * SY)) > step_k]
+    residual = CompiledScript(events=residual_events, init_fn=script.init_fn,
+                              params=script.params, constats=script.constats,
+                              has_stop=script.has_stop, monitors=script.monitors,
+                              strike_fix_dates=residual_fix or None)
+    step_map: dict[int, list] = {}
+    mat_events = []
+    for ev in residual_events:
+        if ev.type == "AT_MATURITY":
+            mat_events.append(ev)
+        else:
+            for d in ev.dates:
+                step_map.setdefault(max(1, round(d * SY)), []).append(ev)
+    ts_eff = max(1, round(max(1 / SY, round(T_max - t0, 6)) * SY))
+    return residual, step_map, mat_events, ts_eff
+
+
+def _mtf_realized_fix(script: CompiledScript, S_outer: np.ndarray,
+                      step_k: int) -> tuple[dict | None, list[int]]:
+    """Split a `CONSTAT() STRIKE_FIX` window at the mark date.
+
+    Returns (realized reduction over the fixing dates already behind t0, one entry
+    per outer scenario — the shape _compute_strike_fix consumes as fix_state_init —,
+    and the list of past steps). Without it the residual repricing saw only the
+    still-future fixing dates: a window half elapsed averaged the wrong subset, and
+    a window fully elapsed fell back on the neutral 1.0, i.e. an Asian-strike
+    product was marked as if its strike had never been fixed."""
+    if not script.strike_fix_dates:
+        return None, []
+    past = sorted({min(max(round(d * SY), 1), step_k) for d in script.strike_fix_dates
+                   if max(1, round(d * SY)) <= step_k})
+    if not past:
+        return None, []
+    WOF_out = S_outer[1:step_k + 1].min(axis=1)          # (step_k, N_outer)
+    w = WOF_out[[s - 1 for s in past], :]                # (len(past), N_outer)
+    return ({"n": len(past), "sum": w.sum(axis=0),
+             "min": w.min(axis=0), "max": w.max(axis=0)}, past)
+
+
 def _simulate_mtf_outer(underlyings, corr_matrix, r: float, mtm_dates: list[float],
-                         N: int, seed: int):
+                         N: int, seed: int) -> np.ndarray:
     """Outer scenario generator: N correlated GBM paths from t=0 to the last MTM date.
-    Returns the full spot tensor plus the running worst-of-min / best-of-max series
-    (needed to seed continuously-monitored barriers in the inner re-pricing)."""
+
+    Returns the spot tensor only. It used to also return running worst-of-min /
+    best-of-max series, which no caller read — run_mark_to_future takes those from
+    the per-scenario replay instead, because the replay's extrema are the ones that
+    stop at each mark date and carry the same path history as the rest of the state.
+    Building them here allocated two more (ts, N) arrays per run for nothing."""
     n = len(underlyings)
     dt = 1.0 / SY
     sq_dt = math.sqrt(dt)
     ts = max(1, round(mtm_dates[-1] * SY))
     L = cholesky(corr_matrix, n)
     Z = default_rng(seed).standard_normal((ts, n, N))
-    S = _simulate_gbm(ts, n, N, dt, sq_dt, underlyings, r, L, Z)
-    WOF = S[1:].min(axis=1)
-    BOF = S[1:].max(axis=1)
-    wof_min_run = np.minimum.accumulate(WOF, axis=0)
-    bof_max_run = np.maximum.accumulate(BOF, axis=0)
-    return S, wof_min_run, bof_max_run
+    return _simulate_gbm(ts, n, N, dt, sq_dt, underlyings, r, L, Z)
+
+
+def _mtf_reject_unsupported(model: str, barrier_monitoring: str,
+                            yield_curve, sigma_r: float) -> None:
+    """Capabilities Mark-to-Future does not carry. Shared by the fan and the
+    drill-down so the two can never disagree on what they accept — a drill-down
+    that priced a scenario the fan refuses would explain a number nobody sees."""
+    if yield_curve:
+        raise ValueError(
+            "La courbe de taux n'est pas encore supportée en Mark-to-Future : "
+            "l'analyse est à taux plat de bout en bout (dérive outer, dérive "
+            "inner et actualisation). La conserver silencieusement comparerait "
+            "un éventail actualisé à plat à un P₀ actualisé sur la courbe. "
+            "Repassez en taux plat pour cette analyse."
+        )
+    if sigma_r:
+        raise ValueError(
+            "Les taux stochastiques ne sont pas encore supportés en "
+            "Mark-to-Future : la revalorisation résiduelle ne porte pas le "
+            "facteur de taux. Générez l'analyse avec sigma_r = 0."
+        )
+    if model == "lsv":
+        raise ValueError(
+            "Local-Stochastic Vol n'est pas encore supporté en Mark-to-Future "
+            "(le rebucketing par pas de temps ne s'intègre pas encore à la boucle "
+            "chunkée). Choisissez un autre modèle (Heston, SABR, Local Vol, Constant)."
+        )
+    if barrier_monitoring == "continuous":
+        raise ValueError(
+            "Le monitoring continu des barrières n'est pas encore supporté en "
+            "Mark-to-Future (l'héritage d'état outer→inner reste sur extrema "
+            "hebdomadaires). Repassez en monitoring hebdomadaire pour cette analyse."
+        )
 
 
 def _mtf_date_stats(pvs: np.ndarray, p0: float) -> dict:
-    """Distribution diagnostics for one MTM date (pvs in % of notional)."""
-    srt = np.sort(pvs)
-    n = len(srt)
+    """Distribution diagnostics for one MTM date (pvs in % of notional).
+
+    Percentiles use the standard linear-interpolation estimator (numpy's default,
+    the same one every risk system and spreadsheet reports). The previous
+    `sorted[int(p * n)]` returned the (floor(p*n) + 1)-th order statistic, whose
+    expected rank is (floor(p*n) + 1) / (n + 1) — badly off in the tails on the
+    small samples this function actually sees. Mark-to-Future conditions on
+    survival, so a callable product leaves a few dozen contracts alive at the late
+    dates: at n = 60 the published "P01" was literally the sample MINIMUM (9 points
+    of notional below the true 1st percentile) and "P99" the sample MAXIMUM. Those
+    two rows are the tail-risk rows of the fan chart."""
+    n = len(pvs)
 
     def q(p: float) -> float:
-        return float(srt[min(n - 1, max(0, int(p * n)))])
+        return float(np.quantile(pvs, p))
 
     mean = float(pvs.mean())
+    # ── Décomposition gagnants / perdants ───────────────────────────
+    # Espérances CONDITIONNELLES au signe du résultat, à ne pas confondre avec
+    # e_upside : celle-ci moyenne max(MTM-100, 0) sur TOUT l'échantillon (elle
+    # compte les perdants comme des zéros et répond « combien de potentiel
+    # au-dessus du pair ce produit porte-t-il en moyenne »), tandis que
+    # avg_gain moyenne le seul sous-échantillon gagnant (« quand ça marche, ça
+    # rapporte combien »). Les deux sont utiles et ne disent pas la même chose ;
+    # les mélanger est l'erreur de lecture classique sur ce type de tuile.
+    #
+    # Le seuil est 100 % du nominal, pas P0 : c'est la question « le produit
+    # vaut-il plus que le pair », indépendante du prix d'entrée. La probabilité
+    # correspondante vis-à-vis du prix payé reste p_above_p0.
+    win, lose = pvs[pvs > 100], pvs[pvs < 100]
+    nw, nl = int(win.size), int(lose.size)
     return {
         "mean": mean, "std": float(pvs.std(ddof=0)),
         "p01": q(0.01), "p05": q(0.05), "p25": q(0.25), "p50": q(0.50),
@@ -2033,6 +2498,17 @@ def _mtf_date_stats(pvs: np.ndarray, p0: float) -> dict:
         "p_above_p0":  float((pvs >= p0).mean() * 100),
         "e_mtm": mean,
         "e_upside": float(np.maximum(pvs - 100, 0).mean()),
+        # None plutôt que 0 quand le sous-échantillon est vide : une moyenne de
+        # rien n'est pas zéro, et un « gain moyen des gagnants : 0,00 % » affiché
+        # alors qu'il n'y a aucun gagnant se lit comme une information.
+        "n_win": nw, "n_lose": nl,
+        "e_mtm_win":  float(win.mean()) if nw else None,
+        "e_mtm_lose": float(lose.mean()) if nl else None,
+        "avg_gain": float((win - 100).mean()) if nw else None,
+        "avg_loss": float((100 - lose).mean()) if nl else None,   # magnitude, > 0
+        "max_gain": float(win.max() - 100) if nw else None,
+        "max_loss": float(100 - lose.min()) if nl else None,      # magnitude, > 0
+        "mtm_min": float(pvs.min()), "mtm_max": float(pvs.max()),
     }
 
 
@@ -2048,31 +2524,46 @@ def run_mark_to_future(script: CompiledScript,
                         n_dates: int = 5,
                         seed: int = 42,
                         user_params=None,
-                        barrier_monitoring: str = "weekly") -> dict:
+                        barrier_monitoring: str = "weekly",
+                        mtm_dates: list[float] | None = None,
+                        yield_curve=None,
+                        sigma_r: float = 0.0) -> dict:
     """Run the full nested Monte Carlo Mark-to-Future analysis (see module section
     docstring above). main_price is the t=0 fair price (% of notional); it is only
     used as the threshold for the P(MTM >= P0) diagnostic.
 
     Inner simulation is processed in chunks of outer scenarios (MTF_MAX_BATCH paths
-    at a time) to bound peak memory regardless of how large n_outer * n_inner gets."""
-    if model == "lsv":
-        raise ValueError(
-            "Local-Stochastic Vol n'est pas encore supporté en Mark-to-Future "
-            "(le rebucketing par pas de temps ne s'intègre pas encore à la boucle "
-            "chunkée). Choisissez un autre modèle (Heston, SABR, Local Vol, Constant)."
-        )
-    if barrier_monitoring == "continuous":
-        raise ValueError(
-            "Le monitoring continu des barrières n'est pas encore supporté en "
-            "Mark-to-Future (l'héritage d'état outer→inner reste sur extrema "
-            "hebdomadaires). Repassez en monitoring hebdomadaire pour cette analyse."
-        )
+    at a time) to bound peak memory regardless of how large n_outer * n_inner gets.
+
+    yield_curve / sigma_r are accepted only to be REFUSED: this analysis is
+    flat-rate throughout (outer drift, inner drift and discounting all read the
+    scalar r). They are in the signature because every caller builds one request
+    body for every analytic and would otherwise drop them silently — the price
+    would carry the curve and the whole fan would not, including the P0 threshold
+    the fan is compared against."""
+    _mtf_reject_unsupported(model, barrier_monitoring, yield_curve, sigma_r)
     t_run0 = time.perf_counter()
     user_params = user_params or {}
     n = len(underlyings)
-    mtm_dates = build_mtf_dates(T_max, n_dates)
+    # `mtm_dates` lets a caller ask for the exact dates it needs instead of the
+    # evenly-spaced grid. The PRIIPs intermediate horizons use it: they need
+    # the value at 1 year and at RHP/2 specifically, and that value is what
+    # this function already computes correctly for a recallable product.
+    mtm_dates = ([round(float(d), 6) for d in mtm_dates]
+                 if mtm_dates else build_mtf_dates(T_max, n_dates))
+    # A mark date inside the first half-step snaps to step 0: the replay would
+    # then index an empty path tensor and die on `WOF_min[-1]` with an IndexError
+    # about axis 0 having size 0 — a stack trace no caller can act on.
+    too_early = [d for d in mtm_dates if _mtf_step(d) < 1]
+    if too_early:
+        raise ValueError(
+            f"Date(s) de valorisation trop proche(s) de t=0 : {too_early} — le "
+            f"moteur travaille sur une grille hebdomadaire, une date en deçà d'un "
+            f"demi-pas ({0.5 / SY:.4f} an, soit 3 jours) n'a aucun pas à rejouer. "
+            f"Demandez au minimum {1 / SY:.4f} an (une semaine)."
+        )
 
-    S_outer, wof_min_run, bof_max_run = _simulate_mtf_outer(
+    S_outer = _simulate_mtf_outer(
         underlyings, corr_matrix, r, mtm_dates, n_outer, seed
     )
 
@@ -2086,25 +2577,67 @@ def run_mark_to_future(script: CompiledScript,
 
     results = []
     for k, t0 in enumerate(mtm_dates):
-        step_k = round(t0 * SY)
-        spot_k    = S_outer[step_k]            # (n, N_outer) — spot at this MTM date
-        wof_min_k = wof_min_run[step_k - 1]     # (N_outer,)   — running min up to t0
-        bof_max_k = bof_max_run[step_k - 1]     # (N_outer,)   — running max up to t0
+        step_k = _mtf_step(t0)
+        spot_k = S_outer[step_k]                # (n, N_outer) — spot at this MTM date
 
-        residual_events = _shift_events_for_mtf(script.events, t0)
-        residual_script = CompiledScript(events=residual_events, init_fn=script.init_fn,
-                                          params=script.params, constats=script.constats)
-        T_eff = max(1 / SY, round(T_max - t0, 6))
-        ts_eff = max(1, round(T_eff * SY))
+        # ── Replay each outer scenario from inception to the mark date ──────
+        # Without this the inner repricing restarted the contract from scratch:
+        # a product already recalled kept being marked as alive (an autocall
+        # certain to be called at its first observation stayed near 107% of
+        # notional for the rest of its original life, on a fan so degenerate
+        # that min and max coincided across every scenario). Coupon memory, the
+        # observation counter and realized extrema were lost the same way.
+        #
+        # The past events are evaluated on the outer paths themselves, with the
+        # maturity block withheld — the product has not matured, it has merely
+        # reached t0 — and the resulting per-scenario state is fed straight
+        # into the inner simulation.
+        past_step_map = _mtf_past_step_map(script, step_k)
 
-        step_map: dict[int, list] = {}
-        mat_events = []
-        for ev in residual_events:
-            if ev.type == "AT_MATURITY":
-                mat_events.append(ev)
-            else:
-                for d in ev.dates:
-                    step_map.setdefault(max(1, round(d * SY)), []).append(ev)
+        outer_states: list[dict] = []
+        # Dated flows of what each scenario has ALREADY been paid before the
+        # mark date. `realized_cf` is their present value, which is enough to
+        # report cash but not to work out the return the investor earned on
+        # it — that needs the dates, and a scenario recalled before this
+        # horizon has a shorter life than the horizon itself.
+        outer_flows: list[list] = []
+        _eval_paths(script, S_outer[:step_k + 1], step_k, n, n_outer, dt, r,
+                    user_params, past_step_map, [], {}, record=False,
+                    state_out=outer_states, flows_out=outer_flows)
+
+        alive = np.array([not st["done"] for st in outer_states])
+        # Cash already paid out, expressed at t0 (the replay discounts to t=0).
+        # There is deliberately no "cash already paid" series here any more.
+        # It only ever described the RECALLED scenarios, and those now leave
+        # the sample entirely — so it documented rows nobody looks at, while
+        # inviting the reader to add it to a mark it does not belong to. It
+        # also carried an exp(r*t0) factor, i.e. the coupon reinvested at the
+        # risk-free rate, which a mark-to-future has no business assuming.
+        #
+        # The dated flows survive as `realized_flows` because the PRIIPs
+        # horizons genuinely need them: there the question is "what did the
+        # investor receive and when", and an internal rate of return cannot be
+        # computed without the dates. Different question, different screen.
+        wof_min_k = np.array([st["wof_min"] for st in outer_states])
+        bof_max_k = np.array([st["bof_max"] for st in outer_states])
+        index_k = np.array([st["index"] for st in outer_states], dtype=np.int64)
+        accum_k = np.array([st["accum"] for st in outer_states], dtype=float)
+        memo_k = [st["memo"] for st in outer_states]
+        s_min_k = np.asarray([st["s_min"] for st in outer_states], dtype=float).T   # (n, N_outer)
+        s_max_k = np.asarray([st["s_max"] for st in outer_states], dtype=float).T
+        s_prev_k = np.asarray([st["s_prev"] for st in outer_states], dtype=float).T
+        rv_sumsq_k = np.array([st["realvol_sumsq"] for st in outer_states])
+        rv_t_k = np.array([st["realvol_t"] for st in outer_states])
+        wof0_k = spot_k.min(axis=0)             # (N_outer,) — worst-of at the mark date
+
+        # has_stop and the fixing window used to be dropped when rebuilding the
+        # residual script, which silently lost its early-redemption flag and its
+        # STRIKE_FIX dates. Both now live in _mtf_residual_script, alongside the
+        # snapped-step past/future split — a fixing date already averaged into
+        # fix_state_k below must not also be re-simulated, or it counts twice.
+        fix_state_k, _past_fix = _mtf_realized_fix(script, S_outer, step_k)
+        residual_script, step_map, mat_events, ts_eff = _mtf_residual_script(
+            script, t0, T_max)
 
         lv_grids = nK = lkm = lkx = None
         if use_lv:
@@ -2123,9 +2656,8 @@ def run_mark_to_future(script: CompiledScript,
             n_chunk = end - start
             N_chunk = n_chunk * n_inner
 
-            spot_chunk    = np.repeat(spot_k[:, start:end], n_inner, axis=1)   # (n, N_chunk)
-            wof_min_chunk = np.repeat(wof_min_k[start:end], n_inner)           # (N_chunk,)
-            bof_max_chunk = np.repeat(bof_max_k[start:end], n_inner)           # (N_chunk,)
+            sl = slice(start, end)
+            spot_chunk = np.repeat(spot_k[:, sl], n_inner, axis=1)             # (n, N_chunk)
 
             rng = default_rng(seed + 1_000_003 * (k + 1) + start)
             Z = rng.standard_normal((ts_eff, n, N_chunk))
@@ -2148,16 +2680,67 @@ def run_mark_to_future(script: CompiledScript,
             payoffs, _ = _eval_paths(
                 residual_script, S_in, ts_eff, n, N_chunk, dt, r, user_params,
                 step_map, mat_events, {}, record=False,
-                wof_min_init=wof_min_chunk, bof_max_init=bof_max_chunk,
+                wof_min_init=np.repeat(wof_min_k[sl], n_inner),
+                bof_max_init=np.repeat(bof_max_k[sl], n_inner),
+                index_offset=np.repeat(index_k[sl], n_inner),
+                memo_init=[memo_k[i] for i in range(start, end) for _ in range(n_inner)],
+                accum_init=np.repeat(accum_k[sl], n_inner),
+                s_min_init=np.repeat(s_min_k[:, sl], n_inner, axis=1),
+                s_max_init=np.repeat(s_max_k[:, sl], n_inner, axis=1),
+                s_prev_init=np.repeat(s_prev_k[:, sl], n_inner, axis=1),
+                wof0_init=np.repeat(wof0_k[sl], n_inner),
+                realvol_state_init={"sumsq": np.repeat(rv_sumsq_k[sl], n_inner),
+                                    "t": np.repeat(rv_t_k[sl], n_inner)},
+                fix_state_init=(None if fix_state_k is None else {
+                    "n": fix_state_k["n"],
+                    "sum": np.repeat(fix_state_k["sum"][sl], n_inner),
+                    "min": np.repeat(fix_state_k["min"][sl], n_inner),
+                    "max": np.repeat(fix_state_k["max"][sl], n_inner),
+                }),
             )
 
             # Each outer scenario's MTF value = mean of its N_inner inner PVs (% notional).
             scenario_pvs[start:end] = np.array(payoffs).reshape(n_chunk, n_inner).mean(axis=1) * 100
 
+        # A terminated contract has no residual value to mark, so it LEAVES the
+        # sample — it is not marked at zero and not shown at its redemption
+        # value either. Zeroing it looked defensible and was not: the recalled
+        # scenarios piled up at 0 and took over the bottom of the distribution,
+        # so the published P05 was made of products that had just paid ~108%
+        # and finished, while the genuinely worst outcome — a live product
+        # deep under its barrier, worth 40-50% — sat in the middle of the fan.
+        # The chart hid the risk it exists to show, and the median printed 0%
+        # from the date more than half the paths had been called.
+        #
+        # Every figure below is therefore CONDITIONAL on the contract still
+        # being alive at t0. The survival rate is published beside it: read
+        # apart, a conditional percentile says nothing about the book.
+        scenario_pvs = np.where(alive, scenario_pvs, 0.0)
+        alive_pvs = scenario_pvs[alive]
+        n_alive = int(alive.sum())
+
         results.append({
             "t": t0,
+            # Per-scenario marks, 0 on the terminated ones — kept for callers
+            # that pair them with `alive` (the PRIIPs horizons do). The chart
+            # must read `pvs_alive`.
             "pvs": [round(float(v), 4) for v in scenario_pvs],
-            "stats": _mtf_date_stats(scenario_pvs, main_price),
+            "pvs_alive": [round(float(v), 4) for v in alive_pvs],
+            "terminated_pct": round(float((~alive).mean() * 100), 2),
+            "n_alive": n_alive,
+            "n_outer": int(n_outer),
+            # One list of (t, montant) per outer scenario: everything paid out
+            # before this mark date, at the dates it was paid.
+            "realized_flows": outer_flows,
+            "alive": [bool(a) for a in alive],
+            # Conditional on survival. None only when nothing survives at all —
+            # there is then no distribution to describe. `thin` marks the case
+            # where a percentile rests on too few contracts to mean much; the
+            # display refuses to plot it, but the engine still returns the
+            # number rather than surprising a caller who asked for a small run.
+            "thin": n_alive < MTF_MIN_ALIVE,
+            "stats": (_mtf_date_stats(alive_pvs, main_price)
+                      if n_alive > 0 else None),
         })
 
     return {
@@ -2166,6 +2749,367 @@ def run_mark_to_future(script: CompiledScript,
         "n_inner": n_inner,
         "n_dates": n_dates,
         "results": results,
+        "elapsed_ms": round((time.perf_counter() - t_run0) * 1000, 1),
+    }
+
+
+# ── Analytics: Mark-to-Future drill-down ────────────────────────────
+#
+# "Why is P05 at 47%?" is not answerable from a fan chart. This reopens one
+# mark date and hands back, for a handful of named scenarios, everything that
+# produced their number: the market path that got there, what the contract had
+# already paid, what it is expected to pay next and with what probability, the
+# discount factor on each of those flows, and — for comparison — what that same
+# trajectory actually ends up paying if you let it run to maturity.
+#
+# The whole thing rests on one property: the fan's outer scenarios are
+# REPRODUCIBLE. _simulate_mtf_outer draws (ts, n, N) in C order, so extending
+# the horizon leaves every earlier step bit-identical; and the inner draws are
+# keyed on (seed, date index k, chunk start). Replaying the same k and the same
+# chunk therefore reproduces the fan's inner paths exactly, which is why the
+# `mtf` reported here equals `pvs[i]` from the fan to the last decimal instead
+# of merely being close to it. An explain panel that did not tie out would be
+# worse than none.
+
+def _mtf_flux_rows(flux_map: dict, n_paths: int, t0: float) -> list[dict]:
+    """Turn a flux_map (aggregated over the inner paths of ONE outer scenario)
+    into the expected-cash-flow table behind a mark.
+
+    Per (date, label): probability of firing, expected amount, implied discount
+    factor and present value. Summing `pv` reconstructs the mark — that identity
+    is returned as a check rather than asserted, so a caller can display the
+    residual instead of the engine hiding it."""
+    rows = []
+    for v in flux_map.values():
+        n_fire, tot, pv = v["n"], v["sum"], v["pv"]
+        rows.append({
+            "t": round(v["t"], 6),                       # années depuis t0
+            "t_abs": round(t0 + v["t"], 6),              # années depuis aujourd'hui
+            "lbl": v["lbl"],
+            "proba": round(n_fire / n_paths * 100, 3),   # % des chemins internes
+            "e_amount": round(tot / n_paths * 100, 6),   # espérance, % du nominal
+            "amount_if_fires": round(tot / n_fire * 100, 6) if n_fire else 0.0,
+            "df": round(pv / tot, 6) if abs(tot) > 1e-12 else 1.0,
+            "pv": round(pv / n_paths * 100, 6),          # contribution au mark
+        })
+    rows.sort(key=lambda x: (x["t"], x["lbl"]))
+    return rows
+
+
+def _mtf_observations(script: CompiledScript, wof_path: np.ndarray, ts_full: int,
+                      step_k: int, stop_step: int | None,
+                      fired: dict[int, list]) -> list[dict]:
+    """Observation calendar of one trajectory, with its status at each date.
+
+    `vivant` before the stop, `rappelé` at the stop itself, `éteint` after it —
+    an observation the contract never reached is not a missing row, it is a row
+    that says the product was already gone."""
+    steps = sorted({max(1, round(d * SY))
+                    for ev in script.events if ev.type == "AT" for d in ev.dates})
+    if any(ev.type == "AT_MATURITY" for ev in script.events) and ts_full not in steps:
+        steps.append(ts_full)
+    out = []
+    for s in steps:
+        if stop_step is None or s < stop_step:
+            status = "vivant"
+        elif s == stop_step:
+            status = "rappelé" if s < ts_full else "maturité"
+        else:
+            status = "éteint"
+        out.append({
+            "step": int(s),
+            "t": round(s / SY, 6),
+            "wof": round(float(wof_path[s - 1]), 6),
+            "past": bool(s <= step_k),
+            "status": status,
+            "flows": fired.get(s, []),
+        })
+    return out
+
+
+def _mtf_barriers(script: CompiledScript, source: str, user_params: dict) -> list[dict]:
+    """Levels the script actually COMPARES an observable against.
+
+    Derived from the script text by the same static analysis the M_ watchlist
+    uses (_analyze_monitors), applied to every PARAM rather than only the
+    M_-prefixed ones. A PARAM that is never compared to WOF/BOF/S[i] — a coupon
+    rate, a participation — comes back with observable None and is dropped:
+    guessing "which PARAM is a barrier" from its value would put CPN = 8% next
+    to PDI = 60% and call both barriers."""
+    from .parser import _analyze_monitors
+    names = [p.name for p in script.params]
+    if not names:
+        return []
+    out = []
+    for mon in _analyze_monitors(source, names):
+        if not mon["observable"]:
+            continue
+        p = next(p for p in script.params if p.name == mon["name"])
+        lvl = user_params.get(p.name, p.stored_val)
+        try:
+            lvl = float(lvl)
+        except (TypeError, ValueError):
+            continue          # PARAM() en tableau : pas un niveau unique
+        out.append({"name": p.name, "level": round(lvl, 6), "is_pct": bool(p.is_pct),
+                    "observable": mon["observable"], "direction": mon["direction"],
+                    "desc": p.desc})
+    return out
+
+
+def run_mtf_drilldown(script: CompiledScript,
+                      underlyings,
+                      corr_matrix,
+                      r: float,
+                      T_max: float,
+                      main_price: float,
+                      t0: float,
+                      scenario_ids: list[int],
+                      labels: list[str] | None = None,
+                      script_source: str = "",
+                      model: str = "constant",
+                      n_outer: int = 200,
+                      n_inner: int = 500,
+                      n_dates: int = 5,
+                      seed: int = 42,
+                      user_params=None,
+                      barrier_monitoring: str = "weekly",
+                      mtm_dates: list[float] | None = None,
+                      yield_curve=None,
+                      sigma_r: float = 0.0,
+                      max_scenarios: int = 12) -> dict:
+    """Full explain of a handful of outer scenarios at one Mark-to-Future date.
+
+    `scenario_ids` are indices into the fan's `pvs` / `alive` arrays. The date
+    grid arguments (n_dates / mtm_dates) must match the run being explained:
+    they fix the date index k, which keys the inner random draws. Get them wrong
+    and the marks come back plausible and slightly different — the one failure
+    mode this whole design exists to prevent, so the grid is echoed back in the
+    response for the caller to check against the fan it came from."""
+    _mtf_reject_unsupported(model, barrier_monitoring, yield_curve, sigma_r)
+    t_run0 = time.perf_counter()
+    user_params = user_params or {}
+    n = len(underlyings)
+    dt = 1.0 / SY
+
+    grid = ([round(float(d), 6) for d in mtm_dates] if mtm_dates
+            else build_mtf_dates(T_max, n_dates))
+    t0 = round(float(t0), 6)
+    k = next((i for i, d in enumerate(grid) if abs(d - t0) < 1e-6), None)
+    if k is None:
+        raise ValueError(
+            f"La date {t0} ne figure pas dans la grille de l'éventail {grid}. "
+            f"Le tirage interne dépend du rang de la date : l'expliquer depuis "
+            f"une autre grille produirait un mark voisin mais différent de celui "
+            f"affiché. Relancez le Mark-to-Future ou demandez une date de la grille."
+        )
+    step_k = _mtf_step(t0)
+    if step_k < 1:
+        raise ValueError(f"Date de valorisation trop proche de t=0 : {t0}.")
+
+    ids = []
+    for i in scenario_ids:
+        i = int(i)
+        if not 0 <= i < n_outer:
+            raise ValueError(f"Scénario {i} hors bornes (0..{n_outer - 1}).")
+        if i not in ids:
+            ids.append(i)
+    if not ids:
+        raise ValueError("Aucun scénario demandé.")
+    if len(ids) > max_scenarios:
+        raise ValueError(
+            f"{len(ids)} scénarios demandés, {max_scenarios} au maximum — chacun "
+            f"rejoue {n_inner} chemins internes et renvoie sa trajectoire complète.")
+    lab = {i: (labels[j] if labels and j < len(labels) else None)
+           for j, i in enumerate(ids)}
+
+    # ── Outer paths, extended to MATURITY ───────────────────────────
+    # The fan stops at its last mark date; the drill-down needs the rest of the
+    # trajectory to show what this scenario actually ends up paying. Extending
+    # the horizon is safe precisely because the prefix is bit-identical.
+    ts_full = max(1, round(T_max * SY))
+    S_full = _simulate_mtf_outer(underlyings, corr_matrix, r, [T_max], n_outer, seed)
+    S_outer = S_full[:step_k + 1]
+
+    # ── Replay to the mark date (same call as the fan) ──────────────
+    outer_states: list[dict] = []
+    outer_flows: list[list] = []
+    _eval_paths(script, S_outer, step_k, n, n_outer, dt, r, user_params,
+                _mtf_past_step_map(script, step_k), [], {}, record=False,
+                state_out=outer_states, flows_out=outer_flows)
+    alive = np.array([not st["done"] for st in outer_states])
+    fix_state_k, _ = _mtf_realized_fix(script, S_outer, step_k)
+    residual_script, step_map, mat_events, ts_eff = _mtf_residual_script(script, t0, T_max)
+
+    use_heston, use_lv, use_sabr = model == "heston", model == "localvol", model == "sabr"
+    sq_dt = math.sqrt(dt)
+    L = cholesky(corr_matrix, n)
+    outer_per_chunk = max(1, MTF_MAX_BATCH // n_inner)
+    lv_grids = nK = lkm = lkx = None
+    if use_lv:
+        lv_grids, nK, lkm, lkx = _build_lv_grid(
+            underlyings, _build_rate_term([], ts_eff, dt, r), ts_eff, dt)
+
+    # ── Full-script evaluation of each trajectory, out to maturity ──
+    # One path, the real script (maturity block included): what this scenario
+    # ends up being worth. This is a single realization along a GBM outer path,
+    # NOT a price — it is the number the mark is an expectation of, and showing
+    # the two side by side is the point of the panel.
+    full_step_map: dict[int, list] = {}
+    full_mat: list = []
+    for ev in script.events:
+        if ev.type == "AT_MATURITY":
+            full_mat.append(ev)
+        else:
+            for d in ev.dates:
+                s = max(1, round(d * SY))
+                if s <= ts_full:
+                    full_step_map.setdefault(s, []).append(ev)
+
+    out_scen: list[dict] = []
+    for i in ids:
+        path_i = np.ascontiguousarray(S_full[:, :, i:i + 1])          # (ts_full+1, n, 1)
+        wof_i = path_i[1:].min(axis=1)[:, 0]                          # (ts_full,)
+        flux_full: dict = {}
+        stops: list = []
+        flows_full: list = []
+        pay_full, pay_raw = _eval_paths(
+            script, path_i, ts_full, n, 1, dt, r, user_params,
+            full_step_map, full_mat, flux_full, record=True,
+            stop_times_out=stops, flows_out=flows_full)
+        stop_t = float(stops[0]) if stops else float(ts_full * dt)
+        stop_step = int(round(stop_t * SY))
+        fired: dict[int, list] = {}
+        for v in flux_full.values():
+            s = max(1, round(v["t"] * SY))
+            fired.setdefault(s, []).append(
+                {"lbl": v["lbl"], "v": round(v["sum"] * 100, 6)})
+
+        out_scen.append({
+            "id": i,
+            "label": lab[i],
+            "alive": bool(alive[i]),
+            "wof_t0": round(float(S_full[step_k, :, i].min()), 6),
+            "spots_t0": [round(float(v), 6) for v in S_full[step_k, :, i]],
+            # Trajectoire complète (hebdomadaire), t=0 inclus.
+            "path": {
+                "t": [round(s / SY, 6) for s in range(ts_full + 1)],
+                "wof": [1.0] + [round(float(v), 6) for v in wof_i],
+                "assets": [[round(float(v), 6) for v in S_full[:, a, i]] for a in range(n)],
+            },
+            "observations": _mtf_observations(script, wof_i, ts_full, step_k,
+                                              stop_step, fired),
+            # Ce qui a DÉJÀ été encaissé avant la date de valorisation.
+            "realized_flows": [
+                {"t": round(t, 6), "v": round(v * 100, 6),
+                 "pv_t0": round(v * math.exp(-r * (t - t0)) * 100, 6)}
+                for t, v in outer_flows[i]],
+            "realized_cash": round(sum(v for _t, v in outer_flows[i]) * 100, 6),
+            # Payoff RÉEL de cette trajectoire si on la laisse courir.
+            "final": {
+                "stop_t": round(stop_t, 6),
+                "recalled": bool(stop_step < ts_full),
+                "total_undiscounted": round(float(pay_raw[0]) * 100, 6),
+                "pv_at_0": round(float(pay_full[0]) * 100, 6),
+                "flows": [{"t": round(t, 6), "v": round(v * 100, 6)}
+                          for t, v in flows_full[0]],
+            },
+        })
+
+    # ── Inner repricing, chunk by chunk, exactly as the fan drew it ──
+    by_chunk: dict[int, list[int]] = {}
+    for i in ids:
+        by_chunk.setdefault((i // outer_per_chunk) * outer_per_chunk, []).append(i)
+
+    marks: dict[int, dict] = {}
+    for start, members in by_chunk.items():
+        end = min(n_outer, start + outer_per_chunk)
+        n_chunk = end - start
+        N_chunk = n_chunk * n_inner
+        sl = slice(start, end)
+        spot_chunk = np.repeat(S_full[step_k][:, sl], n_inner, axis=1)
+        # Same key as run_mark_to_future: seed + 1_000_003*(k+1) + start.
+        rng = default_rng(seed + 1_000_003 * (k + 1) + start)
+        Z = rng.standard_normal((ts_eff, n, N_chunk))
+        if use_heston:
+            Zv = rng.standard_normal((ts_eff, n, N_chunk))
+            S_in = _simulate_heston(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L,
+                                    Z, Zv, spot_chunk)
+        elif use_lv:
+            S_in = _simulate_lv(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L, Z,
+                                lv_grids, nK, lkm, lkx, spot_chunk)
+        elif use_sabr:
+            Za = rng.standard_normal((ts_eff, n, N_chunk))
+            S_in = _simulate_sabr(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L,
+                                  Z, Za, spot_chunk)
+        else:
+            S_in = _simulate_gbm(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L,
+                                 Z, spot_chunk)
+
+        for i in members:
+            j = i - start
+            cols = slice(j * n_inner, (j + 1) * n_inner)
+            flux: dict = {}
+            stops_in: list = []
+            payoffs, _ = _eval_paths(
+                residual_script, np.ascontiguousarray(S_in[:, :, cols]), ts_eff, n,
+                n_inner, dt, r, user_params, step_map, mat_events, flux, record=True,
+                stop_times_out=stops_in,
+                wof_min_init=float(outer_states[i]["wof_min"]),
+                bof_max_init=float(outer_states[i]["bof_max"]),
+                index_offset=int(outer_states[i]["index"]),
+                memo_init=outer_states[i]["memo"],
+                accum_init=float(outer_states[i]["accum"]),
+                s_min_init=np.asarray(outer_states[i]["s_min"], dtype=float),
+                s_max_init=np.asarray(outer_states[i]["s_max"], dtype=float),
+                s_prev_init=np.asarray(outer_states[i]["s_prev"], dtype=float),
+                wof0_init=float(S_full[step_k, :, i].min()),
+                realvol_state_init={"sumsq": float(outer_states[i]["realvol_sumsq"]),
+                                    "t": float(outer_states[i]["realvol_t"])},
+                fix_state_init=(None if fix_state_k is None else {
+                    "n": fix_state_k["n"], "sum": float(fix_state_k["sum"][i]),
+                    "min": float(fix_state_k["min"][i]), "max": float(fix_state_k["max"][i])}),
+            )
+            mtf_i = float(np.mean(payoffs)) * 100
+            rows = _mtf_flux_rows(flux, n_inner, t0)
+            mat_t = ts_eff * dt
+            recalled = sum(1 for s in stops_in if s < mat_t - 0.5 * dt)
+            marks[i] = {
+                "mtf": round(mtf_i, 6),
+                "future_flows": rows,
+                "sum_pv": round(sum(x["pv"] for x in rows), 6),
+                "recall_proba": round(recalled / n_inner * 100, 3),
+                "expected_life": round(float(np.mean(stops_in)) + t0, 6),
+            }
+
+    for sc in out_scen:
+        m = marks[sc["id"]]
+        # Un contrat éteint n'a pas de valeur résiduelle à marquer : il sort de
+        # l'échantillon dans l'éventail, et le panneau doit dire la même chose
+        # plutôt que d'exhiber le prix d'un produit qui n'existe plus.
+        sc["mtf"] = m["mtf"] if sc["alive"] else 0.0
+        sc["residual_mark"] = m["mtf"]
+        sc["future_flows"] = m["future_flows"] if sc["alive"] else []
+        sc["sum_pv"] = m["sum_pv"] if sc["alive"] else 0.0
+        sc["recall_proba"] = m["recall_proba"] if sc["alive"] else None
+        sc["expected_life"] = m["expected_life"] if sc["alive"] else None
+        # Écart de reconstitution : somme des VA des flux futurs - mark. Nul par
+        # construction, publié pour que le tableau soit vérifiable à l'écran.
+        sc["pv_residual"] = round(sc["sum_pv"] - sc["mtf"], 9)
+
+    return {
+        "t": t0,
+        "k": k,
+        "step_k": step_k,
+        "mtm_dates": grid,
+        "main_price": round(main_price, 4),
+        "n_outer": n_outer,
+        "n_inner": n_inner,
+        "T_max": round(T_max, 6),
+        "r": r,
+        "n_assets": n,
+        "asset_names": [u.get("name") or f"S{a + 1}" for a, u in enumerate(underlyings)],
+        "barriers": _mtf_barriers(script, script_source, user_params),
+        "scenarios": out_scen,
         "elapsed_ms": round((time.perf_counter() - t_run0) * 1000, 1),
     }
 
@@ -2456,24 +3400,110 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     }
 
 
+IRR_FLOOR = -1.0 + 1e-6     # -99.9999% — below this everything is "total loss"
+IRR_CAP = 10.0              # +1000%, past which the figure is an artefact
+
+
 def compute_irr(cash_flows: list[dict], guess: float = 0.1,
-                tol: float = 1e-6, max_iter: int = 60) -> float | None:
-    """Newton-Raphson IRR solver. cash_flows = list of {t: years, cf: amount}."""
+                tol: float = 1e-10, max_iter: int = 200) -> float | None:
+    """IRR by bracketing then bisection. cash_flows = list of {t: years, cf: amount}.
+
+    The previous solver was a bare Newton-Raphson started at 10% and clamped
+    to [-0.99, 10]. It answered correctly on ordinary windows and returned
+    None on the ones that matter most:
+
+      * a total loss (-100 at t=0, nothing back) has its IRR at exactly -100%,
+        which a clamp at -99% can never reach;
+      * a near-total loss (-100, +0.01) sits at -99.99%, outside the clamp too;
+      * an overshoot into the clamp stalls the iteration on the flat region.
+
+    Those Nones were then dropped by the callers, so the worst windows of a
+    backtest vanished from its statistics — a selection bias pointing one way,
+    in favour of the product. A performance measure that quietly discards its
+    own left tail is worse than no measure.
+
+    Bisection needs no derivative, cannot overshoot, and converges on every
+    bracketed root. Newton is kept only as a final polish. The cases that
+    genuinely have no single IRR (no outflow, no inflow, several sign changes)
+    still return None — but they are now the only ones, and they are honest."""
+    if not cash_flows:
+        return None
+
     def npv(r_: float) -> float:
-        return sum(cf["cf"] / (1 + r_)**cf["t"] for cf in cash_flows)
+        total = 0.0
+        base = 1.0 + r_
+        for cf in cash_flows:
+            t = cf["t"]
+            try:
+                total += cf["cf"] / (base ** t) if t else cf["cf"]
+            except (ZeroDivisionError, OverflowError):
+                return math.inf if cf["cf"] > 0 else -math.inf
+        return total
 
-    def dnpv(r_: float) -> float:
-        return -sum(cf["t"] * cf["cf"] / (1 + r_)**(cf["t"] + 1) for cf in cash_flows)
+    inflow = sum(cf["cf"] for cf in cash_flows if cf["cf"] > 0)
+    outflow = sum(cf["cf"] for cf in cash_flows if cf["cf"] < 0)
+    if inflow == 0.0 and outflow == 0.0:
+        return None                     # nothing happened
+    if outflow == 0.0:
+        return None                     # no money ever invested: no rate of return
+    if inflow == 0.0:
+        # Everything paid in, nothing back. The rate of return is -100%, and
+        # saying so is the entire point of this rewrite.
+        return -1.0
 
-    r = guess
+    # A conventional window — money out, then money in — has exactly one sign
+    # change, so NPV is strictly decreasing in r and the root is unique. That
+    # is every real product window: you pay at inception and receive coupons
+    # and redemption afterwards. Anything else can carry several mathematical
+    # IRRs, and picking one of them (which the old Newton did, silently) is
+    # not a measure of anything.
+    ordered = sorted(cash_flows, key=lambda c: c["t"])
+    signs = [1 if cf["cf"] > 0 else -1 for cf in ordered if cf["cf"] != 0]
+    conventional = sum(1 for a, b in zip(signs, signs[1:]) if a != b) == 1
+
+    f_lo, f_hi = npv(IRR_FLOOR), npv(IRR_CAP)
+    if not (math.isfinite(f_lo) and math.isfinite(f_hi)):
+        return None
+    if f_lo == 0.0:
+        return IRR_FLOOR
+    if f_hi == 0.0:
+        return IRR_CAP
+    if f_lo > 0.0 and f_hi > 0.0:
+        # Conventional: NPV decreases, so still positive at +1000% means the
+        # root is beyond it — report the cap rather than drop the window.
+        return IRR_CAP if conventional else None
+    if f_lo < 0.0:
+        # Impossible for a conventional window with any inflow: as r → -100%
+        # the discounted inflows dominate and NPV → +∞. Reaching here means a
+        # late negative flow outweighs them, i.e. a non-conventional profile.
+        return None
+
+    lo, hi = IRR_FLOOR, IRR_CAP
     for _ in range(max_iter):
-        f, df = npv(r), dnpv(r)
-        if abs(df) < 1e-12:
+        mid = 0.5 * (lo + hi)
+        f_mid = npv(mid)
+        if f_mid == 0.0 or (hi - lo) < tol:
+            lo = hi = mid
             break
-        r_new = max(-0.99, min(r - f/df, 10.0))
-        if abs(r_new - r) < tol:
-            r = r_new
-            break
-        r = r_new
+        if (f_lo < 0.0) == (f_mid < 0.0):
+            lo, f_lo = mid, f_mid
+        else:
+            hi = mid
+    r = 0.5 * (lo + hi)
 
-    return r if math.isfinite(r) and abs(npv(r)) < 1e-3 else None
+    # Newton polish — accepted only if it stays inside the bracket and does
+    # not worsen the residual, so it can never undo the bisection.
+    def dnpv(r_: float) -> float:
+        try:
+            return -sum(cf["t"] * cf["cf"] / (1.0 + r_) ** (cf["t"] + 1)
+                        for cf in cash_flows)
+        except (ZeroDivisionError, OverflowError):
+            return 0.0
+
+    d = dnpv(r)
+    if abs(d) > 1e-12:
+        cand = r - npv(r) / d
+        if IRR_FLOOR <= cand <= IRR_CAP and abs(npv(cand)) < abs(npv(r)):
+            r = cand
+
+    return r if math.isfinite(r) else None

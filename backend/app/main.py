@@ -58,9 +58,10 @@ def on_startup():
 
 
 # Daily lifecycle pass at 23:00 local — after the US close, since deal events
-# are close-of-day observations and Yahoo only serves reliable closes. Safe as
-# a plain in-process task: run.py runs a single worker with reload disabled,
-# and run_scheduled_refresh() never raises.
+# are close-of-day observations and Yahoo only serves reliable closes. The
+# fixing policy frozen on each deal decides whether the pass is automatic or
+# proposal-only. Safe as a plain in-process task: run.py runs a single worker
+# with reload disabled, and run_scheduled_refresh() never raises.
 @app.on_event("startup")
 async def start_lifecycle_scheduler():
     async def _daily_loop():

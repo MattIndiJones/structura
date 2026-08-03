@@ -139,12 +139,33 @@ def test_apply_scenario_neutral_shock_for_untouched_ticker():
 # ── aggregate_var ──────────────────────────────────────────────────────
 
 def test_aggregate_var_matches_hand_computed_percentile():
+    """10 scénarios à 90 % : la queue pèse alpha*n = 1 scénario, donc la VaR est
+    la pire perte et l'ES vaut cette même perte.
+
+    L'ancienne convention prenait floor(alpha*n)+1 = 2 scénarios : elle
+    annonçait une VaR de 500 et une ES de 750, en moyennant dans la queue une
+    perte qui n'y appartient pas. La queue faisait ainsi 20 % de la
+    distribution pour une mesure à 10 % — l'ES ressortait systématiquement plus
+    douce que ce que son nom promet."""
     deltas = [-1000.0, -500.0, -100.0, 0.0, 50.0, 100.0, 200.0, 300.0, 400.0, 500.0]
     res = ve.aggregate_var(deltas, confidence=0.90)
-    # 10 scenarios, alpha=0.10 -> cut index floor(0.10*10)=1 -> second worst (-500)
-    assert res["var_eur"] == 500.0
-    assert res["es_eur"] == pytest.approx((1000.0 + 500.0) / 2)
+    assert res["var_eur"] == 1000.0
+    assert res["es_eur"] == pytest.approx(1000.0)
     assert res["n_scenarios"] == 10
+    assert res["n_tail"] == 1.0
+
+
+def test_aggregate_var_queue_fractionnaire():
+    """30 scénarios à 95 % : la queue pèse 1,5 scénario. La VaR est la 2e pire
+    perte (la frontière de cette queue) et l'ES pondère la seconde par le reste
+    fractionnaire, conformément à ES = (1/alpha)·∫VaR — ce qui garantit
+    ES >= VaR par construction."""
+    deltas = [-1000.0, -600.0] + [float(i) for i in range(28)]
+    res = ve.aggregate_var(deltas, confidence=0.95)
+    assert res["n_tail"] == 1.5
+    assert res["var_eur"] == 600.0
+    assert res["es_eur"] == pytest.approx((1000.0 + 0.5*600.0)/1.5, abs=0.01)
+    assert res["es_eur"] >= res["var_eur"]
 
 
 def test_aggregate_var_empty_input():

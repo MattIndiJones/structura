@@ -97,6 +97,15 @@
                 <div v-if="pf.riskLoading" class="text-xs text-slate-500">Chargement…</div>
 
                 <template v-else-if="pf.risk">
+                  <!-- Devise non convertible : la position est ABSENTE de tous les
+                       totaux ci-dessous (le backend refuse d'inventer un taux).
+                       Sans ce bandeau l'exclusion serait invisible et le total
+                       paraîtrait complet. -->
+                  <div v-if="pf.risk.deals_missing_fx?.length"
+                    class="text-xs text-red-400 bg-red-950/30 border border-red-900/50 rounded-lg px-3 py-2">
+                    ⚠ {{ pf.risk.deals_missing_fx.length }} deal(s) exclu(s) des totaux — taux de change indisponible
+                    ({{ pf.risk.deals_missing_fx.map(d => `${d.reference} (${d.devise})`).join(', ') }})
+                  </div>
                   <div v-if="pf.risk.deals_missing_greeks.length"
                     class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
                     ⚠ {{ pf.risk.deals_missing_greeks.length }} deal(s) sans Greeks calculés — chiffres incomplets

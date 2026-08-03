@@ -7,7 +7,7 @@ from .models import (
     Indicative, KidRecord, EmtRecord, RfqRequest, RfqQuote, RfqProvider,
     Counterparty, Alert, Portfolio, ShockRun, ComputeBatch, ComputeJob,
     AuditEvent, LifecycleProposal, TradeAmendmentRequest, DealContractVersion,
-    OfficialFixingVersion,
+    OfficialFixingVersion, UatGenerationBatch,
 )
 
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
@@ -66,6 +66,21 @@ def _migrate():
             conn.execute(text("ALTER TABLE deals ADD COLUMN product_type TEXT DEFAULT ''"))
             conn.commit()
 
+        if "fixing_policy" not in cols:
+            conn.execute(text(
+                "ALTER TABLE deals ADD COLUMN fixing_policy TEXT DEFAULT 'AUTO_YAHOO'"))
+            conn.commit()
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_deals_fixing_policy ON deals (fixing_policy)"))
+        conn.commit()
+
+        if "uat_batch_id" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN uat_batch_id INTEGER"))
+            conn.commit()
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_deals_uat_batch_id ON deals (uat_batch_id)"))
+        conn.commit()
+
         if "greeks_json" not in cols:
             conn.execute(text("ALTER TABLE deals ADD COLUMN greeks_json TEXT DEFAULT '{}'"))
             conn.commit()
@@ -78,9 +93,30 @@ def _migrate():
             conn.execute(text("ALTER TABLE deals ADD COLUMN portfolio_id INTEGER"))
             conn.commit()
 
+        # Provenance des scripts écrits par l'assistant IA. Colonnes vides pour
+        # tout script existant : « écrit à la main », ce qui est le cas.
+        script_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(scripts)"))}
+        if script_cols:
+            for col, ddl in (("ai_provider", "TEXT DEFAULT ''"),
+                             ("ai_model", "TEXT DEFAULT ''"),
+                             ("ai_prompt", "TEXT DEFAULT ''"),
+                             ("ai_generated_at", "DATETIME")):
+                if col not in script_cols:
+                    conn.execute(text(f"ALTER TABLE scripts ADD COLUMN {col} {ddl}"))
+                    conn.commit()
+
         rfq_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_requests)"))}
         if rfq_cols and "ao_date" not in rfq_cols:
             conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN ao_date TEXT DEFAULT ''"))
+            conn.commit()
+
+        if rfq_cols and "uat_batch_id" not in rfq_cols:
+            conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN uat_batch_id INTEGER"))
+            conn.commit()
+        if rfq_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_rfq_requests_uat_batch_id "
+                "ON rfq_requests (uat_batch_id)"))
             conn.commit()
 
         if "contract_version" not in cols:
@@ -192,6 +228,7 @@ def _migrate():
             ("evidence_content_type", "TEXT DEFAULT 'application/octet-stream'"),
             ("evidence_size_bytes", "INTEGER DEFAULT 0"),
             ("evidence_payload_b64", "TEXT DEFAULT ''"),
+            ("capture_actor_type", "TEXT DEFAULT 'USER'"),
         ):
             if fixing_version_cols and name not in fixing_version_cols:
                 conn.execute(text(

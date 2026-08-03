@@ -226,6 +226,18 @@ export const usePricingStore = defineStore('pricing', () => {
   const proba     = ref(null)
   const backtest  = ref(null)
   const mtf       = ref(null)
+  // Assistant de scripting IA. `scriptGen` porte le script proposé, sa
+  // reformulation en français et sa fiche de contrôle — jamais appliqué
+  // automatiquement : c'est l'utilisateur qui adopte.
+  const scriptGen        = ref(null)
+  const scriptGenLoading = ref(false)
+  const scriptGenError   = ref(null)
+  const scriptProviders  = ref(null)
+  // Corps de requête ayant produit `mtf`, rejoué à l'identique par le drill-down.
+  const mtfBody   = ref(null)
+  const mtfDrill  = ref(null)
+  const mtfDrillLoading = ref(false)
+  const mtfDrillError   = ref(null)
   const solver    = ref(null)
   const grid      = ref(null)
   const scenarios = ref(null)
@@ -634,12 +646,96 @@ export const usePricingStore = defineStore('pricing', () => {
     corrMatrix.value = corrMat.map(row => [...row])
   }
 
+  // ── Assistant de scripting IA ──────────────────────────────────────
+  // `force` : re-sonde Ollama. La liste des modèles installés change dès qu'on
+  // fait un `ollama pull`, et rien ne le signale à une page déjà ouverte.
+  async function loadScriptProviders(force = false) {
+    if (scriptProviders.value && !force) return scriptProviders.value
+    try {
+      const res = await fetch('/api/script/providers')
+      if (res.ok) scriptProviders.value = await res.json()
+    } catch { /* le sélecteur retombera sur Ollama */ }
+    return scriptProviders.value
+  }
+
+  // Le prompt exact qui partirait, sans rien dépenser. Les exemples envoyés
+  // dépendent de la description : les voir, c'est pouvoir ajuster sa demande
+  // autrement qu'à tâtons.
+  async function previewScriptPrompt(description) {
+    try {
+      const res = await fetch('/api/script/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: description || 'produit structuré',
+          underlyings: _buildUls(),
+          corr_matrix: _buildCorr(),
+          T: globalParams.T,
+        }),
+      })
+      return res.ok ? await res.json() : null
+    } catch { return null }
+  }
+
+  // `refine` repart de `currentScript` : « non, la barrière doit être observée
+  // en continu » doit affiner, pas tout réécrire. Le script de départ est passé
+  // explicitement — c'est celui que l'assistant vient de proposer, pas celui de
+  // l'éditeur, qui n'a pas encore été adopté.
+  async function generateScript({ description, provider, model, refine = false,
+                                  currentScript = '' }) {
+    scriptGenLoading.value = true
+    scriptGenError.value = null
+    try {
+      const res = await fetch('/api/script/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description,
+          provider,
+          model: model || null,
+          underlyings: _buildUls(),
+          corr_matrix: _buildCorr(),
+          r: globalParams.r / 100,
+          T: globalParams.T,
+          user_params: _buildUserParams(),
+          current_script: refine ? currentScript : '',
+          refine,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        scriptGenError.value = data.detail || 'Erreur serveur'
+        scriptGen.value = null
+      } else {
+        scriptGen.value = data
+      }
+    } catch (e) {
+      scriptGenError.value = e.message
+      scriptGen.value = null
+    } finally { scriptGenLoading.value = false }
+  }
+
+  // Adoption explicite : le script ne descend dans l'éditeur que sur action de
+  // l'utilisateur. Un script qui atterrirait tout seul, c'est un produit faux
+  // qui part en cotation.
+  function adoptGeneratedScript() {
+    if (!scriptGen.value?.script) return
+    script.value = scriptGen.value.script
+    parseScript()
+  }
+
   // ── Mark to Future (nested Monte Carlo) ────────────────────────────
   async function runMtf(params = {}) {
     if (!result.value) { error.value = 'Lancez d\'abord un pricing (▶ Pricer).'; return }
     const n_outer = params.n_outer || 200
     const n_inner = params.n_inner || 500
     const n_dates = params.n_dates || 5
+    const body = {
+      ..._baseBody(),
+      main_price: result.value.price * 100,
+      n_outer, n_inner, n_dates,
+      seed: params.seed || globalParams.seed,
+    }
     loading.value = true; error.value = null
     // Rough cost calibration: ~4.7s for the 200×500×5 default on a GBM/local-vol model.
     _startProgress((n_outer * n_inner * n_dates / 500000) * 4700)
@@ -647,17 +743,50 @@ export const usePricingStore = defineStore('pricing', () => {
       const res = await fetch('/api/mtf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ..._baseBody(),
-          main_price: result.value.price * 100,
-          n_outer, n_inner, n_dates,
-          seed: params.seed || globalParams.seed,
-        }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
-      else { mtf.value = await res.json(); rightTab.value = 'mtf' }
+      else {
+        mtf.value = await res.json()
+        // Le corps EXACT qui a produit cet éventail. Le drill-down le rejoue tel
+        // quel au lieu de reconstruire un _baseBody() : sinon une modification du
+        // script entre le lancement et le clic expliquerait un autre produit que
+        // celui affiché, sans que rien ne le signale.
+        mtfBody.value = body
+        mtfDrill.value = null
+        rightTab.value = 'mtf'
+      }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
+  }
+
+  // Explication détaillée de scénarios choisis à une date de l'éventail.
+  // `ids` sont des indices dans mtf.results[i].pvs — le client sait déjà quel
+  // scénario porte quel quantile, inutile de refaire tourner tout l'éventail.
+  async function runMtfDrilldown({ t, ids, labels = [] }) {
+    if (!mtf.value || !mtfBody.value) {
+      mtfDrillError.value = 'Lancez d\'abord un Mark to Future.'
+      return
+    }
+    mtfDrillLoading.value = true
+    mtfDrillError.value = null
+    try {
+      const res = await fetch('/api/mtf/drilldown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...mtfBody.value, t, scenario_ids: ids, labels }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        mtfDrillError.value = err.detail || 'Erreur serveur'
+        mtfDrill.value = null
+      } else {
+        mtfDrill.value = await res.json()
+      }
+    } catch (e) {
+      mtfDrillError.value = e.message
+      mtfDrill.value = null
+    } finally { mtfDrillLoading.value = false }
   }
 
   // ── Simulation: PARAM solver + 2D price grid ───────────────────────
@@ -985,6 +1114,7 @@ export const usePricingStore = defineStore('pricing', () => {
       sens: deal.sens,
       contrepartie: deal.contrepartie || '',
       product_type: deal.product_type || '',
+      fixing_policy: deal.fixing_policy || 'AUTO_YAHOO',
       fair_value: deal.fair_value,
       price_traded: deal.price_traded,
       trade_date: deal.trade_date,
@@ -1196,6 +1326,9 @@ export const usePricingStore = defineStore('pricing', () => {
     underlyings, corrMatrix, activeUnderlyingIdx,
     globalParams, yieldCurve, greekSel, selectedGreeks,
     result, profile, paths, proba, backtest, mtf, solver, grid, scenarios, kid,
+    mtfDrill, mtfDrillLoading, mtfDrillError, runMtfDrilldown,
+    scriptGen, scriptGenLoading, scriptGenError, scriptProviders,
+    loadScriptProviders, generateScript, adoptGeneratedScript, previewScriptPrompt,
     comparator, comparatorError, comparatorLoading, runBacktestCompare, adoptBasket,
     loading, error, progress, yfStatus,
     currentScriptId, currentScriptName,

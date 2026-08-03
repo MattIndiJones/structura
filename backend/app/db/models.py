@@ -63,6 +63,34 @@ class AuditEvent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
+class UatGenerationBatch(SQLModel, table=True):
+    """Admin-created, reproducible RFQ/deal test-data lot.
+
+    Generated rows carry this batch id, which is the only deletion boundary:
+    ordinary business data can never be swept by a reference-prefix purge.
+    The row itself is retained after cleanup so the operator history remains
+    auditable.
+    """
+    __tablename__ = "uat_generation_batches"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    batch_key: str = Field(unique=True, index=True)
+    label: str = Field(default="")
+    created_by: int = Field(foreign_key="users.id", index=True)
+    target_user_id: int = Field(foreign_key="users.id", index=True)
+    mode: str = Field(index=True)  # RFQ_ONLY | BOOKED_ONLY | FULL_CHAIN
+    seed: int
+    requested_count: int
+    rfq_count: int = Field(default=0)
+    deal_count: int = Field(default=0)
+    status: str = Field(default="RUNNING", index=True)  # RUNNING | COMPLETED | FAILED | DELETED
+    config_json: str = Field(default="{}", sa_column=Column(Text))
+    result_json: str = Field(default="{}", sa_column=Column(Text))
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    completed_at: Optional[datetime] = Field(default=None)
+    deleted_at: Optional[datetime] = Field(default=None)
+
+
 class Folder(SQLModel, table=True):
     __tablename__ = "folders"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -103,6 +131,14 @@ class Script(SQLModel, table=True):
     is_shared: bool = Field(default=False)        # visible to same entity members
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    # Provenance : un script écrit par un modèle doit rester identifiable comme
+    # tel. Sur un desk, « qui a écrit ce script » est une question qui se pose,
+    # et la réponse ne peut pas être perdue au premier enregistrement.
+    # Vide pour tout script écrit à la main — l'écrasante majorité.
+    ai_provider: str = Field(default="")          # ollama | openai | anthropic
+    ai_model: str = Field(default="")
+    ai_prompt: str = Field(default="")            # la description en français
+    ai_generated_at: Optional[datetime] = Field(default=None)
 
 
 class Deal(SQLModel, table=True):
@@ -116,6 +152,10 @@ class Deal(SQLModel, table=True):
     reference: str = Field(index=True, unique=True)
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     user_id: int = Field(foreign_key="users.id")
+    # Explicit provenance for synthetic Admin data. Never inferred from the
+    # visible reference, because references are labels rather than ownership.
+    uat_batch_id: Optional[int] = Field(
+        default=None, foreign_key="uat_generation_batches.id", index=True)
 
     # Pre-trade opportunity this deal was booked from, if any — a permanent
     # backward pointer. Indicative-stage KID/EMT records stay attached to
@@ -166,6 +206,9 @@ class Deal(SQLModel, table=True):
     # link to Script.tags — a deal booked from an unsaved ad-hoc script has
     # nothing to inherit tags from, so this stays a plain field on the deal.
     product_type: str = Field(default="")
+    # Frozen lifecycle policy.  Classic products use the automated Yahoo
+    # unadjusted close; controlled products retain the four-eyes workflow.
+    fixing_policy: str = Field(default="AUTO_YAHOO", index=True)
 
     # Dates (ISO strings)
     trade_date: str = Field(default="")
@@ -367,6 +410,8 @@ class RfqRequest(SQLModel, table=True):
     reference: str = Field(index=True, unique=True)   # see Deal.reference
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     user_id: int = Field(foreign_key="users.id")
+    uat_batch_id: Optional[int] = Field(
+        default=None, foreign_key="uat_generation_batches.id", index=True)
 
     name: str = Field(default="")
     ao_date: str = Field(default="")  # ISO date — when the tender was actually sent, distinct from created_at
@@ -601,6 +646,9 @@ class OfficialFixingVersion(SQLModel, table=True):
     record_sha256: str = Field(index=True)
     capture_reason: str = Field(sa_column=Column(Text))
     entered_by: int = Field(foreign_key="users.id", index=True)
+    # ``entered_by`` remains populated for FK/backward compatibility.  This
+    # field distinguishes a human capture from an automated provider record.
+    capture_actor_type: str = Field(default="USER", index=True)
     validated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     validation_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
     validated_at: Optional[datetime] = Field(default=None)

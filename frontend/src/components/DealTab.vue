@@ -72,6 +72,19 @@
           </datalist>
         </div>
 
+        <div class="col-span-2">
+          <label class="label">Traitement des constatations
+            <HelpTip width="w-80" text="Classique : la clôture Yahoo non ajustée devient automatiquement le fixing de référence si tous les contrôles passent. Contrôlé : chaque fixing suit le workflow Ops Maker / Ops Checker. La politique est figée au booking." />
+          </label>
+          <select v-model="form.fixing_policy" class="select">
+            <option value="AUTO_YAHOO">Classique — Yahoo automatique</option>
+            <option value="FOUR_EYES">Produit contrôlé — validation à quatre yeux</option>
+          </select>
+          <p class="text-[10px] text-slate-500 mt-1">
+            Une anomalie Yahoo bascule toujours la constatation en contrôle manuel, sans écraser le dernier fixing officiel.
+          </p>
+        </div>
+
         <div>
           <label class="label">Entité (vous)</label>
           <input :value="entityLabel" type="text"
@@ -515,6 +528,7 @@ const form = reactive({
   sens: 'vente',
   contrepartie: '',
   product_type: '',
+  fixing_policy: 'AUTO_YAHOO',
   fair_value: 0,
   price_traded: 0,
   trade_date: store.globalParams.trade_date || today,
@@ -629,6 +643,10 @@ const rfqPrefillAt = ref(null)
 // from it — the field stays empty and the banner names the provider so the
 // desk knows what to pick instead of facing a blank required select.
 const rfqUnmatchedProvider = ref('')
+// Declared before the immediate prefill watch: reopening a booked deal can
+// provide a non-standard payment date during setup, and the watch must be
+// able to protect it before the maturity default is installed below.
+const paymentDateDirty = ref(false)
 watch(() => store.pendingDealPrefill, (prefill) => {
   if (!prefill) return
   const { nominal, fair_value_at, rfq_provider_label, ...formFields } = prefill
@@ -683,7 +701,6 @@ const maturityDate = computed(() => {
 // Payment date par défaut = maturité + 2j ouvrés, mais reste éditable pour
 // un délai de règlement non standard — dès que l'utilisateur y touche, on
 // arrête de l'écraser automatiquement quand la maturité change.
-const paymentDateDirty = ref(false)
 watch(maturityDate, (v) => {
   if (v && !paymentDateDirty.value) {
     form.payment_date = addBizDays(v, 2)
@@ -803,6 +820,7 @@ async function book() {
       contrepartie: form.contrepartie.trim(),
       devise: store.globalParams.deal_ccy,
       product_type: form.product_type.trim(),
+      fixing_policy: form.fixing_policy,
       nominal: nominalValue.value,
       fair_value: form.fair_value,
       price_traded: form.price_traded,

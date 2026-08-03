@@ -5,14 +5,14 @@ from fastapi import APIRouter, HTTPException
 from ..core.schemas import (
     PricingRequest, PricingResponse, ParseRequest, ParseResponse,
     ProfileRequest, PathsRequest, ProbaRequest, BacktestRequest, BacktestCompareRequest,
-    MtfRequest,
+    MtfRequest, MtfDrilldownRequest, ScriptGenerateRequest,
 )
 from ..core.payscript.parser import parse_script, resolve_constats, effective_T_max
 from ..core.payscript.engine import (
     run_mc, compute_greeks,
     run_payoff_profile, run_mc_paths, run_mc_proba,
     eval_script_on_history, compute_irr,
-    run_mark_to_future,
+    run_mark_to_future, run_mtf_drilldown,
 )
 from ..services.market_data import load_hist_prices
 
@@ -247,6 +247,120 @@ def mtf_endpoint(req: MtfRequest):
             seed=req.seed,
             user_params=req.user_params,
             barrier_monitoring=req.barrier_monitoring,
+            # Forwarded to be REFUSED, not honoured: the analysis is flat-rate
+            # throughout. Dropping them here (which is what happened) priced the
+            # fan on a different discount basis than the P0 it is plotted
+            # against, with nothing on screen saying so.
+            yield_curve=req.yield_curve,
+            sigma_r=req.sigma_r,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/script/providers")
+def script_providers_endpoint():
+    """Moteurs disponibles pour l'assistant, avec l'état de chacun.
+
+    Ollama est annoncé disponible sans sonder localhost : une seconde d'attente
+    à chaque affichage de page pour une information que le premier appel donnera
+    de toute façon."""
+    from ..services.llm import available_providers, DEFAULT_PROVIDER
+    return {"providers": available_providers(), "default": DEFAULT_PROVIDER}
+
+
+@router.post("/script/prompt")
+def script_prompt_endpoint(req: ScriptGenerateRequest):
+    """Le prompt exact qui partirait, sans appeler de modèle.
+
+    Les exemples envoyés dépendent de la description : sans pouvoir les lire, on
+    ne peut ni comprendre une génération ratée, ni ajuster sa demande autrement
+    qu'à tâtons."""
+    from ..services.llm import preview_prompt
+    return preview_prompt(req.description, n_underlyings=len(req.underlyings) or 1,
+                          maturity=req.T)
+
+
+@router.post("/script/generate")
+def script_generate_endpoint(req: ScriptGenerateRequest):
+    """Assistant de scripting — description en français vers script PayScript.
+
+    Renvoie toujours 200 quand le modèle a répondu, même si son script ne
+    compile pas : l'erreur du parser fait partie du résultat à afficher, pas
+    d'un échec de la requête. Seule l'indisponibilité du moteur est un 4xx/5xx.
+    """
+    from ..services.llm import generate, LlmError
+
+    uls = [u.model_dump() for u in req.underlyings]
+    if not uls:
+        # Le pricing de contrôle a besoin d'un sous-jacent ; l'assistant doit
+        # rester utilisable avant que l'utilisateur en ait configuré un.
+        uls = [{"name": "S1", "ticker": "", "ccy": "EUR", "sigma": 0.22, "q": 0.02,
+                "v0": 0.0484, "kappa": 2.0, "theta": 0.0484, "xi": 0.35,
+                "rho_h": -0.70, "alpha": 0.22, "beta": 1.0, "rho": -0.30,
+                "nu": 0.40, "sigma_fx": 0.0, "rho_sfx": 0.0, "ccyh": 0.0}]
+    n = len(uls)
+    corr = req.corr_matrix
+    if len(corr) != n or any(len(row) != n for row in corr):
+        corr = [[1.0 if i == j else 0.5 for j in range(n)] for i in range(n)]
+
+    try:
+        return generate(
+            req.description, provider=req.provider, model=req.model,
+            underlyings=uls, corr=corr, r=req.r, T=req.T,
+            user_params=req.user_params,
+            current_script=req.current_script, refine=req.refine,
+        )
+    except LlmError as e:
+        # 502 : c'est le fournisseur qui est en cause, pas la requête. Le
+        # message est déjà rédigé pour l'utilisateur (Ollama éteint, clé
+        # absente, modèle non installé, quota).
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/mtf/drilldown")
+def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
+    """Mark-to-Future — explication détaillée de scénarios choisis à une date.
+
+    Rejoue les mêmes tirages que /api/mtf (mêmes graine, grille de dates et
+    découpage en lots) : le mark renvoyé ici est celui de l'éventail, pas une
+    ré-estimation voisine."""
+    try:
+        compiled = parse_script(req.script)
+        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    if not compiled.events:
+        raise HTTPException(status_code=422, detail="Aucun événement AT défini dans le script.")
+
+    uls = [u.model_dump() for u in req.underlyings]
+    corr = req.corr_matrix
+    n = len(uls)
+    if len(corr) != n or any(len(row) != n for row in corr):
+        raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
+
+    T_eff = effective_T_max(compiled, req.T)
+    try:
+        return run_mtf_drilldown(
+            compiled, uls, corr, req.r, T_eff,
+            main_price=req.main_price,
+            t0=req.t,
+            scenario_ids=req.scenario_ids,
+            labels=req.labels,
+            # Le texte du script sert à retrouver statiquement quels PARAM sont
+            # comparés à une observable — c'est ce qui distingue une barrière
+            # d'un taux de coupon sans avoir à le deviner sur la valeur.
+            script_source=req.script,
+            model=req.model,
+            n_outer=req.n_outer,
+            n_inner=req.n_inner,
+            n_dates=req.n_dates,
+            seed=req.seed,
+            user_params=req.user_params,
+            barrier_monitoring=req.barrier_monitoring,
+            yield_curve=req.yield_curve,
+            sigma_r=req.sigma_r,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -285,6 +399,7 @@ def backtest_endpoint(req: BacktestRequest):
 
     windows = list(range(0, max_start + 1, req.freq))
     results = []
+    excluded: list[dict] = []
     invest_dec = req.invest_pct / 100.0
 
     try:
@@ -296,13 +411,18 @@ def backtest_endpoint(req: BacktestRequest):
                 continue
             cfs = [{"t": 0.0, "cf": -invest_dec}] + res["cash_flows"]
             irr = compute_irr(cfs)
-            if irr is not None:
-                results.append({
-                    "date": dates[si],
-                    "irr": round(irr, 4),
-                    "T_actual": round(res["T_actual"], 3),
-                    "early_recall": res["early_recall"],
-                })
+            if irr is None:
+                # A window whose IRR cannot be defined is dropped — but it is
+                # counted and dated, because a silent drop is how a backtest
+                # loses its worst cases without anyone noticing.
+                excluded.append({"date": dates[si], "reason": "IRR non défini"})
+                continue
+            results.append({
+                "date": dates[si],
+                "irr": round(irr, 4),
+                "T_actual": round(res["T_actual"], 3),
+                "early_recall": res["early_recall"],
+            })
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -343,6 +463,11 @@ def backtest_endpoint(req: BacktestRequest):
         "early_recall_pct": round(early_recalls / n * 100, 1),
         "sharpe": sharpe,
         "overlap_pct": overlap_pct,
+        # Windows the statistics above do NOT cover. Every figure on this
+        # screen is computed over n_windows, not over len(windows); the
+        # difference belongs on screen, not in a log nobody reads.
+        "excluded_windows": excluded,
+        "n_excluded": len(excluded),
     }
 
 
@@ -371,14 +496,20 @@ def _windowed_backtest(compiled, dates, prices, tickers, T_eff, freq, r, invest_
     windows = range(0, max_start + 1, freq)
     invest_dec = invest_pct / 100.0
     irrs, early_recalls = [], 0
+    n_excluded = 0
     window_rows = [] if return_windows else None
     for si in windows:
         res = eval_script_on_history(compiled, dates, prices, si, T_eff, user_params, tickers, r)
         if res is None:
+            n_excluded += 1
             continue
         cfs = [{"t": 0.0, "cf": -invest_dec}] + res["cash_flows"]
         irr = compute_irr(cfs)
         if irr is None:
+            # Counted, not merely skipped: this comparator ranks candidates
+            # against each other, so two of them dropping a different number
+            # of windows are not being compared on the same basis.
+            n_excluded += 1
             continue
         irrs.append(irr)
         if res["early_recall"]:
@@ -403,6 +534,7 @@ def _windowed_backtest(compiled, dates, prices, tickers, T_eff, freq, r, invest_
         "worst_irr": round(sorted_irrs[0], 4),
         "pct_positive": round(sum(1 for v in irrs if v > 0) / n * 100, 1),
         "early_recall_pct": round(early_recalls / n * 100, 1),
+        "n_excluded": n_excluded,
     }
     if return_windows:
         result["windows"] = window_rows

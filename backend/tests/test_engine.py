@@ -385,7 +385,13 @@ def test_mtf_shape_and_stat_keys():
     assert (mtf['n_outer'], mtf['n_inner'], mtf['n_dates']) == (10, 20, 4)
     assert len(mtf['results']) == 4
     expected_keys = {'mean', 'std', 'p01', 'p05', 'p25', 'p50', 'p75', 'p95', 'p99',
-                      'p_above_100', 'p_above_p0', 'e_mtm', 'e_upside'}
+                      'p_above_100', 'p_above_p0', 'e_mtm', 'e_upside',
+                      # Décomposition gagnants/perdants (voir _mtf_date_stats).
+                      # Les six premières sont None quand le sous-échantillon
+                      # correspondant est vide — la clé reste présente.
+                      'n_win', 'n_lose', 'e_mtm_win', 'e_mtm_lose',
+                      'avg_gain', 'avg_loss', 'max_gain', 'max_loss',
+                      'mtm_min', 'mtm_max'}
     dates = [row['t'] for row in mtf['results']]
     assert dates == sorted(dates)
     assert dates[-1] < 1.0   # last MTM date stays strictly before maturity
@@ -515,22 +521,27 @@ def test_sigma_r_zero_matches_deterministic_rate():
     assert with_default['price'] == explicit_zero['price']
 
 
-def test_sigma_r_jensen_convexity_on_zcb():
-    """A driftless Gaussian short rate makes discounting convex: E[exp(-∫r dt)] >=
-    exp(-E[∫r dt]) (Jensen). So a ZCB's price must (a) increase monotonically with
-    sigma_r, and (b) exactly match the deterministic price at sigma_r=0."""
+def test_sigma_r_refits_the_curve_on_zcb():
+    """A Hull-White short rate must reprice its own input curve, whatever the
+    rate volatility: a zero-coupon bond stays at exp(-rT) as sigma_r grows.
+
+    This test used to assert the opposite — that the price rose monotonically
+    with sigma_r — and it was right about the maths of the model as written:
+    r was f(0,t) plus a centred shock, discounting is exp(-integral r), and
+    Jensen then makes E[exp(-integral x)] = exp(+Var/2) > 1. But that is the
+    defect, not the property. It is precisely what phi(t) exists to cancel, and
+    without it a 5-year zero came out 164bp too expensive at 3% rate vol —
+    an arbitrage against the curve the user supplied."""
     cs = parse_script(ZCB_SIMPLE)
     r, T = 0.03, 3.0
     kw = dict(r=r, T_max=T, N=40000, model='constant', seed=42, antithetic=True)
     deterministic = math.exp(-r * T)
 
-    prices = []
-    for sr in (0.0, 0.005, 0.01, 0.02):
-        res = run_mc(cs, CALL_PARAMS, CORR, sigma_r=sr, **kw)
-        prices.append(res['price'])
-
-    assert prices[0] == pytest.approx(deterministic, abs=1e-6)
-    assert all(prices[i] < prices[i + 1] for i in range(len(prices) - 1)), prices
+    for a_r in (0.0, 0.3):
+        for sr in (0.0, 0.005, 0.01, 0.02, 0.03):
+            price = run_mc(cs, CALL_PARAMS, CORR, sigma_r=sr, a_r=a_r, **kw)['price']
+            assert price == pytest.approx(deterministic, abs=5e-5), \
+                f"sigma_r={sr} a_r={a_r}: {price:.6f} vs {deterministic:.6f}"
 
 
 @pytest.mark.parametrize("model", ["constant", "heston", "sabr", "localvol"])

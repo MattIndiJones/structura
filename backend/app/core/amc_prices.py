@@ -303,6 +303,38 @@ def get_fx_series(from_ccy: str, to_ccy: str,
     return pd.Series(dtype=float)   # not found — caller skips conversion
 
 
+def fx_rate_to(from_ccy: str | None, to_ccy: str = "EUR") -> float | None:
+    """Latest conversion rate, or None when it is genuinely unknown.
+
+    `get_fx_series` answers with an empty Series in two unrelated situations:
+    the conversion is a no-op (same currency, or none recorded), and the pair
+    could not be loaded at all (provider down, exotic cross, empty cache).
+    Every caller used to collapse both into `else 1.0`. That is correct for
+    the first and silently wrong for the second — a JPY notional booked at
+    parity overstates its EUR size by a factor of 164, a USD one by 8.7%, and
+    nothing anywhere said a rate had been invented. Because almost every deal
+    is already in the reporting currency and legitimately takes the empty
+    branch, the defect never showed in normal use.
+
+    Splitting the two is the whole point: 1.0 means "no conversion needed",
+    None means "do not add this position to a total until you know its size".
+    Callers are expected to exclude and name it rather than guess."""
+    src = (from_ccy or "").upper().strip()
+    dst = (to_ccy or "EUR").upper().strip()
+    if not src or src == dst:
+        return 1.0
+    series = get_fx_series(src, dst)
+    if series.empty:
+        return None
+    try:
+        rate = float(series.iloc[-1])
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(rate) or rate <= 0.0:
+        return None    # corrupt cache row, not a quote
+    return rate
+
+
 def get_currency(key: str) -> str:
     """Return the stored currency for a price series, or empty string."""
     p = _parquet_path(key)

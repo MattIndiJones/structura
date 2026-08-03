@@ -9,7 +9,9 @@ from backend.app.core.payscript.parser import (
 
 SIMPLE_VANILLA = """
 PARAM K = 1.0 "strike"
-PARAM T = 1   "maturity"
+# Pas `PARAM T` : T est le temps écoulé, un paramètre de ce nom serait
+# illisible depuis le script (le parser le refuse désormais).
+PARAM MATU = 1 "maturity"
 
 AT MATURITY
   PAY MAX(S[1] - K, 0) "payoff"

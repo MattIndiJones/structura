@@ -119,6 +119,25 @@ def test_rho_du_zero_coupon_vaut_moins_t_fois_le_df():
             f"courbe={curve}: rho={g['rho']:.5f}, attendu {attendu:.5f}")
 
 
+@pytest.mark.parametrize("a_r", [0.0, 0.3])
+def test_le_taux_stochastique_reprice_sa_propre_courbe(a_r):
+    """Propriété qui définit Hull-White : quelle que soit la volatilité de
+    taux, un zéro-coupon doit valoir le facteur d'actualisation de la courbe
+    d'entrée, à chaque pilier.
+
+    Elle ne tenait pas. Le facteur de taux était écrit centré, ce qui semble
+    ajuster la courbe gratuitement — mais l'actualisation étant exp(-∫r),
+    Jensen donne E[exp(-∫x)] = exp(+Var/2) > 1 et toutes les obligations
+    ressortaient trop chères : +164 bp sur un zéro-coupon 5 ans à 3 % de vol de
+    taux, soit un arbitrage contre la courbe fournie par l'utilisateur."""
+    # Les piliers de PENTUE eux-mêmes : 0,5 an à 1 %, 1 an à 3 %, 3 ans à 5 %.
+    for T, z in ((0.5, 0.01), (1.0, 0.03), (3.0, 0.05)):
+        prix = _price(ZERO_COUPON, T=T, curve=PENTUE, q=0.0,
+                      sigma_r=0.02, a_r=a_r)
+        assert prix == pytest.approx(math.exp(-z * T), abs=3e-4), (
+            f"a_r={a_r} T={T} : {prix:.6f} vs {math.exp(-z * T):.6f}")
+
+
 def test_rho_non_nul_sous_courbe_et_taux_stochastiques():
     """Cas dégénéré : quand la dérive suivait le facteur de taux simulé, le
     scalaire `dr` n'atteignait plus rien du tout. Les deux jambes du bump

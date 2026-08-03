@@ -56,6 +56,86 @@ _SAFE_MATH = {
 }
 
 
+# ── Vocabulaire du langage, énumérable ─────────────────────────────
+#
+# Ces tables vivaient à l'intérieur de _transpile_expr. Elles sont remontées au
+# niveau module parce que deux consommateurs doivent pouvoir les LIRE et non
+# seulement les exécuter : la référence de langage (docs/PAYSCRIPT_REFERENCE.md)
+# et le prompt de l'assistant IA, qui décrit à un modèle ce qu'il a le droit
+# d'écrire. Un test compare le vocabulaire réel à la référence, de sorte qu'un
+# mot ajouté ici sans documentation — ou documenté sans exister — casse la
+# construction plutôt que de produire des scripts générés systématiquement faux.
+#
+# Nom PayScript -> expression Python émise par le transpileur.
+MARKET_VARS = {
+    'WOF': 'min(_c["spots"])', 'BOF': 'max(_c["spots"])',
+    'WOF_MIN': '_c["wof_min"]', 'BOF_MAX': '_c["bof_max"]',
+    'FIX_MIN': '_c["fix_min"]', 'FIX_MAX': '_c["fix_max"]',
+    'FIX_AVG': '_c["fix_avg"]',
+    'ACCUM': '_c["accum"]', 'INDEX': '_c["index"]',
+    'T': '_c["t"]', 'N': 'len(_c["spots"])',
+    'REALVOL': '_c["realvol"]',
+}
+
+# Variables par sous-jacent, indicées de 1 à N : S[i], S_MIN[i], ...
+INDEXED_VARS = ('S', 'S_MIN', 'S_MAX', 'S_PREV')
+
+# Nom PayScript -> fonction du bac à sable _SAFE_MATH.
+FUNCTIONS = {
+    'MAX': 'max', 'MIN': 'min', 'ABS': 'abs',
+    'FLOOR': 'floor', 'CEIL': 'ceil',
+    'SQRT': 'sqrt', 'LOG': 'log', 'EXP': 'exp',
+    'INDIC': 'int', 'ROUND': 'round',
+}
+
+# BASKET a sa propre analyse (trois formes : nu, (), (poids...)).
+BASKET_KEYWORD = 'BASKET'
+
+LOGIC_KEYWORDS = ('AND', 'OR', 'NOT', 'TRUE', 'FALSE')
+
+# Instructions reconnues, niveau 0 (déclarations et blocs) puis corps de bloc.
+TOP_LEVEL_STATEMENTS = ('PARAM', 'PARAM()', 'CONSTAT', 'CONSTAT()', 'CONSTAT()()',
+                        'SET', 'AT', 'AT MATURITY')
+BODY_STATEMENTS = ('IF', 'ELSE IF', 'ELSE', 'PAY', 'FLOW', 'ACCRUE', 'SET', 'STOP')
+
+
+# Noms qu'un PARAM ou un SET ne peut pas porter : le transpileur les résout en
+# priorité, si bien qu'un `PARAM FLOOR = 100%` compilait sans broncher puis
+# évaluait `floor + 0.4` — la fonction, pas le paramètre — et mourait au pricing
+# sur un TypeError Python sans rapport visible avec le script. Le template
+# « Booster 3Y » livré dans l'éditeur portait exactement ce défaut.
+RESERVED_NAMES = (
+    frozenset(MARKET_VARS) | frozenset(FUNCTIONS) | frozenset(INDEXED_VARS)
+    | frozenset(LOGIC_KEYWORDS) | {BASKET_KEYWORD}
+    | {'PARAM', 'CONSTAT', 'SET', 'AT', 'MATURITY', 'IF', 'ELSE',
+       'PAY', 'FLOW', 'ACCRUE', 'STOP'}
+)
+
+
+def check_reserved(name: str, line_no: int, kind: str) -> str | None:
+    """Message d'erreur si `name` empiète sur le vocabulaire du langage."""
+    if name.upper() not in RESERVED_NAMES:
+        return None
+    return (f'Ligne {line_no}: "{name.upper()}" est un mot réservé du langage '
+            f'— impossible de le déclarer comme {kind}. Choisissez un autre nom '
+            f'(par exemple {name.upper()}_LVL).')
+
+
+def language_vocabulary() -> dict[str, tuple]:
+    """Tout ce qu'un script a le droit d'écrire, par catégorie. Consommé par la
+    référence de langage et par le prompt de l'assistant IA — un seul endroit
+    à mettre à jour quand le langage bouge."""
+    return {
+        'market': tuple(sorted(MARKET_VARS)),
+        'indexed': INDEXED_VARS,
+        'functions': tuple(sorted(FUNCTIONS)),
+        'basket': (BASKET_KEYWORD,),
+        'logic': LOGIC_KEYWORDS,
+        'top_level': TOP_LEVEL_STATEMENTS,
+        'body': BODY_STATEMENTS,
+    }
+
+
 @dataclass
 class Param:
     name: str
@@ -169,37 +249,22 @@ def _transpile_expr(src: str, unknown: set | None = None,
                 while i < len(s) and s[i] != ']':
                     idx += s[i]; i += 1
                 if i < len(s): i += 1
-                out.append(f'_c["spots"][int({_transpile_expr(idx, unknown, array_params)})-1]'); continue
+                out.append(f'_sidx(_c["spots"], {_transpile_expr(idx, unknown, array_params)}, "S")'); continue
             if u in ('S_MIN', 'S_MAX', 'S_PREV') and i < len(s) and s[i] == '[':
                 idx = ''; i += 1
                 while i < len(s) and s[i] != ']':
                     idx += s[i]; i += 1
                 if i < len(s): i += 1
                 key = {'S_MIN': 's_min', 'S_MAX': 's_max', 'S_PREV': 's_prev'}[u]
-                out.append(f'_c["{key}"][int({_transpile_expr(idx, unknown, array_params)})-1]'); continue
+                out.append(f'_sidx(_c["{key}"], {_transpile_expr(idx, unknown, array_params)}, "{u}")'); continue
             if u == 'AND': out.append(' and '); continue
             if u == 'OR':  out.append(' or ');  continue
             if u == 'NOT': out.append(' not '); continue
             if u == 'TRUE':  out.append('True');  continue
             if u == 'FALSE': out.append('False'); continue
-            BV = {
-                'WOF': 'min(_c["spots"])', 'BOF': 'max(_c["spots"])',
-                'WOF_MIN': '_c["wof_min"]', 'BOF_MAX': '_c["bof_max"]',
-                'FIX_MIN': '_c["fix_min"]', 'FIX_MAX': '_c["fix_max"]',
-                'FIX_AVG': '_c["fix_avg"]',
-                'ACCUM': '_c["accum"]', 'INDEX': '_c["index"]',
-                'T': '_c["t"]', 'N': 'len(_c["spots"])',
-                'REALVOL': '_c["realvol"]',
-            }
-            if u in BV: out.append(BV[u]); continue
-            MF = {
-                'MAX': 'max', 'MIN': 'min', 'ABS': 'abs',
-                'FLOOR': 'floor', 'CEIL': 'ceil',
-                'SQRT': 'sqrt', 'LOG': 'log', 'EXP': 'exp',
-                'INDIC': 'int', 'ROUND': 'round',
-            }
-            if u in MF: out.append(MF[u]); continue
-            if u == 'BASKET':
+            if u in MARKET_VARS: out.append(MARKET_VARS[u]); continue
+            if u in FUNCTIONS: out.append(FUNCTIONS[u]); continue
+            if u == BASKET_KEYWORD:
                 if i < len(s) and s[i] == '(':
                     j = i + 1
                     while j < len(s) and s[j].isspace(): j += 1
@@ -221,10 +286,32 @@ def _transpile_expr(src: str, unknown: set | None = None,
     return ''.join(out)
 
 
+def _sidx(seq, idx, name: str):
+    """S[i] and friends, 1-indexed with a real bounds check.
+
+    Plain `seq[int(idx)-1]` let S[0] read seq[-1] — the LAST underlying —
+    silently pricing a different product. Python's negative indexing makes the
+    one wrong index in the language the only one that doesn't raise."""
+    i = int(idx)
+    if not 1 <= i <= len(seq):
+        raise ValueError(
+            f"{name}[{i}] : indice hors bornes — les sous-jacents sont "
+            f"numérotés de 1 à {len(seq)}.")
+    return seq[i - 1]
+
+
 def _basket(ctx, *weights):
     spots = ctx['spots']
     if not weights:
         return sum(spots) / max(1, len(spots))
+    # zip() truncates to the shorter side but sum(weights) counts them all, so
+    # a weight vector longer than the basket used to divide by a denominator
+    # that included weights no asset ever matched: BASKET(0.5, 0.5) on a single
+    # underlying returned half its level, with no error anywhere.
+    if len(weights) != len(spots):
+        raise ValueError(
+            f"BASKET : {len(weights)} poids pour {len(spots)} sous-jacent(s) — "
+            f"il en faut exactement un par sous-jacent.")
     t = sum(weights) or 1
     return sum(s * w for s, w in zip(spots, weights)) / t
 
@@ -298,7 +385,14 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0,
         if m:
             raw_expr, lbl_raw = m.group(1), (m.group(2) or m.group(1))
             refs = set()
-            try: e = _transpile_expr(raw_expr, refs)
+            # array_params matters here exactly as it does for SET/IF/ACCRUE:
+            # without it a per-observation PARAM() resolves to the whole list
+            # instead of this observation's row, and the flow carries a list
+            # that blows up on `fl["v"] * disc` — outside the evaluator's
+            # try/except, so it escaped as a raw TypeError rather than a
+            # PayScript error. PAY was the only statement in the language that
+            # dropped it.
+            try: e = _transpile_expr(raw_expr, refs, array_params)
             except Exception as ex: errors.append(f'Ligne {no}: {ex}'); i += 1; continue
             if unknown is not None:
                 for name in refs: unknown[name] = no
@@ -318,6 +412,9 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0,
 
         m = re.match(r'^SET\s+([A-Za-z_]\w*)\s*=\s*(.+)$', text, re.I)
         if m:
+            bad = check_reserved(m.group(1), no, 'variable SET')
+            if bad:
+                errors.append(bad); i += 1; continue
             refs = set()
             try: e = _transpile_expr(m.group(2), refs, array_params)
             except Exception as ex: errors.append(f'Ligne {no}: {ex}'); i += 1; continue
@@ -385,7 +482,7 @@ def parse_script(code: str) -> CompiledScript:
     params = []
     constats = []
     i = 0
-    exec_globals = {**_SAFE_MATH, '_basket': _basket, '_pobs': _pobs}
+    exec_globals = {**_SAFE_MATH, '_basket': _basket, '_pobs': _pobs, '_sidx': _sidx}
     # Every PARAM/SET name ever declared, vs. every identifier that fell
     # through to the generic memo lookup (name -> a line it appeared on) —
     # diffed at the end so a typo (referenced but never declared) raises a
@@ -416,6 +513,9 @@ def parse_script(code: str) -> CompiledScript:
         m = re.match(r'^PARAM\(\)\s+([A-Za-z_]\w*)\s*(?:=\s*([\d.]+)(%?))?\s*(?:"([^"]*)")?\s*$', text, re.I)
         if m:
             name = m.group(1).upper()
+            bad = check_reserved(name, no, 'PARAM()')
+            if bad:
+                errors.append(bad); i += 1; continue
             raw_val = float(m.group(2)) if m.group(2) else 0.0
             is_pct = m.group(3) == '%' if m.group(2) else True
             stored = raw_val / 100 if is_pct else raw_val
@@ -434,6 +534,9 @@ def parse_script(code: str) -> CompiledScript:
         m = m_quoted or m_bare
         if m:
             name = m.group(1).upper()
+            bad = check_reserved(name, no, 'PARAM')
+            if bad:
+                errors.append(bad); i += 1; continue
             raw_val = float(m.group(2))
             is_pct = m.group(3) == '%'
             stored = raw_val / 100 if is_pct else raw_val
@@ -470,6 +573,9 @@ def parse_script(code: str) -> CompiledScript:
 
         m = re.match(r'^SET\s+([A-Za-z_]\w*)\s*=\s*(.+)$', text, re.I)
         if m:
+            bad = check_reserved(m.group(1), no, 'variable SET')
+            if bad:
+                errors.append(bad); i += 1; continue
             refs: set = set()
             try: e = _transpile_expr(m.group(2), refs, array_params)
             except Exception as ex: errors.append(f'Ligne {no}: {ex}'); i += 1; continue
@@ -560,7 +666,14 @@ def parse_script(code: str) -> CompiledScript:
         exec(compile(init_src, '<payscript_init>', 'exec'), exec_globals, ns)
         init_fn = ns['_init']
 
-    has_stop = bool(re.search(r'^\s*STOP\s*$', code, re.I | re.MULTILINE))
+    # Détecté sur les lignes DÉCOMMENTÉES, exactement comme _compile_body le
+    # fait : la recherche portait sur le texte brut, si bien qu'un
+    # `STOP  # le contrat s'arrête ici` — écriture idiomatique — compilait bien
+    # un arrêt mais laissait has_stop à False. Le produit se pricait juste et se
+    # décrivait faux : durée de vie espérée non calculée (engine.run_mc), rappel
+    # anticipé absent du fichier réglementaire EMT (api/emt.py: has_autocall),
+    # détection de cycle de vie muette (api/deals.py).
+    has_stop = any(re.match(r'^STOP$', ln['text'], re.I) for ln in lines)
     monitors = _analyze_monitors(code, [p.name for p in params if p.name.startswith('M_')])
     return CompiledScript(events=events, init_fn=init_fn, params=params, constats=constats,
                           has_stop=has_stop, monitors=monitors)

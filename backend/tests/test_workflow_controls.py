@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -18,7 +18,9 @@ from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.api import deals as deals_api, rfq as rfq_api
 from backend.app.core.rfq_controls import booking_gate_failures, pricing_input_hash
-from backend.app.core.workflow import DataCategory, FixingStatus, LifecycleStatus
+from backend.app.core.workflow import (
+    DataCategory, FixingPolicy, FixingStatus, LifecycleStatus,
+)
 from backend.app.db.models import (
     Alert, AuditEvent, Deal, DealEvent, LifecycleProposal, OfficialFixingVersion,
     RfqQuote, RfqRequest, TradeAmendmentRequest,
@@ -147,6 +149,7 @@ def _deal(session: Session) -> Deal:
         maturity_date=today.isoformat(), T=1 / 365.25,
         underlyings_json=json.dumps([{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}]),
         market_snapshot_json=json.dumps({"r": 3.0, "user_params": {}, "constats": {}}),
+        fixing_policy=FixingPolicy.FOUR_EYES.value,
         status="actif",
     )
     session.add(deal)
@@ -179,12 +182,15 @@ def _fixing_submission(
         f"Preuve officielle événement {event.id}, version "
         f"{(supersedes_version or 0) + 1}"
     ).encode("utf-8")
+    observed_at = datetime.now(timezone.utc)
+    if event.event_date != observed_at.date().isoformat():
+        observed_at = datetime.fromisoformat(f"{event.event_date}T12:00:00+00:00")
     return deals_api.EventUpdate(
         spots=spots,
         provider="BLOOMBERG",
         source_type="MESSAGE",
         external_reference=f"MSG-{event.id}-{supersedes_version or 1}",
-        observed_at=f"{event.event_date}T12:00:00+00:00",
+        observed_at=observed_at.isoformat(),
         venue="Official close",
         calendar="TARGET",
         timezone="UTC",
@@ -558,6 +564,276 @@ def test_refresh_error_is_visible_audited_and_alerted(monkeypatch):
     assert session.exec(select(AuditEvent).where(
         AuditEvent.action == "LIFECYCLE_REFRESH_ERROR")).first()
     assert session.exec(select(Alert).where(Alert.kind == "lifecycle_error")).first()
+
+
+def _enable_auto_yahoo(session: Session, deal: Deal) -> Deal:
+    deal.fixing_policy = FixingPolicy.AUTO_YAHOO.value
+    session.add(deal); session.commit(); session.refresh(deal)
+    return deal
+
+
+def _yahoo_closes(deal: Deal, *, maturity_close: float | None = 100.0) -> dict:
+    series = {deal.strike_date: 100.0}
+    if maturity_close is not None:
+        series[deal.maturity_date] = maturity_close
+    return {
+        "provider": "YAHOO_FINANCE",
+        "price_type": "UNADJUSTED_CLOSE",
+        "fetched_at": datetime.utcnow().isoformat(),
+        "series": {"TK1": series},
+        "splits": {"TK1": {}},
+        "missing": [],
+    }
+
+
+def test_auto_yahoo_officializes_fixings_and_applies_terminal_lifecycle(monkeypatch):
+    session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
+    maturity = _events(session, deal)[-1]
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *args: _yahoo_closes(deal))
+    monkeypatch.setattr(deals_api, "_evaluate_lifecycle", lambda *args: {
+        "outcome": "final", "event_id": maturity.id,
+        "event_date": maturity.event_date, "realized_payout": 1.0,
+    })
+
+    result = deals_api.refresh_deal_core(deal, session, actor_user_id=USER.id)
+
+    refreshed = session.get(Deal, deal.id)
+    events = _events(session, deal)
+    versions = session.exec(select(OfficialFixingVersion).where(
+        OfficialFixingVersion.deal_id == deal.id)).all()
+    assert result["policy"] == "AUTO_YAHOO"
+    assert result["officialized"] == 2
+    assert result["proposal"]["status"] == "APPLIED"
+    assert refreshed.status == "échu"
+    assert refreshed.realized_payout == 1.0
+    assert all(event.fixing_status == "APPLIED" for event in events)
+    assert all(version.provider == "YAHOO_FINANCE" for version in versions)
+    assert all(version.capture_actor_type == "PROCESS" for version in versions)
+    assert session.exec(select(AuditEvent).where(
+        AuditEvent.action == "RESOLUTION_AUTO_APPLIED")).first()
+
+
+def test_auto_yahoo_waits_for_same_day_close_without_manual_exception(monkeypatch):
+    session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *args: _yahoo_closes(deal, maturity_close=None))
+    monkeypatch.setattr(
+        deals_api, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
+
+    result = deals_api.refresh_deal_core(deal, session)
+
+    strike, maturity = _events(session, deal)
+    assert strike.fixing_status == "VALIDATED"
+    assert maturity.fixing_status == "EXPECTED"
+    assert result["exceptions"][0]["waiting_for_close"] is True
+    assert result["exceptions"][0]["failures"][0]["code"] == "YAHOO_CLOSE_NOT_PUBLISHED"
+    assert not session.exec(select(Alert).where(
+        Alert.kind == "auto_fixing_exception")).first()
+
+
+def test_auto_yahoo_revision_never_overwrites_an_official_fixing(monkeypatch):
+    session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
+    _, maturity = _events(session, deal)
+    maturity.event_date = (date.today() + timedelta(days=30)).isoformat()
+    deal.maturity_date = maturity.event_date
+    session.add(maturity); session.add(deal); session.commit()
+    monkeypatch.setattr(
+        deals_api, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
+    first_data = _yahoo_closes(deal, maturity_close=None)
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes", lambda *args: first_data)
+    deals_api.refresh_deal_core(deal, session)
+    strike = _events(session, deal)[0]
+    assert json.loads(strike.spots_json) == {"UL1": 100.0}
+
+    revised_data = _yahoo_closes(deal, maturity_close=None)
+    revised_data["series"]["TK1"][deal.strike_date] = 101.0
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes", lambda *args: revised_data)
+    result = deals_api.refresh_deal_core(deal, session)
+
+    strike = _events(session, deal)[0]
+    versions = session.exec(select(OfficialFixingVersion).where(
+        OfficialFixingVersion.deal_event_id == strike.id)
+        .order_by(OfficialFixingVersion.version)).all()
+    assert json.loads(strike.spots_json) == {"UL1": 100.0}
+    assert strike.fixing_status == "MANUAL_REVIEW_REQUIRED"
+    assert [version.status for version in versions] == [
+        "VALIDATED", "MANUAL_REVIEW_REQUIRED"]
+    assert result["exceptions"][0]["failures"][0]["code"] == \
+        "YAHOO_OFFICIAL_REVISION_DETECTED"
+
+
+def test_auto_yahoo_never_bypasses_a_pending_human_exception(monkeypatch):
+    session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
+    strike, maturity = _events(session, deal)
+    maturity.event_date = (date.today() + timedelta(days=30)).isoformat()
+    deal.maturity_date = maturity.event_date
+    session.add(maturity); session.add(deal); session.commit()
+    deals_api.update_event(
+        deal.id, strike.id, _fixing_submission(strike, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *args: _yahoo_closes(deal, maturity_close=None))
+    monkeypatch.setattr(
+        deals_api, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
+
+    result = deals_api.refresh_deal_core(deal, session)
+
+    strike = _events(session, deal)[0]
+    versions = session.exec(select(OfficialFixingVersion).where(
+        OfficialFixingVersion.deal_event_id == strike.id)).all()
+    assert len(versions) == 1
+    assert versions[0].capture_actor_type == "USER"
+    assert versions[0].status == "RECEIVED"
+    assert strike.fixing_status == "MANUAL_REVIEW_REQUIRED"
+    assert result["exceptions"][0]["failures"][0]["code"] == \
+        "CONTROLLED_FIXING_PENDING"
+
+
+def _resolve_auto_exception(
+    session: Session,
+    deal: Deal,
+    event: DealEvent,
+    *,
+    action: str = "CONFIRM_CURRENT",
+    spots: dict | None = None,
+    source_reference: str = "UAT source contrôlée",
+) -> dict:
+    return deals_api.resolve_auto_fixing_exception(
+        deal.id,
+        event.id,
+        deals_api.AutoFixingExceptionResolutionRequest(
+            action=action,
+            expected_version_id=event.current_fixing_version_id,
+            spots=spots,
+            source_reference=source_reference,
+            reason="Décision utilisateur documentée pour le test",
+        ),
+        USER,
+        session,
+    )
+
+
+def test_auto_exception_owner_can_confirm_pending_human_value():
+    session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
+    strike, maturity = _events(session, deal)
+    maturity.event_date = (date.today() + timedelta(days=30)).isoformat()
+    deal.maturity_date = maturity.event_date
+    session.add(maturity); session.add(deal); session.commit()
+    deals_api.update_event(
+        deal.id, strike.id, _fixing_submission(strike, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    strike = session.get(DealEvent, strike.id)
+
+    result = _resolve_auto_exception(session, deal, strike)
+
+    strike = session.get(DealEvent, strike.id)
+    versions = session.exec(select(OfficialFixingVersion).where(
+        OfficialFixingVersion.deal_event_id == strike.id)
+        .order_by(OfficialFixingVersion.version)).all()
+    assert result["remaining_exceptions"] == 0
+    assert strike.fixing_status == "VALIDATED"
+    assert strike.data_category == "FIXING_OFFICIAL"
+    assert strike.validated_by == USER.id
+    assert [version.status for version in versions] == ["SUPERSEDED", "VALIDATED"]
+    assert versions[-1].capture_actor_type == "USER"
+    assert versions[-1].validated_by == USER.id
+    assert session.exec(select(AuditEvent).where(
+        AuditEvent.action == "AUTO_FIXING_EXCEPTION_CONFIRM_CURRENT")).first()
+
+
+def test_auto_exception_owner_can_explicitly_adopt_yahoo(monkeypatch):
+    session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
+    strike, maturity = _events(session, deal)
+    maturity.event_date = (date.today() + timedelta(days=30)).isoformat()
+    deal.maturity_date = maturity.event_date
+    session.add(maturity); session.add(deal); session.commit()
+    deals_api.update_event(
+        deal.id, strike.id, _fixing_submission(strike, {"UL1": 99.0}),
+        OPS_MAKER, session)
+    strike = session.get(DealEvent, strike.id)
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *args: _yahoo_closes(deal, maturity_close=None))
+
+    _resolve_auto_exception(session, deal, strike, action="USE_YAHOO")
+
+    strike = session.get(DealEvent, strike.id)
+    version = session.get(OfficialFixingVersion, strike.current_fixing_version_id)
+    assert json.loads(strike.spots_json) == {"UL1": 100.0}
+    assert version.provider == "YAHOO_FINANCE"
+    assert version.capture_actor_type == "USER"
+    assert version.validation_reason.startswith("Décision utilisateur")
+
+
+def test_user_confirmed_non_yahoo_exception_is_not_reopened(monkeypatch):
+    session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
+    strike, maturity = _events(session, deal)
+    maturity.event_date = (date.today() + timedelta(days=30)).isoformat()
+    deal.maturity_date = maturity.event_date
+    session.add(maturity); session.add(deal); session.commit()
+    deals_api.update_event(
+        deal.id, strike.id, _fixing_submission(strike, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    strike = session.get(DealEvent, strike.id)
+    _resolve_auto_exception(session, deal, strike)
+    revised = _yahoo_closes(deal, maturity_close=None)
+    revised["series"]["TK1"][deal.strike_date] = 101.0
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes", lambda *args: revised)
+    monkeypatch.setattr(
+        deals_api, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
+
+    result = deals_api.refresh_deal_core(deal, session, actor_user_id=USER.id)
+
+    strike = session.get(DealEvent, strike.id)
+    assert json.loads(strike.spots_json) == {"UL1": 100.0}
+    assert json.loads(strike.indicative_spots_json) == {"UL1": 101.0}
+    assert strike.fixing_status == "VALIDATED"
+    assert result["exceptions"] == []
+
+
+def test_auto_exception_resolution_is_refused_for_four_eyes_deal():
+    session = _session(); deal = _deal(session); strike = _events(session, deal)[0]
+    deals_api.update_event(
+        deal.id, strike.id, _fixing_submission(strike, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    strike = session.get(DealEvent, strike.id)
+
+    with pytest.raises(HTTPException) as exc:
+        _resolve_auto_exception(session, deal, strike)
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["failures"][0]["code"] == \
+        "AUTO_EXCEPTION_POLICY_REQUIRED"
+
+
+def test_last_user_exception_replays_and_applies_terminal_lifecycle():
+    session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
+    strike, maturity = _events(session, deal)
+    deals_api.update_event(
+        deal.id, strike.id, _fixing_submission(strike, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    deals_api.update_event(
+        deal.id, maturity.id, _fixing_submission(maturity, {"UL1": 100.0}),
+        OPS_MAKER, session)
+    strike = session.get(DealEvent, strike.id)
+    maturity = session.get(DealEvent, maturity.id)
+
+    first = _resolve_auto_exception(session, deal, strike)
+    second = _resolve_auto_exception(session, deal, maturity)
+
+    refreshed = session.get(Deal, deal.id)
+    assert first["remaining_exceptions"] == 1
+    assert second["remaining_exceptions"] == 0
+    assert second["lifecycle_proposal"]["status"] == "APPLIED"
+    assert refreshed.status == "échu"
+    assert all(event.fixing_status == "APPLIED" for event in _events(session, deal))
 
 
 def _proposal(session: Session, deal: Deal) -> LifecycleProposal:

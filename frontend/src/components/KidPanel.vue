@@ -164,6 +164,13 @@
                     :class="h[sc.key].ann_return >= 0 ? 'text-emerald-400' : 'text-red-400'">
                     {{ h[sc.key].ann_return >= 0 ? '+' : '' }}{{ formatPercent(h[sc.key].ann_return, 2) }} / an
                   </div>
+                  <!-- Durée sur laquelle CE scénario a été annualisé. Un produit
+                       rappelé par anticipation a vécu moins longtemps que l'en-tête
+                       de colonne : sans cette mention le lecteur croit à une erreur. -->
+                  <div v-if="h[sc.key].life && Math.abs(h[sc.key].life - h.T) > 0.01"
+                    class="font-mono text-[10px] text-amber-500/80 mt-0.5">
+                    rappel à {{ formatNumber(h[sc.key].life, 2) }} an{{ h[sc.key].life > 1 ? 's' : '' }}
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -172,8 +179,10 @@
 
         <p class="text-[10px] text-slate-600 mt-3 pt-3 border-t border-slate-800">
           Les scénarios défavorable / modéré / favorable correspondent aux percentiles P10 / P50 / P90 de la
-          distribution Monte Carlo. Le scénario stress correspond au P1. Les horizons intermédiaires utilisent
-          une approximation de la valeur de continuation (prix équitable au rachat anticipé).
+          distribution Monte Carlo. Le scénario stress correspond au P1. Le montant est la somme des flux
+          effectivement reçus ; le rendement est le TRI de ces flux à leurs dates, annualisé sur la durée de vie
+          réelle du scénario — un produit rappelé par anticipation porte donc sa propre durée, signalée sous le
+          rendement, et non celle de l'en-tête de colonne. Aucune hypothèse de réinvestissement n'est appliquée.
         </p>
       </div>
 

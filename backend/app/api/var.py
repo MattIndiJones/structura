@@ -23,7 +23,7 @@ from ..db.database import get_session
 from ..db.models import Deal, Portfolio, ComputeBatch, ComputeJob, User, position_sign
 from .auth import get_current_user
 from ..services.market_data import load_hist_prices
-from ..core.amc_prices import get_fx_series
+from ..core.amc_prices import fx_rate_to
 from ..core.compute.queue_store import enqueue_batch
 from ..core.var_engine import (
     build_deal_scenario_base, apply_scenario_to_deal_base,
@@ -53,8 +53,17 @@ def _launch_var_study(deals: list[Deal], session: Session, user_id: int,
         if base.get("skipped"):
             skipped.append({"deal_id": d.id, "reference": d.reference, "reason": base["reason"]})
             continue
-        fx = get_fx_series(d.devise, "EUR")
-        base["fx_rate"] = float(fx.iloc[-1]) if not fx.empty else 1.0
+        fx_rate = fx_rate_to(d.devise, "EUR")
+        if fx_rate is None:
+            # A VaR is a loss expressed in euros. Converting at parity because
+            # the rate was missing understates the tail by whatever the real
+            # rate happens to be — silently, and precisely on the figure a
+            # limit is checked against. Skipped and named, like any other
+            # deal this run cannot value.
+            skipped.append({"deal_id": d.id, "reference": d.reference,
+                            "reason": f"Taux de change {d.devise}/EUR indisponible."})
+            continue
+        base["fx_rate"] = fx_rate
         # Carried into each job's _meta so the aggregation, which runs long
         # after the deal rows are out of scope, still knows which way the
         # position points. A book of offsetting longs and shorts otherwise

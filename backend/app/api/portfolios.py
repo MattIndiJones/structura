@@ -19,7 +19,7 @@ from ..db.models import Portfolio, Deal, User, Counterparty, position_sign
 from .auth import get_current_user
 from .admin import _CATALOG
 from .deals import MtmExplainRequest
-from ..core.amc_prices import get_fx_series
+from ..core.amc_prices import fx_rate_to
 
 router = APIRouter(prefix="/api/portfolios", tags=["portfolios"])
 
@@ -27,6 +27,18 @@ _STALE_DAYS = 7   # same convention as Admin market-data's price staleness
 
 _TICKER_TO_KEY = {c["ticker"]: c["key"] for c in _CATALOG}
 _TICKER_TO_LABEL = {c["ticker"]: c["label"] for c in _CATALOG}
+
+_REPORTING_CCY = "EUR"
+
+
+def _fx_to_reporting(devise: str | None) -> float | None:
+    """Rate towards the reporting currency — None when genuinely unknown.
+    See core/amc_prices.fx_rate_to for why 1.0 and None must stay distinct."""
+    return fx_rate_to(devise, _REPORTING_CCY)
+
+
+def _fx_missing_row(d: Deal) -> dict:
+    return {"id": d.id, "reference": d.reference, "devise": d.devise}
 
 
 class PortfolioCreate(BaseModel):
@@ -153,6 +165,7 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
     scalar = {"theta": 0.0, "rho": 0.0}
     deals_included, deals_missing_greeks, deals_stale = [], [], []
     deals_missing_theta: list[dict] = []
+    deals_missing_fx: list[dict] = []
     oldest_computed_at = None
     nominal_total_eur = 0.0
     now = datetime.utcnow()
@@ -160,8 +173,12 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
     for d in deals:
         # Nominal is known regardless of whether Greeks were ever computed —
         # unlike the sensitivities below, it must not wait on deals_missing_greeks.
-        fx = get_fx_series(d.devise, "EUR")
-        fx_rate = float(fx.iloc[-1]) if not fx.empty else 1.0
+        fx_rate = _fx_to_reporting(d.devise)
+        if fx_rate is None:
+            # Excluded from every total, not converted at parity: this deal's
+            # size in EUR is unknown, and an unknown size must not be added.
+            deals_missing_fx.append(_fx_missing_row(d))
+            continue
         # Unsigned on purpose: this is the book's gross size, the denominator
         # of every percentage below. A long and a short of the same size are
         # two positions to fund, not zero.
@@ -254,6 +271,9 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
         "deals_missing_greeks": deals_missing_greeks,
         "deals_missing_theta": deals_missing_theta,
         "deals_stale": deals_stale,
+        # Positions left out because their currency could not be converted.
+        # Non-empty means every total below is partial — say so on screen.
+        "deals_missing_fx": deals_missing_fx,
         "nominal_total_eur": nominal_total_eur,
         "per_underlying": per_underlying,
         "corr_pairs": corr_pairs,
@@ -305,8 +325,15 @@ def _run_explain_on_book(deals: list[Deal], session: Session, n_paths: int,
     nominal_total_eur = 0.0
 
     for d in deals:
-        fx = get_fx_series(d.devise, "EUR")
-        fx_rate = float(fx.iloc[-1]) if not fx.empty else 1.0
+        fx_rate = _fx_to_reporting(d.devise)
+        if fx_rate is None:
+            # Same treatment as a deal that cannot be repriced: named in
+            # `skipped`, absent from the EUR totals. Converting at parity here
+            # would break the telescoping the whole waterfall relies on.
+            skipped.append({"deal_id": d.id, "reference": d.reference,
+                            "reason": f"Taux de change {d.devise}/EUR indisponible — "
+                                      f"position exclue des totaux."})
+            continue
         nominal_total_eur += d.nominal * fx_rate
         # pts of nominal → EUR, signed: a P&L explain on a sold product must
         # come out the other way round. Signing here covers every term of the
@@ -448,11 +475,17 @@ def portfolio_risk(
 # always available with zero compute cost.
 def _aggregate_exposure_by_counterparty(deals: list[Deal], session: Session) -> dict:
     by_cpty: dict[str, dict] = {}
+    deals_missing_fx: list[dict] = []
     nominal_total_eur = 0.0
 
     for d in deals:
-        fx = get_fx_series(d.devise, "EUR")
-        fx_rate = float(fx.iloc[-1]) if not fx.empty else 1.0
+        fx_rate = _fx_to_reporting(d.devise)
+        if fx_rate is None:
+            # A counterparty limit is checked against a number. Understating
+            # an exposure because a rate was missing is the one failure mode
+            # this screen exists to prevent, so the position is named instead.
+            deals_missing_fx.append(_fx_missing_row(d))
+            continue
         nom_eur = d.nominal * fx_rate
         nominal_total_eur += nom_eur
 
@@ -493,7 +526,10 @@ def _aggregate_exposure_by_counterparty(deals: list[Deal], session: Session) -> 
         "hhi": round(hhi, 4) if hhi else None,
         "effective_n": effective_n,
         "top3_pct": top3_pct,
-        "reporting_ccy": "EUR",
+        # Non-empty: the exposures and the limit checks above cover only part
+        # of the book. A breach could be hiding in what is listed here.
+        "deals_missing_fx": deals_missing_fx,
+        "reporting_ccy": _REPORTING_CCY,
     }
 
 

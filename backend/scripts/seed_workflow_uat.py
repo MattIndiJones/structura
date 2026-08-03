@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Create a deterministic UAT dataset for RFQ -> booking -> lifecycle.
 
+The dataset covers both fixing policies: a classic AUTO_YAHOO deal with
+user-resolvable exceptions, and controlled FOUR_EYES deals for Maker/Checker
+tests.  Every synthetic scenario is clearly identified by a UAT label or
+reference.
+
 Without an option, the script is non-destructive and only runs on an empty
 database. ``--reset-test-db`` explicitly drops and recreates the one local
 SQLite test schema at ``backend/data/structura.db`` before seeding.
 
 Usage from the repository root:
     .venv\Scripts\python.exe backend\scripts\seed_workflow_uat.py --reset-test-db
+    .venv\Scripts\python.exe backend\scripts\seed_workflow_uat.py --reset-test-db --generated-count 10
 """
 from __future__ import annotations
 
@@ -29,11 +35,16 @@ from backend.app.api.portfolios import get_or_create_default_portfolio
 from backend.app.core.audit import record_audit_event
 from backend.app.core.lifecycle_controls import official_input_hash
 from backend.app.core.rfq_controls import booking_gate_failures
-from backend.app.core.workflow import DataCategory, FixingStatus, LifecycleStatus
+from backend.app.core.workflow import (
+    DataCategory, FixingPolicy, FixingStatus, LifecycleStatus,
+)
 from backend.app.db.database import _hash_pw, engine, init_db
 from backend.app.db.models import (
     Alert, AuditEvent, Deal, DealEvent, LifecycleProposal, OfficialFixingVersion,
     RfqQuote, RfqRequest, TradeAmendmentRequest, User,
+)
+from backend.app.services.uat_generation import (
+    LIFECYCLE_PROFILE_KEYS, UatGenerationRequest, generate_batch,
 )
 
 
@@ -238,6 +249,7 @@ def _base_lifecycle_deal(
     status: str = "actif",
     outcome: str | None = None,
     payout: float | None = None,
+    fixing_policy: str = FixingPolicy.FOUR_EYES.value,
 ) -> Deal:
     today = date.today()
     portfolio = get_or_create_default_portfolio(session, user.id)
@@ -262,6 +274,7 @@ def _base_lifecycle_deal(
         fair_value=99.0,
         price_traded=99.2,
         product_type="Autocall UAT lifecycle",
+        fixing_policy=fixing_policy,
         trade_date=(today - timedelta(days=400)).isoformat(),
         strike_date=(today - timedelta(days=400)).isoformat(),
         value_date=(today - timedelta(days=400)).isoformat(),
@@ -375,7 +388,8 @@ def _create_lifecycle_scenarios(
     today = date.today()
 
     proposed = _base_lifecycle_deal(
-        session, user, reference="UAT-LC-001-PROPOSITION")
+        session, user, reference="UAT-LC-001-PROPOSITION",
+        fixing_policy=FixingPolicy.AUTO_YAHOO.value)
     strike = DealEvent(
         deal_id=proposed.id, event_index=0,
         event_date=(today - timedelta(days=400)).isoformat(), t_years=0.0,
@@ -427,6 +441,17 @@ def _create_lifecycle_scenarios(
         message="UAT : rappel anticipé proposé, validation humaine requise.",
         dedup_key=f"uat:proposal:{proposal.id}",
     ))
+    for exception_event in (strike, observation):
+        session.add(Alert(
+            user_id=user.id, deal_id=proposed.id,
+            deal_reference=proposed.reference, kind="auto_fixing_exception",
+            message=(
+                f"UAT : {exception_event.label} doit être décidé par "
+                "l'utilisateur du deal."),
+            dedup_key=(
+                f"auto-fixing-exception:{proposed.id}:"
+                f"{exception_event.id}:uat"),
+        ))
     record_audit_event(
         session,
         action="RESOLUTION_PROPOSED",
@@ -611,11 +636,14 @@ def _verify_uat_dataset(session: Session) -> list[str]:
     proposed_events = session.exec(select(DealEvent).where(
         DealEvent.deal_id == proposed.id)).all()
     if proposed.status != "actif" or proposed_row.status != "PROPOSED" \
+            or proposed.fixing_policy != FixingPolicy.AUTO_YAHOO.value \
             or sum(event.fixing_status == "RECEIVED" for event in proposed_events) != 2:
         raise RuntimeError("Le scénario lifecycle proposé est incohérent.")
-    checks.append("résolution proposée non appliquée")
+    checks.append("deux exceptions AUTO_YAHOO résolubles par l'utilisateur")
 
     partial = deals["UAT-LC-002-FIXING-PARTIEL"]
+    if partial.fixing_policy != FixingPolicy.FOUR_EYES.value:
+        raise RuntimeError("Le scénario de contrôle Maker/Checker n'est plus FOUR_EYES.")
     if not session.exec(select(DealEvent).where(
             DealEvent.deal_id == partial.id,
             DealEvent.fixing_status == "PARTIAL")).first():
@@ -667,11 +695,33 @@ def _verify_uat_dataset(session: Session) -> list[str]:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Crée le jeu UAT RFQ → booking → lifecycle.")
+        description="Crée le jeu UAT RFQ -> booking -> lifecycle.")
     parser.add_argument(
         "--reset-test-db",
         action="store_true",
         help="Supprime et recrée explicitement le schéma de la base SQLite locale de test.",
+    )
+    parser.add_argument(
+        "--generated-count",
+        type=int,
+        default=0,
+        choices=range(0, 101),
+        metavar="0..100",
+        help=("Ajoute un lot reproductible via le même moteur que l'écran Admin "
+              "(0 : fixtures de contrôle uniquement)."),
+    )
+    parser.add_argument(
+        "--generated-seed",
+        type=int,
+        default=42,
+        help="Graine du lot Admin optionnel (défaut : 42).",
+    )
+    parser.add_argument(
+        "--generated-lifecycle-profile",
+        choices=(*LIFECYCLE_PROFILE_KEYS, "COMPLETE_MIX"),
+        default="COMPLETE_MIX",
+        help=("Profil temporel du lot optionnel (défaut : COMPLETE_MIX, qui "
+              "parcourt les huit cas avec au moins huit objets)."),
     )
     return parser.parse_args()
 
@@ -739,6 +789,21 @@ def main() -> None:
         _create_rfq_scenarios(session, user)
         _create_lifecycle_scenarios(session, user, ops_maker, checker)
         checks = _verify_uat_dataset(session)
+        generated_batch = None
+        if args.generated_count:
+            admin = session.exec(select(User).where(User.username == "admin")).one()
+            generated_batch = generate_batch(
+                UatGenerationRequest(
+                    target_user_id=user.id,
+                    mode="FULL_CHAIN",
+                    count=args.generated_count,
+                    seed=args.generated_seed,
+                    label="Lot CLI partagé avec le générateur Admin",
+                    lifecycle_profile=args.generated_lifecycle_profile,
+                ),
+                admin,
+                session,
+            )
         print(json.dumps({
             "status": "ok",
             "logins": {
@@ -749,6 +814,7 @@ def main() -> None:
             "booked_reference": booked["reference"],
             "summary": _summary(session),
             "checks": checks,
+            "generated_batch": generated_batch,
         }, ensure_ascii=False, indent=2))
 
 

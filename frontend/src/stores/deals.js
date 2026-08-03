@@ -115,7 +115,9 @@ export const useDealsStore = defineStore('deals', () => {
       const res = await apiFetch(`/api/deals/${dealId}/events/refresh`, { method: 'POST' })
       if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Erreur refresh')) }
       const result = await res.json()
-      refreshStatus.value = `✓ ${result.message}`
+      refreshStatus.value = result.message?.startsWith('⚠')
+        ? result.message
+        : `✓ ${result.message}`
       // Reload events
       const dealRes = await apiFetch(`/api/deals/${dealId}`)
       if (dealRes.ok) currentDeal.value = await dealRes.json()
@@ -150,6 +152,25 @@ export const useDealsStore = defineStore('deals', () => {
     const updated = await res.json()
     if (currentDeal.value?.id === dealId) await selectDeal(dealId)
     return updated
+  }
+
+  async function resolveAutoFixingException(dealId, eventId, payload) {
+    const res = await apiFetch(
+      `/api/deals/${dealId}/events/${eventId}/resolve-auto-exception`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(errorMessage(err, 'Traitement de l’exception impossible'))
+    }
+    const result = await res.json()
+    if (currentDeal.value?.id === dealId) {
+      currentDeal.value = null
+      await selectDeal(dealId)
+    }
+    return result
   }
 
   async function transitionProposal(dealId, proposalId, action, reason, confirmedOutcome = null) {
@@ -225,7 +246,8 @@ export const useDealsStore = defineStore('deals', () => {
   return {
     deals, currentDeal, loading, error, refreshStatus, auditEvents, pendingAmendments,
     loadDeals, nextRef, bookDeal, selectDeal, updateDeal,
-    updateEvent, validateFixing, rejectFixing, transitionProposal,
+    updateEvent, validateFixing, rejectFixing, resolveAutoFixingException,
+    transitionProposal,
     requestAmendment, transitionAmendment, loadPendingAmendments, loadAudit,
     refreshEvents, getRepriceInputs, getWatchlist,
   }

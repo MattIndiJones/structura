@@ -68,7 +68,9 @@
           </div>
           <div v-else class="mt-3 pt-3 border-t border-slate-700">
             <p class="text-xs text-amber-500/80">
-              S₀ à renseigner — un Ops Maker doit soumettre le fixing Strike avec sa preuve officielle.
+              {{ deal.fixing_policy === 'FOUR_EYES'
+                ? 'S₀ à renseigner — un Ops Maker doit soumettre le fixing Strike avec sa preuve officielle.'
+                : 'S₀ en attente — la clôture Yahoo sera officialisée automatiquement après publication et contrôle.' }}
             </p>
           </div>
         </template>
@@ -78,7 +80,15 @@
           <span class="px-2 py-1 rounded border border-slate-700 bg-slate-800 text-xs text-slate-300">
             {{ deal.status }}
           </span>
-          <HelpTip text="Le statut contractuel est en lecture seule. Un résultat terminal passe obligatoirement par proposition, validation humaine puis application auditée." />
+          <span class="px-2 py-1 rounded border text-xs"
+            :class="deal.fixing_policy === 'FOUR_EYES'
+              ? 'border-amber-800/60 bg-amber-950/30 text-amber-400'
+              : 'border-blue-800/60 bg-blue-950/30 text-blue-400'">
+            {{ deal.fixing_policy === 'FOUR_EYES' ? 'Contrôle 4 yeux' : 'Yahoo automatique' }}
+          </span>
+          <HelpTip :text="deal.fixing_policy === 'FOUR_EYES'
+            ? 'Le statut contractuel est en lecture seule. Un résultat terminal passe par validation humaine et application auditée.'
+            : 'Les clôtures Yahoo non ajustées sont officialisées et appliquées automatiquement si les contrôles passent. Toute anomalie bloque le traitement et crée une exception explicite.'" />
           <button class="btn-secondary text-xs px-3 py-1.5" @click="reprice" :disabled="repricing">
             <span v-if="repricing"
               class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -108,6 +118,20 @@
             <span v-if="dealsStore.loading"
               class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
             📡 Actualiser monitoring indicatif
+          </button>
+        </div>
+
+        <div v-if="autoExceptionEvents.length"
+          class="mb-3 rounded-lg border border-red-800/50 bg-red-950/25 px-3 py-2.5 text-xs text-red-300 flex items-center justify-between gap-3">
+          <div>
+            <strong>{{ autoExceptionEvents.length }} constatation(s) bloquent le lifecycle.</strong>
+            <div class="mt-0.5 text-red-200/70">
+              Sur ce produit classique, l’utilisateur du deal décide la valeur officielle et motive son contrôle.
+            </div>
+          </div>
+          <button class="btn-secondary text-[10px] px-2 py-1 shrink-0"
+            @click="openAutoException(autoExceptionEvents[0])">
+            Traiter les exceptions
           </button>
         </div>
 
@@ -165,10 +189,12 @@
                   <span class="text-slate-600 font-normal ml-1">officiel / indicatif</span>
                 </th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3">Fixing
-                  <HelpTip text="Yahoo est uniquement indicatif. Un Ops Maker soumet un fixing candidat avec sa preuve ; un Ops Checker distinct le valide avant toute résolution." />
+                  <HelpTip :text="deal.fixing_policy === 'FOUR_EYES'
+                    ? 'Un Ops Maker soumet un fixing candidat avec sa preuve ; un Ops Checker distinct le valide avant toute résolution.'
+                    : 'La clôture Yahoo non ajustée fait foi opérationnellement après contrôles automatiques. Une donnée manquante, périmée, atypique ou corrigée bascule en exception.'" />
                 </th>
                 <th class="text-left text-slate-500 font-medium pb-2">Statut
-                  <HelpTip text="futur = date pas encore atteinte. observé = spot constaté normalement. callé = ce constat a déclenché le rappel anticipé du produit. ki = barrière de knock-in franchie à ce constat. final = constat de maturité." />
+                  <HelpTip text="Le statut affiché combine la date, l'état du fixing et le résultat contractuel : à venir, clôture attendue, validation requise, exception, observé, callé, KI ou final." />
                 </th>
               </tr>
             </thead>
@@ -215,7 +241,7 @@
                 <td class="py-2 pr-3">
                   <span :class="sourceClass(ev.source)"
                     class="px-1.5 py-0.5 rounded text-[10px] font-medium">
-                    {{ ev.fixing_status }}<span v-if="ev.fixing_version"> · v{{ ev.fixing_version }}</span>
+                    {{ fixingStatusLabel(ev.fixing_status, deal.fixing_policy) }}<span v-if="ev.fixing_version"> · v{{ ev.fixing_version }}</span>
                   </span>
                   <div v-if="ev.fixing_provider" class="text-[10px] text-slate-500 mt-1">
                     {{ ev.fixing_provider }} · {{ ev.fixing_external_reference }}
@@ -237,7 +263,15 @@
                           = {{ ev.spots?.[underlying.name] }}
                         </span>
                       </div>
-                      <div><span class="text-slate-600">Maker :</span> utilisateur #{{ ev.fixing_entered_by }} · {{ ev.fixing_entered_at }}</div>
+                      <div>
+                        <span class="text-slate-600">Capture :</span>
+                        <template v-if="ev.fixing_provider === 'YAHOO_FINANCE' && ev.fixing_source_type === 'API'">
+                          processus automatique Yahoo
+                        </template>
+                        <template v-else>
+                          utilisateur #{{ ev.fixing_entered_by }} · {{ ev.fixing_entered_at }}
+                        </template>
+                      </div>
                       <div><span class="text-slate-600">Motif :</span> {{ ev.fixing_reason }}</div>
                       <template v-if="currentFixingVersion(ev)">
                         <div>
@@ -273,10 +307,14 @@
                   <button v-if="canValidateFixing(ev)"
                           class="block mt-1 text-[10px] text-red-400 hover:text-red-300"
                           @click="rejectEventFixing(ev)">Rejeter le fixing</button>
+                  <button v-if="canResolveAutoException(ev)"
+                          class="block mt-1 text-[10px] text-blue-400 hover:text-blue-300 font-semibold"
+                          @click="openAutoException(ev)">Traiter l’exception utilisateur</button>
                 </td>
                 <td class="py-2">
-                  <span class="text-[10px] bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-300">
-                    {{ ev.status }}
+                  <span class="text-[10px] border rounded px-1.5 py-0.5"
+                    :class="eventOperationalClass(ev)">
+                    {{ eventOperationalLabel(ev, deal.fixing_policy) }}
                   </span>
                 </td>
               </tr>
@@ -551,6 +589,11 @@
 
     </template>
 
+    <AutoFixingExceptionModal
+      v-model="autoExceptionOpen"
+      :deal="deal"
+      :event="autoExceptionEvent"
+      @resolved="onAutoExceptionResolved" />
   </div>
 </template>
 
@@ -560,6 +603,7 @@ import { useDealsStore } from '../stores/deals.js'
 import { usePricingStore } from '../stores/pricing.js'
 import { useAuthStore } from '../stores/auth.js'
 import HelpTip from './HelpTip.vue'
+import AutoFixingExceptionModal from './AutoFixingExceptionModal.vue'
 import { formatDate } from '../utils/format.js'
 import { apiFetch } from '../utils/api.js'
 
@@ -577,6 +621,8 @@ const saveMsg = ref('')
 const auditResult = ref('')
 const amendmentForm = reactive({ field_name: 'nominal', new_value: '', reason: '' })
 const fixingEventId = ref(null)
+const autoExceptionOpen = ref(false)
+const autoExceptionEvent = ref(null)
 const fixingProviders = [
   'BLOOMBERG', 'REFINITIV', 'OFFICIAL_EXCHANGE',
   'CALCULATION_AGENT', 'ISSUER_AGENT', 'CUSTODIAN',
@@ -601,6 +647,11 @@ const isOpsChecker = computed(() => authStore.user?.role === 'checker' &&
   deal.value?.user_id !== authStore.user?.id)
 const fixingEvent = computed(() => deal.value?.events?.find(
   event => event.id === fixingEventId.value) ?? null)
+const autoExceptionStatuses = new Set([
+  'RECEIVED', 'PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED',
+])
+const autoExceptionEvents = computed(() => (deal.value?.events || []).filter(
+  event => canResolveAutoException(event)))
 
 const allEventsFuture = computed(() => {
   const evs = deal.value?.events
@@ -727,10 +778,73 @@ function canSubmitFixing(ev) {
     ev.event_date <= today && ev.fixing_status !== 'APPLIED'
 }
 
+function fixingStatusLabel(status, policy = '') {
+  const labels = {
+    EXPECTED: 'Attendu',
+    RECEIVED: policy === 'AUTO_YAHOO' ? 'Reçu — décision utilisateur' : 'Reçu — Checker requis',
+    VALIDATED: 'Officiel',
+    APPLIED: 'Appliqué',
+    PARTIAL: 'Incomplet',
+    MISSING: 'Manquant',
+    REJECTED: 'Rejeté',
+    CONTESTED: 'Contesté',
+    MANUAL_REVIEW_REQUIRED: policy === 'AUTO_YAHOO' ? 'À décider' : 'À contrôler',
+  }
+  return labels[status] || status || 'Inconnu'
+}
+
+function eventOperationalLabel(ev, policy = '') {
+  if (ev.event_date > today) return 'À venir'
+  if (ev.fixing_status === 'EXPECTED') return 'Clôture attendue'
+  if (ev.fixing_status === 'RECEIVED') {
+    return policy === 'AUTO_YAHOO' ? 'À traiter par l’utilisateur' : 'En attente de validation'
+  }
+  if (['PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)) {
+    return 'Exception à traiter'
+  }
+  return ev.status === 'futur' ? 'Fixing à appliquer' : ev.status
+}
+
+function eventOperationalClass(ev) {
+  if (['PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)) {
+    return 'border-red-800/60 bg-red-950/30 text-red-400'
+  }
+  if (ev.fixing_status === 'RECEIVED') {
+    return 'border-amber-800/60 bg-amber-950/30 text-amber-400'
+  }
+  if (['VALIDATED', 'APPLIED'].includes(ev.fixing_status)) {
+    return 'border-emerald-800/60 bg-emerald-950/30 text-emerald-400'
+  }
+  return 'border-slate-700 bg-slate-800 text-slate-400'
+}
+
 function canValidateFixing(ev) {
   return isOpsChecker.value &&
     ['RECEIVED', 'PARTIAL', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status) &&
     ev.fixing_entered_by !== authStore.user?.id
+}
+
+function canResolveAutoException(ev) {
+  return deal.value?.fixing_policy === 'AUTO_YAHOO' &&
+    (isDealOwner.value || authStore.user?.role === 'admin') &&
+    ev.event_date <= today && autoExceptionStatuses.has(ev.fixing_status)
+}
+
+function openAutoException(ev) {
+  autoExceptionEvent.value = ev
+  autoExceptionOpen.value = true
+}
+
+async function onAutoExceptionResolved(result) {
+  showSaveMsg(`✓ ${result.message}`)
+  await loadAudit()
+  const next = autoExceptionEvents.value[0]
+  if (next) {
+    autoExceptionEvent.value = next
+  } else {
+    autoExceptionOpen.value = false
+    autoExceptionEvent.value = null
+  }
 }
 
 function currentFixingVersion(ev) {

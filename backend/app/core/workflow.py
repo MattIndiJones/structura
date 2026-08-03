@@ -43,6 +43,19 @@ class FixingStatus(WorkflowValue):
     MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
 
 
+class FixingPolicy(WorkflowValue):
+    """How contractual fixings become official for a booked deal.
+
+    The policy is frozen on the deal at booking time.  ``AUTO_YAHOO`` makes
+    the unadjusted Yahoo close the operational reference source when the
+    automated quality gates pass.  ``FOUR_EYES`` preserves the governed
+    Maker/Checker workflow for controlled products.
+    """
+
+    AUTO_YAHOO = "AUTO_YAHOO"
+    FOUR_EYES = "FOUR_EYES"
+
+
 class LifecycleStatus(WorkflowValue):
     PENDING = "PENDING"
     PROPOSED = "PROPOSED"

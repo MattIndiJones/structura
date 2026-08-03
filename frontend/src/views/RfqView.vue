@@ -1179,7 +1179,17 @@ async function submitCreate() {
           ccy: form.currency, sigma: advanced.sigma / 100, q: advanced.q / 100,
         }],
         corr_matrix: [[1]],
-        r: advanced.r / 100, T: form.T, N: advanced.N, model: advanced.model,
+        // T dérivé du calendrier CONSTAT quand il y en a un, et non du ténor
+        // tapé : c'est la fin de calendrier que l'écran affiche comme maturité.
+        // Laisser les deux diverger obligeait à « corriger » T à chaque calcul
+        // de prix modèle — donc à toucher un terme contractuel après
+        // sollicitation. T est fixé une fois, à la création, où il est encore
+        // librement modifiable.
+        r: advanced.r / 100,
+        T: (createMaturityDate.value
+            ? yearsBetween(form.value_date, createMaturityDate.value)
+            : form.T),
+        N: advanced.N, model: advanced.model,
         user_params,
         constats: buildConstatsPayload(scriptConstats.value, constatOverrides),
         notional: nominalValue.value, currency: form.currency,
@@ -1242,42 +1252,34 @@ async function computeModelPrice() {
   computing.value = true
   computeError.value = ''
   try {
-    // Persist the (possibly just-edited) params before pricing with them —
-    // "Calculer prix modèle" always reflects what's currently in the form
-    // above, not the values frozen at creation time.
-    const user_params = {}
-    for (const pp of detailParsedParams.value) {
-      const v = detailParamOverrides[pp.name] ?? pp.raw_default
-      user_params[pp.name] = pp.is_pct ? v / 100 : v
-    }
-    // The panel displays the CONSTAT calendar end as the maturity, so that's
-    // the tenor to price. Left at the T typed at creation, AT_MATURITY fires
-    // on a date the RFQ never shows (2Y calendar with T=3 → redemption
-    // simulated at 3 years: effective_T_max only ever extends the horizon,
-    // never shortens it). No calendar (simple-mode indicatif) → T stays the
-    // tenor and the dates are metadata, nothing to derive.
-    let T = rfq.current.params?.T ?? 3
-    if (detailCalendarEnd.value) {
-      T = yearsBetween(detailAdvanced.value_date, detailCalendarEnd.value)
-      if (!(T > 0)) {
-        throw new Error(`La fin de calendrier (${detailCalendarEnd.value}) précède la date de `
-                      + `valeur (${detailAdvanced.value_date}) — corrigez les dates avant de calculer.`)
-      }
-    }
-    const existingUnderlying = (rfq.current.params?.underlyings || [])[0] || {}
-    const mergedParams = {
-      ...rfq.current.params,
-      T,
-      underlyings: [{ ...existingUnderlying, sigma: detailAdvanced.sigma / 100, q: detailAdvanced.q / 100 }],
-      r: detailAdvanced.r / 100,
-      N: detailAdvanced.N,
-      model: detailAdvanced.model,
-      user_params,
-      constats: buildConstatsPayload(detailScriptConstats.value, detailConstatOverrides),
-      strike_date: detailAdvanced.strike_date,
-      value_date: detailAdvanced.value_date,
-    }
-    await rfq.update(rfq.current.id, { params: mergedParams })
+    // On n'envoie QUE les hypothèses de modèle. Les termes contractuels
+    // (constats, dates, sous-jacents, user_params, T) restent côté serveur et
+    // ne transitent pas : c'est ce qui permet de recalculer le prix modèle à
+    // tout moment de la vie de l'AO, cotations reçues ou non.
+    //
+    // Auparavant ce bouton renvoyait le bloc complet reconstruit depuis le
+    // formulaire. Rien de tout cela n'était une modification voulue, mais la
+    // re-sérialisation ne retombait pas sur la valeur stockée : le contrôle de
+    // gel se déclenchait sur cinq termes auxquels personne n'avait touché, et
+    // l'AO devenait impossible à re-pricer. Le même remaniement réduisait au
+    // passage un panier worst-of à son premier sous-jacent.
+    //
+    // sigma/q sont fusionnés par INDICE sur le panier stocké (voir
+    // _merge_pricing_params) : la taille du panier vient de l'AO, pas du
+    // formulaire de pricing.
+    const nUnderlyings = (rfq.current.params?.underlyings || []).length || 1
+    const pricingUnderlyings = Array.from({ length: nUnderlyings }, () => ({
+      sigma: detailAdvanced.sigma / 100,
+      q: detailAdvanced.q / 100,
+    }))
+    await rfq.update(rfq.current.id, {
+      pricing_params: {
+        underlyings: pricingUnderlyings,
+        r: detailAdvanced.r / 100,
+        N: detailAdvanced.N,
+        model: detailAdvanced.model,
+      },
+    })
     await rfq.computeModelPrice(rfq.current)
   } catch (e) {
     computeError.value = e.message

@@ -175,6 +175,14 @@
                           @click="openDealDetail(w.deal_id)">
                           {{ w.reference }}
                         </button>
+                        <button type="button"
+                          class="text-slate-500 hover:text-blue-300 shrink-0 transition-colors"
+                          :class="copiedReference === w.reference ? 'text-emerald-400' : ''"
+                          :title="copiedReference === w.reference ? 'Référence copiée' : 'Copier la référence du deal'"
+                          :aria-label="`Copier la référence ${w.reference}`"
+                          @click.stop="copyDealReference(w.reference)">
+                          {{ copiedReference === w.reference ? '✓' : '⧉' }}
+                        </button>
                         <RouterLink :to="`/pricer?dealId=${w.deal_id}`"
                           class="text-slate-500 hover:text-slate-300 shrink-0" title="Ouvrir dans le Pricer">
                           ⇥
@@ -311,10 +319,24 @@
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-slate-500 text-xs">{{ expanded[d.id] ? '▾' : '▸' }}</span>
                 <span class="font-mono font-semibold text-slate-200">{{ d.reference }}</span>
+                <button type="button"
+                  class="text-slate-500 hover:text-blue-300 shrink-0 transition-colors"
+                  :class="copiedReference === d.reference ? 'text-emerald-400' : ''"
+                  :title="copiedReference === d.reference ? 'Référence copiée' : 'Copier la référence du deal'"
+                  :aria-label="`Copier la référence ${d.reference}`"
+                  @click.stop="copyDealReference(d.reference)">
+                  {{ copiedReference === d.reference ? '✓' : '⧉' }}
+                </button>
                 <span class="text-slate-600">·</span>
                 <span class="text-slate-300">{{ d.contrepartie }}</span>
                 <span v-if="d.product_type" class="text-slate-500 text-[10px] border border-slate-700 rounded px-1.5 py-0.5">
                   {{ d.product_type }}
+                </span>
+                <span class="text-[10px] border rounded px-1.5 py-0.5"
+                  :class="d.fixing_policy === 'FOUR_EYES'
+                    ? 'border-amber-800/60 bg-amber-950/30 text-amber-400'
+                    : 'border-blue-800/60 bg-blue-950/30 text-blue-400'">
+                  {{ d.fixing_policy === 'FOUR_EYES' ? 'Contrôle 4 yeux' : 'Yahoo auto' }}
                 </span>
                 <span :class="statusClass(d.status)" class="badge uppercase">
                   {{ d.status }}
@@ -700,8 +722,26 @@
 
                 <!-- Constatations (lecture seule) -->
                 <div>
-                  <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                    Constatations ({{ details[d.id].events?.length ?? 0 }})
+                  <div class="flex items-center justify-between gap-3 mb-1.5">
+                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                      Constatations ({{ details[d.id].events?.length ?? 0 }})
+                    </div>
+                    <button v-if="autoExceptionEvents(d.id).length"
+                      class="btn-secondary text-[10px] px-2 py-1 text-red-300 border-red-800/60"
+                      @click="openAutoException(d, autoExceptionEvents(d.id)[0])">
+                      Traiter {{ autoExceptionEvents(d.id).length }} exception(s)
+                    </button>
+                  </div>
+                  <div v-if="autoExceptionEvents(d.id).length"
+                    class="mb-2 rounded-lg border border-red-800/50 bg-red-950/25 px-3 py-2 text-xs text-red-300 flex items-center justify-between gap-3">
+                    <span>
+                      <strong>{{ autoExceptionEvents(d.id).length }} constatation(s) bloquent le lifecycle.</strong>
+                      L’utilisateur du deal doit choisir la valeur officielle et motiver sa décision.
+                    </span>
+                    <button class="btn-secondary text-[10px] px-2 py-1 shrink-0"
+                      @click="openAutoException(d, autoExceptionEvents(d.id)[0])">
+                      Traiter maintenant
+                    </button>
                   </div>
                   <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                     <table class="w-full text-xs border-collapse">
@@ -712,7 +752,9 @@
                           <th class="pb-1.5 pr-3 font-medium whitespace-nowrap">Date</th>
                           <th v-for="u in details[d.id].underlyings" :key="u.name"
                             class="pb-1.5 pr-3 font-medium whitespace-nowrap">{{ u.ticker || u.name }}</th>
-                          <th class="pb-1.5 font-medium">Statut</th>
+                          <th class="pb-1.5 pr-3 font-medium whitespace-nowrap">Fixing</th>
+                          <th class="pb-1.5 pr-3 font-medium">Statut</th>
+                          <th class="pb-1.5 font-medium">Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -733,9 +775,25 @@
                             </template>
                             <span v-else class="text-slate-600">–</span>
                           </td>
+                          <td class="py-1.5 pr-3">
+                            <span :class="fixingStatusClass(ev.fixing_status)"
+                              class="px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap">
+                              {{ fixingStatusLabel(ev.fixing_status, d.fixing_policy) }}
+                            </span>
+                          </td>
+                          <td class="py-1.5 pr-3">
+                            <span :class="operationalEventClass(ev)"
+                              class="px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap">
+                              {{ operationalEventLabel(ev, d.fixing_policy) }}
+                            </span>
+                          </td>
                           <td class="py-1.5">
-                            <span :class="eventStatusClass(ev.status)"
-                              class="px-1.5 py-0.5 rounded text-[10px] font-medium">{{ ev.status }}</span>
+                            <button v-if="canResolveAutoException(d, ev)"
+                              class="btn-secondary text-[10px] px-2 py-1 whitespace-nowrap"
+                              @click="openAutoException(d, ev)">
+                              Traiter
+                            </button>
+                            <span v-else class="text-slate-700">—</span>
                           </td>
                         </tr>
                       </tbody>
@@ -832,6 +890,12 @@
         </template>
       </div>
     </main>
+
+    <AutoFixingExceptionModal
+      v-model="autoExceptionModal.open"
+      :deal="autoExceptionModal.deal"
+      :event="autoExceptionModal.event"
+      @resolved="onAutoExceptionResolved" />
   </div>
 </template>
 
@@ -845,6 +909,7 @@ import HelpTip from '../components/HelpTip.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import DataFilterBar from '../components/ui/DataFilterBar.vue'
+import AutoFixingExceptionModal from '../components/AutoFixingExceptionModal.vue'
 import { useDataFilter } from '../composables/useDataFilter.js'
 import { formatInt, formatPercent, formatDate } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
@@ -867,10 +932,74 @@ const activeTab = ref('watchlist')
 
 const refreshingId = ref(null)
 const refreshResults = reactive({})
+const copiedReference = ref('')
+let copyReferenceTimer = null
+
+async function copyDealReference(reference) {
+  try {
+    await navigator.clipboard.writeText(reference)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = reference
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+  }
+  copiedReference.value = reference
+  clearTimeout(copyReferenceTimer)
+  copyReferenceTimer = setTimeout(() => {
+    copiedReference.value = ''
+  }, 1800)
+}
 
 // ── Fiche détail dépliable (accordéon multi-ouvert) ─────────────────
 const expanded = reactive({})
 const details = reactive({})   // deal_id → full deal (with events)
+const autoExceptionModal = reactive({ open: false, deal: null, event: null })
+
+const autoExceptionStatuses = new Set([
+  'RECEIVED', 'PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED',
+])
+
+function canResolveAutoException(deal, event) {
+  return deal?.fixing_policy === 'AUTO_YAHOO' &&
+    event?.event_date <= todayIso && autoExceptionStatuses.has(event?.fixing_status)
+}
+
+function autoExceptionEvents(dealId) {
+  const fullDeal = details[dealId]
+  return (fullDeal?.events || []).filter(event =>
+    canResolveAutoException(fullDeal, event))
+}
+
+function openAutoException(deal, event) {
+  autoExceptionModal.deal = details[deal.id] || deal
+  autoExceptionModal.event = event
+  autoExceptionModal.open = true
+}
+
+async function onAutoExceptionResolved(result) {
+  const dealId = autoExceptionModal.deal?.id
+  if (!dealId) return
+  refreshResults[dealId] = `✓ ${result.message}`
+  await loadDetail(dealId)
+  await dealsStore.loadDeals()
+  loadAlerts()
+  loadWatchlist()
+  const remaining = autoExceptionEvents(dealId)
+  if (remaining.length) {
+    autoExceptionModal.deal = details[dealId]
+    autoExceptionModal.event = remaining[0]
+  } else {
+    autoExceptionModal.open = false
+    autoExceptionModal.deal = null
+    autoExceptionModal.event = null
+  }
+}
 
 async function toggleDetail(id) {
   expanded[id] = !expanded[id]
@@ -935,6 +1064,50 @@ function eventStatusClass(s) {
     'futur': 'bg-slate-800 text-slate-500',
   }
   return map[s] || 'bg-slate-800 text-slate-500'
+}
+
+function fixingStatusLabel(status, policy = '') {
+  const labels = {
+    EXPECTED: 'Attendu',
+    RECEIVED: policy === 'AUTO_YAHOO' ? 'Reçu — décision utilisateur' : 'Reçu — Checker requis',
+    VALIDATED: 'Officiel',
+    APPLIED: 'Appliqué',
+    PARTIAL: 'Incomplet',
+    MISSING: 'Manquant',
+    REJECTED: 'Rejeté',
+    CONTESTED: 'Contesté',
+    MANUAL_REVIEW_REQUIRED: policy === 'AUTO_YAHOO' ? 'À décider' : 'À contrôler',
+  }
+  return labels[status] || status || 'Inconnu'
+}
+
+function fixingStatusClass(status) {
+  if (['VALIDATED', 'APPLIED'].includes(status)) return 'bg-emerald-900/40 text-emerald-400'
+  if (status === 'RECEIVED') return 'bg-amber-900/40 text-amber-400'
+  if (['PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED'].includes(status)) {
+    return 'bg-red-900/40 text-red-400'
+  }
+  return 'bg-slate-800 text-slate-500'
+}
+
+function operationalEventLabel(ev, policy = '') {
+  if (ev.event_date > todayIso) return 'À venir'
+  if (ev.fixing_status === 'EXPECTED') return 'Clôture attendue'
+  if (ev.fixing_status === 'RECEIVED') {
+    return policy === 'AUTO_YAHOO' ? 'À traiter par l’utilisateur' : 'En attente de validation'
+  }
+  if (['PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)) {
+    return 'Exception à traiter'
+  }
+  return ev.status === 'futur' ? 'Fixing à appliquer' : ev.status
+}
+
+function operationalEventClass(ev) {
+  if (['PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)) {
+    return 'bg-red-900/40 text-red-400'
+  }
+  if (ev.fixing_status === 'RECEIVED') return 'bg-amber-900/40 text-amber-400'
+  return eventStatusClass(ev.status)
 }
 
 function s0For(id, name) {
@@ -1437,7 +1610,9 @@ async function refresh(dealId) {
   refreshingId.value = dealId
   try {
     const res = await dealsStore.refreshEvents(dealId)
-    refreshResults[dealId] = describeOutcome(res.evaluation) || res.message
+    refreshResults[dealId] = res.policy === 'AUTO_YAHOO'
+      ? res.message
+      : describeOutcome(res.evaluation) || res.message
   } catch (e) {
     refreshResults[dealId] = `⚠ ${e.message}`
   } finally {

@@ -338,20 +338,63 @@ def aggregate_var(deltas_eur: list[float], confidence: float = 0.95) -> dict:
     arr = np.array(sorted(deltas_eur))   # ascending: worst losses first
     n = len(arr)
     alpha = 1.0 - confidence
-    # +1e-9 guards against float noise (e.g. 1.0 - 0.90 == 0.09999999999999998
-    # in binary, which would floor DOWN to the wrong bucket without this).
-    cut = max(0, min(n - 1, int(math.floor(alpha * n + 1e-9))))
-    var_value = -arr[cut]
-    tail = arr[:cut + 1]
-    es_value = -float(tail.mean())
+    # The loss tail holds alpha*n scenarios — not floor(alpha*n)+1, which is
+    # what averaging arr[:cut+1] used to do. That extra, less-bad scenario
+    # diluted the tail: on 100 scenarios at 95% it averaged the 6 worst instead
+    # of the 5 worst, so the reported Expected Shortfall was systematically
+    # softer than the measure it claimed to be. The effect grows as the
+    # scenario count falls, which is exactly when a risk figure is read most
+    # literally.
+    #
+    # w is the (generally fractional) tail size, m the whole scenarios strictly
+    # inside it. ES follows the coherent definition ES = (1/alpha)*integral of
+    # VaR over [0, alpha], which on an empirical distribution weights the
+    # boundary scenario by the fractional remainder. VaR is the boundary of
+    # that same tail, so ES >= VaR holds by construction and both figures come
+    # from one definition rather than two.
+    w = alpha * n
+    m = max(0, min(n, int(math.floor(w + 1e-9))))
+    k = max(1, min(n, int(math.ceil(w - 1e-9))))
+    var_value = -arr[k - 1]
+    if m >= 1:
+        tail_sum = float(arr[:m].sum())
+        if m < n:
+            tail_sum += (w - m) * float(arr[m])
+        es_value = -tail_sum / w
+    else:
+        # Tail thinner than a single scenario: the worst one is all we know.
+        es_value = -float(arr[0])
 
     def pctl(p: float) -> float:
-        return float(np.percentile(arr, p))
+        """Empirical quantile, inverse-CDF convention: the worst scenario that
+        was actually observed at or below level p — arr[ceil(p*n) - 1].
+
+        This used to be np.percentile, which interpolates linearly between the
+        two neighbouring scenarios. Both estimate the same quantile of the same
+        sample, so the payload carried two different answers to one question:
+        on 100 scenarios of 1..100 EUR of loss, var_eur read 96.00 while p5 read
+        -95.05. Nothing on screen said which was the 5% quantile, and a reader
+        comparing the tile to the chart had no way to reconcile them.
+
+        The VaR convention wins because it is the one a risk figure should use:
+        no value is invented between scenarios that were run, and the number
+        reported is a loss that actually occurred in the simulation. It also
+        makes the relation exact and checkable — var_eur == -p5 whenever the
+        confidence level is 95%, by construction rather than by luck."""
+        idx = int(math.ceil(p / 100.0 * n - 1e-9)) - 1
+        return float(arr[max(0, min(n - 1, idx))])
 
     return {
         "var_eur": round(float(var_value), 2),
         "es_eur": round(float(es_value), 2),
         "n_scenarios": n,
+        # Size of the loss tail both figures are read on, in scenarios. Makes
+        # explicit how thin the estimate is: a 95% VaR on 20 scenarios rests on
+        # a single observation, and nothing else on screen says so.
+        "n_tail": round(w, 2),
+        # One convention for every quantile in this payload, named so a reader
+        # never has to guess which estimator produced a number.
+        "quantile_convention": "empirique_inverse_cdf",
         "distribution_summary": {
             "p1": round(pctl(1), 2), "p5": round(pctl(5), 2), "p50": round(pctl(50), 2),
             "p95": round(pctl(95), 2), "p99": round(pctl(99), 2),

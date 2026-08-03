@@ -20,6 +20,9 @@ node_modules/
 .vscode/
 *.iml
 
+# Signing key generated per machine — must never be versioned (cf. auth.py)
+backend/data/.jwt_secret
+
 # Runtime data (price store, FF series — auto-generated)
 backend/data/*.db
 backend/data/*.sqlite

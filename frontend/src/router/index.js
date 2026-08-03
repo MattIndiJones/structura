@@ -108,6 +108,11 @@ const routes = [
     meta: { requiresAdmin: true, title: 'Files de calcul' },
   },
   {
+    path: '/admin/uat-generator',
+    component: () => import('../views/AdminUatGeneratorView.vue'),
+    meta: { requiresAdmin: true, title: 'Générateur UAT' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },

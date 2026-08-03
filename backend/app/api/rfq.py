@@ -45,6 +45,12 @@ class RfqUpdate(BaseModel):
     ao_date: Optional[str] = None
     sens: Optional[str] = Field(default=None, pattern="^(achat|vente)$")
     params: Optional[dict] = None
+    # Model assumptions only — volatility, dividend, rate, model, path count.
+    # Merged into the stored params without ever touching the contractual
+    # identity, so re-pricing stays possible for the whole life of a tender,
+    # quotes in hand or not. See _merge_pricing_params for why this exists
+    # rather than resubmitting the whole blob through `params`.
+    pricing_params: Optional[dict] = None
     status: Optional[str] = None
     model_price: Optional[float] = None
     selected_quote_id: Optional[int] = None
@@ -348,6 +354,57 @@ def _improves(new_price: float, old_price: float, sens: str) -> bool:
     return new_price <= old_price if sens == "achat" else new_price >= old_price
 
 
+# Keys that define WHAT is being tendered. They are frozen once a provider has
+# been solicited, and a re-pricing must never be able to reach them — not even
+# by resubmitting an identical-looking value.
+_CONTRACTUAL_KEYS = {"underlyings", "user_params", "constats", "notional",
+                     "currency", "strike_date", "value_date", "T"}
+# Inside an underlying, the same split: identity on one side, model on the other.
+_CONTRACTUAL_UL_KEYS = {"name", "ticker", "ccy"}
+
+
+def _merge_pricing_params(rfq: RfqRequest, incoming: dict) -> dict:
+    """Overlay model assumptions on the stored params, contractual terms intact.
+
+    "Calculer prix modèle" used to PATCH the whole params blob, rebuilt from
+    the form: constats regenerated from the script, dates re-read from the
+    inputs, user_params re-derived with a /100 conversion, and `underlyings`
+    reduced to a single entry. None of that was an edit the user had made, but
+    the re-serialisation did not round-trip to the stored value, so the freeze
+    control fired on five contractual terms nobody had touched — and a tender
+    with quotes in hand could no longer be re-priced at all. On a worst-of, the
+    same rebuild also silently dropped every underlying but the first.
+
+    Merging server-side removes the whole class of problem: the contractual
+    half is never transmitted, so it cannot drift, and re-pricing stays open
+    for the entire life of the tender."""
+    stored = json.loads(rfq.params_json or "{}")
+    merged = dict(stored)
+
+    for key, value in incoming.items():
+        if key in _CONTRACTUAL_KEYS and key != "underlyings":
+            continue                      # silently ignored: not ours to move
+        if key != "underlyings":
+            merged[key] = value
+
+    incoming_uls = incoming.get("underlyings")
+    if incoming_uls is not None:
+        stored_uls = stored.get("underlyings") or []
+        out = []
+        # Zip against the STORED list: the basket's size and composition come
+        # from the tender, never from what the pricing form happens to send.
+        for i, stored_ul in enumerate(stored_uls):
+            ul = dict(stored_ul)
+            if i < len(incoming_uls) and isinstance(incoming_uls[i], dict):
+                for k, v in incoming_uls[i].items():
+                    if k not in _CONTRACTUAL_UL_KEYS:
+                        ul[k] = v
+            out.append(ul)
+        merged["underlyings"] = out
+
+    return merged
+
+
 def _refuse_if_booked(rfq: RfqRequest, session: Session, what: str) -> None:
     """Once a trade has come out of a tender, the tender IS the evidence for
     it: who was put in competition, at what prices, and why this one won.
@@ -408,11 +465,13 @@ def _is_expert_script(script_text: str) -> bool:
         ev.constat_ref in declared for ev in compiled.events if ev.constat_ref))
 
 
-@router.post("", status_code=201)
-def create_rfq(
+def _create_rfq(
     body: RfqCreate,
-    current: Annotated[User, Depends(get_current_user)],
-    session: Annotated[Session, Depends(get_session)],
+    current: User,
+    session: Session,
+    *,
+    reference_prefix: str | None = None,
+    uat_batch_id: int | None = None,
 ):
     if body.kind == "to_trade" and not _is_expert_script(body.script_snapshot):
         raise HTTPException(
@@ -420,11 +479,13 @@ def create_rfq(
                  "CONSTAT réel) pour la précision requise — sauvegardez-le dans le Pricer, "
                  "ou repartez du script d'un deal déjà booké en mode Expert.")
 
-    reference = _gen_ref(session)
+    reference = (next_reference(session, RfqRequest, reference_prefix)
+                 if reference_prefix else _gen_ref(session))
     rfq = RfqRequest(
         reference=reference,
         entity_id=current.entity_id,
         user_id=current.id,
+        uat_batch_id=uat_batch_id,
         name=body.name.strip(),
         ao_date=body.ao_date or date.today().isoformat(),
         kind=body.kind,
@@ -449,6 +510,15 @@ def create_rfq(
     session.commit()
     session.refresh(rfq)
     return _rfq_row(rfq, [])
+
+
+@router.post("", status_code=201)
+def create_rfq(
+    body: RfqCreate,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    return _create_rfq(body, current, session)
 
 
 @router.get("")
@@ -550,6 +620,15 @@ def update_rfq(
     before_audit = _rfq_audit_state(rfq)
     data = body.model_dump(exclude_unset=True)
     requested_fields = set(data)
+    if "pricing_params" in data:
+        _refuse_if_booked(rfq, session, "les hypothèses de pricing")
+        merged = _merge_pricing_params(rfq, data.pop("pricing_params") or {})
+        new_hash = pricing_input_hash(rfq.script_snapshot, merged)
+        if rfq.model_price is not None and rfq.model_input_hash != new_hash:
+            rfq.model_price = None
+            rfq.model_price_at = None
+            rfq.model_input_hash = None
+        rfq.params_json = json.dumps(merged)
     if "params" in data:
         _refuse_if_booked(rfq, session, "les termes et paramètres de l'AO")
         new_params = data.pop("params") or {}

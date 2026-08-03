@@ -13,6 +13,11 @@ from ..db.models import RfqProvider, User, Entity, Counterparty
 from .auth import get_current_admin
 from ..core import admin_registry
 from ..core.amc_prices import fetch_prices as _fetch_prices, price_status as _price_status, _slug
+from ..services.uat_generation import (
+    UatGenerationRequest, delete_batch as delete_uat_batch,
+    generate_batch as generate_uat_batch, generator_config,
+    list_batches as list_uat_batches, preview_generation,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -59,6 +64,51 @@ def _row(p: RfqProvider, cpty_names: dict | None = None) -> dict:
 
 def _cpty_names(session: Session) -> dict:
     return {c.id: c.name for c in session.exec(select(Counterparty)).all()}
+
+
+# ── Deterministic RFQ / booking UAT generator ─────────────────────────
+
+@router.get("/uat-generator/config")
+def uat_generator_config(
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    return generator_config(session)
+
+
+@router.get("/uat-generator/batches")
+def uat_generator_batches(
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    return list_uat_batches(session)
+
+
+@router.post("/uat-generator/preview")
+def uat_generator_preview(
+    body: UatGenerationRequest,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    return preview_generation(body, session)
+
+
+@router.post("/uat-generator/batches", status_code=201)
+def uat_generator_create(
+    body: UatGenerationRequest,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    return generate_uat_batch(body, admin, session)
+
+
+@router.delete("/uat-generator/batches/{batch_id}")
+def uat_generator_delete(
+    batch_id: int,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    return delete_uat_batch(batch_id, admin, session)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────

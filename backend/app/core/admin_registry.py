@@ -17,10 +17,14 @@ import json
 from datetime import datetime
 from pathlib import Path
 from fastapi import HTTPException
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from ..db.models import (
     Script, Folder, Deal, DealEvent, Document, AmcStudy, Indicative,
     KidRecord, EmtRecord, RfqRequest, RfqQuote, User, AdminAuditLog,
+    Alert, ShockRun, LifecycleProposal, TradeAmendmentRequest,
+    DealContractVersion, OfficialFixingVersion,
 )
 from .audit import commit_rejection
 
@@ -32,6 +36,40 @@ def _cleanup_document_file(row: Document) -> None:
     path = _DOCS_DIR / row.file_path
     if path.exists():
         path.unlink()
+
+
+def _break_deal_fixing_cycle(row: Deal, session: Session) -> None:
+    """Cut `deal_events.current_fixing_version_id` before anything is deleted.
+
+    `deal_events` points at `official_fixing_versions`, which points back at
+    `deal_events`. A cycle cannot be topologically sorted, so SQLAlchemy stops
+    trying to order the DELETEs by dependency and emits them in an order of its
+    own — in practice `DELETE FROM deals` first, which fails on its own
+    children. That is why deleting ANY deal returned "Erreur suppression",
+    even one with nothing but three lifecycle events attached.
+
+    Nulling the forward pointer removes the cycle; the versions themselves are
+    then deleted as children, before the events they belong to."""
+    session.execute(
+        text("UPDATE deal_events SET current_fixing_version_id = NULL "
+             "WHERE deal_id = :did"),
+        {"did": row.id})
+    session.flush()
+
+
+def _break_rfq_quote_cycle(row: RfqRequest, session: Session) -> None:
+    """Same shape of problem on the tender side: `rfq_requests` keeps a
+    `selected_quote_id` pointing into `rfq_quotes`, and quotes can point at a
+    parent quote of the same tender. Deleting the quotes while either pointer
+    still holds fails on the foreign key — the observed
+    `DELETE FROM rfq_quotes ... FOREIGN KEY constraint failed`."""
+    session.execute(
+        text("UPDATE rfq_requests SET selected_quote_id = NULL WHERE id = :rid"),
+        {"rid": row.id})
+    session.execute(
+        text("UPDATE rfq_quotes SET parent_quote_id = NULL WHERE rfq_id = :rid"),
+        {"rid": row.id})
+    session.flush()
 
 
 REGISTRY: dict[str, dict] = {
@@ -46,7 +84,29 @@ REGISTRY: dict[str, dict] = {
     "deals": {
         "model": Deal, "label": "Deals",
         "columns": ["id", "reference", "contrepartie", "devise", "nominal", "status", "user_id", "created_at"],
-        "children": [(DealEvent, "deal_id")],
+        "prepare": _break_deal_fixing_cycle,
+        # ORDER MATTERS and is enforced by a flush between each entry, because
+        # SQLAlchemy's own ordering cannot be trusted here (see the cycle in
+        # _break_deal_fixing_cycle). Everything that points at deal_events must
+        # go before deal_events itself.
+        #
+        # Only DealEvent used to be listed, so a deal carrying an alert, a
+        # lifecycle proposal, an amendment request or a fixing version could
+        # not be deleted at all — and the failure surfaced as a bare
+        # "Erreur suppression" with no indication of what was holding it.
+        "children": [
+            (OfficialFixingVersion, "deal_id"),
+            (LifecycleProposal, "deal_id"),
+            (TradeAmendmentRequest, "deal_id"),
+            (DealContractVersion, "deal_id"),
+            (Alert, "deal_id"),
+            (ShockRun, "deal_id"),
+            (Document, "deal_id"),
+            (DealEvent, "deal_id"),
+        ],
+        # KID and EMT stay blockers rather than cascades: they are the
+        # regulatory records the client was actually handed, and they must
+        # outlive an administrative purge or be removed deliberately first.
         "blockers": [(KidRecord, "deal_id"), (EmtRecord, "deal_id")],
         "editable_fields": {},
     },
@@ -67,6 +127,7 @@ REGISTRY: dict[str, dict] = {
     "rfq_requests": {
         "model": RfqRequest, "label": "RFQ",
         "columns": ["id", "reference", "name", "template_type", "status", "user_id", "created_at"],
+        "prepare": _break_rfq_quote_cycle,
         "children": [(RfqQuote, "rfq_id")],
         # A booked deal's tender is its best-execution trail — same rule the
         # RFQ module enforces on its own delete (api/rfq.py:delete_rfq).
@@ -141,16 +202,55 @@ def delete_row(table_key: str, row_id: int, session: Session) -> None:
         if blocked:
             raise HTTPException(409, f"Suppression bloquée : des {blocker_model.__tablename__} sont rattachés à cet enregistrement")
 
-    for child_model, fk in cfg.get("children", []):
-        for child in session.exec(select(child_model).where(getattr(child_model, fk) == row_id)).all():
-            session.delete(child)
+    try:
+        # Cut any pointer that would make the dependency graph cyclic, before
+        # anything is removed.
+        prepare = cfg.get("prepare")
+        if prepare:
+            prepare(row, session)
 
-    on_delete = cfg.get("on_delete")
-    if on_delete:
-        on_delete(row)
+        # One flush per level, in the order declared above. Marking every
+        # child for deletion and letting a single commit sort it out is what
+        # used to fail: with a cycle in the schema SQLAlchemy gives up on
+        # dependency ordering and can emit the parent's DELETE first.
+        for child_model, fk in cfg.get("children", []):
+            children = session.exec(
+                select(child_model).where(getattr(child_model, fk) == row_id)).all()
+            if not children:
+                continue
+            child_cfg = _config_for_model(child_model)
+            child_hook = child_cfg.get("on_delete") if child_cfg else None
+            for child in children:
+                if child_hook:
+                    child_hook(child)      # e.g. remove the document's file
+                session.delete(child)
+            session.flush()
 
-    session.delete(row)
-    session.commit()
+        on_delete = cfg.get("on_delete")
+        if on_delete:
+            on_delete(row)
+
+        session.delete(row)
+        session.commit()
+    except IntegrityError as exc:
+        # A relation nobody declared. Rather than a bare 500 and a blank
+        # "Erreur suppression" on screen, name the row and say what to do —
+        # and make the gap visible so the registry above gets completed.
+        session.rollback()
+        detail = str(getattr(exc, "orig", exc)).strip()
+        raise HTTPException(
+            409,
+            f"Suppression impossible : cet enregistrement est encore référencé "
+            f"par d'autres données ({detail}). Supprimez-les d'abord, ou "
+            f"signalez-le — la table de dépendances de l'explorateur est "
+            f"probablement incomplète pour « {cfg['label']} ».") from exc
+
+
+def _config_for_model(model) -> dict | None:
+    for cfg in REGISTRY.values():
+        if cfg["model"] is model:
+            return cfg
+    return None
 
 
 def delete_rows(table_key: str, row_ids: list, session: Session) -> dict:

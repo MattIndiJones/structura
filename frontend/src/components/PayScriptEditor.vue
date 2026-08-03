@@ -20,10 +20,16 @@
 
       <select class="select text-xs w-auto" @change="loadExample($event.target.value); $event.target.value=''">
         <option value="">{{ expertMode ? 'Exemples (expert)…' : 'Exemples…' }}</option>
+        <option value="__blank__">— Script libre (vide) —</option>
         <optgroup v-for="(items, group) in groupedTemplates" :key="group" :label="group">
           <option v-for="t in items" :key="t.key" :value="t.key">{{ t.label }}</option>
         </optgroup>
       </select>
+
+      <button class="btn-secondary text-xs px-3 py-1.5 shrink-0" @click="assistantOpen = true">
+        ✨ Assistant IA
+      </button>
+      <HelpTip width="w-72" text="Décrivez le produit en français, un modèle propose un script PayScript. Rien n'est appliqué automatiquement : le script arrive accompagné d'une reformulation en français et d'une fiche de contrôle, et c'est vous qui l'adoptez. Ollama tourne en local — la description ne quitte pas la machine." />
 
       <!-- Script name chip (when loaded from DB) -->
       <span v-if="store.currentScriptName"
@@ -191,6 +197,9 @@
         </div>
       </div>
     </details>
+
+    <ScriptAssistantModal v-model="assistantOpen"
+                          @adopted="notice = 'Script adopté depuis l\'assistant — relisez-le avant de pricer.'" />
   </div>
 </template>
 
@@ -201,6 +210,7 @@ import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
 import BaseModal from './ui/BaseModal.vue'
 import AlertMessage from './ui/AlertMessage.vue'
+import ScriptAssistantModal from './ScriptAssistantModal.vue'
 import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
 
 const store = usePricingStore()
@@ -216,6 +226,7 @@ const groupedTemplates = computed(() => {
 let debounceTimer = null
 
 const expertMode = ref(false)
+const assistantOpen = ref(false)
 
 // ── Save / update ──────────────────────────────────────────────────
 const saving       = ref(false)
@@ -353,9 +364,24 @@ function getExpertConstatDefaults(key) {
 }
 
 // ── Load example ───────────────────────────────────────────────────
+const BLANK_SCRIPT = `# Script libre — décrivez votre payoff.
+# Aide : bouton ✨ Assistant IA, ou le mémo de vocabulaire ci-dessous.
+
+AT MATURITY:
+  PAY 1
+`
+
 async function loadExample(key) {
   if (!key) return
   Object.keys(store.paramOverrides).forEach(k => delete store.paramOverrides[k])
+
+  // Point de départ vierge : un squelette qui parse (donc qui price) plutôt
+  // qu'un éditeur vide, qui afficherait une erreur avant la première frappe.
+  if (key === '__blank__') {
+    store.script = BLANK_SCRIPT
+    await store.parseScript()
+    return
+  }
 
   if (expertMode.value) {
     store.script = expertExamples[key] || examples[key] || ''

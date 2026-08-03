@@ -1,8 +1,9 @@
-"""Daily indicative lifecycle monitoring + alert creation.
+"""Daily lifecycle refresh + alert creation.
 
-One pass over ACTIVE deals replays each frozen script on non-binding market
-data. A terminal result is only a proposal: this process never validates a
-fixing and never applies an economic outcome. Barrier alerts are indicative too.
+One pass over ACTIVE deals follows the fixing policy frozen at booking:
+``AUTO_YAHOO`` officialises controlled unadjusted closes and may apply a
+deterministic terminal result; ``FOUR_EYES`` keeps Yahoo non-binding and only
+creates a proposal. Barrier alerts remain indicative in both modes.
 
 Ran two ways:
 - by the in-process scheduler (main.py) every day at 23:00 local time,
@@ -67,8 +68,19 @@ def refresh_book(session: Session, user_id: int | None = None) -> dict:
 
         ev = (res or {}).get("evaluation") or {}
         outcome = ev.get("outcome")
+        proposal = (res or {}).get("proposal") or {}
         if outcome in ("callé", "ki", "final"):
-            summary["proposed"].append({"reference": deal.reference, "outcome": outcome})
+            target = (
+                summary["resolved"]
+                if proposal.get("status") == "APPLIED"
+                else summary["proposed"]
+            )
+            target.append({"reference": deal.reference, "outcome": outcome})
+
+        # An automated resolution has just made the deal terminal.  There is
+        # no remaining barrier watchlist to inspect in this pass.
+        if proposal.get("status") == "APPLIED":
+            continue
 
         # Still active — barrier crossings on the same gaps the watchlist shows.
         try:
@@ -110,9 +122,9 @@ def run_scheduled_refresh() -> None:
         with Session(engine) as session:
             summary = refresh_book(session)
         log.info(
-            "Refresh quotidien : %s deal(s) actifs, %s rafraîchi(s), %s alerte(s), propositions=%s, erreurs=%s",
+            "Refresh quotidien : %s deal(s) actifs, %s rafraîchi(s), %s alerte(s), propositions=%s, résolutions=%s, erreurs=%s",
             summary["deals"], summary["refreshed"], summary["alerts_created"],
-            summary["proposed"], summary["errors"],
+            summary["proposed"], summary["resolved"], summary["errors"],
         )
     except Exception:
         log.exception("Refresh quotidien échoué")

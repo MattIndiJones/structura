@@ -124,15 +124,22 @@ def test_prix_inchange_autocall():
 
 # ── G3 — taux stochastiques ────────────────────────────────────────────────
 #
-# Ce mode est le seul où le drift suit déjà la courbe aujourd'hui (via
-# _forward_rate_arr). Il doit le rester à l'identique : la cohérence
-# courbe/drift ajoutée ailleurs ne doit rien changer ici.
+# Seules valeurs de ce fichier à avoir été rebasées, et pour une raison
+# documentée : l'ajout du terme de convexité de Hull-White (φ(t)). Le facteur
+# de taux était écrit centré, ce qui semblait ajuster la courbe gratuitement —
+# mais l'actualisation étant exp(-∫r), l'inégalité de Jensen faisait sortir
+# E[exp(-∫x)] = exp(+Var/2) > 1 : toutes les obligations ressortaient trop
+# chères, de 164 bp sur un zéro-coupon 5 ans à 3 % de vol de taux. Le modèle
+# reprice désormais sa propre courbe à moins de 0,25 bp, bruit Monte Carlo
+# compris.
+#
+# Ces quatre nombres ne doivent plus bouger.
 
 GOLDEN_TAUX_STOCH = {
-    ("flat",  0.0): 0.087945,
-    ("flat",  0.3): 0.087922,
-    ("curve", 0.0): 0.083160,
-    ("curve", 0.3): 0.083137,
+    ("flat",  0.0): 0.087963,
+    ("flat",  0.3): 0.087937,
+    ("curve", 0.0): 0.083178,
+    ("curve", 0.3): 0.083152,
 }
 COURBE = [[0.5, 0.01], [1.0, 0.02], [3.0, 0.035]]
 
