@@ -26,8 +26,18 @@ en français. Code, commentaires, noms de fichiers/variables : anglais.
   (`reload=False` définitif, le reloader Windows est cassé).
 - `npm run build` (depuis `frontend/`) obligatoire après toute modification Vue avant
   de considérer un changement frontend terminé.
-- pytest se lance depuis la **racine** du repo : `.venv\Scripts\python.exe -m pytest
-  backend\tests` — pas depuis `backend/`.
+- pytest se lance toujours depuis la **racine** du repo, jamais depuis `backend/`.
+- Pendant le développement, lancer uniquement les tests ciblés par le changement
+  (nœud, fichier ou petit groupe de fichiers pertinent). Ne pas relancer
+  automatiquement toute la suite `backend\tests` après chaque modification ou à
+  chaque fin de tâche.
+- La suite backend complète est réservée à une demande explicite de Philippe ou à
+  un changement réellement transversal susceptible d'affecter plusieurs domaines
+  (moteur de pricing partagé, schémas/API centraux, lifecycle commun). Dans ce
+  dernier cas, annoncer la raison avant de la lancer.
+- Une modification de documentation seule ne justifie aucun pytest. Une modification
+  de tests seule se valide d'abord avec les tests modifiés ; la suite complète n'est
+  pas requise par défaut.
 
 ## Base de données
 

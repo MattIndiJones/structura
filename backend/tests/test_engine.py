@@ -584,7 +584,10 @@ def test_hull_white_jensen_convexity_on_zcb():
     sigma_r=0, even with a_r > 0."""
     cs = parse_script(ZCB_SIMPLE)
     r, T = 0.03, 5.0
-    kw = dict(r=r, T_max=T, N=40000, model='constant', seed=42, antithetic=True, a_r=0.3)
+    # 8k CRN paths are enough to keep the three rounded prices strictly
+    # ordered with this fixed seed. 40k made this single invariant retain more
+    # than 1.4 GB because stochastic-rate and antithetic matrices coexist.
+    kw = dict(r=r, T_max=T, N=8000, model='constant', seed=42, antithetic=True, a_r=0.3)
     deterministic = math.exp(-r * T)
 
     prices = []
@@ -602,7 +605,9 @@ def test_hull_white_stationary_variance():
     formula directly (not via option prices, to isolate the rate model itself)."""
     sigma_r, a_r, dt = 0.02, 0.3, 1 / 52
     ts = 500   # ~9.6y, several mean-reversion half-lives (ln2/a_r ≈ 2.3y)
-    N = 20000
+    # The 5% statistical tolerance is still met deterministically at 5k paths;
+    # retaining 20k full 500-step paths only multiplied memory for this moment test.
+    N = 5000
     rng = np.random.default_rng(1)
     Z_r = rng.standard_normal((ts, N))
     fwd = np.full(ts, 0.03)

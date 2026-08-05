@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+import math
+
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import date
 
@@ -9,6 +11,12 @@ class UnderlyingParams(BaseModel):
     ccy: str = "EUR"
     sigma: float = 0.20
     q: float = 0.02
+    # Optional piecewise-constant annual dividend-yield curve. Each node is
+    # [bucket_end_years, annual_yield] in engine units (0.02 = 2%). The scalar
+    # q remains the first-year / legacy flat assumption; an empty curve keeps
+    # the historical pricing path exactly unchanged.
+    dividend_curve: List[List[float]] = Field(default_factory=list)
+    dividend_decay: float = Field(default=0.0, ge=0.0, le=1.0)
     sigma_fx: float = 0.0
     rho_sfx: float = 0.0
     ccyh: float = 0.0
@@ -27,6 +35,30 @@ class UnderlyingParams(BaseModel):
     # Dupire local vol
     skew: float = 0.0
     curvature: float = 0.0
+
+    @field_validator("dividend_curve")
+    @classmethod
+    def validate_dividend_curve(cls, curve: List[List[float]]) -> List[List[float]]:
+        previous_q = math.inf
+        normalized: List[List[float]] = []
+        for index, node in enumerate(curve, start=1):
+            if len(node) != 2:
+                raise ValueError("Chaque nœud de dividende doit contenir [maturité, taux].")
+            maturity, rate = float(node[0]), float(node[1])
+            if not (math.isfinite(maturity) and math.isfinite(rate)):
+                raise ValueError("La courbe de dividende contient une valeur non finie.")
+            if abs(maturity - index) > 1e-9:
+                raise ValueError(
+                    "La courbe de dividende doit utiliser des buckets annuels consécutifs "
+                    "1A, 2A, 3A, etc."
+                )
+            if rate < 0.0:
+                raise ValueError("Un rendement de dividende ne peut pas être négatif.")
+            if rate > previous_q + 1e-12:
+                raise ValueError("La courbe de dividende dégressive doit être non croissante.")
+            normalized.append([maturity, rate])
+            previous_q = rate
+        return normalized
 
 
 class PricingRequest(BaseModel):

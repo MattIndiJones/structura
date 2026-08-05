@@ -191,7 +191,9 @@ def test_var_and_es_are_exact_on_a_known_sample():
 def test_rho_rS_no_longer_moves_the_equity_correlation():
     """Three assets entered at 0.30 used to come out at 0.867 when each was
     0.90 correlated to the rate factor, moving a worst-of by 7.6 points."""
-    kw = dict(r=0.03, T_max=1.0, N=40000, model="constant", seed=42, sigma_r=0.01)
+    # The historical defect moved the price by 7.6 points; 8k fixed-seed CRN
+    # paths retain ample power against the 1 bp guard without the 40k-path peak.
+    kw = dict(r=0.03, T_max=1.0, N=8000, model="constant", seed=42, sigma_r=0.01)
     script = parse_script(WORST_OF)
     flat = run_mc(script, _three(0.0), CORR3, **kw)["price"]
     tilted = run_mc(script, _three(0.7), CORR3, **kw)["price"]

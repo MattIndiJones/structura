@@ -13,10 +13,17 @@ import math
 import numpy as np
 import pytest
 
+from backend.app.core.payscript import engine as payscript_engine
 from backend.app.core.payscript.parser import parse_script
 from backend.app.core.payscript.engine import (
     run_mc, run_mark_to_future, run_mtf_drilldown, _simulate_mtf_outer, SY,
 )
+
+
+@pytest.fixture(autouse=True)
+def _bound_test_mtf_batches(monkeypatch):
+    """Keep fan/detail identity coverage while forcing several small chunks."""
+    monkeypatch.setattr(payscript_engine, "MTF_MAX_BATCH", 5_000)
 
 
 def _ul(**kw):
@@ -28,6 +35,7 @@ def _ul(**kw):
 
 
 C1 = [[1.0]]
+REFERENCE_PATHS = 20_000
 
 AUTOCALL = """
 PARAM CPN = 8%
@@ -69,7 +77,7 @@ CFG = dict(model="constant", n_outer=400, n_inner=300, n_dates=4, seed=42)
 def _fan(src, T=3.0, r=0.025, uls=None):
     cs = parse_script(src)
     uls = uls or _ul()
-    p0 = run_mc(cs, uls, C1, r=r, T_max=T, N=40000, model="constant", seed=123)["price"] * 100
+    p0 = run_mc(cs, uls, C1, r=r, T_max=T, N=REFERENCE_PATHS, model="constant", seed=123)["price"] * 100
     fan = run_mark_to_future(cs, uls, C1, r=r, T_max=T, main_price=p0, **CFG)
     return cs, uls, r, T, p0, fan
 

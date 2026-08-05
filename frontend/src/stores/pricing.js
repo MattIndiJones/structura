@@ -99,6 +99,7 @@ export const usePricingStore = defineStore('pricing', () => {
     {
       name: 'Sous-jacent 1', ticker: '', ccy: 'EUR',
       sigma: 20, q: 2.0,
+      dividendCurveEnabled: false, dividendDecay: 10.0,
       sigma_fx: 0, rho_sfx: 0, ccyh: 0,
       v0: 4.0, kappa: 2.0, theta: 4.0, xi: 35, rho_h: -70, rho_rS: 40,
       alpha: 20, beta: 50, rho: -30, nu: 40,
@@ -286,6 +287,10 @@ export const usePricingStore = defineStore('pricing', () => {
       name: u.name, ticker: u.ticker, ccy: u.ccy,
       sigma: u.sigma / 100,
       q: u.q / 100,
+      dividend_curve: _buildDividendCurve(u).map(p => [p.T, p.rate / 100]),
+      dividend_decay: u.dividendCurveEnabled
+        ? Math.max(0, Math.min(100, Number(u.dividendDecay) || 0)) / 100
+        : 0,
       sigma_fx: u.sigma_fx / 100,
       rho_sfx: u.rho_sfx / 100,
       ccyh: u.ccyh / 10000,
@@ -301,6 +306,18 @@ export const usePricingStore = defineStore('pricing', () => {
       nu: u.nu / 100,
       skew: u.skew / 100,
       curvature: u.curvature / 100,
+    }))
+  }
+
+  function _buildDividendCurve(u) {
+    if (!u?.dividendCurveEnabled) return []
+    const q1 = Math.max(0, Number(u.q) || 0)
+    const decay = Math.max(0, Math.min(100, Number(u.dividendDecay) || 0)) / 100
+    const years = Math.max(1, Math.ceil(Number(globalParams.T) || 1))
+    return Array.from({ length: years }, (_, index) => ({
+      label: `A${index + 1}`,
+      T: index + 1,
+      rate: q1 * Math.pow(1 - decay, index),
     }))
   }
 
@@ -440,6 +457,9 @@ export const usePricingStore = defineStore('pricing', () => {
     return {
       underlyings: underlyings.value.map(u => ({
         name: u.name, ticker: u.ticker, ccy: u.ccy, sigma: u.sigma, q: u.q, rho_rS: u.rho_rS,
+        dividendCurveEnabled: !!u.dividendCurveEnabled,
+        dividendDecay: u.dividendDecay,
+        dividendCurve: _buildDividendCurve(u),
       })),
       corrMatrix: corrMatrix.value.map(row => [...row]),
       r: globalParams.r, T: globalParams.T, N: globalParams.N, seed: globalParams.seed,
@@ -994,6 +1014,7 @@ export const usePricingStore = defineStore('pricing', () => {
     return {
       name: `Sous-jacent ${n}`, ticker: '', ccy: 'EUR',
       sigma: 20, q: 2.0, sigma_fx: 0, rho_sfx: 0, ccyh: 0,
+      dividendCurveEnabled: false, dividendDecay: 10.0,
       v0: 4.0, kappa: 2.0, theta: 4.0, xi: 35, rho_h: -70, rho_rS: 40,
       alpha: 20, beta: 50, rho: -30, nu: 40,
       skew: -10, curvature: 5, showQuanto: false,
@@ -1146,12 +1167,17 @@ export const usePricingStore = defineStore('pricing', () => {
       // percentage-number convention or _buildUls() silently divides by 100
       // a second time (0.2 -> 0.002, a near-zero vol that breaks pricing).
       underlyings.value = p.underlyings.map((u, i) => {
-        const { sigma, q, ...rest } = u
+        const { sigma, q, dividend_curve, dividend_decay, ...rest } = u
+        const inferredDecay = dividend_curve?.length > 1 && dividend_curve[0]?.[1] > 0
+          ? (1 - dividend_curve[1][1] / dividend_curve[0][1]) * 100
+          : 0
         return {
           ..._defaultUnderlying(i + 1),
           ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v != null)),
           ...(sigma != null ? { sigma: sigma * 100 } : {}),
           ...(q != null ? { q: q * 100 } : {}),
+          dividendCurveEnabled: !!dividend_curve?.length,
+          dividendDecay: dividend_decay != null ? dividend_decay * 100 : inferredDecay,
         }
       })
       corrMatrix.value = p.corr_matrix?.length ? p.corr_matrix : [[1.0]]
@@ -1301,6 +1327,7 @@ export const usePricingStore = defineStore('pricing', () => {
     underlyings.value.push({
       name: `Sous-jacent ${n+1}`, ticker: '', ccy: 'EUR',
       sigma: 20, q: 2.0, sigma_fx: 0, rho_sfx: 0, ccyh: 0,
+      dividendCurveEnabled: false, dividendDecay: 10.0,
       v0: 4.0, kappa: 2.0, theta: 4.0, xi: 35, rho_h: -70, rho_rS: 40,
       alpha: 20, beta: 50, rho: -30, nu: 40,
       skew: -10, curvature: 5, showQuanto: false,
@@ -1339,6 +1366,7 @@ export const usePricingStore = defineStore('pricing', () => {
     runSolver, runGrid, paramIsPct, fromStoredUnits, runScenarios, fetchSchedulePreview,
     buildUserParams: _buildUserParams,
     buildConstats: _buildConstats,
+    buildDividendCurve: _buildDividendCurve,
     loadYfOne, loadYfAll, fetchStoredSpot, refreshStoredSpot,
     addUnderlying, removeUnderlying,
     resetToDefaults, loadFromDb, loadFromDeal, loadFromRfq, saveScript, updateScript,

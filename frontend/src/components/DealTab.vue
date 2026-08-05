@@ -801,7 +801,12 @@ async function book() {
     // Full underlying objects (not just name/ticker/sigma/q/ccy) so a smile
     // model (Heston/SABR/Local Vol/quanto) survives a reopen — see
     // pricing.js:loadFromDeal and reprice_inputs' "still alive" branch.
-    underlyings: store.underlyings.map(u => ({ ...u })),
+    underlyings: store.underlyings.map(u => ({
+      ...u,
+      // Freeze both the generating assumptions and the exact annual nodes.
+      // Lifecycle replay consumes the nodes; q/decay explain how they arose.
+      dividendCurve: store.buildDividendCurve(u),
+    })),
     corrMatrix: store.corrMatrix,
     // PARAM overrides frozen in STORED units (fractions), same shape the
     // pricing API takes — the lifecycle replay and the watchlist read these,

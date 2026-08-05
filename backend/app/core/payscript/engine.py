@@ -254,6 +254,71 @@ def _dupire_vol(K: float, T: float, sigma0: float, skew: float, curvature: float
     return max(0.005, min(sig, 1.5)) if math.isfinite(sig) else fb
 
 
+def _validate_dividend_curve(curve: list, q_first_year: float) -> list[list[float]]:
+    """Validate the annual, declining yield-curve contract used by Structura.
+
+    The HTTP schema catches malformed requests, but lifecycle and compute
+    workflows also call the engine directly with dictionaries. Validation
+    therefore lives at the consumption boundary as well: a malformed frozen
+    snapshot must fail visibly rather than produce a plausible price.
+    """
+    normalized: list[list[float]] = []
+    previous_q = math.inf
+    previous_maturity = 0.0
+    for node in curve:
+        if not isinstance(node, (list, tuple)) or len(node) != 2:
+            raise ValueError("Chaque nœud de dividende doit contenir [maturité, taux].")
+        maturity, rate = float(node[0]), float(node[1])
+        if not (math.isfinite(maturity) and math.isfinite(rate)):
+            raise ValueError("La courbe de dividende contient une valeur non finie.")
+        if maturity <= previous_maturity + 1e-12:
+            raise ValueError(
+                "Les maturités de la courbe de dividende doivent être "
+                "strictement croissantes et positives."
+            )
+        if rate < 0.0:
+            raise ValueError("Un rendement de dividende ne peut pas être négatif.")
+        if rate > previous_q + 1e-12:
+            raise ValueError("La courbe de dividende dégressive doit être non croissante.")
+        normalized.append([maturity, rate])
+        previous_maturity = maturity
+        previous_q = rate
+
+    if normalized and abs(normalized[0][1] - float(q_first_year)) > 1e-12:
+        raise ValueError(
+            "Le premier bucket de la courbe de dividende doit être égal à q "
+            "(hypothèse de première année)."
+        )
+    return normalized
+
+
+def _build_dividend_step_matrix(underlyings, ts: int, dt: float) -> np.ndarray | None:
+    """Piecewise-constant q applied to each simulation step and underlying.
+
+    Nodes are bucket END dates: [1, q1] means q1 on (0, 1Y], [2, q2]
+    means q2 on (1Y, 2Y], and the last node is extended if the simulation
+    horizon is longer. Returning None when every curve is empty is deliberate:
+    all legacy simulations then keep their scalar-q arithmetic bit for bit.
+    """
+    raw_curves = [u.get("dividend_curve") or [] for u in underlyings]
+    if not any(raw_curves):
+        return None
+
+    times = (np.arange(ts, dtype=np.float64) + 1.0) * dt
+    q_steps = np.empty((ts, len(underlyings)), dtype=np.float64)
+    for asset_index, (u, raw_curve) in enumerate(zip(underlyings, raw_curves)):
+        q_flat = float(u.get("q", 0.02))
+        if not raw_curve:
+            q_steps[:, asset_index] = q_flat
+            continue
+        curve = _validate_dividend_curve(raw_curve, q_flat)
+        ends = np.asarray([node[0] for node in curve], dtype=np.float64)
+        rates = np.asarray([node[1] for node in curve], dtype=np.float64)
+        bucket_index = np.searchsorted(ends, times, side="left")
+        q_steps[:, asset_index] = rates[np.minimum(bucket_index, len(rates) - 1)]
+    return q_steps
+
+
 def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int = 50):
     """Precompute local vol grid (ts, nK) for each underlying asset.
 
@@ -264,19 +329,26 @@ def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int 
     logKmin, logKmax = math.log(0.20), math.log(3.0)
     Ks = [math.exp(logKmin + i/(nK-1)*(logKmax-logKmin)) for i in range(nK)]
     grids = []
-    for u in underlyings:
+    dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
+    for asset_index, u in enumerate(underlyings):
         sig0 = u.get("sigma", 0.20)
         skew = u.get("skew", 0.0)
         curv = u.get("curvature", 0.0)
-        q = u.get("q", 0.02)
+        q_flat = u.get("q", 0.02)
         g = np.zeros((ts, nK), dtype=np.float32)
         for step in range(ts):
             T_s = (step + 1) * dt
             # Zero rate to this maturity — the right discount for a call
             # expiring at T_s. Falls back to the scalar when there is no curve.
             r_s = rates.r_flat if rates.zero is None else float(rates.zero[step + 1])
+            # The Dupire surface needs the same cumulative dividend carry as
+            # the paths. For a term structure this is the continuously
+            # compounded zero-equivalent q(0,T); for the legacy flat case the
+            # scalar is retained exactly.
+            q_s = (q_flat if dividend_steps is None
+                   else float(dividend_steps[:step + 1, asset_index].mean()))
             for ki, K in enumerate(Ks):
-                lv = _dupire_vol(K, T_s, sig0, skew, curv, r_s, q)
+                lv = _dupire_vol(K, T_s, sig0, skew, curv, r_s, q_s)
                 g[step, ki] = lv if math.isfinite(lv) and lv > 0 else sig0
         grids.append(g)
     return grids, nK, logKmin, logKmax
@@ -319,6 +391,7 @@ def _simulate_gbm(ts: int, n: int, N: int, dt: float, sq_dt: float,
         S[0] = _seed_spot(spot_mult)
 
     r_term = r_eff if r_path is None else r_path
+    dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
     for i, u in enumerate(underlyings):
         sig = u.get("sigma", 0.20)
         if vol_add is not None:
@@ -327,7 +400,9 @@ def _simulate_gbm(ts: int, n: int, N: int, dt: float, sq_dt: float,
             vol_out[:, i, :] = sig
         z_i = _blend_rate_factor(Zc[:, i, :], Z_r, u.get("rho_rS", 0.0)) if Z_r is not None else Zc[:, i, :]
         q_adj = u.get("sigma_fx", 0.0) * u.get("rho_sfx", 0.0) * sig
-        drift = r_term + u.get("ccyh", 0.0) - u.get("q", 0.02) - q_adj - 0.5 * sig * sig
+        q_term = (u.get("q", 0.02) if dividend_steps is None
+                  else dividend_steps[:, i, None])
+        drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5 * sig * sig
         log_ret = drift * dt + sig * sq_dt * z_i
         S[1:, i, :] = S[0, i] * np.exp(np.cumsum(log_ret, axis=0))
 
@@ -371,6 +446,7 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
         S[0] = _seed_spot(spot_mult)
 
     V = [np.full(N, u.get("v0", 0.04), dtype=np.float64) for u in underlyings]
+    dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
 
     for step in range(ts):
         r_term = r_eff if r_path is None else r_path[step]
@@ -415,7 +491,9 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
             # parameters, not the diffusion legs — hence `vega_scope` below,
             # which reports the coverage rather than pretending it is total.
             bumped_variance = rh*rh * V_bar + rhop*rhop * sv*sv
-            drift = (r_term + u.get("ccyh", 0.0) - u.get("q", 0.02)
+            q_term = (u.get("q", 0.02) if dividend_steps is None
+                      else dividend_steps[step, i])
+            drift = (r_term + u.get("ccyh", 0.0) - q_term
                      - q_adj - 0.5 * bumped_variance)
 
             # Andersen (2007) spot update — see docstring for the martingale
@@ -458,6 +536,7 @@ def _simulate_sabr(ts: int, n: int, N: int, dt: float, sq_dt: float,
         S[0] = _seed_spot(spot_mult)
 
     alpha = [np.full(N, u.get("alpha", 0.20), dtype=np.float64) for u in underlyings]
+    dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
 
     for step in range(ts):
         r_term = r_eff if r_path is None else r_path[step]
@@ -492,7 +571,9 @@ def _simulate_sabr(ts: int, n: int, N: int, dt: float, sq_dt: float,
                 vol_out[step, i, :] = sig
 
             q_adj = u.get("sigma_fx", 0.0) * u.get("rho_sfx", 0.0) * sig
-            drift = r_term + u.get("ccyh", 0.0) - u.get("q", 0.02) - q_adj - 0.5 * sig**2
+            q_term = (u.get("q", 0.02) if dividend_steps is None
+                      else dividend_steps[step, i])
+            drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5 * sig**2
             S[step + 1, i, :] = S_c * np.exp(drift * dt + sig * sq_dt * z_S)
             alpha[i] = alpha_new
 
@@ -519,6 +600,7 @@ def _simulate_lv(ts: int, n: int, N: int, dt: float, sq_dt: float,
         S[0] = _seed_spot(spot_mult)
 
     dlogK = (logKmax - logKmin) / (nK - 1)
+    dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
 
     for step in range(ts):
         r_term = r_eff if r_path is None else r_path[step]
@@ -538,7 +620,9 @@ def _simulate_lv(ts: int, n: int, N: int, dt: float, sq_dt: float,
                 vol_out[step, i, :] = lvs
             z_i = _blend_rate_factor(Zc[step, i, :], Z_r[step], u.get("rho_rS", 0.0)) if Z_r is not None else Zc[step, i, :]
             q_adj = u.get("sigma_fx", 0.0) * u.get("rho_sfx", 0.0) * lvs
-            drift = r_term + u.get("ccyh", 0.0) - u.get("q", 0.02) - q_adj - 0.5*lvs**2
+            q_term = (u.get("q", 0.02) if dividend_steps is None
+                      else dividend_steps[step, i])
+            drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5*lvs**2
             S[step+1, i, :] = S_c * np.exp(drift*dt + lvs*sq_dt*z_i)
 
     return S
@@ -606,6 +690,7 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
     V = [np.full(N, u.get("v0", 0.04), dtype=np.float64) for u in underlyings]
 
     dlogK = (logKmax - logKmin) / (nK - 1)
+    dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
 
     for step in range(ts):
         r_term = r_eff if r_path is None else r_path[step]
@@ -660,7 +745,9 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
 
             z_i = _blend_rate_factor(Zc[step, i, :], Z_r[step], u.get("rho_rS", 0.0)) if Z_r is not None else Zc[step, i, :]
             q_adj = u.get("sigma_fx", 0.0) * u.get("rho_sfx", 0.0) * eff_vol
-            drift = r_term + u.get("ccyh", 0.0) - u.get("q", 0.02) - q_adj - 0.5*eff_vol**2
+            q_term = (u.get("q", 0.02) if dividend_steps is None
+                      else dividend_steps[step, i])
+            drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5*eff_vol**2
             S[step+1, i, :] = S_c * np.exp(drift*dt + eff_vol*sq_dt*z_i)
             V[i] = V_next
 
@@ -2426,7 +2513,8 @@ def _simulate_mtf_outer(underlyings, corr_matrix, r: float, mtm_dates: list[floa
 
 
 def _mtf_reject_unsupported(model: str, barrier_monitoring: str,
-                            yield_curve, sigma_r: float) -> None:
+                            yield_curve, sigma_r: float,
+                            underlyings=None) -> None:
     """Capabilities Mark-to-Future does not carry. Shared by the fan and the
     drill-down so the two can never disagree on what they accept — a drill-down
     that priced a scenario the fan refuses would explain a number nobody sees."""
@@ -2443,6 +2531,14 @@ def _mtf_reject_unsupported(model: str, barrier_monitoring: str,
             "Les taux stochastiques ne sont pas encore supportés en "
             "Mark-to-Future : la revalorisation résiduelle ne porte pas le "
             "facteur de taux. Générez l'analyse avec sigma_r = 0."
+        )
+    if any(u.get("dividend_curve") for u in (underlyings or [])):
+        raise ValueError(
+            "La courbe de dividende n'est pas encore supportée en "
+            "Mark-to-Future : chaque revalorisation future devrait décaler les "
+            "buckets de dividende à sa propre date. La réappliquer depuis "
+            "l'année 1 donnerait un éventail cohérent en apparence mais faux. "
+            "Repassez en dividende plat pour cette analyse."
         )
     if model == "lsv":
         raise ValueError(
@@ -2541,7 +2637,8 @@ def run_mark_to_future(script: CompiledScript,
     body for every analytic and would otherwise drop them silently — the price
     would carry the curve and the whole fan would not, including the P0 threshold
     the fan is compared against."""
-    _mtf_reject_unsupported(model, barrier_monitoring, yield_curve, sigma_r)
+    _mtf_reject_unsupported(model, barrier_monitoring, yield_curve, sigma_r,
+                            underlyings)
     t_run0 = time.perf_counter()
     user_params = user_params or {}
     n = len(underlyings)
@@ -2885,7 +2982,8 @@ def run_mtf_drilldown(script: CompiledScript,
     and the marks come back plausible and slightly different — the one failure
     mode this whole design exists to prevent, so the grid is echoed back in the
     response for the caller to check against the fan it came from."""
-    _mtf_reject_unsupported(model, barrier_monitoring, yield_curve, sigma_r)
+    _mtf_reject_unsupported(model, barrier_monitoring, yield_curve, sigma_r,
+                            underlyings)
     t_run0 = time.perf_counter()
     user_params = user_params or {}
     n = len(underlyings)

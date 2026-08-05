@@ -17,10 +17,17 @@ import math
 import numpy as np
 import pytest
 
+from backend.app.core.payscript import engine as payscript_engine
 from backend.app.core.payscript.parser import parse_script, resolve_constats
 from backend.app.core.payscript.engine import (
     run_mc, run_mark_to_future, build_mtf_dates, _mtf_date_stats, _mtf_step, SY,
 )
+
+
+@pytest.fixture(autouse=True)
+def _bound_test_mtf_batches(monkeypatch):
+    """Exercise chunking without giving a statistical test a production-size peak."""
+    monkeypatch.setattr(payscript_engine, "MTF_MAX_BATCH", 5_000)
 
 
 def _ul(**kw):
@@ -32,6 +39,7 @@ def _ul(**kw):
 
 
 C1 = [[1.0]]
+REFERENCE_PATHS = 20_000
 
 
 def _tower_z(cs, uls, r, T, p0, t0, n_outer=3000, n_inner=300, params=None):
@@ -90,7 +98,7 @@ def test_pas_de_double_comptage_dans_la_fenetre_d_arrondi():
     d'écart. Mesuré à t0=0.995 : +415 bp d'écart à la tour, z = +21.8."""
     cs = parse_script(PHOENIX)
     r, T = 0.03, 2.0
-    p0 = run_mc(cs, _ul(), C1, r=r, T_max=T, N=60000, model="constant",
+    p0 = run_mc(cs, _ul(), C1, r=r, T_max=T, N=REFERENCE_PATHS, model="constant",
                 seed=123)["price"] * 100
     for t0 in (0.98, 0.995, 1.0):
         z, _ = _tower_z(cs, _ul(), r, T, p0, t0)
@@ -115,7 +123,7 @@ AT MATURITY
     PAY WOF
 """)
     uls, r = _ul(sigma=0.20, q=0.019), 0.025
-    p0 = run_mc(cs, uls, C1, r=r, T_max=3.0, N=60000, model="constant",
+    p0 = run_mc(cs, uls, C1, r=r, T_max=3.0, N=REFERENCE_PATHS, model="constant",
                 seed=123)["price"] * 100
     z, _ = _tower_z(cs, uls, r, 3.0, p0, t0, n_outer=2000, n_inner=300)
     assert abs(z) < 4.0, f"t0={t0} : écart à la tour z={z:.1f}"
@@ -153,7 +161,7 @@ def test_strike_fix_realise_conserve_en_mtf(t0):
     fixé (mesuré : -108 bp à t0=1.5, z=-3.6)."""
     cs = _fix_script()
     r, T = 0.03, 3.0
-    p0 = run_mc(cs, _ul(), C1, r=r, T_max=T, N=60000, model="constant",
+    p0 = run_mc(cs, _ul(), C1, r=r, T_max=T, N=REFERENCE_PATHS, model="constant",
                 seed=1)["price"] * 100
     z, _ = _tower_z(cs, _ul(), r, T, p0, t0, n_outer=2000, n_inner=400)
     assert abs(z) < 4.0, f"t0={t0} : écart à la tour z={z:.1f}"

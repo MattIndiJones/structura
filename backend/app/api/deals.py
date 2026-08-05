@@ -5139,10 +5139,19 @@ def _engine_underlyings(market: dict, underlyings_json: list) -> list[dict]:
         def g(key, default, scale=100.0):
             v = u.get(key)
             return default if v is None else v / scale
+        dividend_curve = []
+        for node in u.get("dividendCurve") or []:
+            if isinstance(node, dict):
+                maturity, rate = node.get("T"), node.get("rate")
+            else:
+                maturity, rate = node
+            dividend_curve.append([float(maturity), float(rate) / 100.0])
         out.append({
             "name": u_ref.get("name", ""), "ticker": u_ref.get("ticker", ""),
             "ccy": u.get("ccy", "EUR"),
             "sigma": g("sigma", 0.20), "q": g("q", 0.02),
+            "dividend_curve": dividend_curve,
+            "dividend_decay": g("dividendDecay", 0.0),
             "sigma_fx": g("sigma_fx", 0.0), "rho_sfx": g("rho_sfx", 0.0),
             "ccyh": g("ccyh", 0.0, 10000.0),
             "v0": g("v0", 0.04), "kappa": u.get("kappa") or 2.0,
@@ -5153,6 +5162,51 @@ def _engine_underlyings(market: dict, underlyings_json: list) -> list[dict]:
             "skew": g("skew", -0.10), "curvature": g("curvature", 0.05),
         })
     return out
+
+
+def _regenerate_dividend_curve(underlying: dict, maturity: float) -> None:
+    """Rebuild a full-tenor curve after a first-year q refresh.
+
+    Reinvestment deliberately refreshes Yahoo's q assumption. If the booked
+    structure used a declining curve, changing only the scalar q would be a
+    silent no-op because the path engine consumes the frozen nodes. Keep the
+    booked decay convention and rebuild every explanatory/used node instead.
+    """
+    if not underlying.get("dividend_curve"):
+        return
+    q1 = float(underlying.get("q", 0.0))
+    decay = float(underlying.get("dividend_decay", 0.0))
+    n_years = max(1, math.ceil(float(maturity)))
+    underlying["dividend_curve"] = [
+        [float(year), q1 * (1.0 - decay) ** (year - 1)]
+        for year in range(1, n_years + 1)
+    ]
+
+
+def _shift_dividend_curve(underlying: dict, elapsed: float) -> None:
+    """Condition a booked dividend curve on a residual valuation date.
+
+    Original nodes are bucket ends measured from the deal value date. A
+    residual Monte Carlo starts at zero again, so every surviving end date is
+    shifted by elapsed time and q is reset to the currently active bucket.
+    """
+    curve = underlying.get("dividend_curve") or []
+    if not curve or elapsed <= 0.0:
+        return
+    eps = 1e-9
+    remaining = [
+        [float(end) - elapsed, float(rate)]
+        for end, rate in curve
+        if float(end) > elapsed + eps
+    ]
+    if remaining:
+        underlying["q"] = remaining[0][1]
+        underlying["dividend_curve"] = remaining
+    else:
+        # Beyond the final stored node the convention is a flat extension of
+        # the last bucket. Clearing the curve restores exactly that scalar path.
+        underlying["q"] = float(curve[-1][1])
+        underlying["dividend_curve"] = []
 
 
 # ── Réinvestissement (module solution d'investissement) ────────────────
@@ -5208,6 +5262,7 @@ def reinvest_roll_endpoint(
                 u["sigma"] = vol_data["vols"][tk]
             if tk in vol_data["div_yields"]:
                 u["q"] = vol_data["div_yields"][tk]
+                _regenerate_dividend_curve(u, deal.T)
         if n_u > 1 and all(tk in vol_data["corr"] for tk in tickers):
             corr = [[vol_data["corr"][t1].get(t2, 0.0) for t2 in tickers] for t1 in tickers]
 
@@ -5278,6 +5333,7 @@ def _price_reinvest_candidate(compiled, base_ul: dict, r_frac: float, T: float, 
     ul["name"], ul["ticker"] = name, ticker
     ul["sigma"] = vol_data["vols"][ticker]
     ul["q"] = vol_data["div_yields"].get(ticker, 0.0)
+    _regenerate_dividend_curve(ul, T)
 
     try:
         solved = solve_for_param(
@@ -5672,6 +5728,8 @@ def _mtm_core(
         norm_spots.append(series[-1] / s0)
 
     engine_uls = _engine_underlyings(market, underlyings_json)
+    for underlying in engine_uls:
+        _shift_dividend_curve(underlying, T_elapsed)
     n_u = len(engine_uls)
     corr = market.get("corrMatrix") or [
         [1.0 if i == j else 0.0 for j in range(n_u)] for i in range(n_u)
@@ -5713,6 +5771,9 @@ def _mtm_core(
                 model_used = "constant"   # same reasoning as the realized mode
             if ov.q is not None:
                 u["q"] = ov.q / 100.0
+                # A flat manual override replaces the complete booked curve;
+                # keeping the nodes would make the visible override a no-op.
+                u["dividend_curve"] = []
         source += "+overrides"
     if body.r is not None:
         # A fresh flat rate with the stale booking curve would be incoherent —
@@ -5806,6 +5867,11 @@ def _mtm_core(
                       for u, eu in zip(underlyings_json, engine_uls)},
             "q": {u["name"]: round(eu["q"] * 100.0, 2)
                   for u, eu in zip(underlyings_json, engine_uls)},
+            "dividend_curve": {
+                u["name"]: [[round(t, 6), round(q * 100.0, 6)] for t, q in
+                            (eu.get("dividend_curve") or [])]
+                for u, eu in zip(underlyings_json, engine_uls)
+            },
             "corr": [[round(v, 4) for v in row] for row in corr],
         },
     }

@@ -309,6 +309,9 @@
       </div>
     </div>
 
+    <!-- ── Courbe de dividende ──────────────────────────────────────── -->
+    <DividendCurveCard />
+
     <!-- ── Courbe de taux ───────────────────────────────────────────── -->
     <YieldCurveCard />
 
@@ -353,6 +356,7 @@ import { computed } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import VolSmile from './VolSmile.vue'
+import DividendCurveCard from './DividendCurveCard.vue'
 import YieldCurveCard from './YieldCurveCard.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
