@@ -11,6 +11,7 @@ import pytest
 from fastapi import HTTPException
 from sqlmodel import SQLModel, Session, create_engine, select
 
+from backend.app.api import alerts as alerts_api
 from backend.app.api import deals as deals_api
 from backend.app.core.lifecycle_controls import (
     replay_official_fixings, semantic_maturity_outcome,
@@ -18,7 +19,7 @@ from backend.app.core.lifecycle_controls import (
 from backend.app.core.payscript.parser import parse_script
 from backend.app.core.workflow import DataCategory, FixingStatus
 from backend.app.db.models import (
-    AuditEvent, Deal, DealContractVersion, DealEvent, LifecycleProposal,
+    Alert, AuditEvent, Deal, DealContractVersion, DealEvent, LifecycleProposal,
     OfficialFixingVersion, TradeAmendmentRequest,
 )
 
@@ -185,6 +186,117 @@ def test_path_dependent_official_replay_fails_closed():
     assert failures[0]["code"] == "OFFICIAL_PATH_REQUIRED"
 
 
+def test_partial_official_fixing_prefix_cannot_manufacture_maturity():
+    session = _session()
+    deal = _deal(session)
+
+    result, failures = replay_official_fixings(deal, _events(session, deal)[:1])
+
+    assert failures == []
+    assert result["outcome"] == "en_cours"
+    assert result["event_date"] == deal.strike_date
+    assert result["realized_payout"] == 0.0
+
+
+def test_auto_yahoo_refresh_uses_official_replay_as_lifecycle_truth(monkeypatch):
+    session = _session()
+    deal = _deal(session)
+    captured = {}
+
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *_args, **_kwargs: {"provider": "test"},
+    )
+    monkeypatch.setattr(
+        deals_api, "_auto_validate_yahoo_event",
+        lambda *_args, **_kwargs: (False, None),
+    )
+    monkeypatch.setattr(
+        deals_api, "_reference_history_arrays",
+        lambda *_args, **_kwargs: ([deal.strike_date], {"TK1": [100.0]}),
+    )
+    monkeypatch.setattr(
+        deals_api, "replay_official_fixings",
+        lambda _deal, events: ({
+            "outcome": "en_cours",
+            "event_id": events[-1].id,
+            "event_date": events[-1].event_date,
+            "realized_payout": 0.0,
+        }, []),
+    )
+    monkeypatch.setattr(
+        deals_api, "_evaluate_lifecycle",
+        lambda *_args, **_kwargs: {"outcome": "final", "realized_payout": 0.25},
+    )
+
+    def capture_apply(_deal, evaluation, _session, _actor_user_id):
+        captured["evaluation"] = evaluation
+        return None
+
+    monkeypatch.setattr(deals_api, "_auto_apply_lifecycle", capture_apply)
+
+    response = deals_api._refresh_auto_yahoo_deal_core(
+        deal, session, actor_user_id=99,
+        underlyings=[{"name": "UL1", "ticker": "TK1"}],
+        tickers=["TK1"],
+    )
+
+    assert captured["evaluation"]["outcome"] == "en_cours"
+    assert response["evaluation"]["outcome"] == "en_cours"
+
+
+def test_admin_can_run_mtm_and_greeks_on_a_foreign_uat_deal(monkeypatch):
+    session = _session()
+    deal = _deal(session)
+    admin = SimpleNamespace(id=99, entity_id=None, role="admin")
+    payload = {"resolved_pending": True, "message": "fixture"}
+    monkeypatch.setattr(
+        deals_api, "_mtm_core",
+        lambda *_args, **_kwargs: (payload, None),
+    )
+
+    assert deals_api.deal_mtm(deal.id, admin, session) == payload
+    assert deals_api.deal_greeks(deal.id, admin, session) == payload
+
+
+def test_admin_book_refresh_and_alerts_cover_uat_target_users(monkeypatch):
+    session = _session()
+    session.add(Alert(
+        user_id=1, deal_id=None, deal_reference="UAT-TARGET",
+        kind="test", message="foreign alert", dedup_key="foreign-alert",
+    ))
+    session.commit()
+    admin = SimpleNamespace(id=99, entity_id=None, role="admin")
+    captured = {}
+
+    def fake_refresh(_session, user_id):
+        captured["user_id"] = user_id
+        return {"deals": 1}
+
+    monkeypatch.setattr(alerts_api, "refresh_book", fake_refresh)
+
+    assert alerts_api.refresh_whole_book(admin, session) == {"deals": 1}
+    assert captured["user_id"] is None
+    assert alerts_api.list_alerts(admin, session)["alerts"][0]["deal_reference"] \
+        == "UAT-TARGET"
+
+
+def test_admin_watchlist_includes_foreign_uat_deals(monkeypatch):
+    session = _session()
+    deal = _deal(session)
+    admin = SimpleNamespace(id=99, entity_id=None, role="admin")
+    regular_user = SimpleNamespace(id=99, entity_id=None, role="user")
+    monkeypatch.setattr(
+        deals_api, "build_watchlist_row",
+        lambda row, _session, _today: {
+            "id": row.id, "min_gap": None, "days_to_next": None,
+        },
+    )
+
+    assert [row["id"] for row in deals_api.watchlist(admin, session)] == [deal.id]
+    assert deals_api.watchlist(regular_user, session) == []
+
+
 def test_validation_freezes_official_replay_and_application_uses_it():
     session = _session()
     deal = _deal(session)
@@ -290,7 +402,19 @@ def test_official_indicative_outcome_mismatch_blocks_validation():
                for row in exc.value.detail["failures"])
 
 
-def test_amendment_requires_four_eyes_and_applies_exactly_once():
+@pytest.fixture
+def four_eyes_armed(monkeypatch):
+    """Réarme la deuxième signature sur les amendements.
+
+    Depuis le 07/08/2026 le contrôle est désactivé par défaut (poste
+    mono-opérateur : voir core/workflow.py:amendment_four_eyes_enabled). Le
+    mécanisme reste entièrement en place et doit rester testé, sinon il pourrira
+    en silence et ne sera plus réarmable le jour où le desk se dédouble.
+    """
+    monkeypatch.setenv("STRUCTURA_AMENDMENT_FOUR_EYES", "1")
+
+
+def test_amendment_requires_four_eyes_and_applies_exactly_once(four_eyes_armed):
     session = _session()
     deal = _deal(session)
     requested = deals_api.request_amendment(
@@ -330,6 +454,70 @@ def test_amendment_requires_four_eyes_and_applies_exactly_once():
             deals_api.AmendmentDecisionRequest(reason="Deuxième application interdite"),
             CHECKER, session)
     assert duplicate.value.detail["code"] == "AMENDMENT_STATUS_INVALID"
+
+
+def test_amendment_is_carried_through_by_its_own_maker_by_default():
+    """Mode par défaut : une seule signature, mais toutes les autres garanties.
+
+    Le maker ouvre, approuve et applique. Ce qui ne bouge pas : la machine à
+    états (une demande APPLIED ne se rejoue pas), le versionnement contractuel,
+    et la piste d'audit.
+    """
+    session = _session()
+    deal = _deal(session)
+    requested = deals_api.request_amendment(
+        deal.id,
+        deals_api.AmendmentRequestCreate(
+            field_name="nominal", new_value=2_000_000,
+            reason="Correction contractuelle documentée"),
+        MAKER, session)
+
+    approved = deals_api.approve_amendment(
+        deal.id, requested["id"],
+        deals_api.AmendmentDecisionRequest(reason="Décision du propriétaire du deal"),
+        MAKER, session)
+    assert approved["status"] == "APPROVED"
+
+    result = deals_api.apply_amendment(
+        deal.id, requested["id"],
+        deals_api.AmendmentDecisionRequest(reason="Application par le propriétaire"),
+        MAKER, session)
+    assert result["deal"]["nominal"] == 2_000_000
+    assert result["deal"]["contract_version"] == 2
+    assert result["amendment"]["status"] == "APPLIED"
+    assert len(session.exec(select(DealContractVersion)).all()) == 2
+
+    # L'idempotence ne dépendait pas de la deuxième signature.
+    with pytest.raises(HTTPException) as duplicate:
+        deals_api.apply_amendment(
+            deal.id, requested["id"],
+            deals_api.AmendmentDecisionRequest(reason="Deuxième application interdite"),
+            MAKER, session)
+    assert duplicate.value.detail["code"] == "AMENDMENT_STATUS_INVALID"
+
+    # Et la trace reste écrite, motif compris.
+    applied = session.exec(select(AuditEvent).where(
+        AuditEvent.action == "AMENDMENT_APPLIED")).first()
+    assert applied is not None
+    assert applied.actor_user_id == MAKER.id
+
+
+def test_single_signature_mode_still_refuses_a_foreign_user():
+    """Retirer la deuxième signature n'ouvre pas le deal à un tiers."""
+    session = _session()
+    deal = _deal(session)
+    requested = deals_api.request_amendment(
+        deal.id,
+        deals_api.AmendmentRequestCreate(
+            field_name="nominal", new_value=2_000_000,
+            reason="Correction contractuelle documentée"),
+        MAKER, session)
+    with pytest.raises(HTTPException) as exc:
+        deals_api.approve_amendment(
+            deal.id, requested["id"],
+            deals_api.AmendmentDecisionRequest(reason="Utilisateur d'une autre entité"),
+            OTHER_CHECKER, session)
+    assert exc.value.status_code == 404
 
 
 def test_amendment_checker_is_entity_scoped():

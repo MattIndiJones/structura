@@ -3,7 +3,7 @@
 
     <!-- ── Barre d'outils : statut de pricing + actions ─────────── -->
     <div class="sticky top-0 z-30 border-b px-5 py-2.5 flex items-center gap-4 shrink-0"
-         style="background: rgba(255,255,255,.95); backdrop-filter: blur(6px); border-color: var(--border);">
+         style="background: rgba(250,249,246,.90); backdrop-filter: blur(10px); border-color: var(--border); box-shadow: 0 4px 14px rgba(11,26,49,.025);">
 
       <RouterLink :to="{ path: '/', query: { category: 'pricing' } }" class="btn-secondary text-xs px-3 py-1.5 shrink-0">← Retour</RouterLink>
 

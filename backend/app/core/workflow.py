@@ -6,7 +6,29 @@ invent a second mapping.
 """
 from __future__ import annotations
 
+import os
 from enum import Enum
+
+
+def amendment_four_eyes_enabled() -> bool:
+    """Whether approving and applying an amendment needs a SECOND person.
+
+    Off by default. On a tactical, single-operator desk there is nobody to
+    separate duties with, and the requirement turned the only available
+    correction path for a booked trade (nominal, contrepartie, price_traded,
+    payment_date) into a dead end: the maker could open a request and then
+    nothing could ever close it.
+
+    What this flag governs is deliberately narrow — the identity of the second
+    signatory, and nothing else. The request/approve/apply state machine, the
+    contract versioning, the stale-base-version refusals and the audit trail
+    are unconditional, so re-arming the control is one environment variable
+    rather than a rewrite. Read through this function (never captured into a
+    module constant) so a deployment or a test can flip it without import-order
+    surprises.
+    """
+    return os.getenv(
+        "STRUCTURA_AMENDMENT_FOUR_EYES", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class WorkflowValue(str, Enum):

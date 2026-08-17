@@ -9,7 +9,8 @@ Ran two ways:
 - by the in-process scheduler (main.py) every day at 23:00 local time,
   after the US close — events are close-of-day observations and Yahoo
   only serves reliable closes, so intraday runs would add noise, not info;
-- on demand for one user via POST /api/alerts/refresh-book.
+- on demand for one user, or the full visible book for an administrator, via
+  POST /api/alerts/refresh-book.
 
 Alerts are deduplicated forever by Alert.dedup_key: a resolution or a
 barrier crossing alerts once, no matter how many later runs re-detect it.

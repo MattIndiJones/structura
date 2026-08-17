@@ -164,19 +164,28 @@ def test_every_offered_product_family_completes_the_full_chain(family):
     assert batch["rfq_count"] == batch["deal_count"] == 1
 
 
-@pytest.mark.parametrize(("profile", "family", "deal_status", "outcome"), [
-    ("CURRENT_ACTIVE", "ATHENA", "actif", None),
-    ("FORWARD_START", "CAPITAL_GUARANTEED", "actif", None),
-    ("ACTIVE_1Y_PENDING", "ATHENA", "actif", None),
-    ("ACTIVE_2Y_OFFICIAL", "PHOENIX", "actif", None),
-    ("MATURED_PENDING", "REVERSE_CONVERTIBLE", "actif", None),
-    ("CALLED", "ATHENA", "callé", "callé"),
-    ("MATURED_FINAL", "CAPITAL_GUARANTEED", "échu", "final"),
-    ("MATURED_KI", "REVERSE_CONVERTIBLE", "échu", "ki"),
+@pytest.mark.parametrize(("profile", "family"), [
+    ("CURRENT_ACTIVE", "ATHENA"),
+    ("ACTIVE_1Y_PENDING", "ATHENA"),
+    ("ACTIVE_2Y_OFFICIAL", "PHOENIX"),
+    ("MATURED_PENDING", "REVERSE_CONVERTIBLE"),
+    ("CALLED", "ATHENA"),
+    ("MATURED_FINAL", "CAPITAL_GUARANTEED"),
+    ("MATURED_KI", "REVERSE_CONVERTIBLE"),
 ])
-def test_each_historical_lifecycle_profile_is_materialized_coherently(
-    profile, family, deal_status, outcome,
-):
+def test_every_reached_observation_carries_its_real_close(profile, family):
+    """One observation, one date, that underlying's actual close on that date.
+
+    The generator used to attach a constant ratio instead — a flat 0.80, or
+    1.15 to force a call, 0.35 to force a knock-in — so a deal showed the same
+    number at three different dates (430 -> 344, 344, 344) and every profile
+    that skipped the machinery had no strike fixing at all, leaving the barrier
+    watchlist with no S0 to measure against.
+
+    The deal's outcome is deliberately not asserted: it is whatever the script
+    makes of the real closes, which is the point. The profile only sets how far
+    back the deal was traded.
+    """
     session, admin, target = _session_and_users()
     batch = generate_batch(_request(
         target,
@@ -187,42 +196,75 @@ def test_each_historical_lifecycle_profile_is_materialized_coherently(
         lifecycle_profile=profile,
     ), admin, session)
     assert batch["status"] == "COMPLETED"
-    scenario = batch["result"]["scenarios"][0]
-    assert scenario["profile"] == profile
+    assert batch["result"]["scenarios"][0]["profile"] == profile
 
     deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).one()
     events = session.exec(select(DealEvent).where(
-        DealEvent.deal_id == deal.id)).all()
-    assert deal.status == deal_status
-    assert deal.resolution_outcome == outcome
+        DealEvent.deal_id == deal.id).order_by(DealEvent.event_index)).all()
+    today = date.today().isoformat()
+    reached = [e for e in events if e.event_date <= today]
+    assert reached, f"{profile} devrait avoir au moins la constatation de strike"
 
-    if profile == "FORWARD_START":
-        assert date.fromisoformat(deal.strike_date) > date.today()
-        assert all(date.fromisoformat(event.event_date) > date.today()
-                   for event in events)
-    if profile in {"ACTIVE_1Y_PENDING", "MATURED_PENDING"}:
-        missing = [event for event in events if event.fixing_status == "MISSING"]
-        assert missing
-        if profile == "ACTIVE_1Y_PENDING":
-            assert any(event.t_years > 0 for event in missing)
-        assert scenario["missing_fixings"] == len(missing)
-        assert len(session.exec(select(Alert).where(Alert.deal_id == deal.id)).all()) \
-            == len(missing)
-    if profile == "ACTIVE_2Y_OFFICIAL":
-        validated = [event for event in events if event.fixing_status == "VALIDATED"]
-        assert validated
-        assert any(event.t_years > 0 for event in validated)
-        assert scenario["official_fixings"] == len(validated)
-        assert not session.exec(select(LifecycleProposal).where(
-            LifecycleProposal.deal_id == deal.id)).first()
-    if outcome:
-        proposal = session.exec(select(LifecycleProposal).where(
-            LifecycleProposal.deal_id == deal.id)).one()
-        assert proposal.status == "APPLIED"
-        assert proposal.comparison_status == "MATCH"
-        assert scenario["outcome"] == outcome
-        assert session.exec(select(OfficialFixingVersion).where(
-            OfficialFixingVersion.deal_id == deal.id)).first()
+    # The strike must be fixed: without S0 the barrier watchlist computes
+    # nothing at all, which is how four active deals out of five ended up
+    # showing "en attente du strike" for ever.
+    strike = next(e for e in events if e.t_years == 0.0)
+    s0 = json.loads(strike.spots_json or "{}")
+    assert s0, "pas de S0 : la surveillance des barrières ne peut rien calculer"
+    assert set(s0) == {u["name"] for u in json.loads(deal.underlyings_json)}
+    assert all(v > 0 for v in s0.values())
+
+    for event in reached:
+        spots = json.loads(event.spots_json or "{}")
+        assert spots, f"{event.label} atteinte mais sans cours"
+        assert all(v > 0 for v in spots.values())
+
+    # No cloned values: a ratio applied to S0 gave the exact same number at
+    # every date, which no underlying ever does.
+    if len(reached) > 2:
+        first = json.loads(reached[1].spots_json)
+        assert any(json.loads(e.spots_json) != first for e in reached[2:]), \
+            "toutes les observations portent le même cours — ratio synthétique ?"
+
+
+def test_forward_start_has_nothing_to_fix_yet():
+    session, admin, target = _session_and_users()
+    batch = generate_batch(_request(
+        target, mode="BOOKED_ONLY", count=1, seed=29,
+        product_types=["CAPITAL_GUARANTEED"], lifecycle_profile="FORWARD_START",
+    ), admin, session)
+    deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).one()
+    events = session.exec(select(DealEvent).where(
+        DealEvent.deal_id == deal.id)).all()
+
+    assert date.fromisoformat(deal.strike_date) > date.today()
+    assert all(date.fromisoformat(e.event_date) > date.today() for e in events)
+    assert all(not json.loads(e.spots_json or "{}") for e in events)
+    assert batch["result"]["scenarios"][0]["official_fixings"] == 0
+
+
+@pytest.mark.parametrize("profile", ["ACTIVE_1Y_PENDING", "MATURED_PENDING"])
+def test_controlled_deal_is_never_auto_filled(profile):
+    """A FOUR_EYES deal has no automatic source, so nothing is invented for it.
+
+    Its values are entered by hand — but they are left plainly empty rather
+    than dressed up: the exception modal labels the indicative column "dernière
+    valeur Yahoo", and a fabricated number there is officialised in one click.
+    """
+    session, admin, target = _session_and_users()
+    batch = generate_batch(_request(
+        target, mode="BOOKED_ONLY", count=1, seed=29,
+        product_types=["ATHENA"], lifecycle_profile=profile,
+        fixing_policy="FOUR_EYES",
+    ), admin, session)
+    deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).one()
+    events = session.exec(select(DealEvent).where(
+        DealEvent.deal_id == deal.id)).all()
+
+    assert deal.fixing_policy == "FOUR_EYES"
+    assert batch["result"]["scenarios"][0]["official_fixings"] == 0
+    assert all(not json.loads(e.spots_json or "{}") for e in events)
+    assert all(not json.loads(e.indicative_spots_json or "{}") for e in events)
 
 
 def test_complete_mix_covers_all_eight_profiles_and_cleans_terminal_dependencies():

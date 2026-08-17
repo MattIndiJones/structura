@@ -10,7 +10,7 @@ from datetime import datetime, date, timedelta, timezone
 from typing import Annotated, Literal, Optional, List
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -29,11 +29,13 @@ from ..core.audit import commit_rejection, record_audit_event
 from ..core.lifecycle_controls import (
     official_input_hash, replay_official_fixings, semantic_maturity_outcome,
 )
+from ..core.market_snapshot import snapshot_rate, snapshot_rate_is_default
 from ..core.rfq_controls import (
     booking_gate_failures, failures_payload, product_terms, product_terms_hash,
 )
 from ..core.workflow import (
     AmendmentStatus, DataCategory, FixingPolicy, FixingStatus, LifecycleStatus,
+    amendment_four_eyes_enabled,
 )
 from ..core.schemas import ReinvestScanRequest, ReinvestProposalRequest
 
@@ -130,7 +132,23 @@ class AutoFixingExceptionResolutionRequest(BaseModel):
     expected_version_id: Optional[int] = None
     spots: Optional[dict] = None
     source_reference: str = Field(default="", max_length=500)
-    reason: str = Field(min_length=10, max_length=2000)
+    # Taking the automatic source is not a deviation, so it carries no written
+    # justification: the signature exists to record *departures* from Yahoo,
+    # and demanding a motive to accept the default inverted that — an operator
+    # had to write ten characters to agree with the machine. The actor, the
+    # action and its timestamp are audited either way. The two actions that do
+    # override the automatic source keep the requirement, and so does a
+    # USE_YAHOO that overrides a soft control (enforced in the handler, where
+    # the control outcome is known).
+    reason: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def _motive_required_when_overriding(self):
+        if self.action != "USE_YAHOO" and len(self.reason.strip()) < 10:
+            raise ValueError(
+                "Le motif est obligatoire (10 caractères minimum) pour toute "
+                "décision qui écarte la source automatique.")
+        return self
 
 
 class LifecycleValidationRequest(BaseModel):
@@ -1045,15 +1063,23 @@ def _checker_request(
     current: User,
     session: Session,
 ) -> tuple[Deal, TradeAmendmentRequest]:
+    deal = session.get(Deal, deal_id)
+    request = session.get(TradeAmendmentRequest, request_id)
+    if not deal or not request or request.deal_id != deal_id:
+        raise HTTPException(404, "Demande d'amendement introuvable")
+
+    if not amendment_four_eyes_enabled():
+        # Single-signature mode: whoever may act on the deal may decide on its
+        # amendments, including the maker. Every other guarantee still applies.
+        if not _can_access_deal(deal, current, session):
+            raise HTTPException(404, "Demande d'amendement introuvable")
+        return deal, request
+
     if getattr(current, "role", None) not in {"checker", "admin"}:
         raise HTTPException(403, {
             "code": "CHECKER_ROLE_REQUIRED",
             "message": "Cette action est réservée à un checker ou administrateur.",
         })
-    deal = session.get(Deal, deal_id)
-    request = session.get(TradeAmendmentRequest, request_id)
-    if not deal or not request or request.deal_id != deal_id:
-        raise HTTPException(404, "Demande d'amendement introuvable")
     if current.role != "admin" and (
         current.entity_id is None or current.entity_id != _deal_entity_id(deal, session)
     ):
@@ -1412,15 +1438,19 @@ def watchlist(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    """Barrier-proximity watchlist over the user's ACTIVE deals: for each,
+    """Barrier-proximity watchlist over the accessible ACTIVE deals: for each,
     the next observation date, the current worst-of performance vs S₀, and
     the gap (in points of S₀) to every barrier-looking PARAM in the booked
     script. Sorted most-urgent first (smallest barrier gap, then nearest
     observation). Uses the script's PARAM defaults — user overrides typed in
     the UI at pricing time are not persisted on the deal (known limitation)."""
-    deals = session.exec(
-        select(Deal).where(Deal.user_id == current.id, Deal.status == "actif")
-    ).all()
+    statement = select(Deal).where(Deal.status == "actif")
+    current_role = getattr(current, "role", "user")
+    if current_role not in {"ops_maker", "checker", "admin"}:
+        statement = statement.where(Deal.user_id == current.id)
+    deals = session.exec(statement).all()
+    if current_role in {"ops_maker", "checker"}:
+        deals = [deal for deal in deals if _can_access_deal(deal, current, session)]
     today = date.today()
     rows = [build_watchlist_row(deal, session, today) for deal in deals]
 
@@ -2992,7 +3022,7 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
         compiled, market.get("constats") or {},
         anchor=date.fromisoformat(deal.value_date) if deal.value_date else None,
     )
-    r_frac = (market.get("r", 3.0) or 3.0) / 100.0
+    r_frac = snapshot_rate(market)
     # PARAM overrides frozen at booking (stored units) — without them the
     # replay would use the script's seed defaults, wrong for any deal whose
     # terms were tuned in the UI (degressive barriers, negotiated coupon…).
@@ -3023,7 +3053,10 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
     # what the client actually received in total, as a fraction of nominal.
     # eval_script_on_history only ever appends flows that fired, so summing
     # the whole list (not just the terminal one) is correct in either case.
-    realized_payout = round(sum(cf["cf"] for cf in res["cash_flows"]), 4)
+    # Keep the same precision as the authoritative fixing replay.  Rounding
+    # the monitoring leg to four decimals created false payout mismatches on
+    # large notionals even when both calculations were economically identical.
+    realized_payout = round(sum(cf["cf"] for cf in res["cash_flows"]), 8)
 
     if res["early_recall"]:
         T_actual = res["T_actual"]
@@ -3046,7 +3079,7 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
         return {"outcome": outcome, "event_id": maturity_event.id,
                 "event_date": maturity_event.event_date,
                 "outcome_basis": outcome_basis,
-                "maturity_payout": round(maturity_payout, 4),
+                "maturity_payout": round(maturity_payout, 8),
                 "realized_payout": realized_payout}
 
     return {"outcome": "en_cours"}
@@ -3060,7 +3093,7 @@ def refresh_events(
 ):
     """Load non-binding monitoring data and, when relevant, propose a result."""
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     try:
         return refresh_deal_core(deal, session, actor_user_id=current.id)
@@ -3696,6 +3729,25 @@ def resolve_auto_fixing_exception(
                 object_type="DEAL_EVENT", object_id=event.id, current=current,
                 message="Valeur Yahoo non adoptée — la donnée reste inexploitable.",
                 failures=normalized, before=before,
+            )
+        # Accepting a clean Yahoo close needs no motive — see the schema. But a
+        # USE_YAHOO that survives a soft control is the operator overruling that
+        # control, and an overrule with no stated reason leaves nothing in the
+        # ledger to review later.
+        if review_failures and len(body.reason.strip()) < 10:
+            _reject_workflow_action(
+                session, action="AUTO_FIXING_EXCEPTION_RESOLUTION_REJECTED",
+                object_type="DEAL_EVENT", object_id=event.id, current=current,
+                message="Motif requis — cette reprise Yahoo écarte un contrôle.",
+                failures=[_workflow_failure(
+                    "AUTO_EXCEPTION_REASON_REQUIRED", "reason",
+                    "Reprendre la clôture Yahoo malgré un contrôle en échec "
+                    "doit être motivé.",
+                    expected="Un motif de 10 caractères minimum.",
+                    action="Décrivez le contrôle effectué avant d'officialiser.",
+                    received=body.reason or None,
+                )],
+                before=before,
             )
         evidence, evidence_payload, evidence_hash = _auto_yahoo_evidence(
             deal, event, underlyings, spots, used_dates,
@@ -4382,12 +4434,24 @@ def _auto_apply_lifecycle(
     for stale in session.exec(select(LifecycleProposal).where(
         LifecycleProposal.deal_id == deal.id,
         LifecycleProposal.id != proposal.id,
-        LifecycleProposal.status == LifecycleStatus.PROPOSED.value,
+        LifecycleProposal.status.in_([
+            LifecycleStatus.PROPOSED.value,
+            LifecycleStatus.MANUAL_REVIEW_REQUIRED.value,
+        ]),
     )).all():
         stale.status = LifecycleStatus.STALE.value
         stale.error_message = "Remplacée par la résolution automatique AUTO_YAHOO."
         stale.updated_at = now
         session.add(stale)
+    # A former reconciliation exception is no longer actionable once the same
+    # deal has been resolved successfully from authoritative fixings.
+    for alert in session.exec(select(Alert).where(
+        Alert.deal_id == deal.id,
+        Alert.kind == "auto_lifecycle_exception",
+        Alert.read == False,  # noqa: E712
+    )).all():
+        alert.read = True
+        session.add(alert)
     record_audit_event(
         session,
         action="RESOLUTION_AUTO_APPLIED",
@@ -4459,7 +4523,26 @@ def _refresh_auto_yahoo_deal_core(
     dates, prices = _reference_history_arrays(reference_data, tickers)
     if not dates:
         raise ValueError("Les clôtures Yahoo ne permettent pas de construire un historique commun")
-    evaluation = _evaluate_lifecycle(deal, events, dates, prices, tickers)
+
+    # Lifecycle truth comes from the longest contiguous prefix of validated
+    # contractual fixings.  The dense Yahoo history remains useful monitoring
+    # data and a governed fallback for scripts whose path dependence cannot be
+    # established from event fixings alone, but it must not decide an otherwise
+    # replayable terminal outcome on dates that differ from the booked calendar.
+    official_prefix: list[DealEvent] = []
+    for event in sorted(past_events, key=lambda row: (row.t_years, row.event_index)):
+        if (event.fixing_status != FixingStatus.VALIDATED.value or
+                event.data_category != DataCategory.FIXING_OFFICIAL.value):
+            break
+        official_prefix.append(event)
+    official_evaluation = None
+    replay_failures: list[dict] = []
+    if official_prefix:
+        official_evaluation, replay_failures = replay_official_fixings(
+            deal, official_prefix)
+    evaluation = official_evaluation
+    if evaluation is None:
+        evaluation = _evaluate_lifecycle(deal, events, dates, prices, tickers)
     proposal = _auto_apply_lifecycle(deal, evaluation, session, actor_user_id)
     deal.updated_at = datetime.utcnow()
     session.add(deal)
@@ -4493,6 +4576,7 @@ def _refresh_auto_yahoo_deal_core(
         "message": message,
         "evaluation": evaluation,
         "proposal": _proposal_row(proposal) if proposal else None,
+        "official_replay_failures": replay_failures,
         "policy": FixingPolicy.AUTO_YAHOO.value,
     }
 
@@ -5044,7 +5128,7 @@ def reprice_inputs(
 ):
     """Return normalized inputs for re-pricing the deal at current market conditions."""
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
 
     if deal.status in ("callé", "échu"):
@@ -5230,7 +5314,7 @@ def reinvest_roll_endpoint(
     from ..services.market_data import load_hist_vol
 
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     if deal.status != "actif":
         raise HTTPException(422, f"Deal {deal.status} — rien à reconduire")
@@ -5274,7 +5358,7 @@ def reinvest_roll_endpoint(
             if tk in prices and prices[tk]:
                 current_spots[tk] = round(float(prices[tk][-1]), 4)
 
-    r_frac = (market.get("r", 3.0) or 3.0) / 100.0
+    r_frac = snapshot_rate(market)
     user_params = market.get("user_params", {}) or {}
     rate_model = market.get("rateModel", "deterministic")
     sigma_r = (market.get("sigma_r", 0.0) or 0.0) / 100.0 if rate_model != "deterministic" else 0.0
@@ -5382,7 +5466,7 @@ def _reinvest_context(deal: Deal, req_T: float | None):
         raise HTTPException(422, f"Script non exploitable : {e}")
 
     base_ul = _engine_underlyings(market, underlyings_json)[0]
-    r_frac = (market.get("r", 3.0) or 3.0) / 100.0
+    r_frac = snapshot_rate(market)
     T = effective_T_max(compiled, req_T if req_T else deal.T)
     return compiled, market, base_ul, r_frac, T
 
@@ -5395,7 +5479,7 @@ def reinvest_scan_endpoint(
     session: Annotated[Session, Depends(get_session)],
 ):
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
 
     compiled, market, base_ul, r_frac, T = _reinvest_context(deal, req.T)
@@ -5537,7 +5621,7 @@ def reinvest_proposal_endpoint(
     session: Annotated[Session, Depends(get_session)],
 ):
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     return _reinvest_proposal_data(deal, req)
 
@@ -5554,7 +5638,7 @@ def reinvest_proposal_pdf_endpoint(
     from ..core.reinvest_proposal_pdf import generate_reinvest_proposal_pdf
 
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     data = _reinvest_proposal_data(deal, req)
     try:
@@ -5673,7 +5757,7 @@ def _mtm_core(
             break
 
     user_params = market.get("user_params", {}) or {}
-    r_frac = (market.get("r", 3.0) or 3.0) / 100.0
+    r_frac = snapshot_rate(market)
 
     replay = eval_script_on_history(
         compiled, dates_list, prices, start_idx, deal.T, user_params, tickers, r_frac
@@ -5861,6 +5945,10 @@ def _mtm_core(
             "source": source,
             "model": model_used,
             "r": round(r_frac * 100.0, 4),
+            # True only for a legacy snapshot carrying no rate at all: the
+            # figure above is then our fallback, not this deal's own term.
+            # A zero or negative booked rate is honoured and reads False.
+            "r_is_default": snapshot_rate_is_default(market) and body.r is None,
             "flat_curve": not yc,
             "window_returns": n_returns,
             "sigma": {u["name"]: round(eu["sigma"] * 100.0, 2)
@@ -5916,7 +6004,7 @@ def deal_mtm(
 ):
     """Residual MtM endpoint — see _mtm_core."""
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     payload, _ctx = _mtm_core(deal, session, n_paths, body)
     return payload
@@ -5939,7 +6027,7 @@ def deal_greeks(
     from ..core.payscript.engine import compute_greeks
 
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
 
     body = body or DealGreeksRequest()
@@ -6257,7 +6345,7 @@ def deal_mtm_explain(
 ):
     """P&L explain endpoint — see _explain_core."""
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     payload, _c1, _c2 = _explain_core(deal, session, n_paths,
                                       body or MtmExplainRequest())
@@ -6280,7 +6368,7 @@ def deal_mtm_explain_report(
     from ..core.deal_valuation_pdf import generate_explain_pdf
 
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     payload, _c1, c2 = _explain_core(deal, session, n_paths,
                                      body or MtmExplainRequest())
@@ -6365,7 +6453,7 @@ def deal_mtm_report(
     from ..core.deal_valuation_pdf import generate_valuation_pdf
 
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     payload, ctx = _mtm_core(deal, session, n_paths, body)
     if payload.get("resolved_pending") or ctx is None:

@@ -149,7 +149,7 @@
                       <HelpTip text="Sous-jacent(s) du deal. Pour un worst-of, tous les sous-jacents du panier sont listés." />
                     </th>
                     <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Produit
-                      <HelpTip text="Nom du produit — celui du script sauvegardé dont le deal est issu, ou à défaut celui de la RFQ qu'il a remportée. Vide pour un script ad hoc jamais sauvegardé, qui n'a effectivement pas de nom." />
+                      <HelpTip text="Libellé métier ou scénario du produit. La famille du payoff reste dans Type et l'identifiant technique reste dans Réf, afin de ne pas répéter la même information." />
                     </th>
                     <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Type
                       <HelpTip text="Type de produit tel que booké (Autocall Athena, Phoenix Mémoire, Barrier RC…)." />
@@ -194,7 +194,7 @@
                       {{ (w.underlyings || []).map(u => u.ticker || u.name).join(' / ') || '—' }}
                     </td>
                     <td class="py-2 pr-3 text-slate-300">
-                      {{ w.product_name || '—' }}
+                      {{ watchlistProductName(w) || '—' }}
                     </td>
                     <td class="py-2 pr-3 whitespace-nowrap">
                       <span v-if="w.product_type" class="text-slate-500 text-[10px] border border-slate-700 rounded px-1.5 py-0.5">
@@ -279,7 +279,7 @@
             </div>
             <div class="flex flex-col gap-1">
               <label class="text-[10px] text-slate-500 uppercase tracking-wider">Portefeuille</label>
-              <select v-model="filters.portfolioId" class="select text-xs py-1.5 min-w-[140px]">
+              <select v-model="filters.portfolioId" class="select text-xs py-1.5 w-32 max-w-32">
                 <option value="">Tous</option>
                 <option v-for="p in portfolios" :key="p.id" :value="String(p.id)">
                   {{ p.is_default ? '⭐ ' : '' }}{{ p.name }}
@@ -310,46 +310,57 @@
             Aucun deal ne correspond à ces filtres.
           </div>
 
-          <div v-for="d in filteredDeals" :key="d.id" :id="`deal-${d.id}`"
-            class="card flex flex-col gap-3 hover:shadow-xl hover:shadow-black/30
-                   hover:border-slate-700 transition-all duration-200 scroll-mt-4">
+          <div v-for="(d, dealIndex) in filteredDeals" :key="d.id" :id="`deal-${d.id}`"
+            class="card deal-card flex flex-col gap-3 hover:shadow-xl hover:shadow-black/30
+                   hover:border-slate-700 transition-all duration-200 scroll-mt-4"
+            :class="{ 'deal-card--alternate': dealIndex % 2 === 1 }">
             <!-- Ligne d'en-tête — cliquable pour déplier la fiche détail -->
-            <div class="flex items-start justify-between gap-3 flex-wrap cursor-pointer select-none"
+            <div class="deal-card__header cursor-pointer select-none"
               @click="toggleDetail(d.id)">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-slate-500 text-xs">{{ expanded[d.id] ? '▾' : '▸' }}</span>
-                <span class="font-mono font-semibold text-slate-200">{{ d.reference }}</span>
-                <button type="button"
-                  class="text-slate-500 hover:text-blue-300 shrink-0 transition-colors"
-                  :class="copiedReference === d.reference ? 'text-emerald-400' : ''"
-                  :title="copiedReference === d.reference ? 'Référence copiée' : 'Copier la référence du deal'"
-                  :aria-label="`Copier la référence ${d.reference}`"
-                  @click.stop="copyDealReference(d.reference)">
-                  {{ copiedReference === d.reference ? '✓' : '⧉' }}
-                </button>
-                <span class="text-slate-600">·</span>
-                <span class="text-slate-300">{{ d.contrepartie }}</span>
-                <span v-if="d.product_type" class="text-slate-500 text-[10px] border border-slate-700 rounded px-1.5 py-0.5">
-                  {{ d.product_type }}
-                </span>
-                <span class="text-[10px] border rounded px-1.5 py-0.5"
-                  :class="d.fixing_policy === 'FOUR_EYES'
-                    ? 'border-amber-800/60 bg-amber-950/30 text-amber-400'
-                    : 'border-blue-800/60 bg-blue-950/30 text-blue-400'">
-                  {{ d.fixing_policy === 'FOUR_EYES' ? 'Contrôle 4 yeux' : 'Yahoo auto' }}
-                </span>
-                <span :class="statusClass(d.status)" class="badge uppercase">
-                  {{ d.status }}
-                </span>
-                <select class="select text-[10px] py-0.5" :value="d.portfolio_id ? String(d.portfolio_id) : ''"
+              <div class="deal-card__identity">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="text-slate-500 text-xs shrink-0">{{ expanded[d.id] ? '▾' : '▸' }}</span>
+                  <span class="font-mono font-semibold text-slate-200 whitespace-nowrap">{{ d.reference }}</span>
+                  <button type="button"
+                    class="text-slate-500 hover:text-blue-300 shrink-0 transition-colors"
+                    :class="copiedReference === d.reference ? 'text-emerald-400' : ''"
+                    :title="copiedReference === d.reference ? 'Référence copiée' : 'Copier la référence du deal'"
+                    :aria-label="`Copier la référence ${d.reference}`"
+                    @click.stop="copyDealReference(d.reference)">
+                    {{ copiedReference === d.reference ? '✓' : '⧉' }}
+                  </button>
+                </div>
+                <div class="deal-card__identity-meta">
+                  <span v-if="d.product_type" class="font-medium text-slate-400">
+                    {{ d.product_type }}
+                  </span>
+                  <span v-if="d.product_type && d.contrepartie" class="text-slate-600">·</span>
+                  <span class="text-slate-300">{{ d.contrepartie }}</span>
+                  <span class="text-[10px] border rounded px-1.5 py-0.5"
+                    :class="d.fixing_policy === 'FOUR_EYES'
+                      ? 'border-amber-800/60 bg-amber-950/30 text-amber-400'
+                      : 'border-blue-800/60 bg-blue-950/30 text-blue-400'">
+                    {{ d.fixing_policy === 'FOUR_EYES' ? 'Contrôle 4 yeux' : 'Yahoo auto' }}
+                  </span>
+                  <span :class="statusClass(d.status)" class="badge uppercase">
+                    {{ d.status }}
+                  </span>
+                </div>
+              </div>
+              <div class="deal-card__actions" @click.stop>
+                <select v-if="canAssignPortfolio(d)"
+                  class="select deal-card__portfolio text-[10px] py-1"
+                  :value="d.portfolio_id ? String(d.portfolio_id) : ''"
                   @click.stop @change="assignDealPortfolio(d.id, $event.target.value)"
                   title="Portefeuille auquel ce deal est rangé — utilisé pour l'agrégation des Greeks">
                   <option v-for="p in portfolios" :key="p.id" :value="String(p.id)">
                     {{ p.is_default ? '⭐ ' : '' }}{{ p.name }}
                   </option>
                 </select>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
+                <span v-else class="deal-card__portfolio-label"
+                  title="Portefeuille du propriétaire du deal — modification réservée au propriétaire">
+                  {{ d.portfolio_id ? `PF #${d.portfolio_id}` : 'Sans PF' }}
+                </span>
                 <select v-if="d.status === 'actif'" class="select text-xs py-1"
                   :value="mtmMode[d.id] || 'booking'" @click.stop
                   @change="mtmMode[d.id] = $event.target.value"
@@ -904,6 +915,7 @@ import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
 import { usePortfoliosStore, shockPresets, blankShockForm } from '../stores/portfolios.js'
+import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
 import HelpTip from '../components/HelpTip.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
@@ -917,6 +929,7 @@ import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
 const route = useRoute()
 const dealsStore = useDealsStore()
 const portfoliosStore = usePortfoliosStore()
+const authStore = useAuthStore()
 
 // Portfolio list & deal→portfolio assignment live in the shared store (the
 // Risk Management module is the primary owner) — Booking only reads the list
@@ -926,6 +939,10 @@ const shockHistory = portfoliosStore.shockHistory
 
 function assignDealPortfolio(dealId, rawValue) {
   return portfoliosStore.assignDeal(dealId, rawValue)
+}
+
+function canAssignPortfolio(deal) {
+  return deal.user_id === authStore.user?.id
 }
 
 const activeTab = ref('watchlist')
@@ -1002,8 +1019,24 @@ async function onAutoExceptionResolved(result) {
 }
 
 async function toggleDetail(id) {
-  expanded[id] = !expanded[id]
-  if (expanded[id] && !details[id]) await loadDetail(id)
+  const opening = !expanded[id]
+  expanded[id] = opening
+  if (!opening) return
+  if (!details[id]) await loadDetail(id)
+  await focusDealCard(id)
+}
+
+async function focusDealCard(id) {
+  await nextTick()
+  await new Promise(resolve => window.requestAnimationFrame(resolve))
+  const card = document.getElementById(`deal-${id}`)
+  if (!card) return
+  const scrollContainer = card.closest('main')
+  const availableHeight = (scrollContainer?.clientHeight || window.innerHeight) - 48
+  card.scrollIntoView({
+    behavior: 'smooth',
+    block: card.offsetHeight <= availableHeight ? 'center' : 'start',
+  })
 }
 
 async function loadDetail(id) {
@@ -1442,6 +1475,22 @@ const watchlistByUrgency = computed(() =>
   )
 )
 
+const UAT_BATCH_SUFFIX = /\s*\[\d{8}-\d{6}-[A-Z0-9]+\]\s*$/i
+
+function watchlistProductName(row) {
+  const rawName = String(row?.product_name || '')
+    .replace(UAT_BATCH_SUFFIX, '')
+    .trim()
+  if (!rawName) return ''
+
+  const productType = String(row?.product_type || '').trim().toLocaleLowerCase('fr-FR')
+  return rawName
+    .split(/\s+—\s+/)
+    .map(part => part.trim())
+    .filter(part => part && (!productType || part.toLocaleLowerCase('fr-FR') !== productType))
+    .join(' — ')
+}
+
 // Mêmes filtres que l'onglet Deals, sur les axes que porte la watchlist —
 // voir composables/useDataFilter.
 const wlFilterFields = [
@@ -1456,7 +1505,7 @@ const wlFilterFields = [
 const wlSorts = [
   { key: 'days_to_next', label: 'Prochaine obs.' },
   { key: 'reference', label: 'Référence' },
-  { key: 'product_name', label: 'Produit' },
+  { key: 'product_name', label: 'Produit', get: watchlistProductName },
   { key: 'min_gap', label: 'Barrière la plus proche' },
 ]
 const wlFilter = useDataFilter(watchlistByUrgency, wlFilterFields, { sorts: wlSorts })
@@ -1469,8 +1518,7 @@ async function openDealDetail(id) {
   activeTab.value = 'deals'
   expanded[id] = true
   if (!details[id]) await loadDetail(id)
-  await nextTick()
-  document.getElementById(`deal-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  await focusDealCard(id)
 }
 
 // barrierChipClass/barrierGapLabel now live in utils/barriers.js — shared
@@ -1634,3 +1682,70 @@ onMounted(async () => {
   if (dealId) openDealDetail(dealId)
 })
 </script>
+
+<style scoped>
+.deal-card--alternate {
+  background: var(--surface2);
+}
+
+.deal-card__header {
+  display: grid;
+  grid-template-columns: minmax(15rem, 1fr) max-content;
+  align-items: start;
+  gap: 0.75rem;
+}
+
+.deal-card__identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.deal-card__identity-meta {
+  display: flex;
+  min-height: 1.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 1.25rem;
+  font-size: 0.75rem;
+}
+
+.deal-card__actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-self: end;
+  gap: 0.5rem;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 0.125rem;
+  scrollbar-width: thin;
+}
+
+.deal-card__portfolio {
+  width: 7rem;
+  max-width: 7rem;
+}
+
+.deal-card__portfolio-label {
+  width: 4.75rem;
+  flex: 0 0 4.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.4rem;
+  color: var(--muted);
+  font-size: 0.625rem;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .deal-card__header {
+    grid-template-columns: minmax(10rem, 1fr) minmax(0, 2fr);
+  }
+}
+</style>

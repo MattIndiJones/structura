@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import Entity, User
+from ..core.workflow import amendment_four_eyes_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +215,10 @@ def me(current: Annotated[User, Depends(get_current_user)]):
         "email": current.email,
         "role": current.role,
         "entity_id": current.entity_id,
+        # Deployment-wide governance, not a per-user right: the UI needs it to
+        # decide whether an amendment must be handed to somebody else or can be
+        # carried through by whoever opened it (see core/workflow.py).
+        "amendment_four_eyes": amendment_four_eyes_enabled(),
     }
 
 

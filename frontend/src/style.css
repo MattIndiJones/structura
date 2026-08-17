@@ -13,8 +13,8 @@
   /* Neutres (remplace slate) — 950=fond crème, 900=carte blanche, 100/50=encre */
   --n-50: 20 18 16;      --n-100: 26 24 20;     --n-200: 46 42 36;
   --n-300: 74 69 60;     --n-400: 107 101 90;   --n-500: 122 116 105;
-  --n-600: 163 157 146;  --n-700: 204 200 191;  --n-800: 226 221 214;
-  --n-900: 255 255 255;  --n-950: 240 238 232;
+  --n-600: 163 157 146;  --n-700: 210 206 196;  --n-800: 229 226 219;
+  --n-900: 255 255 255;  --n-950: 250 249 246;
 
   /* Bleu finance (remplace blue/brand) */
   --a-50: 244 248 253;   --a-100: 232 240 251;  --a-200: 215 229 247;
@@ -41,8 +41,8 @@
   --gld-900: 246 236 208; --gld-950: 253 246 227;
 
   /* Alias sémantiques — usage direct en CSS (hors utilities Tailwind) */
-  --bg: #f0eee8;             --surface: #ffffff;        --surface2: #f7f5f0;
-  --border: #e2ddd6;         --border2: #ccc8bf;
+  --bg: #faf9f6;             --surface: #ffffff;        --surface2: #f2efe9;
+  --border: #e5e2db;         --border2: #d2cec4;
   --text: #1a1814;           --muted: #7a7469;          --subtle: #9a9488;
   --accent: #1a5fa0;         --accent-vivid: #2563eb;   --accent-light: #e8f0fb;
   --positive: #1a7a4a;       --positive-light: #e8f5ee;
@@ -57,7 +57,14 @@
 }
 
 @layer base {
-  body { @apply bg-slate-950 text-slate-100; }
+  body {
+    @apply bg-slate-950 text-slate-100;
+    background-image:
+      linear-gradient(to right, rgba(11, 26, 49, .028) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(11, 26, 49, .028) 1px, transparent 1px);
+    background-size: 64px 64px;
+    background-attachment: fixed;
+  }
 
   /* Anneau de focus visible global — accessibilité clavier, cohérent partout
      (les .input/.select gardent en plus leur propre traitement de bordure). */

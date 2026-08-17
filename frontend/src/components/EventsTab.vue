@@ -419,7 +419,8 @@
           <div>
             <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Amendements gouvernés</h2>
             <p class="text-[10px] text-slate-600 mt-0.5">
-              Maker distinct du checker · version contractuelle · application exactement une fois
+              <span v-if="authStore.user?.amendment_four_eyes">Maker distinct du checker · </span>
+              version contractuelle · application exactement une fois · motif et piste d'audit
             </p>
           </div>
         </div>
@@ -433,7 +434,9 @@
           </select>
           <input v-model="amendmentForm.new_value" class="input text-xs" placeholder="Nouvelle valeur" />
           <input v-model="amendmentForm.reason" class="input text-xs" placeholder="Motif contractuel détaillé" />
-          <button class="btn-secondary text-xs" @click="createAmendment">Soumettre au checker</button>
+          <button class="btn-secondary text-xs" @click="createAmendment">
+            {{ authStore.user?.amendment_four_eyes ? 'Soumettre au checker' : 'Créer la demande' }}
+          </button>
         </div>
         <div v-if="!deal.amendment_requests?.length" class="text-xs text-slate-600">Aucun amendement.</div>
         <div v-else class="flex flex-col gap-2">
@@ -1000,6 +1003,12 @@ function amendmentStatusClass(status) {
 }
 
 function canCheck(request) {
+  // Le contrôle à quatre yeux est une politique de déploiement (voir
+  // core/workflow.py:amendment_four_eyes_enabled, remontée par /auth/me).
+  // Désactivé — le cas par défaut sur un poste mono-opérateur — celui qui a
+  // ouvert la demande peut la mener à son terme ; tout le reste (versionnement
+  // contractuel, refus sur version périmée, piste d'audit) est inchangé.
+  if (!authStore.user?.amendment_four_eyes) return isDealOwner.value
   return ['checker', 'admin'].includes(authStore.user?.role) &&
     request.requested_by !== authStore.user?.id
 }

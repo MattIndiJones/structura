@@ -25,7 +25,7 @@ from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import Deal, Portfolio, ShockRun, User, position_sign
 from .auth import get_current_user
-from .deals import _mtm_core, MtmRequest
+from .deals import _can_access_deal, _mtm_core, MtmRequest
 from ..core.amc_prices import fx_rate_to
 
 router = APIRouter(tags=["shocks"])
@@ -227,7 +227,7 @@ def shock_deal(
     n_paths: int = 20000,
 ):
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     result = _run_shock_on_deal(deal, session, n_paths, body)
     run = _persist_shock(session, current.id, "deal", body, result, deal_id=deal_id)

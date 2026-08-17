@@ -12,6 +12,15 @@ from ..services.lifecycle_alerts import refresh_book
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 
+def _admin(current: User) -> bool:
+    return getattr(current, "role", None) == "admin"
+
+
+def _visible_alerts(current: User):
+    statement = select(Alert)
+    return statement if _admin(current) else statement.where(Alert.user_id == current.id)
+
+
 def _alert_row(a: Alert) -> dict:
     return {
         "id": a.id,
@@ -31,12 +40,12 @@ def list_alerts(
     unread_only: bool = False,
     limit: int = 100,
 ):
-    q = select(Alert).where(Alert.user_id == current.id)
+    q = _visible_alerts(current)
     if unread_only:
         q = q.where(Alert.read == False)   # noqa: E712
     rows = session.exec(q.order_by(Alert.created_at.desc()).limit(limit)).all()
     unread = len(session.exec(
-        select(Alert).where(Alert.user_id == current.id, Alert.read == False)   # noqa: E712
+        _visible_alerts(current).where(Alert.read == False)   # noqa: E712
     ).all())
     return {"unread": unread, "alerts": [_alert_row(a) for a in rows]}
 
@@ -48,7 +57,7 @@ def mark_read(
     session: Annotated[Session, Depends(get_session)],
 ):
     alert = session.get(Alert, alert_id)
-    if not alert or alert.user_id != current.id:
+    if not alert or (not _admin(current) and alert.user_id != current.id):
         raise HTTPException(404, "Alerte introuvable")
     alert.read = True
     session.add(alert)
@@ -62,7 +71,7 @@ def mark_all_read(
     session: Annotated[Session, Depends(get_session)],
 ):
     rows = session.exec(
-        select(Alert).where(Alert.user_id == current.id, Alert.read == False)   # noqa: E712
+        _visible_alerts(current).where(Alert.read == False)   # noqa: E712
     ).all()
     for a in rows:
         a.read = True
@@ -76,6 +85,9 @@ def refresh_whole_book(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    """Same pass as the nightly scheduler, restricted to the current user's
-    active deals — one Yahoo fetch per deal, so a few seconds on a big book."""
-    return refresh_book(session, user_id=current.id)
+    """Same pass as the nightly scheduler.
+
+    Administrators operate the full book they can see (including UAT deals
+    owned by the selected target user); regular users keep an owner-only pass.
+    """
+    return refresh_book(session, user_id=None if _admin(current) else current.id)

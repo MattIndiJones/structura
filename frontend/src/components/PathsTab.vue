@@ -82,6 +82,24 @@ const COLORS = {
   normal:   { stroke: 'rgba(122,116,105,0.30)', solid: chartTheme.ticks, label: 'Remboursement normal' },
 }
 
+const axisNumber = (value, ticks, maxDecimals = 2) => {
+  const numericValue = Number(value)
+  const values = ticks
+    .map(tick => Number(tick.value))
+    .filter(Number.isFinite)
+  const steps = values
+    .slice(1)
+    .map((current, index) => Math.abs(current - values[index]))
+    .filter(step => step > 0)
+  const step = steps.length > 0 ? Math.min(...steps) : 1
+  const decimals = step >= 1 ? 0 : step >= 0.1 ? 1 : maxDecimals
+
+  return numericValue.toLocaleString('fr-FR', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })
+}
+
 const legend = computed(() => {
   if (!store.paths) return []
   const { autocall_count, ki_count, normal_count, total } = store.paths
@@ -142,18 +160,30 @@ async function renderChart() {
         legend: { display: false },
         tooltip: {
           mode: 'nearest', intersect: false,
-          callbacks: { label: it => `${it.raw.y.toFixed(1).replace('.', ',')}% à T=${it.raw.x.toFixed(2).replace('.', ',')}Y` },
+          callbacks: {
+            label: it => `${it.raw.y.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} % à T=${it.raw.x.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} an`,
+          },
         },
       },
       scales: {
         x: {
           type: 'linear', min: 0, max: T,
           title: { display: true, text: 'Temps (années)', font: { size: 9 } },
-          ticks: { font: { size: 9 }, callback: v => v + 'Y' },
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: 7,
+            maxRotation: 0,
+            font: { size: 9 },
+            callback: (value, _index, ticks) => axisNumber(value, ticks, 2),
+          },
         },
         y: {
           title: { display: true, text: yAxisLabel.value, font: { size: 9 } },
-          ticks: { font: { size: 9 }, callback: v => v + '%' },
+          ticks: {
+            maxTicksLimit: 7,
+            font: { size: 9 },
+            callback: (value, _index, ticks) => `${axisNumber(value, ticks)} %`,
+          },
         },
       },
     }, demo.enabled),

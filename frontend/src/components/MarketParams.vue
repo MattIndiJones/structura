@@ -21,20 +21,20 @@
     <!-- ── Paramètres globaux ─────────────────────────────────────── -->
     <div class="card">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Paramètres Monte Carlo</h2>
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div class="mc-params-grid grid grid-cols-2 sm:grid-cols-3 gap-3">
 
         <!-- Contexte marché -->
         <div class="col-span-2 sm:col-span-3 text-[10px] font-semibold text-slate-600 uppercase tracking-wider -mb-1">
           Contexte marché
         </div>
-        <div>
+        <div class="mc-param-field">
           <label class="label">Devise deal
             <HelpTip text="Éditable dans l'onglet Deal (carte Identité) — affichée ici en lecture seule pour contexte." />
           </label>
           <input :value="store.globalParams.deal_ccy" type="text"
             class="input bg-slate-800/40 text-slate-500 cursor-not-allowed" readonly />
         </div>
-        <div>
+        <div class="mc-param-field">
           <label class="label">Taux sans risque (%)
             <HelpTip text="Taux utilisé pour actualiser les flux futurs (valeur présente) et comme drift risque-neutre des trajectoires simulées. Un taux constant unique ici, sauf si vous activez une courbe de taux plus bas." />
           </label>
@@ -42,15 +42,15 @@
             <input v-model.number="store.globalParams.r" type="number" step="0.1" class="input" />
           </SensitiveValue>
         </div>
-        <div>
+        <div class="mc-param-field">
           <label class="label">Maturité (Y)
             <HelpTip v-if="store.scriptConstats.length > 0" text="Le script utilise CONSTAT — la maturité réelle est dictée par le calendrier (la date la plus tardive parmi les événements résolus, éditable dans l'onglet Deal), pas par ce champ." />
             <HelpTip v-else text="Horizon de simulation en années. Si le script a des dates AT qui dépassent cette valeur, le pricer étend automatiquement l'horizon effectif (voir t_max_effective dans les résultats) — ce champ est un minimum, pas un plafond strict." />
           </label>
           <div v-if="store.scriptConstats.length > 0"
-               class="input bg-slate-800/40 text-slate-500 cursor-not-allowed flex items-center justify-between">
-            <span>Calendrier (CONSTAT)</span>
-            <span v-if="store.result?.t_max_effective" class="font-mono text-slate-400">
+               class="input bg-slate-800/40 text-slate-500 cursor-not-allowed flex items-center justify-between gap-2">
+            <span class="truncate">Calendrier deal</span>
+            <span v-if="store.result?.t_max_effective" class="font-mono text-slate-400 shrink-0">
               {{ formatNumber(store.result.t_max_effective, 2) }} Y
             </span>
           </div>
@@ -61,7 +61,7 @@
         <div class="col-span-2 sm:col-span-3 text-[10px] font-semibold text-slate-600 uppercase tracking-wider -mb-1 mt-1">
           Modèle
         </div>
-        <div>
+        <div class="mc-param-field">
           <label class="label">Modèle vol
             <HelpTip width="w-72" text="Constant (GBM) : volatilité fixe, le plus rapide, suffisant pour la plupart des produits. Heston/SABR : volatilité stochastique avec smile, à utiliser si le produit est sensible au smile (barrières proches de la monnaie, options digitales). Local Vol (Dupire) : calibré sur un skew/convexité paramétriques, réconcilie exactement les prix vanille au marché mais avec une dynamique de skew forward peu réaliste. Local-Stochastic Vol : combine les deux — calibré comme Local Vol, dynamique de skew forward réaliste comme Heston. Recommandé pour les barrières/autocalls, plus lent à calculer." />
           </label>
@@ -73,18 +73,18 @@
             <option value="lsv">Local-Stochastic Vol</option>
           </select>
         </div>
-        <div>
+        <div class="mc-param-field">
           <label class="label">Modèle de taux
             <HelpTip width="w-72" text="Déterministe : taux constant, pas de risque de taux dans le pricing (rho sera nul). Stochastique ABM/Hull-White : simule un taux court aléatoire — nécessaire si le produit a une sensibilité réelle aux taux (durée longue, flux différés) ou si vous voulez calculer un rho non trivial." />
           </label>
           <select v-model="store.globalParams.rateModel" class="select">
-            <option value="deterministic">Déterministe (r constant)</option>
-            <option value="abm">Stochastique ABM (corrélé actions)</option>
-            <option value="hull_white">Hull-White (mean-reverting)</option>
+            <option value="deterministic">Déterministe (plat)</option>
+            <option value="abm">ABM stochastique</option>
+            <option value="hull_white">Hull-White</option>
           </select>
         </div>
         <template v-if="store.globalParams.rateModel !== 'deterministic'">
-          <div>
+          <div class="mc-param-field">
             <label class="label">σ taux (%/an)
               <HelpTip text="Vol du facteur de taux stochastique, partagé par tous les sous-jacents. La corrélation taux-spot par actif se règle via ρ(r,S) sur chaque sous-jacent." />
             </label>
@@ -92,7 +92,7 @@
               <input v-model.number="store.globalParams.sigma_r" type="number" step="0.1" min="0" class="input" />
             </SensitiveValue>
           </div>
-          <div v-if="store.globalParams.rateModel === 'hull_white'">
+          <div v-if="store.globalParams.rateModel === 'hull_white'" class="mc-param-field">
             <label class="label">a (retour à la moyenne)
               <HelpTip text="Vitesse de retour à la moyenne du taux court (Hull-White). Plus a est grand, plus le taux revient vite vers la courbe forward. Demi-vie ≈ ln(2)/a." />
             </label>
@@ -106,7 +106,7 @@
         <div class="col-span-2 sm:col-span-3 text-[10px] font-semibold text-slate-600 uppercase tracking-wider -mb-1 mt-1">
           Mécanique moteur
         </div>
-        <div>
+        <div class="mc-param-field">
           <label class="label">N simulations
             <HelpTip text="Nombre de trajectoires Monte Carlo. Plus N est grand, plus l'intervalle de confiance du prix (IC95%) est étroit, mais le temps de calcul croît linéairement — 20 000 est un bon compromis pour explorer, montez à 50-100k pour un prix final à figer." />
           </label>
@@ -118,7 +118,7 @@
             <option :value="100000">100 000</option>
           </select>
         </div>
-        <div>
+        <div class="mc-param-field">
           <label class="label">Seed
             <HelpTip text="Graine du générateur aléatoire — fixe le tirage des trajectoires. Deux runs avec le même seed et les mêmes paramètres donnent exactement le même prix (reproductible pour du débogage ou une comparaison A/B), un seed différent donne un résultat légèrement différent (bruit Monte Carlo)." />
           </label>
@@ -126,13 +126,13 @@
             <input v-model.number="store.globalParams.seed" type="number" step="1" class="input" />
           </SensitiveValue>
         </div>
-        <div>
+        <div class="mc-param-field">
           <label class="label">Monitoring barrières
             <HelpTip width="w-72" text="Hebdomadaire : les extrema (WOF_MIN, S_MIN, BOF_MAX) sont observés aux pas de la grille MC (52/an) — une barrière contractuellement continue ou daily est alors sous-estimée. Continu : un pont brownien reconstitue les extrema intra-pas — P(KI) plus élevée, la jambe put d'un autocall est mieux valorisée. Les valeurs aux dates d'observation (WOF, fixings) restent inchangées." />
           </label>
           <select v-model="store.globalParams.barrierMonitoring" class="select">
-            <option value="weekly">Hebdomadaire (grille MC)</option>
-            <option value="continuous">Continu (pont brownien)</option>
+            <option value="weekly">Hebdo. (grille MC)</option>
+            <option value="continuous">Continu (pont)</option>
           </select>
         </div>
       </div>
@@ -388,6 +388,18 @@ function setCorr(i, j, val) {
 </script>
 
 <style scoped>
+.mc-param-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mc-param-field > .label {
+  min-height: 2rem;
+  display: flex;
+  align-items: flex-start;
+  gap: .25rem;
+  line-height: 1.25;
+}
 .greek-chk {
   @apply inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700
          text-xs font-semibold text-slate-400 cursor-pointer bg-slate-800/50

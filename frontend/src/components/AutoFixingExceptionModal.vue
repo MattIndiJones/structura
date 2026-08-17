@@ -88,12 +88,22 @@
       </div>
 
       <div class="flex flex-col gap-1">
-        <label class="label">Motif de la décision</label>
+        <label class="label">
+          Motif de la décision
+          <span v-if="reasonOptional" class="font-normal text-slate-500">— facultatif</span>
+        </label>
         <textarea v-model="form.reason" rows="3" class="input resize-y"
-          placeholder="Décris le contrôle effectué et pourquoi cette valeur doit devenir officielle (10 caractères minimum)."></textarea>
+          :placeholder="reasonOptional
+            ? 'Facultatif : reprendre la clôture Yahoo ne demande pas de justification.'
+            : 'Décris le contrôle effectué et pourquoi cette valeur doit devenir officielle (10 caractères minimum).'"></textarea>
         <div class="text-[10px] text-slate-600">
           L’ancienne version reste dans l’historique ; aucun fixing officiel n’est écrasé.
         </div>
+      </div>
+
+      <div v-if="blockingReason && !submitting"
+        class="rounded-lg border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-amber-300">
+        {{ blockingReason }}
       </div>
 
       <div v-if="error" class="rounded-lg border border-red-800/60 bg-red-950/30 px-3 py-2 text-red-300 whitespace-pre-line">
@@ -148,20 +158,66 @@ const exceptionExplanation = computed(() => {
   return 'Les contrôles automatiques n’autorisent pas l’application de cette constatation.'
 })
 
-const canSubmit = computed(() => {
-  if (form.reason.trim().length < 10) return false
-  if (form.action !== 'REPLACE_MANUAL') return true
-  if (form.source_reference.trim().length < 3) return false
-  return (props.deal?.underlyings || []).every(underlying => {
-    const value = Number(form.spots[underlying.name])
-    return Number.isFinite(value) && value > 0
-  })
+function missingSpots(source) {
+  return (props.deal?.underlyings || []).filter(underlying => {
+    const value = Number((source || {})[underlying.name])
+    return !Number.isFinite(value) || value <= 0
+  }).map(underlying => underlying.ticker || underlying.name)
+}
+
+// Why the submit button is dead, in the operator's words. Doubles as the
+// canSubmit predicate so the two can never disagree — the button used to go
+// grey with the 10-character rule living only in a placeholder that vanishes
+// as soon as you type, leaving no way to find out what was missing.
+// The action-specific checks come first on purpose: "there is nothing to
+// confirm" is a more useful thing to read than "write a longer motive".
+const blockingReason = computed(() => {
+  if (form.action === 'USE_YAHOO' && missingSpots(props.event?.indicative_spots).length) {
+    return `Aucune valeur Yahoo n’est disponible pour ${missingSpots(props.event?.indicative_spots).join(', ')}. `
+      + 'Passe par « Corriger manuellement » pour saisir le fixing et sa source.'
+  }
+  // CONFIRM_CURRENT on an empty fixing would officialise a void value — the
+  // one thing the four-eyes ledger must never record.
+  if (form.action === 'CONFIRM_CURRENT' && missingSpots(props.event?.spots).length) {
+    return `Il n’y a aucune valeur courante à confirmer pour ${missingSpots(props.event?.spots).join(', ')}. `
+      + 'Passe par « Corriger manuellement » pour saisir le fixing et sa source.'
+  }
+  if (form.action === 'REPLACE_MANUAL') {
+    const missing = missingSpots(form.spots)
+    if (missing.length) {
+      return `Renseigne un fixing strictement positif pour ${missing.join(', ')}.`
+    }
+    if (form.source_reference.trim().length < 3) {
+      return 'La source ou référence contrôlée est obligatoire (3 caractères minimum).'
+    }
+  }
+  // Accepting the automatic source is not a deviation, so it needs no written
+  // motive — requiring one meant typing ten characters to agree with the
+  // machine. The backend applies the same rule, and still demands a motive if
+  // the reprise overrides a soft control, which it answers with a 422.
+  if (form.action === 'USE_YAHOO') return ''
+  const written = form.reason.trim().length
+  if (written < 10) {
+    return `Le motif de la décision est obligatoire : ${written} caractère${written > 1 ? 's' : ''} `
+      + 'saisi'+ (written > 1 ? 's' : '') + ' sur 10 minimum.'
+  }
+  return ''
 })
+
+const reasonOptional = computed(() => form.action === 'USE_YAHOO')
+
+const canSubmit = computed(() => !blockingReason.value)
 
 function reset() {
   error.value = ''
+  // Land on the only action that can actually go through: Yahoo if there is a
+  // reading to take, confirmation if a current value exists, manual entry
+  // otherwise. Defaulting to CONFIRM_CURRENT on an event with no value at all
+  // opened the modal already stuck.
   form.action = Object.keys(props.event?.indicative_spots || {}).length
-    ? 'USE_YAHOO' : 'CONFIRM_CURRENT'
+    ? 'USE_YAHOO'
+    : (Object.keys(props.event?.spots || {}).length
+        ? 'CONFIRM_CURRENT' : 'REPLACE_MANUAL')
   form.spots = Object.fromEntries((props.deal?.underlyings || []).map(
     underlying => [underlying.name, props.event?.spots?.[underlying.name] ?? '']))
   form.source_reference = ''

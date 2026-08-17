@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import random
 import uuid
 from datetime import date, datetime, timedelta
@@ -23,8 +24,8 @@ from sqlmodel import Session, select
 from ..api import deals as deals_api
 from ..api import rfq as rfq_api
 from ..core.audit import record_audit_event
-from ..core.lifecycle_controls import replay_official_fixings
-from ..core.workflow import DataCategory, FixingStatus, LifecycleStatus
+from ..core.compute.executor import run_batch
+from ..core.workflow import DataCategory
 from ..db.models import (
     Alert, Counterparty, Deal, DealContractVersion, DealEvent,
     Document, EmtRecord, KidRecord, LifecycleProposal, OfficialFixingVersion,
@@ -55,11 +56,16 @@ UNDERLYINGS = [
      "sigma": 0.26, "q": 0.020},
 ]
 
+# Paths per UAT pricing run. The probe that motivated real pricing measured a
+# 95% half-width around 0.1 to 0.3 point of notional here — far finer than a
+# fixture needs, while keeping a deal under ~5 s so a batch stays bearable.
+UAT_PRICING_PATHS = 20_000
+
 MODES = ("RFQ_ONLY", "BOOKED_ONLY", "FULL_CHAIN")
 RFQ_PROFILES = ("EXECUTABLE", "CONTROL_MIX")
 
 LIFECYCLE_PROFILES = {
-    "CURRENT_ACTIVE": "Trade du jour — actif",
+    "CURRENT_ACTIVE": "Trade récent — actif",
     "FORWARD_START": "Forward start à 3 mois",
     "ACTIVE_1Y_PENDING": "Trade ancien 1 an — fixings en attente",
     "ACTIVE_2Y_OFFICIAL": "Trade ancien 2 ans — fixings officialisés",
@@ -299,34 +305,80 @@ def _profile_tenor_floor(profile: str, family: str) -> float:
     return floor
 
 
+def _to_business_day(value: date) -> date:
+    """Snap a generated date back to the nearest preceding weekday.
+
+    _profile_dates is pure calendar arithmetic, so roughly two dates in seven
+    used to land on a weekend — and a strike on Sunday 2023-08-06 has no close
+    on any index, so its fixing can never be resolved, automatically or
+    manually: the deal is born stuck. Rolling *backwards* rather than forwards
+    keeps a maturity inside its own schedule instead of pushing it past its
+    payment date. Public holidays stay unhandled on purpose: they are ~3% of
+    sessions, and unlike a weekend they differ per exchange in a basket."""
+    while value.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        value -= timedelta(days=1)
+    return value
+
+
 def _profile_dates(profile: str, tenor: float, today: date) -> tuple[date, date, date]:
+    # Historical anchors are pushed a few days past the round anniversary. An
+    # exact multiple of 365 makes the annual observation schedule land back on
+    # today's date, and today has no close published yet — so that observation
+    # came back as a YAHOO_CLOSE_NOT_PUBLISHED exception and stayed empty,
+    # which is the same trap a same-day strike falls into.
+    _CLEAR = 5
     if profile == "FORWARD_START":
         strike = today + timedelta(days=90)
         trade = today
     elif profile == "ACTIVE_1Y_PENDING":
-        strike = today - timedelta(days=365)
+        strike = today - timedelta(days=365 + _CLEAR)
         trade = strike
     elif profile == "ACTIVE_2Y_OFFICIAL":
-        strike = today - timedelta(days=2 * 365)
+        strike = today - timedelta(days=2 * 365 + _CLEAR)
         trade = strike
     elif profile == "CALLED":
         # Two elapsed years guarantee at least one truly reached observation,
         # including an annual schedule whose first resolved date is shifted by
         # the contract-calendar resolver.
-        strike = today - timedelta(days=2 * 365)
+        strike = today - timedelta(days=2 * 365 + _CLEAR)
         trade = strike
     elif profile in {"MATURED_PENDING", "MATURED_FINAL", "MATURED_KI"}:
         strike = today - timedelta(days=round((tenor + 0.25) * 365.25))
         trade = strike
+    elif profile == "CURRENT_ACTIVE":
+        # Struck one business day back, but traded today. A deal struck *today*
+        # has no close to fix S0 against until tonight, so this fixture arrived
+        # — and stayed, all session — with every constatation empty and nothing
+        # an operator could do about it. The trade date has to stay today
+        # though: _age_generated_records only ages an RFQ whose trade is in the
+        # past, so this profile is also what keeps a fresh, bookable RFQ in the
+        # control mix. Moving both broke that.
+        strike = today - timedelta(days=1)
+        trade = today
     else:
         strike = today
         trade = today
-    maturity = strike + timedelta(days=round(tenor * 365.25))
+    strike = _to_business_day(strike)
+    trade = _to_business_day(trade)
+    maturity = _to_business_day(strike + timedelta(days=round(tenor * 365.25)))
     return trade, strike, maturity
 
 
+def _phoenix_period_coupon(coupon: float, period_years: float) -> float:
+    """Phoenix coupon actually paid at ONE observation, from an annual rate.
+
+    The Phoenix pays `CPN * COUPON` at *every* observation, so an un-scaled
+    coupon makes the price a function of the observation frequency rather
+    than of the product's economics: the same drawn 12% priced 110% annually,
+    139% semi-annually and 183% quarterly. Athena and Reverse Convertible
+    need no such scaling — they pay once (at call, then STOP; at maturity)
+    and are already frequency-invariant."""
+    return coupon * period_years
+
+
 def _product_script(family: str, coupon: float, ac_bar: float,
-                    coupon_bar: float, ki_bar: float, participation: float) -> str:
+                    coupon_bar: float, ki_bar: float, participation: float,
+                    period_years: float = 1.0) -> str:
     if family == "ATHENA":
         return f"""PARAM COUPON = {coupon:.2f}%
 PARAM M_AC_BAR = {ac_bar:.2f}%
@@ -344,7 +396,8 @@ AT MATURITY:
   PAY KI * WOF
 """
     if family == "PHOENIX":
-        return f"""PARAM COUPON = {coupon:.2f}%
+        period_coupon = _phoenix_period_coupon(coupon, period_years)
+        return f"""PARAM COUPON = {period_coupon:.4f}%  # {coupon:.2f}% p.a. sur {period_years:.2f} an
 PARAM M_AC_BAR = {ac_bar:.2f}%
 PARAM M_CPN_BAR = {coupon_bar:.2f}%
 PARAM M_KI_BAR = {ki_bar:.2f}%
@@ -404,8 +457,10 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
             first = strike + timedelta(
                 days=round(frequency_months * 365.25 / 12))
         else:
+            frequency_months = 12
             frequency = "1Y"
             first = maturity
+        period_years = frequency_months / 12
         count_underlyings = rng.randint(body.min_underlyings, body.max_underlyings)
         selected_underlyings = [dict(item) for item in rng.sample(universe, count_underlyings)]
         nominal = round(rng.uniform(body.nominal_min, body.nominal_max) / 10_000) * 10_000
@@ -416,7 +471,8 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
         ki_bar = float(rng.choice([50, 55, 60, 65, 70]))
         participation = float(rng.choice([80, 90, 100, 110, 120]))
         script = _product_script(
-            family, coupon, ac_bar, coupon_bar, ki_bar, participation)
+            family, coupon, ac_bar, coupon_bar, ki_bar, participation,
+            period_years)
         if family == "ATHENA":
             user_params = {
                 "COUPON": coupon / 100,
@@ -424,8 +480,10 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
                 "M_KI_BAR": ki_bar / 100,
             }
         elif family == "PHOENIX":
+            # Annualised: the drawn coupon is a yearly rate, the script pays
+            # its per-observation share. Must match _product_script's PARAM.
             user_params = {
-                "COUPON": coupon / 100,
+                "COUPON": _phoenix_period_coupon(coupon, period_years) / 100,
                 "M_AC_BAR": ac_bar / 100,
                 "M_CPN_BAR": coupon_bar / 100,
                 "M_KI_BAR": ki_bar / 100,
@@ -461,15 +519,16 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
                              for j in range(count_underlyings)]
                             for i in range(count_underlyings)],
         }
-        model_price = round(rng.uniform(97.0, 100.0), 2)
         fixing_policy = (rng.choice(["AUTO_YAHOO", "FOUR_EYES"])
                          if body.fixing_policy == "MIX" else body.fixing_policy)
         # Resolved and system-officialized fixtures exercise the production
-        # AUTO_YAHOO transition. FOUR_EYES remains available for pending cases.
+        # AUTO_YAHOO transition; the pending ones exercise the human path and
+        # are forced the other way, because a deliberately unresolved fixing on
+        # an automatic deal is a contradiction, not a test case.
         if lifecycle_profile in TERMINAL_PROFILES | {"ACTIVE_2Y_OFFICIAL"}:
             fixing_policy = "AUTO_YAHOO"
         profile_label = LIFECYCLE_PROFILES[lifecycle_profile]
-        ao_date = min(today, trade - timedelta(days=2))
+        ao_date = _to_business_day(min(today, trade - timedelta(days=2)))
         specs.append({
             "index": index,
             "family": family,
@@ -481,7 +540,11 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
             "ao_date": ao_date.isoformat(),
             "maturity_date": maturity.isoformat(),
             "payment_date": (maturity + timedelta(days=5)).isoformat(),
-            "model_price": model_price,
+            # Filled by _price_specs before anything is written. Left None here
+            # on purpose: preview_generation does not price (a batch of Monte
+            # Carlo runs is seconds, not milliseconds) and must never surface a
+            # made-up number, which is what a placeholder would become.
+            "model_price": None,
             "fixing_policy": fixing_policy,
             "lifecycle_profile": lifecycle_profile,
             "lifecycle_profile_label": profile_label,
@@ -493,6 +556,71 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
                              ][(index - 1) % 4]),
         })
     return specs
+
+
+def _price_specs(specs: list[dict], *, seed: int) -> None:
+    """Price every spec with the production engine, in place.
+
+    Replaces a `rng.uniform(97, 100)` draw that ignored the coupon, the
+    barriers, the tenor and the basket size alike — so every downstream
+    consumer of a fair value (residual MtM, P&L explain, the RFQ margin,
+    portfolio risk) was being exercised against a number carrying no
+    information about the product it was attached to.
+
+    Pricing at inception needs no historical market data, which is what makes
+    this cheap: the generated payoffs are all expressed in fractions of S0
+    (WOF, the M_* barriers, PAY in units of 1), so the price as a fraction of
+    notional is invariant to the spot level — only sigma, q, r, T and the
+    correlation matter, and UNDERLYINGS carries sigma and q per ticker.
+
+    Runs through core/compute so a batch spreads over processes (the engine is
+    pure-Python per path, the GIL would serialise threads): ~1 to 5 s per deal
+    sequentially, which a fifty-deal batch cannot afford.
+
+    A deal that fails to price raises rather than falling back to a default —
+    a silent fallback here would quietly reintroduce exactly the fictional
+    price this function exists to remove."""
+    if not specs:
+        return
+    jobs = []
+    for spec in specs:
+        params = spec["params"]
+        jobs.append((spec["index"], {
+            "script_text": spec["script"],
+            "underlyings": params["underlyings"],
+            "corr": params["corr_matrix"],
+            "r": params["r"],
+            "T": params["T"],
+            "n_paths": UAT_PRICING_PATHS,
+            "model": params["model"],
+            # Derived from the batch seed so a given seed keeps producing a
+            # given set of prices — the generator's reproducibility contract.
+            "seed": (seed * 100_003 + spec["index"]) % (2 ** 31 - 1),
+            "antithetic": True,
+            "user_params": params["user_params"],
+            "constat_values": params["constats"],
+            "value_date": params["value_date"],
+        }))
+
+    results = run_batch(
+        "payscript_reprice", jobs,
+        max_workers=max(1, min(8, (os.cpu_count() or 4))),
+    )
+    by_index = {result.job_id: result for result in results}
+    failures = []
+    for spec in specs:
+        result = by_index.get(spec["index"])
+        if result is None or not result.ok or result.result is None:
+            failures.append(
+                f"{spec['name']}: {result.error if result else 'aucun résultat'}")
+            continue
+        # The engine returns a fraction of notional; the whole booking chain
+        # (fair_value, quote prices, price_traded) speaks in percent.
+        spec["model_price"] = round(float(result.result["price"]) * 100, 2)
+    if failures:
+        raise RuntimeError(
+            "Pricing UAT impossible pour "
+            f"{len(failures)} produit(s) : {' | '.join(failures[:5])}")
 
 
 def preview_generation(body: UatGenerationRequest, session: Session) -> dict:
@@ -612,6 +740,37 @@ def _create_rfq(spec: dict, body: UatGenerationRequest, target: User,
     return session.get(RfqRequest, rfq.id), selected
 
 
+def _align_events_to_business_days(deal: Deal, session: Session) -> int:
+    """Move every booked observation off Saturday and Sunday.
+
+    _book_deal resolves the contract calendar by rolling year fractions, and
+    that resolver carries no business-day convention, so 22% of the events
+    this generator produced landed on a weekend — a date on which no index
+    has a close, hence a fixing no operator can ever resolve. Snapping the
+    anchors in _profile_dates is not enough: the intermediate observations
+    come from the resolver, not from the anchors.
+
+    Only event_date moves. t_years is left exactly as booked because it drives
+    the Monte-Carlo schedule and the official replay, and a shift of at most
+    two days on a multi-year schedule is immaterial there — which is precisely
+    how a real observation calendar behaves once its dates are adjusted.
+    Consecutive observations are a quarter apart at the tightest, so rolling
+    backwards can never make two of them collide."""
+    moved = 0
+    for event in session.exec(
+        select(DealEvent).where(DealEvent.deal_id == deal.id)
+    ).all():
+        current = date.fromisoformat(event.event_date)
+        aligned = _to_business_day(current)
+        if aligned != current:
+            event.event_date = aligned.isoformat()
+            session.add(event)
+            moved += 1
+    if moved:
+        session.flush()
+    return moved
+
+
 def _book(spec: dict, target: User, batch: UatGenerationBatch,
           session: Session, *, rfq: RfqRequest | None = None,
           selected: RfqQuote | None = None, counterparty: str) -> Deal:
@@ -657,176 +816,42 @@ def _book(spec: dict, target: User, batch: UatGenerationBatch,
         uat_batch_id=batch.id,
     )
     deal = session.get(Deal, deal_data["id"])
+    _align_events_to_business_days(deal, session)
     return deal
 
 
-def _event_spots(spec: dict, ratio: float) -> dict[str, float]:
-    return {
-        row["name"]: round(float(row["s0"]) * ratio, 8)
-        for row in spec["params"]["underlyings"]
-    }
+def _load_yahoo_fixings(deal: Deal, target: User, session: Session,
+                        result: dict) -> dict:
+    """Officialise, at generation time, everything Yahoo can already answer.
 
+    Generated deals used to arrive with every constatation empty, and the only
+    way to fill them was a Refresh the operator had to know to press — so the
+    whole fixture was useless for anything downstream of a fixing: residual
+    MtM, lifecycle resolution, P&L explain, valuation notes.
 
-def _attach_uat_official_fixing(
-    spec: dict,
-    deal: Deal,
-    event: DealEvent,
-    spots: dict[str, float],
-    target: User,
-    batch: UatGenerationBatch,
-    session: Session,
-) -> OfficialFixingVersion:
-    """Create the same immutable evidence ledger used by real fixings.
+    This calls the production path, the very one the Refresh button calls, so
+    a batch lands with its reachable closes already applied and its lifecycle
+    already resolved where it should be.
 
-    The values are deterministic synthetic fixtures, never presented as a
-    Yahoo download. Their governed state is nevertheless production-shaped,
-    so lifecycle replay and application exercise the real safety gates.
-    """
-    event.spots_json = json.dumps(spots, ensure_ascii=False, sort_keys=True)
-    observed_at = f"{event.event_date}T12:00:00+00:00"
-    evidence_payload = json.dumps({
-        "fixture": "STRUCTURA_UAT_OFFICIAL_FIXING",
-        "batch_key": batch.batch_key,
-        "deal_reference": deal.reference,
-        "event_index": event.event_index,
-        "event_date": event.event_date,
-        "profile": spec["lifecycle_profile"],
-        "spots": spots,
-    }, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    body = deals_api.EventUpdate(
-        spots=spots,
-        provider="UAT_SYNTHETIC",
-        source_type="UAT_FIXTURE",
-        external_reference=(
-            f"UAT-FIX-{batch.batch_key}-{deal.id}-{event.event_index}-V1"),
-        observed_at=observed_at,
-        venue="Synthetic UAT close",
-        calendar="UAT_DETERMINISTIC",
-        timezone="UTC",
-        evidence_sha256=hashlib.sha256(evidence_payload).hexdigest(),
-        evidence_filename=(
-            f"uat-{batch.batch_key}-{deal.id}-{event.event_index}.json"),
-        evidence_content_type="application/json",
-        evidence_payload_b64=base64.b64encode(evidence_payload).decode("ascii"),
-        reason=(
-            "Fixing synthétique déterministe créé exclusivement pour le test UAT."),
-    )
-    payload = deals_api._fixing_record_payload(
-        deal, event, body, version=1, supersedes_id=None)
-    now = datetime.utcnow()
-    version = OfficialFixingVersion(
-        deal_id=deal.id,
-        deal_event_id=event.id,
-        version=1,
-        status=FixingStatus.VALIDATED.value,
-        spots_json=event.spots_json,
-        provider=body.provider,
-        source_type=body.source_type,
-        external_reference=body.external_reference,
-        observed_at=datetime.fromisoformat(observed_at).replace(tzinfo=None),
-        venue=body.venue,
-        calendar=body.calendar,
-        timezone=body.timezone,
-        evidence_sha256=body.evidence_sha256,
-        evidence_filename=body.evidence_filename,
-        evidence_content_type=body.evidence_content_type,
-        evidence_size_bytes=len(evidence_payload),
-        evidence_payload_b64=body.evidence_payload_b64,
-        record_sha256=deals_api._fixing_record_hash(payload),
-        capture_reason=body.reason,
-        entered_by=target.id,
-        capture_actor_type="SYSTEM",
-        validation_reason="Auto-validation de la fixture UAT déterministe.",
-        validated_at=now,
-    )
-    session.add(version)
-    session.flush()
+    Only for profiles the generator leaves unresolved. The terminal and
+    officialised ones attach their own synthetic fixings to force a specific
+    outcome (a call at 1.15, a knock-in at 0.35); replaying them against real
+    Yahoo closes would contradict the very scenario they exist to produce.
 
-    event.current_fixing_version_id = version.id
-    event.fixing_version = version.version
-    event.fixing_entered_by = target.id
-    event.fixing_entered_at = now
-    event.fixing_provider = version.provider
-    event.fixing_source_type = version.source_type
-    event.fixing_external_reference = version.external_reference
-    event.fixing_observed_at = version.observed_at
-    event.fixing_venue = version.venue
-    event.fixing_calendar = version.calendar
-    event.fixing_timezone = version.timezone
-    event.fixing_evidence_sha256 = version.evidence_sha256
-    event.fixing_record_sha256 = version.record_sha256
-    event.fixing_reason = version.capture_reason
-    event.source = "auto"
-    event.status = "observé"
-    event.fixing_status = FixingStatus.VALIDATED.value
-    event.data_category = DataCategory.FIXING_OFFICIAL.value
-    event.validated_at = now
-    session.add(event)
-    record_audit_event(
-        session,
-        action="UAT_OFFICIAL_FIXING_CAPTURED",
-        object_type="DEAL_EVENT",
-        object_id=event.id,
-        actor_user_id=None,
-        actor_type="SYSTEM",
-        result="SUCCESS",
-        after={
-            "deal_reference": deal.reference,
-            "event_index": event.event_index,
-            "fixing_version_id": version.id,
-            "profile": spec["lifecycle_profile"],
-        },
-        reason="Fixture UAT officielle, versionnée et rejouable.",
-        data_source=DataCategory.FIXING_OFFICIAL,
-        correlation_id=f"uat:{batch.batch_key}",
-    )
-    return version
-
-
-def _mark_missing_historical_event(
-    spec: dict,
-    deal: Deal,
-    event: DealEvent,
-    target: User,
-    batch: UatGenerationBatch,
-    session: Session,
-) -> None:
-    event.spots_json = "{}"
-    event.source = "pending"
-    event.status = "futur"
-    event.fixing_status = FixingStatus.MISSING.value
-    event.data_category = DataCategory.UNKNOWN.value
-    session.add(event)
-    message = (
-        f"UAT — fixing manquant pour « {event.label} » au {event.event_date}. "
-        "L'utilisateur responsable doit renseigner tous les spots, la source, "
-        "la référence externe, l'heure observée, la place/calendrier/fuseau, "
-        "la preuve et le motif avant de poursuivre le lifecycle.")
-    session.add(Alert(
-        user_id=target.id,
-        deal_id=deal.id,
-        deal_reference=deal.reference,
-        kind="fixing_missing",
-        message=message,
-        dedup_key=f"uat-missing:{batch.id}:{deal.id}:{event.id}",
-    ))
-    record_audit_event(
-        session,
-        action="UAT_HISTORICAL_FIXING_MARKED_MISSING",
-        object_type="DEAL_EVENT",
-        object_id=event.id,
-        actor_user_id=None,
-        actor_type="SYSTEM",
-        result="SUCCESS",
-        after={
-            "deal_reference": deal.reference,
-            "event_index": event.event_index,
-            "fixing_status": event.fixing_status,
-            "profile": spec["lifecycle_profile"],
-        },
-        reason="Exception historique volontaire pour test utilisateur.",
-        correlation_id=f"uat:{batch.batch_key}",
-    )
+    A failure is recorded, not raised: Yahoo unreachable, or a close not yet
+    published, must not sink a whole batch — the deal is still valid, it just
+    has nothing to load yet."""
+    try:
+        outcome = deals_api._refresh_deal_core(
+            deal, session, actor_user_id=target.id)
+    except Exception as exc:  # provider outage, ticker gap, closed market
+        result["fixings_error"] = f"{type(exc).__name__}: {exc}"[:200]
+        return result
+    result["official_fixings"] = int(outcome.get("officialized") or 0)
+    result["pending_exceptions"] = len(outcome.get("exceptions") or [])
+    evaluation = outcome.get("evaluation") or {}
+    result["outcome"] = evaluation.get("outcome")
+    return result
 
 
 def _materialize_lifecycle_profile(
@@ -836,6 +861,22 @@ def _materialize_lifecycle_profile(
     batch: UatGenerationBatch,
     session: Session,
 ) -> dict:
+    """Give the deal its real observations and let the script say what happened.
+
+    Every profile used to attach a constant synthetic ratio to each reached
+    observation — 1.0 at the strike, then a flat 0.80, or 1.15 to force a call,
+    or 0.35 to force a knock-in — and then assert the very outcome it had just
+    engineered. Two things were wrong with that. The values were not a
+    trajectory: a deal showed 344 at three different dates because 344 is
+    0.80 x 430, which is not something a stock does. And every profile that
+    skipped the machinery got no strike fixing at all, so the barrier watchlist
+    had no S0 to measure against and computed nothing on four deals out of five.
+
+    There is one rule now: at each observation date, the underlying's actual
+    close, fetched through the production path. Whether a barrier is breached
+    follows from the script evaluating those values — it is not decided here.
+    A profile no longer forces an outcome; it decides how far back the deal was
+    traded, which is the part that was ever worth having."""
     profile = spec["lifecycle_profile"]
     events = list(session.exec(
         select(DealEvent).where(DealEvent.deal_id == deal.id)
@@ -852,66 +893,16 @@ def _materialize_lifecycle_profile(
         "outcome": None,
     }
 
-    if profile in {"CURRENT_ACTIVE", "FORWARD_START"}:
+    if not reached:
+        # FORWARD_START, and only it: even the strike is still ahead.
+        return result
+    if spec["fixing_policy"] != "AUTO_YAHOO":
+        # A controlled deal has no automatic source: its values are entered by
+        # hand. Nothing is invented for it here.
         return result
 
-    if profile in {"ACTIVE_1Y_PENDING", "MATURED_PENDING"}:
-        for event in reached:
-            _mark_missing_historical_event(
-                spec, deal, event, target, batch, session)
-        result["missing_fixings"] = len(reached)
-        session.flush()
-        return result
-
-    if profile == "ACTIVE_2Y_OFFICIAL":
-        for event in reached:
-            ratio = 1.0 if abs(event.t_years) < 1e-9 else 0.80
-            _attach_uat_official_fixing(
-                spec, deal, event, _event_spots(spec, ratio),
-                target, batch, session)
-        result["official_fixings"] = len(reached)
-        session.flush()
-        if deal.status != "actif":
-            raise RuntimeError(
-                f"{deal.reference}: le profil historique actif est devenu terminal.")
-        return result
-
-    if profile == "CALLED":
-        strike = next((event for event in events if abs(event.t_years) < 1e-9), None)
-        trigger = next((event for event in reached if event.t_years > 0), None)
-        if not strike or not trigger:
-            raise RuntimeError(
-                f"{deal.reference}: aucune observation atteinte pour le scénario de rappel.")
-        terminal_events = [strike, trigger]
-        expected_outcome = "callé"
-        terminal_ratio = 1.15
-    else:
-        terminal_events = events
-        expected_outcome = "ki" if profile == "MATURED_KI" else "final"
-        terminal_ratio = 0.35 if profile == "MATURED_KI" else 0.80
-
-    for event in terminal_events:
-        ratio = 1.0 if abs(event.t_years) < 1e-9 else terminal_ratio
-        _attach_uat_official_fixing(
-            spec, deal, event, _event_spots(spec, ratio), target, batch, session)
+    _load_yahoo_fixings(deal, target, session, result)
     session.flush()
-    evaluation, failures = replay_official_fixings(deal, terminal_events)
-    if failures or not evaluation:
-        raise RuntimeError(
-            f"{deal.reference}: rejeu officiel impossible ({failures}).")
-    if evaluation.get("outcome") != expected_outcome:
-        raise RuntimeError(
-            f"{deal.reference}: résultat {evaluation.get('outcome')} au lieu de "
-            f"{expected_outcome} pour le profil {profile}.")
-    proposal = deals_api._auto_apply_lifecycle(
-        deal, evaluation, session, actor_user_id=None)
-    session.flush()
-    if not proposal or proposal.status != LifecycleStatus.APPLIED.value:
-        status = proposal.status if proposal else None
-        raise RuntimeError(
-            f"{deal.reference}: application lifecycle refusée (statut {status}).")
-    result["official_fixings"] = len(terminal_events)
-    result["outcome"] = expected_outcome
     record_audit_event(
         session,
         action="UAT_LIFECYCLE_SCENARIO_MATERIALIZED",
@@ -923,10 +914,10 @@ def _materialize_lifecycle_profile(
         after={
             "deal_reference": deal.reference,
             "profile": profile,
-            "outcome": expected_outcome,
-            "proposal_id": proposal.id,
+            "official_fixings": result["official_fixings"],
+            "outcome": result["outcome"],
         },
-        reason="Scénario UAT obtenu par rejeu officiel et application production.",
+        reason="Constatations UAT chargées depuis les clôtures Yahoo réelles.",
         data_source=DataCategory.FIXING_OFFICIAL,
         correlation_id=f"uat:{batch.batch_key}",
     )
@@ -984,6 +975,9 @@ def _age_generated_records(
 def generate_batch(body: UatGenerationRequest, admin: User, session: Session) -> dict:
     target, providers = _validate_request(body, session)
     specs = _build_specs(body)
+    # Before any row is written: a batch that cannot be priced must fail whole
+    # rather than book deals carrying an invented fair value.
+    _price_specs(specs, seed=body.seed)
     batch_key = datetime.utcnow().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6].upper()
     batch = UatGenerationBatch(
         batch_key=batch_key,

@@ -1,10 +1,12 @@
 <template>
-  <header class="sticky top-0 z-40 border-b bg-surface2/95 backdrop-blur"
+  <header class="app-header sticky top-0 z-40 border-b bg-surface2/95 backdrop-blur"
           style="border-color: var(--border); background-color: rgba(255,255,255,.95);">
     <div class="px-5 py-2.5 flex items-center gap-1">
       <RouterLink to="/" class="flex items-center gap-2.5 pr-4 mr-1 border-r shrink-0 hover:opacity-80 transition-opacity"
                   style="border-color: var(--border);">
-        <img src="/tp_logo.png" alt="TP Advisory" class="h-7 w-7 rounded-sm bg-white object-contain p-0.5">
+        <span class="brand-mark">
+          <img src="/tp_logo.png" alt="TP Advisory">
+        </span>
         <span class="font-display font-black tracking-tight text-[15px]" style="color: var(--text);">Structura</span>
       </RouterLink>
 
@@ -59,6 +61,39 @@ function logout() {
 </script>
 
 <style scoped>
+.app-header {
+  box-shadow:
+    0 1px 0 rgba(11, 26, 49, .04),
+    0 7px 20px rgba(11, 26, 49, .045);
+}
+.app-header::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 16px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, .72), rgba(250, 249, 246, 0));
+  pointer-events: none;
+}
+.brand-mark {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+}
+.brand-mark img {
+  width: 56px;
+  height: 56px;
+  max-width: none;
+  flex: none;
+  transform: translateY(-1px);
+}
 .nav-link {
   padding: .5rem .85rem;
   border-radius: 8px;

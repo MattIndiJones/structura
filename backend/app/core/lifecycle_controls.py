@@ -13,6 +13,7 @@ import math
 import re
 from datetime import date, timedelta
 
+from .market_snapshot import snapshot_rate
 from .payscript.engine import eval_script_on_history
 from .payscript.parser import parse_script, resolve_constats
 
@@ -137,7 +138,17 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
 
     last_step = max(round(float(event.t_years) * 252) for event in ordered)
     maturity_step = round(float(deal.T) * 252)
-    grid_size = max(last_step, maturity_step) + 1
+    # A replay over an incomplete fixing prefix must stop at the last fixing
+    # actually observed.  Padding every prefix to maturity used to manufacture
+    # a terminal path by carrying the latest spot forward, which could mature
+    # an otherwise live deal (or hide a later autocall) without official data.
+    maturity_reached = any(
+        float(event.t_years) >= float(deal.T) - 1e-9 or
+        event.event_date >= deal.maturity_date
+        for event in ordered
+    )
+    terminal_step = max(last_step, maturity_step) if maturity_reached else last_step
+    grid_size = terminal_step + 1
     anchor = date.fromisoformat(deal.value_date or deal.strike_date)
     dates = [(anchor + timedelta(days=index)).isoformat() for index in range(grid_size)]
     prices = {
@@ -165,7 +176,7 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
         deal.T,
         market.get("user_params") or {},
         tickers,
-        (market.get("r", 3.0) or 3.0) / 100.0,
+        snapshot_rate(market),
     )
     if replay is None:
         return None, [{"code": "OFFICIAL_REPLAY_UNAVAILABLE"}]
@@ -180,6 +191,17 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
             "event_id": trigger.id,
             "event_date": trigger.event_date,
             "t_years": trigger.t_years,
+            "realized_payout": realized_payout,
+        }
+    elif not maturity_reached:
+        # Coupons paid by the supplied observations remain part of the replay,
+        # but the lifecycle itself is not terminal until a contractual maturity
+        # fixing has actually been supplied.
+        trigger = max(ordered, key=lambda row: row.t_years)
+        result = {
+            "outcome": "en_cours",
+            "event_id": trigger.id,
+            "event_date": trigger.event_date,
             "realized_payout": realized_payout,
         }
     else:
