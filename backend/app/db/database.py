@@ -1,13 +1,13 @@
 from pathlib import Path
 import bcrypt
 from sqlalchemy import event, text
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import SQLModel, Session, create_engine, select
 from .models import (
     Entity, User, Folder, Script, Deal, DealEvent, Document, AmcStudy,
     Indicative, KidRecord, EmtRecord, RfqRequest, RfqQuote, RfqProvider,
     Counterparty, Alert, Portfolio, ShockRun, ComputeBatch, ComputeJob,
     AuditEvent, LifecycleProposal, TradeAmendmentRequest, DealContractVersion,
-    OfficialFixingVersion, UatGenerationBatch,
+    OfficialFixingVersion, UatGenerationBatch, Underlying,
 )
 
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
@@ -468,8 +468,27 @@ def init_db():
     _seed()
     _seed_rfq_providers()
     _seed_counterparties()
+    _seed_underlyings()
     _backfill_default_portfolios()
     _backfill_rfq_statuses()
+
+
+def _seed_underlyings():
+    """Sème le catalogue repris du front. Idempotent : n'ajoute que les couples
+    (ticker, groupe) absents, donc une base déjà administrée n'est pas écrasée
+    et une base existante récupère les nouveautés du seed."""
+    from .underlyings_seed import UNDERLYINGS_SEED
+
+    with Session(engine) as s:
+        existants = {(u.ticker, u.group_name) for u in s.exec(select(Underlying)).all()}
+        ajouts = [
+            Underlying(ticker=ticker, label=label, group_name=groupe, ccy=ccy)
+            for ticker, label, groupe, ccy in UNDERLYINGS_SEED
+            if (ticker, groupe) not in existants
+        ]
+        if ajouts:
+            s.add_all(ajouts)
+            s.commit()
 
 
 def _seed():

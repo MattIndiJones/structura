@@ -46,6 +46,7 @@ def _params() -> dict:
         "underlyings": [{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}],
         "user_params": {}, "constats": {}, "notional": 1_000_000.0,
         "currency": "EUR", "strike_date": today, "value_date": today,
+        "payment_date": (date.today() + timedelta(days=370)).isoformat(),
         "T": 1.0, "model": "constant", "r": 0.03,
     }
 

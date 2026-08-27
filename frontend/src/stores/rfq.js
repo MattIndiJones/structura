@@ -21,6 +21,10 @@ export const useRfqStore = defineStore('rfq', () => {
   const current   = ref(null)
   const providers = ref([])
   const history   = ref([])
+  // Dernière réponse complète de /api/price pour l'AO courant. Le prix
+  // modèle stocké côté serveur n'est qu'un nombre : sans ça, impossible de
+  // montrer d'où il vient (flux par date, IC 95 %, fugit).
+  const lastPricing = ref(null)
 
   async function fetchProviders() {
     const res = await apiFetch('/api/rfq/providers')
@@ -39,6 +43,10 @@ export const useRfqStore = defineStore('rfq', () => {
 
   async function fetchOne(id) {
     const res = await apiFetch(`/api/rfq/${id}`)
+    // La décomposition appartient à l'AO pour lequel elle a été calculée :
+    // on la jette en changeant d'AO, pas en rafraîchissant le même (ajouter
+    // une cotation ne périme pas le prix modèle).
+    if (lastPricing.value && lastPricing.value.rfqId !== id) lastPricing.value = null
     current.value = await _json(res, 'RFQ introuvable')
     return current.value
   }
@@ -62,6 +70,10 @@ export const useRfqStore = defineStore('rfq', () => {
     })
     const rfq = await _json(res, 'Erreur mise à jour RFQ')
     if (current.value?.id === id) current.value = rfq
+    // Le serveur remet model_price à null dès qu'une hypothèse de pricing
+    // change (api/rfq.py) : la décomposition gardée en mémoire décrirait
+    // alors un prix qui n'existe plus.
+    if (rfq.model_price == null && lastPricing.value?.rfqId === id) lastPricing.value = null
     const idx = list.value.findIndex(r => r.id === id)
     if (idx !== -1) list.value[idx] = rfq
     return rfq
@@ -125,7 +137,7 @@ export const useRfqStore = defineStore('rfq', () => {
   // (same /api/price endpoint the Pricer uses) and stores the result on the RFQ.
   async function computeModelPrice(rfq) {
     const p = rfq.params || {}
-    const res = await fetch('/api/price', {
+    const res = await apiFetch('/api/price', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -138,21 +150,47 @@ export const useRfqStore = defineStore('rfq', () => {
         model: p.model || 'constant',
         user_params: p.user_params || {},
         constats: p.constats || {},
-        // Value date = the product's t=0, what the CONSTAT calendar's dates
-        // are counted from (see PricingRequest.anchor). Without it the RFQ
-        // prices its calendar from today and the deal booked out of it
-        // reprices from its value date — same product, two prices.
-        anchor: p.value_date || null,
+        // Trois dates, trois rôles distincts : la diffusion démarre au
+        // strike (c'est là que le niveau initial se constate), le prix
+        // s'exprime à la value date (c'est le montant échangé au règlement),
+        // et le remboursement final tombe à la payment date. La devise nomme
+        // le calendrier de jours ouvrés qui porte tout ça.
+        strike_date: p.strike_date || null,
+        value_date: p.value_date || null,
+        payment_date: p.payment_date || null,
+        settlement_ccy: p.currency || null,
+        // Repli historique : sans date de strike, l'axe reste ancré sur la
+        // value date, comme avant que les trois dates existent.
+        anchor: p.strike_date || p.value_date || null,
       }),
     })
     const data = await _json(res, 'Erreur calcul du prix modèle')
+    // On garde la réponse entière, pas seulement le prix : c'est elle qui
+    // permet au détail de l'AO d'expliquer le chiffre qu'on oppose au
+    // fournisseur, ligne de flux par ligne de flux.
+    lastPricing.value = {
+      rfqId: rfq.id,
+      result: data,
+      // Le strike ancre l'axe des temps du moteur : c'est lui qui reconvertit
+      // un t en date. La value date ne reste que comme repli.
+      strikeDate: p.strike_date || null,
+      valueDate: p.value_date || null,
+      hypotheses: {
+        model: p.model || 'constant',
+        r: p.r ?? null,
+        N: p.N ?? null,
+        sigma: p.underlyings?.[0]?.sigma ?? null,
+        q: p.underlyings?.[0]?.q ?? null,
+      },
+      at: new Date().toISOString(),
+    }
     // /api/price returns a 0–1 fraction of nominal; quotes are entered in
     // percentage points (e.g. 98.5), so scale to match before comparing.
     return update(rfq.id, { model_price: data.price * 100 })
   }
 
   return {
-    list, current, providers, history,
+    list, current, providers, history, lastPricing,
     fetchProviders, fetchList, fetchOne, create, update, remove,
     addQuote, updateQuote, removeQuote, computeModelPrice, fetchHistory,
     toggleLastLook, selectQuote,

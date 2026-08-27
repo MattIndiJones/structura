@@ -168,7 +168,11 @@ def test_three_percent_deal_still_discounts(session_with_flat_history):
 
     assert payload["market_used"]["r"] == 3.0
     assert payload["market_used"]["r_is_default"] is False
-    expected = math.exp(-0.03 * payload["T_remaining"])
+    # Le remboursement est regle a la payment date du deal, cinq jours apres sa
+    # maturite : le mark actualise jusque-la, pas jusqu au dernier fixing. Cinq
+    # jours a 3 %, c est 4,1 points de base — l ordre de grandeur exact que le
+    # chantier sur les dates de reglement a rendu visible.
+    expected = math.exp(-0.03 * (payload["T_remaining"] + 5 / 365.25))
     assert payload["mtm"] == pytest.approx(expected, abs=1e-4)
 
 

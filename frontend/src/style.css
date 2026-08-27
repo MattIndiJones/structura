@@ -177,6 +177,11 @@
     background-size: 14px;
   }
   .select:focus { border-color: var(--accent); background-color: var(--surface); }
+  /* Le chevron étant peint en fond, sa gouttière droite ne doit jamais être
+     rognée par un utilitaire px-* : le texte de l'option passerait dessous.
+     Sélecteur doublé pour gagner en spécificité sur les utilitaires, qui
+     sont dans un layer postérieur. Le padding gauche, lui, reste libre. */
+  .select.select { padding-right: 2.2rem; }
 
   /* ── Stat-box (tuiles denses — grilles de Greeks, paramètres…) ── */
   .stat-box {

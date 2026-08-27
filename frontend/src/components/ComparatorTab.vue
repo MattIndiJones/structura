@@ -134,12 +134,15 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { apiFetch } from '../utils/api.js'
-import { underlyingGroups } from '../data/commonUnderlyings.js'
+import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
 import { formatPercent, formatInt } from '../utils/format.js'
 import HelpTip from './HelpTip.vue'
+
+// Catalogue de sous-jacents : chargé depuis la base au montage.
+onMounted(ensureUnderlyings)
 
 const store = usePricingStore()
 
@@ -150,9 +153,12 @@ const basketSize = computed(() => Math.max(1, store.underlyings.filter(u => u.ti
 // Candidate pool — independent from store.underlyings, drawn from the
 // shared catalog (commonUnderlyings.js) also used by DealTab/RfqView, so
 // tickers/labels stay consistent everywhere.
-const tickerLabels = Object.fromEntries(underlyingGroups.flatMap(g => g.items.map(it => [it.ticker, it.label])))
+// Calculee, et non figee au chargement du module : le catalogue arrive de
+// la base apres le montage.
+const tickerLabels = computed(() =>
+  Object.fromEntries(underlyingGroups.flatMap(g => g.items.map(it => [it.ticker, it.label]))))
 function labelFor(ticker) {
-  return tickerLabels[ticker] || ticker
+  return tickerLabels.value[ticker] || ticker
 }
 
 const pool = ref([{ ticker: '' }, { ticker: '' }, { ticker: '' }])

@@ -117,10 +117,12 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
         }]
 
     market = json.loads(deal.market_snapshot_json or "{}")
+    origin = deal.strike_date or deal.value_date
     compiled = resolve_constats(
         parse_script(deal.script_snapshot),
         market.get("constats") or {},
-        anchor=date.fromisoformat(deal.value_date) if deal.value_date else None,
+        anchor=date.fromisoformat(origin) if origin else None,
+        currency=(deal.devise or "").strip().upper() or None,
     )
     underlyings = json.loads(deal.underlyings_json or "[]")
     names = [row.get("name") for row in underlyings]

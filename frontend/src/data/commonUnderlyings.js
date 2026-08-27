@@ -1,98 +1,44 @@
-// Common underlyings (Yahoo Finance tickers) — single source of truth shared
-// by MarketParams.vue (Pricer) and the RFQ module.
+// Catalogue de sous-jacents — désormais chargé depuis la base, plus codé ici.
+//
+// Cette liste était un tableau en dur : ajouter un titre demandait un
+// développeur et un rebuild. Elle vient maintenant de la table `underlyings`,
+// administrable depuis /admin/underlyings.
+//
+// L'export garde son nom et sa forme — un tableau [{ group, items: [{ ticker,
+// label, ccy }] }] — et il est REMPLI SUR PLACE plutôt que remplacé, pour que
+// les vues qui l'utilisent (`v-for`, `.flatMap`) n'aient rien à changer.
 
-export const underlyingGroups = [
-  {
-    group: 'Indices Europe',
-    items: [
-      { ticker: '^STOXX50E', label: 'Euro Stoxx 50' },
-      { ticker: '^FCHI',     label: 'CAC 40' },
-      { ticker: '^GDAXI',    label: 'DAX 40' },
-      { ticker: '^FTSE',     label: 'FTSE 100' },
-      { ticker: '^IBEX',     label: 'IBEX 35' },
-      { ticker: '^SSMI',     label: 'SMI' },
-    ],
-  },
-  {
-    group: 'Indices US',
-    items: [
-      { ticker: '^GSPC', label: 'S&P 500' },
-      { ticker: '^NDX',  label: 'Nasdaq 100' },
-      { ticker: '^DJI',  label: 'Dow Jones' },
-      { ticker: '^RUT',  label: 'Russell 2000' },
-    ],
-  },
-  {
-    group: 'Indices Asie',
-    items: [
-      { ticker: '^N225',     label: 'Nikkei 225' },
-      { ticker: '^HSI',      label: 'Hang Seng' },
-      { ticker: '000300.SS', label: 'CSI 300' },
-    ],
-  },
-  {
-    group: 'Actions FR (CAC)',
-    items: [
-      { ticker: 'MC.PA',  label: 'LVMH' },
-      { ticker: 'TTE.PA', label: 'TotalEnergies' },
-      { ticker: 'SAN.PA', label: 'Sanofi' },
-      { ticker: 'BNP.PA', label: 'BNP Paribas' },
-      { ticker: 'AXA.PA', label: 'AXA' },
-      { ticker: 'OR.PA',  label: "L'Oréal" },
-      { ticker: 'AIR.PA', label: 'Airbus' },
-    ],
-  },
-  {
-    group: 'Actions US',
-    items: [
-      { ticker: 'AAPL',  label: 'Apple' },
-      { ticker: 'MSFT',  label: 'Microsoft' },
-      { ticker: 'NVDA',  label: 'Nvidia' },
-      { ticker: 'AMZN',  label: 'Amazon' },
-      { ticker: 'GOOGL', label: 'Alphabet' },
-      { ticker: 'META',  label: 'Meta' },
-      { ticker: 'TSLA',  label: 'Tesla' },
-    ],
-  },
-  {
-    group: 'ETF / Matières premières',
-    items: [
-      { ticker: 'GLD', label: 'GLD (Or)' },
-      { ticker: 'SLV', label: 'SLV (Argent)' },
-      { ticker: 'USO', label: 'USO (Pétrole WTI)' },
-      { ticker: 'SPY', label: 'SPY (S&P 500 ETF)' },
-      { ticker: 'QQQ', label: 'QQQ (Nasdaq ETF)' },
-      { ticker: 'EEM', label: 'EEM (Émergents)' },
-    ],
-  },
-  {
-    group: 'Banques',
-    items: [
-      { ticker: 'BNP.PA',  label: 'BNP Paribas' },
-      { ticker: 'SAN.MC',  label: 'Banco Santander' },
-      { ticker: 'ISP.MI',  label: 'Intesa Sanpaolo' },
-      { ticker: 'DBK.DE',  label: 'Deutsche Bank' },
-      { ticker: 'UBSG.SW', label: 'UBS' },
-      { ticker: 'JPM',     label: 'JPMorgan Chase' },
-      { ticker: 'GS',      label: 'Goldman Sachs' },
-      { ticker: 'MS',      label: 'Morgan Stanley' },
-      { ticker: 'BAC',     label: 'Bank of America' },
-      { ticker: 'C',       label: 'Citigroup' },
-    ],
-  },
-  {
-    group: 'Luxe',
-    items: [
-      { ticker: 'MC.PA',  label: 'LVMH' },
-      { ticker: 'OR.PA',  label: "L'Oréal" },
-      { ticker: 'RMS.PA', label: 'Hermès' },
-      { ticker: 'KER.PA', label: 'Kering' },
-      { ticker: 'CFR.SW', label: 'Richemont' },
-      { ticker: 'RL',     label: 'Ralph Lauren' },
-      { ticker: 'TPR',    label: 'Tapestry' },
-      { ticker: 'EL',     label: 'Estée Lauder' },
-      { ticker: 'CPRI',   label: 'Capri Holdings' },
-      { ticker: 'PVH',    label: 'PVH Corp' },
-    ],
-  },
-]
+import { reactive } from 'vue'
+import { apiFetch } from '../utils/api.js'
+
+export const underlyingGroups = reactive([])
+
+let chargement = null
+
+/** Charge le catalogue une fois pour toutes. Idempotent : les vues peuvent
+ *  l'appeler chacune à leur montage sans multiplier les requêtes. */
+export function ensureUnderlyings() {
+  if (underlyingGroups.length) return Promise.resolve(underlyingGroups)
+  if (chargement) return chargement
+  chargement = apiFetch('/api/finance/underlyings')
+    .then(res => (res.ok ? res.json() : []))
+    .then(groupes => {
+      // Remplissage sur place : remplacer la référence casserait toutes les
+      // vues qui ont importé le tableau.
+      underlyingGroups.splice(0, underlyingGroups.length, ...groupes)
+      return underlyingGroups
+    })
+    .catch(() => underlyingGroups)
+    .finally(() => { chargement = null })
+  return chargement
+}
+
+/** Libellé d'un ticker, ou le ticker lui-même s'il n'est pas au catalogue —
+ *  un sous-jacent saisi à la main reste parfaitement valable. */
+export function underlyingLabel(ticker) {
+  for (const groupe of underlyingGroups) {
+    const trouve = groupe.items.find(it => it.ticker === ticker)
+    if (trouve) return trouve.label
+  }
+  return ticker
+}

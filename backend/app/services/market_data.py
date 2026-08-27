@@ -104,8 +104,25 @@ def load_hist_vol(tickers: list[str], period: str = "1y") -> dict:
         return {"error": str(e)}
 
 
-def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None) -> dict:
-    """Daily close prices for backtest replay."""
+def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
+                      adjusted: bool = False) -> dict:
+    """Daily close prices for backtest replay.
+
+    `adjusted` decides WHICH price, and the two answer different questions.
+
+    False (the default) returns the raw close — the price that actually traded
+    that day. Every payoff reads this one: a barrier, a coupon condition, a
+    fixing and a strike are written on the price the market printed, not on a
+    total-return series. Yahoo's adjusted close deflates past prices by every
+    dividend paid since, so a 50% barrier tested on it is crossed later than in
+    reality, or never. On Société Générale at 14/06/2024 the raw close is 22.150
+    — the strike of a real term sheet to the cent — where the adjusted one says
+    21.105, 4.7% off. It also keeps this feed consistent with the contractual
+    fixings, which load_yahoo_reference_closes already takes raw.
+
+    True returns the dividend-adjusted close, for statistical estimates where
+    total return is the honest input: realized volatility, correlations,
+    calibration. Never for anything a payoff reads."""
     if not _HAS_YF:
         return {"error": "yfinance non installé"}
     try:
@@ -113,7 +130,7 @@ def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None) 
         price_series: dict = {}
         for tk in tickers:
             try:
-                hist = yf.Ticker(tk).history(start=start, end=end, auto_adjust=True)
+                hist = yf.Ticker(tk).history(start=start, end=end, auto_adjust=adjusted)
                 if not hist.empty and "Close" in hist.columns:
                     # Same cross-timezone alignment fix as load_hist_vol above —
                     # without it, a multi-ticker basket backtest silently
@@ -256,3 +273,185 @@ def load_yahoo_reference_closes(
     except Exception as exc:
         logger.exception("load_yahoo_reference_closes")
         return {"error": str(exc)}
+
+
+def search_symbols(query: str, limit: int = 10) -> dict:
+    """Résout un nom ou un fragment de symbole en tickers Yahoo.
+
+    Il n'existe pas de liste exhaustive téléchargeable des instruments cotés :
+    c'est la recherche qui tient lieu de référentiel, et elle a l'avantage
+    d'être toujours à jour. « STM » rend STM (New York), STMPA.PA (Paris) et
+    STMMI.MI (Milan) — trois cotations du même titre, entre lesquelles il faut
+    trancher, puisqu'une note fixe sur une place et pas sur une autre.
+    """
+    if not _HAS_YF:
+        return {"error": "yfinance non installé"}
+    terme = (query or "").strip()
+    if len(terme) < 2:
+        return {"error": "Saisissez au moins deux caractères."}
+    try:
+        quotes = yf.Search(terme, max_results=max(1, min(25, limit))).quotes or []
+    except Exception as exc:
+        logger.debug("Yahoo search %s: %s", terme, exc)
+        return {"error": f"Recherche Yahoo indisponible : {exc}"}
+    return {"results": [
+        {
+            "ticker": q.get("symbol", ""),
+            "label": q.get("shortname") or q.get("longname") or q.get("symbol", ""),
+            "exchange": q.get("exchange") or "",
+            "type": q.get("quoteType") or "",
+        }
+        for q in quotes if q.get("symbol")
+    ]}
+
+
+def probe_ticker(ticker: str) -> dict:
+    """Vérifie qu'un ticker répond, avant de l'inscrire au référentiel.
+
+    Un ticker muet ajouté en silence ne se découvre qu'au moment où l'on
+    price — souvent des semaines plus tard, et toujours au mauvais moment. On
+    tire un mois d'historique : s'il ne vient rien, on refuse. La devise est
+    lue chez Yahoo plutôt que devinée d'après le suffixe de cotation.
+    """
+    if not _HAS_YF:
+        return {"ok": False, "error": "yfinance non installé"}
+    symbole = (ticker or "").strip()
+    if not symbole:
+        return {"ok": False, "error": "Ticker vide"}
+    try:
+        instrument = yf.Ticker(symbole)
+        hist = instrument.history(period="1mo", auto_adjust=False)
+        if hist.empty or "Close" not in hist.columns:
+            return {"ok": False, "error": f"Aucune cotation pour « {symbole} »."}
+        closes = hist["Close"].dropna()
+        if closes.empty:
+            return {"ok": False, "error": f"Aucune clôture exploitable pour « {symbole} »."}
+        ccy = ""
+        try:
+            ccy = (instrument.fast_info.get("currency") or "").upper()
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "last_close": round(float(closes.iloc[-1]), 6),
+            "last_date": closes.index[-1].strftime("%Y-%m-%d"),
+            "points": int(len(closes)),
+            "ccy": ccy,
+        }
+    except Exception as exc:
+        logger.debug("probe_ticker %s: %s", symbole, exc)
+        return {"ok": False, "error": f"Ticker injoignable : {exc}"}
+
+
+def dividend_profile(ticker: str, asof: Optional[str] = None,
+                      window_years: float = 1.0) -> dict:
+    """Rendement de dividende d'un titre, à une date donnée, par deux voies.
+
+    Le champ `trailingAnnualDividendYield` de Yahoo est un instantané du JOUR :
+    il ne sait rien dire du 8 mai 2026, et il tombe à zéro sur un titre qui a
+    suspendu son dividende — sans distinguer « ne verse pas » de « donnée
+    absente ». Cette fonction reconstruit le rendement à n'importe quelle date,
+    et le fait deux fois :
+
+    - `yield_declared` : les dividendes réellement détachés sur la fenêtre,
+      rapportés au cours de fin de fenêtre. C'est la convention de pricing —
+      ce que le forward consomme, puisqu'on escompte le futur au cours
+      d'aujourd'hui.
+    - `yield_implied` : lu dans l'écart entre la série ajustée et la série nue.
+      Le rapport des deux vaut le produit des (1 − D/C) de chaque détachement,
+      chacun pondéré par le cours de SA date. C'est le rendement réellement
+      subi par la série de prix.
+
+    Les deux répondent à des questions différentes et doivent rester proches.
+    Quand ils divergent, quelque chose manque au flux de dividendes — une
+    opération sur titre, typiquement. Le signaler vaut mieux qu'un chiffre
+    silencieusement faux.
+    """
+    if not _HAS_YF:
+        return {"ok": False, "error": "yfinance non installé"}
+    symbole = (ticker or "").strip()
+    if not symbole:
+        return {"ok": False, "error": "Ticker vide"}
+    try:
+        fin = date.fromisoformat(asof) if asof else date.today()
+        debut = fin - timedelta(days=round(window_years * 365.25))
+        # Marge amont : il faut une clôture avant le début de fenêtre pour
+        # ancrer le rapport, et le premier jour peut être fermé.
+        marge = (debut - timedelta(days=10)).isoformat()
+        borne = (fin + timedelta(days=1)).isoformat()
+
+        instrument = yf.Ticker(symbole)
+        nu = instrument.history(start=marge, end=borne, auto_adjust=False)
+        ajuste = instrument.history(start=marge, end=borne, auto_adjust=True)
+        if nu.empty or "Close" not in nu.columns:
+            return {"ok": False, "error": f"Aucune cotation pour « {symbole} » sur la période."}
+
+        closes_nus = nu["Close"].dropna()
+        closes_nus.index = closes_nus.index.tz_localize(None)
+        closes_aj = ajuste["Close"].dropna()
+        closes_aj.index = closes_aj.index.tz_localize(None)
+
+        avant_fin = closes_nus[closes_nus.index <= _ts(fin)]
+        avant_debut = closes_nus[closes_nus.index <= _ts(debut)]
+        if avant_fin.empty:
+            return {"ok": False, "error": f"Aucune clôture au {fin} pour « {symbole} »."}
+        cours_fin = float(avant_fin.iloc[-1])
+
+        detaches = []
+        try:
+            serie_div = instrument.dividends
+            serie_div.index = serie_div.index.tz_localize(None)
+            fenetre = serie_div[(serie_div.index > _ts(debut)) & (serie_div.index <= _ts(fin))]
+            detaches = [{"date": d.strftime("%Y-%m-%d"), "amount": round(float(v), 6)}
+                        for d, v in fenetre.items()]
+        except Exception as exc:
+            logger.debug("dividends %s: %s", symbole, exc)
+
+        total = sum(d["amount"] for d in detaches)
+        yield_declared = round(total / cours_fin / window_years, 6) if cours_fin else 0.0
+
+        yield_implied = None
+        rapports = (closes_aj / closes_nus).dropna()
+        rapports = rapports[rapports > 0]
+        if not avant_debut.empty and len(rapports) >= 2:
+            r_debut = rapports[rapports.index <= _ts(debut)]
+            r_fin = rapports[rapports.index <= _ts(fin)]
+            if not r_debut.empty and not r_fin.empty:
+                yield_implied = round(
+                    -math.log(float(r_debut.iloc[-1]) / float(r_fin.iloc[-1])) / window_years, 6)
+
+        ecart = (round(abs(yield_declared - yield_implied), 6)
+                 if yield_implied is not None else None)
+        # Un ecart de quelques dixiemes de point est NORMAL : les deux methodes
+        # ponderent differemment — le declare rapporte au cours de fin de
+        # fenetre, l implicite au cours de chaque detachement. Sur un titre qui
+        # a beaucoup bouge, l ecart suit le mouvement. Ce qui n est pas normal,
+        # c est une divergence de plus de moitie : elle trahit un dividende ou
+        # une operation sur titre absent du flux Yahoo.
+        plafond = max(yield_declared, yield_implied or 0.0)
+        suspect = bool(ecart is not None and ecart > 0.005
+                       and plafond > 0 and ecart / plafond > 0.6)
+        return {
+            "ok": True,
+            "ticker": symbole,
+            "asof": fin.isoformat(),
+            "window_years": window_years,
+            "price": round(cours_fin, 6),
+            "yield_declared": yield_declared,
+            "yield_implied": yield_implied,
+            "dividends": detaches,
+            # Aucun dividende ET aucun écart entre les deux séries : le titre
+            # ne verse pas. C'est un fait, pas une donnée manquante — et c'est
+            # la distinction que le champ Yahoo ne faisait pas.
+            "pays_dividends": bool(detaches) or bool(yield_implied and yield_implied > 1e-6),
+            "discrepancy": ecart,
+            "suspect": suspect,
+        }
+    except Exception as exc:
+        logger.debug("dividend_profile %s: %s", symbole, exc)
+        return {"ok": False, "error": f"Dividendes indisponibles : {exc}"}
+
+
+def _ts(jour: date):
+    import pandas as pd
+    return pd.Timestamp(jour)

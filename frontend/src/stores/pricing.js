@@ -77,6 +77,10 @@ export const usePricingStore = defineStore('pricing', () => {
       start_date: '', end_date: '', roll_date: '',
       frequency: { value: 3, unit: 'M' }, stub: 'short_last',
       sub_frequency: kind === 'nested_schedule' ? { value: 1, unit: 'M' } : null,
+      // Sans ajustement ni décalage par défaut : c'est déjà ce que le parseur
+      // suppose faute de valeur, donc rien ne bouge pour un script existant.
+      // Un term sheet qui dit autre chose le dit maintenant explicitement.
+      convention: 'none', settlement_lag: 0,
     })
   }
 
@@ -125,6 +129,13 @@ export const usePricingStore = defineStore('pricing', () => {
     trade_date: new Date().toISOString().split('T')[0],
     strike_date: new Date().toISOString().split('T')[0],
     value_date: new Date().toISOString().split('T')[0],
+    // Échange final des flux. Vide, le remboursement est actualisé à la
+    // maturité — ce qui surestime la note des jours de règlement.
+    payment_date: '',
+    // Date à laquelle on veut la valeur. Vide ou égale au strike, on price à
+    // l'émission ; postérieure, on rejoue le passé et on ne simule que la vie
+    // restante. Le mode ne se choisit pas, il se déduit de cette date.
+    valuation_date: '',
     // 'deterministic' (r constant) | 'abm' (gaussien sans retour à la moyenne)
     // | 'hull_white' (gaussien avec retour à la moyenne)
     rateModel: 'deterministic',
@@ -158,10 +169,53 @@ export const usePricingStore = defineStore('pricing', () => {
     ],
   })
 
+  // ── Courbe de funding (spread émetteur) ───────────────────────────
+  // Distincte de la courbe de taux, et pas par coquetterie : un spread
+  // émetteur n'entre QUE dans l'actualisation. Le crédit de l'émetteur ne
+  // déplace pas le forward du sous-jacent. Fondues ensemble, on obtiendrait le
+  // signe inverse — voir engine._funding_df_arr.
+  //
+  // Deux modes, parce que c'est ainsi qu'on travaille : un niveau unique quand
+  // on connaît le funding de la contrepartie et que ça suffit, une courbe par
+  // pilier quand elle a une forme — ce qui arrive vite sur un émetteur tendu,
+  // où le court coûte plus cher que le long.
+  const fundingCurve = reactive({
+    enabled: false,
+    mode: 'flat',          // 'flat' | 'pillars'
+    level: 1.50,           // en %, appliqué à tous les piliers
+    pillars: [
+      { label: '3M',  T: 0.25, spread: 1.50 },
+      { label: '6M',  T: 0.5,  spread: 1.50 },
+      { label: '1Y',  T: 1.0,  spread: 1.50 },
+      { label: '2Y',  T: 2.0,  spread: 1.50 },
+      { label: '3Y',  T: 3.0,  spread: 1.50 },
+      { label: '5Y',  T: 5.0,  spread: 1.50 },
+      { label: '7Y',  T: 7.0,  spread: 1.50 },
+      { label: '10Y', T: 10.0, spread: 1.50 },
+    ],
+  })
+
+  /** Ce que la requête doit porter : un niveau plat OU des piliers, jamais
+   *  les deux — côté moteur la courbe l'emporte, autant ne pas l'ambiguïser. */
+  function _fundingPayload() {
+    if (!fundingCurve.enabled) return { funding_curve: [], funding_spread: 0 }
+    if (fundingCurve.mode === 'pillars') {
+      return {
+        funding_curve: fundingCurve.pillars.map(p => [p.T, p.spread / 100]),
+        funding_spread: 0,
+      }
+    }
+    return { funding_curve: [], funding_spread: (Number(fundingCurve.level) || 0) / 100 }
+  }
+
   // ── Greeks selection ──────────────────────────────────────────────
   const greekSel = reactive({
     delta: true, gamma: false, vega: true,
     theta: true, rho: false, corr: false,
+    // Sensibilité au spread émetteur. Décochée par défaut comme le rho : sur
+    // un produit non émis elle n'a pas d'objet, elle prend son sens sur une
+    // valorisation de secondaire.
+    credit: false,
   })
   const selectedGreeks = computed(() => Object.keys(greekSel).filter(k => greekSel[k]))
 
@@ -345,6 +399,11 @@ export const usePricingStore = defineStore('pricing', () => {
           start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
           frequency: _tenorStr(v.frequency), stub: v.stub,
           sub_frequency: c.kind === 'nested_schedule' ? _tenorStr(v.sub_frequency) : null,
+          // Le serveur les attend depuis le chantier des dates ; ils ne
+          // partaient pas d'ici, si bien qu'une convention saisie dans le
+          // Pricer n'avait aucun effet sur le calendrier réellement calculé.
+          convention: v.convention || 'none',
+          settlement_lag: v.settlement_lag || 0,
         }
       }
     }
@@ -367,6 +426,11 @@ export const usePricingStore = defineStore('pricing', () => {
           ov.end_date   = v.end_date   || ''
           ov.roll_date  = v.roll_date  || ''
           ov.stub       = v.stub       || 'short_last'
+          // Sans ça, rouvrir un deal booké ou recharger un script depuis la
+          // bibliothèque perdait sa convention et son décalage de règlement :
+          // le calendrier se recalculait sans eux, en silence.
+          ov.convention     = v.convention     || 'none'
+          ov.settlement_lag = v.settlement_lag || 0
           if (v.frequency && ov.frequency) {
             if (typeof v.frequency === 'object') {
               ov.frequency.value = v.frequency.value ?? 3
@@ -403,14 +467,23 @@ export const usePricingStore = defineStore('pricing', () => {
       yield_curve: yieldCurve.enabled
         ? yieldCurve.pillars.map(p => [p.T, p.rate / 100])
         : [],
+      ..._fundingPayload(),
       barrier_monitoring: globalParams.barrierMonitoring,
       constats: _buildConstats(),
-      // The CONSTAT calendar carries absolute dates; the engine needs year
-      // fractions from the product's t=0, which is its value date — not the
-      // day we happen to click "Pricer". Left unset, a deal priced today and
-      // the same deal replayed after booking (api/deals.py anchors on
-      // deal.value_date) resolve the same calendar differently.
-      anchor: globalParams.value_date || null,
+      // Les trois dates et la devise, exactement comme pour la valorisation en
+      // cours de vie. Elles ne partaient pas d'ici : le serveur recevait un
+      // décalage de règlement sans calendrier de devise pour le compter et
+      // refusait le calcul — c'est ce qui cassait les Greeks dès qu'un CONSTAT
+      // portait un règlement.
+      strike_date: globalParams.strike_date || null,
+      value_date: globalParams.value_date || null,
+      payment_date: globalParams.payment_date || null,
+      settlement_ccy: globalParams.deal_ccy || null,
+      // Le calendrier CONSTAT porte des dates absolues ; le moteur veut des
+      // fractions d'année depuis l'origine de son axe, qui est la date de
+      // STRIKE — là où le niveau initial se constate. Repli sur la value date
+      // pour les produits qui n'en déclarent pas.
+      anchor: globalParams.strike_date || globalParams.value_date || null,
     }
   }
 
@@ -468,6 +541,12 @@ export const usePricingStore = defineStore('pricing', () => {
       barrierMonitoring: globalParams.barrierMonitoring,
       trade_date: globalParams.trade_date, strike_date: globalParams.strike_date,
       value_date: globalParams.value_date,
+      // La dernière constatation telle qu'elle a été envoyée au moteur, pour
+      // que l'écran l'affiche plutôt que de la redériver de la maturité en
+      // années — qui la manquait de quelques jours.
+      maturity_date: _maturityDate(),
+      payment_date: globalParams.payment_date,
+      valuation_date: globalParams.valuation_date,
       yieldCurveEnabled: yieldCurve.enabled,
       paramsUsed: scriptParams.value.map(p => ({
         name: p.name, value: paramOverrides[p.name] ?? p.raw_default, is_pct: p.is_pct,
@@ -481,7 +560,82 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   // ── Price ─────────────────────────────────────────────────────────
+  /** Vrai quand la date de valorisation demande un rejeu du passé. */
+  function isInLife() {
+    const v = globalParams.valuation_date
+    return !!(v && globalParams.strike_date && v > globalParams.strike_date)
+  }
+
+  /** Maturité déduite : depuis la constatation initiale, qui est l'origine de
+   *  la diffusion. */
+  function _maturityDate() {
+    // Un calendrier CONSTAT dit la dernière constatation à la journée près.
+    // La déduire de la maturité en années la manquait de plusieurs jours —
+    // 19/06 au lieu du 14/06 sur un trois ans mensuel — parce que T×365,25
+    // n'est pas une date d'anniversaire.
+    const fins = scriptConstats.value
+      .filter(c => c.kind !== 'single')
+      .map(c => constatOverrides[c.name]?.end_date)
+      .filter(Boolean)
+    if (fins.length) return fins.reduce((a, b) => (b > a ? b : a))
+    if (!globalParams.strike_date || !globalParams.T) return null
+    const d = new Date(globalParams.strike_date)
+    d.setDate(d.getDate() + Math.round(globalParams.T * 365.25))
+    return d.toISOString().split('T')[0]
+  }
+
+  /** Corps de requête de la valorisation en cours de vie — partagé par le
+   *  prix et les Greeks, pour qu'ils décrivent forcément le même produit. */
+  function _inLifeBody() {
+    return {
+      script: script.value,
+      underlyings: _buildUls(),
+      corr_matrix: _buildCorr(),
+      r: globalParams.r / 100,
+      N: globalParams.N,
+      model: globalParams.model,
+      seed: globalParams.seed,
+      antithetic: globalParams.antithetic,
+      user_params: _buildUserParams(),
+      constats: _buildConstats(),
+      strike_date: globalParams.strike_date,
+      value_date: globalParams.value_date || globalParams.strike_date,
+      maturity_date: _maturityDate(),
+      payment_date: globalParams.payment_date || null,
+      valuation_date: globalParams.valuation_date,
+      settlement_ccy: globalParams.deal_ccy || 'EUR',
+      yield_curve: yieldCurve.enabled
+        ? yieldCurve.pillars.map(p => [p.T, p.rate / 100])
+        : [],
+      ..._fundingPayload(),
+      barrier_monitoring: globalParams.barrierMonitoring,
+      ..._rateParams(),
+    }
+  }
+
+  /** Valorisation en cours de vie : le passé est rejoué sur cours réels, seule
+   *  la vie restante est simulée. Voir api/inlife.py pour pourquoi un simple
+   *  « repartir du bon spot » ne suffirait pas sur un produit à mémoire. */
+  async function runInLifePricing() {
+    loading.value = true; error.value = null; result.value = null
+    _startProgress((globalParams.N / 20000) * 350)
+    try {
+      const res = await apiFetch('/api/price/in-life', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(_inLifeBody()),
+      })
+      const data = await res.json()
+      if (!res.ok) { error.value = data.detail || 'Erreur serveur'; return }
+      if (data.early_recall) { error.value = data.message; return }
+      result.value = { ...data, _inputs: _snapshotInputs() }
+      rightTab.value = 'results'
+    } catch (e) { error.value = e.message }
+    finally { loading.value = false; _stopProgress() }
+  }
+
   async function runPricing() {
+    if (isInLife()) return runInLifePricing()
     loading.value = true; error.value = null; result.value = null
     _startProgress((globalParams.N / 20000) * 350)
     try {
@@ -503,17 +657,55 @@ export const usePricingStore = defineStore('pricing', () => {
     finally { loading.value = false; _stopProgress() }
   }
 
+  // ── Spread émetteur implicite ─────────────────────────────────────
+  const impliedFunding = ref(null)
+
+  /** Le calcul à l'envers : on donne le prix de marché, on lit le spread qui
+   *  le reproduit. C'est la question qu'on se pose vraiment devant une ligne
+   *  de secondaire — pas « que vaut-elle pour moi » mais « à quel spread le
+   *  marché la traite ». N'a de sens qu'en cours de vie. */
+  async function runImpliedFunding(prixCiblePct) {
+    if (!isInLife()) {
+      error.value = 'Le spread implicite se lit sur une valorisation en cours de vie : '
+                  + 'renseignez une date de valorisation postérieure au strike.'
+      return
+    }
+    loading.value = true; error.value = null; impliedFunding.value = null
+    _startProgress((globalParams.N / 20000) * 3500)
+    try {
+      const res = await apiFetch('/api/price/implied-funding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // La bissection reprice une dizaine de fois : à 20 000 chemins ce
+        // serait quatre minutes pour un chiffre qu'on lit à quelques bps près.
+        // Même arbitrage que le solveur de paramètres, qui tourne à 8 000.
+        body: JSON.stringify({ ..._inLifeBody(),
+                                N: Math.min(globalParams.N, 8000),
+                                target_price: prixCiblePct / 100 }),
+      })
+      const data = await res.json()
+      if (!res.ok) { error.value = data.detail || 'Erreur serveur'; return }
+      impliedFunding.value = data
+    } catch (e) { error.value = e.message }
+    finally { loading.value = false; _stopProgress() }
+  }
+
   // ── Greeks ────────────────────────────────────────────────────────
   async function runGreeks() {
     if (!result.value || !selectedGreeks.value.length) return
     loading.value = true; error.value = null
     _startProgress(selectedGreeks.value.length * (globalParams.N / 20000) * 400)
     try {
-      const res = await fetch('/api/price', {
+      // Même bascule que le prix : en cours de vie, les sensibilités se
+      // calculent sur la jambe résiduelle. Passer par /api/price bumpait le
+      // produit NEUF depuis t=0 — des Greeks d'émission affichés à côté d'un
+      // mark-to-market, sans rapport avec le chiffre au-dessus.
+      const enCours = isInLife()
+      const res = await apiFetch(enCours ? '/api/price/in-life' : '/api/price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ..._baseBody(),
+          ...(enCours ? _inLifeBody() : _baseBody()),
           N: globalParams.N,
           antithetic: globalParams.antithetic,
           compute_greeks: true,
@@ -902,29 +1094,20 @@ export const usePricingStore = defineStore('pricing', () => {
     finally { loading.value = false; _stopProgress() }
   }
 
-  // ── Schedule (CONSTAT calendar) preview ─────────────────────────────
-  // Pure API call, no shared state mutation — each CONSTAT sub-panel in
-  // PayScriptEditor.vue manages its own preview result locally, so multiple
-  // CONSTAT()/CONSTAT()() declarations in the same script don't clobber a
-  // single shared ref, and this doesn't touch the main loading/progress UI.
-  async function fetchSchedulePreview({ start_date, end_date, roll_date, frequency, stub, sub_frequency }) {
-    const res = await fetch('/api/schedule/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        start_date, end_date, roll_date, frequency, stub,
-        sub_frequency: sub_frequency || null,
-      }),
-    })
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.detail || 'Erreur serveur')
-    }
-    return res.json()
-  }
-
   // ── Yahoo Finance data loader ─────────────────────────────────────
   const yfStatus = ref('')
+
+  /** Profil de dividende d'un titre à une date donnée : rendement déclaré,
+   *  rendement implicite lu dans l'écart des séries, et les détachements qui
+   *  fondent le chiffre. `asof` vide = aujourd'hui. */
+  async function loadDividendProfile(ticker, asof) {
+    try {
+      const params = new URLSearchParams({ ticker })
+      if (asof) params.set('asof', asof)
+      const res = await apiFetch(`/api/finance/dividends?${params}`)
+      return res.ok ? await res.json() : null
+    } catch { return null }
+  }
 
   async function loadYfOne(idx) {
     const u = underlyings.value[idx]
@@ -938,13 +1121,23 @@ export const usePricingStore = defineStore('pricing', () => {
       if (data.error) { yfStatus.value = `⚠ ${tk}: ${data.error}`; return }
       // backend renvoie la clé uppercase identique à tk
       const vol = data.vols?.[tk] ?? null
-      const q   = data.div_yields?.[tk] ?? 0
+      // Le dividende ne vient plus du champ instantané de Yahoo : il est
+      // reconstruit à la DATE DE VALORISATION, avec le détail des
+      // détachements qui le fondent (voir services/market_data.dividend_profile).
+      const div = await loadDividendProfile(tk, globalParams.valuation_date || null)
+      const q = div?.ok ? div.yield_declared : (data.div_yields?.[tk] ?? 0)
       if (vol != null) {
         underlyings.value[idx].sigma = Math.round(vol * 1000) / 10
         underlyings.value[idx].alpha = Math.round(vol * 1000) / 10
         underlyings.value[idx].q     = Math.round(q * 10000) / 100
         underlyings.value[idx].name  = tk
-        yfStatus.value = `✓ ${tk} — σ=${(vol*100).toFixed(1)}%, q=${(q*100).toFixed(2)}% · ${data.n_obs} obs.`
+        underlyings.value[idx].dividendProfile = div?.ok ? div : null
+        const suffixe = div?.ok
+          ? (div.pays_dividends
+              ? ` · ${div.dividends.length} détachement(s)` + (div.suspect ? ' ⚠ écart de sources' : '')
+              : ' · ne verse pas de dividende')
+          : ''
+        yfStatus.value = `✓ ${tk} — σ=${(vol*100).toFixed(1)}%, q=${(q*100).toFixed(2)}% · ${data.n_obs} obs.${suffixe}`
       } else {
         yfStatus.value = `⚠ ${tk}: introuvable sur Yahoo Finance`
         if (data.missing?.includes(tk)) yfStatus.value += ' — vérifiez le ticker'
@@ -990,22 +1183,42 @@ export const usePricingStore = defineStore('pricing', () => {
     } catch (e) { yfStatus.value = '⚠ Erreur: ' + e.message }
   }
 
-  // ── Stored spot lookup (Parquet price store — separate from hist_vol
-  // above, which only calibrates σ/q on the fly and persists nothing) ──
-  async function fetchStoredSpot(key, date) {
-    const res = await fetch(`/api/amc/prices/spot?key=${encodeURIComponent(key)}&date=${encodeURIComponent(date)}`)
-    if (!res.ok) return null
-    return res.json()
-  }
-
-  async function refreshStoredSpot(key, ticker) {
-    const res = await fetch('/api/amc/prices/fetch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, ticker }),
-    })
-    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur Yahoo Finance') }
-    return res.json()
+  /** Clôtures NUES à une date, par ticker : { TICKER: {close, date} }.
+   *
+   *  Le fixing d'un produit structuré est la clôture non ajustée — celle que
+   *  le term sheet cite. Cet écran lisait le magasin de prix AMC, qui est
+   *  volontairement auto-ajusté (voir core/amc_prices.py) parce qu'il sert au
+   *  FIFO et à l'attribution de portefeuille, où la série total-return est la
+   *  bonne. Résultat : des spots déflatés des dividendes versés depuis, donc
+   *  en contradiction avec le niveau que le moteur a réellement utilisé — et
+   *  vides tant qu'on n'avait pas semé le magasin à la main.
+   *
+   *  On lit désormais la même source que le pricer, à la demande. */
+  async function loadStrikeCloses(tickers, jour) {
+    const tk = [...new Set((tickers || []).filter(Boolean))]
+    if (!tk.length || !jour) return {}
+    // Marge arrière : une date de strike un week-end ou un férié n'a pas de
+    // cours, c'est la dernière clôture connue qui fait foi — même convention
+    // que le rejeu côté serveur.
+    const debut = new Date(jour)
+    debut.setDate(debut.getDate() - 10)
+    const q = new URLSearchParams({ tickers: tk.join(','),
+                                     start: debut.toISOString().split('T')[0], end: jour })
+    try {
+      const res = await fetch(`/api/finance/hist_prices?${q}`)
+      if (!res.ok) return {}
+      const data = await res.json()
+      const dates = data.dates || []
+      let idx = -1
+      for (let i = 0; i < dates.length; i++) { if (dates[i] <= jour) idx = i; else break }
+      if (idx < 0) return {}
+      const out = {}
+      for (const t of tk) {
+        const serie = data.prices?.[t]
+        if (serie && serie[idx]) out[t] = { close: serie[idx], date: dates[idx] }
+      }
+      return out
+    } catch { return {} }
   }
 
   // ── Underlyings management ────────────────────────────────────────
@@ -1275,6 +1488,31 @@ export const usePricingStore = defineStore('pricing', () => {
       for (const [k, v] of Object.entries(saved)) {
         if (k in globalParams) globalParams[k] = v
       }
+      // Le panier et sa calibration. Fusionnés sur un sous-jacent par défaut
+      // pour qu'un champ ajouté après la sauvegarde arrive avec sa valeur par
+      // défaut plutôt qu'en undefined. Absents des scripts enregistrés avant
+      // que ce soit sauvegardé : on garde alors ce qui est à l'écran.
+      if (Array.isArray(saved.underlyings) && saved.underlyings.length) {
+        underlyings.value = saved.underlyings.map(
+          (u, i) => ({ ..._defaultUnderlying(i + 1), ...u }))
+      }
+      if (Array.isArray(saved.corr_matrix) && saved.corr_matrix.length) {
+        corrMatrix.value = saved.corr_matrix.map(row => [...row])
+      }
+      if (saved.funding) {
+        fundingCurve.enabled = !!saved.funding.enabled
+        fundingCurve.mode = saved.funding.mode || 'flat'
+        fundingCurve.level = saved.funding.level ?? 1.5
+        if (Array.isArray(saved.funding.pillars) && saved.funding.pillars.length) {
+          fundingCurve.pillars = saved.funding.pillars.map(x => ({ ...x }))
+        }
+      }
+      if (saved.yield_curve_enabled != null) {
+        yieldCurve.enabled = !!saved.yield_curve_enabled
+        if (Array.isArray(saved.yield_curve_pillars) && saved.yield_curve_pillars.length) {
+          yieldCurve.pillars = saved.yield_curve_pillars.map(x => ({ ...x }))
+        }
+      }
     }
 
     _clearResults()
@@ -1285,13 +1523,33 @@ export const usePricingStore = defineStore('pricing', () => {
       script_text: script.value,
       params_json: JSON.stringify({ ...paramOverrides }),
       constats_json: JSON.stringify(JSON.parse(JSON.stringify(constatOverrides))),
+      // Tout ce qu'il faut pour retrouver le pricing tel quel, pas seulement
+      // le script. Il manquait les trois dates qui définissent la vie du
+      // produit, le panier et sa calibration, et la corrélation : rouvrir un
+      // script sauvegardé rendait un écran qu'il fallait resaisir sous-jacent
+      // par sous-jacent, avec des dates repartant d'aujourd'hui — donc un
+      // autre prix, sans que rien ne le signale.
       global_params_json: JSON.stringify({
         r: globalParams.r, T: globalParams.T, N: globalParams.N,
         seed: globalParams.seed, model: globalParams.model,
         antithetic: globalParams.antithetic, deal_ccy: globalParams.deal_ccy,
         rateModel: globalParams.rateModel, sigma_r: globalParams.sigma_r, a_r: globalParams.a_r,
         barrierMonitoring: globalParams.barrierMonitoring,
+        trade_date: globalParams.trade_date,
+        strike_date: globalParams.strike_date,
         value_date: globalParams.value_date,
+        payment_date: globalParams.payment_date,
+        valuation_date: globalParams.valuation_date,
+        underlyings: underlyings.value.map(u => ({ ...u })),
+        corr_matrix: corrMatrix.value.map(row => [...row]),
+        // Le spread émetteur fait partie des hypothèses de valorisation au
+        // même titre que la vol : sans lui, rouvrir le script rendrait un
+        // autre prix sans que rien ne le signale.
+        funding: { enabled: fundingCurve.enabled, mode: fundingCurve.mode,
+                    level: fundingCurve.level,
+                    pillars: fundingCurve.pillars.map(x => ({ ...x })) },
+        yield_curve_enabled: yieldCurve.enabled,
+        yield_curve_pillars: yieldCurve.pillars.map(x => ({ ...x })),
       }),
     }
   }
@@ -1363,11 +1621,13 @@ export const usePricingStore = defineStore('pricing', () => {
     currentRfqId, pendingDealPrefill, openedDeal,
     parseScript, runPricing, runGreeks,
     runProfile, runPaths, runProba, runBacktest, runMtf,
-    runSolver, runGrid, paramIsPct, fromStoredUnits, runScenarios, fetchSchedulePreview,
+    runSolver, runGrid, paramIsPct, fromStoredUnits, runScenarios,
+    runInLifePricing, isInLife, loadDividendProfile,
+    fundingCurve, runImpliedFunding, impliedFunding,
     buildUserParams: _buildUserParams,
     buildConstats: _buildConstats,
     buildDividendCurve: _buildDividendCurve,
-    loadYfOne, loadYfAll, fetchStoredSpot, refreshStoredSpot,
+    loadYfOne, loadYfAll, loadStrikeCloses,
     addUnderlying, removeUnderlying,
     resetToDefaults, loadFromDb, loadFromDeal, loadFromRfq, saveScript, updateScript,
     pricingBody: () => ({ ..._baseBody(), N: globalParams.N, antithetic: globalParams.antithetic, ..._rateParams() }),

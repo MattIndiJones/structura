@@ -59,180 +59,228 @@
       <main class="flex-1 overflow-y-auto p-6">
 
         <!-- Formulaire de création -->
-        <div v-if="showCreateForm" class="max-w-2xl flex flex-col gap-4">
+        <div v-if="showCreateForm" class="flex flex-col gap-4 max-w-2xl xl:max-w-[1500px]">
           <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider">Nouvelle RFQ</h2>
 
           <AlertMessage v-if="createError" kind="error">{{ createError }}</AlertMessage>
 
-          <div class="card flex flex-col gap-3">
-            <div class="grid grid-cols-2 gap-3">
-              <div class="flex flex-col gap-1">
-                <label class="label">Nom *</label>
-                <input v-model="form.name" type="text" class="input" placeholder="Autocall Athena USD 3Y — Client X" />
+          <!-- Deux colonnes dès qu'il y a la place : à gauche ce qu'on
+               demande et à qui, à droite le produit qu'on fait pricer. -->
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+            <div class="card flex flex-col gap-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="flex flex-col gap-1">
+                  <label class="label">Nom *</label>
+                  <input v-model="form.name" type="text" class="input" placeholder="Autocall Athena USD 3Y — Client X" />
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="label">Date de l'AO</label>
+                  <input v-model="form.ao_date" type="date" class="input" />
+                </div>
               </div>
-              <div class="flex flex-col gap-1">
-                <label class="label">Date de l'AO</label>
-                <input v-model="form.ao_date" type="date" class="input" />
-              </div>
-            </div>
 
-            <div class="flex flex-col gap-1">
-              <label class="label">Type de RFQ</label>
+              <div class="flex flex-col gap-1">
+                <label class="label">Type de RFQ</label>
+                <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
+                  <button :class="['px-2 py-1 transition-colors', form.kind === 'indicatif' ? 'bg-slate-700 text-slate-200 font-semibold' : 'text-slate-500 hover:text-slate-400']"
+                          @click="onKindToggle('indicatif')">Indicatif</button>
+                  <button :class="['px-2 py-1 transition-colors', form.kind === 'to_trade' ? 'bg-amber-900/80 text-amber-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
+                          @click="onKindToggle('to_trade')">To trade</button>
+                </div>
+                <p class="text-[10px] text-slate-600 mt-0.5">
+                  {{ form.kind === 'indicatif'
+                    ? "Sonder rapidement un niveau de prix pour affiner une idée — script Normal, pas de trade attendu."
+                    : "Pensée pour aboutir à un trade — script en mode Expert (calendrier CONSTAT réel) : template Expert prédéfini, script sauvegardé ou deal déjà booké." }}
+                </p>
+              </div>
+
+              <div class="flex flex-col gap-1">
+                <label class="label">Sens (notre côté)</label>
+                <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
+                  <button :class="['px-2 py-1 transition-colors', form.sens === 'achat' ? 'bg-emerald-900/70 text-emerald-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
+                          @click="form.sens = 'achat'">↓ Achat (nous achetons)</button>
+                  <button :class="['px-2 py-1 transition-colors', form.sens === 'vente' ? 'bg-blue-900/70 text-blue-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
+                          @click="form.sens = 'vente'">↑ Vente (nous vendons)</button>
+                </div>
+                <p class="text-[10px] text-slate-600 mt-0.5">{{ sensHint(form.sens) }}</p>
+              </div>
+
               <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
-                <button :class="['px-2 py-1 transition-colors', form.kind === 'indicatif' ? 'bg-slate-700 text-slate-200 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                        @click="onKindToggle('indicatif')">Indicatif</button>
-                <button :class="['px-2 py-1 transition-colors', form.kind === 'to_trade' ? 'bg-amber-900/80 text-amber-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                        @click="onKindToggle('to_trade')">To trade</button>
+                <button :class="['px-2 py-1 transition-colors', form.source === 'template' ? 'bg-slate-700 text-slate-200 font-semibold' : 'text-slate-500 hover:text-slate-400']"
+                        @click="onSourceToggle('template')">{{ form.kind === 'to_trade' ? 'Template Expert' : 'Template no-code' }}</button>
+                <button :class="['px-2 py-1 transition-colors', form.source === 'script' ? 'bg-blue-900/80 text-blue-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
+                        @click="onSourceToggle('script')">Script existant</button>
               </div>
-              <p class="text-[10px] text-slate-600 mt-0.5">
-                {{ form.kind === 'indicatif'
-                  ? "Sonder rapidement un niveau de prix pour affiner une idée — script Normal, pas de trade attendu."
-                  : "Pensée pour aboutir à un trade — script en mode Expert (calendrier CONSTAT réel) : template Expert prédéfini, script sauvegardé ou deal déjà booké." }}
-              </p>
-            </div>
 
-            <div class="flex flex-col gap-1">
-              <label class="label">Sens (notre côté)</label>
-              <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
-                <button :class="['px-2 py-1 transition-colors', form.sens === 'achat' ? 'bg-emerald-900/70 text-emerald-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                        @click="form.sens = 'achat'">↓ Achat (nous achetons)</button>
-                <button :class="['px-2 py-1 transition-colors', form.sens === 'vente' ? 'bg-blue-900/70 text-blue-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                        @click="form.sens = 'vente'">↑ Vente (nous vendons)</button>
-              </div>
-              <p class="text-[10px] text-slate-600 mt-0.5">{{ sensHint(form.sens) }}</p>
-            </div>
-
-            <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
-              <button :class="['px-2 py-1 transition-colors', form.source === 'template' ? 'bg-slate-700 text-slate-200 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                      @click="onSourceToggle('template')">{{ form.kind === 'to_trade' ? 'Template Expert' : 'Template no-code' }}</button>
-              <button :class="['px-2 py-1 transition-colors', form.source === 'script' ? 'bg-blue-900/80 text-blue-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                      @click="onSourceToggle('script')">Script existant</button>
-            </div>
-
-            <div v-if="form.source === 'template'" class="flex flex-col gap-1">
-              <label class="label">Type de produit</label>
-              <select v-model="form.template_type" class="select" @change="onTemplateChange">
-                <option value="">Choisir un template…</option>
-                <optgroup v-for="(items, group) in groupedTemplates" :key="group" :label="group">
-                  <option v-for="t in items" :key="t.key" :value="t.key">{{ t.label }}</option>
-                </optgroup>
-              </select>
-              <p v-if="form.kind === 'to_trade'" class="text-[10px] text-slate-600 mt-0.5">
-                Version Expert du template (calendrier CONSTAT déjà en place) — les mêmes 16 modèles qu'en mode Normal.
-              </p>
-            </div>
-            <div v-else class="flex flex-col gap-1">
-              <label class="label">Script de la bibliothèque</label>
-              <select :value="librarySelectValue" class="select" @change="onLibrarySelect($event.target.value)">
-                <option value="">Choisir un script…</option>
-                <optgroup label="Scripts sauvegardés">
-                  <option v-for="s in scripts" :key="'s'+s.id" :value="'script:'+s.id">{{ s.name }}</option>
-                </optgroup>
-                <optgroup v-if="expertDeals.length" label="Deals bookés (mode Expert)">
-                  <option v-for="d in expertDeals" :key="'d'+d.id" :value="'deal:'+d.id">
-                    {{ d.reference }} — {{ d.product_type || d.contrepartie }}
-                  </option>
-                </optgroup>
-              </select>
-              <p v-if="form.kind === 'to_trade'" class="text-[10px] text-slate-600 mt-0.5">
-                Seuls les scripts avec un calendrier CONSTAT réel (mode Expert) conviennent pour une RFQ to trade.
-              </p>
-            </div>
-
-            <!-- Sous-jacent -->
-            <div class="grid grid-cols-2 gap-3">
-              <div class="flex flex-col gap-1">
-                <label class="label">Sous-jacent</label>
-                <select class="select" :value="form.underlying_ticker" @change="onUnderlyingSelect($event.target.value)">
-                  <option value="">— Choisir un sous-jacent —</option>
-                  <optgroup v-for="g in underlyingGroups" :key="g.group" :label="g.group">
-                    <option v-for="it in g.items" :key="it.ticker" :value="it.ticker">{{ it.label }}</option>
+              <div v-if="form.source === 'template'" class="flex flex-col gap-1">
+                <label class="label">Type de produit</label>
+                <select v-model="form.template_type" class="select" @change="onTemplateChange">
+                  <option value="">Choisir un template…</option>
+                  <optgroup v-for="(items, group) in groupedTemplates" :key="group" :label="group">
+                    <option v-for="t in items" :key="t.key" :value="t.key">{{ t.label }}</option>
                   </optgroup>
                 </select>
-                <input v-model="form.underlying_ticker" type="text" class="input font-mono text-xs mt-1"
-                       placeholder="Ticker (ou saisie libre)" />
+                <p v-if="form.kind === 'to_trade'" class="text-[10px] text-slate-600 mt-0.5">
+                  Version Expert du template (calendrier CONSTAT déjà en place) — les mêmes 16 modèles qu'en mode Normal.
+                </p>
               </div>
-              <div class="flex flex-col gap-1">
-                <label class="label">Nominal</label>
-                <input v-model="nominalRaw" @blur="formatNominal" @focus="unformatNominal"
-                       type="text" inputmode="numeric" class="input font-mono"
-                       placeholder="1 000 000" />
-              </div>
-              <div class="flex flex-col gap-1">
-                <label class="label">Devise</label>
-                <select v-model="form.currency" class="select">
-                  <option>EUR</option><option>USD</option><option>GBP</option>
-                  <option>JPY</option><option>CHF</option><option>SGD</option>
+              <div v-else class="flex flex-col gap-1">
+                <label class="label">Script de la bibliothèque</label>
+                <select :value="librarySelectValue" class="select" @change="onLibrarySelect($event.target.value)">
+                  <option value="">Choisir un script…</option>
+                  <optgroup label="Scripts sauvegardés">
+                    <option v-for="s in scripts" :key="'s'+s.id" :value="'script:'+s.id">{{ s.name }}</option>
+                  </optgroup>
+                  <optgroup v-if="expertDeals.length" label="Deals bookés (mode Expert)">
+                    <option v-for="d in expertDeals" :key="'d'+d.id" :value="'deal:'+d.id">
+                      {{ d.reference }} — {{ d.product_type || d.contrepartie }}
+                    </option>
+                  </optgroup>
                 </select>
+                <p v-if="form.kind === 'to_trade'" class="text-[10px] text-slate-600 mt-0.5">
+                  Seuls les scripts avec un calendrier CONSTAT réel (mode Expert) conviennent pour une RFQ to trade.
+                </p>
               </div>
-              <div class="flex flex-col gap-1">
-                <label class="label">Maturité (années)</label>
-                <input v-model.number="form.T" type="number" step="0.5" class="input" />
-              </div>
-              <div class="flex flex-col gap-1">
-                <label class="label">Date de strike</label>
-                <input v-model="form.strike_date" type="date" class="input" />
-              </div>
-              <div class="flex flex-col gap-1">
-                <label class="label">Date de valeur</label>
-                <input v-model="form.value_date" type="date" class="input" />
-              </div>
-              <div class="flex flex-col gap-1">
-                <label class="label">Date de maturité</label>
-                <input :value="createMaturityDate" type="date" readonly
-                       class="input bg-slate-800/40 text-slate-500 cursor-not-allowed" />
-              </div>
+
             </div>
 
-            <!-- Termes du produit + calendrier(s) CONSTAT (dynamiques, extraits du script) -->
-            <div v-if="parsedParams.length || scriptConstats.length" class="border-t border-slate-800 pt-3">
-              <RfqParamsEditor :parsed-params="parsedParams" :param-overrides="paramOverrides"
-                               :constats="scriptConstats" :constat-overrides="constatOverrides" />
-            </div>
-
-            <!-- Hypothèses de pricing (avancé, pour le calcul du prix modèle interne) -->
-            <details class="border-t border-slate-800 pt-3">
-              <summary class="label mb-0 cursor-pointer select-none">▸ Hypothèses de pricing (avancé)</summary>
-              <div class="flex items-center gap-3 mt-2">
-                <button type="button" class="btn-secondary text-xs px-3 py-1.5"
-                        :disabled="!form.underlying_ticker?.trim() || createYfLoading"
-                        :title="form.underlying_ticker?.trim()
-                                ? `Vol réalisée 1 an et rendement du dividende de ${form.underlying_ticker} (Yahoo Finance)`
-                                : 'Renseignez un ticker de sous-jacent ci-dessus'"
-                        @click="loadCreateUnderlyingParams">
-                  📡 Charger les paramètres du sous-jacent
-                </button>
-                <span v-if="createYfStatus" class="text-[10px] text-slate-500">{{ createYfStatus }}</span>
-              </div>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
+            <div class="card flex flex-col gap-3">
+              <!-- Sous-jacent -->
+              <div class="grid grid-cols-2 gap-3">
                 <div class="flex flex-col gap-1">
-                  <label class="label">Vol implicite (%)</label>
-                  <input v-model.number="advanced.sigma" type="number" class="input" />
+                  <label class="label">Sous-jacent</label>
+                  <select class="select" :value="form.underlying_ticker" @change="onUnderlyingSelect($event.target.value)">
+                    <option value="">— Choisir un sous-jacent —</option>
+                    <optgroup v-for="g in underlyingGroups" :key="g.group" :label="g.group">
+                      <option v-for="it in g.items" :key="it.ticker" :value="it.ticker">{{ it.label }}</option>
+                    </optgroup>
+                  </select>
+                  <input v-model="form.underlying_ticker" type="text" class="input font-mono text-xs mt-1"
+                         placeholder="Ticker (ou saisie libre)" />
                 </div>
                 <div class="flex flex-col gap-1">
-                  <label class="label">Dividende (%)</label>
-                  <input v-model.number="advanced.q" type="number" step="0.1" class="input" />
+                  <label class="label">Nominal</label>
+                  <input v-model="nominalRaw" @blur="formatNominal" @focus="unformatNominal"
+                         type="text" inputmode="numeric" class="input font-mono"
+                         placeholder="1 000 000" />
                 </div>
                 <div class="flex flex-col gap-1">
-                  <label class="label">Taux sans risque (%)</label>
-                  <input v-model.number="advanced.r" type="number" step="0.1" class="input" />
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Trajectoires (N)</label>
-                  <input v-model.number="advanced.N" type="number" step="1000" class="input" />
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Modèle</label>
-                  <select v-model="advanced.model" class="select">
-                    <option value="constant">Constant (GBM)</option>
-                    <option value="heston">Heston</option>
-                    <option value="sabr">SABR</option>
-                    <option value="localvol">Dupire (Local Vol)</option>
-                    <option value="lsv">Local-Stochastic Vol</option>
+                  <label class="label">Devise</label>
+                  <select v-model="form.currency" class="select">
+                    <option>EUR</option><option>USD</option><option>GBP</option>
+                    <option>JPY</option><option>CHF</option><option>SGD</option>
                   </select>
                 </div>
+                <div class="flex flex-col gap-1">
+                  <label class="label">Maturité (années)</label>
+                  <input v-model.number="form.T" type="number" step="0.5" class="input" />
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="label"
+                         title="Date de constatation du niveau initial du ou des sous-jacents. C'est là que démarre la diffusion Monte Carlo.">Date de strike *</label>
+                  <input v-model="form.strike_date" type="date" class="input"
+                         @change="resolveFormDate('strike_date')" />
+                  <select v-model="form.strike_date_convention" class="select py-1 text-[11px]"
+                          title="Ce que devient cette date si elle tombe un week-end ou un jour férié du calendrier de la devise."
+                          @change="resolveFormDate('strike_date')">
+                    <option value="none">Aucun ajustement</option>
+                    <option value="following">Jour ouvré suivant</option>
+                    <option value="modified_following">Suivant, sauf changement de mois</option>
+                    <option value="preceding">Jour ouvré précédent</option>
+                    <option value="modified_preceding">Précédent, sauf changement de mois</option>
+                  </select>
+                  <span v-if="dateNotices.strike_date" class="text-[10px] text-amber-500">{{ dateNotices.strike_date }}</span>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="label"
+                         title="Date d'échange du cash entre contreparties. Le prix coté est le montant qui bouge ce jour-là. Elle peut précéder la date de strike (forward start).">Date de valeur *</label>
+                  <input v-model="form.value_date" type="date" class="input"
+                         @change="resolveFormDate('value_date')" />
+                  <select v-model="form.value_date_convention" class="select py-1 text-[11px]"
+                          title="Ce que devient cette date si elle tombe un week-end ou un jour férié du calendrier de la devise."
+                          @change="resolveFormDate('value_date')">
+                    <option value="none">Aucun ajustement</option>
+                    <option value="following">Jour ouvré suivant</option>
+                    <option value="modified_following">Suivant, sauf changement de mois</option>
+                    <option value="preceding">Jour ouvré précédent</option>
+                    <option value="modified_preceding">Précédent, sauf changement de mois</option>
+                  </select>
+                  <span v-if="dateNotices.value_date" class="text-[10px] text-amber-500">{{ dateNotices.value_date }}</span>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="label">Date de maturité</label>
+                  <input :value="createMaturityDate" type="date" readonly
+                         class="input bg-slate-800/40 text-slate-500 cursor-not-allowed" />
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="label"
+                         title="Échange final des flux de cash. Proposée à trois jours ouvrés après la dernière constatation — modifiable, c'est le term sheet qui tranche.">Date de paiement *</label>
+                  <input v-model="form.payment_date" type="date" class="input"
+                         @change="resolveFormDate('payment_date')" />
+                  <select v-model="form.payment_date_convention" class="select py-1 text-[11px]"
+                          title="Ce que devient cette date si elle tombe un week-end ou un jour férié du calendrier de la devise."
+                          @change="resolveFormDate('payment_date')">
+                    <option value="none">Aucun ajustement</option>
+                    <option value="following">Jour ouvré suivant</option>
+                    <option value="modified_following">Suivant, sauf changement de mois</option>
+                    <option value="preceding">Jour ouvré précédent</option>
+                    <option value="modified_preceding">Précédent, sauf changement de mois</option>
+                  </select>
+                  <span v-if="dateNotices.payment_date" class="text-[10px] text-amber-500">{{ dateNotices.payment_date }}</span>
+                </div>
               </div>
-            </details>
+
+              <!-- Termes du produit + calendrier(s) CONSTAT (dynamiques, extraits du script) -->
+              <div v-if="parsedParams.length || scriptConstats.length" class="border-t border-slate-800 pt-3">
+                <RfqParamsEditor :parsed-params="parsedParams" :param-overrides="paramOverrides"
+                                 :constats="scriptConstats" :constat-overrides="constatOverrides"
+                                 :currency="form.currency" />
+              </div>
+
+              <!-- Hypothèses de pricing (avancé, pour le calcul du prix modèle interne) -->
+              <details class="border-t border-slate-800 pt-3">
+                <summary class="label mb-0 cursor-pointer select-none">▸ Hypothèses de pricing (avancé)</summary>
+                <div class="flex items-center gap-3 mt-2">
+                  <button type="button" class="btn-secondary text-xs px-3 py-1.5"
+                          :disabled="!form.underlying_ticker?.trim() || createYfLoading"
+                          :title="form.underlying_ticker?.trim()
+                                  ? `Vol réalisée 1 an et rendement du dividende de ${form.underlying_ticker} (Yahoo Finance)`
+                                  : 'Renseignez un ticker de sous-jacent ci-dessus'"
+                          @click="loadCreateUnderlyingParams">
+                    📡 Charger les paramètres du sous-jacent
+                  </button>
+                  <span v-if="createYfStatus" class="text-[10px] text-slate-500">{{ createYfStatus }}</span>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
+                  <div class="flex flex-col gap-1">
+                    <label class="label">Vol implicite (%)</label>
+                    <input v-model.number="advanced.sigma" type="number" class="input" />
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <label class="label">Dividende (%)</label>
+                    <input v-model.number="advanced.q" type="number" step="0.1" class="input" />
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <label class="label">Taux sans risque (%)</label>
+                    <input v-model.number="advanced.r" type="number" step="0.1" class="input" />
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <label class="label">Trajectoires (N)</label>
+                    <input v-model.number="advanced.N" type="number" step="1000" class="input" />
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <label class="label">Modèle</label>
+                    <select v-model="advanced.model" class="select">
+                      <option value="constant">Constant (GBM)</option>
+                      <option value="heston">Heston</option>
+                      <option value="sabr">SABR</option>
+                      <option value="localvol">Dupire (Local Vol)</option>
+                      <option value="lsv">Local-Stochastic Vol</option>
+                    </select>
+                  </div>
+                </div>
+              </details>
+            </div>
           </div>
 
           <div class="flex gap-2">
@@ -244,7 +292,7 @@
         </div>
 
         <!-- Détail RFQ -->
-        <div v-else-if="rfq.current" class="max-w-5xl flex flex-col gap-4">
+        <div v-else-if="rfq.current" class="flex flex-col gap-4 max-w-[1900px]">
           <div class="flex items-start justify-between">
             <div>
               <div class="flex items-center gap-2">
@@ -263,305 +311,361 @@
             </div>
           </div>
 
-          <!-- Détails du produit -->
-          <div class="card grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div>
-              <div class="label mb-0.5">Date de l'AO</div>
-              <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.ao_date) }}</div>
-            </div>
-            <div>
-              <div class="label mb-0.5">Sous-jacent</div>
-              <div class="text-xs text-slate-200">
-                {{ underlyingSummary.name || '—' }}
-                <span v-if="underlyingSummary.ticker" class="text-slate-500 font-mono">({{ underlyingSummary.ticker }})</span>
-              </div>
-            </div>
-            <div>
-              <div class="label mb-0.5">Nominal</div>
-              <div class="text-xs text-slate-200">{{ fmtNominal(rfq.current.params?.notional) }} {{ rfq.current.params?.currency || '' }}</div>
-            </div>
-            <div>
-              <div class="label mb-0.5">Date de strike</div>
-              <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.params?.strike_date) || '—' }}</div>
-            </div>
-            <div>
-              <div class="label mb-0.5">Date de valeur</div>
-              <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.params?.value_date) || '—' }}</div>
-            </div>
-            <div>
-              <div class="label mb-0.5">Maturité</div>
-              <div class="text-xs text-slate-200">
-                {{ fmtDateOnly(detailMaturityDate) || '—' }}
-                <span v-if="rfq.current.params?.T" class="text-slate-500">({{ fmtTenor(rfq.current.params.T) }} ans)</span>
-              </div>
-            </div>
-            <div>
-              <div class="label mb-0.5">Statut</div>
-              <div class="flex items-center gap-2">
-                <span class="text-xs text-slate-200">{{ statusLabel(rfq.current.status) }}</span>
-                <button v-if="rfq.current.status !== 'clos'"
-                        class="text-[10px] underline text-slate-500 hover:text-slate-300"
-                        :title="rfq.current.status === 'sans_suite'
-                                ? 'Rendre l\'AO au statut déduit de ses cotations'
-                                : 'AO abandonné ou perdu — il ne donnera pas lieu à un trade'"
-                        @click="toggleSansSuite">
-                  {{ rfq.current.status === 'sans_suite' ? 'Rouvrir' : 'Sans suite' }}
-                </button>
-              </div>
-            </div>
-            <div>
-              <div class="label mb-0.5">Sens (notre côté)</div>
-              <select class="select py-1 px-2 text-xs" :value="rfq.current.sens || 'achat'"
-                      :disabled="!!rfq.current.quotes?.length"
-                      :title="rfq.current.quotes?.length ? 'Sens figé dès la première sollicitation' : sensHint(rfq.current.sens)"
-                      @change="updateSens($event.target.value)">
-                <option value="achat">↓ Achat (nous achetons)</option>
-                <option value="vente">↑ Vente (nous vendons)</option>
-              </select>
-            </div>
-          </div>
+          <!-- Deux colonnes figées : à gauche tout l'AO (produit, prix,
+               script, cotations), à droite le contrôle du prix. La grille ne
+               dépend QUE de la largeur de fenêtre, jamais de l'état des
+               données — la colonne de gauche a la même largeur avant et après
+               un pricing, rien ne se réagence quand le prix arrive.
 
-          <!-- Prix modèle — params modifiables avant recalcul -->
-          <div class="card flex flex-col gap-3">
-            <div class="flex items-center gap-4">
-              <div class="stat-box flex-1">
-                <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Prix modèle Structura</div>
-                <div class="text-xl font-bold text-slate-100">{{ fmtPrice(rfq.current.model_price) }}</div>
-                <div v-if="rfq.current.model_price_at" class="text-[10px] text-slate-600 mt-0.5">
-                  Calculé le {{ fmtDate(rfq.current.model_price_at) }}
+               1650 px : en-dessous, la colonne de gauche descendrait sous
+               700 px utiles une fois les 560 px du panneau retirés (plus la
+               liste des AO et les marges) — on empile alors plutôt que de
+               rendre les deux colonnes illisibles. 560 px, c'est la largeur
+               qu'exige la table des flux pour ne pas défiler. -->
+          <div class="flex flex-col gap-4 min-[1650px]:grid min-[1650px]:grid-cols-[minmax(0,1fr)_560px] min-[1650px]:items-start">
+            <div class="flex flex-col gap-4 min-w-0">
+              <!-- Détails du produit -->
+              <div class="card grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <div class="label mb-0.5">Date de l'AO</div>
+                  <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.ao_date) }}</div>
                 </div>
-              </div>
-              <button class="btn-secondary text-xs" :disabled="computing || !!rfq.current.booked_deal" @click="computeModelPrice">
-                {{ computing ? 'Calcul…' : 'Calculer prix modèle' }}
-              </button>
-            </div>
-
-            <details class="border-t border-slate-800 pt-3">
-              <summary class="label mb-0 cursor-pointer select-none">▸ Paramètres de pricing (modifiables)</summary>
-              <div class="mt-2 flex flex-col gap-3">
-                <fieldset :disabled="!!rfq.current.quotes?.length">
-                  <RfqParamsEditor :parsed-params="detailParsedParams" :param-overrides="detailParamOverrides"
-                                   :constats="detailScriptConstats" :constat-overrides="detailConstatOverrides" />
-                </fieldset>
-                <div class="flex items-center gap-3 border-t border-slate-800 pt-3">
-                  <button type="button" class="btn-secondary text-xs px-3 py-1.5"
-                          :disabled="!underlyingSummary.ticker || detailYfLoading"
-                          :title="underlyingSummary.ticker
-                                  ? `Vol réalisée 1 an et rendement du dividende de ${underlyingSummary.ticker} (Yahoo Finance)`
-                                  : 'Aucun ticker de sous-jacent sur cette RFQ'"
-                          @click="loadDetailUnderlyingParams">
-                    📡 Charger les paramètres du sous-jacent
-                  </button>
-                  <span v-if="detailYfStatus" class="text-[10px] text-slate-500">{{ detailYfStatus }}</span>
-                </div>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Vol implicite (%)</label>
-                    <input v-model.number="detailAdvanced.sigma" type="number" class="input" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Dividende (%)</label>
-                    <input v-model.number="detailAdvanced.q" type="number" step="0.1" class="input" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Taux sans risque (%)</label>
-                    <input v-model.number="detailAdvanced.r" type="number" step="0.1" class="input" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Trajectoires (N)</label>
-                    <input v-model.number="detailAdvanced.N" type="number" step="1000" class="input" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Modèle</label>
-                    <select v-model="detailAdvanced.model" class="select">
-                      <option value="constant">Constant (GBM)</option>
-                      <option value="heston">Heston</option>
-                      <option value="sabr">SABR</option>
-                      <option value="localvol">Dupire (Local Vol)</option>
-                      <option value="lsv">Local-Stochastic Vol</option>
-                    </select>
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Date de strike</label>
-                    <input v-model="detailAdvanced.strike_date" type="date" class="input"
-                           :disabled="!!rfq.current.quotes?.length" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Date de valeur</label>
-                    <input v-model="detailAdvanced.value_date" type="date" class="input"
-                           :disabled="!!rfq.current.quotes?.length" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Date de maturité</label>
-                    <input :value="detailMaturityDate" type="date" readonly
-                           class="input bg-slate-800/40 text-slate-500 cursor-not-allowed" />
+                <div>
+                  <div class="label mb-0.5">Sous-jacent</div>
+                  <div class="text-xs text-slate-200">
+                    {{ underlyingSummary.name || '—' }}
+                    <span v-if="underlyingSummary.ticker" class="text-slate-500 font-mono">({{ underlyingSummary.ticker }})</span>
                   </div>
                 </div>
-              </div>
-            </details>
-          </div>
-          <AlertMessage v-if="computeError" kind="error">{{ computeError }}</AlertMessage>
-
-          <!-- Script (collapsible) -->
-          <details class="card text-xs text-slate-400">
-            <summary class="font-bold cursor-pointer text-slate-300 select-none">▸ PayScript</summary>
-            <pre class="mt-3 font-mono text-slate-400 whitespace-pre-wrap">{{ rfq.current.script_snapshot }}</pre>
-          </details>
-
-          <!-- Quotes -->
-          <div class="card flex flex-col gap-3">
-            <div class="flex items-center justify-between">
-              <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Fournisseurs sollicités</div>
-              <div class="flex items-center gap-2">
-                <span v-if="bestQuote" class="text-[10px] text-slate-500" :title="sensHint(rfq.current.sens)">
-                  Meilleure réponse ({{ rfq.current.sens === 'vente' ? 'prix le plus haut' : 'prix le plus bas' }}) :
-                  <span class="text-slate-300 font-semibold">{{ fmtPrice(bestQuote.price) }}</span>
-                  ({{ providerLabel(bestQuote.provider) }})
-                </span>
-                <button v-if="!rfq.current.booked_deal" class="btn-secondary text-xs" @click="openAddQuote">+ Ajouter un fournisseur</button>
-              </div>
-            </div>
-
-            <AlertMessage v-if="lastLookError" kind="error" dismissible @dismiss="lastLookError = ''">{{ lastLookError }}</AlertMessage>
-
-            <!-- Un AO s'exécute une fois : une fois booké, plus de bouton de
-                 booking, on renvoie vers le deal. Le serveur refuse le doublon
-                 de toute façon (deals.py:book_deal, 409). -->
-            <div v-if="rfq.current.booked_deal"
-                 class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
-              <span class="text-xs text-slate-300">
-                📋 AO exécuté — deal <span class="font-mono text-slate-200">{{ rfq.current.booked_deal.reference }}</span>.
-              </span>
-              <button class="btn-secondary text-xs px-3 py-1.5 shrink-0"
-                      @click="openBookedDeal">→ Voir le booking</button>
-            </div>
-
-            <div v-else-if="rfq.current.selected_quote_id" class="flex items-center justify-between gap-3 rounded-lg border border-amber-800/60 bg-amber-950/20 px-3 py-2">
-              <span class="text-xs text-amber-300">
-                ⭐ Réponse retenue — prête à booker.
-                <span v-if="rfq.current.kind === 'indicatif'" class="text-amber-500/80">
-                  RFQ indicative — pensée pour explorer, pas pour trader.
-                </span>
-              </span>
-              <div class="flex items-center gap-2 shrink-0">
-                <button v-if="rfq.current.kind === 'indicatif'" class="btn-secondary text-xs px-3 py-1.5"
-                        @click="convertToTrade(rfq.current)">📐 Convertir en RFQ to trade</button>
-                <button class="btn-primary text-xs px-3 py-1.5" @click="bookFromRfq">📋 Booker cette réponse</button>
-              </div>
-            </div>
-
-            <div v-if="!rfq.current.quotes?.length" class="text-xs text-slate-600 py-2">
-              Aucun fournisseur sollicité pour l'instant.
-            </div>
-
-            <div v-else class="table-shell" tabindex="0" role="region">
-            <table class="w-full text-xs min-w-[1280px]">
-              <thead>
-                <tr class="text-left text-slate-500 border-b border-slate-800">
-                  <th class="py-1.5 pr-2 font-medium">Fournisseur</th>
-                  <th class="py-1.5 pr-2 font-medium">Contact</th>
-                  <th class="py-1.5 pr-2 font-medium num">Prix</th>
-                  <th class="py-1.5 pr-2 font-medium num"
-                      title="Écart au prix modèle Structura, signé de notre côté : positif = en notre faveur (à l'achat, coter sous le modèle ; à la vente, au-dessus).">Écart</th>
-                  <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Statut</th>
-                  <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Fermeté</th>
-                  <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Date réponse</th>
-                  <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Valide jusqu'au</th>
-                  <th class="py-1.5 pr-2 font-medium whitespace-nowrap" title="Le fournisseur voit le meilleur prix du marché et peut s'aligner, ou garder le deal à son propre prix.">Last look</th>
-                  <th class="py-1.5 pr-2 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                <template v-for="q in rfq.current.quotes" :key="q.id">
-                <tr :class="['border-b border-slate-800/60', q.id === rfq.current.selected_quote_id ? 'bg-amber-950/10' : '']">
-                  <td class="py-1.5 pr-2 text-slate-300 whitespace-nowrap">
-                    <span v-if="q.parent_quote_id" class="text-slate-600 mr-1">↳</span>
-                    <span :class="q.parent_quote_id ? 'text-slate-400 italic' : ''">
-                      {{ q.parent_quote_id ? 'Last look' : providerLabel(q.provider) }}
-                    </span>
-                  </td>
-                  <td class="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{{ q.contact || '—' }}</td>
-                  <td class="py-1.5 pr-2">
-                    <input type="number" class="input py-1 px-2 w-24"
-                           :disabled="!!rfq.current.booked_deal"
-                           :value="q.price ?? ''"
-                           @change="onQuotePriceChange(q, $event.target.value)" />
-                  </td>
-                  <td class="py-1.5 pr-2 num whitespace-nowrap" :class="spreadClass(q)">{{ spreadBps(q) }}</td>
-                  <td class="py-1.5 pr-2">
-                    <select class="select py-1 px-2 min-w-[110px]" :value="q.status"
-                            :disabled="!!rfq.current.booked_deal" @change="updateQuoteField(q, 'status', $event.target.value)">
-                      <option value="en_attente">En attente</option>
-                      <option value="recu">Reçu</option>
-                      <option value="decline">Décliné</option>
-                      <option value="expire">Expiré</option>
-                    </select>
-                  </td>
-                  <td class="py-1.5 pr-2">
-                    <select class="select py-1 px-2 min-w-[110px]" :value="q.firmness || 'UNKNOWN'"
-                            :disabled="!!rfq.current.booked_deal"
-                            @change="updateQuoteField(q, 'firmness', $event.target.value)">
-                      <option value="UNKNOWN">À qualifier</option>
-                      <option value="INDICATIVE">Indicative</option>
-                      <option value="FIRM">Ferme</option>
-                    </select>
-                  </td>
-                  <td class="py-1.5 pr-2">
-                    <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
-                           :disabled="!!rfq.current.booked_deal"
-                           :value="toDatetimeLocal(q.quoted_at)"
-                           @change="onQuoteDateChange(q, $event.target.value)" />
-                  </td>
-                  <td class="py-1.5 pr-2">
-                    <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
-                           :disabled="!!rfq.current.booked_deal"
-                           :value="toDatetimeLocal(q.valid_until)"
-                           @change="onQuoteValidityChange(q, $event.target.value)" />
-                  </td>
-                  <td class="py-1.5 pr-2">
-                    <select v-if="!q.parent_quote_id" class="select py-1 px-2 min-w-[80px]"
-                            :disabled="!!rfq.current.booked_deal || q.price == null"
-                            :value="q.last_look ? 'oui' : 'non'"
-                            @change="onLastLookToggle(q, $event.target.value === 'oui')">
-                      <option value="non">Non</option>
-                      <option value="oui">Oui</option>
-                    </select>
-                  </td>
-                  <td class="py-1.5 pr-2 text-right whitespace-nowrap">
-                    <button :class="['text-xs mr-2', q.id === rfq.current.selected_quote_id ? 'text-amber-400 font-semibold' : 'text-slate-600 hover:text-amber-400']"
-                            :disabled="!!rfq.current.booked_deal || q.price == null || ['decline', 'expire'].includes(q.status)"
-                            :title="q.price == null ? 'Saisissez un prix final avant de retenir la réponse' : (q.id === rfq.current.selected_quote_id ? 'Réponse retenue — cliquer pour désélectionner' : 'Retenir cette réponse')"
-                            @click="onSelectQuote(q)">
-                      {{ q.id === rfq.current.selected_quote_id ? '★ Retenue' : '☆ Retenir' }}
+                <div>
+                  <div class="label mb-0.5">Nominal</div>
+                  <div class="text-xs text-slate-200">{{ fmtNominal(rfq.current.params?.notional) }} {{ rfq.current.params?.currency || '' }}</div>
+                </div>
+                <div>
+                  <div class="label mb-0.5">Date de strike</div>
+                  <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.params?.strike_date) || '—' }}</div>
+                </div>
+                <div>
+                  <div class="label mb-0.5">Date de valeur</div>
+                  <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.params?.value_date) || '—' }}</div>
+                </div>
+                <div>
+                  <div class="label mb-0.5">Maturité</div>
+                  <div class="text-xs text-slate-200">
+                    {{ fmtDateOnly(detailMaturityDate) || '—' }}
+                    <span v-if="rfq.current.params?.T" class="text-slate-500">({{ fmtTenor(rfq.current.params.T) }} ans)</span>
+                  </div>
+                </div>
+                <div>
+                  <div class="label mb-0.5">Statut</div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-200">{{ statusLabel(rfq.current.status) }}</span>
+                    <button v-if="rfq.current.status !== 'clos'"
+                            class="text-[10px] underline text-slate-500 hover:text-slate-300"
+                            :title="rfq.current.status === 'sans_suite'
+                                    ? 'Rendre l\'AO au statut déduit de ses cotations'
+                                    : 'AO abandonné ou perdu — il ne donnera pas lieu à un trade'"
+                            @click="toggleSansSuite">
+                      {{ rfq.current.status === 'sans_suite' ? 'Rouvrir' : 'Sans suite' }}
                     </button>
-                    <button v-if="!rfq.current.booked_deal" class="text-slate-600 hover:text-red-400" @click="removeQuote(q.id)">✕</button>
-                  </td>
-                </tr>
-                </template>
-              </tbody>
-            </table>
+                  </div>
+                </div>
+                <div>
+                  <div class="label mb-0.5">Sens (notre côté)</div>
+                  <select class="select py-1 px-2 text-xs" :value="rfq.current.sens || 'achat'"
+                          :disabled="!!rfq.current.quotes?.length"
+                          :title="rfq.current.quotes?.length ? 'Sens figé dès la première sollicitation' : sensHint(rfq.current.sens)"
+                          @change="updateSens($event.target.value)">
+                    <option value="achat">↓ Achat (nous achetons)</option>
+                    <option value="vente">↑ Vente (nous vendons)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Prix modèle — params modifiables avant recalcul -->
+              <div class="card flex flex-col gap-3">
+                <div class="flex items-center gap-4">
+                  <div class="stat-box flex-1">
+                    <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Prix modèle Structura</div>
+                    <div class="text-xl font-bold text-slate-100">{{ fmtPrice(rfq.current.model_price) }}</div>
+                    <!-- Ligne toujours rendue : sans elle, la tuile gagnait un cran
+                         de hauteur au premier calcul et tout le bloc sautait. -->
+                    <div class="text-[10px] text-slate-600 mt-0.5">
+                      {{ rfq.current.model_price_at ? 'Calculé le ' + fmtDate(rfq.current.model_price_at) : 'Pas encore calculé' }}
+                    </div>
+                  </div>
+                  <!-- Les deux libellés partagent la même cellule de grille : le
+                       bouton se dimensionne sur le plus long et ne bouge plus en
+                       passant à « Calcul… ». Une largeur en dur serait à refaire à
+                       chaque changement de libellé ou de police. -->
+                  <button class="btn-secondary text-xs grid shrink-0" :disabled="computing || !!rfq.current.booked_deal" @click="computeModelPrice">
+                    <span class="col-start-1 row-start-1" :class="computing ? 'invisible' : ''">Calculer prix modèle</span>
+                    <span class="col-start-1 row-start-1" :class="computing ? '' : 'invisible'">Calcul…</span>
+                  </button>
+                </div>
+
+                <details class="border-t border-slate-800 pt-3">
+                  <summary class="label mb-0 cursor-pointer select-none">▸ Paramètres de pricing (modifiables)</summary>
+                  <div class="mt-2 flex flex-col gap-3">
+                    <fieldset :disabled="!!rfq.current.quotes?.length">
+                      <RfqParamsEditor :parsed-params="detailParsedParams" :param-overrides="detailParamOverrides"
+                                       :constats="detailScriptConstats" :constat-overrides="detailConstatOverrides"
+                                       :currency="rfq.current.params?.currency || 'EUR'" />
+                    </fieldset>
+
+                    <!-- L'éditeur ci-dessus ne vivait qu'en mémoire : le calcul du
+                         prix n'envoie que les hypothèses de modèle, jamais les
+                         termes. Un échéancier modifié se perdait donc au premier
+                         rechargement de l'AO. Cette barre est le seul chemin qui
+                         les persiste. -->
+                    <div class="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-3">
+                      <button type="button" class="btn-primary text-xs px-3 py-1.5 shrink-0"
+                              :disabled="!detailTermsDirty || savingTerms"
+                              title="Enregistre l'échéancier, les termes du produit et les dates sur l'AO. Refusé par le serveur si une cotation existe déjà — les termes contractuels sont alors figés."
+                              @click="saveDetailTerms">
+                        💾 Enregistrer les termes
+                      </button>
+                      <span class="text-[11px]" :class="detailTermsDirty ? 'text-amber-500' : 'text-slate-600'">
+                        {{ detailTermsDirty
+                          ? 'Modifications non enregistrées — elles seront perdues sans cette sauvegarde.'
+                          : 'Termes enregistrés.' }}
+                      </span>
+                      <button type="button" class="text-[11px] underline text-slate-500 hover:text-slate-300 shrink-0"
+                              title="Recharger les termes tels qu'ils sont enregistrés sur l'AO"
+                              @click="refreshDetailParams">Recharger</button>
+                    </div>
+                    <AlertMessage v-if="termsError" kind="error" dismissible @dismiss="termsError = ''">{{ termsError }}</AlertMessage>
+
+                    <div class="flex items-center gap-3 border-t border-slate-800 pt-3">
+                      <button type="button" class="btn-secondary text-xs px-3 py-1.5"
+                              :disabled="!underlyingSummary.ticker || detailYfLoading"
+                              :title="underlyingSummary.ticker
+                                      ? `Vol réalisée 1 an et rendement du dividende de ${underlyingSummary.ticker} (Yahoo Finance)`
+                                      : 'Aucun ticker de sous-jacent sur cette RFQ'"
+                              @click="loadDetailUnderlyingParams">
+                        📡 Charger les paramètres du sous-jacent
+                      </button>
+                      <span v-if="detailYfStatus" class="text-[10px] text-slate-500">{{ detailYfStatus }}</span>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div class="flex flex-col gap-1">
+                        <label class="label">Vol implicite (%)</label>
+                        <input v-model.number="detailAdvanced.sigma" type="number" class="input" />
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <label class="label">Dividende (%)</label>
+                        <input v-model.number="detailAdvanced.q" type="number" step="0.1" class="input" />
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <label class="label">Taux sans risque (%)</label>
+                        <input v-model.number="detailAdvanced.r" type="number" step="0.1" class="input" />
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <label class="label">Trajectoires (N)</label>
+                        <input v-model.number="detailAdvanced.N" type="number" step="1000" class="input" />
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <label class="label">Modèle</label>
+                        <select v-model="detailAdvanced.model" class="select">
+                          <option value="constant">Constant (GBM)</option>
+                          <option value="heston">Heston</option>
+                          <option value="sabr">SABR</option>
+                          <option value="localvol">Dupire (Local Vol)</option>
+                          <option value="lsv">Local-Stochastic Vol</option>
+                        </select>
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <label class="label">Date de strike</label>
+                        <input v-model="detailAdvanced.strike_date" type="date" class="input"
+                               :disabled="!!rfq.current.quotes?.length" />
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <label class="label">Date de valeur</label>
+                        <input v-model="detailAdvanced.value_date" type="date" class="input"
+                               :disabled="!!rfq.current.quotes?.length" />
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <label class="label">Date de maturité</label>
+                        <input :value="detailMaturityDate" type="date" readonly
+                               class="input bg-slate-800/40 text-slate-500 cursor-not-allowed" />
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <label class="label"
+                               title="Date d'échange final des flux de cash — celle du term sheet. C'est elle qui actualise le remboursement, pas la maturité.">Date de paiement ⓘ</label>
+                        <input v-model="detailAdvanced.payment_date" type="date" class="input"
+                               :disabled="!!rfq.current.quotes?.length" />
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              </div>
+              <AlertMessage v-if="computeError" kind="error">{{ computeError }}</AlertMessage>
+
+              <!-- Script (collapsible) -->
+              <details class="card text-xs text-slate-400">
+                <summary class="font-bold cursor-pointer text-slate-300 select-none">▸ PayScript</summary>
+                <pre class="mt-3 font-mono text-slate-400 whitespace-pre-wrap">{{ rfq.current.script_snapshot }}</pre>
+              </details>
+
+              <!-- Quotes -->
+              <div class="card flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                  <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Fournisseurs sollicités</div>
+                  <div class="flex items-center gap-2">
+                    <span v-if="bestQuote" class="text-[10px] text-slate-500" :title="sensHint(rfq.current.sens)">
+                      Meilleure réponse ({{ rfq.current.sens === 'vente' ? 'prix le plus haut' : 'prix le plus bas' }}) :
+                      <span class="text-slate-300 font-semibold">{{ fmtPrice(bestQuote.price) }}</span>
+                      ({{ providerLabel(bestQuote.provider) }})
+                    </span>
+                    <button v-if="!rfq.current.booked_deal" class="btn-secondary text-xs" @click="openAddQuote">+ Ajouter un fournisseur</button>
+                  </div>
+                </div>
+
+                <AlertMessage v-if="lastLookError" kind="error" dismissible @dismiss="lastLookError = ''">{{ lastLookError }}</AlertMessage>
+
+                <!-- Un AO s'exécute une fois : une fois booké, plus de bouton de
+                     booking, on renvoie vers le deal. Le serveur refuse le doublon
+                     de toute façon (deals.py:book_deal, 409). -->
+                <div v-if="rfq.current.booked_deal"
+                     class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
+                  <span class="text-xs text-slate-300">
+                    📋 AO exécuté — deal <span class="font-mono text-slate-200">{{ rfq.current.booked_deal.reference }}</span>.
+                  </span>
+                  <button class="btn-secondary text-xs px-3 py-1.5 shrink-0"
+                          @click="openBookedDeal">→ Voir le booking</button>
+                </div>
+
+                <div v-else-if="rfq.current.selected_quote_id" class="flex items-center justify-between gap-3 rounded-lg border border-amber-800/60 bg-amber-950/20 px-3 py-2">
+                  <span class="text-xs text-amber-300">
+                    ⭐ Réponse retenue — prête à booker.
+                    <span v-if="rfq.current.kind === 'indicatif'" class="text-amber-500/80">
+                      RFQ indicative — pensée pour explorer, pas pour trader.
+                    </span>
+                  </span>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button v-if="rfq.current.kind === 'indicatif'" class="btn-secondary text-xs px-3 py-1.5"
+                            @click="convertToTrade(rfq.current)">📐 Convertir en RFQ to trade</button>
+                    <button class="btn-primary text-xs px-3 py-1.5" @click="bookFromRfq">📋 Booker cette réponse</button>
+                  </div>
+                </div>
+
+                <div v-if="!rfq.current.quotes?.length" class="text-xs text-slate-600 py-2">
+                  Aucun fournisseur sollicité pour l'instant.
+                </div>
+
+                <div v-else class="table-shell" tabindex="0" role="region">
+                <table class="w-full text-xs min-w-[1280px]">
+                  <thead>
+                    <tr class="text-left text-slate-500 border-b border-slate-800">
+                      <th class="py-1.5 pr-2 font-medium">Fournisseur</th>
+                      <th class="py-1.5 pr-2 font-medium">Contact</th>
+                      <th class="py-1.5 pr-2 font-medium num">Prix</th>
+                      <th class="py-1.5 pr-2 font-medium num"
+                          title="Écart au prix modèle Structura, signé de notre côté : positif = en notre faveur (à l'achat, coter sous le modèle ; à la vente, au-dessus).">Écart</th>
+                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Statut</th>
+                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Fermeté</th>
+                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Date réponse</th>
+                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap"
+                      title="Renseignée d'office à l'heure de réponse + 2 h dès qu'on connaît celle-ci — une cotation ne se tient pas plus longtemps. Modifiable ensuite, et jamais écrasée une fois saisie.">Valide jusqu'au</th>
+                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap" title="Le fournisseur voit le meilleur prix du marché et peut s'aligner, ou garder le deal à son propre prix.">Last look</th>
+                      <th class="py-1.5 pr-2 font-medium"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template v-for="q in rfq.current.quotes" :key="q.id">
+                    <tr :class="['border-b border-slate-800/60', q.id === rfq.current.selected_quote_id ? 'bg-amber-950/10' : '']">
+                      <td class="py-1.5 pr-2 text-slate-300 whitespace-nowrap">
+                        <span v-if="q.parent_quote_id" class="text-slate-600 mr-1">↳</span>
+                        <span :class="q.parent_quote_id ? 'text-slate-400 italic' : ''">
+                          {{ q.parent_quote_id ? 'Last look' : providerLabel(q.provider) }}
+                        </span>
+                      </td>
+                      <td class="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{{ q.contact || '—' }}</td>
+                      <td class="py-1.5 pr-2">
+                        <input type="number" class="input py-1 px-2 w-24"
+                               :disabled="!!rfq.current.booked_deal"
+                               :value="q.price ?? ''"
+                               @change="onQuotePriceChange(q, $event.target.value)" />
+                      </td>
+                      <td class="py-1.5 pr-2 num whitespace-nowrap" :class="spreadClass(q)">{{ spreadBps(q) }}</td>
+                      <td class="py-1.5 pr-2">
+                        <select class="select py-1 px-2 min-w-[125px]" :value="q.status"
+                                :disabled="!!rfq.current.booked_deal" @change="updateQuoteField(q, 'status', $event.target.value)">
+                          <option value="en_attente">En attente</option>
+                          <option value="recu">Reçu</option>
+                          <option value="decline">Décliné</option>
+                          <option value="expire">Expiré</option>
+                        </select>
+                      </td>
+                      <td class="py-1.5 pr-2">
+                        <select class="select py-1 px-2 min-w-[125px]" :value="q.firmness || 'UNKNOWN'"
+                                :disabled="!!rfq.current.booked_deal"
+                                @change="updateQuoteField(q, 'firmness', $event.target.value)">
+                          <option value="UNKNOWN">À qualifier</option>
+                          <option value="INDICATIVE">Indicative</option>
+                          <option value="FIRM">Ferme</option>
+                        </select>
+                      </td>
+                      <td class="py-1.5 pr-2">
+                        <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
+                               :disabled="!!rfq.current.booked_deal"
+                               :value="toDatetimeLocal(q.quoted_at)"
+                               @change="onQuoteDateChange(q, $event.target.value)" />
+                      </td>
+                      <td class="py-1.5 pr-2">
+                        <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
+                               :disabled="!!rfq.current.booked_deal"
+                               :value="toDatetimeLocal(q.valid_until)"
+                               @change="onQuoteValidityChange(q, $event.target.value)" />
+                      </td>
+                      <td class="py-1.5 pr-2">
+                        <select v-if="!q.parent_quote_id" class="select py-1 px-2 min-w-[80px]"
+                                :disabled="!!rfq.current.booked_deal || q.price == null"
+                                :value="q.last_look ? 'oui' : 'non'"
+                                @change="onLastLookToggle(q, $event.target.value === 'oui')">
+                          <option value="non">Non</option>
+                          <option value="oui">Oui</option>
+                        </select>
+                      </td>
+                      <td class="py-1.5 pr-2 text-right whitespace-nowrap">
+                        <button :class="['text-xs mr-2', q.id === rfq.current.selected_quote_id ? 'text-amber-400 font-semibold' : 'text-slate-600 hover:text-amber-400']"
+                                :disabled="!!rfq.current.booked_deal || q.price == null || ['decline', 'expire'].includes(q.status)"
+                                :title="q.price == null ? 'Saisissez un prix final avant de retenir la réponse' : (q.id === rfq.current.selected_quote_id ? 'Réponse retenue — cliquer pour désélectionner' : 'Retenir cette réponse')"
+                                @click="onSelectQuote(q)">
+                          {{ q.id === rfq.current.selected_quote_id ? '★ Retenue' : '☆ Retenir' }}
+                        </button>
+                        <button v-if="!rfq.current.booked_deal" class="text-slate-600 hover:text-red-400" @click="removeQuote(q.id)">✕</button>
+                      </td>
+                    </tr>
+                    </template>
+                  </tbody>
+                </table>
+                </div>
+
+                <!-- Add quote inline form -->
+                <div v-if="addingQuote" class="flex items-end gap-2 pt-2 border-t border-slate-800">
+                  <div class="flex flex-col gap-1">
+                    <label class="label">Fournisseur</label>
+                    <select v-model="quoteForm.provider" class="select">
+                      <option v-for="p in rfq.providers" :key="p.id" :value="p.label">{{ p.label }}</option>
+                      <option value="autre">Autre (banque non listée)</option>
+                    </select>
+                  </div>
+                  <div v-if="quoteForm.provider === 'autre'" class="flex flex-col gap-1">
+                    <label class="label">Nom de la banque</label>
+                    <input v-model="quoteForm.customProvider" type="text" class="input" />
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <label class="label">Contact</label>
+                    <input v-model="quoteForm.contact" type="text" class="input" placeholder="Nom / email (optionnel)" />
+                  </div>
+                  <button class="btn-primary text-xs px-3 py-2" @click="submitAddQuote">Ajouter</button>
+                  <button class="btn-secondary text-xs px-3 py-2" @click="addingQuote = false">Annuler</button>
+                </div>
+              </div>
             </div>
 
-            <!-- Add quote inline form -->
-            <div v-if="addingQuote" class="flex items-end gap-2 pt-2 border-t border-slate-800">
-              <div class="flex flex-col gap-1">
-                <label class="label">Fournisseur</label>
-                <select v-model="quoteForm.provider" class="select">
-                  <option v-for="p in rfq.providers" :key="p.id" :value="p.label">{{ p.label }}</option>
-                  <option value="autre">Autre (banque non listée)</option>
-                </select>
-              </div>
-              <div v-if="quoteForm.provider === 'autre'" class="flex flex-col gap-1">
-                <label class="label">Nom de la banque</label>
-                <input v-model="quoteForm.customProvider" type="text" class="input" />
-              </div>
-              <div class="flex flex-col gap-1">
-                <label class="label">Contact</label>
-                <input v-model="quoteForm.contact" type="text" class="input" placeholder="Nom / email (optionnel)" />
-              </div>
-              <button class="btn-primary text-xs px-3 py-2" @click="submitAddQuote">Ajouter</button>
-              <button class="btn-secondary text-xs px-3 py-2" @click="addingQuote = false">Annuler</button>
-            </div>
+            <RfqPricingPanel :rfq="rfq.current" :pricing="rfq.lastPricing" />
           </div>
         </div>
 
@@ -586,12 +690,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useRfqStore } from '../stores/rfq.js'
 import { apiFetch } from '../utils/api.js'
 import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
-import { underlyingGroups } from '../data/commonUnderlyings.js'
+import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import BaseModal from '../components/ui/BaseModal.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -599,7 +703,11 @@ import AlertMessage from '../components/ui/AlertMessage.vue'
 import DataFilterBar from '../components/ui/DataFilterBar.vue'
 import { useDataFilter } from '../composables/useDataFilter.js'
 import RfqParamsEditor from '../components/RfqParamsEditor.vue'
+import RfqPricingPanel from '../components/RfqPricingPanel.vue'
 import { formatDate, formatDateTime, formatPercent, formatInt, formatBps } from '../utils/format.js'
+
+// Catalogue de sous-jacents : chargé depuis la base au montage.
+onMounted(ensureUnderlyings)
 
 // ── CONSTAT calendar helpers — mirror of pricing.js's constatOverrides
 // shape/serialization (see RfqParamsEditor.vue's docstring), duplicated
@@ -611,6 +719,9 @@ function makeDefaultConstatValue(kind) {
     start_date: '', end_date: '', roll_date: '',
     frequency: { value: 3, unit: 'M' }, stub: 'short_last',
     sub_frequency: kind === 'nested_schedule' ? { value: 1, unit: 'M' } : null,
+    // Pas de convention par défaut : une date fixée par un term sheet ne se
+    // déplace pas tant que personne n'a dit comment.
+    convention: 'none', settlement_lag: 0,
   })
 }
 function syncConstatOverrides(constats, overridesObj) {
@@ -640,6 +751,8 @@ function buildConstatsPayload(constats, overridesObj) {
         start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
         frequency: tenorStr(v.frequency), stub: v.stub,
         sub_frequency: c.kind === 'nested_schedule' ? tenorStr(v.sub_frequency) : null,
+        convention: v.convention || 'none',
+        settlement_lag: v.settlement_lag || 0,
       }
     }
   }
@@ -661,6 +774,8 @@ function restoreConstatOverrides(constats, overridesObj, saved) {
       overridesObj[c.name].roll_date = sv.roll_date || ''
       overridesObj[c.name].frequency = parseTenor(sv.frequency)
       overridesObj[c.name].stub = sv.stub || 'short_last'
+      overridesObj[c.name].convention = sv.convention || 'none'
+      overridesObj[c.name].settlement_lag = sv.settlement_lag || 0
       if (c.kind === 'nested_schedule') overridesObj[c.name].sub_frequency = parseTenor(sv.sub_frequency)
     }
   }
@@ -701,18 +816,10 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
 
-// Mirrors DealTab.vue's own addBizDays/maturity derivation — kept local here
-// too since an RFQ has no Deal instance to borrow it from, and the two only
-// need to agree on the date shape (ISO string), not share a live import.
-function addBizDays(isoDate, n) {
-  const d = new Date(isoDate)
-  let added = 0
-  while (added < n) {
-    d.setDate(d.getDate() + 1)
-    if (d.getDay() !== 0 && d.getDay() !== 6) added++
-  }
-  return d.toISOString().split('T')[0]
-}
+// addBizDays a disparu avec les dates devinees : il ne comptait que les jours
+// de semaine, sans aucun ferie, et servait a proposer une value date a
+// strike + 2. Les jours ouvres vivent desormais cote serveur, sur un vrai
+// calendrier par devise (core/calendars.py).
 function addYears(isoDate, years) {
   const d = new Date(isoDate)
   d.setDate(d.getDate() + Math.round(years * 365.25))
@@ -743,9 +850,18 @@ const form = reactive({
   underlying_ticker: '',
   currency: 'CHF',
   T: 3,
-  strike_date: todayIso(),
-  value_date: addBizDays(todayIso(), 2),
+  // Aucune date par défaut : elles viennent du term sheet, pas d'une règle
+  // T+2 qui aurait l'air juste sans l'être. Saisie obligatoire.
+  strike_date: '',
+  value_date: '',
+  payment_date: '',
+  // Une convention par date, sans défaut global : une date fixée par un term
+  // sheet un jour fermé y reste tant que personne n'a dit comment la traiter.
+  strike_date_convention: 'none',
+  value_date_convention: 'none',
+  payment_date_convention: 'none',
 })
+const dateNotices = reactive({ strike_date: '', value_date: '', payment_date: '' })
 
 // Read-only preview of the maturity date, same rule DealTab.vue books with:
 // the latest CONSTAT schedule end date if the script has one (to_trade),
@@ -756,8 +872,10 @@ const createMaturityDate = computed(() => {
     .map(c => constatOverrides[c.name]?.end_date)
     .filter(Boolean)
   if (ends.length) return ends.reduce((max, d) => (d > max ? d : max))
-  if (!form.value_date || !form.T) return ''
-  return addYears(form.value_date, form.T)
+  // Sans calendrier, la maturité se compte depuis le strike : T est l'horizon
+  // de diffusion, et la diffusion démarre à la constatation initiale.
+  if (!form.strike_date || !form.T) return ''
+  return addYears(form.strike_date, form.T)
 })
 
 // "To trade" needs the precision a real Expert-mode CONSTAT calendar gives —
@@ -904,7 +1022,10 @@ function openCreateForm() {
     name: '', ao_date: todayIso(), kind: 'indicatif', sens: 'achat', source: 'template', template_type: '',
     script_id: null, source_deal_id: null,
     underlying_name: 'Sous-jacent', underlying_ticker: '', currency: 'CHF', T: 3,
-    strike_date: todayIso(), value_date: addBizDays(todayIso(), 2),
+    // Aucune date inventee : ni a l ouverture du formulaire, ni en dupliquant,
+    // ni en convertissant. Elles viennent du term sheet de l affaire en cours,
+    // pas de celle d avant.
+    strike_date: '', value_date: '', payment_date: '',
   })
   Object.assign(advanced, { sigma: 20, q: 2, r: 3, N: 20000, model: 'constant' })
   nominalRaw.value = '1 000 000'
@@ -932,7 +1053,10 @@ async function duplicateRfq(source) {
     underlying_ticker: u.ticker || '',
     currency: p.currency || 'CHF',
     T: p.T ?? 3,
-    strike_date: todayIso(), value_date: addBizDays(todayIso(), 2),
+    // Aucune date inventee : ni a l ouverture du formulaire, ni en dupliquant,
+    // ni en convertissant. Elles viennent du term sheet de l affaire en cours,
+    // pas de celle d avant.
+    strike_date: '', value_date: '', payment_date: '',
   })
   Object.assign(advanced, {
     sigma: Math.round((u.sigma ?? 0.20) * 1000) / 10,
@@ -974,7 +1098,10 @@ async function convertToTrade(source) {
     underlying_ticker: u.ticker || '',
     currency: p.currency || 'CHF',
     T: p.T ?? 3,
-    strike_date: todayIso(), value_date: addBizDays(todayIso(), 2),
+    // Aucune date inventee : ni a l ouverture du formulaire, ni en dupliquant,
+    // ni en convertissant. Elles viennent du term sheet de l affaire en cours,
+    // pas de celle d avant.
+    strike_date: '', value_date: '', payment_date: '',
   })
   Object.assign(advanced, {
     sigma: Math.round((u.sigma ?? 0.20) * 1000) / 10,
@@ -1000,18 +1127,24 @@ async function selectRfq(id) {
 // Editable copy of the RFQ's pricing params, shown in the detail panel's
 // "Paramètres de pricing" — separate reactive state from the create form's
 // (paramOverrides/constatOverrides/advanced) so editing one never bleeds
-// into the other. Recalculating persists this copy back onto the RFQ (see
-// computeModelPrice) rather than being a one-shot, throw-away tweak.
+// into the other. Le calcul du prix n'envoie QUE les hypothèses de modèle :
+// les termes contractuels (échéancier, dates, termes du produit) ne sont
+// persistés que par saveDetailTerms, via le bouton dédié.
 const detailParsedParams    = ref([])
 const detailParamOverrides  = reactive({})
 const detailScriptConstats  = ref([])
 const detailConstatOverrides = reactive({})
 const detailAdvanced = reactive({
   sigma: 20, q: 2, r: 3, N: 20000, model: 'constant',
-  strike_date: todayIso(), value_date: addBizDays(todayIso(), 2),
+  strike_date: '', value_date: '', payment_date: '',
 })
 
 async function refreshDetailParams() {
+  await _loadDetailParams()
+  termsBaseline.value = contractualSubset(detailTermsPayload())
+}
+
+async function _loadDetailParams() {
   const script = rfq.current?.script_snapshot || ''
   const p = rfq.current?.params || {}
   const u = (p.underlyings && p.underlyings[0]) || {}
@@ -1021,8 +1154,9 @@ async function refreshDetailParams() {
     r: Math.round((p.r ?? 0.03) * 1000) / 10,
     N: p.N ?? 20000,
     model: p.model || 'constant',
-    strike_date: p.strike_date || todayIso(),
-    value_date: p.value_date || addBizDays(todayIso(), 2),
+    strike_date: p.strike_date || '',
+    value_date: p.value_date || '',
+    payment_date: p.payment_date || '',
   })
   Object.keys(detailParamOverrides).forEach(k => delete detailParamOverrides[k])
   if (!script.trim()) { detailParsedParams.value = []; detailScriptConstats.value = []; return }
@@ -1044,6 +1178,83 @@ async function refreshDetailParams() {
   } catch {
     detailParsedParams.value = []
     detailScriptConstats.value = []
+  }
+}
+
+const savingTerms  = ref(false)
+const termsError   = ref('')
+// Photo des termes tels que l'éditeur les affichait au dernier chargement.
+const termsBaseline = ref('')
+
+// Tri récursif des clés : les termes stockés viennent du serveur, ceux de
+// l'éditeur sont reconstruits — sans canonisation, deux objets identiques
+// mais différemment ordonnés passeraient pour une modification. Même règle
+// que le _normalise() de rfq_controls.py côté serveur.
+function canonical(v) {
+  if (Array.isArray(v)) return v.map(canonical)
+  if (v && typeof v === 'object') {
+    return Object.keys(v).sort().reduce((o, k) => { o[k] = canonical(v[k]); return o }, {})
+  }
+  return v
+}
+
+// Termes contractuels tels que l'éditeur les tient en ce moment. On repart
+// des params STOCKÉS et on n'écrase que ce que l'éditeur pilote : une
+// reconstruction complète depuis le formulaire réduisait un panier worst-of
+// à son premier sous-jacent et déclenchait le gel sur cinq termes auxquels
+// personne n'avait touché.
+function detailTermsPayload() {
+  const stored = rfq.current?.params || {}
+  const user_params = {}
+  for (const pp of detailParsedParams.value) {
+    const v = detailParamOverrides[pp.name] ?? pp.raw_default
+    user_params[pp.name] = pp.is_pct ? v / 100 : v
+  }
+  return {
+    ...stored,
+    user_params,
+    constats: buildConstatsPayload(detailScriptConstats.value, detailConstatOverrides),
+    strike_date: detailAdvanced.strike_date,
+    value_date: detailAdvanced.value_date,
+    payment_date: detailAdvanced.payment_date,
+    // T suit le calendrier, comme à la création : déplacer la dernière
+    // constatation sans bouger T laisserait la maturité affichée et
+    // l'horizon de simulation raconter deux histoires différentes.
+    T: detailCalendarEnd.value
+      ? yearsBetween(detailAdvanced.strike_date, detailCalendarEnd.value)
+      : (stored.T ?? null),
+  }
+}
+
+// Sous-ensemble contractuel — ce que le serveur compare pour décider si les
+// termes ont bougé (product_terms). Les hypothèses de modèle en sont exclues.
+function contractualSubset(p) {
+  return JSON.stringify(canonical({
+    user_params: p.user_params ?? {},
+    constats: p.constats ?? {},
+    strike_date: p.strike_date ?? null,
+    value_date: p.value_date ?? null,
+    payment_date: p.payment_date ?? null,
+    T: p.T ?? null,
+  }))
+}
+
+const detailTermsDirty = computed(() => {
+  if (!rfq.current || !termsBaseline.value) return false
+  return contractualSubset(detailTermsPayload()) !== termsBaseline.value
+})
+
+async function saveDetailTerms() {
+  termsError.value = ''
+  savingTerms.value = true
+  try {
+    await rfq.update(rfq.current.id, { params: detailTermsPayload() })
+    await refreshDetailParams()
+    notice.value = 'Termes de l\'AO enregistrés'
+  } catch (e) {
+    termsError.value = e.message
+  } finally {
+    savingTerms.value = false
   }
 }
 
@@ -1142,6 +1353,45 @@ const detailMaturityDate = computed(() => {
 
 const fmtNominal = formatInt
 
+// Une date saisie ne se déplace jamais en silence : le serveur la résout sur
+// le calendrier de la devise, l'écran dit d'où elle vient et où elle va.
+async function resolveFormDate(field) {
+  dateNotices[field] = ''
+  const value = form[field]
+  const convention = form[`${field}_convention`]
+  if (!value || !convention || convention === 'none') return
+  try {
+    const res = await apiFetch('/api/calendar/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: value, currency: form.currency, convention }),
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    if (data.moved) {
+      form[field] = data.date
+      dateNotices[field] = `Ajustée depuis le ${data.source}, jour fermé sur le calendrier ${form.currency}.`
+    }
+  } catch { /* le champ garde ce qui a été saisi */ }
+}
+
+// Trois jours ouvrés après la dernière constatation : l'usage courant. Une
+// proposition, jamais un écrasement — un term sheet qui dit autre chose gagne.
+async function proposePaymentDate() {
+  if (form.payment_date || !createMaturityDate.value) return
+  try {
+    const res = await apiFetch('/api/calendar/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: createMaturityDate.value, currency: form.currency,
+                             business_days: 3 }),
+    })
+    if (res.ok) form.payment_date = (await res.json()).date
+  } catch { /* rien à proposer, le champ reste à saisir */ }
+}
+
+watch(createMaturityDate, proposePaymentDate)
+
 async function submitCreate() {
   createError.value = ''
   if (!form.name.trim()) { createError.value = 'Le nom est requis'; return }
@@ -1150,6 +1400,14 @@ async function submitCreate() {
   }
   if (form.source === 'script' && !form.script_id && !form.source_deal_id && !duplicateSourceScript.value) {
     createError.value = 'Choisissez un script'; return
+  }
+  for (const [champ, libelle] of [['strike_date', 'de strike'],
+                                  ['value_date', 'de valeur'],
+                                  ['payment_date', 'de paiement']]) {
+    if (!form[champ]) { createError.value = `La date ${libelle} est requise`; return }
+  }
+  if (form.payment_date < form.value_date) {
+    createError.value = 'La date de paiement ne peut pas précéder la date de valeur'; return
   }
   const script_snapshot = currentScriptText()
   if (form.kind === 'to_trade' && !script_snapshot.includes('CONSTAT')) {
@@ -1186,14 +1444,25 @@ async function submitCreate() {
         // sollicitation. T est fixé une fois, à la création, où il est encore
         // librement modifiable.
         r: advanced.r / 100,
+        // T est l'horizon de DIFFUSION : il se compte depuis le strike, pas
+        // depuis le règlement. Deux jours ouvrés d'écart avec l'ancienne
+        // définition, mais surtout deux définitions différentes du symbole.
         T: (createMaturityDate.value
-            ? yearsBetween(form.value_date, createMaturityDate.value)
+            ? yearsBetween(form.strike_date, createMaturityDate.value)
             : form.T),
         N: advanced.N, model: advanced.model,
         user_params,
         constats: buildConstatsPayload(scriptConstats.value, constatOverrides),
         notional: nominalValue.value, currency: form.currency,
         strike_date: form.strike_date, value_date: form.value_date,
+        payment_date: form.payment_date,
+        // Traçabilité : les dates stockées sont déjà les dates effectives, la
+        // convention dit seulement comment on y est arrivé.
+        date_conventions: {
+          strike_date: form.strike_date_convention,
+          value_date: form.value_date_convention,
+          payment_date: form.payment_date_convention,
+        },
       },
     })
     showCreateForm.value = false
@@ -1309,17 +1578,37 @@ function updateQuoteField(q, field, value) {
   rfq.updateQuote(rfq.current.id, q.id, { [field]: value })
 }
 
+// Une cotation vit quelques heures, pas quelques jours : dès qu'on connaît
+// l'heure de réponse, on tient le prix pour valable deux heures. C'est une
+// valeur proposée — une validité déjà saisie n'est jamais écrasée, et le
+// serveur exige de toute façon une validité postérieure à la réponse
+// (api/rfq.py update_quote).
+const DEFAULT_VALIDITY_HOURS = 2
+
+function withDefaultValidity(q, quotedAtIso, payload) {
+  if (quotedAtIso && !q.valid_until) {
+    payload.valid_until = new Date(
+      new Date(quotedAtIso).getTime() + DEFAULT_VALIDITY_HOURS * 3600_000
+    ).toISOString()
+  }
+  return payload
+}
+
 function onQuotePriceChange(q, value) {
   const price = value === '' ? null : Number(value)
   const payload = { price }
   // First time a price is entered, log the response as received now unless
   // a date was already set explicitly.
-  if (price !== null && !q.quoted_at) payload.quoted_at = new Date().toISOString()
+  if (price !== null && !q.quoted_at) {
+    payload.quoted_at = new Date().toISOString()
+    withDefaultValidity(q, payload.quoted_at, payload)
+  }
   rfq.updateQuote(rfq.current.id, q.id, payload)
 }
 
 function onQuoteDateChange(q, value) {
-  rfq.updateQuote(rfq.current.id, q.id, { quoted_at: value ? new Date(value).toISOString() : null })
+  const quotedAt = value ? new Date(value).toISOString() : null
+  rfq.updateQuote(rfq.current.id, q.id, withDefaultValidity(q, quotedAt, { quoted_at: quotedAt }))
 }
 
 function onQuoteValidityChange(q, value) {

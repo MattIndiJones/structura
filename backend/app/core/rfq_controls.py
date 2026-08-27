@@ -67,7 +67,8 @@ def product_terms(script_snapshot: str, params: dict | None) -> dict:
         terms["user_params"] = p.get("user_params") or {}
     if "constats" in p:
         terms["constats"] = p.get("constats") or {}
-    for key in ("notional", "currency", "strike_date", "value_date", "T"):
+    for key in ("notional", "currency", "strike_date", "value_date",
+                "payment_date", "T"):
         if key in p:
             terms[key] = p[key]
     return _normalise(terms)
@@ -139,6 +140,23 @@ def rfq_readiness_failures(rfq: RfqRequest) -> list[ControlFailure]:
         failures.append(ControlFailure("STRIKE_DATE_INVALID", "La date de strike RFQ est absente ou invalide."))
     if not _valid_iso_date(params.get("value_date")):
         failures.append(ControlFailure("VALUE_DATE_INVALID", "La date de valeur RFQ est absente ou invalide."))
+    if not _valid_iso_date(params.get("payment_date")):
+        failures.append(ControlFailure(
+            "PAYMENT_DATE_INVALID",
+            "La date de paiement RFQ est absente ou invalide — c'est elle qui date "
+            "l'échange final des flux, et elle ne se déduit d'aucun fixing."))
+    # L'écart entre strike et value date n'est PAS contraint : il vaut deux jours
+    # ouvrés dans le cas courant, mais un forward start verse le nominal avant
+    # que le niveau de référence soit fixé, et un départ décalé peut mettre des
+    # semaines entre les deux. C'est une décision commerciale, pas une règle —
+    # le moteur sait actualiser dans les deux sens (engine._df_at_time).
+    # Seul l'ordre du règlement final reste contraint : le dernier échange de
+    # cash ne peut pas précéder le premier.
+    _value, _payment = params.get("value_date"), params.get("payment_date")
+    if all(_valid_iso_date(d) for d in (_value, _payment)) and _payment < _value:
+        failures.append(ControlFailure(
+            "DATES_OUT_OF_ORDER",
+            f"La date de paiement ({_payment}) précède la date de valeur ({_value})."))
     tenor = params.get("T")
     if not isinstance(tenor, (int, float)) or isinstance(tenor, bool) or tenor <= 0:
         failures.append(ControlFailure("TENOR_INVALID", "La maturité T de la RFQ doit être positive."))
@@ -146,9 +164,12 @@ def rfq_readiness_failures(rfq: RfqRequest) -> list[ControlFailure]:
     if rfq.script_snapshot:
         try:
             compiled = parse_script(rfq.script_snapshot)
-            anchor = (date.fromisoformat(params["value_date"])
-                      if _valid_iso_date(params.get("value_date")) else None)
-            resolve_constats(compiled, params.get("constats") or {}, anchor=anchor)
+            # Le calendrier se compte depuis la constatation initiale : c'est
+            # là que le produit commence, pas au règlement.
+            anchor = (date.fromisoformat(params["strike_date"])
+                      if _valid_iso_date(params.get("strike_date")) else None)
+            resolve_constats(compiled, params.get("constats") or {}, anchor=anchor,
+                             currency=str(params.get("currency") or "").strip().upper() or None)
         except (KeyError, TypeError, ValueError) as exc:
             failures.append(ControlFailure(
                 "CONTRACT_CALENDAR_INVALID",

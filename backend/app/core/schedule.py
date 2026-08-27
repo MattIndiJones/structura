@@ -36,6 +36,8 @@ from enum import Enum
 
 from dateutil.relativedelta import relativedelta
 
+from .calendars import BusinessDayConvention, add_business_days, adjust
+
 DAYS_PER_YEAR = 365.25   # simple ACT/365.25 day count for the year-fraction preview
 
 
@@ -150,16 +152,38 @@ def _fill_interval(lo: date, hi: date, sub_frequency: Tenor) -> list[date]:
 
 
 def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
-                       stub: StubConvention, sub_frequency: Tenor | None = None) -> dict:
+                       stub: StubConvention, sub_frequency: Tenor | None = None,
+                       currency: str | None = None,
+                       convention: BusinessDayConvention = BusinessDayConvention.MODIFIED_FOLLOWING,
+                       settlement_lag: int = 0) -> dict:
     """Build a full CONSTAT() or CONSTAT()() schedule.
+
+    The grid is rolled on unadjusted dates first, then each resulting date is
+    moved onto a business day — the market order, and the only one that keeps
+    a quarterly schedule quarterly: adjusting before rolling would compound
+    each shift into the next period.
+
+    `currency` names the settlement calendar (the currency the cash moves in).
+    Without it nothing is adjusted and no payment date is produced: a schedule
+    is then a bare calendar grid, as it was before business days existed here.
+    A settlement lag without a currency is refused rather than counted in
+    calendar days behind the caller's back.
 
     Returns a dict with:
       main_dates — the CONSTAT() roll schedule (always includes start/end).
       dates      — the fully expanded schedule (== main_dates when no
                    sub_frequency; otherwise every main interval subdivided).
+      payment_dates — when each observation's cash actually moves: the date
+                   itself at T+0, later once a settlement lag applies. Same
+                   length as `dates`, and equal to it when no currency is given.
       year_fractions — each date's ACT/365.25 offset from start, for preview
                    purposes (this is what a future phase would feed to AT).
     """
+    if settlement_lag and not currency:
+        raise ValueError(
+            "Un décalage de règlement suppose un calendrier : précisez la devise "
+            "de règlement du calendrier CONSTAT.")
+
     main_dates = generate_main_schedule(start, end, roll_date, frequency, stub)
 
     if sub_frequency is None:
@@ -170,10 +194,48 @@ def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
             dates.extend(_fill_interval(lo, hi, sub_frequency))
         dates.append(main_dates[-1])
 
+    raw_dates = list(dates)
+    if currency:
+        main_dates = _dedupe([adjust(d, currency, convention) for d in main_dates])
+        # Les deux listes restent appariées : on déduplique sur la date ajustée
+        # en gardant la première date brute qui y mène, pour pouvoir dire d'où
+        # chaque constatation vient.
+        pairs = [(adjust(d, currency, convention), d) for d in dates]
+        seen: set[date] = set()
+        kept = []
+        for adjusted, original in pairs:
+            if adjusted not in seen:
+                seen.add(adjusted)
+                kept.append((adjusted, original))
+        dates = [a for a, _ in kept]
+        raw_dates = [o for _, o in kept]
+        payment_dates = [add_business_days(d, settlement_lag, currency) for d in dates]
+    else:
+        payment_dates = list(dates)
+
     year_fractions = [round((d - start).days / DAYS_PER_YEAR, 6) for d in dates]
 
     return {
         "main_dates": main_dates,
         "dates": dates,
+        # La grille avant ajustement, appariée à `dates`. Égale à elle quand
+        # aucune convention ne s'applique — ce qui rend l'écart lisible sans
+        # avoir à le recalculer.
+        "raw_dates": raw_dates,
+        "payment_dates": payment_dates,
         "year_fractions": year_fractions,
     }
+
+
+def _dedupe(dates: list[date]) -> list[date]:
+    """Two calendar dates can adjust onto the same business day — a daily
+    schedule spanning a weekend lands Saturday, Sunday and Monday all on the
+    Monday. Observing one fixing three times would triple-count it, so the
+    duplicates collapse: the schedule keeps one observation per business day."""
+    seen: set[date] = set()
+    out: list[date] = []
+    for d in dates:
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out

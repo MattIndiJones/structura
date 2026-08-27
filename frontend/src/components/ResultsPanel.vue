@@ -18,6 +18,38 @@
 
   <!-- ── Résultats ─────────────────────────────────────────────── -->
   <div v-else-if="tab === 'results'" class="flex flex-col gap-4">
+    <!-- Bandeau de valorisation en cours de vie. Entierement calcule depuis la
+         reponse : il ne peut pas se desynchroniser d un mode qu on aurait
+         choisi ailleurs, puisqu il n y a pas de mode. -->
+    <div v-if="store.result?.in_life"
+         class="rounded-xl border border-amber-800/60 bg-amber-950/20 px-4 py-3 flex flex-col gap-1">
+      <div class="text-xs font-bold text-amber-400 uppercase tracking-wider">
+        Valorisation au {{ formatDate(store.result.valuation_date) }}
+      </div>
+      <div class="text-[11px] text-slate-400 flex flex-wrap gap-x-4 gap-y-1">
+        <span>{{ store.result.past.observations_done }} constatation(s) rejouée(s) sur cours réels</span>
+        <span>{{ formatNumber(store.result.past.years_elapsed, 2) }} an écoulé,
+              {{ formatNumber(store.result.past.years_remaining, 2) }} restant</span>
+        <span v-if="store.result.past.worst_of != null">
+          worst-of <span class="font-mono text-slate-300">{{ formatPercent(store.result.past.worst_of * 100, 1) }}</span>
+        </span>
+      </div>
+      <!-- L'état que le passé a écrit, variable par variable et sous le nom
+           que le script leur donne. Une somme n'aurait pas de sens : un solde
+           de coupons et un indicateur de barrière ne s'additionnent pas. -->
+      <div v-if="etatRepris.length" class="text-[10px] flex flex-wrap gap-x-3 gap-y-0.5">
+        <span class="text-slate-500 uppercase tracking-wider">État repris</span>
+        <span v-for="v in etatRepris" :key="v.nom" class="font-mono text-amber-500">
+          {{ v.nom }} <SensitiveValue>{{ formatNumber(v.valeur, 4) }}</SensitiveValue>
+        </span>
+      </div>
+      <div v-if="performancesPassees.length" class="text-[10px] text-slate-500 flex flex-wrap gap-x-3">
+        <span v-for="perf in performancesPassees" :key="perf.nom" class="font-mono">
+          {{ perf.nom }} {{ formatPercent(perf.valeur * 100, 1) }}
+        </span>
+      </div>
+    </div>
+
     <!-- Prix -->
     <div class="rounded-xl border border-blue-800/50 bg-blue-950/30 p-5">
       <div class="text-xs font-bold text-blue-400/70 uppercase tracking-wider mb-1">Prix équitable</div>
@@ -133,13 +165,23 @@
         <div class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Caractéristiques économiques</div>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
 
-          <!-- Maturité -->
+          <!-- Maturité — résiduelle en cours de vie, sinon la maturité pleine.
+               Afficher les 3,00 ans du contrat à côté d'un fugit compté depuis
+               la valorisation mettait deux axes différents côte à côte : le
+               produit paraissait mourir au tiers de sa vie alors qu'il va au
+               bout. -->
           <div class="bg-slate-800/50 rounded-lg px-3 py-2">
-            <div class="text-slate-500 mb-1">Maturité</div>
-            <div class="font-mono font-bold text-slate-100 text-base">
-              <SensitiveValue>{{ formatNumber(store.result.t_max_effective ?? inputs.T, 2) }} ans</SensitiveValue>
+            <div class="text-slate-500 mb-1">
+              {{ enCoursDeVie ? 'Maturité résiduelle' : 'Maturité' }}
             </div>
-            <div v-if="store.result.t_max_effective && Math.abs(store.result.t_max_effective - inputs.T) > 0.01"
+            <div class="font-mono font-bold text-slate-100 text-base">
+              <SensitiveValue>{{ formatNumber(maturiteAffichee, 2) }} ans</SensitiveValue>
+            </div>
+            <div v-if="enCoursDeVie" class="text-[10px] text-slate-600 mt-0.5">
+              <SensitiveValue>{{ formatNumber(store.result.past.years_elapsed, 2) }}</SensitiveValue> an écoulé
+              sur <SensitiveValue>{{ formatNumber(store.result.past.years_elapsed + store.result.past.years_remaining, 2) }}</SensitiveValue>
+            </div>
+            <div v-else-if="store.result.t_max_effective && Math.abs(store.result.t_max_effective - inputs.T) > 0.01"
                  class="text-amber-500 text-[10px] mt-0.5">
               ↗ depuis <SensitiveValue>{{ formatNumber(inputs.T, 2) }} ans</SensitiveValue> (CONSTAT)
             </div>
@@ -148,12 +190,16 @@
           <!-- Fugit — seulement si le script a un STOP -->
           <div v-if="inputs.hasStop && store.result.fugit != null" class="bg-slate-800/50 rounded-lg px-3 py-2">
             <div class="text-slate-500 mb-1">Fugit <span class="text-slate-600 font-normal">(durée moy.)</span>
-              <HelpTip text="Durée de vie moyenne pondérée par probabilité E[τ] — la date à laquelle le produit s'arrête en moyenne (rappel anticipé ou échéance). Sert de point d'interpolation sur la courbe de taux pour ce produit à STOP, puisqu'il n'a pas une maturité unique fixe." />
+              <HelpTip text="Durée de vie moyenne pondérée par probabilité E[τ] — la date à laquelle le produit s'arrête en moyenne (rappel anticipé ou échéance). Sert de point d'interpolation sur la courbe de taux pour ce produit à STOP, puisqu'il n'a pas une maturité unique fixe. En cours de vie, il se compte depuis la date de valorisation : le comparer à la maturité résiduelle dit s'il reste de l'espoir de rappel." />
             </div>
             <div class="font-mono font-bold text-amber-300 text-base">
               <SensitiveValue>{{ formatNumber(store.result.fugit, 2) }} ans</SensitiveValue>
             </div>
-            <div class="text-[10px] text-slate-600 mt-0.5">E[τ] sur {{ formatInt(store.result.n_eff) }} chemins</div>
+            <div v-if="enCoursDeVie" class="text-[10px] text-slate-600 mt-0.5">
+              depuis la valorisation · vie totale attendue
+              <SensitiveValue>{{ formatNumber(vieTotaleAttendue, 2) }} ans</SensitiveValue>
+            </div>
+            <div v-else class="text-[10px] text-slate-600 mt-0.5">E[τ] sur {{ formatInt(store.result.n_eff) }} chemins</div>
           </div>
 
           <!-- Taux / courbe -->
@@ -313,7 +359,10 @@
 
       <!-- ── Spots ────────────────────────────────────────────────── -->
       <div class="flex flex-col gap-2">
-        <div class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Spots (à la strike date)</div>
+        <div class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">
+          Niveaux initiaux constatés (S₀)
+          <HelpTip text="Clôture NON AJUSTÉE de chaque sous-jacent à la date de strike — le fixing officiel, celui que cite un term sheet. Quand une valorisation en cours de vie a eu lieu, ce sont les niveaux que le moteur a réellement retenus pour mesurer les performances, donc ceux qui ont produit le prix ci-dessus." />
+        </div>
         <div class="flex flex-col gap-2">
           <div v-for="(u, i) in inputs.underlyings" :key="i"
                class="flex flex-wrap items-center gap-3 bg-slate-800/50 rounded-lg px-3 py-2 text-xs">
@@ -329,11 +378,9 @@
                 <span class="text-slate-600">au {{ formatDate(spotState[u.ticker].value.date) }}</span>
               </template>
               <span v-else class="text-slate-600">non disponible</span>
-              <button class="text-blue-400 hover:underline ml-auto"
-                      :disabled="spotState[u.ticker]?.refreshing"
-                      @click="refreshSpot(u.ticker)">
-                {{ spotState[u.ticker]?.refreshing ? '…' : '↺ Actualiser' }}
-              </button>
+              <span v-if="spotState[u.ticker]?.value" class="ml-auto text-[10px] text-slate-600">
+                {{ spotState[u.ticker].source === 'moteur' ? 'retenu par le moteur' : 'clôture non ajustée' }}
+              </span>
             </template>
             <span v-else class="text-slate-600">100% (référence normalisée, aucun ticker)</span>
           </div>
@@ -344,93 +391,14 @@
 
   <!-- ── Flux ──────────────────────────────────────────────────── -->
   <div v-else-if="tab === 'flux'" class="flex flex-col gap-4">
-    <div v-if="fluxGroups.length === 0"
-         class="flex flex-col items-center justify-center py-16 gap-2 text-slate-600">
-      <div class="text-3xl">💰</div>
-      <div class="text-sm font-medium">Aucun flux — vérifiez les instructions PAY dans le script</div>
-    </div>
-    <template v-else>
-      <!-- Résumé -->
-      <div class="grid grid-cols-3 gap-3">
-        <div class="stat-box min-w-0">
-          <div class="text-xs text-slate-500 mb-1">Prix MC (PV Σ)</div>
-          <div class="text-xl font-bold text-blue-400"><SensitiveValue>{{ f2(store.result.price) }} %</SensitiveValue></div>
-        </div>
-        <div class="stat-box min-w-0">
-          <div class="text-xs text-slate-500 mb-1">Dates de flux</div>
-          <div class="text-xl font-bold text-slate-200">{{ formatInt(fluxGroups.length) }}</div>
-        </div>
-        <div class="stat-box min-w-0">
-          <div class="text-xs text-slate-500 mb-1">N chemins</div>
-          <div class="text-xl font-bold text-slate-300"><SensitiveValue>{{ formatInt(store.result.n_eff) }}</SensitiveValue></div>
-        </div>
-      </div>
-
-      <!-- Table -->
-      <div class="card overflow-x-auto table-shell" tabindex="0" role="region">
-        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
-          💰 Décomposition des flux — PV par composante
-        </div>
-        <div class="text-[11px] text-slate-600 mb-4">
-          Contribution PV = E[CF] × DF · la somme des lignes reconstitue le prix MC
-        </div>
-        <table class="w-full min-w-[520px] text-xs border-collapse">
-          <thead>
-            <tr class="bg-slate-800/60 border-b-2 border-slate-700">
-              <th class="text-left py-1.5 px-2 whitespace-nowrap">Date</th>
-              <th class="text-left py-1.5 px-2">Expression</th>
-              <th class="text-right py-1.5 px-2 whitespace-nowrap num">P(actif)
-                <HelpTip align="right" text="Fraction des chemins simulés où cette instruction PAY a effectivement produit un flux (ex : condition IF vraie, produit pas encore rappelé). 100% = flux systématique." />
-              </th>
-              <th class="text-right py-1.5 px-2 whitespace-nowrap num">E[CF]
-                <HelpTip align="right" text="Espérance du flux brut, non actualisé, moyennée sur tous les chemins (y compris ceux où il vaut 0). C'est le montant avant application du facteur d'actualisation DF." />
-              </th>
-              <th class="text-right py-1.5 px-2 whitespace-nowrap num">DF
-                <HelpTip align="right" text="Facteur d'actualisation implicite = PV ÷ E[CF]. Sous taux déterministes c'est exp(−r·t) ; sous taux stochastiques c'est l'espérance conditionnelle E[B(0,t) | ce flux se déclenche], donc peut différer légèrement de exp(−r·t)." />
-              </th>
-              <th class="text-right py-1.5 px-2 whitespace-nowrap num">Contrib. PV
-                <HelpTip align="right" text="Contribution actualisée de cette ligne au prix total = E[CF] × DF. La somme de toutes les lignes de toutes les dates redonne exactement le Prix équitable de l'onglet Résultats." />
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-for="grp in fluxGroups" :key="grp.tKey">
-              <tr v-for="(row, ri) in grp.rows" :key="row.key"
-                  :class="[
-                    ri < grp.rows.length - 1 ? 'border-b border-slate-800' : 'border-b-2 border-slate-700',
-                    row.pv < 0 ? 'bg-red-950/20' : ''
-                  ]">
-                <td class="py-1.5 px-2 font-bold text-slate-300 whitespace-nowrap align-top text-[10px]">
-                  <span v-if="ri === 0">{{ grp.label }}</span>
-                </td>
-                <td class="py-1.5 px-2 font-mono text-[11px]"
-                    :class="row.pv < 0 ? 'text-red-400' : 'text-slate-500'">{{ row.lbl }}</td>
-                <td class="py-1.5 px-2 text-right num text-slate-400"><SensitiveValue>{{ formatPercent(row.pAct, 1) }}</SensitiveValue></td>
-                <td class="py-1.5 px-2 text-right num font-semibold font-mono"
-                    :class="row.eCF >= 0 ? 'text-slate-300' : 'text-red-400'">
-                  <SensitiveValue>{{ formatSignedPercent(row.eCF, 2) }}</SensitiveValue>
-                </td>
-                <td class="py-1.5 px-2 text-right num font-mono text-slate-400">
-                  <SensitiveValue>{{ formatNumber(row.df, 4) }}</SensitiveValue>
-                </td>
-                <td class="py-1.5 px-2 text-right num font-bold font-mono"
-                    :class="row.pv >= 0 ? 'text-green-400' : 'text-red-400'">
-                  <SensitiveValue>{{ formatSignedPercent(row.pv, 3) }}</SensitiveValue>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-          <tfoot>
-            <tr class="bg-slate-800/60 border-t-2 border-slate-600">
-              <td colspan="5" class="py-2 px-2 font-black text-slate-200">= Prix total</td>
-              <td class="py-2 px-2 text-right num font-black text-blue-400 text-sm">
-                <SensitiveValue>{{ formatPercent(fluxTotal, 2) }}</SensitiveValue>
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </template>
+    <!-- En cours de vie, le Monte Carlo ne simule que la vie restante : l'axe
+         des temps de sa table de flux part de la DATE DE VALORISATION, pas du
+         strike. L'ancrer sur le strike datait les échéances futures deux ans
+         dans le passé. -->
+    <FluxDecomposition :result="store.result"
+                       :origin-date="store.result?.in_life
+                         ? store.result.valuation_date : inputs?.strike_date"
+                       :value-date="inputs?.value_date" />
   </div>
 
   <!-- ── Greeks ────────────────────────────────────────────────── -->
@@ -521,6 +489,7 @@ import ScenarioGrid from './ScenarioGrid.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
+import FluxDecomposition from './FluxDecomposition.vue'
 import { formatDate, formatGreek, formatInt, formatNumber, formatPercent } from '../utils/format.js'
 
 Chart.register(BarElement, BarController, CategoryScale, LinearScale, Tooltip)
@@ -536,8 +505,6 @@ const tab = computed(() => store.rightTab)
 // ── Helpers format ────────────────────────────────────────────────
 const f2 = v => v != null ? formatNumber(v * 100, 2) : '—'
 const f1 = v => v != null ? formatNumber(v * 100, 1) : '—'
-const formatSignedPercent = (value, decimals) =>
-  `${value >= 0 ? '+' : ''}${formatPercent(value, decimals)}`
 
 const spreadP75P25 = computed(() => {
   const p = store.result?.payoffs
@@ -560,60 +527,91 @@ function addDaysStr(isoDate, days) {
   return d.toISOString().split('T')[0]
 }
 
+const enCoursDeVie = computed(() => !!store.result?.in_life)
+
+/** Maturité à afficher : résiduelle en cours de vie, pleine sinon. */
+const maturiteAffichee = computed(() => {
+  const r = store.result
+  if (!r) return null
+  if (r.in_life) return r.past?.years_remaining ?? null
+  return r.t_max_effective ?? inputs.value?.T ?? null
+})
+
+/** Vie totale attendue depuis la constatation initiale : ce qui s'est déjà
+ *  écoulé plus l'espérance de durée restante. C'est ce chiffre-là qu'on cite,
+ *  pas le fugit résiduel seul. */
+const vieTotaleAttendue = computed(() => {
+  const r = store.result
+  if (!r?.in_life || r.fugit == null) return null
+  return (r.past?.years_elapsed ?? 0) + r.fugit
+})
+
 const maturityDateStr = computed(() => {
-  if (!inputs.value?.value_date) return null
+  // Celle que le moteur a reçue, quand on l'a. Le repli redérive depuis le
+  // STRIKE — origine de l'axe — et non depuis la value date.
+  if (inputs.value?.maturity_date) return inputs.value.maturity_date
+  const origine = inputs.value?.strike_date || inputs.value?.value_date
+  if (!origine) return null
   const T = store.result?.t_max_effective || inputs.value.T
-  return addDaysStr(inputs.value.value_date, T * 365.25)
+  return addDaysStr(origine, T * 365.25)
 })
 
 const observationRows = computed(() => {
-  if (!store.result?.flux_table || !inputs.value?.value_date) return []
-  const times = [...new Set(Object.values(store.result.flux_table).map(e => e.t))].sort((a, b) => a - b)
-  const vd = inputs.value.value_date
+  const res = store.result
+  if (!res?.flux_table || !inputs.value) return []
+  // L'axe des temps du moteur part du STRIKE — et, en cours de vie, de la
+  // date de valorisation, puisque seule la vie restante est simulée. L'ancrer
+  // sur la value date décalait toutes les échéances ; l'ancrer sur le strike
+  // en cours de vie les ramenait deux ans en arrière, toutes marquées passées.
+  const enCours = !!res.in_life
+  const origine = enCours ? res.valuation_date
+                          : (inputs.value.strike_date || inputs.value.value_date)
+  if (!origine) return []
+  const times = [...new Set(Object.values(res.flux_table).map(e => e.t))].sort((a, b) => a - b)
   const now = todayStr()
-  const maturityT = store.result?.t_max_effective ?? inputs.value.T
+  const maturityT = res.t_max_effective ?? inputs.value.T
+  // En cours de vie, la numérotation reprend là où le passé s'est arrêté :
+  // repartir de 1 ferait croire que le produit vient d'être émis.
+  const deja = enCours ? (res.past?.observations_done ?? 0) : 0
   return times.map((t, idx) => {
-    const date = addDaysStr(vd, t * 365.25)
+    const date = addDaysStr(origine, t * 365.25)
+    const estMaturite = enCours ? idx === times.length - 1
+                                : Math.abs(t - maturityT) < 0.01
     return {
-      label: Math.abs(t - maturityT) < 0.01 ? 'Maturité' : `Obs. ${idx + 1}`,
+      label: estMaturite ? 'Maturité' : `Obs. ${deja + idx + 1}`,
       date, t, isFuture: date > now,
     }
   })
 })
 
-// ── Spots (store Parquet — lecture seule + bouton d'actualisation) ─
+// ── Niveaux initiaux constatés ────────────────────────────────────
+// Deux sources, dans cet ordre : ceux que le MOTEUR a effectivement retenus
+// quand il a rejoué le passé (ils font foi, puisque c'est eux qui ont produit
+// le prix affiché juste au-dessus), sinon la clôture nue à la date de strike.
+// Plus de magasin à semer à la main, donc plus d'écran vide après un pricing.
 const spotState = reactive({})
 
-async function loadSpot(ticker) {
-  if (!ticker) return
-  if (!spotState[ticker]) spotState[ticker] = { loading: false, refreshing: false, value: null }
-  spotState[ticker].loading = true
-  try {
-    spotState[ticker].value = await store.fetchStoredSpot(ticker, inputs.value?.strike_date || todayStr())
-  } finally {
-    spotState[ticker].loading = false
+async function loadSpots() {
+  const inp = inputs.value
+  if (!inp?.underlyings?.length) return
+  const jour = inp.strike_date || todayStr()
+  const tickers = inp.underlyings.map(u => u.ticker).filter(Boolean)
+  for (const t of tickers) {
+    if (!spotState[t]) spotState[t] = { loading: false, value: null }
+    spotState[t].loading = true
   }
-}
-
-async function refreshSpot(ticker) {
-  if (!spotState[ticker]) spotState[ticker] = { loading: false, refreshing: false, value: null }
-  spotState[ticker].refreshing = true
-  try {
-    await store.refreshStoredSpot(ticker, ticker)
-    await loadSpot(ticker)
-  } catch (e) {
-    spotState[ticker].error = e.message
-  } finally {
-    spotState[ticker].refreshing = false
-  }
-}
-
-watch(inputs, (inp) => {
-  if (!inp) return
+  const utilises = store.result?.past?.strike_levels || null
+  const closes = await store.loadStrikeCloses(tickers, jour)
   for (const u of inp.underlyings) {
-    if (u.ticker) loadSpot(u.ticker)
+    if (!u.ticker) continue
+    const duMoteur = utilises?.[u.name]
+    spotState[u.ticker] = duMoteur != null
+      ? { loading: false, value: { close: duMoteur, date: jour }, source: 'moteur' }
+      : { loading: false, value: closes[u.ticker] || null, source: 'cloture' }
   }
-}, { immediate: true })
+}
+
+watch(inputs, loadSpots, { immediate: true })
 
 const MODEL_LABELS = { constant: 'Constant (GBM)', heston: 'Heston QE', sabr: 'SABR (Hagan)', localvol: 'Local Vol (Dupire)' }
 const modelLabel = m => MODEL_LABELS[m] || m
@@ -695,54 +693,28 @@ watch(() => demo.enabled, drawHist)   // instant — re-render axes/tooltip on t
 onMounted(() => { if (tab.value === 'results') drawHist() })
 onUnmounted(() => { if (histChart) histChart.destroy() })
 
-// ── Flux ──────────────────────────────────────────────────────────
-function tToCalDate(t) {
-  const valueDate = inputs.value?.value_date
-  if (!valueDate) return t < 0.005 ? 'T₀' : `T + ${formatNumber(t, 2)} ans`
-  return formatDate(addDaysStr(valueDate, t * 365.25))
-}
-
-const fluxGroups = computed(() => {
-  const ft = store.result?.flux_table
-  if (!ft) return []
-  const N = store.result.n_eff || store.result.n_paths || 1
-  const byDate = new Map()
-
-  for (const [key, d] of Object.entries(ft)) {
-    if (!d || typeof d.t !== 'number') continue
-    const tKey = d.t.toFixed(6)
-    if (!byDate.has(tKey)) {
-      const t = d.t
-      byDate.set(tKey, { t, tKey, label: tToCalDate(t), rows: [] })
-    }
-    const pvRaw = typeof d.pv === 'number' ? d.pv : (d.sum ?? 0)
-    const eCF   = (d.sum ?? 0) / N * 100
-    const pv    = pvRaw / N * 100
-    byDate.get(tKey).rows.push({
-      key,
-      lbl:    d.lbl ?? key,
-      n:      d.n ?? 0,
-      pAct:   (d.n ?? 0) / N * 100,
-      eCF,
-      pv,
-      df:     typeof d.df === 'number' ? d.df : null,
-    })
-  }
-
-  return [...byDate.values()]
-    .sort((a, b) => a.t - b.t)
-    .map(g => ({ ...g, rows: [...g.rows].sort((a, b) => b.pv - a.pv) }))
-})
-
-const fluxTotal = computed(() =>
-  fluxGroups.value.reduce((s, g) => s + g.rows.reduce((rs, r) => rs + r.pv, 0), 0)
+// ── Greeks ────────────────────────────────────────────────────────
+// Solde de coupons accumules par un produit a memoire : la somme des
+// variables de memoire non versees. Nul sur un produit qui n en a pas.
+// Variables que le rejeu du passé a écrites — solde de coupons en mémoire,
+// indicateur de barrière franchie, compteur… L'API a déjà retiré les PARAM du
+// script ; on les affiche telles quelles, sans les sommer ni les convertir en
+// pourcentage : selon la variable, 1 vaut « 100 % du nominal » ou « vrai ».
+const etatRepris = computed(() =>
+  Object.entries(store.result?.past?.memory || {})
+    .map(([nom, valeur]) => ({ nom, valeur: Number(valeur) || 0 }))
+    .sort((a, b) => a.nom.localeCompare(b.nom))
 )
 
-// ── Greeks ────────────────────────────────────────────────────────
+const performancesPassees = computed(() =>
+  Object.entries(store.result?.past?.performances || {})
+    .map(([nom, valeur]) => ({ nom, valeur }))
+    .sort((a, b) => a.valeur - b.valeur))
+
 const fmtG = formatGreek
 
-const GREEK_SYM = { delta: 'Δ', gamma: 'Γ', vega: 'ν', theta: 'Θ', rho: 'ρ', corr: 'ρᵢⱼ' }
-const GREEK_NAME = { delta: 'Delta', gamma: 'Gamma', vega: 'Vega', theta: 'Theta', rho: 'Rho', corr: 'Corrélation' }
+const GREEK_SYM = { delta: 'Δ', gamma: 'Γ', vega: 'ν', theta: 'Θ', rho: 'ρ', corr: 'ρᵢⱼ', credit: 'CR' }
+const GREEK_NAME = { delta: 'Delta', gamma: 'Gamma', vega: 'Vega', theta: 'Theta', rho: 'Rho', corr: 'Corrélation', credit: 'Crédit' }
 
 const gType = name => name.match(/^([a-z]+)/)?.[1] || name
 
@@ -792,6 +764,7 @@ const GREEK_DESC = {
   theta: "Θ — décroissance du prix due au seul passage d'un jour, marché inchangé (portage temporel).",
   rho:   "ρ — sensibilité du prix à une hausse de 100bp du taux sans risque.",
   corr:  "ρᵢⱼ — sensibilité du prix à une hausse de 5pts de corrélation entre les sous-jacents concernés (pertinent surtout sur les payoffs worst-of/best-of).",
+  credit: "CR — sensibilité du prix à un écartement de 100bp du spread émetteur. Signe structurellement opposé au rho : un spread n'actualise que les flux, il ne remonte aucun forward. Le desk lit plutôt le DV01, un centième de ce chiffre.",
 }
 const gDesc = name => {
   const key = name.match(/^([a-z]+)/)?.[1] || name
@@ -806,6 +779,7 @@ const gUnit = name => {
   if (type === 'theta') return 'pt de prix / jour'
   if (type === 'rho')   return 'pt de prix / +100 bp'
   if (type === 'corr')  return 'pt de prix / +5 pts corr.'
+  if (type === 'credit') return 'pt de prix / +100 bp spread'
   return ''
 }
 
@@ -821,6 +795,11 @@ const gInterp = (name, val) => {
   if (type === 'theta') return `1 jour → prix ${formatted}`
   if (type === 'rho')   return `+100 bp → prix ${formatted}`
   if (type === 'corr')  return `+5 pts corr. → prix ${formatted}`
+  if (type === 'credit') {
+    // Le DV01 est ce que le desk cote : l'impact d'UN point de base.
+    const dv01 = formatNumber(display / 100, 4)
+    return `+100 bp de spread → prix ${formatted} · DV01 ${dv01} pt/bp`
+  }
   return ''
 }
 

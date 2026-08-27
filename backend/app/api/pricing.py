@@ -1,4 +1,5 @@
 import itertools
+from datetime import date
 import math
 import numpy as np
 from fastapi import APIRouter, HTTPException
@@ -15,6 +16,7 @@ from ..core.payscript.engine import (
     run_mark_to_future, run_mtf_drilldown,
 )
 from ..services.market_data import load_hist_prices
+from ..core.calendars import UnsupportedCurrency
 
 router = APIRouter(prefix="/api", tags=["pricing"])
 
@@ -30,6 +32,9 @@ def _clean_flux(flux_map: dict) -> dict:
         df = round(pv / sm, 6) if abs(sm) > 1e-10 else 1.0
         result[k] = {
             "t":   round(v["t"], 6),
+            # When the cash actually moves. Equal to t when nothing settles
+            # later, which is what makes df readable as exp(-r·t).
+            "t_pay": round(v.get("t_pay", v["t"]), 6),
             "lbl": v["lbl"],
             "n":   v["n"],
             "sum": sm,
@@ -69,14 +74,27 @@ def price_endpoint(req: PricingRequest):
     # `async def` here would hold the event loop and freeze the whole API
     # for every other request while a pricing runs. Same for every other
     # MC-driven endpoint in this file.
+    # L'axe du temps s'ancre sur la date de strike : c'est là que le niveau
+    # initial est constaté, donc là que la diffusion démarre. Sans elle, on
+    # retombe sur `anchor` — la value date, comme avant.
+    origin = req.strike_date or req.anchor or date.today()
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
-    except ValueError as e:
+        compiled = resolve_constats(compiled, req.constats, anchor=origin,
+                                    currency=req.settlement_ccy)
+    except (ValueError, UnsupportedCurrency) as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     if not compiled.events:
         raise HTTPException(status_code=422, detail="Aucun événement AT défini dans le script.")
+
+    # La date de paiement finale se compte sur le même axe que les
+    # constatations : celui ancré sur `anchor`.
+    maturity_payment_t = None
+    if req.payment_date is not None:
+        maturity_payment_t = round((req.payment_date - origin).days / 365.25, 6)
+    value_date_t = (round((req.value_date - origin).days / 365.25, 6)
+                    if req.value_date is not None else 0.0)
 
     uls = [u.model_dump() for u in req.underlyings]
     corr = req.corr_matrix
@@ -100,9 +118,13 @@ def price_endpoint(req: PricingRequest):
             antithetic=req.antithetic,
             user_params=req.user_params,
             yield_curve=req.yield_curve or [],
+            funding_curve=req.funding_curve or [],
+            funding_spread=req.funding_spread,
             sigma_r=req.sigma_r,
             a_r=req.a_r,
             barrier_monitoring=req.barrier_monitoring,
+            maturity_payment_t=maturity_payment_t,
+            value_date_t=value_date_t,
         )
 
         greeks: dict = {}
@@ -112,6 +134,8 @@ def price_endpoint(req: PricingRequest):
                 req.N, req.model, req.seed, req.user_params,
                 selected=req.selected_greeks, sigma_r=req.sigma_r, a_r=req.a_r,
                 yield_curve=req.yield_curve or [],
+                funding_curve=req.funding_curve or [],
+                funding_spread=req.funding_spread,
                 barrier_monitoring=req.barrier_monitoring,
             )
     except ValueError as e:

@@ -98,6 +98,11 @@ const routes = [
     meta: { requiresAdmin: true, title: 'Entités' },
   },
   {
+    path: '/admin/underlyings',
+    component: () => import('../views/AdminUnderlyingsView.vue'),
+    meta: { requiresAdmin: true, title: 'Sous-jacents' },
+  },
+  {
     path: '/admin/market-data',
     component: () => import('../views/AdminMarketDataView.vue'),
     meta: { requiresAdmin: true, title: 'Données de marché' },

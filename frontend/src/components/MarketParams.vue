@@ -43,6 +43,15 @@
           </SensitiveValue>
         </div>
         <div class="mc-param-field">
+          <label class="label">Date de valorisation
+            <HelpTip text="Date à laquelle on veut la valeur du produit. Laissée vide, ou égale à la constatation initiale, on price à l'émission. Postérieure, le passé est rejoué sur les cours réellement constatés — coupons déjà versés, mémoire accumulée, barrières franchies — et seule la vie restante est simulée. C'est ce qui distingue un mark-to-market d'un prix d'émission." />
+          </label>
+          <input v-model="store.globalParams.valuation_date" type="date" class="input" />
+          <div v-if="store.isInLife()" class="text-[10px] text-amber-500 mt-0.5">
+            Valorisation en cours de vie
+          </div>
+        </div>
+        <div class="mc-param-field">
           <label class="label">Maturité (Y)
             <HelpTip v-if="store.scriptConstats.length > 0" text="Le script utilise CONSTAT — la maturité réelle est dictée par le calendrier (la date la plus tardive parmi les événements résolus, éditable dans l'onglet Deal), pas par ce champ." />
             <HelpTip v-else text="Horizon de simulation en années. Si le script a des dates AT qui dépassent cette valeur, le pricer étend automatiquement l'horizon effectif (voir t_max_effective dans les résultats) — ce champ est un minimum, pas un plafond strict." />
@@ -315,11 +324,39 @@
     <!-- ── Courbe de taux ───────────────────────────────────────────── -->
     <YieldCurveCard />
 
+    <!-- ── Spread émetteur ─────────────────────────────────────────── -->
+    <FundingCurveCard />
+
     <!-- ── Matrice corrélation ────────────────────────────────────── -->
     <div v-if="store.underlyings.length > 1" class="card">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Matrice de corrélation
         <HelpTip width="w-72" text="Corrélation entre les chocs browniens des sous-jacents dans la simulation. Sur un payoff worst-of, une corrélation plus faible augmente la dispersion des trajectoires donc la probabilité qu'un des actifs traîne loin derrière — c'est en général défavorable au détenteur du produit. La diagonale est fixée à 1 (chaque actif est parfaitement corrélé à lui-même)." />
       </h2>
+      <!-- Choc parallele sur toutes les paires. Le cap a +/-1 est une borne
+           dure : au-dela la matrice ne serait plus une matrice de correlation.
+           Une paire qui sature est signalee, parce que le choc n'est alors
+           plus parallele — et une matrice poussee a 1 devient degeneree, que
+           le moteur repare mais au prix d'un ecart silencieux au choc demande. -->
+      <div class="flex items-center gap-1.5 mb-3 flex-wrap">
+        <span class="text-[10px] text-slate-500 uppercase tracking-wider mr-1">Choc parallèle</span>
+        <button v-for="d in [-0.20, -0.10, -0.05, 0.05, 0.10, 0.20]" :key="d"
+                class="text-xs px-2 py-0.5 rounded border border-slate-700 bg-slate-800
+                       text-slate-400 hover:border-blue-500 hover:text-blue-400 transition-colors font-mono"
+                @click="bumpCorr(d)">
+          {{ d > 0 ? '+' : '' }}{{ d.toFixed(2) }}
+        </button>
+        <template v-if="corrBump !== 0">
+          <span class="text-xs font-mono text-blue-400 ml-1">
+            cumulé {{ corrBump > 0 ? '+' : '' }}{{ corrBump.toFixed(2) }}
+          </span>
+          <button class="text-[10px] text-slate-500 hover:text-slate-300 underline ml-1"
+                  @click="resetCorr">revenir</button>
+        </template>
+        <span v-if="corrSature" class="text-[10px] text-amber-500 ml-2">
+          ⚠ {{ corrSature }} paire(s) au plafond ±1 — le choc n'est plus parallèle
+        </span>
+      </div>
+
       <div class="overflow-x-auto">
         <table class="text-xs border-collapse">
           <thead>
@@ -339,9 +376,9 @@
                   <input type="number" step="0.05" min="-1" max="1"
                     :value="store.corrMatrix[i]?.[j] ?? 0"
                     @input="setCorr(i, j, $event.target.value)"
-                    class="input w-16 text-center text-xs" />
+                    class="input w-24 text-center text-xs corr-cell font-mono" />
                 </SensitiveValue>
-                <span v-else class="block text-center text-slate-600 w-16">1.00</span>
+                <span v-else class="block text-center text-slate-600 w-24 font-mono">1.00</span>
               </td>
             </tr>
           </tbody>
@@ -352,12 +389,13 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import VolSmile from './VolSmile.vue'
 import DividendCurveCard from './DividendCurveCard.vue'
 import YieldCurveCard from './YieldCurveCard.vue'
+import FundingCurveCard from './FundingCurveCard.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
 import { formatNumber } from '../utils/format.js'
@@ -377,17 +415,72 @@ const greekOptions = [
   { key: 'theta', label: '&Theta; Theta',  tip: 'Décroissance temporelle (1j)' },
   { key: 'rho',   label: '&rho; Rho',      tip: 'Sensibilité aux taux (+100bp)' },
   { key: 'corr',  label: '&rho;<sub>ij</sub> Corr', tip: 'Sensibilité corrélation (+5%, multi-actifs)' },
+  { key: 'credit', label: 'CR Crédit', tip: 'Sensibilité au spread émetteur (+100bp) — actualisation seule, signe opposé au rho' },
 ]
 
+const CAP = 1
+
 function setCorr(i, j, val) {
-  const v = Math.max(-1, Math.min(1, parseFloat(val) || 0))
+  const v = Math.max(-CAP, Math.min(CAP, parseFloat(val) || 0))
   if (!store.corrMatrix[i]) store.corrMatrix[i] = []
   store.corrMatrix[i][j] = v
   store.corrMatrix[j][i] = v
+  // Une saisie a la main redefinit la reference : le choc cumule repart de la.
+  corrBase = null
+  corrBump.value = 0
+}
+
+// ── Choc parallele sur la correlation ─────────────────────────────
+// La reference est figee au premier choc et le cumul s'applique TOUJOURS a
+// elle, jamais au dernier etat : sinon deux chocs de +0,10 apres saturation
+// ne se defont pas avec un -0,20, et « revenir » ne revient nulle part.
+let corrBase = null
+const corrBump = ref(0)
+const corrSature = ref(0)
+
+function _snapshot() {
+  return store.corrMatrix.map(row => [...row])
+}
+
+function _appliquer(cumul) {
+  let satures = 0
+  const n = store.underlyings.length
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const brut = (corrBase[i]?.[j] ?? 0) + cumul
+      const v = Math.max(-CAP, Math.min(CAP, brut))
+      if (v !== brut) satures++
+      if (!store.corrMatrix[i]) store.corrMatrix[i] = []
+      store.corrMatrix[i][j] = Math.round(v * 1e4) / 1e4
+      store.corrMatrix[j][i] = store.corrMatrix[i][j]
+    }
+  }
+  corrSature.value = satures
+}
+
+function bumpCorr(delta) {
+  if (corrBase === null) corrBase = _snapshot()
+  corrBump.value = Math.round((corrBump.value + delta) * 100) / 100
+  _appliquer(corrBump.value)
+}
+
+function resetCorr() {
+  if (corrBase === null) return
+  _appliquer(0)
+  corrBump.value = 0
+  corrSature.value = 0
+  corrBase = null
 }
 </script>
 
 <style scoped>
+/* Les fleches natives d'un input[type=number] mangent un tiers de la cellule
+   et tronquaient les correlations a quatre decimales. On les retire ici
+   seulement : ailleurs elles servent a incrementer au pas. */
+.corr-cell::-webkit-outer-spin-button,
+.corr-cell::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.corr-cell { -moz-appearance: textfield; appearance: textfield; padding-left: 2px; padding-right: 2px; }
+
 .mc-param-field {
   min-width: 0;
   display: flex;

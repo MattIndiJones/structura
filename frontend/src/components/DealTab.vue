@@ -156,22 +156,19 @@
           <label class="label">Trade date
             <HelpTip text="Date d'accord commercial entre les parties — la date à laquelle le deal est juridiquement conclu. Distincte de la strike date (fixing des niveaux initiaux) et de la value date (règlement effectif)." />
           </label>
-          <input v-model="form.trade_date" type="date" class="input"
-            @change="store.globalParams.trade_date = form.trade_date" />
+          <input v-model="form.trade_date" type="date" class="input" />
         </div>
         <div>
           <label class="label">Strike date <span class="text-slate-600 font-normal">(fixing S₀)</span>
             <HelpTip text="Date à laquelle les niveaux initiaux (S₀) des sous-jacents sont constatés — la référence par rapport à laquelle toutes les performances du produit sont mesurées ensuite. Se saisit dans l'onglet Events une fois le deal booké." />
           </label>
-          <input v-model="form.strike_date" type="date" class="input"
-            @change="store.globalParams.strike_date = form.strike_date" />
+          <input v-model="form.strike_date" type="date" class="input" />
         </div>
         <div>
           <label class="label">Value date
             <HelpTip text="t=0 pour l'actualisation. Généralement strike + 2j ouvrés." />
           </label>
-          <input v-model="form.value_date" type="date" class="input"
-            @change="store.globalParams.value_date = form.value_date" />
+          <input v-model="form.value_date" type="date" class="input" />
         </div>
         <div>
           <label class="label">Maturité
@@ -182,7 +179,7 @@
         </div>
         <div class="col-span-2">
           <label class="label">Payment date <span class="text-slate-600 font-normal">(règlement cash final)</span>
-            <HelpTip text="Date à laquelle le client reçoit définitivement son cash — distincte de la maturité (dernière date d'observation/fixing). Par défaut maturité + 2j ouvrés, éditable si le termsheet prévoit un délai de règlement différent. Donnée de booking : n'affecte pas le calcul du prix (le moteur actualise jusqu'à la dernière observation)." />
+            <HelpTip text="Date à laquelle le client reçoit définitivement son cash — distincte de la maturité, qui est la dernière date d'observation. Proposée à maturité + 3 jours ouvrés sur le calendrier de la devise, éditable si le term sheet prévoit autre chose. Elle porte l'actualisation du remboursement final : ce n'est pas qu'une donnée de booking, elle entre dans le prix." />
           </label>
           <input v-model="form.payment_date" type="date" class="input"
             @input="paymentDateDirty = true" />
@@ -315,6 +312,34 @@
                   </select>
                 </div>
               </div>
+              <!-- Convention et règlement : le masque RFQ les portait déjà,
+                   pas cet éditeur. Sans eux un term sheet ne peut pas être
+                   saisi tel qu'il est écrit — une constatation tombant un
+                   samedi restait au samedi, et un règlement à J+7 ouvrés était
+                   inexprimable. Les deux étaient pourtant déjà lus par
+                   scheduleRequest(). -->
+              <div>
+                <label class="label">Convention
+                  <HelpTip text="Ce que devient une date de constatation qui tombe un jour fermé sur le calendrier de la devise de règlement. « Jour ouvré suivant » est l'usage courant. Le calendrier tient compte des fériés, pas seulement des week-ends." />
+                </label>
+                <select v-model="store.constatOverrides[c.name].convention" class="select">
+                  <option value="none">Aucun ajustement</option>
+                  <option value="following">Jour ouvré suivant</option>
+                  <option value="modified_following">Suivant, sauf changement de mois</option>
+                  <option value="preceding">Jour ouvré précédent</option>
+                  <option value="modified_preceding">Précédent, sauf changement de mois</option>
+                </select>
+              </div>
+              <div>
+                <label class="label">Règlement
+                  <HelpTip text="Nombre de jours ouvrés entre une constatation et l'échange de cash correspondant. C'est cette date-là qui porte l'actualisation, pas celle de l'observation." />
+                </label>
+                <div class="flex items-center gap-1">
+                  <input type="number" min="0" max="15" class="input w-16"
+                         v-model.number="store.constatOverrides[c.name].settlement_lag" />
+                  <span class="text-[10px] text-slate-500 whitespace-nowrap">j. ouvrés</span>
+                </div>
+              </div>
               <div>
                 <label class="label">Stub
                   <HelpTip text="Quand la période totale n'est pas un multiple exact de la fréquence, le stub dit où va la période irrégulière restante. Short/Long = la période résiduelle est plus courte/longue qu'une période pleine. First/Last = elle se place au début ou à la fin du calendrier." />
@@ -340,29 +365,9 @@
               </div>
             </div>
 
-            <!-- Aperçu calendrier — rétractable, sous les champs -->
-            <details class="mt-1">
-              <summary class="text-blue-400 hover:underline cursor-pointer select-none inline-block"
-                       @click="previewConstat(c.name)">
-                Aperçu du calendrier
-              </summary>
-              <span v-if="previewErrors[c.name]" class="text-red-400 ml-2">⚠ {{ previewErrors[c.name] }}</span>
-              <div v-else-if="previews[c.name]" class="mt-1.5">
-                <div class="text-slate-500 mb-1">
-                  <SensitiveValue>{{ Math.max(previews[c.name].dates.length - 1, 0) }} observation(s) réelle(s)</SensitiveValue>
-                  <span class="text-slate-600"> ({{ previews[c.name].dates.length }} date(s) générée(s), la 1ère est le début de période — non observée)</span>
-                </div>
-                <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 max-h-32 overflow-y-auto pr-1">
-                  <span v-for="(d, i) in previews[c.name].dates" :key="i" class="font-mono"
-                        :title="i === 0 ? 'Début de période — pas une date d\'observation' : ''">
-                    <span :class="i === 0 ? 'text-slate-700 line-through' : 'text-slate-500'">
-                      <SensitiveValue>{{ d }}</SensitiveValue>
-                    </span>
-                    <span v-if="i === 0" class="text-slate-600"> (début de période)</span>
-                  </span>
-                </div>
-              </div>
-            </details>
+            <!-- Même échéancier que le module RFQ : un calendrier ne se lit
+                 pas différemment selon l'écran où on l'ouvre. -->
+            <ObservationSchedule class="mt-1" :request="scheduleRequest(c)" />
           </div>
         </div>
       </div>
@@ -411,12 +416,16 @@
                 <td class="py-1.5 pr-3 font-mono text-slate-300 whitespace-nowrap">{{ formatDate(ev.date) }}</td>
                 <td class="py-1.5 pr-3 font-mono num text-slate-400">{{ formatNumber(ev.t, 2) }}</td>
                 <td v-for="u in store.underlyings" :key="u.name" class="py-1.5 pr-2">
-                  <span class="text-slate-600 font-mono text-[10px]">–</span>
+                  <span v-if="closesPassees[ev.date]?.[u.ticker]"
+                        class="text-slate-300 font-mono text-[10px]">
+                    <SensitiveValue>{{ formatNumber(closesPassees[ev.date][u.ticker], 2) }}</SensitiveValue>
+                  </span>
+                  <span v-else class="text-slate-600 font-mono text-[10px]">–</span>
                 </td>
                 <td class="py-1.5">
                   <span class="text-[10px]"
-                    :class="ev.isFuture ? 'text-slate-600' : 'text-amber-400'">
-                    {{ ev.isFuture ? 'futur' : 'à observer' }}
+                    :class="ev.isFuture ? 'text-slate-600' : 'text-emerald-400'">
+                    {{ ev.isFuture ? 'à observer' : 'constaté' }}
                   </span>
                 </td>
               </tr>
@@ -493,8 +502,12 @@ import { useDemoModeStore } from '../stores/demoMode.js'
 import { apiFetch } from '../utils/api.js'
 import HelpTip from './HelpTip.vue'
 import SensitiveValue from './SensitiveValue.vue'
-import { underlyingGroups } from '../data/commonUnderlyings.js'
+import ObservationSchedule from './ObservationSchedule.vue'
+import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
 import { formatPercent, formatNumber, formatInt, formatMoneyRound, formatDate } from '../utils/format.js'
+
+// Catalogue de sous-jacents : chargé depuis la base au montage.
+onMounted(ensureUnderlyings)
 
 const emit = defineEmits(['go-events'])
 
@@ -570,21 +583,19 @@ function onTickerBlur() {
 }
 
 // ── Calendrier CONSTAT (mode expert) ──────────────────────
-const previews = reactive({})
-const previewErrors = reactive({})
 const tenorStr = t => (t && t.value) ? `${t.value}${t.unit}` : null
 
-async function previewConstat(name) {
-  delete previewErrors[name]
-  try {
-    const v = store.constatOverrides[name]
-    previews[name] = await store.fetchSchedulePreview({
-      start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
-      frequency: tenorStr(v.frequency), stub: v.stub,
-      sub_frequency: tenorStr(v.sub_frequency),
-    })
-  } catch (e) {
-    previewErrors[name] = e.message
+// Corps de requete de l apercu : ObservationSchedule appelle le serveur
+// lui-meme, ce composant ne fait que lui donner la forme attendue.
+function scheduleRequest(c) {
+  const v = store.constatOverrides[c.name] || {}
+  return {
+    start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
+    frequency: tenorStr(v.frequency), stub: v.stub,
+    sub_frequency: tenorStr(v.sub_frequency) || null,
+    currency: form.devise || store.globalParams.deal_ccy || 'EUR',
+    convention: v.convention || 'none',
+    settlement_lag: v.settlement_lag || 0,
   }
 }
 
@@ -595,17 +606,33 @@ watch(() => store.result, (r) => {
   }
 }, { immediate: true })
 
-watch(() => store.globalParams.trade_date, (v) => {
-  if (v) form.trade_date = v
-}, { immediate: true })
+// Les trois dates du deal vivent à deux endroits : le formulaire de cet
+// onglet et le contexte de pricing. La synchronisation va DANS LES DEUX SENS.
+// Elle n'allait que du store vers le formulaire ; le retour reposait sur un
+// @change du DOM, qui ne se déclenche pas sur une écriture programmatique et
+// laissait le moteur pricer sur une date de strike périmée — donc valoriser à
+// l'émission un produit déjà en cours de vie, sans que rien ne le signale.
+// L'assignation conditionnelle suffit à couper la boucle : réécrire la même
+// valeur ne redéclenche pas le watcher.
+// Déclaré AVANT tout watcher immédiat qui le touche. Il vivait plus bas :
+// la synchronisation des dates, elle aussi immédiate, le lisait dans sa zone
+// morte temporelle. L'exception passait inaperçue, le drapeau restait faux, et
+// la proposition à J+3 écrasait la date de règlement d'un script rouvert.
+const paymentDateDirty = ref(false)
 
-watch(() => store.globalParams.strike_date, (v) => {
-  if (v) form.strike_date = v
-}, { immediate: true })
-
-watch(() => store.globalParams.value_date, (v) => {
-  if (v) form.value_date = v
-}, { immediate: true })
+for (const champ of ['trade_date', 'strike_date', 'value_date', 'payment_date']) {
+  watch(() => store.globalParams[champ], (v) => {
+    if (v && form[champ] !== v) form[champ] = v
+    // Une date de règlement qui arrive du contexte — script rouvert depuis la
+    // bibliothèque, deal rechargé — est un fait, pas un défaut. Sans ce
+    // drapeau, la proposition à J+3 ouvrés l'écrasait au chargement : un
+    // term sheet à J+7 revenait silencieusement à J+3.
+    if (champ === 'payment_date' && v) paymentDateDirty.value = true
+  }, { immediate: true })
+  watch(() => form[champ], (v) => {
+    if (v && store.globalParams[champ] !== v) store.globalParams[champ] = v
+  })
+}
 
 // ── Nominal formatting ────────────────────────────────────
 const nominalRaw = ref('1 000 000')
@@ -643,10 +670,6 @@ const rfqPrefillAt = ref(null)
 // from it — the field stays empty and the banner names the provider so the
 // desk knows what to pick instead of facing a blank required select.
 const rfqUnmatchedProvider = ref('')
-// Declared before the immediate prefill watch: reopening a booked deal can
-// provide a non-standard payment date during setup, and the watch must be
-// able to protect it before the maturity default is installed below.
-const paymentDateDirty = ref(false)
 watch(() => store.pendingDealPrefill, (prefill) => {
   if (!prefill) return
   const { nominal, fair_value_at, rfq_provider_label, ...formFields } = prefill
@@ -692,22 +715,108 @@ const maturityDate = computed(() => {
   if (scheduleEndDates.value.length > 0) {
     return scheduleEndDates.value.reduce((max, d) => (d > max ? d : max))
   }
-  if (!form.value_date || !store.globalParams.T) return ''
-  const d = new Date(form.value_date)
+  // La maturité se compte depuis le STRIKE : c'est la constatation initiale
+  // qui ouvre la vie du produit, pas le règlement du nominal. Ancrer sur la
+  // value date décalait toute l'échéance de (value − strike) — quelques jours
+  // sur un produit réel, systématiquement dans le même sens.
+  const origine = form.strike_date || form.value_date
+  if (!origine || !store.globalParams.T) return ''
+  const d = new Date(origine)
   d.setDate(d.getDate() + Math.round(store.globalParams.T * 365.25))
   return d.toISOString().split('T')[0]
 })
 
-// Payment date par défaut = maturité + 2j ouvrés, mais reste éditable pour
-// un délai de règlement non standard — dès que l'utilisateur y touche, on
-// arrête de l'écraser automatiquement quand la maturité change.
-watch(maturityDate, (v) => {
-  if (v && !paymentDateDirty.value) {
-    form.payment_date = addBizDays(v, 2)
-  }
-}, { immediate: true })
+// Payment date par défaut = maturité + 3j ouvrés, l'usage courant. Le
+// calendrier vient du serveur et dépend de la devise : un 14 juillet ou un
+// lundi de Pâques n'est pas un jour de règlement, et un décompte local qui ne
+// saute que les week-ends proposerait une date fermée. Reste éditable pour un
+// délai non standard — dès que l'utilisateur y touche, on arrête de l'écraser.
+const SETTLEMENT_LAG_DEFAULT = 3
+
+async function proposePaymentDate(maturite) {
+  if (!maturite || paymentDateDirty.value) return
+  const devise = form.devise || store.globalParams.deal_ccy || 'EUR'
+  try {
+    const res = await fetch('/api/calendar/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: maturite, currency: devise,
+                             business_days: SETTLEMENT_LAG_DEFAULT }),
+    })
+    if (res.ok) { form.payment_date = (await res.json()).date; return }
+  } catch { /* serveur muet : on retombe sur le décompte local ci-dessous */ }
+  // Repli hors ligne — week-ends seulement, donc potentiellement un jour férié.
+  form.payment_date = addBizDays(maturite, SETTLEMENT_LAG_DEFAULT)
+}
+
+watch(maturityDate, proposePaymentDate, { immediate: true })
 
 const entityLabel = computed(() => auth.user?.entity_id ? `Entité #${auth.user.entity_id}` : 'N/A')
+
+// Dates de constatation issues du calendrier CONSTAT, et clôtures relevées à
+// ces dates. Deux choses que le tableau affichait en tirets faute de les avoir.
+const datesCalendrier = ref([])
+const closesPassees = ref({})   // { 'YYYY-MM-DD': { ticker: cours } }
+
+async function chargerCalendrier() {
+  const calendriers = store.scriptConstats.filter(c => c.kind !== 'single')
+  if (!calendriers.length) { datesCalendrier.value = []; return }
+  const toutes = new Set()
+  for (const c of calendriers) {
+    try {
+      const res = await fetch('/api/schedule/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(scheduleRequest(c)),
+      })
+      if (!res.ok) continue
+      const data = await res.json()
+      // La première date est le début de période, pas une observation.
+      ;(data.dates || []).slice(1).forEach(d => toutes.add(d))
+    } catch { /* calendrier incomplet : on retombe sur les flux */ }
+  }
+  datesCalendrier.value = [...toutes].sort()
+}
+
+async function chargerCloturesPassees() {
+  const todayStr = new Date().toISOString().split('T')[0]
+  // Les mêmes dates que le tableau affiche — calendrier CONSTAT quand il y en
+  // a un, sinon celles déduites des flux. Se limiter au calendrier laissait
+  // les colonnes S₀ vides sur tout script en mode Normal, qui n'en a pas.
+  // Le strike en fait partie : c'est la constatation la plus utile à relire.
+  const jours = new Set(datesObservations.value)
+  if (form.strike_date) jours.add(form.strike_date)
+  const passees = [...jours].filter(d => d <= todayStr).sort()
+  const tickers = store.underlyings.map(u => u.ticker).filter(Boolean)
+  if (!passees.length || !tickers.length) { closesPassees.value = {}; return }
+  try {
+    const q = new URLSearchParams({ tickers: tickers.join(','),
+                                     start: form.strike_date || passees[0], end: todayStr })
+    const res = await fetch(`/api/finance/hist_prices?${q}`)
+    if (!res.ok) return
+    const data = await res.json()
+    const dates = data.dates || []
+    const releve = {}
+    for (const jour of passees) {
+      // Dernière clôture connue à cette date : un jour fermé n'a pas de cours,
+      // c'est celui d'avant qui fait foi — la même convention que le replay.
+      let idx = -1
+      for (let i = 0; i < dates.length; i++) {
+        if (dates[i] <= jour) idx = i; else break
+      }
+      if (idx < 0) continue
+      releve[jour] = {}
+      for (const tk of tickers) {
+        const serie = data.prices?.[tk]
+        if (serie && serie[idx]) releve[jour][tk] = serie[idx]
+      }
+    }
+    closesPassees.value = releve
+  } catch { /* pas d'historique : les cellules restent vides */ }
+}
+
+watch(() => [store.scriptConstats, store.constatOverrides, form.strike_date],
+      chargerCalendrier, { deep: true, immediate: true })
 
 const observationTimes = computed(() => {
   if (!store.result?.flux_table) return []
@@ -720,23 +829,61 @@ function addDays(isoDate, days) {
   return d.toISOString().split('T')[0]
 }
 
+// Dates de constatation du produit, quelle que soit la façon dont le script
+// les exprime : le calendrier CONSTAT fait foi quand il existe, sinon on les
+// reconstruit depuis les temps de flux, ancrés sur le strike. Une seule
+// source pour le tableau et pour le relevé des clôtures passées.
+const datesObservations = computed(() => {
+  if (datesCalendrier.value.length) return datesCalendrier.value
+  const origine = form.strike_date
+  if (!origine) return []
+  // En cours de vie, le Monte Carlo ne simule que la vie restante : les temps
+  // de sa table de flux se comptent depuis la DATE DE VALORISATION, pas depuis
+  // le strike. Les ancrer sur le strike ramenait la maturité d'un produit de
+  // trois ans à dix mois après son émission. Les constatations déjà passées
+  // ne sont pas dans cette table — elles sont dans realized_flows, elles
+  // comptées depuis le strike.
+  const res = store.result
+  if (res?.in_life && res.valuation_date) {
+    const passees = [...new Set((res.past?.realized_flows || []).map(f => f.t))]
+      .sort((a, b) => a - b)
+      .map(t => addDays(origine, t * 365.25))
+    const futures = observationTimes.value.map(t => addDays(res.valuation_date, t * 365.25))
+    return [...passees, ...futures]
+  }
+  return observationTimes.value.map(t => addDays(origine, t * 365.25))
+})
+
+watch(datesObservations, chargerCloturesPassees, { immediate: true })
+
 const previewEvents = computed(() => {
-  if (!store.result) return []
+  if (!store.result && !datesCalendrier.value.length) return []
   const todayStr = new Date().toISOString().split('T')[0]
+  const origine = form.strike_date || todayStr
   const events = []
 
   // Ligne 0 : strike date (fixing S₀)
   events.push({
     label: 'Strike / Fixing S₀',
-    date: form.strike_date || todayStr,
+    date: origine,
     t: 0,
-    isFuture: (form.strike_date || todayStr) > todayStr,
+    isFuture: origine > todayStr,
   })
 
-  // Constatations dérivées des flux
-  observationTimes.value.forEach((t, idx) => {
-    const date = addDays(form.value_date || todayStr, t * 365.25)
-    const isLast = idx === observationTimes.value.length - 1
+  // Les dates du CALENDRIER CONTRACTUEL quand il y en a un. Auparavant elles
+  // étaient dérivées de la table de flux du Monte Carlo, donc des pas de la
+  // grille hebdomadaire : jusqu'à trois jours de décalage sur chaque date,
+  // et comptés depuis la value date alors que l'axe s'ancre sur le strike.
+  const lignes = (datesObservations.value.length
+      ? datesObservations.value
+      : observationTimes.value.map(t => addDays(origine, t * 365.25))
+  ).map(date => ({
+    date,
+    t: Math.round(((new Date(date) - new Date(origine)) / 86400000 / 365.25) * 1e4) / 1e4,
+  }))
+
+  lignes.forEach(({ date, t }, idx) => {
+    const isLast = idx === lignes.length - 1
     events.push({
       label: isLast ? 'Maturité' : `Obs. ${idx + 1} (${formatNumber(t, 2)}Y)`,
       date,

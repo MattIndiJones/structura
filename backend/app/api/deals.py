@@ -23,6 +23,10 @@ from .auth import get_current_user
 from ..services.market_data import load_hist_prices, load_yahoo_reference_closes
 from ..core.payscript.parser import parse_script, resolve_constats, CompiledScript, effective_T_max
 from ..core.payscript.engine import eval_script_on_history
+from ..core.inlife_valuation import (
+    InLifeProduct, ValuationError, build_residual,
+    _engine_underlyings, _shift_dividend_curve,
+)
 from ..core.calibration import realized_market
 from ..core.references import next_reference
 from ..core.audit import commit_rejection, record_audit_event
@@ -265,6 +269,10 @@ def _deal_product_terms(body: DealCreate) -> dict:
         "currency": body.devise,
         "strike_date": body.strike_date,
         "value_date": body.value_date,
+        # La date de reglement final fait partie de l identite du produit : deux
+        # deals identiques regles a deux dates differentes ne valent pas le meme
+        # prix, l ecart se compte en points de base.
+        "payment_date": body.payment_date,
         "T": body.T,
     }
     return product_terms(body.script_snapshot, params)
@@ -326,9 +334,14 @@ def _derive_observation_times(body) -> List[float]:
     dates, and no dependency on having clicked ▶ Pricer."""
     compiled = parse_script(body.script_snapshot)
     market = body.market_snapshot or {}
+    # Ancré sur la constatation initiale, pas sur le règlement : le produit
+    # commence quand son niveau de référence est fixé. Repli sur la value date
+    # pour les bookings qui n'ont pas encore de date de strike.
+    origin = body.strike_date or body.value_date
     compiled = resolve_constats(
         compiled, market.get("constats") or {},
-        anchor=date.fromisoformat(body.value_date) if body.value_date else None,
+        anchor=date.fromisoformat(origin) if origin else None,
+        currency=(body.devise or "").strip().upper() or None,
     )
     # AT_MATURITY carries no date of its own: it fires at the end of the
     # horizon. Which end? The deal's OWN maturity date, not the tenor typed in
@@ -339,8 +352,12 @@ def _derive_observation_times(body) -> List[float]:
     # a product that has four. A coupon calendar shorter than the note (2Y of
     # coupons on a 3Y maturity) stays correct: its maturity date is the 3Y one.
     horizon = body.T
-    if body.maturity_date and body.value_date:
-        from_maturity = _years_between(body.value_date, body.maturity_date)
+    # Mesure depuis la MEME origine que les constatations resolues ci-dessus :
+    # la date de strike. Compter l horizon depuis la value date alors que les
+    # observations partent du strike decalerait le remboursement de l ecart
+    # entre les deux dates.
+    if body.maturity_date and origin:
+        from_maturity = _years_between(origin, body.maturity_date)
         if from_maturity > 0:
             horizon = from_maturity
     T_eff = effective_T_max(compiled, horizon)
@@ -1227,7 +1244,11 @@ def _book_deal(
             "ni valorisé, ni dénoué. Vérifiez le calendrier CONSTAT du script.")
 
     maturity = date.fromisoformat(body.maturity_date)
-    event_dates = [_date_plus_years(body.value_date, t) for t in times]
+    # Les temps d observation se comptent depuis la MEME origine que celle qui
+    # les a resolus (_derive_observation_times) : la date de strike. Les
+    # reconvertir depuis la value date les decalerait de l ecart entre les deux.
+    _obs_origin = body.strike_date or body.value_date
+    event_dates = [_date_plus_years(_obs_origin, t) for t in times]
     after_maturity = [d for d in event_dates if date.fromisoformat(d) > maturity]
     if after_maturity:
         _reject_booking(
@@ -1302,7 +1323,7 @@ def _book_deal(
     ))
 
     for idx, t in enumerate(times):
-        ev_date = _date_plus_years(body.value_date, t)
+        ev_date = _date_plus_years(_obs_origin, t)
         is_maturity = (idx == len(times) - 1)
         label = "Maturité" if is_maturity else f"Obs. {idx + 1} ({t:.2f}Y)"
         session.add(DealEvent(
@@ -3018,9 +3039,11 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
     # persisted since 2026-07-19) — resolved relative to the deal's value_date,
     # not today. Deals booked before that persistence still raise ValueError
     # here, which callers already treat as "replay unavailable".
+    _origin = deal.strike_date or deal.value_date
     compiled = resolve_constats(
         compiled, market.get("constats") or {},
-        anchor=date.fromisoformat(deal.value_date) if deal.value_date else None,
+        anchor=date.fromisoformat(_origin) if _origin else None,
+        currency=(deal.devise or "").strip().upper() or None,
     )
     r_frac = snapshot_rate(market)
     # PARAM overrides frozen at booking (stored units) — without them the
@@ -5152,7 +5175,10 @@ def reprice_inputs(
     value_d = date.fromisoformat(deal.value_date)
 
     T_remaining = max(0.0, (maturity - today).days / 365.25)
-    T_elapsed = max(0.0, (today - value_d).days / 365.25)
+    # Meme origine que les temps d observation : la date de strike. Compter le
+    # temps ecoule depuis la value date decalerait tout le residuel.
+    _elapsed_origin = (date.fromisoformat(deal.strike_date) if deal.strike_date else value_d)
+    T_elapsed = max(0.0, (today - _elapsed_origin).days / 365.25)
 
     underlyings = json.loads(deal.underlyings_json)
     tickers = [u["ticker"] for u in underlyings if u.get("ticker")]
@@ -5211,43 +5237,6 @@ def reprice_inputs(
 
 # ── MtM résiduel ──────────────────────────────────────────────────────
 
-def _engine_underlyings(market: dict, underlyings_json: list) -> list[dict]:
-    """Engine-unit underlyings from the booking snapshot: display units
-    (σ=20 → 0.20) with neutral defaults for anything a partial snapshot
-    (old / API-booked deal) doesn't carry — same fallbacks the Pricer UI
-    applies when reopening such a deal (see pricing.js loadFromDeal)."""
-    snap_by_name = {u.get("name"): u for u in market.get("underlyings", []) or []}
-    out = []
-    for u_ref in underlyings_json:
-        u = snap_by_name.get(u_ref.get("name"), {})
-        def g(key, default, scale=100.0):
-            v = u.get(key)
-            return default if v is None else v / scale
-        dividend_curve = []
-        for node in u.get("dividendCurve") or []:
-            if isinstance(node, dict):
-                maturity, rate = node.get("T"), node.get("rate")
-            else:
-                maturity, rate = node
-            dividend_curve.append([float(maturity), float(rate) / 100.0])
-        out.append({
-            "name": u_ref.get("name", ""), "ticker": u_ref.get("ticker", ""),
-            "ccy": u.get("ccy", "EUR"),
-            "sigma": g("sigma", 0.20), "q": g("q", 0.02),
-            "dividend_curve": dividend_curve,
-            "dividend_decay": g("dividendDecay", 0.0),
-            "sigma_fx": g("sigma_fx", 0.0), "rho_sfx": g("rho_sfx", 0.0),
-            "ccyh": g("ccyh", 0.0, 10000.0),
-            "v0": g("v0", 0.04), "kappa": u.get("kappa") or 2.0,
-            "theta": g("theta", 0.04), "xi": g("xi", 0.35),
-            "rho_h": g("rho_h", -0.70), "rho_rS": g("rho_rS", 0.40),
-            "alpha": g("alpha", 0.20), "beta": g("beta", 0.50),
-            "rho": g("rho", -0.30), "nu": g("nu", 0.40),
-            "skew": g("skew", -0.10), "curvature": g("curvature", 0.05),
-        })
-    return out
-
-
 def _regenerate_dividend_curve(underlying: dict, maturity: float) -> None:
     """Rebuild a full-tenor curve after a first-year q refresh.
 
@@ -5266,43 +5255,6 @@ def _regenerate_dividend_curve(underlying: dict, maturity: float) -> None:
         for year in range(1, n_years + 1)
     ]
 
-
-def _shift_dividend_curve(underlying: dict, elapsed: float) -> None:
-    """Condition a booked dividend curve on a residual valuation date.
-
-    Original nodes are bucket ends measured from the deal value date. A
-    residual Monte Carlo starts at zero again, so every surviving end date is
-    shifted by elapsed time and q is reset to the currently active bucket.
-    """
-    curve = underlying.get("dividend_curve") or []
-    if not curve or elapsed <= 0.0:
-        return
-    eps = 1e-9
-    remaining = [
-        [float(end) - elapsed, float(rate)]
-        for end, rate in curve
-        if float(end) > elapsed + eps
-    ]
-    if remaining:
-        underlying["q"] = remaining[0][1]
-        underlying["dividend_curve"] = remaining
-    else:
-        # Beyond the final stored node the convention is a flat extension of
-        # the last bucket. Clearing the curve restores exactly that scalar path.
-        underlying["q"] = float(curve[-1][1])
-        underlying["dividend_curve"] = []
-
-
-# ── Réinvestissement (module solution d'investissement) ────────────────
-# Flow A (ce fichier, "roll") : côté client, dans la vue MtM — reconduire la
-# MÊME structure sur le MÊME sous-jacent, value date/strike date à aujourd'hui,
-# tenor plein d'origine. Ce n'est PAS un MtM résiduel (pas d'historique à
-# rejouer, pas d'état à porter) : juste le même script pricé à neuf.
-# Flow B (ce fichier, "scan") : côté desk, onglet Life Cycle dédié — swap du
-# sous-jacent sur un pool de candidats, coupon résolu par bissection (réutilise
-# solve_for_param, le même moteur que le Solveur existant), classement filtré
-# par seuils de proba. Jamais montré au client tel quel.
-# Voir MEMORY investment-solution-module pour le cadrage complet.
 
 @router.post("/{deal_id}/reinvest/roll")
 def reinvest_roll_endpoint(
@@ -5327,7 +5279,8 @@ def reinvest_roll_endpoint(
 
     try:
         compiled = parse_script(deal.script_snapshot)
-        compiled = resolve_constats(compiled, market.get("constats") or {}, anchor=date.today())
+        compiled = resolve_constats(compiled, market.get("constats") or {}, anchor=date.today(),
+                                    currency=(deal.devise or "").strip().upper() or None)
     except ValueError as e:
         raise HTTPException(422, f"Script non exploitable pour la reconduction : {e}")
 
@@ -5461,7 +5414,8 @@ def _reinvest_context(deal: Deal, req_T: float | None):
                                   "produits mono-sous-jacent (limitation v1).")
     try:
         compiled = parse_script(deal.script_snapshot)
-        compiled = resolve_constats(compiled, market.get("constats") or {}, anchor=date.today())
+        compiled = resolve_constats(compiled, market.get("constats") or {}, anchor=date.today(),
+                                    currency=(deal.devise or "").strip().upper() or None)
     except ValueError as e:
         raise HTTPException(422, f"Script non exploitable : {e}")
 
@@ -5722,55 +5676,51 @@ def _mtm_core(
     if today >= maturity:
         raise HTTPException(422, "Échéance atteinte — lancer le refresh du cycle de vie "
                                  "pour résoudre le deal plutôt que le valoriser")
-    T_elapsed = max(0.0, (today - value_d).days / 365.25)
+    # Meme origine que les temps d observation : la date de strike. Compter le
+    # temps ecoule depuis la value date decalerait tout le residuel.
+    _elapsed_origin = (date.fromisoformat(deal.strike_date) if deal.strike_date else value_d)
+    T_elapsed = max(0.0, (today - _elapsed_origin).days / 365.25)
     T_remaining = max(1 / 52, (maturity - today).days / 365.25)
+    residual_payment_t = (
+        (date.fromisoformat(deal.payment_date) - today).days / 365.25
+        if deal.payment_date else None)
 
-    market = json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {}
-    underlyings_json = json.loads(deal.underlyings_json)
-    tickers = [u["ticker"] for u in underlyings_json if u.get("ticker")]
+    # Le rejeu du passé et la construction du résiduel vivent dans le cœur
+    # (core/inlife_valuation) : le Pricer doit pouvoir les appeler sans qu'un
+    # deal existe. Ici on ne fait que traduire un deal en paramètres.
+    strike_event = next((e for e in _get_events(deal_id, session) if e.t_years == 0.0), None)
+    produit = InLifeProduct(
+        script_snapshot=deal.script_snapshot,
+        underlyings=json.loads(deal.underlyings_json),
+        strike_levels=json.loads(strike_event.spots_json) if strike_event else {},
+        strike_date=(date.fromisoformat(deal.strike_date) if deal.strike_date else value_d),
+        value_date=value_d,
+        tenor=deal.T,
+        currency=(deal.devise or "").strip().upper(),
+        payment_date=(date.fromisoformat(deal.payment_date) if deal.payment_date else None),
+        market=json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {},
+    )
+    # Historique réalisé depuis le strike (même fenêtre J-7 que le refresh du
+    # cycle de vie : un strike un week-end ou un férié a besoin de la clôture
+    # qui précède). Le chargement reste ici, le cœur ne fait pas d'I/O.
+    tickers = [u["ticker"] for u in produit.underlyings if u.get("ticker")]
     if not tickers:
         raise HTTPException(422, "Aucun ticker défini sur ce deal")
-
-    try:
-        compiled = parse_script(deal.script_snapshot)
-        compiled = resolve_constats(compiled, market.get("constats") or {}, anchor=value_d)
-    except ValueError as e:
-        raise HTTPException(422, f"Script/calendriers non exploitables pour le MtM résiduel "
-                                 f"(deal booké avant la persistance des CONSTAT ?) : {e}")
-
-    # Realized history from strike (same J-7 window convention as the
-    # lifecycle refresh — a weekend/holiday strike needs the preceding close).
-    fetch_start = (date.fromisoformat(deal.strike_date) - timedelta(days=7)).isoformat()
+    fetch_start = (produit.strike_date - timedelta(days=7)).isoformat()
     px_data = load_hist_prices(tickers, fetch_start, today.isoformat())
     if "error" in px_data:
         raise HTTPException(422, px_data["error"])
-    dates_list = px_data.get("dates", [])
-    prices = px_data.get("prices", {})
-    if not dates_list:
-        raise HTTPException(422, "Données historiques vides")
+    try:
+        residuel = build_residual(produit, px_data.get("prices", {}),
+                                  px_data.get("dates", []), T_elapsed, today)
+    except ValuationError as exc:
+        raise HTTPException(422, str(exc))
 
-    start_idx = 0
-    for i_d, d_str in enumerate(dates_list):
-        if d_str <= deal.strike_date:
-            start_idx = i_d
-        else:
-            break
-
-    user_params = market.get("user_params", {}) or {}
-    r_frac = snapshot_rate(market)
-
-    replay = eval_script_on_history(
-        compiled, dates_list, prices, start_idx, deal.T, user_params, tickers, r_frac
-    )
-    if replay is None:
-        raise HTTPException(422, "Replay impossible — S₀ introuvable dans l'historique")
-    if replay["early_recall"]:
+    if residuel.early_recall:
         # The old wording pointed at "refresh the lifecycle", which stopped
         # being actionable when fixings became governed: a refresh only updates
         # INDICATIVE monitoring data and raises a proposal — resolving the deal
         # now requires an official fixing validated by an independent Checker.
-        # Telling the user to press a button that cannot unblock them wastes
-        # their time and makes the control look broken rather than deliberate.
         return {
             "resolved_pending": True,
             "message": "Le replay indicatif détecte un rappel anticipé : ce deal ne "
@@ -5778,42 +5728,26 @@ def _mtm_core(
                        "officiel validé — soumettez la version candidate puis faites-la "
                        "traiter dans la file Checker. Un refresh ne met à jour que les "
                        "données indicatives et ne résoudra pas le deal.",
-            "T_actual": replay["T_actual"],
+            "T_actual": residuel.T_actual,
         }, None
-    state = replay["state"]
-    realized_cfs = replay["cash_flows"]
 
-    residual_events = _shift_events_for_mtf(compiled.events, T_elapsed)
-    if not residual_events:
-        raise HTTPException(422, "Aucun événement résiduel — vérifier le calendrier du deal")
-    # STRIKE_FIX window split at today: past dates (d <= T_elapsed) were replayed
-    # on real closes (state["fix_state"]), only strictly-future dates stay on the
-    # residual script — no fixing date is ever counted twice.
-    residual_fix = [round(d - T_elapsed, 6) for d in (compiled.strike_fix_dates or [])
-                    if d > T_elapsed + 1e-9]
-    residual_script = CompiledScript(
-        events=residual_events, init_fn=compiled.init_fn,
-        params=compiled.params, constats=compiled.constats,
-        has_stop=compiled.has_stop, monitors=compiled.monitors,
-        strike_fix_dates=residual_fix or None,
-    )
-
-    # Paths start at today's spot in % of strike — the barriers written in %
-    # of strike then bite at the right distance without any rescaling.
-    strike_event = next((e for e in _get_events(deal_id, session) if e.t_years == 0.0), None)
-    s0_map: dict = json.loads(strike_event.spots_json) if strike_event else {}
-    norm_spots = []
-    for u in underlyings_json:
-        tk, name = u.get("ticker", ""), u["name"]
-        s0 = s0_map.get(name, 0.0)
-        series = [float(p) for p in prices.get(tk, []) if p]
-        if not (tk and series and s0 > 0):
-            raise HTTPException(422, f"Spot/S₀ manquant pour {name} — compléter l'event Strike")
-        norm_spots.append(series[-1] / s0)
-
-    engine_uls = _engine_underlyings(market, underlyings_json)
-    for underlying in engine_uls:
-        _shift_dividend_curve(underlying, T_elapsed)
+    # Noms locaux conservés : toute la suite de la fonction les utilise tels
+    # quels, ce qui garde le déplacement mécanique et vérifiable.
+    market = produit.market
+    underlyings_json = produit.underlyings
+    compiled = residuel.compiled
+    residual_script = residuel.residual_script
+    state = residuel.state
+    realized_cfs = residuel.realized_flows
+    norm_spots = residuel.norm_spots
+    engine_uls = residuel.engine_uls
+    r_frac = residuel.r_frac
+    prices = residuel.prices
+    dates_list = residuel.dates_list
+    user_params = residuel.user_params
+    replay = residuel.replay
+    start_idx = residuel.start_idx
+    s0_map = residuel.s0_map
     n_u = len(engine_uls)
     corr = market.get("corrMatrix") or [
         [1.0 if i == j else 0.0 for j in range(n_u)] for i in range(n_u)
@@ -5868,6 +5802,7 @@ def _mtm_core(
     try:
         result = run_mc(
             residual_script, engine_uls, corr, r_frac, T_remaining,
+            maturity_payment_t=residual_payment_t,
             N=max(1000, min(100000, n_paths)),
             model=model_used, seed=42,
             antithetic=bool(market.get("antithetic", True)),
@@ -5976,6 +5911,7 @@ def _mtm_core(
         "norm_spots": norm_spots,
         "T_elapsed": T_elapsed,
         "T_remaining": T_remaining,
+        "residual_payment_t": residual_payment_t,
         "n_mc": result["n_paths"],
         # Everything needed to re-run this photo's MC (or a mix of two photos)
         # for the P&L explain waterfall:
@@ -6128,6 +6064,7 @@ def _run_explain_step(cal: dict, spot: dict, uls: list, corr, model: str,
     st = spot["state"]
     return run_mc(
         cal["residual_script"], uls, corr, common["r_frac"], cal["T_remaining"],
+        maturity_payment_t=cal.get("residual_payment_t"),
         N=common["N"], model=model, seed=42, antithetic=common["antithetic"],
         user_params=common["user_params"], spot_mult=spot["norm_spots"],
         spot_base=spot["norm_spots"],

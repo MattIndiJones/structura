@@ -342,10 +342,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useDealsStore } from '../stores/deals.js'
 import { apiFetch } from '../utils/api.js'
-import { underlyingGroups } from '../data/commonUnderlyings.js'
+import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
 import HelpTip from '../components/HelpTip.vue'
 import { formatInt, formatDate } from '../utils/format.js'
 import { chartTheme, applyChartTheme } from '../charts/theme.js'
@@ -356,6 +356,9 @@ import {
 
 Chart.register(LineElement, LineController, PointElement, BarElement, BarController,
   CategoryScale, LinearScale, Tooltip, Legend)
+
+// Catalogue de sous-jacents : chargé depuis la base au montage.
+onMounted(ensureUnderlyings)
 applyChartTheme(Chart)
 
 const dealsStore = useDealsStore()

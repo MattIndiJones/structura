@@ -9,10 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import RfqProvider, User, Entity, Counterparty
+from ..db.models import RfqProvider, User, Entity, Counterparty, Underlying
 from .auth import get_current_admin
 from ..core import admin_registry
 from ..core.amc_prices import fetch_prices as _fetch_prices, price_status as _price_status, _slug
+from ..services.market_data import probe_ticker, search_symbols
 from ..services.uat_generation import (
     UatGenerationRequest, delete_batch as delete_uat_batch,
     generate_batch as generate_uat_batch, generator_config,
@@ -588,3 +589,125 @@ def market_data_fetch(
         raise HTTPException(422, str(e))
     except Exception as e:
         raise HTTPException(500, f"Erreur Yahoo Finance : {e}")
+
+
+# ── Référentiel de sous-jacents ───────────────────────────────────────
+# Cette liste vivait dans un fichier du front, modifiable par un développeur
+# seulement. Ces endpoints la rendent administrable : chercher un titre chez
+# Yahoo, vérifier qu'il répond, l'inscrire.
+
+class UnderlyingCreate(BaseModel):
+    ticker: str
+    label: str = ""
+    group: str = "Autres"
+    ccy: str = ""
+    exchange: str = ""
+
+
+class UnderlyingUpdate(BaseModel):
+    label: Optional[str] = None
+    group: Optional[str] = None
+    ccy: Optional[str] = None
+    active: Optional[bool] = None
+
+
+def _underlying_row(u: Underlying) -> dict:
+    return {
+        "id": u.id, "ticker": u.ticker, "label": u.label,
+        "group": u.group_name, "ccy": u.ccy, "exchange": u.exchange,
+        "active": u.active,
+    }
+
+
+@router.get("/underlyings")
+def list_underlyings(
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Le catalogue, groupes et libellés triés alphabétiquement."""
+    rows = session.exec(
+        select(Underlying).order_by(Underlying.group_name, Underlying.label)
+    ).all()
+    return [_underlying_row(u) for u in rows]
+
+
+@router.get("/underlyings/search")
+def search_underlyings(
+    q: str,
+    admin: Annotated[User, Depends(get_current_admin)],
+):
+    """Cherche un titre chez Yahoo — nom ou fragment de symbole."""
+    res = search_symbols(q)
+    if "error" in res:
+        raise HTTPException(422, res["error"])
+    return res
+
+
+@router.post("/underlyings", status_code=201)
+def create_underlying(
+    body: UnderlyingCreate,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    ticker = body.ticker.strip()
+    if not ticker:
+        raise HTTPException(422, "Le ticker est requis")
+    groupe = (body.group or "Autres").strip() or "Autres"
+    if session.exec(select(Underlying).where(
+            Underlying.ticker == ticker,
+            Underlying.group_name == groupe)).first():
+        raise HTTPException(409, f"« {ticker} » figure déjà dans le groupe « {groupe} ».")
+
+    # On refuse un ticker muet plutôt que de le découvrir au moment de pricer.
+    sonde = probe_ticker(ticker)
+    if not sonde.get("ok"):
+        raise HTTPException(422, sonde.get("error", f"Ticker « {ticker} » injoignable."))
+
+    u = Underlying(
+        ticker=ticker,
+        label=(body.label or "").strip() or ticker,
+        group_name=groupe,
+        # La devise vient de Yahoo quand il la donne : plus sûr que le suffixe
+        # de cotation, qui ne dit rien d'une place multidevise.
+        ccy=((body.ccy or "").strip() or sonde.get("ccy") or "EUR").upper(),
+        exchange=(body.exchange or "").strip(),
+    )
+    session.add(u)
+    session.commit()
+    session.refresh(u)
+    return {**_underlying_row(u), "probe": sonde}
+
+
+@router.patch("/underlyings/{underlying_id}")
+def update_underlying(
+    underlying_id: int,
+    body: UnderlyingUpdate,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    u = session.get(Underlying, underlying_id)
+    if not u:
+        raise HTTPException(404, "Sous-jacent introuvable")
+    data = body.model_dump(exclude_unset=True)
+    if "group" in data:
+        u.group_name = (data.pop("group") or "Autres").strip() or "Autres"
+    for field, value in data.items():
+        setattr(u, field, value)
+    u.updated_at = datetime.utcnow()
+    session.add(u)
+    session.commit()
+    session.refresh(u)
+    return _underlying_row(u)
+
+
+@router.delete("/underlyings/{underlying_id}", status_code=204)
+def delete_underlying(
+    underlying_id: int,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    u = session.get(Underlying, underlying_id)
+    if not u:
+        raise HTTPException(404, "Sous-jacent introuvable")
+    session.delete(u)
+    session.commit()

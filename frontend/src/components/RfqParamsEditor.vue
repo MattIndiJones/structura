@@ -50,9 +50,29 @@
               <label class="text-[10px] text-slate-600">Fréquence</label>
               <div class="flex gap-1">
                 <input type="number" min="1" v-model.number="constatOverrides[c.name].frequency.value" class="input py-1 px-2 w-14" />
-                <select v-model="constatOverrides[c.name].frequency.unit" class="select py-1 px-1">
-                  <option value="D">J</option><option value="M">M</option><option value="Y">A</option>
+                <select v-model="constatOverrides[c.name].frequency.unit" class="select py-1 pl-2 w-16">
+                  <option value="D">D</option><option value="M">M</option><option value="Y">Y</option>
                 </select>
+              </div>
+            </div>
+            <div class="flex flex-col gap-0.5">
+              <label class="text-[10px] text-slate-600"
+                     title="Ce que devient une constatation qui tombe un week-end ou un jour férié du calendrier de la devise de règlement. « Aucun ajustement » laisse la date là où le term sheet l'a mise.">Convention ⓘ</label>
+              <select v-model="constatOverrides[c.name].convention" class="select py-1 px-2">
+                <option value="none">Aucun ajustement</option>
+                <option value="following">Jour ouvré suivant</option>
+                <option value="modified_following">Suivant, sauf changement de mois</option>
+                <option value="preceding">Jour ouvré précédent</option>
+                <option value="modified_preceding">Précédent, sauf changement de mois</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-0.5">
+              <label class="text-[10px] text-slate-600"
+                     title="Jours ouvrés entre une constatation et le mouvement effectif du cash. 0 = payé le jour de la constatation.">Règlement ⓘ</label>
+              <div class="flex items-center gap-1">
+                <input type="number" min="0" max="30" class="input py-1 px-2 w-14"
+                       v-model.number="constatOverrides[c.name].settlement_lag" />
+                <span class="text-[10px] text-slate-600">j. ouvrés</span>
               </div>
             </div>
             <div class="flex flex-col gap-0.5">
@@ -68,29 +88,13 @@
               <label class="text-[10px] text-slate-600">Sous-fréquence</label>
               <div class="flex gap-1">
                 <input type="number" min="1" v-model.number="constatOverrides[c.name].sub_frequency.value" class="input py-1 px-2 w-14" />
-                <select v-model="constatOverrides[c.name].sub_frequency.unit" class="select py-1 px-1">
-                  <option value="D">J</option><option value="M">M</option><option value="Y">A</option>
+                <select v-model="constatOverrides[c.name].sub_frequency.unit" class="select py-1 pl-2 w-16">
+                  <option value="D">D</option><option value="M">M</option><option value="Y">Y</option>
                 </select>
               </div>
             </div>
           </div>
-          <details class="text-[10px] text-slate-500">
-            <summary class="cursor-pointer select-none" @click="preview(c)">▸ Aperçu du calendrier</summary>
-            <span v-if="previewErrors[c.name]" class="text-red-400">⚠ {{ previewErrors[c.name] }}</span>
-            <div v-else-if="previews[c.name]" class="mt-1 flex flex-col gap-1">
-              <span class="text-slate-400">
-                {{ Math.max(previews[c.name].dates.length - 1, 0) }} observation(s) réelle(s)
-                <span class="text-slate-600">({{ previews[c.name].dates.length }} date(s) générée(s), la 1ère est le début de période — non observée)</span>
-              </span>
-              <div class="flex flex-wrap gap-1">
-                <span v-for="(d, i) in previews[c.name].dates" :key="d" class="font-mono"
-                      :title="i === 0 ? 'Début de période — pas une date d\'observation' : ''">
-                  <span :class="i === 0 ? 'text-slate-600 line-through' : ''">{{ d }}</span>
-                  <span v-if="i === 0" class="text-slate-600"> (début de période)</span>
-                </span>
-              </div>
-            </div>
-          </details>
+          <ObservationSchedule :request="scheduleRequest(c)" />
         </div>
       </div>
     </div>
@@ -99,38 +103,34 @@
 
 <script setup>
 import { reactive } from 'vue'
+import ObservationSchedule from './ObservationSchedule.vue'
 
 const props = defineProps({
   parsedParams: { type: Array, default: () => [] },
   paramOverrides: { type: Object, required: true },
   constats: { type: Array, default: () => [] },
   constatOverrides: { type: Object, required: true },
+  // Devise du cash : elle nomme le calendrier de jours ouvrés sur lequel les
+  // constatations sont roulées et les décalages de règlement comptés. Le
+  // marché du sous-jacent n'y joue aucun rôle.
+  currency: { type: String, default: 'EUR' },
 })
-
-const previews = reactive({})
-const previewErrors = reactive({})
 
 function tenorStr(t) {
   return (t && t.value) ? `${t.value}${t.unit}` : null
 }
 
-async function preview(c) {
-  delete previewErrors[c.name]
-  const v = props.constatOverrides[c.name]
-  try {
-    const res = await fetch('/api/schedule/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
-        frequency: tenorStr(v.frequency), stub: v.stub,
-        sub_frequency: tenorStr(v.sub_frequency) || null,
-      }),
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur serveur')
-    previews[c.name] = await res.json()
-  } catch (e) {
-    previewErrors[c.name] = e.message
+// Ce que l'aperçu envoie au serveur — la forme de l'API, pas celle de l'état
+// local de cet éditeur.
+function scheduleRequest(c) {
+  const v = props.constatOverrides[c.name] || {}
+  return {
+    start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
+    frequency: tenorStr(v.frequency), stub: v.stub,
+    sub_frequency: tenorStr(v.sub_frequency) || null,
+    currency: props.currency,
+    convention: v.convention || 'none',
+    settlement_lag: v.settlement_lag || 0,
   }
 }
 </script>

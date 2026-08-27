@@ -71,6 +71,18 @@
           <p class="text-xs text-slate-600">Parcourez et nettoyez les enregistrements métier (lecture seule + suppression).</p>
         </RouterLink>
 
+        <RouterLink to="/admin/underlyings"
+          class="card flex flex-col gap-3 hover:border-emerald-700 hover:bg-emerald-950/20 hover:shadow-xl hover:shadow-black/30 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-emerald-900/50 flex items-center justify-center text-xl">🏷️</div>
+            <div>
+              <div class="font-bold text-slate-100 group-hover:text-emerald-300 transition-colors">Sous-jacents</div>
+              <div class="text-xs text-slate-500">Catalogue des titres et indices</div>
+            </div>
+          </div>
+          <p class="text-xs text-slate-600">Cherchez un titre chez Yahoo, vérifiez qu'il cote, ajoutez-le aux listes du Pricer et des AO.</p>
+        </RouterLink>
+
         <RouterLink to="/admin/market-data"
           class="card flex flex-col gap-3 hover:border-cyan-700 hover:bg-cyan-950/20 hover:shadow-xl hover:shadow-black/30 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
           <div class="flex items-center gap-3">

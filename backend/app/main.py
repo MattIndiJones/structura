@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from .api.pricing import router as pricing_router
+from .api.inlife import router as inlife_router
 from .api.market_data import router as market_data_router
 from .api.simulation import router as simulation_router
 from .api.scenarios import router as scenarios_router
@@ -75,6 +76,7 @@ async def start_lifecycle_scheduler():
 
     asyncio.create_task(_daily_loop())
 
+app.include_router(inlife_router)
 app.include_router(auth_router)
 app.include_router(folders_router)
 app.include_router(scripts_db_router)

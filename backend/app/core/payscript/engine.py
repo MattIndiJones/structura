@@ -836,6 +836,45 @@ def _build_df_arr(yield_curve: list, ts: int, dt: float, r_eff: float) -> np.nda
 # Disabled by default (sigma_r=0) — every call site below is then a no-op and
 # reproduces the exact prior deterministic-rate behavior.
 
+def _df_at_time(df_arr: np.ndarray | None, t: float, dt: float, ts: int,
+                r_eff: float):
+    """Discount factor at an arbitrary time, off a curve defined on grid steps.
+
+    A payment date almost never lands on a simulation step: a coupon observed
+    on a weekly grid and settled five business days later falls between two
+    steps, and a redemption settled after the last fixing falls beyond the grid
+    entirely. Log-linear in the discount factor — linear in the zero rate over
+    each interval — and, past the last point, extension at the curve's own
+    final forward rate rather than at the flat r.
+
+    Returns a scalar for a deterministic curve, one factor per path for a
+    stochastic one."""
+    if t == 0:
+        return 1.0
+    if df_arr is None:
+        # Vaut aussi pour t < 0 : exp(+r|t|) > 1, on capitalise en arriere.
+        return math.exp(-r_eff * t)
+
+    log_df = np.log(np.maximum(df_arr, 1e-300))
+    x = t / dt
+    k = int(math.floor(x))
+
+    if x < 0:
+        # Avant l origine de l axe. Cas reel : une value date ANTERIEURE a la
+        # constatation initiale (forward start ou le nominal est verse avant que
+        # le niveau de reference soit fixe). Le facteur y est superieur a 1 : on
+        # remonte le temps au premier forward de la courbe.
+        fwd = (log_df[0] - log_df[1]) / dt if ts >= 1 else r_eff
+        return np.exp(log_df[0] - fwd * t)
+
+    if k >= ts:
+        # Past the simulated horizon nothing is random any more — only the curve.
+        fwd = (log_df[ts - 1] - log_df[ts]) / dt if ts >= 1 else r_eff
+        return np.exp(log_df[ts] - fwd * (t - ts * dt))
+
+    return np.exp(log_df[k] + (log_df[k + 1] - log_df[k]) * (x - k))
+
+
 def _forward_rate_arr(df_arr: np.ndarray, dt: float) -> np.ndarray:
     """Instantaneous forward rate over each weekly sub-interval [s-1, s], derived
     from a deterministic discount curve: f[s-1] = -(log df[s] - log df[s-1]) / dt.
@@ -973,6 +1012,32 @@ def _build_rate_term(yield_curve, ts: int, dt: float, r: float,
     return _RateTerm(df=df, r_flat=r_flat, step_fwd=step_fwd, zero=zero)
 
 
+def _funding_df_arr(funding_curve, funding_spread: float,
+                    ts: int, dt: float) -> np.ndarray | None:
+    """Facteur d'actualisation du seul spread émetteur, ou None s'il n'y en a pas.
+
+    DÉLIBÉRÉMENT séparé de `_RateTerm`, qui unifie drift, actualisation et
+    calibration du smile pour qu'ils ne puissent pas diverger. Un spread de
+    funding n'est pas un taux : il dit la qualité de crédit de celui qui doit
+    payer, pas le coût de portage du sous-jacent. Le crédit de l'émetteur ne
+    déplace pas le forward de l'action.
+
+    Le router dans la courbe de taux donnerait le SIGNE INVERSE — sur une note
+    la hausse du forward l'emporte sur l'actualisation, et le produit vaudrait
+    plus cher à mesure que son émetteur se dégrade. C'est pour ça qu'il entre
+    ici, sur `df` seul, et jamais dans `step_fwd`.
+
+    `funding_curve` (piliers [T, spread]) l'emporte sur `funding_spread`
+    (niveau plat). Interpolation et extrapolation identiques à celles de la
+    courbe de taux — même fonction, avec un taux de repli nul."""
+    if funding_curve:
+        return _build_df_arr(funding_curve, ts, dt, 0.0)
+    if funding_spread:
+        t = np.arange(ts + 1, dtype=np.float64) * dt
+        return np.exp(-funding_spread * t)
+    return None
+
+
 def _blend_rate_factor(z_i, Z_r_val, rho_rS: float):
     """Couple an asset's Brownian to the shared rate factor: z_i_final =
     rho_rS*Z_r_val + z_i, where z_i already carries variance 1 - rho_rS^2
@@ -1090,6 +1155,19 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 dt: float, r_eff: float, user_params: dict,
                 step_map: dict, mat_events: list, flux_map: dict,
                 record: bool, df_arr: np.ndarray | None = None,
+                # Settlement of each flow. pay_map holds the payment time of
+                # every step_map entry, aligned index by index with it; pay_df
+                # the discount factor of each distinct payment time; mat_pay_*
+                # the product's own final payment date. All None means "paid at
+                # observation" — every caller with no settlement calendar.
+                pay_map: dict | None = None,
+                pay_df: dict | None = None,
+                mat_pay_df=None,
+                mat_pay_t: float | None = None,
+                # The PV is expressed at the value date, while the time axis is
+                # anchored on the strike: 1 / P(0, value date). 1.0 when the two
+                # coincide, which is every caller that knows only one date.
+                pv_rebase: float = 1.0,
                 wof_min_init=None, bof_max_init=None,
                 stop_times_out: list | None = None,
                 flows_out: list | None = None,
@@ -1246,9 +1324,19 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             obs_idx += 1
             ctx["index"] = obs_idx
 
-            for ev in step_map[step]:
+            for ev_i, ev in enumerate(step_map[step]):
                 if done:
                     break
+                # Un flux constaté ici peut ne bouger que des jours plus tard :
+                # il vaut sa valeur actualisée à la date de PAIEMENT, pas au
+                # fixing. Sans calendrier de règlement, les deux coïncident.
+                t_pay = pay_map[step][ev_i] if pay_map and step in pay_map else None
+                if t_pay is None:
+                    disc_ev = disc * pv_rebase
+                else:
+                    d_pay = pay_df[t_pay]
+                    disc_ev = (d_pay[path] if isinstance(d_pay, np.ndarray)
+                               else d_pay) * pv_rebase
                 st: dict = {"flows": [], "done": False}
                 try:
                     ev.fn(ctx, st)
@@ -1257,7 +1345,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                         f"Erreur d'exécution du script (événement {ev.type}, t={ctx['t']:.4f}) : {e}"
                     ) from e
                 for fl in st["flows"]:
-                    cf = fl["v"] * disc
+                    cf = fl["v"] * disc_ev
                     ctx["total_cf"] += cf
                     ctx["total_cf_raw"] += fl["v"]
                     if path_flows is not None and fl["v"] != 0:
@@ -1265,7 +1353,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     if record and fl["v"] != 0:
                         key = f"{ctx['t']:.6f}|{fl['lbl']}"
                         if key not in flux_map:
-                            flux_map[key] = {"t": ctx["t"], "lbl": fl["lbl"], "n": 0, "sum": 0.0, "pv": 0.0}
+                            flux_map[key] = {"t": ctx["t"], "lbl": fl["lbl"], "n": 0, "sum": 0.0, "pv": 0.0,
+                                             "t_pay": t_pay if t_pay is not None else ctx["t"]}
                         flux_map[key]["n"] += 1
                         flux_map[key]["sum"] += fl["v"]
                         flux_map[key]["pv"] += cf
@@ -1280,6 +1369,13 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 disc = math.exp(-r_eff * ts * dt)
             else:
                 disc = df_arr[ts, path] if df_arr.ndim == 2 else df_arr[ts]
+            # Le remboursement final est réglé à la payment date du produit —
+            # celle du term sheet, saisie, jamais déduite d'un fixing.
+            if mat_pay_df is None:
+                disc_mat = disc * pv_rebase
+            else:
+                disc_mat = (mat_pay_df[path] if isinstance(mat_pay_df, np.ndarray)
+                            else mat_pay_df) * pv_rebase
             ctx["s_prev"] = list(ctx["spots"])
             ctx["spots"] = list(S[ts, :, path])
             ctx["s_min"] = list(S_min[ts - 1, :, path])
@@ -1302,7 +1398,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                         f"Erreur d'exécution du script (événement {ev.type}, t={ctx['t']:.4f}) : {e}"
                     ) from e
                 for fl in st["flows"]:
-                    cf = fl["v"] * disc
+                    cf = fl["v"] * disc_mat
                     ctx["total_cf"] += cf
                     ctx["total_cf_raw"] += fl["v"]
                     if path_flows is not None and fl["v"] != 0:
@@ -1310,7 +1406,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     if record and fl["v"] != 0:
                         key = f"{ctx['t']:.6f}|{fl['lbl']}"
                         if key not in flux_map:
-                            flux_map[key] = {"t": ctx["t"], "lbl": fl["lbl"], "n": 0, "sum": 0.0, "pv": 0.0}
+                            flux_map[key] = {"t": ctx["t"], "lbl": fl["lbl"], "n": 0, "sum": 0.0, "pv": 0.0,
+                                             "t_pay": mat_pay_t if mat_pay_t is not None else ctx["t"]}
                         flux_map[key]["n"] += 1
                         flux_map[key]["sum"] += fl["v"]
                         flux_map[key]["pv"] += cf
@@ -1351,7 +1448,12 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                           dt: float, r_eff: float, user_params: dict,
                           step_map: dict, mat_events: list,
                           df_arr: np.ndarray | None = None,
-                          bridge_min=None, bridge_max=None) -> dict:
+                          bridge_min=None, bridge_max=None,
+                          # Settlement, exactly as in _eval_paths — see there.
+                          pay_map: dict | None = None,
+                          pay_df: dict | None = None,
+                          mat_pay_df=None,
+                          pv_rebase: float = 1.0) -> dict:
     """Like _eval_paths but returns per-path outcome classification.
 
     df_arr (ts+1,) — optional deterministic discount curve; None falls back to
@@ -1412,9 +1514,11 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
             ctx["bof_max"] = float(BOF_max[step-1, path])
             obs_idx += 1
             ctx["index"] = obs_idx
-            for ev in step_map[step]:
+            for ev_i, ev in enumerate(step_map[step]):
                 if done:
                     break
+                t_pay = pay_map[step][ev_i] if pay_map and step in pay_map else None
+                disc_ev = (disc if t_pay is None else pay_df[t_pay]) * pv_rebase
                 st = {"flows": [], "done": False}
                 try:
                     ev.fn(ctx, st)
@@ -1423,7 +1527,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                         f"Erreur d'exécution du script (événement {ev.type}, t={ctx['t']:.4f}) : {e}"
                     ) from e
                 for fl in st["flows"]:
-                    ctx["total_cf"] += fl["v"] * disc
+                    ctx["total_cf"] += fl["v"] * disc_ev
                     ctx["total_cf_raw"] += fl["v"]
                 if st["done"]:
                     done = True
@@ -1433,6 +1537,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
 
         if not done and mat_events:
             disc = df_arr[ts] if df_arr is not None else math.exp(-r_eff * ts * dt)
+            disc_mat = (disc if mat_pay_df is None else mat_pay_df) * pv_rebase
             ctx["s_prev"] = list(ctx["spots"])
             ctx["spots"] = list(S[ts, :, path])
             ctx["s_min"] = list(S_min[ts-1, :, path])
@@ -1452,7 +1557,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                         f"Erreur d'exécution du script (événement {ev.type}, t={ctx['t']:.4f}) : {e}"
                     ) from e
                 for fl in st["flows"]:
-                    ctx["total_cf"] += fl["v"] * disc
+                    ctx["total_cf"] += fl["v"] * disc_mat
                     ctx["total_cf_raw"] += fl["v"]
                 if st["done"]:
                     done = True
@@ -1502,9 +1607,23 @@ def run_mc(script: CompiledScript,
            dt_add: float = 0.0,
            corr_delta=None,
            yield_curve=None,
+           # Spread emetteur. Actualisation SEULE — voir _funding_df_arr pour
+           # pourquoi il ne doit surtout pas rejoindre la courbe de taux.
+           funding_curve=None,
+           funding_spread: float = 0.0,
+           ds: float = 0.0,
            sigma_r: float = 0.0,
            a_r: float = 0.0,
            barrier_monitoring: str = "weekly",
+           # Year-fraction of the product's own payment date — when the final
+           # redemption's cash actually moves. None keeps it paid at maturity,
+           # which is what every caller without a term sheet in hand can say.
+           maturity_payment_t: float | None = None,
+           # Year-fraction of the value date on the strike-anchored axis. The
+           # diffusion starts where the initial level is fixed; the price is the
+           # amount exchanged at settlement. 0.0 makes the two the same date,
+           # which is what every caller that knows only one date says.
+           value_date_t: float = 0.0,
            wof_min_init=None,
            bof_max_init=None,
            index_offset: int = 0,
@@ -1536,20 +1655,28 @@ def run_mc(script: CompiledScript,
     sq_dt = math.sqrt(dt)
 
     step_map: dict[int, list] = {}
+    # Payment time of each step_map entry, aligned index by index with it. Two
+    # calendars with different settlement lags can land on the same observation
+    # step, so the payment date belongs to the entry, not to the step.
+    pay_map: dict[int, list] = {}
     mat_events = []
     for ev in script.events:
         if ev.type == "AT_MATURITY":
             mat_events.append(ev)
         else:
-            for d in ev.dates:
+            for i, d in enumerate(ev.dates):
                 # Clamp to step >= 1: a date rounding to step 0 would make the
                 # evaluators index S_min[-1]/WOF_min[-1] — the END of the path.
                 step = max(1, round(d * SY))
                 step_map.setdefault(step, []).append(ev)
+                pays = ev.payment_dates
+                pay_map.setdefault(step, []).append(
+                    pays[i] if pays and i < len(pays) else None)
 
     # Drop steps beyond the simulation horizon — happens when T_max is capped
     # below the script's event dates (e.g. PRIIPs intermediate-horizon MC).
     step_map = {k: v for k, v in step_map.items() if k <= ts}
+    pay_map = {k: v for k, v in pay_map.items() if k <= ts}
 
     corr = [row[:] for row in corr_matrix]
     if corr_delta:
@@ -1581,6 +1708,19 @@ def run_mc(script: CompiledScript,
     rates = _build_rate_term(yield_curve or [], ts, dt, r, dr)
     df_arr = rates.df
 
+    # Le spread emetteur s'applique APRES, sur l'actualisation seule : r_det
+    # ci-dessous continue de porter les forwards sans risque, donc le drift des
+    # sous-jacents ne bouge pas d'un iota quand le credit de l'emetteur bouge.
+    # `ds` est le choc parallele du spread, ce qui fait du credit une vraie
+    # derivee et non une derivee partielle — meme role que `dr` pour le rho.
+    _fund_df = _funding_df_arr(funding_curve, funding_spread, ts, dt)
+    if ds:
+        _t_ax = np.arange(ts + 1, dtype=np.float64) * dt
+        _shift = np.exp(-ds * _t_ax)
+        _fund_df = _shift if _fund_df is None else _fund_df * _shift
+    if _fund_df is not None:
+        df_arr = df_arr * _fund_df
+
     # Deterministic drift term, shaped (ts,1): broadcasts against (ts,N) in
     # _simulate_gbm, and reduces to a scalar under the [step] indexing the four
     # step-wise simulators use. None when there is no curve, in which case the
@@ -1611,6 +1751,11 @@ def run_mc(script: CompiledScript,
         fwd = _forward_rate_arr(df_arr, dt)
         r_path_base, df_base = _stochastic_rate_paths(fwd, sigma_r, a_r, sq_dt, dt, Z_r)
         r_path_anti, df_anti = _stochastic_rate_paths(fwd, sigma_r, a_r, sq_dt, dt, -Z_r)
+        # Le spread s'ajoute a l'actualisation stochastique comme a la
+        # deterministe : il est certain, seul le taux sans risque diffuse.
+        if _fund_df is not None:
+            df_base = df_base * _fund_df[:, None]
+            df_anti = df_anti * _fund_df[:, None]
     else:
         # The drift follows the same curve that discounts the payoff. r_det is
         # None without a curve, so the simulators keep using the scalar r_eff.
@@ -1689,9 +1834,33 @@ def run_mc(script: CompiledScript,
 
     stop_times_base: list[float] | None = [] if script.has_stop else None
     flows_base: list | None = [] if per_path_flows else None
+    # One discount factor per distinct payment date, computed once on the same
+    # curve as the rest of the run. A payment date lands between two grid steps
+    # (or past the last one) — see _df_at_time.
+    # Le prix coté est le montant échangé à la value date, pas la PV au
+    # fixing initial. P(0, value date) est le zéro-coupon d'aujourd'hui, donc
+    # déterministe même sous taux stochastiques : on lit la courbe, jamais les
+    # trajectoires.
+    pv_rebase = (1.0 / _df_at_time(df_arr, value_date_t, dt, ts, r_eff)
+                 if value_date_t else 1.0)
+
+    pay_times = {t for entries in pay_map.values() for t in entries if t is not None}
+    pay_df_base = {t: _df_at_time(df_base, t, dt, ts, r_eff) for t in pay_times}
+    # Sans date de paiement explicite, le remboursement est actualise a
+    # l'horizon REEL du produit et non au pas de grille le plus proche : sur
+    # une grille hebdomadaire, l'arrondi valait jusqu'a 3,5 jours, soit ~3 bps.
+    # Invisible sur une maturite ronde (elle tombe pile sur un pas), systematique
+    # des qu'un calendrier CONSTAT fixe la fin a une date quelconque.
+    mat_t = maturity_payment_t if maturity_payment_t is not None else T
+    mat_pay_df_base = _df_at_time(df_base, mat_t, dt, ts, r_eff)
+
     payoffs_base, raw_base = _eval_paths(script, S_base, ts, n, N_pairs, dt, r_eff,
                                           user_params, step_map, mat_events, flux_map,
                                           record=True, df_arr=df_base,
+                                          pay_map=pay_map, pay_df=pay_df_base,
+                                          mat_pay_df=mat_pay_df_base,
+                                          mat_pay_t=mat_t,
+                                          pv_rebase=pv_rebase,
                                           stop_times_out=stop_times_base,
                                           flows_out=flows_base,
                                           bridge_min=br_min_b, bridge_max=br_max_b,
@@ -1754,6 +1923,12 @@ def run_mc(script: CompiledScript,
         payoffs_anti, raw_anti = _eval_paths(script, S_anti, ts, n, N_pairs, dt, r_eff,
                                               user_params, step_map, mat_events, {},
                                               record=False, df_arr=df_anti,
+                                              pay_map=pay_map,
+                                              pay_df={t: _df_at_time(df_anti, t, dt, ts, r_eff)
+                                                      for t in pay_times},
+                                              mat_pay_df=_df_at_time(df_anti, mat_t, dt, ts, r_eff),
+                                              mat_pay_t=mat_t,
+                                              pv_rebase=pv_rebase,
                                               stop_times_out=stop_times_anti,
                                               flows_out=flows_anti,
                                               bridge_min=br_min_a, bridge_max=br_max_a,
@@ -1859,7 +2034,8 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
                    user_params,
                    selected: list | None = None, sigma_r: float = 0.0, a_r: float = 0.0,
                    yield_curve=None, barrier_monitoring: str = "weekly",
-                   antithetic: bool = True, state: dict | None = None):
+                   antithetic: bool = True, state: dict | None = None,
+                   funding_curve=None, funding_spread: float = 0.0):
     """CRN bump-and-reprice greeks.
 
     Every term of every finite difference — including the CENTER of gamma/
@@ -1905,6 +2081,7 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
             underlyings, corr_matrix, r, T if T_ is None else T_, N_g, model, seed,
             antithetic=antithetic, user_params=user_params, sigma_r=sigma_r, a_r=a_r,
             yield_curve=yield_curve or [], barrier_monitoring=barrier_monitoring,
+            funding_curve=funding_curve or [], funding_spread=funding_spread,
             spot_mult=sv, spot_base=base_spots,
             wof_min_init=st.get("wof_min"), bof_max_init=st.get("bof_max"),
             index_offset=st.get("index", 0) if index_ is None else index_,
@@ -1968,6 +2145,13 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
 
     if "rho" in sel:
         greeks["rho"] = round((price(dr=0.01) - price(dr=-0.01)) / 0.02, 4)
+
+    # Sensibilite au spread emetteur. Meme echelle que le rho — derivee par
+    # unite de spread — mais son signe est structurellement l'oppose : un
+    # spread qui s'ecarte n'actualise que les flux, il ne remonte aucun
+    # forward. Le desk lit plutot le DV01, un centieme de ce chiffre.
+    if "credit" in sel:
+        greeks["credit"] = round((price(ds=0.01) - price(ds=-0.01)) / 0.02, 4)
 
     if "corr" in sel and n > 1:
         for ci in range(n):
@@ -2159,12 +2343,17 @@ def run_mc_paths(script: CompiledScript, underlyings, corr_matrix,
 
     step_map: dict = {}
     mat_events = []
+    pay_map: dict[int, list] = {}
     for ev in script.events:
         if ev.type == "AT_MATURITY":
             mat_events.append(ev)
         else:
-            for d in ev.dates:
-                step_map.setdefault(max(1, round(d*SY)), []).append(ev)
+            for i, d in enumerate(ev.dates):
+                step = max(1, round(d*SY))
+                step_map.setdefault(step, []).append(ev)
+                pays = ev.payment_dates
+                pay_map.setdefault(step, []).append(
+                    pays[i] if pays and i < len(pays) else None)
 
     L = cholesky(corr_matrix, n)
     rng = default_rng(seed)
@@ -2195,8 +2384,13 @@ def run_mc_paths(script: CompiledScript, underlyings, corr_matrix,
         S = _simulate_gbm(ts, n, N_stat, dt, sq_dt, underlyings, r, L, Z, vol_out=vol_used)
 
     br_min, br_max = _bridge_extrema(S, vol_used, dt, rng) if use_bridge else (None, None)
+    df_arr_pay = None   # visualisation a taux plat, cf. commentaire ci-dessus
     det = _eval_paths_detailed(script, S, ts, n, N_stat, dt, r, user_params, step_map, mat_events,
-                                bridge_min=br_min, bridge_max=br_max)
+                                bridge_min=br_min, bridge_max=br_max,
+                                pay_map=pay_map,
+                                pay_df={t: _df_at_time(df_arr_pay, t, dt, ts, r)
+                                        for entries in pay_map.values()
+                                        for t in entries if t is not None})
 
     # Downsample time steps: take every 2 weeks for display
     stride = max(1, ts // 60)
@@ -2262,12 +2456,17 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
 
     step_map: dict = {}
     mat_events = []
+    pay_map: dict[int, list] = {}
     for ev in script.events:
         if ev.type == "AT_MATURITY":
             mat_events.append(ev)
         else:
-            for d in ev.dates:
-                step_map.setdefault(max(1, round(d*SY)), []).append(ev)
+            for i, d in enumerate(ev.dates):
+                step = max(1, round(d*SY))
+                step_map.setdefault(step, []).append(ev)
+                pays = ev.payment_dates
+                pay_map.setdefault(step, []).append(
+                    pays[i] if pays and i < len(pays) else None)
 
     L = cholesky(corr_matrix, n)
     rng = default_rng(seed)
@@ -2304,8 +2503,13 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
 
     br_min, br_max = _bridge_extrema(S, vol_used, dt, rng) if use_bridge else (None, None)
     df_arr = rates.df
+    df_arr_pay = df_arr
     det = _eval_paths_detailed(script, S, ts, n, N_p, dt, r, user_params, step_map, mat_events,
-                                df_arr=df_arr, bridge_min=br_min, bridge_max=br_max)
+                                df_arr=df_arr, bridge_min=br_min, bridge_max=br_max,
+                                pay_map=pay_map,
+                                pay_df={t: _df_at_time(df_arr_pay, t, dt, ts, r)
+                                        for entries in pay_map.values()
+                                        for t in entries if t is not None})
 
     ac = sum(1 for o in det["outcomes"] if o == "autocall")
     ki = sum(1 for o in det["outcomes"] if o == "ki")
@@ -2426,10 +2630,17 @@ def _shift_events_for_mtf(events: list[CompiledEvent], t0: float) -> list[Compil
         if ev.type != "AT":
             shifted.append(ev)
             continue
-        future_dates = [round(d - t0, 6) for d in ev.dates
-                        if max(1, round(d * SY)) > step_k]
+        keep = [i for i, d in enumerate(ev.dates) if max(1, round(d * SY)) > step_k]
+        future_dates = [round(ev.dates[i] - t0, 6) for i in keep]
         if future_dates:
-            shifted.append(CompiledEvent(type=ev.type, dates=future_dates, fn=ev.fn))
+            # Les dates de paiement suivent leur constatation dans le decalage :
+            # les perdre ici ferait actualiser au fixing tout le residuel, donc
+            # un MtM incoherent avec le prix d origine du meme produit.
+            pays = ev.payment_dates
+            shifted.append(CompiledEvent(
+                type=ev.type, dates=future_dates, fn=ev.fn,
+                payment_dates=([round(pays[i] - t0, 6) for i in keep]
+                               if pays and len(pays) == len(ev.dates) else None)))
     return shifted
 
 

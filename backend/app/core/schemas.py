@@ -75,6 +75,11 @@ class PricingRequest(BaseModel):
     compute_greeks: bool = False
     selected_greeks: List[str] = ["delta", "gamma", "vega", "theta", "rho"]
     yield_curve: List[List[float]] = []
+    # Spread emetteur : il n'entre QUE dans l'actualisation, jamais dans le
+    # drift. La courbe par piliers l'emporte sur le niveau plat quand elle est
+    # fournie. Voir engine._funding_df_arr.
+    funding_curve: List[List[float]] = []
+    funding_spread: float = Field(default=0.0, ge=-0.05, le=0.50)
     sigma_r: float = Field(default=0.0, ge=0.0, le=0.10)
     a_r: float = Field(default=0.0, ge=0.0, le=2.0)
     # Barrier monitoring: "weekly" (extrema at the weekly grid steps, historic
@@ -92,6 +97,19 @@ class PricingRequest(BaseModel):
     # same calendar into different year fractions than the very same deal once
     # booked — the two prices then differ for no economic reason.
     anchor: Optional[date] = None
+    # Settlement currency: names the business-day calendar the CONSTAT dates are
+    # rolled onto and the settlement lags counted in. None leaves every date raw
+    # and every flow paid at its observation.
+    settlement_ccy: Optional[str] = None
+    # The product's own payment date — when the final redemption's cash moves.
+    # From the term sheet, never derived from a fixing. None pays at maturity.
+    payment_date: Optional[date] = None
+    # Where the initial level is fixed, and therefore where the diffusion
+    # starts. When given it becomes the time axis' origin, in place of `anchor`.
+    strike_date: Optional[date] = None
+    # When the cash is exchanged between counterparties. The quoted price is the
+    # amount that moves on that date, so it is the date the PV is expressed at.
+    value_date: Optional[date] = None
 
 
 class PricingResponse(BaseModel):
@@ -344,6 +362,22 @@ class ScenarioRequest(AnalysisBase):
     N: int = Field(default=2000, ge=300, le=20000)
 
 
+class BusinessDayRequest(BaseModel):
+    """Resolve one date against a settlement calendar.
+
+    Serves the two things a UI needs and cannot compute itself: moving a typed
+    date onto a business day according to a chosen convention, and proposing a
+    date N business days after another one (a settlement lag)."""
+    date: str
+    currency: str = "EUR"
+    convention: str = Field(
+        default="none",
+        pattern="^(following|modified_following|preceding|modified_preceding|none)$")
+    # Applied BEFORE the convention: the lag lands on a business day by
+    # construction, the convention then has nothing left to move.
+    business_days: int = Field(default=0, ge=0, le=60)
+
+
 class ScheduleRequest(BaseModel):
     """CONSTAT()/CONSTAT()() calendar generation — "expert mode", independent
     of any script. Dates are ISO strings (YYYY-MM-DD); frequency/sub_frequency
@@ -355,3 +389,12 @@ class ScheduleRequest(BaseModel):
     stub: str = Field(default="short_last",
                        pattern="^(short_first|short_last|long_first|long_last)$")
     sub_frequency: Optional[str] = None
+    # Settlement currency: names the business-day calendar the dates are rolled
+    # onto. None leaves the grid on raw calendar dates — a preview of what the
+    # tenor produces, not of what the product observes.
+    currency: Optional[str] = None
+    # Business days between an observation and the movement of its cash.
+    settlement_lag: int = Field(default=0, ge=0, le=30)
+    convention: str = Field(
+        default="modified_following",
+        pattern="^(following|modified_following|preceding|modified_preceding|none)$")

@@ -236,7 +236,9 @@ def test_booking_from_an_rfq_links_deal_and_closes_the_rfq():
         contrepartie="BNP Paribas", nominal=1_000_000.0, fair_value=97.9,
         price_traded=98.0, trade_date=date.today().isoformat(),
         strike_date=date.today().isoformat(), value_date=date.today().isoformat(),
-        maturity_date=(date.today() + timedelta(days=1096)).isoformat(), T=3.0,
+        maturity_date=(date.today() + timedelta(days=1096)).isoformat(),
+        # Reglement final cinq jours apres la derniere constatation.
+        payment_date=(date.today() + timedelta(days=1101)).isoformat(), T=3.0,
         underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "s0_abs": 100.0}],
         observation_times=[1.0, 2.0, 3.0],
         script_snapshot="AT MATURITY\n  PAY 1",
@@ -254,7 +256,9 @@ def _booking_body(**over):
         contrepartie="BNP Paribas", nominal=1_000_000.0, fair_value=97.9,
         price_traded=98.0, trade_date=date.today().isoformat(),
         strike_date=date.today().isoformat(), value_date=date.today().isoformat(),
-        maturity_date=(date.today() + timedelta(days=1096)).isoformat(), T=3.0,
+        maturity_date=(date.today() + timedelta(days=1096)).isoformat(),
+        # Reglement final cinq jours apres la derniere constatation.
+        payment_date=(date.today() + timedelta(days=1101)).isoformat(), T=3.0,
         underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "s0_abs": 100.0}],
         observation_times=[1.0, 2.0, 3.0],
         script_snapshot="AT MATURITY\n  PAY 1",
@@ -282,6 +286,7 @@ def _book_deal(body, current, s):
                     "constats": (body.market_snapshot or {}).get("constats", {}),
                     "notional": body.nominal, "currency": body.devise,
                     "strike_date": body.strike_date, "value_date": body.value_date,
+                    "payment_date": body.payment_date,
                     "T": body.T, "model": "constant", "r": 0.03,
                 }
                 rfq.params_json = json.dumps(params)
@@ -768,6 +773,15 @@ AT MATURITY:
   PAY 1
 """
 
+# Les temps d observation se comptent depuis la date de strike des fixtures,
+# qui est celle du jour : ils doivent donc se calculer, pas se figer.
+_DATES_OBS = ("2027-08-30", "2028-08-30", "2029-08-30")
+
+
+def _annees_depuis_strike(jour: str) -> float:
+    return round((date.fromisoformat(jour) - date.today()).days / 365.25, 4)
+
+
 _CALENDAR = {"OBSERVATIONS": {
     "start_date": "2026-08-30", "end_date": "2029-08-30",
     "roll_date": "2027-08-30", "frequency": "1Y", "stub": "short_last",
@@ -780,7 +794,10 @@ def _expert_booking(**over):
         market_snapshot={"constats": _CALENDAR},
         value_date="2026-09-03",
         maturity_date="2029-08-30",
-        T=2.9897,
+        # T se compte depuis la date de strike (celle de _booking_body, soit
+        # aujourd hui). Calcule, jamais fige : une constante deviendrait
+        # fausse des le lendemain.
+        T=_annees_depuis_strike("2029-08-30"),
         observation_times=[],
     )
     base.update(over)
@@ -798,18 +815,19 @@ def test_observations_are_derived_without_any_pricing():
     times = [e["t_years"] for e in deal["events"]]
     assert times[0] == 0.0                      # strike
     assert len(times) == 4                      # + 3 constatations annuelles
-    assert times[1:] == [0.9884, 1.9904, 2.9897]
+    assert times[1:] == [_annees_depuis_strike(d) for d in _DATES_OBS]
 
 
 def test_the_contractual_calendar_wins_over_the_simulation_grid():
     """Les temps envoyés par le client sont ceux de la grille hebdomadaire du
-    Monte Carlo (0.9808 = 51/52), pas ceux du calendrier (0.9884) — 3 jours
-    d'écart sur chaque date d'observation dont le cycle de vie se sert."""
+    Monte Carlo, pas ceux du calendrier — plusieurs jours d'écart sur chaque
+    date d'observation dont le cycle de vie se sert. Les temps attendus se
+    comptent depuis la date de strike, origine de la diffusion."""
     s = _make_session()
     deal = _book_deal(
         _expert_booking(observation_times=[0.9808, 2.0, 2.9808]), USER, s)
 
-    assert [e["t_years"] for e in deal["events"]][1:] == [0.9884, 1.9904, 2.9897]
+    assert [e["t_years"] for e in deal["events"]][1:] == [_annees_depuis_strike(d) for d in _DATES_OBS]
     # …et la date affichée redevient celle du contrat.
     assert deal["events"][1]["event_date"] == "2027-08-30"
 
@@ -847,7 +865,7 @@ def test_maturity_lands_on_the_deals_own_maturity_date():
     apparaissait sur un produit qui en a quatre."""
     s = _make_session()
     deal = _book_deal(_expert_booking(
-        script_snapshot=_ATHENA_MATURITY, T=3.0,
+        script_snapshot=_ATHENA_MATURITY, T=_annees_depuis_strike("2029-08-30"),
         maturity_date="2029-08-30", observation_times=[]), USER, s)
 
     # 4 lignes : le strike + 3 constatations annuelles. La 5ᵉ, au 2029-09-03,
@@ -865,9 +883,11 @@ def test_a_coupon_calendar_shorter_than_the_note_keeps_the_notes_maturity():
     s = _make_session()
     short_cal = {"OBSERVATIONS": dict(_CALENDAR["OBSERVATIONS"], end_date="2028-08-30")}
     deal = _book_deal(_expert_booking(
-        script_snapshot=_ATHENA_MATURITY, T=3.0,
+        # 2029-09-03 moins la date de strike, en annees : 1104 / 365,25.
+        script_snapshot=_ATHENA_MATURITY, T=_annees_depuis_strike("2029-09-03"),
         market_snapshot={"constats": short_cal},
-        maturity_date="2029-09-03", observation_times=[]), USER, s)
+        maturity_date="2029-09-03", payment_date="2029-09-10",
+        observation_times=[]), USER, s)
 
     assert deal["events"][-1]["event_date"] == "2029-09-03"
     assert deal["events"][-1]["label"] == "Maturité"
@@ -1097,6 +1117,9 @@ def _rfq_with_contractual_terms(s):
         "currency": "EUR",
         "strike_date": today,
         "value_date": today,
+        # Reglement final cinq jours apres la maturite : c est le term sheet
+        # qui le fixe, il ne se deduit d aucune constatation.
+        "payment_date": (date.today() + timedelta(days=1101)).isoformat(),
         "T": 3.0,
         "model": "constant",
         "r": 0.03,

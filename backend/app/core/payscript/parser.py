@@ -210,6 +210,13 @@ class CompiledEvent:
     # ('first',) | ('last',) | ('index', N) for `AT Name.first:` /
     # `AT Name.last:` / `AT Name[N]:` (N is 1-indexed, like S[i]).
     constat_qualifier: tuple | None = None
+    # When each date's cash actually moves, as year-fractions on the same
+    # anchor as `dates` — one entry per observation. A coupon observed on the
+    # 15th and paid five business days later is worth its discounted value at
+    # the payment date, not at the fixing. None means "paid at observation":
+    # literal `AT 1, 2, 3:` events, and CONSTAT calendars resolved without a
+    # settlement calendar.
+    payment_dates: list[float] | None = None
 
 
 # ── Expression transpiler ─────────────────────────────────────────
@@ -733,7 +740,7 @@ def _analyze_monitors(code: str, m_param_names: list[str]) -> list[dict]:
 # Using each CONSTAT's own start_date as its private zero instead would make
 # multiple CONSTATs in the same script inconsistent with each other.
 def resolve_constats(script: CompiledScript, constat_values: dict,
-                     anchor=None) -> CompiledScript:
+                     anchor=None, currency: str | None = None) -> CompiledScript:
     """Resolve constat_ref-only events into concrete dates. Raises ValueError
     if an AT references a CONSTAT with no corresponding entry in
     constat_values, or with malformed values.
@@ -742,6 +749,19 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
     the pre-trade pricing case). Replaying a deal booked in the past must pass
     its value_date, otherwise every calendar date lands too early by the time
     already elapsed.
+
+    currency names the settlement calendar. Each CONSTAT then carries its own
+    date handling, alongside its dates and frequency:
+      convention — how a date that is not a business day is moved onto one.
+                   Absent means no adjustment: a date fixed by a term sheet on
+                   a closed day stays where the term sheet put it. There is no
+                   global default, because two calendars of the same product
+                   legitimately roll differently.
+      settlement_lag — business days between an observation and the movement of
+                   its cash, which produces every flow's payment date.
+    Without a currency, dates stay raw calendar dates and flows are paid at
+    observation — the historical behaviour, kept for callers with no currency
+    to offer.
 
     Qualifiers (`AT Name.first:` / `.last:` / `[N]:`) pin down ONE date out of
     the full schedule, as an ADDITIONAL event at that date — `AT Name:` still
@@ -757,9 +777,21 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         return script   # nothing to resolve — common/simple-mode case
 
     from datetime import date
+    from ..calendars import BusinessDayConvention, add_business_days, adjust
     from ..schedule import generate_schedule, parse_tenor, StubConvention
 
     today = anchor or date.today()
+
+    def _convention(name: str, v) -> BusinessDayConvention:
+        raw = v.get('convention') if isinstance(v, dict) else None
+        if not raw:
+            return BusinessDayConvention.NONE
+        try:
+            return BusinessDayConvention(raw)
+        except ValueError:
+            raise ValueError(
+                f"CONSTAT {name}: convention de jour ouvré inconnue: {raw!r} "
+                f"(attendu {', '.join(c.value for c in BusinessDayConvention)}).")
     constat_by_name = {c.name: c for c in script.constats}
 
     def _to_year_frac(d: date) -> float:
@@ -773,8 +805,8 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         except ValueError:
             raise ValueError(f"CONSTAT {constat_name}: '{field}' invalide (attendu YYYY-MM-DD): {raw!r}")
 
-    def _resolve_full(name: str) -> list[float]:
-        """The complete, unfiltered date list for a CONSTAT (every date)."""
+    def _resolve_full(name: str) -> tuple[list[float], list[float]]:
+        """Observation dates and their payment dates for a CONSTAT, unfiltered."""
         if name not in constat_by_name:
             raise ValueError(f"CONSTAT inconnu référencé par AT: {name}")
         if name not in constat_values:
@@ -782,9 +814,22 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         kind = constat_by_name[name].kind
         v = constat_values[name]
 
+        lag = int(v.get('settlement_lag') or 0) if isinstance(v, dict) else 0
+        conv = _convention(name, v)
+
         if kind == 'single':
             raw = v if isinstance(v, str) else v.get('date') if isinstance(v, dict) else None
-            return [_to_year_frac(_parse_date_field(raw, name, 'date'))]
+            observed = _parse_date_field(raw, name, 'date')
+            if currency:
+                observed = adjust(observed, currency, conv)
+                paid = add_business_days(observed, lag, currency)
+            elif lag:
+                raise ValueError(
+                    f"CONSTAT {name}: un décalage de règlement suppose un calendrier — "
+                    f"précisez la devise de règlement.")
+            else:
+                paid = observed
+            return [_to_year_frac(observed)], [_to_year_frac(paid)]
 
         start = _parse_date_field(v.get('start_date'), name, 'start_date')
         end = _parse_date_field(v.get('end_date'), name, 'end_date')
@@ -798,14 +843,17 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
             raise ValueError(f"CONSTAT {name}: convention de stub invalide: {v.get('stub')!r}")
         sub_freq = parse_tenor(v['sub_frequency']) if v.get('sub_frequency') else None
 
-        result = generate_schedule(start, end, roll, freq, stub, sub_freq)
+        result = generate_schedule(start, end, roll, freq, stub, sub_freq,
+                                   currency=currency, convention=conv,
+                                   settlement_lag=lag)
         # Drop the schedule's own start_date: it's the start of the first
         # accrual period, not itself an observation/payment date.
-        return [_to_year_frac(d) for d in result['dates'][1:]]
+        return ([_to_year_frac(d) for d in result['dates'][1:]],
+                [_to_year_frac(d) for d in result['payment_dates'][1:]])
 
-    _cache: dict[str, list[float]] = {}
+    _cache: dict[str, tuple[list[float], list[float]]] = {}
 
-    def _full_dates(name: str) -> list[float]:
+    def _full_dates(name: str) -> tuple[list[float], list[float]]:
         if name not in _cache:
             _cache[name] = _resolve_full(name)
         return _cache[name]
@@ -829,15 +877,17 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         if not ev.constat_ref:
             new_events.append(ev)
             continue
-        dates = _full_dates(ev.constat_ref)
+        dates, payments = _full_dates(ev.constat_ref)
         if ev.constat_qualifier:
             idx = _qualifier_index(ev.constat_qualifier, len(dates), ev.constat_ref)
-            resolved = [dates[idx]]
+            resolved, resolved_pay = [dates[idx]], [payments[idx]]
         else:
-            resolved = list(dates)   # plain `AT Name:` — every date, unfiltered
-        new_events.append(CompiledEvent(type=ev.type, dates=resolved, fn=ev.fn))
+            # plain `AT Name:` — every date, unfiltered
+            resolved, resolved_pay = list(dates), list(payments)
+        new_events.append(CompiledEvent(type=ev.type, dates=resolved, fn=ev.fn,
+                                        payment_dates=resolved_pay if currency else None))
 
-    strike_fix_dates = _full_dates('STRIKE_FIX') if has_strike_fix else None
+    strike_fix_dates = _full_dates('STRIKE_FIX')[0] if has_strike_fix else None
 
     return CompiledScript(events=new_events, init_fn=script.init_fn,
                            params=script.params, constats=script.constats,

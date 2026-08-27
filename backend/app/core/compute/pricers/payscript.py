@@ -44,11 +44,24 @@ def price_payscript_job(payload: dict) -> dict:
     from ...payscript.engine import run_mc
 
     compiled = parse_script(payload["script_text"])
+    maturity_payment_t = None
+    value_date_t = 0.0
     if payload.get("constat_values"):
         from datetime import date
-        anchor = date.fromisoformat(payload["value_date"]) if payload.get("value_date") else None
+        # L axe du temps s ancre sur la constatation initiale ; a defaut, sur la
+        # value date comme avant que les deux dates soient distinguees.
+        origin_raw = payload.get("strike_date") or payload.get("value_date")
+        origin = date.fromisoformat(origin_raw) if origin_raw else None
         compiled = resolve_constats(
-            compiled, payload["constat_values"], anchor=anchor)
+            compiled, payload["constat_values"], anchor=origin,
+            currency=payload.get("settlement_ccy"))
+        if origin is not None:
+            if payload.get("payment_date"):
+                maturity_payment_t = round(
+                    (date.fromisoformat(payload["payment_date"]) - origin).days / 365.25, 6)
+            if payload.get("value_date"):
+                value_date_t = round(
+                    (date.fromisoformat(payload["value_date"]) - origin).days / 365.25, 6)
 
     corr = payload.get("corr_shocked") or payload["corr"]
     result = run_mc(
@@ -66,5 +79,7 @@ def price_payscript_job(payload: dict) -> dict:
         vol_add=payload.get("vol_add"),
         dr=payload.get("dr", 0.0),
         barrier_monitoring=payload.get("barrier_monitoring", "weekly"),
+        maturity_payment_t=maturity_payment_t,
+        value_date_t=value_date_t,
     )
     return {"price": result["price"], "n_paths": result.get("n_paths")}

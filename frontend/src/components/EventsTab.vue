@@ -564,7 +564,7 @@
               <tr v-for="(ev, i) in previewEvents" :key="i"
                 :class="[
                   'border-b border-slate-800/50',
-                  ev.t === 0 ? 'bg-amber-950/20' : 'opacity-60',
+                  ev.t === 0 ? 'bg-amber-950/20' : (ev.isFuture ? 'opacity-60' : ''),
                 ]">
                 <td class="py-2 pr-3 text-slate-500">{{ i + 1 }}</td>
                 <td class="py-2 pr-3 whitespace-nowrap"
@@ -573,11 +573,22 @@
                 </td>
                 <td class="py-2 pr-3 font-mono text-slate-400 whitespace-nowrap">{{ ev.date }}</td>
                 <td class="py-2 pr-3 font-mono num text-slate-400">{{ ev.t.toFixed(2) }}</td>
+                <!-- La clôture réellement relevée à cette date, quand elle est
+                     passée. Ces cellules étaient un tiret littéral : sur un
+                     produit déjà en vie, l'écran ne montrait aucune des
+                     constatations déjà tombées. -->
                 <td v-for="u in store.underlyings" :key="u.name" class="py-2 pr-3">
-                  <span class="text-slate-700 font-mono text-[10px]">–</span>
+                  <span v-if="closesPassees[ev.date]?.[u.ticker]"
+                        class="text-slate-300 font-mono text-[10px]">
+                    {{ formatNumber(closesPassees[ev.date][u.ticker], 2) }}
+                  </span>
+                  <span v-else class="text-slate-700 font-mono text-[10px]">–</span>
                 </td>
                 <td class="py-2">
-                  <span class="text-[10px] text-slate-600">futur</span>
+                  <span class="text-[10px]"
+                        :class="ev.isFuture ? 'text-slate-600' : 'text-emerald-400'">
+                    {{ ev.isFuture ? 'à observer' : 'constaté' }}
+                  </span>
                 </td>
               </tr>
             </tbody>
@@ -607,8 +618,9 @@ import { usePricingStore } from '../stores/pricing.js'
 import { useAuthStore } from '../stores/auth.js'
 import HelpTip from './HelpTip.vue'
 import AutoFixingExceptionModal from './AutoFixingExceptionModal.vue'
-import { formatDate } from '../utils/format.js'
+import { formatDate, formatNumber } from '../utils/format.js'
 import { apiFetch } from '../utils/api.js'
+import { useObservationPreview } from '../composables/useObservationPreview.js'
 
 const props = defineProps({ initialDealId: { type: Number, default: null } })
 
@@ -674,27 +686,15 @@ const pricingObsTimes = computed(() => {
   return [...new Set(Object.values(store.result.flux_table).map(e => e.t))].sort((a, b) => a - b)
 })
 
-const previewEvents = computed(() => {
-  const base = store.globalParams.value_date || today
-  const events = []
-
-  events.push({
-    label: 'Strike / Fixing S₀',
-    date: addDays(base, -2),
-    t: 0,
-  })
-
-  pricingObsTimes.value.forEach((t, idx) => {
-    const isLast = idx === pricingObsTimes.value.length - 1
-    events.push({
-      label: isLast ? 'Maturité' : `Obs. ${idx + 1} (${t.toFixed(2)}Y)`,
-      date: addDays(base, t * 365.25),
-      t,
-    })
-  })
-
-  return events
-})
+// Aperçu partagé avec l'onglet Deal : mêmes dates, mêmes clôtures passées.
+// L'implémentation locale devinait la date de strike comme « value date moins
+// deux jours » et ancrait tout dessus — faux dès que les deux dates diffèrent,
+// et sans rapport avec l'axe du moteur en cours de vie.
+const { closesPassees, previewEvents } = useObservationPreview(
+  store,
+  () => store.globalParams.strike_date || store.globalParams.value_date || today,
+  () => store.globalParams.deal_ccy || 'EUR',
+)
 
 function goToDeal() {
   store.leftTab = 'deal'

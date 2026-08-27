@@ -17,6 +17,10 @@ from datetime import date, datetime, timedelta
 from typing import Literal
 
 from fastapi import HTTPException
+
+from ..core.calendars import (
+    BusinessDayConvention, add_business_days, adjust,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, update
 from sqlmodel import Session, select
@@ -305,19 +309,20 @@ def _profile_tenor_floor(profile: str, family: str) -> float:
     return floor
 
 
-def _to_business_day(value: date) -> date:
-    """Snap a generated date back to the nearest preceding weekday.
+def _to_business_day(value: date, currency: str = "EUR") -> date:
+    """Snap a generated date back to the nearest preceding business day.
 
     _profile_dates is pure calendar arithmetic, so roughly two dates in seven
     used to land on a weekend — and a strike on Sunday 2023-08-06 has no close
     on any index, so its fixing can never be resolved, automatically or
     manually: the deal is born stuck. Rolling *backwards* rather than forwards
     keeps a maturity inside its own schedule instead of pushing it past its
-    payment date. Public holidays stay unhandled on purpose: they are ~3% of
-    sessions, and unlike a weekend they differ per exchange in a basket."""
-    while value.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
-        value -= timedelta(days=1)
-    return value
+    payment date.
+
+    Public holidays are now handled: the settlement calendar of the currency
+    says which days are closed, TARGET for the euro. The previous version only
+    skipped weekends, and generated fixtures whose strike fell on Christmas."""
+    return adjust(value, currency, BusinessDayConvention.PRECEDING)
 
 
 def _profile_dates(profile: str, tenor: float, today: date) -> tuple[date, date, date]:
@@ -495,14 +500,25 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
             }
         else:
             user_params = {"M_PARTICIPATION": participation / 100}
+        # Deux jours ouvrés pour le règlement initial, cinq pour le final :
+        # les usages les plus courants sur notes structurées EUR et CHF.
+        value_date = add_business_days(strike, 2, currency)
+        # Trois jours ouvres apres la derniere constatation : l usage courant.
+        payment_date = add_business_days(maturity, 3, currency)
         constat_value = ({
             "start_date": first.isoformat(),
             "end_date": maturity.isoformat(),
             "roll_date": first.isoformat(),
             "frequency": frequency,
             "stub": "short_last",
+            # Une constatation tombant un jour fermé passe au jour ouvré
+            # suivant, et son coupon est réglé trois jours ouvrés plus tard.
+            "convention": "following",
+            "settlement_lag": 3,
         } if family in {"ATHENA", "PHOENIX"} else {
             "date": maturity.isoformat(),
+            "convention": "following",
+            "settlement_lag": 3,
         })
         params = {
             "underlyings": selected_underlyings,
@@ -511,7 +527,13 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
             "notional": float(nominal),
             "currency": currency,
             "strike_date": strike.isoformat(),
-            "value_date": strike.isoformat(),
+            # Le cash s'échange deux jours ouvrés après la constatation
+            # initiale — l'usage sur note structurée. Poser value = strike
+            # décrivait un règlement le jour même, qui n'existe pas.
+            "value_date": value_date.isoformat(),
+            "payment_date": payment_date.isoformat(),
+            # T est l'horizon de DIFFUSION : de la constatation initiale à la
+            # dernière constatation.
             "T": round((maturity - strike).days / 365.25, 6),
             "model": "constant",
             "r": round(rng.uniform(0.015, 0.045), 4),
@@ -539,7 +561,7 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
             "trade_date": trade.isoformat(),
             "ao_date": ao_date.isoformat(),
             "maturity_date": maturity.isoformat(),
-            "payment_date": (maturity + timedelta(days=5)).isoformat(),
+            "payment_date": payment_date.isoformat(),
             # Filled by _price_specs before anything is written. Left None here
             # on purpose: preview_generation does not price (a batch of Monte
             # Carlo runs is seconds, not milliseconds) and must never surface a
@@ -599,7 +621,10 @@ def _price_specs(specs: list[dict], *, seed: int) -> None:
             "antithetic": True,
             "user_params": params["user_params"],
             "constat_values": params["constats"],
+            "strike_date": params["strike_date"],
             "value_date": params["value_date"],
+            "payment_date": params["payment_date"],
+            "settlement_ccy": params["currency"],
         }))
 
     results = run_batch(

@@ -508,6 +508,41 @@ class Counterparty(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class Underlying(SQLModel, table=True):
+    """Catalogue de sous-jacents administrable.
+
+    Cette liste vivait dans un fichier JavaScript du front : seul un
+    développeur pouvait y ajouter un titre, et il fallait un rebuild. Elle est
+    ici pour que l'ajout d'un sous-jacent redevienne un geste d'administration.
+
+    Un ticker peut figurer dans PLUSIEURS groupes — BNP Paribas est à la fois
+    une valeur du CAC et une banque — donc l'unicité porte sur le couple
+    (ticker, groupe) et non sur le ticker seul. C'est le comportement qu'avait
+    le fichier, et il rend le choix d'un sous-jacent plus rapide selon qu'on
+    raisonne par indice ou par secteur.
+
+    Le ticker est la clé Yahoo, place de cotation comprise : STMicroelectronics
+    existe à Paris (STMPA.PA) et à Milan (STMMI.MI), et une note italienne fixe
+    sur l'une des deux, pas sur l'autre."""
+    __tablename__ = "underlyings"
+    __table_args__ = (UniqueConstraint("ticker", "group_name",
+                                        name="uq_underlying_ticker_group"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(index=True)
+    label: str
+    # `group` est un mot réservé SQL : la colonne s'appelle group_name, l'API
+    # expose « group ».
+    group_name: str = Field(default="Autres")
+    ccy: str = Field(default="EUR")
+    # Place de cotation telle que Yahoo la nomme (PAR, MIL, NYQ…), renseignée
+    # par la recherche. Purement informative, elle aide à trancher entre deux
+    # cotations du même titre.
+    exchange: str = Field(default="")
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class RfqProvider(SQLModel, table=True):
     """Admin-managed catalog of RFQ counterparties. RfqQuote.provider stores
     the label directly (free string, not a FK) so historical quotes stay
