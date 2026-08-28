@@ -17,7 +17,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import {
@@ -171,7 +171,7 @@ async function renderChart() {
         },
         y: {
           title: { display: true, text: 'Vol implicite (%)', font: { size: 8 } },
-          ticks: { font: { size: 9 }, callback: v => v + '%' },
+          ticks: { font: { size: 9 }, callback: axisTick('%') },
         },
       },
     }, demo.enabled),

@@ -146,6 +146,7 @@ const leftTabs = [
 ]
 const rightTabs = [
   { id: 'results',  label: '📊 Résultats' },
+  { id: 'summary',  label: '📝 Résumé' },
   { id: 'flux',     label: '💰 Flux' },
   { id: 'greeks',   label: '∂ Greeks' },
   { id: 'profile',  label: '📈 Profil Payoff' },

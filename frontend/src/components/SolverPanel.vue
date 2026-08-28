@@ -118,7 +118,7 @@ import { reactive, ref, computed, watch, nextTick, onMounted, onUnmounted } from
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -196,7 +196,7 @@ async function renderTrace() {
       scales: {
         x: { title: { display: true, text: 'Itération', font: { size: 9 } },
              ticks: { font: { size: 9 } } },
-        y: { ticks: { font: { size: 9 }, callback: v => v + '%' } },
+        y: { ticks: { font: { size: 9 }, callback: axisTick('%') } },
       },
       animation: { duration: 200 },
     }, demo.enabled),

@@ -46,9 +46,15 @@ def price_var_scenario_job(payload: dict) -> dict:
 
     compiled = parse_script(payload["script_text"])
     if payload.get("constat_values"):
+        # Le worker re-resout le calendrier depuis une charge serialisee : la
+        # devise doit donc voyager avec, sinon un CONSTAT portant un decalage
+        # de reglement le fait echouer alors que le MtM du meme deal passe.
+        # Et l'ancre est le STRIKE, comme partout ailleurs.
+        origin_raw = payload.get("strike_date") or payload["value_date"]
         compiled = resolve_constats(
             compiled, payload["constat_values"],
-            anchor=date.fromisoformat(payload["value_date"]),
+            anchor=date.fromisoformat(origin_raw),
+            currency=payload.get("settlement_ccy"),
         )
 
     T_elapsed = payload["T_elapsed"]

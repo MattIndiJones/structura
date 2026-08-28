@@ -4324,7 +4324,7 @@ import { useRoute } from 'vue-router'
 import { Chart, registerables } from 'chart.js'
 import { apiFetch } from '../utils/api.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import SensitiveValue from '../components/SensitiveValue.vue'
 import { formatPercent, formatPercentRaw, formatNumber, formatInt, formatMoneyRound, formatDate } from '../utils/format.js'
 
@@ -4670,7 +4670,7 @@ function chartOpts(unit, label, invertY = false) {
     scales: {
       x: { ticks: { font: { size: 9 }, maxTicksLimit: 8 } },
       y: {
-        ticks: { font: { size: 9 }, callback: v => v + unit },
+        ticks: { font: { size: 9 }, callback: axisTick(unit) },
         reverse: invertY,
         title: { display: false },
       },
@@ -5451,7 +5451,7 @@ function renderStudyPerf() {
         plugins: { legend: { labels: { font: { size: 10 } } } },
         scales: {
           x: { ticks: { maxRotation: 0, maxTicksLimit: 8 } },
-          y: { ticks: { callback: v => v + '%' } },
+          y: { ticks: { callback: axisTick('%') } },
         },
       },
     })

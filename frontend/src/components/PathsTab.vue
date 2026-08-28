@@ -50,7 +50,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisNumber, chartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -82,23 +82,6 @@ const COLORS = {
   normal:   { stroke: 'rgba(122,116,105,0.30)', solid: chartTheme.ticks, label: 'Remboursement normal' },
 }
 
-const axisNumber = (value, ticks, maxDecimals = 2) => {
-  const numericValue = Number(value)
-  const values = ticks
-    .map(tick => Number(tick.value))
-    .filter(Number.isFinite)
-  const steps = values
-    .slice(1)
-    .map((current, index) => Math.abs(current - values[index]))
-    .filter(step => step > 0)
-  const step = steps.length > 0 ? Math.min(...steps) : 1
-  const decimals = step >= 1 ? 0 : step >= 0.1 ? 1 : maxDecimals
-
-  return numericValue.toLocaleString('fr-FR', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  })
-}
 
 const legend = computed(() => {
   if (!store.paths) return []

@@ -36,6 +36,42 @@ export const chartTheme = {
   series: ['#2563eb', '#1a7a4a', '#b8860b', '#c0392b', '#7c5cd6', '#0e7490', '#d2649a', '#5a6b7a'],
 }
 
+/**
+ * Formate une graduation d'axe avec juste ce qu'il faut de décimales.
+ *
+ * Le nombre de décimales se déduit du PAS entre graduations, pas de la valeur :
+ * un axe qui monte de 0,05 en 0,05 a besoin de deux décimales, un axe qui monte
+ * de 1000 en 1000 n'en a besoin d'aucune. Sans ça, `value + '%'` recrache le
+ * flottant brut — l'axe du solveur affichait « 46.150000000000006 % ».
+ */
+export function axisNumber(value, ticks, maxDecimals = 2) {
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return value
+  const values = (Array.isArray(ticks) ? ticks : [])
+    .map(tick => Number(tick?.value))
+    .filter(Number.isFinite)
+  const steps = values
+    .slice(1)
+    .map((current, index) => Math.abs(current - values[index]))
+    .filter(step => step > 0)
+  const step = steps.length > 0 ? Math.min(...steps) : 1
+  const decimals = step >= 1 ? 0 : step >= 0.1 ? 1 : maxDecimals
+
+  return numericValue.toLocaleString('fr-FR', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })
+}
+
+/**
+ * Fabrique un `callback` de graduation avec suffixe — la forme qu'attend
+ * Chart.js. `axisTick('%')` remplace `v => v + '%'`, qui était la source du
+ * bruit de virgule flottante partout où il apparaissait.
+ */
+export function axisTick(suffix = '', maxDecimals = 2) {
+  return (value, _index, ticks) => `${axisNumber(value, ticks, maxDecimals)}${suffix}`
+}
+
 export function applyChartTheme(Chart) {
   Chart.defaults.font.family = "'Plus Jakarta Sans', system-ui, sans-serif"
   Chart.defaults.font.size = 11

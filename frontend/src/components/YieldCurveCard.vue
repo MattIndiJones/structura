@@ -78,7 +78,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import { formatPercent } from '../utils/format.js'
@@ -180,11 +180,15 @@ async function renderChart() {
       scales: {
         x: {
           type: 'linear', min: 0, max: 30,
-          ticks: { font: { size: 8 }, callback: v => v + 'Y',
+          // Piliers IRREGULIERS explicites : la regle par pas donnerait
+          // « 0,25Y  0,50Y  1,00Y » — plus verbeux pour rien. On garde la
+          // valeur telle quelle, avec le separateur decimal de l'interface.
+          ticks: { font: { size: 8 },
+                   callback: v => `${Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 })}Y`,
                    values: [0.25, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30] },
         },
         y: {
-          ticks: { font: { size: 8 }, callback: v => v + '%' },
+          ticks: { font: { size: 8 }, callback: axisTick('%') },
         },
       },
     }, demo.enabled),

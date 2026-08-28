@@ -3,12 +3,13 @@ from datetime import date
 import math
 import numpy as np
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from ..core.schemas import (
     PricingRequest, PricingResponse, ParseRequest, ParseResponse,
     ProfileRequest, PathsRequest, ProbaRequest, BacktestRequest, BacktestCompareRequest,
     MtfRequest, MtfDrilldownRequest, ScriptGenerateRequest,
 )
-from ..core.payscript.parser import parse_script, resolve_constats, effective_T_max
+from ..core.payscript.parser import analysis_origin, parse_script, resolve_analysis_constats, effective_T_max
 from ..core.payscript.engine import (
     run_mc, compute_greeks,
     run_payoff_profile, run_mc_paths, run_mc_proba,
@@ -77,11 +78,12 @@ def price_endpoint(req: PricingRequest):
     # L'axe du temps s'ancre sur la date de strike : c'est là que le niveau
     # initial est constaté, donc là que la diffusion démarre. Sans elle, on
     # retombe sur `anchor` — la value date, comme avant.
-    origin = req.strike_date or req.anchor or date.today()
+    origin = analysis_origin(req)
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=origin,
-                                    currency=req.settlement_ccy)
+        # Meme resolveur que toutes les analytiques : c'est ce qui garantit que
+        # le profil, les probas ou la grille decrivent le produit qu'on price.
+        compiled = resolve_analysis_constats(compiled, req)
     except (ValueError, UnsupportedCurrency) as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -160,110 +162,182 @@ def price_endpoint(req: PricingRequest):
 
 @router.post("/profile")
 def profile_endpoint(req: ProfileRequest):
-    """Payoff profile — sweep spot 40%–200%, quasi-deterministic."""
+    """Payoff profile — sweep spot 40%–200%, quasi-deterministic.
+
+    En cours de vie, le profil se dessine sur la jambe RÉSIDUELLE : mêmes
+    niveaux balayés, mais avec les coupons déjà accumulés et les barrières
+    déjà franchies. Sans ça la courbe est celle du produit neuf, ce qui sur
+    une note en difficulté raconte une autre histoire que la sienne.
+    """
+    ctx = residual_context_or_none(req)
     try:
-        compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
+        if ctx is not None:
+            compiled, uls = ctx.script, ctx.underlyings
+            r_eff, T_eff = ctx.r, ctx.T_remaining
+            etat = ctx.mc_kwargs
+            # Le balayage pince le spot lui-même : le multiplicateur de spot du
+            # rejeu n'a pas lieu d'être ici, il ferait double emploi.
+            etat.pop("spot_mult", None)
+            etat.pop("spot_base", None)
+        else:
+            compiled = resolve_analysis_constats(parse_script(req.script), req)
+            uls = [u.model_dump() for u in req.underlyings]
+            r_eff, T_eff = req.r, effective_T_max(compiled, req.T)
+            etat = None
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    uls = [u.model_dump() for u in req.underlyings]
     corr = req.corr_matrix
     n = len(uls)
     if len(corr) != n or any(len(row) != n for row in corr):
         raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
 
-    T_eff = effective_T_max(compiled, req.T)
     try:
-        return run_payoff_profile(compiled, uls, corr, req.r, T_eff, req.user_params)
+        res = run_payoff_profile(compiled, uls, corr, r_eff, T_eff,
+                                  req.user_params, state=etat)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    res["in_life"] = ctx is not None
+    if ctx is not None:
+        res["valuation_date"] = ctx.valuation.isoformat()
+        res["years_remaining"] = round(ctx.T_remaining, 4)
+    return res
+
+
+def residual_context_or_none(req):
+    """Contexte résiduel quand la requête est en cours de vie, sinon None.
+
+    Import différé : inlife.py importe déjà ce module, un import au sommet
+    créerait un cycle."""
+    valuation = getattr(req, "valuation_date", None)
+    strike = getattr(req, "strike_date", None)
+    maturity = getattr(req, "maturity_date", None)
+    if not (valuation and strike and maturity and valuation > strike):
+        return None
+    from .inlife import build_request_residual
+    ctx = build_request_residual(req)
+    # Un rappel anticipé détecté dans le passé : il n'y a plus rien à analyser
+    # sur la vie restante, on retombe sur l'analyse à l'émission.
+    return None if ctx.residuel.early_recall else ctx
 
 
 @router.post("/paths")
 def paths_endpoint(req: PathsRequest):
     """Monte Carlo sample paths for visualization."""
+    ctx = residual_context_or_none(req)
     try:
-        compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
+        if ctx is not None:
+            compiled, uls = ctx.script, ctx.underlyings
+            r_eff, T_eff, etat = ctx.r, ctx.T_remaining, ctx.mc_kwargs
+            yc = ctx.sur_axe_residuel(req.yield_curve)
+        else:
+            compiled = resolve_analysis_constats(parse_script(req.script), req)
+            uls = [u.model_dump() for u in req.underlyings]
+            r_eff, T_eff = req.r, effective_T_max(compiled, req.T)
+            etat, yc = None, (req.yield_curve or [])
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    uls = [u.model_dump() for u in req.underlyings]
     corr = req.corr_matrix
     n = len(uls)
     if len(corr) != n or any(len(row) != n for row in corr):
         raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
-
-    T_eff = effective_T_max(compiled, req.T)
     try:
-        return run_mc_paths(
-            compiled, uls, corr, req.r, T_eff,
+        res = run_mc_paths(
+            compiled, uls, corr, r_eff, T_eff,
             N_display=req.N_display,
             N_stat=req.N_stat,
             model=req.model,
             seed=req.seed,
             user_params=req.user_params,
             barrier_monitoring=req.barrier_monitoring,
+            state=etat,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    res["in_life"] = ctx is not None
+    if ctx is not None:
+        res["valuation_date"] = ctx.valuation.isoformat()
+        res["years_remaining"] = round(ctx.T_remaining, 4)
+    return res
 
 
 @router.post("/proba")
 def proba_endpoint(req: ProbaRequest):
     """Probability analysis — P(autocall), P(KI), expected life, percentiles."""
+    ctx = residual_context_or_none(req)
     try:
-        compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
+        if ctx is not None:
+            compiled, uls = ctx.script, ctx.underlyings
+            r_eff, T_eff, etat = ctx.r, ctx.T_remaining, ctx.mc_kwargs
+            yc = ctx.sur_axe_residuel(req.yield_curve)
+        else:
+            compiled = resolve_analysis_constats(parse_script(req.script), req)
+            uls = [u.model_dump() for u in req.underlyings]
+            r_eff, T_eff = req.r, effective_T_max(compiled, req.T)
+            etat, yc = None, (req.yield_curve or [])
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    uls = [u.model_dump() for u in req.underlyings]
     corr = req.corr_matrix
     n = len(uls)
     if len(corr) != n or any(len(row) != n for row in corr):
         raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
-
-    T_eff = effective_T_max(compiled, req.T)
     try:
-        return run_mc_proba(
-            compiled, uls, corr, req.r, T_eff,
+        res = run_mc_proba(
+            compiled, uls, corr, r_eff, T_eff,
             N=req.N,
             model=req.model,
             seed=req.seed,
             user_params=req.user_params,
-            yield_curve=req.yield_curve or [],
+            yield_curve=yc,
             barrier_monitoring=req.barrier_monitoring,
+            state=etat,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    res["in_life"] = ctx is not None
+    if ctx is not None:
+        res["valuation_date"] = ctx.valuation.isoformat()
+        res["years_remaining"] = round(ctx.T_remaining, 4)
+    return res
 
 
 @router.post("/mtf")
 def mtf_endpoint(req: MtfRequest):
     """Mark-to-Future — nested Monte Carlo: distribution of future mark-to-model
-    values of the product, under the risk-neutral measure with frozen market params."""
+    values of the product, under the risk-neutral measure with frozen market params.
+
+    En cours de vie, l'éventail part du niveau du jour et de l'état déjà réalisé :
+    les scénarios extérieurs composent leur propre histoire par-dessus celle que
+    le passé a écrite, au lieu de repartir d'un produit neuf."""
+    ctx = residual_context_or_none(req)
     try:
-        compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
+        if ctx is not None:
+            compiled, uls = ctx.script, ctx.underlyings
+            r_eff, T_eff, etat = ctx.r, ctx.T_remaining, ctx.mc_kwargs
+        else:
+            compiled = resolve_analysis_constats(parse_script(req.script), req)
+            uls = [u.model_dump() for u in req.underlyings]
+            r_eff, T_eff, etat = req.r, None, None
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     if not compiled.events:
         raise HTTPException(status_code=422, detail="Aucun événement AT défini dans le script.")
 
-    uls = [u.model_dump() for u in req.underlyings]
     corr = req.corr_matrix
     n = len(uls)
     if len(corr) != n or any(len(row) != n for row in corr):
         raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
 
-    T_eff = effective_T_max(compiled, req.T)
+    if T_eff is None:
+        T_eff = effective_T_max(compiled, req.T)
     try:
-        return run_mark_to_future(
-            compiled, uls, corr, req.r, T_eff,
+        res = run_mark_to_future(
+            compiled, uls, corr, r_eff, T_eff,
             main_price=req.main_price,
+            state=etat,
             model=req.model,
             n_outer=req.n_outer,
             n_inner=req.n_inner,
@@ -280,6 +354,11 @@ def mtf_endpoint(req: MtfRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    res["in_life"] = ctx is not None
+    if ctx is not None:
+        res["valuation_date"] = ctx.valuation.isoformat()
+        res["years_remaining"] = round(ctx.T_remaining, 4)
+    return res
 
 
 @router.get("/script/providers")
@@ -303,6 +382,64 @@ def script_prompt_endpoint(req: ScriptGenerateRequest):
     from ..services.llm import preview_prompt
     return preview_prompt(req.description, n_underlyings=len(req.underlyings) or 1,
                           maturity=req.T)
+
+
+class ProductAnalysisRequest(BaseModel):
+    """Un résumé de produit et ce qu'on veut en faire.
+
+    Le résumé arrive REDIGE depuis l'écran, il n'est pas reconstruit ici : ce
+    que l'utilisateur a lu est exactement ce qui part au modèle. Le reconstruire
+    côté serveur rouvrirait l'écart entre l'affiché et l'envoyé."""
+    resume: str
+    intention: str = "analyse"
+    question: str = ""
+    provider: str = ""
+    model: str = ""
+
+
+@router.post("/product/analyse")
+def product_analyse_endpoint(req: ProductAnalysisRequest):
+    """Second avis d'un modèle sur un produit déjà pricé.
+
+    200 dès que le modèle a répondu : son avis est un texte, pas un calcul, et
+    il n'y a rien à valider côté serveur. Seule l'indisponibilité du moteur ou
+    une intention inconnue est un 4xx."""
+    from ..services.llm import DEFAULT_PROVIDER, LlmError
+    from ..services.llm.analysis import analyse_produit
+
+    try:
+        return analyse_produit(
+            req.resume, req.intention, question=req.question,
+            provider=req.provider or DEFAULT_PROVIDER,
+            model=req.model or None,
+        )
+    except LlmError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/product/analyse/prompt")
+def product_analyse_prompt_endpoint(req: ProductAnalysisRequest):
+    """Les deux messages qui PARTIRAIENT, sans appeler le modèle.
+
+    Même constructeur que l'envoi réel (`construire_prompts`) : un aperçu
+    reconstruit à part finirait par décrire autre chose que ce qui part, et
+    l'utilisateur croirait relire sa demande alors qu'il lirait une fiction.
+    Aucun appel réseau, aucun jeton consommé — on peut donc regarder avant de
+    demander."""
+    from ..services.llm import LlmError
+    from ..services.llm.analysis import construire_prompts
+
+    try:
+        return construire_prompts(req.resume, req.intention, req.question)
+    except LlmError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/product/analyse/intentions")
+def product_intentions_endpoint():
+    """Les intentions proposables, avec leur libellé d'écran."""
+    from ..services.llm.analysis import INTENTIONS
+    return {"intentions": [{"id": k, "label": v["label"]} for k, v in INTENTIONS.items()]}
 
 
 @router.post("/script/generate")
@@ -351,7 +488,7 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
     ré-estimation voisine."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
+        compiled = resolve_analysis_constats(compiled, req)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -395,7 +532,7 @@ def backtest_endpoint(req: BacktestRequest):
     """Historical backtest — replay script on actual Yahoo Finance price history."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
+        compiled = resolve_analysis_constats(compiled, req)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -591,7 +728,7 @@ def _realized_corr(prices: dict, tickers: list) -> list:
 def backtest_compare_endpoint(req: BacktestCompareRequest):
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
+        compiled = resolve_analysis_constats(compiled, req)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

@@ -479,6 +479,10 @@ export const usePricingStore = defineStore('pricing', () => {
       value_date: globalParams.value_date || null,
       payment_date: globalParams.payment_date || null,
       settlement_ccy: globalParams.deal_ccy || null,
+      // Ce qui fait basculer une analytique sur la vie restante. Absentes,
+      // elle décrit le produit à l'émission — comportement historique.
+      valuation_date: globalParams.valuation_date || null,
+      maturity_date: _maturityDate(),
       // Le calendrier CONSTAT porte des dates absolues ; le moteur veut des
       // fractions d'année depuis l'origine de son axe, qui est la date de
       // STRIKE — là où le niveau initial se constate. Repli sur la value date
@@ -553,6 +557,17 @@ export const usePricingStore = defineStore('pricing', () => {
       })),
       hasConstats: scriptConstats.value.length > 0,
       hasStop: scriptHasStop.value,
+      // Le produit lui-même, pas seulement ses réglages : le résumé écrit et
+      // tout ce qui le consomme doivent décrire le payoff EXACT qui a produit
+      // ce prix, calendrier compris.
+      script: script.value,
+      scriptName: currentScriptName.value || '',
+      constats: JSON.parse(JSON.stringify(constatOverrides)),
+      deal_ccy: globalParams.deal_ccy,
+      funding: fundingCurve.enabled
+        ? { mode: fundingCurve.mode, level: fundingCurve.level,
+            pillars: fundingCurve.pillars.map(x => ({ ...x })) }
+        : null,
       yieldCurvePillars: yieldCurve.enabled
         ? yieldCurve.pillars.map(p => ({ T: p.T, rate: p.rate, label: p.label }))
         : [],
@@ -820,6 +835,15 @@ export const usePricingStore = defineStore('pricing', () => {
           model: globalParams.model,
           user_params: _buildUserParams(),
           constats: _buildConstats(),
+          // Le comparateur construit son corps à la main (candidats, fenêtre
+          // d'historique) : sans ces quatre champs son calendrier se résout
+          // autrement que celui du prix — et échoue net dès qu'un CONSTAT
+          // porte un décalage de règlement.
+          strike_date: globalParams.strike_date || null,
+          value_date: globalParams.value_date || null,
+          payment_date: globalParams.payment_date || null,
+          settlement_ccy: globalParams.deal_ccy || null,
+          anchor: globalParams.strike_date || globalParams.value_date || null,
           basket_size: params.basket_size || 1,
           shortlist_n: params.shortlist_n || 8,
           start_date: params.start_date || '2010-01-01',

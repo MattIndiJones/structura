@@ -739,6 +739,40 @@ def _analyze_monitors(code: str, m_param_names: list[str]) -> list[dict]:
 # rest of the engine already uses everywhere (T_max is "years from now").
 # Using each CONSTAT's own start_date as its private zero instead would make
 # multiple CONSTATs in the same script inconsistent with each other.
+def resolve_analysis_constats(compiled, req):
+    """Resout le calendrier d'une requete d'analyse EXACTEMENT comme le prix.
+
+    Toutes les analytiques derivees d'un script — profil de payoff, chemins MC,
+    probabilites, Mark-to-Future, backtest, solveur, grille, scenarios — doivent
+    voir le meme produit que /api/price. Chacune appelait `resolve_constats`
+    avec le seul `anchor`, sans devise : un CONSTAT portant un decalage de
+    reglement les faisait toutes echouer, et un ancrage sur la value date leur
+    aurait de toute facon donne un calendrier decale de quelques jours.
+
+    Passer par ici plutot que d'appeler `resolve_constats` directement est ce
+    qui empeche ces dix points d'appel de rediverger au prochain chantier.
+
+    L'origine suit la meme regle qu'ailleurs : la date de STRIKE, ou `anchor`
+    en repli pour les appelants qui n'en declarent pas.
+    """
+    return resolve_constats(compiled, req.constats, anchor=analysis_origin(req),
+                            currency=getattr(req, "settlement_ccy", None))
+
+
+def analysis_origin(req):
+    """Origine de l'axe des temps d'une requete : la date de STRIKE.
+
+    Repli sur `anchor` pour les appelants qui ne declarent pas de strike, puis
+    sur aujourd'hui. Expose separement parce que /api/price a besoin de la
+    valeur elle-meme, pour situer la date de paiement et la value date sur le
+    meme axe que les constatations.
+    """
+    from datetime import date as _date
+    return (getattr(req, "strike_date", None)
+            or getattr(req, "anchor", None)
+            or _date.today())
+
+
 def resolve_constats(script: CompiledScript, constat_values: dict,
                      anchor=None, currency: str | None = None) -> CompiledScript:
     """Resolve constat_ref-only events into concrete dates. Raises ValueError

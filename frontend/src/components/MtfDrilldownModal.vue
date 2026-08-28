@@ -220,7 +220,7 @@ import HelpTip from './HelpTip.vue'
 import AlertMessage from './ui/AlertMessage.vue'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import { formatPercent, formatNumber } from '../utils/format.js'
 import {
   Chart, LineElement, LineController, PointElement,
@@ -348,7 +348,7 @@ function renderPath() {
       },
       scales: {
         x: { ticks: { font: { size: 9 }, maxTicksLimit: 12 } },
-        y: { ticks: { font: { size: 9 }, callback: v => v + '%' } },
+        y: { ticks: { font: { size: 9 }, callback: axisTick('%') } },
       },
     }, demo.enabled),
   })

@@ -348,7 +348,7 @@ import { apiFetch } from '../utils/api.js'
 import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
 import HelpTip from '../components/HelpTip.vue'
 import { formatInt, formatDate } from '../utils/format.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import {
   Chart, LineElement, LineController, PointElement, BarElement, BarController,
   CategoryScale, LinearScale, Tooltip, Legend,
@@ -632,7 +632,7 @@ watch(proposalData, async () => {
         },
         scales: {
           x: { ticks: { font: { size: 8 }, maxTicksLimit: 8 } },
-          y: { ticks: { font: { size: 8 }, callback: v => v + '%' } },
+          y: { ticks: { font: { size: 8 }, callback: axisTick('%') } },
         },
         animation: { duration: 150 },
       },
@@ -664,7 +664,7 @@ watch(proposalData, async () => {
         },
         scales: {
           x: { ticks: { font: { size: 8 }, maxTicksLimit: 8 }, grid: { display: false } },
-          y: { ticks: { font: { size: 8 }, callback: v => v + '%' } },
+          y: { ticks: { font: { size: 8 }, callback: axisTick('%') } },
         },
         animation: { duration: 150 },
       },

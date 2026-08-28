@@ -1,1 +1,0 @@
-import{a as t}from"./api-DoU1ziIU.js";import{B as i}from"./index-DKzzAoBw.js";const e=i([]);let n=null;function o(){return e.length?Promise.resolve(e):n||(n=t("/api/finance/underlyings").then(r=>r.ok?r.json():[]).then(r=>(e.splice(0,e.length,...r),e)).catch(()=>e).finally(()=>{n=null}),n)}export{o as e,e as u};

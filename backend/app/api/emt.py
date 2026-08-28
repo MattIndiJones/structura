@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from ..core.schemas import PricingRequest
-from ..core.payscript.parser import parse_script, resolve_constats
+from ..core.payscript.parser import parse_script, resolve_analysis_constats, resolve_constats
 from .auth import get_current_user
 from ..db.database import get_session
 from ..db.models import User, EmtRecord, Indicative, Deal
@@ -110,7 +110,7 @@ def emt_compute(
     """Compute an indicative EMT / target-market profile from a KID already run."""
     try:
         compiled = parse_script(req.script)
-        compiled = resolve_constats(compiled, req.constats, anchor=req.anchor)
+        compiled = resolve_analysis_constats(compiled, req)
     except ValueError as e:
         raise HTTPException(422, str(e))
 

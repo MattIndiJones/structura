@@ -76,6 +76,10 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
             "script_text": deal.script_snapshot,
             "constat_values": market.get("constats"),
             "value_date": deal.value_date,
+            # Sans ces deux-la le worker ne peut pas resoudre un calendrier
+            # portant une convention ou un decalage de reglement.
+            "strike_date": deal.strike_date,
+            "settlement_ccy": (deal.devise or "").strip().upper() or None,
             "T_elapsed": ctx["T_elapsed"],
             "state": ctx["state"],
             "norm_spots": list(ctx["norm_spots"]),

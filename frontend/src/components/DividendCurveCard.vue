@@ -102,7 +102,7 @@ import {
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import HelpTip from './HelpTip.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import SensitiveValue from './SensitiveValue.vue'
@@ -179,11 +179,11 @@ async function renderChart() {
       scales: {
         x: {
           type: 'linear', min: 0, max: horizon,
-          ticks: { font: { size: 8 }, callback: value => `${value}A` },
+          ticks: { font: { size: 8 }, callback: axisTick('A', 0) },
         },
         y: {
           beginAtZero: true,
-          ticks: { font: { size: 8 }, callback: value => `${value}%` },
+          ticks: { font: { size: 8 }, callback: axisTick('%') },
         },
       },
     }, demo.enabled),

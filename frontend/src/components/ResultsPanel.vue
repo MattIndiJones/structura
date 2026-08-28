@@ -1,6 +1,7 @@
 <template>
   <!-- ── Tabs sans pricing requis ─────────────────────────────── -->
-  <ProfileTab  v-if="tab === 'profile'" />
+  <SummaryTab  v-if="tab === 'summary'" />
+  <ProfileTab  v-else-if="tab === 'profile'" />
   <PathsTab    v-else-if="tab === 'paths'" />
   <ProbaTab    v-else-if="tab === 'proba'" />
   <BacktestTab   v-else-if="tab === 'backtest'" />
@@ -479,6 +480,7 @@ import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import { Chart, BarElement, BarController, CategoryScale, LinearScale, Tooltip } from 'chart.js'
+import SummaryTab from './SummaryTab.vue'
 import ProfileTab  from './ProfileTab.vue'
 import PathsTab    from './PathsTab.vue'
 import ProbaTab    from './ProbaTab.vue'

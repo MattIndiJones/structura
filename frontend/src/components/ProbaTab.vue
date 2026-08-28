@@ -110,7 +110,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -223,7 +223,7 @@ async function renderCharts() {
           tooltip: { callbacks: { label: it => `${it.raw.toFixed(1).replace('.', ',')}%` } } },
         scales: {
           x: { ticks: { font: { size: 10 } } },
-          y: { ticks: { font: { size: 9 }, callback: v => v + '%' }, min: 0 },
+          y: { ticks: { font: { size: 9 }, callback: axisTick('%') }, min: 0 },
         },
         animation: { duration: 200 },
       }, demo.enabled),
@@ -268,7 +268,7 @@ async function renderCharts() {
           tooltip: { callbacks: { label: it => `${it.raw.toFixed(1).replace('.', ',')}% des chemins` } } },
         scales: {
           x: { ticks: { font: { size: 9 }, maxRotation: 45 } },
-          y: { ticks: { font: { size: 9 }, callback: v => v + '%' }, min: 0 },
+          y: { ticks: { font: { size: 9 }, callback: axisTick('%') }, min: 0 },
         },
         animation: { duration: 200 },
       }, demo.enabled),

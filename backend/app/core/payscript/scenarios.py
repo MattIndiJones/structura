@@ -44,6 +44,10 @@ def compute_scenario_grid(script_text: str, underlyings, corr_matrix, r: float, 
                            barrier_monitoring: str = "weekly",
                            constat_values: dict | None = None,
                            constat_anchor: str | None = None,
+                           constat_currency: str | None = None,
+                           residual_state: dict | None = None,
+                           state_spots: list | None = None,
+                           residual_elapsed: float | None = None,
                            max_workers: int = DEFAULT_MAX_WORKERS) -> dict:
     """2D stress grid: price(spot_shock, vol_shock) for every combination, plus
     the unshocked base price for reference (computed independently of whether
@@ -59,12 +63,14 @@ def compute_scenario_grid(script_text: str, underlyings, corr_matrix, r: float, 
     def _payload(spot_shock: float, vol_shock: float) -> dict:
         return dict(
             script_text=script_text, constat_values=constat_values,
-            constat_anchor=constat_anchor,
+            constat_anchor=constat_anchor, constat_currency=constat_currency,
             underlyings=underlyings, corr=corr_matrix, r=r, T=T,
             n_paths=N, model=model, seed=seed, user_params=user_params,
             spot_shock=spot_shock, vol_shock=vol_shock,
             yield_curve=yield_curve or [], sigma_r=sigma_r, a_r=a_r,
             barrier_monitoring=barrier_monitoring,
+            residual_state=residual_state, state_spots=state_spots,
+            residual_elapsed=residual_elapsed,
         )
 
     # job 0 = unshocked base price; jobs 1.. = grid cells in row-major order

@@ -113,7 +113,7 @@ import { Chart, registerables } from 'chart.js'
 import { useRfqStore } from '../stores/rfq.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import { templateMeta } from '../data/payscriptTemplates.js'
 import { formatBps as centralFormatBps } from '../utils/format.js'
 
@@ -223,7 +223,7 @@ function chartOpts() {
     },
     scales: {
       x: { ticks: { font: { size: 9 }, maxTicksLimit: 8 } },
-      y: { ticks: { font: { size: 9 }, callback: v => `${v} bps` } },
+      y: { ticks: { font: { size: 9 }, callback: axisTick(' bps') } },
     },
   }
 }

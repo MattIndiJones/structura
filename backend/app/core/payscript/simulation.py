@@ -27,13 +27,19 @@ def _price_with_params(script: CompiledScript, underlyings, corr_matrix, r: floa
                         T: float, N: int, model: str, seed: int,
                         base_user_params: dict, overrides: dict,
                         yield_curve=None, sigma_r: float = 0.0, a_r: float = 0.0,
-                        barrier_monitoring: str = "weekly") -> float:
-    """Price the product with one or more PARAMs overridden, all else held fixed."""
+                        barrier_monitoring: str = "weekly",
+                        state: dict | None = None) -> float:
+    """Price the product with one or more PARAMs overridden, all else held fixed.
+
+    `state` porte l'etat d'un produit deja en cours de vie — memoire de coupons,
+    extrema franchis, niveau du jour. Entonnoir unique du solveur ET de la
+    grille : le brancher ici les aligne tous les deux sur la jambe residuelle.
+    """
     user_params = {**base_user_params, **overrides}
     res = run_mc(script, underlyings, corr_matrix, r, T, N, model, seed,
                  antithetic=True, user_params=user_params,
                  yield_curve=yield_curve or [], sigma_r=sigma_r, a_r=a_r,
-                 barrier_monitoring=barrier_monitoring)
+                 barrier_monitoring=barrier_monitoring, **(state or {}))
     return res["price"]
 
 
@@ -60,7 +66,8 @@ def solve_for_param(script: CompiledScript, underlyings, corr_matrix, r: float, 
                      param_name: str, target_price: float, lo: float, hi: float,
                      N: int = DEFAULT_SOLVER_N, tol: float = 1e-4, max_iter: int = 40,
                      yield_curve=None, sigma_r: float = 0.0, a_r: float = 0.0,
-                     barrier_monitoring: str = "weekly") -> dict:
+                     barrier_monitoring: str = "weekly",
+                     state: dict | None = None) -> dict:
     """Bisection root-find: find param_value in [lo, hi] such that
     price(param_value) == target_price.
 
@@ -73,7 +80,7 @@ def solve_for_param(script: CompiledScript, underlyings, corr_matrix, r: float, 
         return _price_with_params(script, underlyings, corr_matrix, r, T, N, model, seed,
                                    base_user_params, {param_name: x},
                                    yield_curve=yield_curve, sigma_r=sigma_r, a_r=a_r,
-                                   barrier_monitoring=barrier_monitoring) - target_price
+                                   barrier_monitoring=barrier_monitoring, state=state) - target_price
 
     f_lo, f_hi = f(lo), f(hi)
     trace = [{"iter": 0, "x": lo, "price": f_lo + target_price},
@@ -116,7 +123,8 @@ def compute_price_grid(script: CompiledScript, underlyings, corr_matrix, r: floa
                         param_y: str, y_min: float, y_max: float, y_steps: int,
                         N: int = DEFAULT_GRID_N,
                         yield_curve=None, sigma_r: float = 0.0, a_r: float = 0.0,
-                        barrier_monitoring: str = "weekly") -> dict:
+                        barrier_monitoring: str = "weekly",
+                        state: dict | None = None) -> dict:
     """2D price heatmap: price(param_x, param_y) over an evenly-spaced grid, all
     other PARAMs and market data held at their current values.
 
@@ -133,7 +141,7 @@ def compute_price_grid(script: CompiledScript, underlyings, corr_matrix, r: floa
             p = _price_with_params(script, underlyings, corr_matrix, r, T, N, model, seed,
                                     base_user_params, {param_x: x, param_y: y},
                                     yield_curve=yield_curve, sigma_r=sigma_r, a_r=a_r,
-                                    barrier_monitoring=barrier_monitoring)
+                                    barrier_monitoring=barrier_monitoring, state=state)
             row.append(round(p, 6))
         prices.append(row)
 

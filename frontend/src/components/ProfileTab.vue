@@ -78,7 +78,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -181,7 +181,7 @@ async function renderChart() {
         },
         y: {
           title: { display: true, text: `${seriesLabel} (${unit.value})`, font: { size: 9 } },
-          ticks: { callback: v => v + unit.value, font: { size: 9 } },
+          ticks: { callback: (v, i, t) => axisTick(unit.value)(v, i, t), font: { size: 9 } },
         },
       },
       animation: { duration: 200 },

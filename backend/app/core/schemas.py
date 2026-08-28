@@ -170,6 +170,26 @@ class AnalysisBase(BaseModel):
     # resolve its calendar the same way the price did, or the profile/probas/
     # stress grid describe a product on a different schedule than the one priced.
     anchor: Optional[date] = None
+    # Le reste du contexte de marché, pour la meme raison. Il manquait ici : un
+    # CONSTAT portant un decalage de reglement faisait echouer TOUTES les
+    # analytiques (profil, chemins, probas, MtF, backtest, solveur, grille,
+    # scenarios) avec « un decalage de reglement suppose un calendrier », alors
+    # que le prix, lui, passait. Sans devise, resolve_constats n'a aucun
+    # calendrier de jours ouvres sur lequel compter le decalage.
+    settlement_ccy: Optional[str] = None
+    strike_date: Optional[date] = None
+    value_date: Optional[date] = None
+    payment_date: Optional[date] = None
+    # Postérieure au strike, l'analytique se calcule sur la VIE RESTANTE, avec
+    # l'état du passé injecté — comme le prix. Sans elle, une note dont le
+    # worst-of est à 34 % du strike était analysée comme si on l'émettait
+    # aujourd'hui à 100 %.
+    valuation_date: Optional[date] = None
+    maturity_date: Optional[date] = None
+    # Spread emetteur : une analytique qui l'ignore décrit un produit moins
+    # risque que celui qu'on price.
+    funding_curve: List[List[float]] = []
+    funding_spread: float = Field(default=0.0, ge=-0.05, le=0.50)
 
 
 class ProfileRequest(AnalysisBase):

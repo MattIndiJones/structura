@@ -1,5 +1,6 @@
 <template>
   <div class="flex flex-col gap-4">
+    <InLifeNotAlignedBanner />
     <!-- Sub-tabs -->
     <div class="flex gap-2">
       <button v-for="t in subTabs" :key="t.id"
@@ -149,11 +150,12 @@
 </template>
 
 <script setup>
+import InLifeNotAlignedBanner from './InLifeNotAlignedBanner.vue'
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import ComparatorTab from './ComparatorTab.vue'
@@ -294,7 +296,7 @@ async function renderCharts() {
         tooltip: { callbacks: { label: it => `TRI: ${it.raw.toFixed(2).replace('.', ',')}%` } } },
       scales: {
         x: { ticks: { font: { size: 8 }, maxTicksLimit: 8, maxRotation: 30 } },
-        y: { ticks: { font: { size: 9 }, callback: v => v + '%' } },
+        y: { ticks: { font: { size: 9 }, callback: axisTick('%') } },
       },
       animation: { duration: 200 },
     }, demo.enabled),

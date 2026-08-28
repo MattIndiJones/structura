@@ -236,7 +236,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
-import { chartTheme, applyChartTheme } from '../charts/theme.js'
+import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
@@ -444,7 +444,7 @@ function renderChart() {
       },
       scales: {
         x: { ticks: { font: { size: 10 } } },
-        y: { ticks: { font: { size: 9 }, callback: v => v + '%' } },
+        y: { ticks: { font: { size: 9 }, callback: axisTick('%') } },
       },
       animation: { duration: 250 },
     }, demo.enabled),

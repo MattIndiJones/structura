@@ -204,6 +204,27 @@ _DISPATCH = {
 }
 
 
+def _modele_effectif(info: ProviderInfo, model: str | None) -> str:
+    """Le modèle à appeler réellement, jamais un nom absent de la machine.
+
+    Le défaut de PROVIDERS est celui de l'assistant de SCRIPTING — un modèle de
+    code. Il n'a aucune raison d'être installé sur une machine qui se sert de
+    l'application pour autre chose, et l'échec arrivait après coup, sous la
+    forme d'un « Modèle inconnu d'Ollama » que rien n'annonçait dans l'écran.
+
+    Pour Ollama on sait ce qui est installé : on s'y tient. Demander un modèle
+    absent est une erreur qu'on peut éviter au lieu de la reporter.
+    """
+    demande = model or info.default_model
+    if info.key != "ollama":
+        return demande
+    installes = ollama_models()
+    if not installes or demande in installes:
+        return demande
+    # Le défaut recommandé s'il est là, sinon le premier installé.
+    return info.default_model if info.default_model in installes else installes[0]
+
+
 def complete(provider: str, model: str | None, system: str, user: str, *,
              temperature: float = 0.1, max_tokens: int = 2000) -> str:
     """Une réponse texte. `temperature` bas par défaut : écrire un payoff dans
@@ -213,7 +234,7 @@ def complete(provider: str, model: str | None, system: str, user: str, *,
         raise LlmError(
             f"Moteur inconnu : {provider!r} — valeurs admises : "
             f"{', '.join(PROVIDERS)}.")
-    out = _DISPATCH[provider](model or info.default_model, system, user,
+    out = _DISPATCH[provider](_modele_effectif(info, model), system, user,
                               temperature, max_tokens)
     if not (out or "").strip():
         raise LlmError("Le modèle a renvoyé une réponse vide.")

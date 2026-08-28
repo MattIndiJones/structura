@@ -120,11 +120,76 @@ def _closes_at(prices: dict, dates_list: list, jour: str) -> dict:
             if idx < len(serie) and serie[idx]}
 
 
-@router.post("/price/in-life")
-def price_in_life(
-    req: InLifePricingRequest,
-    current: Annotated[User, Depends(get_current_user)],
-):
+class ResidualContext:
+    """Le produit ramené à sa vie restante, prêt pour N'IMPORTE quelle analytique.
+
+    Extrait de `price_in_life` pour que le profil de payoff, les chemins, les
+    probabilités, le Mark-to-Future, le solveur et les scénarios voient le même
+    produit que le prix. Sans ça chacun price le produit NEUF : sur une note
+    dont le worst-of est à 34 % du strike, l'onglet Probabilités annonçait
+    39 % de chance de rappel et 2,12 ans de durée espérée pour une vie
+    restante de 1,10 an — des chiffres qui décrivent une autre note.
+
+    `mc_kwargs` porte l'état que le rejeu a reconstitué : mémoire de coupons,
+    extrema franchis, compteur de constatations. Ce sont des faits ; ils ne
+    bougent ni avec un choc ni avec un bump.
+    """
+
+    def __init__(self, residuel, valuation, T_elapsed, T_remaining, niveaux,
+                 corr_matrix, payment_t, produit=None):
+        self.residuel = residuel
+        # Le produit d'origine : ses `underlyings` gardent nom et ticker, que la
+        # jambe résiduelle ne porte plus.
+        self.produit = produit
+        self.valuation = valuation
+        self.T_elapsed = T_elapsed
+        self.T_remaining = T_remaining
+        self.niveaux = niveaux
+        self.corr_matrix = corr_matrix
+        self.payment_t = payment_t
+
+    @property
+    def script(self):
+        return self.residuel.residual_script
+
+    @property
+    def underlyings(self):
+        return self.residuel.engine_uls
+
+    @property
+    def r(self):
+        return self.residuel.r_frac
+
+    @property
+    def mc_kwargs(self) -> dict:
+        """Les arguments d'état à passer à run_mc pour repartir du bon produit."""
+        etat = self.residuel.state
+        spots = self.residuel.norm_spots
+        return dict(
+            spot_mult=spots, spot_base=spots,
+            wof_min_init=etat["wof_min"], bof_max_init=etat["bof_max"],
+            index_offset=etat["index"], memo_init=etat["memo"],
+            accum_init=etat["accum"],
+            s_min_init=etat["s_min"], s_max_init=etat["s_max"],
+            s_prev_init=etat["s_prev"],
+            wof0_init=min(spots) if spots else 1.0,
+            realvol_state_init=etat["realvol_state"],
+            fix_state_init=etat["fix_state"],
+        )
+
+    def sur_axe_residuel(self, courbe):
+        """Décale les piliers d'une courbe sur l'axe du MC résiduel."""
+        return [[max(0.0, t - self.T_elapsed), niveau]
+                for t, niveau in (courbe or []) if t > self.T_elapsed]
+
+
+def build_request_residual(req) -> ResidualContext:
+    """Rejoue le passé d'une requête et rend le contexte résiduel.
+
+    Lève HTTPException(422) avec un motif lisible plutôt que de rendre un
+    nombre plausible et faux : valorisation hors de la vie du produit, ticker
+    manquant, historique absent sur un payoff dépendant du chemin.
+    """
     valuation = req.valuation_date or req.strike_date
     if valuation < req.strike_date:
         raise HTTPException(
@@ -163,7 +228,7 @@ def price_in_life(
                        f"cours passés, sa valeur ne peut pas être reconstituée.")
         raise HTTPException(422, detail)
 
-    niveaux = dict(req.strike_levels)
+    niveaux = dict(getattr(req, "strike_levels", None) or {})
     if not niveaux:
         au_strike = _closes_at(prices, dates_list, req.strike_date.isoformat())
         for u in req.underlyings:
@@ -179,7 +244,7 @@ def price_in_life(
         "user_params": req.user_params,
         "r": req.r * 100,
         "model": req.model,
-        "antithetic": req.antithetic,
+        "antithetic": getattr(req, "antithetic", True),
         # L'instantané complet, en unités d'affichage — c'est ce que
         # _engine_underlyings attend. Ne passer que name/sigma/q laissait
         # retomber sur les défauts la courbe de dividende ET toute la
@@ -206,6 +271,26 @@ def price_in_life(
     except ValuationError as exc:
         raise HTTPException(422, str(exc))
 
+
+    T_remaining = max(1 / 52, (req.maturity_date - valuation).days / 365.25)
+    paiement = ((req.payment_date - valuation).days / 365.25
+                if req.payment_date else None)
+    return ResidualContext(residuel, valuation, T_elapsed, T_remaining, niveaux,
+                            getattr(req, "corr_matrix", None), paiement, produit)
+
+
+@router.post("/price/in-life")
+def price_in_life(
+    req: InLifePricingRequest,
+    current: Annotated[User, Depends(get_current_user)],
+):
+    ctx = build_request_residual(req)
+    residuel = ctx.residuel
+    produit = ctx.produit
+    valuation = ctx.valuation
+    T_elapsed = ctx.T_elapsed
+    niveaux = ctx.niveaux
+
     if residuel.early_recall:
         return {
             "early_recall": True,
@@ -215,20 +300,15 @@ def price_in_life(
             "valuation_date": valuation.isoformat(),
         }
 
-    T_remaining = max(1 / 52, (req.maturity_date - valuation).days / 365.25)
-    paiement_residuel = (
-        (req.payment_date - valuation).days / 365.25 if req.payment_date else None)
+    T_remaining = ctx.T_remaining
+    paiement_residuel = ctx.payment_t
     etat = residuel.state
-    # La courbe de taux se lit sur l'axe du Monte Carlo résiduel, qui démarre à
-    # la date de valorisation : ses piliers sont décalés du temps déjà écoulé,
+    # Les courbes se lisent sur l'axe du Monte Carlo résiduel, qui démarre à la
+    # date de valorisation : leurs piliers sont décalés du temps déjà écoulé,
     # sinon un pilier « 2 ans » du contrat serait relu comme 2 ans après
     # aujourd'hui.
-    def _sur_axe_residuel(courbe):
-        return [[max(0.0, t - T_elapsed), niveau]
-                for t, niveau in (courbe or []) if t > T_elapsed]
-
-    courbe_residuelle = _sur_axe_residuel(req.yield_curve)
-    funding_residuel = _sur_axe_residuel(req.funding_curve)
+    courbe_residuelle = ctx.sur_axe_residuel(req.yield_curve)
+    funding_residuel = ctx.sur_axe_residuel(req.funding_curve)
     try:
         res = run_mc(
             residuel.residual_script, residuel.engine_uls, req.corr_matrix,
