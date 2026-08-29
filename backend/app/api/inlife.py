@@ -26,11 +26,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..core.inlife_valuation import (
-    InLifeProduct, ValuationError, build_residual,
+    InLifeProduct, ValuationError, VariantTerms, build_residual,
 )
 from ..core.lifecycle_controls import path_dependency_reasons
 from ..core.payscript.engine import compute_greeks, run_mc
-from ..core.schemas import UnderlyingParams
+from ..core.schemas import UnderlyingParams, VariantOverrides
 from ..db.models import User
 from ..services.market_data import load_hist_prices
 from .auth import get_current_user
@@ -81,6 +81,10 @@ class InLifePricingRequest(BaseModel):
     # Niveau initial constaté par sous-jacent, en absolu. Vide, on prend la
     # clôture NUE à la date de strike — ce que le term sheet appelle le strike.
     strike_levels: dict[str, float] = Field(default_factory=dict)
+
+    # Avenant : les termes de la variante, qui ne valent que pour la vie
+    # restante. Absent, on valorise le produit tel qu'il a été émis.
+    variant: Optional[VariantOverrides] = None
 
 
 def _snapshot_underlying(u: UnderlyingParams) -> dict:
@@ -161,6 +165,34 @@ class ResidualContext:
         return self.residuel.r_frac
 
     @property
+    def user_params(self):
+        """Les PARAM de la vie restante — ceux de la variante s'il y en a une.
+
+        Les analytiques doivent lire ceci plutôt que `req.user_params` : sur un
+        avenant, la barrière qui price le reliquat n'est plus celle sous
+        laquelle le passé s'est déroulé."""
+        return self.residuel.residual_user_params or self.residuel.user_params
+
+    @property
+    def script_text(self):
+        """Le TEXTE du script qui price — celui de la variante s'il y en a une.
+
+        Pour les analytiques qui repricent dans un processus séparé : elles
+        reçoivent le script en texte et le recompilent, donc `script` (compilé)
+        ne leur sert à rien."""
+        return self.residuel.pricing_script_text
+
+    @property
+    def constats(self):
+        """Le calendrier qui price, dans la forme que `resolve_constats` attend."""
+        return self.residuel.pricing_constats
+
+    @property
+    def variant_state_check(self):
+        """Ce que la variante fait de l'état repris. Vide hors variante."""
+        return self.residuel.variant_state_check
+
+    @property
     def mc_kwargs(self) -> dict:
         """Les arguments d'état à passer à run_mc pour repartir du bon produit."""
         etat = self.residuel.state
@@ -183,12 +215,39 @@ class ResidualContext:
                 for t, niveau in (courbe or []) if t > self.T_elapsed]
 
 
-def build_request_residual(req) -> ResidualContext:
+def variant_terms_or_none(req) -> VariantTerms | None:
+    """Les termes d'avenant portés par une requête, s'il y en a.
+
+    Un seul endroit les construit, pour que le prix et les analytiques voient
+    la même variante. Les laisser se reconstruire chacun de leur côté est
+    exactement ce qui faisait décrire au profil de payoff un produit que le
+    prix ne décrivait plus."""
+    v = getattr(req, "variant", None)
+    if v is None:
+        return None
+    if (v.mode or "avenant") != "avenant":
+        raise HTTPException(
+            422, "Une note neuve (roll) ne se valorise pas en cours de vie : elle "
+                 "est strikée aujourd'hui, il n'y a pas de passé à rejouer. "
+                 "Chargez-la comme un pricing à l'émission.")
+    terms = VariantTerms(script=v.script, user_params=v.user_params,
+                         constats=v.constats)
+    return None if terms.est_vide() else terms
+
+
+def build_request_residual(req, variant: VariantTerms | None = None) -> ResidualContext:
     """Rejoue le passé d'une requête et rend le contexte résiduel.
 
     Lève HTTPException(422) avec un motif lisible plutôt que de rendre un
     nombre plausible et faux : valorisation hors de la vie du produit, ticker
     manquant, historique absent sur un payoff dépendant du chemin.
+
+    `variant` porte les termes d'un avenant — script, PARAM et calendrier qui
+    s'appliquent à partir de la valorisation. La requête, elle, continue de
+    porter les termes d'ORIGINE : c'est sous eux que le passé est rejoué, et
+    cette asymétrie est ce qui interdit à une variante de rappeler
+    rétroactivement. Sans variante, le comportement est celui d'avant, à
+    l'identique.
     """
     valuation = req.valuation_date or req.strike_date
     if valuation < req.strike_date:
@@ -267,12 +326,19 @@ def build_request_residual(req) -> ResidualContext:
 
     T_elapsed = max(0.0, (valuation - req.strike_date).days / 365.25)
     try:
-        residuel = build_residual(produit, prices, dates_list, T_elapsed, valuation)
+        residuel = build_residual(produit, prices, dates_list, T_elapsed,
+                                  valuation, variant=variant)
     except ValuationError as exc:
         raise HTTPException(422, str(exc))
 
 
     T_remaining = max(1 / 52, (req.maturity_date - valuation).days / 365.25)
+    # Une variante qui prolonge la maturité déplace l'horizon de simulation :
+    # la maturité de la REQUÊTE est celle du parent, et s'y tenir laisserait les
+    # constatations prolongées hors du Monte Carlo — le remboursement final ne
+    # serait jamais versé, pour un prix qui reste plausible.
+    if residuel.T_residual_max:
+        T_remaining = max(T_remaining, residuel.T_residual_max)
     paiement = ((req.payment_date - valuation).days / 365.25
                 if req.payment_date else None)
     return ResidualContext(residuel, valuation, T_elapsed, T_remaining, niveaux,
@@ -284,7 +350,7 @@ def price_in_life(
     req: InLifePricingRequest,
     current: Annotated[User, Depends(get_current_user)],
 ):
-    ctx = build_request_residual(req)
+    ctx = build_request_residual(req, variant_terms_or_none(req))
     residuel = ctx.residuel
     produit = ctx.produit
     valuation = ctx.valuation
@@ -315,7 +381,7 @@ def price_in_life(
             residuel.r_frac, T_remaining,
             maturity_payment_t=paiement_residuel,
             N=req.N, model=req.model, seed=req.seed, antithetic=req.antithetic,
-            user_params=residuel.user_params,
+            user_params=ctx.user_params,
             yield_curve=courbe_residuelle,
             funding_curve=funding_residuel, funding_spread=req.funding_spread,
             sigma_r=req.sigma_r, a_r=req.a_r,
@@ -346,7 +412,7 @@ def price_in_life(
             greeks = compute_greeks(
                 residuel.residual_script, residuel.engine_uls, req.corr_matrix,
                 residuel.r_frac, T_remaining, req.N, req.model, seed=req.seed,
-                user_params=residuel.user_params, selected=req.selected_greeks,
+                user_params=ctx.user_params, selected=req.selected_greeks,
                 sigma_r=req.sigma_r, a_r=req.a_r, yield_curve=courbe_residuelle,
                 funding_curve=funding_residuel, funding_spread=req.funding_spread,
                 barrier_monitoring=req.barrier_monitoring,
@@ -402,6 +468,11 @@ def price_in_life(
         "fugit": res.get("fugit"),
         "valuation_date": valuation.isoformat(),
         "in_life": T_elapsed > 0,
+        # Ce que la variante fait de l'état repris du passé. Vide hors variante.
+        # Affiché à côté du prix : un avenant qui n'utilise plus une variable de
+        # mémoire fait disparaître ce que le client a accumulé, et ce fait doit
+        # se lire plutôt que se deviner.
+        "variant_state_check": ctx.variant_state_check,
         # De quoi écrire le bandeau d'état sans le recalculer côté écran.
         "past": {
             "years_elapsed": round(T_elapsed, 4),

@@ -7,7 +7,7 @@
         <div class="page-header mb-0">
           <div>
             <div class="flex items-center gap-3">
-              <RouterLink :to="{ path: '/', query: { category: 'life_cycle' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
+              <BackLink :fallback="{ path: '/', query: { category: 'life_cycle' } }" />
               <h1 class="page-title">Réinvestissement — alternatives à un produit en vie</h1>
             </div>
             <p class="page-subtitle">
@@ -342,6 +342,7 @@
 </template>
 
 <script setup>
+import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useDealsStore } from '../stores/deals.js'
 import { apiFetch } from '../utils/api.js'

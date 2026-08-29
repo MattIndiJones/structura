@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, computed } from 'vue'
 import { apiFetch } from '../utils/api.js'
+import { calculerDelta, contexteDepuisCorps } from '../composables/useVariantDelta.js'
+import { courbeDividende } from '../composables/useDividendCurve.js'
 
 const DEFAULT_SCRIPT = `# Autocall Athena 3 ans
 PARAM COUPON = 8%
@@ -37,11 +39,21 @@ export const usePricingStore = defineStore('pricing', () => {
   // default on every debounced re-parse.
   const paramOverrides = reactive({})
 
+  /**
+   * Aligne les surcharges sur ce que le script DÉCLARE, sans rien détruire.
+   *
+   * Règle du projet : le script déclare des noms, le deal porte les valeurs.
+   * Une valeur saisie est une donnée de term sheet, pas une dérivée du texte —
+   * une manipulation de texte ne doit donc jamais la détruire.
+   *
+   * Un nom qui disparaît laisse sa valeur DORMANTE : plus rien ne la lit
+   * (`_buildUserParams` et `_buildConstats` parcourent les déclarations, pas
+   * les entrées), mais si le nom revient, la valeur revient avec lui. Le coût
+   * est de quelques centaines d'octets ; le bénéfice est qu'un renommage par
+   * erreur, un copier-coller ou une frappe malheureuse ne coûtent plus une
+   * ressaisie de term sheet.
+   */
   function _syncParamOverrides() {
-    const names = new Set(scriptParams.value.map(p => p.name))
-    for (const k of Object.keys(paramOverrides)) {
-      if (!names.has(k)) delete paramOverrides[k]
-    }
     for (const p of scriptParams.value) {
       if (!(p.name in paramOverrides)) {
         // PARAM() → a table of per-observation rows, seeded with one row
@@ -88,11 +100,8 @@ export const usePricingStore = defineStore('pricing', () => {
     return (t && t.value) ? `${t.value}${t.unit}` : null
   }
 
+  /** Même règle que `_syncParamOverrides` : on complète, on ne supprime pas. */
   function _syncConstatOverrides() {
-    const names = new Set(scriptConstats.value.map(c => c.name))
-    for (const k of Object.keys(constatOverrides)) {
-      if (!names.has(k)) delete constatOverrides[k]
-    }
     for (const c of scriptConstats.value) {
       if (!(c.name in constatOverrides)) constatOverrides[c.name] = _defaultConstatValue(c.kind)
     }
@@ -154,6 +163,13 @@ export const usePricingStore = defineStore('pricing', () => {
   // ── Yield curve (term structure of zero rates) ────────────────────
   const yieldCurve = reactive({
     enabled: false,
+    // Ancrage sur le taux sans risque de l'écran : la courbe se dérive alors
+    // de r par une pente amortie plutôt que de se saisir pilier par pilier.
+    // Voir `courbeAncree`. Désactivé par défaut — les niveaux saisis à la main
+    // et les scénarios restent le comportement d'origine.
+    ancree: false,
+    ecart: 120,   // prime de terme totale, en bps
+    tau: 4.0,     // années pour en parcourir les deux tiers
     pillars: [
       { label: '3M',  T: 0.25,  rate: 3.2 },
       { label: '6M',  T: 0.5,   rate: 3.4 },
@@ -221,6 +237,31 @@ export const usePricingStore = defineStore('pricing', () => {
 
   // ── Current script DB identity ────────────────────────────────────
   const currentScriptId   = ref(null)
+  // ── Variante ──────────────────────────────────────────────────────
+  // Renseigné quand l'écran affiche une DÉCLINAISON d'un deal plutôt que le
+  // deal lui-même. `ecarts` vient du serveur : c'est le delta stocké, enrichi
+  // de la valeur d'origine. Le recalculer ici ferait diverger ce qu'on colore
+  // de ce qui a servi à pricer.
+  const variantInfo = ref(null)   // {id, parent_id, title, mode, ecarts[], delta, parent}
+
+  /**
+   * Oublie la déclinaison affichée.
+   *
+   * `variantInfo` décrit LE PRODUIT ACTUELLEMENT DANS LE STORE. Tout ce qui
+   * remplace ce produit doit donc le relâcher — sans quoi l'état « modifié »
+   * continue de comparer l'écran au parent d'une variante qu'on ne regarde
+   * plus, et l'avertissement de sortie se redéclenche page après page.
+   *
+   * Appelé aussi quand l'utilisateur confirme qu'il quitte sans enregistrer :
+   * il vient de dire que ces modifications sont abandonnées, les lui
+   * représenter à la navigation suivante serait lui redemander ce qu'il a déjà
+   * tranché. Revenir sur la déclinaison la rechargera depuis le serveur, donc
+   * sans les modifications abandonnées — ce qui est exactement ce qu'il a
+   * demandé.
+   */
+  function relacherVariante() {
+    variantInfo.value = null
+  }
   const currentScriptName = ref('')
 
   // ── Pre-trade opportunity (Indicative) this pricing session is tied to —
@@ -363,17 +404,10 @@ export const usePricingStore = defineStore('pricing', () => {
     }))
   }
 
-  function _buildDividendCurve(u) {
-    if (!u?.dividendCurveEnabled) return []
-    const q1 = Math.max(0, Number(u.q) || 0)
-    const decay = Math.max(0, Math.min(100, Number(u.dividendDecay) || 0)) / 100
-    const years = Math.max(1, Math.ceil(Number(globalParams.T) || 1))
-    return Array.from({ length: years }, (_, index) => ({
-      label: `A${index + 1}`,
-      T: index + 1,
-      rate: q1 * Math.pow(1 - decay, index),
-    }))
-  }
+  // La dérivation vit dans useDividendCurve : l'écran d'appel d'offres en a
+  // besoin avec SON horizon, et deux implémentations d'une convention de
+  // bucket finiraient par décaler la courbe d'un an sans rien signaler.
+  const _buildDividendCurve = (u) => courbeDividende(u, globalParams.T)
 
   function _buildCorr() {
     const n = underlyings.value.length
@@ -389,10 +423,32 @@ export const usePricingStore = defineStore('pricing', () => {
   // tenor string ("3M") only at the point of sending, so the UI can keep them
   // as two separate, simple inputs.
   function _buildConstats() {
+    return _constatsFrom(constatOverrides, scriptConstats.value)
+  }
+
+  /**
+   * Un jeu de CONSTAT, de la forme STOCKÉE vers la forme que le serveur attend.
+   *
+   * Les deux diffèrent : `frequency` est un objet {value, unit} à l'écran et
+   * une chaîne « 1M » dans la requête. Envoyer la forme stockée telle quelle
+   * faisait lever au serveur une AttributeError non rattrapée — un 500 en texte
+   * brut, que le front ne savait même pas lire.
+   *
+   * Factorisé pour que les termes d'ORIGINE d'un avenant passent par la MÊME
+   * transformation que ceux de l'écran. Une seconde conversion, côté serveur,
+   * aurait redonné deux formes qui divergent.
+   */
+  function _constatsFrom(overrides, declares = null) {
     const out = {}
-    for (const c of scriptConstats.value) {
-      const v = constatOverrides[c.name]
-      if (c.kind === 'single') {
+    // Sans déclaration de script, on lit la forme depuis la valeur elle-même :
+    // une chaîne est une date unique, un objet un échéancier.
+    const liste = declares || Object.keys(overrides || {}).map(name => ({
+      name, kind: typeof overrides[name] === 'string' ? 'single' : 'schedule',
+    }))
+    for (const c of liste) {
+      const v = (overrides || {})[c.name]
+      if (v == null) continue
+      if (c.kind === 'single' || typeof v === 'string') {
         out[c.name] = v
       } else {
         out[c.name] = {
@@ -454,8 +510,16 @@ export const usePricingStore = defineStore('pricing', () => {
     }
   }
 
+  /**
+   * Le corps commun à toutes les analytiques.
+   *
+   * Il passe par `_avecTermesDOrigine` comme le prix : sans ça, l'onglet
+   * Probabilités rejouait le passé sous la barrière de la VARIANTE et comptait
+   * des rappels qui n'ont jamais eu lieu. Le prix affichait une chose, la
+   * distribution en décrivait une autre — et rien ne le signalait.
+   */
   function _baseBody() {
-    return {
+    return _avecTermesDOrigine({
       script: script.value,
       underlyings: _buildUls(),
       corr_matrix: _buildCorr(),
@@ -488,7 +552,7 @@ export const usePricingStore = defineStore('pricing', () => {
       // STRIKE — là où le niveau initial se constate. Repli sur la value date
       // pour les produits qui n'en déclarent pas.
       anchor: globalParams.strike_date || globalParams.value_date || null,
-    }
+    })
   }
 
   // sigma_r/a_r only apply to /price (and Greeks) — see runPricing/runGreeks.
@@ -520,8 +584,17 @@ export const usePricingStore = defineStore('pricing', () => {
         scriptHasStop.value = data.has_stop ?? false
         parseError.value = null
       } else {
-        parseError.value = data.errors; scriptParams.value = []; scriptConstats.value = []
-        scriptHasStop.value = false
+        // Une erreur de parse veut dire « je ne sais pas ce que ce script
+        // déclare », pas « il ne déclare rien ». On garde donc la dernière
+        // lecture valide et on ne synchronise PAS : vider les déclarations
+        // puis synchroniser effaçait toutes les saisies, et l'éditeur repasse
+        // par un état non parsable à chaque ligne qu'on ajoute — il suffit
+        // d'une pause de 500 ms au milieu d'un `SET`.
+        //
+        // Rien ne peut être valorisé avec des déclarations périmées : le
+        // bouton Pricer est désactivé tant que `parseError` est renseigné.
+        parseError.value = data.errors
+        return
       }
       _syncParamOverrides(); _syncConstatOverrides()
     } catch (e) { parseError.value = e.message }
@@ -562,7 +635,9 @@ export const usePricingStore = defineStore('pricing', () => {
       // ce prix, calendrier compris.
       script: script.value,
       scriptName: currentScriptName.value || '',
-      constats: JSON.parse(JSON.stringify(constatOverrides)),
+      // Les CONSTAT DÉCLARÉS seulement : une entrée dormante décrirait dans le
+      // résumé un échéancier que le produit ne porte plus.
+      constats: JSON.parse(JSON.stringify(_declares(constatOverrides, scriptConstats.value))),
       deal_ccy: globalParams.deal_ccy,
       funding: fundingCurve.enabled
         ? { mode: fundingCurve.mode, level: fundingCurve.level,
@@ -601,8 +676,25 @@ export const usePricingStore = defineStore('pricing', () => {
 
   /** Corps de requête de la valorisation en cours de vie — partagé par le
    *  prix et les Greeks, pour qu'ils décrivent forcément le même produit. */
+  /**
+   * Le corps d'une valorisation en cours de vie.
+   *
+   * Sur une VARIANTE d'avenant, il ne suffit pas d'envoyer ce que l'écran
+   * affiche : le serveur rejouerait alors tout le passé sous les termes
+   * nouveaux. Une barrière de rappel abaissée à 50 % trouverait une
+   * constatation passée au-dessus et conclurait au rappel anticipé — le prix
+   * d'une note déjà remboursée, ou un refus, selon les cas.
+   *
+   * Le corps porte donc les termes de l'ORIGINE — script, PARAM, calendrier —
+   * et le bloc `variant` porte ceux de l'écran. Le passé se rejoue sous les
+   * premiers, la vie restante se price sous les seconds. C'est cette asymétrie,
+   * et elle seule, qui interdit à une variante de réécrire l'histoire.
+   *
+   * Une note neuve (roll) n'a pas de passé : son contexte est déjà celui de
+   * l'écran, dates recalées comprises, et aucun bloc `variant` n'est nécessaire.
+   */
   function _inLifeBody() {
-    return {
+    return _avecTermesDOrigine({
       script: script.value,
       underlyings: _buildUls(),
       corr_matrix: _buildCorr(),
@@ -625,6 +717,34 @@ export const usePricingStore = defineStore('pricing', () => {
       ..._fundingPayload(),
       barrier_monitoring: globalParams.barrierMonitoring,
       ..._rateParams(),
+    })
+  }
+
+  /**
+   * Sépare les termes du rejeu de ceux du pricing, quand une variante est
+   * affichée. Hors variante, rend le corps inchangé.
+   *
+   * `base_pricing` vient du serveur (vue de variante) : il porte le script, les
+   * PARAM en unités MOTEUR et le calendrier de l'ORIGINE. Les recalculer ici
+   * demanderait de reparser le script du parent pour connaître ses `is_pct` —
+   * une seconde voie de conversion, donc une divergence de plus.
+   */
+  function _avecTermesDOrigine(corps) {
+    const v = variantInfo.value
+    if (!v?.base) return corps
+    return {
+      ...corps,
+      script: v.base.script,
+      user_params: v.base.user_params,
+      // Le serveur rend le calendrier de l'origine dans sa forme STOCKÉE :
+      // il passe par la même conversion que celui de l'écran.
+      constats: _constatsFrom(v.base.constats),
+      variant: {
+        script: corps.script,
+        user_params: corps.user_params,
+        constats: corps.constats,
+        mode: v.mode || 'avenant',
+      },
     }
   }
 
@@ -1277,6 +1397,7 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   function resetToDefaults() {
+    relacherVariante()
     currentScriptId.value   = null
     currentScriptName.value = ''
     script.value = DEFAULT_SCRIPT
@@ -1297,6 +1418,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // underlyings/corr, PARAM overrides — so Script/Marché & Paramètres/Deal/
   // Events all agree, instead of showing whatever was last being edited here.
   async function loadFromDeal(deal) {
+    relacherVariante()
     const market = deal.market_snapshot || {}
     currentScriptId.value   = deal.script_id || null
     currentScriptName.value = deal.reference
@@ -1391,6 +1513,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // builds at creation (single r/T/N/model, no Heston/SABR/curve fields) —
   // same defensive merge-over-defaults as loadFromDeal handles that fine.
   async function loadFromRfq(rfqObj) {
+    relacherVariante()
     const p = rfqObj.params || {}
     currentScriptId.value   = rfqObj.script_id || null
     currentScriptName.value = rfqObj.reference
@@ -1428,6 +1551,14 @@ export const usePricingStore = defineStore('pricing', () => {
       deal_ccy: p.currency || globalParams.deal_ccy,
       strike_date: p.strike_date || globalParams.strike_date,
       value_date: p.value_date || globalParams.value_date,
+      // La date de paiement AUSSI, et c'est la troisième du même term sheet :
+      // l'oublier laissait le champ vide dans le masque de booking, où une
+      // proposition en J+3 depuis la maturité venait le remplir. Cette date-là
+      // n'est pas celle de l'AO — et `payment_date` fait partie des termes
+      // contractuels gelés, donc le booking était refusé pour un écart que
+      // personne n'avait saisi. Elle date l'échange final des flux : elle se
+      // reprend, elle ne se recalcule pas.
+      payment_date: p.payment_date || globalParams.payment_date,
       // The whole point of landing in the Pricer is to re-run the price and
       // check it against the RFQ's — which only means something if the
       // simulation context matches too, not just the product. rfq.js's
@@ -1492,7 +1623,44 @@ export const usePricingStore = defineStore('pricing', () => {
     }
   }
 
+  /**
+   * Charge une VARIANTE : son contexte effectif, plus de quoi colorer.
+   *
+   * Le contexte arrive déjà résolu du serveur — parent + delta, et pour un
+   * roll, dates déjà recalées. L'écran ne refait aucune de ces opérations :
+   * les refaire ici ferait diverger ce qu'on affiche de ce qui price, et c'est
+   * exactement l'écart qu'on passe son temps à fermer ailleurs.
+   */
+  async function loadVariant(vue) {
+    const c = vue.contexte || {}
+    await loadFromDb({
+      id: vue.parent_id,
+      name: vue.name,
+      script_text: c.script_text || '',
+      params_json: JSON.stringify(c.params || {}),
+      constats_json: JSON.stringify(c.constats || {}),
+      global_params_json: JSON.stringify(c.global || {}),
+    })
+    // Après loadFromDb, qui vient de la remettre à null.
+    variantInfo.value = {
+      id: vue.id, parent_id: vue.parent_id,
+      title: vue.variant_title, mode: vue.variant_mode,
+      ecarts: vue.ecarts || [],
+      // Le delta ENREGISTRÉ, contre lequel se mesure ce que l'écran porte.
+      delta: vue.delta || { set: {}, removed: [] },
+      // Absent sur une note neuve : elle n'a pas de passé à rejouer.
+      base: vue.base_pricing || null,
+      // Le contexte de l'origine, contre lequel se calculent les écarts
+      // au moment d'enregistrer.
+      parent: vue.contexte_parent || null,
+    }
+  }
+
   async function loadFromDb(data) {
+    // Charger une ORIGINE efface toute variante affichée : sans ça, la barre
+    // de déclinaison survivrait à la navigation et colorerait des champs par
+    // rapport à un parent qui n'est plus à l'écran.
+    relacherVariante()
     currentScriptId.value   = data.id
     currentScriptName.value = data.name
     script.value = data.script_text
@@ -1578,6 +1746,110 @@ export const usePricingStore = defineStore('pricing', () => {
     }
   }
 
+  /**
+   * Enregistre la déclinaison affichée — en écrivant ses ÉCARTS, pas une copie.
+   *
+   * Sans ça, travailler sur une variante puis revenir dessus perdait tout :
+   * l'écran chargeait le contexte du serveur, qui ne portait aucune des
+   * modifications restées locales.
+   *
+   * Les écarts sont déduits en comparant l'état courant au contexte de
+   * l'origine — voir useVariantDelta pour ce qui compte comme un écart, et
+   * surtout pour ce qui n'en est pas un.
+   */
+  /**
+   * Les écarts que l'écran porte À CET INSTANT, contre l'origine.
+   *
+   * Dérivé plutôt que suivi à la main : un drapeau « modifié » qu'il faut
+   * penser à lever se désynchronise au premier champ ajouté, et c'est
+   * précisément le genre d'oubli qui fait perdre du travail sans un mot.
+   * Ici l'état ne peut pas mentir — il EST la comparaison.
+   */
+  const deltaCourant = computed(() => {
+    const v = variantInfo.value
+    if (!v?.parent) return null
+    return calculerDelta(v.parent, _contexteAPlat(), {
+      params: scriptParams.value.map(x => x.name),
+      constats: scriptConstats.value.map(x => x.name),
+    })
+  })
+
+  /**
+   * Le contexte courant, avec les sous-jacents dans la forme d'INSTANTANÉ.
+   *
+   * La fiche brute de l'écran ne porte pas sa courbe de dividende : celle-ci se
+   * DÉRIVE de `q` et du taux de décroissance, et seulement si la courbe est
+   * activée. Un titre ajouté à une note neuve arriverait donc au moteur sans
+   * dividende, avec un prix parfaitement plausible.
+   *
+   * On la dérive donc ici, dans la forme que `_engine_underlyings` sait relire
+   * côté serveur — celle que produit déjà `_snapshot_underlying` pour la
+   * valorisation en cours de vie. C'est ce qui permet au serveur de n'avoir
+   * QU'UN convertisseur : une seconde voie, même soignée, finit toujours par
+   * perdre un champ que la première gère.
+   */
+  /** Les entrées d'une table de surcharges dont le nom est encore déclaré. */
+  function _declares(surcharges, declarations) {
+    const noms = new Set(declarations.map(d => d.name))
+    return Object.fromEntries(
+      Object.entries(surcharges).filter(([nom]) => noms.has(nom)))
+  }
+
+  function _contexteAPlat() {
+    const ctx = contexteDepuisCorps(_scriptBody())
+    const uls = ctx.global?.underlyings
+    if (Array.isArray(uls)) {
+      ctx.global.underlyings = uls.map(u => ({
+        ...u,
+        dividendCurve: _buildDividendCurve(u),
+        dividendDecay: u.dividendCurveEnabled
+          ? Math.max(0, Math.min(100, Number(u.dividendDecay) || 0)) : 0,
+      }))
+    }
+    return ctx
+  }
+
+  /** Vrai quand l'écran diffère de ce qui est enregistré pour cette variante. */
+  const variantDirty = computed(() => {
+    const v = variantInfo.value
+    if (!v?.parent) return false
+    const enregistre = { set: v.delta?.set || {}, removed: v.delta?.removed || [] }
+    const courant = deltaCourant.value || { set: {}, removed: [] }
+    return JSON.stringify(_trie(courant)) !== JSON.stringify(_trie(enregistre))
+  })
+
+  // Les clés d'un objet JSON n'ont pas d'ordre garanti, et `removed` est une
+  // liste dont l'ordre ne porte rien : sans tri, deux deltas identiques
+  // paraîtraient différents et l'écran annoncerait des modifications fantômes.
+  function _trie(d) {
+    return {
+      set: Object.fromEntries(Object.entries(d.set || {}).sort()),
+      removed: [...(d.removed || [])].sort(),
+    }
+  }
+
+  async function saveVariant() {
+    const v = variantInfo.value
+    if (!v?.parent) throw new Error("Aucune déclinaison affichée.")
+    const delta = deltaCourant.value
+    if (!delta) throw new Error("Aucune déclinaison affichée.")
+
+    const res = await apiFetch(`/api/db/scripts/variants/${v.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delta }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || "Enregistrement refusé")
+    // On rafraîchit les écarts sans recharger l'écran : recharger écraserait
+    // ce que l'utilisateur vient de saisir par ce que le serveur en a compris,
+    // et un aller-retour invisible est le meilleur moyen de perdre une saisie.
+    variantInfo.value = { ...v, ecarts: data.ecarts || [],
+                          delta: data.delta || delta,
+                          base: data.base_pricing || v.base }
+    return data
+  }
+
   async function saveScript({ name, description = '', folderId = null, isShared = false, tags = '' }) {
     const res = await apiFetch('/api/db/scripts', {
       method: 'POST',
@@ -1641,6 +1913,11 @@ export const usePricingStore = defineStore('pricing', () => {
     comparator, comparatorError, comparatorLoading, runBacktestCompare, adoptBasket,
     loading, error, progress, yfStatus,
     currentScriptId, currentScriptName,
+    // Le corps que l'écran envoie pour SON prix. Exposé pour que la
+    // comparaison de variantes s'y adosse plutôt que d'en refaire un —
+    // deux voies de construction finiraient par classer des produits
+    // que l'écran ne price pas.
+    inLifeBody: _inLifeBody,
     currentIndicativeId, productTitle, ensureIndicative,
     currentRfqId, pendingDealPrefill, openedDeal,
     parseScript, runPricing, runGreeks,
@@ -1653,7 +1930,10 @@ export const usePricingStore = defineStore('pricing', () => {
     buildDividendCurve: _buildDividendCurve,
     loadYfOne, loadYfAll, loadStrikeCloses,
     addUnderlying, removeUnderlying,
-    resetToDefaults, loadFromDb, loadFromDeal, loadFromRfq, saveScript, updateScript,
+    resetToDefaults, loadFromDb, loadVariant, saveVariant, variantInfo,
+    relacherVariante,
+    variantDirty,
+    loadFromDeal, loadFromRfq, saveScript, updateScript,
     pricingBody: () => ({ ..._baseBody(), N: globalParams.N, antithetic: globalParams.antithetic, ..._rateParams() }),
   }
 })

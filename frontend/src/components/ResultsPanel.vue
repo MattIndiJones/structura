@@ -1,6 +1,7 @@
 <template>
   <!-- ── Tabs sans pricing requis ─────────────────────────────── -->
   <SummaryTab  v-if="tab === 'summary'" />
+  <VariantCompareTab v-else-if="tab === 'variants'" />
   <ProfileTab  v-else-if="tab === 'profile'" />
   <PathsTab    v-else-if="tab === 'paths'" />
   <ProbaTab    v-else-if="tab === 'proba'" />
@@ -47,6 +48,31 @@
       <div v-if="performancesPassees.length" class="text-[10px] text-slate-500 flex flex-wrap gap-x-3">
         <span v-for="perf in performancesPassees" :key="perf.nom" class="font-mono">
           {{ perf.nom }} {{ formatPercent(perf.valeur * 100, 1) }}
+        </span>
+      </div>
+
+      <!-- Ce que la déclinaison fait de l'état repris.
+           Abandonner la mémoire accumulée est une restructuration parfaitement
+           légitime — c'est même le levier principal quand on monétise le
+           coupon. Impossible de distinguer l'intention d'un renommage
+           étourdi : on ne refuse donc pas, on l'AFFICHE, à côté du prix qu'elle
+           a produit. Un fait tu vaut moins qu'un fait montré. -->
+      <div v-if="etatAbandonne.length"
+           class="mt-1 rounded border border-red-900/50 bg-red-950/20 px-2.5 py-2
+                  text-[10px] flex flex-col gap-1">
+        <span class="text-red-400 font-semibold uppercase tracking-wider">
+          ⚠ Cette déclinaison n'utilise plus {{ etatAbandonne.length }} variable(s)
+          d'état du passé
+        </span>
+        <span class="text-slate-400 flex flex-wrap gap-x-3 gap-y-0.5">
+          <span v-for="v in etatAbandonne" :key="v.nom" class="font-mono">
+            {{ v.nom }} <SensitiveValue>{{ formatNumber(v.valeur, 4) }}</SensitiveValue>
+          </span>
+        </span>
+        <span class="text-slate-500">
+          Ce que le détenteur avait accumulé sous ces variables ne lui est pas
+          versé. Voulu si vous monétisez le coupon ; à vérifier si vous avez
+          seulement renommé.
         </span>
       </div>
     </div>
@@ -481,6 +507,7 @@ import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import { chartTheme, applyChartTheme } from '../charts/theme.js'
 import { Chart, BarElement, BarController, CategoryScale, LinearScale, Tooltip } from 'chart.js'
 import SummaryTab from './SummaryTab.vue'
+import VariantCompareTab from './VariantCompareTab.vue'
 import ProfileTab  from './ProfileTab.vue'
 import PathsTab    from './PathsTab.vue'
 import ProbaTab    from './ProbaTab.vue'
@@ -705,6 +732,26 @@ onUnmounted(() => { if (histChart) histChart.destroy() })
 const etatRepris = computed(() =>
   Object.entries(store.result?.past?.memory || {})
     .map(([nom, valeur]) => ({ nom, valeur: Number(valeur) || 0 }))
+    .sort((a, b) => a.nom.localeCompare(b.nom))
+)
+
+/**
+ * Les variables d'état que la déclinaison affichée ne lit plus.
+ *
+ * Le serveur les rapporte dans `variant_state_check` — il ne refuse pas, parce
+ * qu'abandonner la mémoire est une restructuration légitime et qu'il ne peut
+ * pas distinguer l'intention d'un renommage. Ce rapport partait dans chaque
+ * réponse et n'était affiché nulle part : le mécanisme existait, testé, juste,
+ * et invisible. Un refus non affiché vaut un refus absent.
+ *
+ * On ne montre que celles qui sont ABANDONNÉES et qui portaient quelque chose :
+ * signaler « CPN 0,0000 non lu » est du bruit qui ferait ignorer la ligne le
+ * jour où elle dit « DUE 0,0667 non lu ».
+ */
+const etatAbandonne = computed(() =>
+  Object.entries(store.result?.variant_state_check || {})
+    .filter(([, v]) => !v.lu_par_la_variante && Math.abs(Number(v.valeur) || 0) > 1e-9)
+    .map(([nom, v]) => ({ nom, valeur: Number(v.valeur) || 0 }))
     .sort((a, b) => a.nom.localeCompare(b.nom))
 )
 

@@ -139,6 +139,23 @@ class Script(SQLModel, table=True):
     ai_model: str = Field(default="")
     ai_prompt: str = Field(default="")            # la description en français
     ai_generated_at: Optional[datetime] = Field(default=None)
+    # ── Filiation ───────────────────────────────────────────────────
+    # Une variante d'un deal existant : elle ne stocke QUE ses écarts, dans
+    # variant_delta_json, et hérite tout le reste de son parent à la lecture.
+    # Voir core/variants.py pour le pourquoi — en résumé : une copie ne peut pas
+    # distinguer « on l'a enlevé » de « il n'y a jamais été », donc elle ne peut
+    # pas afficher un retrait en grisé.
+    #
+    # Variantes à PLAT, un seul niveau : toutes rattachées à l'origine. Une
+    # variante de variante rendrait « différent de quoi ? » ambigu et la
+    # couleur illisible ; pour itérer, on duplique en sœur.
+    parent_id: Optional[int] = Field(default=None, foreign_key="scripts.id", index=True)
+    variant_title: str = Field(default="")
+    # 'avenant' (le contrat continue, seul l'avenir change) | 'roll' (débouclage
+    # et note neuve strikée aujourd'hui). Deux prix et deux économies, pas deux
+    # paramétrages — cf. build_residual.
+    variant_mode: str = Field(default="")
+    variant_delta_json: str = Field(default="{}")
 
 
 class Deal(SQLModel, table=True):

@@ -194,7 +194,7 @@ def profile_endpoint(req: ProfileRequest):
 
     try:
         res = run_payoff_profile(compiled, uls, corr, r_eff, T_eff,
-                                  req.user_params, state=etat)
+                                  analysis_user_params(req, ctx), state=etat)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     res["in_life"] = ctx is not None
@@ -202,6 +202,16 @@ def profile_endpoint(req: ProfileRequest):
         res["valuation_date"] = ctx.valuation.isoformat()
         res["years_remaining"] = round(ctx.T_remaining, 4)
     return res
+
+
+def analysis_user_params(req, ctx):
+    """Les PARAM que l'analytique doit employer.
+
+    Sur une jambe résiduelle d'avenant, ce sont ceux de la VARIANTE : la
+    requête, elle, porte les termes d'origine, qui n'ont servi qu'à rejouer le
+    passé. Hors variante les deux coïncident, donc rien ne bouge sur une
+    analytique ordinaire."""
+    return ctx.user_params if ctx is not None else req.user_params
 
 
 def residual_context_or_none(req):
@@ -214,8 +224,11 @@ def residual_context_or_none(req):
     maturity = getattr(req, "maturity_date", None)
     if not (valuation and strike and maturity and valuation > strike):
         return None
-    from .inlife import build_request_residual
-    ctx = build_request_residual(req)
+    from .inlife import build_request_residual, variant_terms_or_none
+    # La variante suit le prix jusque dans les analytiques : sans ça l'onglet
+    # Probabilités décrirait le produit d'origine sous un prix d'avenant, ce
+    # qui est exactement l'écart qu'on vient de fermer partout ailleurs.
+    ctx = build_request_residual(req, variant_terms_or_none(req))
     # Un rappel anticipé détecté dans le passé : il n'y a plus rien à analyser
     # sur la vie restante, on retombe sur l'analyse à l'émission.
     return None if ctx.residuel.early_recall else ctx
@@ -249,7 +262,7 @@ def paths_endpoint(req: PathsRequest):
             N_stat=req.N_stat,
             model=req.model,
             seed=req.seed,
-            user_params=req.user_params,
+            user_params=analysis_user_params(req, ctx),
             barrier_monitoring=req.barrier_monitoring,
             state=etat,
         )
@@ -289,7 +302,7 @@ def proba_endpoint(req: ProbaRequest):
             N=req.N,
             model=req.model,
             seed=req.seed,
-            user_params=req.user_params,
+            user_params=analysis_user_params(req, ctx),
             yield_curve=yc,
             barrier_monitoring=req.barrier_monitoring,
             state=etat,
@@ -343,7 +356,7 @@ def mtf_endpoint(req: MtfRequest):
             n_inner=req.n_inner,
             n_dates=req.n_dates,
             seed=req.seed,
-            user_params=req.user_params,
+            user_params=analysis_user_params(req, ctx),
             barrier_monitoring=req.barrier_monitoring,
             # Forwarded to be REFUSED, not honoured: the analysis is flat-rate
             # throughout. Dropping them here (which is what happened) priced the

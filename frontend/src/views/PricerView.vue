@@ -8,7 +8,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Pricer from './Pricer.vue'
 import { usePricingStore } from '../stores/pricing.js'
@@ -20,15 +20,42 @@ const store  = usePricingStore()
 const auth   = useAuthStore()
 const ready  = ref(false)
 
-onMounted(async () => {
-  const id = route.params.id
-  if (id) {
+async function charger() {
+  const { id, variantId } = route.params
+  if (variantId) {
+    await loadVariantFromDb(parseInt(variantId))
+  } else if (id) {
     await loadScriptFromDb(parseInt(id))
   } else {
     store.resetToDefaults()
   }
   ready.value = true
+}
+
+onMounted(charger)
+
+// Vue Router RÉUTILISE le composant quand deux routes le partagent : passer de
+// /pricer/5 à /pricer/v/3 ne remonte rien, donc onMounted ne rejoue pas. Sans
+// ce watch, cliquer « Origine » ou une autre déclinaison changeait l'URL et
+// laissait l'écran sur le produit précédent — et créer une variante n'ouvrait
+// jamais la variante créée.
+watch(() => [route.params.id, route.params.variantId], async () => {
+  ready.value = false
+  await charger()
 })
+
+async function loadVariantFromDb(id) {
+  // Le contexte arrive déjà résolu — parent + delta, et pour une note neuve,
+  // dates déjà recalées. Le refaire ici ferait diverger l'écran du prix.
+  try {
+    const res = await apiFetch(`/api/db/scripts/variants/${id}/resolved`,
+                               { headers: auth.authHeaders() })
+    if (!res.ok) { store.resetToDefaults(); return }
+    await store.loadVariant(await res.json())
+  } catch {
+    store.resetToDefaults()
+  }
+}
 
 async function loadScriptFromDb(id) {
   try {

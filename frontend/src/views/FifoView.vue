@@ -3,7 +3,7 @@
 
     <div class="page-header px-6 pt-6 pb-0 mb-0">
       <div class="flex items-center gap-3">
-        <RouterLink :to="{ path: '/', query: { category: 'studies' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
+        <BackLink :fallback="{ path: '/', query: { category: 'studies' } }" />
         <h1 class="page-title">Carnet d'ordres — FIFO</h1>
       </div>
       <div class="page-actions">
@@ -242,6 +242,7 @@
 </template>
 
 <script setup>
+import BackLink from '../components/ui/BackLink.vue'
 import { ref, computed } from 'vue'
 import { apiFetch } from '../utils/api.js'
 import { formatNumber, formatInt } from '../utils/format.js'

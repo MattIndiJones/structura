@@ -100,7 +100,11 @@ def _migrate():
             for col, ddl in (("ai_provider", "TEXT DEFAULT ''"),
                              ("ai_model", "TEXT DEFAULT ''"),
                              ("ai_prompt", "TEXT DEFAULT ''"),
-                             ("ai_generated_at", "DATETIME")):
+                             ("ai_generated_at", "DATETIME"),
+                             ("parent_id", "INTEGER"),
+                             ("variant_title", "TEXT DEFAULT ''"),
+                             ("variant_mode", "TEXT DEFAULT ''"),
+                             ("variant_delta_json", "TEXT DEFAULT '{}'")):
                 if col not in script_cols:
                     conn.execute(text(f"ALTER TABLE scripts ADD COLUMN {col} {ddl}"))
                     conn.commit()

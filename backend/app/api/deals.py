@@ -39,7 +39,7 @@ from ..core.rfq_controls import (
 )
 from ..core.workflow import (
     AmendmentStatus, DataCategory, FixingPolicy, FixingStatus, LifecycleStatus,
-    amendment_four_eyes_enabled,
+    QuoteFirmness, amendment_four_eyes_enabled,
 )
 from ..core.schemas import ReinvestScanRequest, ReinvestProposalRequest
 
@@ -371,7 +371,9 @@ def _derive_observation_times(body) -> List[float]:
     return sorted(t for t in times if t > 0)
 
 
-def _rfq_provenance(rfq, price_traded: float, session: Session) -> str:
+def _rfq_provenance(rfq, price_traded: float, session: Session,
+                    *, fermete_avant: str | None = None,
+                    firmness_affirmee_au_booking: bool = False) -> str:
     """Freeze the tender's competitive picture onto the deal: the retained
     response, every rival price it beat, and our own model price at the time.
     Stored as JSON on the deal (Deal.rfq_provenance_json) rather than looked
@@ -404,6 +406,17 @@ def _rfq_provenance(rfq, price_traded: float, session: Session) -> str:
             "provider": won.provider, "price": won.price,
             "is_last_look": won.parent_quote_id is not None,
             "quoted_at": won.quoted_at.isoformat() if won.quoted_at else None,
+            # D'où vient la fermeté : affirmée par la contrepartie avant le
+            # trade, ou par l'acte de booking lui-même. Six mois plus tard, les
+            # deux se lisent « FIRM » sur la quote — seules ces lignes les
+            # distinguent, et c'est la distinction qui a une valeur probante.
+            #
+            # `firmness_before_booking` porte le cas qui compte : une cotation
+            # marquée INDICATIVE et bookée quand même. Le booking ne s'y oppose
+            # plus, mais la piste d'audit doit continuer de le dire.
+            "firmness": won.firmness,
+            "firmness_before_booking": fermete_avant,
+            "firmness_asserted_at_booking": firmness_affirmee_au_booking,
         } if won else None,
         # Only final answers: a superseded quote is the same bank's earlier
         # price, not a competitor (see rfq.py:superseded_quote_ids).
@@ -441,7 +454,14 @@ def _deal_row(d: Deal, events: list | None = None) -> dict:
         "nominal": d.nominal,
         "fair_value": d.fair_value,
         "price_traded": d.price_traded,
-        "margin": round(d.price_traded - d.fair_value, 4),
+        # NOTRE marge, dans notre sens. `sens` décrit la CONTREPARTIE
+        # (« la banque vend »), donc nous sommes de l'autre côté : quand elle
+        # vend, nous achetons, et payer 98 un produit qui en vaut 100 nous fait
+        # gagner 2. La soustraction nue rendait −2 sur ce cas, et l'infobulle de
+        # l'écran décrivait pourtant le bon comportement.
+        "margin": round(
+            (d.fair_value - d.price_traded) if d.sens == "vente"
+            else (d.price_traded - d.fair_value), 4),
         "trade_date": d.trade_date,
         "strike_date": d.strike_date,
         "value_date": d.value_date,
@@ -1222,7 +1242,24 @@ def _book_deal(
             _validate_rfq_booking_identity(source_rfq, body, session)
         except HTTPException as exc:
             _reject_booking(session, current, body, exc.status_code, exc.detail)
-        rfq_provenance = _rfq_provenance(source_rfq, body.price_traded, session)
+
+        # Le booking qualifie la cotation retenue. Une quote encore « à
+        # qualifier » qui vient d'être tradée EST ferme — c'est le trade qui le
+        # dit. La laisser UNKNOWN ferait mentir l'analyse contrepartie, qui
+        # continuerait de compter comme non qualifié un prix sur lequel on a
+        # traité. La provenance garde d'où vient l'affirmation.
+        fermete_avant = selected.firmness if selected is not None else None
+        qualifiee_au_booking = (
+            selected is not None
+            and selected.firmness != QuoteFirmness.FIRM.value)
+        if qualifiee_au_booking:
+            selected.firmness = QuoteFirmness.FIRM.value
+            session.add(selected)
+
+        rfq_provenance = _rfq_provenance(
+            source_rfq, body.price_traded, session,
+            fermete_avant=fermete_avant,
+            firmness_affirmee_au_booking=qualifiee_au_booking)
 
     # A new deal's script and frozen CONSTAT values are the contract.  Client
     # Monte-Carlo grid points are never a safe booking fallback.
@@ -5399,7 +5436,12 @@ def _price_reinvest_candidate(compiled, base_ul: dict, r_frac: float, T: float, 
         "param_name": param_name, "solved_param": solved["param_value"],
         "price": proba["price"],
         "ki_pct": proba["ki_pct"], "autocall_pct": proba["autocall_pct"],
-        "capital_loss_pct": proba["capital_loss_pct"], "full_coupon_pct": proba["full_coupon_pct"],
+        # Le scan classe des candidats sur « récupère-t-on ce qu'on a payé ? » —
+        # une valeur présente contre le prix payé. C'est `net_loss_pct`, pas
+        # `capital_loss_pct`, qui répond lui à « récupère-t-on le pair ? » et se
+        # lit sur le flux nominal. Les deux étaient une seule mesure, et le
+        # défaut de référence à 1,0 la rendait fausse partout ailleurs.
+        "capital_loss_pct": proba["net_loss_pct"], "full_coupon_pct": proba["full_coupon_pct"],
     }
 
 

@@ -1533,6 +1533,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
     obs_times = sorted({step * dt for step in obs_steps})
 
     payoffs: list[float] = []
+    payoffs_raw: list[float] = []
     outcomes: list[str] = []
     stop_times: list[float | None] = []
     final_wofs: list[float] = []
@@ -1649,6 +1650,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
 
         pf = ctx["total_cf"]
         payoffs.append(pf)
+        payoffs_raw.append(ctx["total_cf_raw"])
         stop_times.append(stop_t)
         final_wofs.append(float(WOF[ts-1, path]) if ts > 0 else 1.0)
 
@@ -1664,6 +1666,11 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
 
     return {
         "payoffs": payoffs,
+        # Le même flux, NON actualisé. Il servait déjà à classer les issues
+        # (`total_cf_raw < 0.999` → perte) sans être rendu, si bien que les
+        # mesures d'aval n'avaient que la version actualisée sous la main et
+        # comparaient une valeur présente à un pair nominal.
+        "payoffs_raw": payoffs_raw,
         "outcomes": outcomes,
         "stop_times": stop_times,
         "final_wofs": final_wofs,
@@ -2535,10 +2542,12 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
                   r: float, T_max: float, N: int = 5000,
                   model: str = "constant", seed: int = 42, user_params=None,
                   yield_curve=None, barrier_monitoring: str = "weekly",
-                  capital_ref: float = 1.0, state: dict | None = None) -> dict:
+                  capital_ref: float | None = None, state: dict | None = None) -> dict:
     """Full MC run returning probability breakdown.
 
-    capital_ref: what "capital_loss_pct"/"full_coupon_pct" measure against.
+    capital_ref: le prix payé, contre lequel `net_loss_pct` se mesure — une
+        valeur présente comparée à une valeur présente. `capital_loss_pct`,
+        lui, ne s'en sert pas : il compare le flux NOMINAL au pair.
     Defaults to par (1.0) — correct for autocall/phoenix-style notes designed
     to price at par. For anything priced away from par (options, certificates
     — see the reinvestment scan, api/deals.py), pass the actual price paid
@@ -2620,7 +2629,16 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
     ki = sum(1 for o in det["outcomes"] if o == "ki")
     nm = sum(1 for o in det["outcomes"] if o == "normal")
 
-    event_counts = {round(step * dt, 4): cnt for step, cnt in det["event_step_counts"].items()}
+    # Les dates d'observation et les comptes de rappel sont appariés PAR LEUR
+    # CLÉ côté écran (event_counts[t] pour chaque t de obs_times). Les deux
+    # doivent donc être arrondis identiquement : `obs_times` sortait brut
+    # (0.019230769…) tandis que les clés étaient arrondies à 4 décimales, si
+    # bien que la recherche ratait dès qu'une date n'était pas ronde. Sur un
+    # calendrier mensuel, l'écran ne lisait que 23 rappels sur 58 — le graphe
+    # « P(rappel) par date » restait vide et le donut n'affichait que la perte,
+    # alors que le compteur annonçait 32 % de rappels.
+    _cle = lambda t: round(t, 4)
+    event_counts = {_cle(step * dt): cnt for step, cnt in det["event_step_counts"].items()}
 
     stop_ts = [st for st in det["stop_times"] if st is not None]
     expected_life = (sum(stop_ts) + (ki + nm) * T_max) / N_p
@@ -2630,15 +2648,34 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
     def perc(p: float) -> float:
         return round(ps[int(N_p * p)] * 100, 2)
 
-    # Two generic, payoff-shape-agnostic proxies used by the reinvestment
-    # candidate scan (see MEMORY investment-solution-module): capital loss =
-    # discounted payoff below capital_ref (doesn't distinguish PV timing from
-    # nominal loss, but needs no product-specific knowledge), full coupon =
-    # payoff within 0.5% of the best path observed (the "everything went
-    # right" tail).
-    max_payoff = ps[-1] if ps else 0.0
-    capital_loss_count = sum(1 for p in ps if p < capital_ref)
-    full_coupon_count = sum(1 for p in ps if max_payoff > 0 and p >= max_payoff * 0.995)
+    # ── Deux mesures distinctes, longtemps confondues en une ──
+    #
+    # `capital_loss_pct` répond à « le détenteur récupère-t-il le pair ? ».
+    # C'est une question NOMINALE : elle se lit sur le flux non actualisé,
+    # exactement comme le classement des issues quelques lignes plus haut. Elle
+    # se lisait sur le flux ACTUALISÉ, comparé à un pair de 1,0 — si bien qu'un
+    # produit à capital 100 % garanti annonçait 100 % de perte en capital, la
+    # valeur actualisée du pair étant inférieure au pair à tout taux positif.
+    #
+    # `net_loss_pct` répond à « le détenteur récupère-t-il ce qu'il a payé ? ».
+    # C'est une question de VALEUR : elle compare la valeur présente du payoff
+    # au prix payé (`capital_ref`), deux grandeurs de même nature. C'est celle
+    # dont le scan de réinvestissement a besoin pour classer des candidats, et
+    # c'est pour elle que ce code avait été écrit — le défaut venait du DÉFAUT
+    # de `capital_ref` à 1,0, qui la détournait en comparaison au pair.
+    raw = sorted(det["payoffs_raw"])
+    max_payoff = raw[-1] if raw else 0.0
+    capital_loss_count = sum(1 for p in raw if p < 1.0)
+    # Sans prix de référence, la perte nette n'a pas de sens : la comparer au
+    # pair nominal recréerait exactement le défaut qu'on vient de corriger, une
+    # valeur présente jugée contre un montant nominal. Elle est alors ABSENTE
+    # plutôt que fausse — un écran ne peut pas afficher ce qu'on ne lui donne pas.
+    net_loss_count = (sum(1 for p in ps if p < capital_ref)
+                      if capital_ref is not None else None)
+    # « Tout s'est bien passé » : à 0,5 % du meilleur chemin OBSERVÉ. Mesure
+    # relative à l'échantillon, donc comparable entre candidats d'un même scan
+    # mais pas d'une simulation à l'autre — l'écran doit le dire.
+    full_coupon_count = sum(1 for p in raw if max_payoff > 0 and p >= max_payoff * 0.995)
 
     return {
         "has_autocall": det["has_autocall"],
@@ -2646,7 +2683,7 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
         "ki_count": ki,
         "normal_count": nm,
         "total": N_p,
-        "obs_times": sorted(det["obs_times"]),
+        "obs_times": sorted(_cle(t) for t in det["obs_times"]),
         "event_counts": event_counts,
         "expected_life": round(expected_life, 3),
         "final_wofs": [round(w * 100, 2) for w in det["final_wofs"]],
@@ -2660,6 +2697,8 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
         "ki_pct": round(ki / N_p * 100, 1),
         "autocall_pct": round(ac / N_p * 100, 1),
         "capital_loss_pct": round(capital_loss_count / N_p * 100, 1),
+        "net_loss_pct": (round(net_loss_count / N_p * 100, 1)
+                         if net_loss_count is not None else None),
         "full_coupon_pct": round(full_coupon_count / N_p * 100, 1),
     }
 

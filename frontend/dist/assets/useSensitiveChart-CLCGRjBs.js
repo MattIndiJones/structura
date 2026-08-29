@@ -1,1 +1,0 @@
-function p(s={},c){var l;if(!c)return s;const t=Object.keys(s.scales||{}),i=t.length?t:["x","y"],e={};for(const n of i){const o=(s.scales||{})[n]||{};e[n]={...o,ticks:{...o.ticks||{},display:!1}}}return{...s,scales:e,plugins:{...s.plugins,tooltip:{...(l=s.plugins)==null?void 0:l.tooltip,enabled:!1}}}}export{p as d};

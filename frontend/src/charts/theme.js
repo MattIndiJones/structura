@@ -82,15 +82,30 @@ export function applyChartTheme(Chart) {
   Chart.defaults.scale.ticks.color = chartTheme.ticks
   Chart.defaults.scale.border.color = chartTheme.border
 
-  Chart.defaults.plugins.legend.labels.color = chartTheme.ticks
-  Chart.defaults.plugins.legend.labels.font = { size: 10 }
+  // Un plugin n'a de `defaults` qu'une fois ENREGISTRÉ, et chaque écran
+  // n'enregistre que ce qu'il utilise. Écrire à l'aveugle marchait tant que
+  // les cartes ne vivaient que dans le Pricer, où un autre graphe enregistrait
+  // Legend avant elles ; réutilisées dans l'appel d'offres, où personne ne le
+  // fait, elles mouraient sur un TypeError au setup — carte entièrement
+  // absente, et rien dans l'écran pour dire pourquoi.
+  //
+  // Habiller ce qui est là libère le thème de l'ordre d'enregistrement, donc
+  // d'un couplage entre des écrans sans rapport les uns avec les autres.
+  const legende = Chart.defaults.plugins.legend
+  if (legende) {
+    legende.labels.color = chartTheme.ticks
+    legende.labels.font = { size: 10 }
+  }
 
-  Chart.defaults.plugins.tooltip.backgroundColor = chartTheme.surface
-  Chart.defaults.plugins.tooltip.borderColor = chartTheme.border
-  Chart.defaults.plugins.tooltip.borderWidth = 1
-  Chart.defaults.plugins.tooltip.titleColor = chartTheme.ink
-  Chart.defaults.plugins.tooltip.bodyColor = chartTheme.ink
-  Chart.defaults.plugins.tooltip.padding = 8
-  Chart.defaults.plugins.tooltip.cornerRadius = 8
-  Chart.defaults.plugins.tooltip.boxPadding = 4
+  const infobulle = Chart.defaults.plugins.tooltip
+  if (infobulle) {
+    infobulle.backgroundColor = chartTheme.surface
+    infobulle.borderColor = chartTheme.border
+    infobulle.borderWidth = 1
+    infobulle.titleColor = chartTheme.ink
+    infobulle.bodyColor = chartTheme.ink
+    infobulle.padding = 8
+    infobulle.cornerRadius = 8
+    infobulle.boxPadding = 4
+  }
 }

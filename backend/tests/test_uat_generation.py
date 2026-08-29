@@ -139,7 +139,11 @@ def test_rfq_control_mix_builds_expected_non_bookable_cases():
         )})
     assert codes_by_index[0] == set()
     assert "QUOTE_EXPIRED" in codes_by_index[1]
-    assert "QUOTE_NOT_FIRM" in codes_by_index[2]
+    # Le scénario INDICATIVE reste généré — c'est un état de donnée réel —
+    # mais il ne bloque plus le booking : aucune étiquette de fermeté ne le
+    # fait depuis le 29/08/2026. Ce qu'il valait est conservé dans la
+    # provenance du deal, pas opposé au desk.
+    assert codes_by_index[2] == set()
     assert "QUOTE_NOT_SELECTED" in codes_by_index[3]
 
 
@@ -316,3 +320,46 @@ def test_periodic_historical_profile_rejects_non_periodic_product_selection():
         ), session)
     assert exc.value.status_code == 422
     assert "Athena ou Phoenix" in str(exc.value.detail)
+
+
+@pytest.mark.parametrize("jour", [
+    pytest.param(date(2026, 8, 24), id="lundi"),
+    pytest.param(date(2026, 8, 26), id="mercredi"),
+    pytest.param(date(2026, 8, 28), id="vendredi"),
+    pytest.param(date(2026, 8, 29), id="samedi"),
+    pytest.param(date(2026, 8, 30), id="dimanche"),
+])
+def test_le_lot_de_controle_reste_bookable_quel_que_soit_le_jour(monkeypatch, jour):
+    """Régression : la RFQ propre du lot de contrôle vieillissait le week-end.
+
+    `_profile_dates` cale ses dates sur un jour ouvré en RECULANT. Le profil
+    CURRENT_ACTIVE pose `trade = today` — délibérément, pour garder une RFQ
+    fraîche et bookable dans le lot — puis se fait ramener au vendredi dès qu'on
+    génère un samedi. La garde d'ancienneté comparait ce jour ouvré à une date
+    CALENDAIRE : la RFQ était donc vieillie, et sortait avec QUOTE_EXPIRED et
+    MODEL_PRICE_STALE.
+
+    Le défaut ne se voyait ni le lundi ni le jeudi. Ce test parcourt la semaine
+    entière, parce qu'un cas nominal en semaine passerait sans rien prouver.
+    """
+    import backend.app.services.uat_generation as gen
+
+    class _Date(date):
+        @classmethod
+        def today(cls):
+            return jour
+    monkeypatch.setattr(gen, "date", _Date)
+
+    session, admin, target = _session_and_users()
+    batch = generate_batch(_request(
+        target, mode="RFQ_ONLY", count=4, quotes_per_rfq=1,
+        rfq_profile="CONTROL_MIX"), admin, session)
+    rfqs = session.exec(select(RfqRequest).where(
+        RfqRequest.uat_batch_id == batch["id"]).order_by(RfqRequest.created_at)).all()
+
+    selected = session.get(RfqQuote, rfqs[0].selected_quote_id)
+    codes = {f.code for f in booking_gate_failures(
+        rfqs[0], selected,
+        expected_counterparty=selected.provider,
+        requested_counterparty=selected.provider)}
+    assert codes == set(), f"généré un {jour:%A} : {sorted(codes)}"

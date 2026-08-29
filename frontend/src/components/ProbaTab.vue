@@ -166,6 +166,41 @@ const vanillaStats = computed(() => {
   ]
 })
 
+/**
+ * Assez de décimales pour que deux dates d'observation ne portent pas le même
+ * libellé. Une seule suffisait pour du trimestriel ; du mensuel affichait
+ * « T=0,3Y » deux fois de suite, et l'axe devenait illisible.
+ */
+function precisionDates(times) {
+  for (const d of [1, 2, 3]) {
+    if (new Set(times.map(t => t.toFixed(d))).size === times.length) return d
+  }
+  return 3
+}
+
+function libelleDate(t, decimales) {
+  return `T=${t.toLocaleString('fr-FR', { minimumFractionDigits: decimales,
+                                          maximumFractionDigits: decimales })}Y`
+}
+
+/**
+ * Une couleur par date, quel qu'en soit le nombre.
+ *
+ * La palette était figée à six teintes : au-delà, `backgroundColor` valait
+ * undefined et les barres devenaient TRANSPARENTES. Sur un calendrier mensuel,
+ * plus de la moitié du graphe manquait sans que rien ne le signale.
+ */
+function rampeRappel(n) {
+  const base = ['#14603a', '#1a7a4a', '#2f9d61', '#4cb883', '#7fd0a5', '#a8e0c2']
+  if (n <= base.length) return base.slice(0, n)
+  // Dégradé continu du plus foncé au plus clair, pour que l'ordre des dates
+  // reste lisible dans la légende.
+  return Array.from({ length: n }, (_, i) => {
+    const x = (i / (n - 1)) * (base.length - 1)
+    return base[Math.min(base.length - 1, Math.round(x))]
+  })
+}
+
 async function renderCharts() {
   await nextTick()
   if (!store.proba || !donutCanvas.value || !barCanvas.value) return
@@ -184,8 +219,9 @@ async function renderCharts() {
 
   if (has_autocall) {
     // Donut: per-date autocall + ki + normal
-    const acColors = ['#14603a','#1a7a4a','#2f9d61','#4cb883','#7fd0a5','#a8e0c2']
-    const acLabels = obs_times.map(t => `Rappel T=${t.toFixed(1)}Y`)
+    const acColors = rampeRappel(obs_times.length)
+    const dec = precisionDates(obs_times)
+    const acLabels = obs_times.map(t => `Rappel ${libelleDate(t, dec)}`)
     const acData   = obs_times.map(t => ec[t] || 0)
 
     donutChart = new Chart(donutCanvas.value, {
@@ -194,7 +230,7 @@ async function renderCharts() {
         labels: [...acLabels, 'Remboursement normal', 'Perte en capital'],
         datasets: [{
           data: [...acData, normal_count, ki_count],
-          backgroundColor: [...acColors.slice(0, obs_times.length), chartTheme.ticks, chartTheme.negative],
+          backgroundColor: [...acColors, chartTheme.ticks, chartTheme.negative],
           borderWidth: 1.5, borderColor: chartTheme.surface,
         }],
       },
@@ -214,7 +250,7 @@ async function renderCharts() {
     barChart = new Chart(barCanvas.value, {
       type: 'bar',
       data: {
-        labels: obs_times.map(t => `T=${t.toFixed(1)}Y`),
+        labels: obs_times.map(t => libelleDate(t, dec)),
         datasets: [{ label: 'P(rappel)', data: barData, backgroundColor: acColors, borderRadius: 4 }],
       },
       options: demoChartOptions({

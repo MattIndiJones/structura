@@ -158,7 +158,9 @@ async function relaunchBatch(b) {
 }
 
 async function deleteBatch(b) {
-  if (!confirm(`Supprimer le batch "${b.label}" (${b.total_jobs} jobs) ? Irréversible.`)) return
+  if (!await confirmer({ titre: `Supprimer le batch « ${b.label} » ?`,
+                       message: `${b.total_jobs} job(s) seront supprimés. Irréversible.`,
+                       confirmer: 'Supprimer le batch', danger: true })) return
   b.busy = true
   error.value = ''
   notice.value = ''

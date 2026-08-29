@@ -3,7 +3,7 @@
 
     <div class="page-header px-6 pt-6 pb-0 mb-0">
       <div class="flex items-center gap-3">
-        <RouterLink :to="{ path: '/', query: { category: 'pricing' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
+        <BackLink :fallback="{ path: '/', query: { category: 'pricing' } }" />
         <h1 class="page-title">Mes Scripts</h1>
       </div>
       <div class="page-actions">
@@ -107,6 +107,15 @@
                 </div>
                 <div v-if="s.description" class="text-xs text-slate-500 truncate mt-0.5">{{ s.description }}</div>
               </div>
+              <!-- Une origine à déclinaisons se distingue AVANT d'être
+                   ouverte : sans ça on rouvre le deal en croyant ouvrir la
+                   variante sur laquelle on travaillait. -->
+              <button v-if="s.variant_count" class="badge shrink-0 bg-amber-500/15 text-amber-400
+                             border border-amber-600/40 hover:bg-amber-500/25 transition-colors"
+                      :title="`${s.variant_count} déclinaison(s)`"
+                      @click.stop="basculerVariantes(s)">
+                ⑂ {{ s.variant_count }} {{ ouvert === s.id ? '▲' : '▼' }}
+              </button>
               <span v-if="s.is_shared" class="badge badge-positive shrink-0">Partagé</span>
               <span v-if="s.user_id !== auth.user?.id" class="badge badge-muted shrink-0">{{ s.owner }}</span>
             </div>
@@ -115,6 +124,38 @@
             <div v-if="s.tags" class="flex flex-wrap gap-1">
               <span v-for="tag in s.tags.split(',').filter(Boolean)" :key="tag"
                     class="text-[10px] bg-slate-800 text-slate-400 rounded px-1.5 py-0.5">{{ tag.trim() }}</span>
+            </div>
+
+            <!-- Sous-onglets : l'origine d'abord, toujours, puis chaque
+                 déclinaison avec son titre et son mode. -->
+            <div v-if="ouvert === s.id" class="flex flex-col gap-1 rounded border border-slate-800
+                                                bg-slate-900/60 p-2" @click.stop>
+              <button class="text-left text-[11px] px-2 py-1 rounded text-slate-300
+                             hover:bg-slate-800 transition-colors"
+                      @click="openScript(s.id)">
+                Origine — {{ s.name }}
+              </button>
+              <button v-for="v in (variantesPar[s.id] || [])" :key="v.id"
+                      class="text-left text-[11px] px-2 py-1 rounded text-slate-400
+                             hover:bg-slate-800 hover:text-slate-200 transition-colors
+                             flex items-center gap-1.5"
+                      @click="router.push(`/pricer/v/${v.id}`)">
+                <span class="flex-1 truncate">{{ v.variant_title }}</span>
+                <span class="text-[9px] px-1 py-px rounded uppercase tracking-wide shrink-0"
+                      :class="v.variant_mode === 'roll'
+                        ? 'bg-violet-500/20 text-violet-300' : 'bg-slate-700 text-slate-500'">
+                  {{ v.variant_mode === 'roll' ? 'note neuve' : 'avenant' }}
+                </span>
+                <span v-if="v.ecarts?.length" class="text-[9px] text-amber-400 shrink-0">
+                  {{ v.ecarts.length }} △
+                </span>
+                <span class="text-slate-600 hover:text-red-400 text-[10px] shrink-0"
+                      :title="`Supprimer « ${v.variant_title} »`"
+                      @click.stop="supprimerVariante(s, v)">✕</span>
+              </button>
+              <div v-if="!(variantesPar[s.id] || []).length" class="text-[10px] text-slate-600 px-2">
+                Chargement…
+              </div>
             </div>
 
             <!-- Footer -->
@@ -148,10 +189,12 @@
 </template>
 
 <script setup>
+import BackLink from '../components/ui/BackLink.vue'
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
+import { confirmer } from '../composables/useConfirm.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import DataFilterBar from '../components/ui/DataFilterBar.vue'
@@ -178,6 +221,22 @@ const newFolder = ref({ active: false, name: '', parentId: null })
 // Rename folder modal
 const renameFolderInput = ref(null)
 const renameFolder = ref({ active: false, id: null, name: '' })
+
+// Déclinaisons dépliées. Chargées à la demande : les remonter avec la liste
+// ferait un appel par carte pour une information que l'on ne regarde que sur
+// une carte à la fois.
+const ouvert = ref(null)
+const variantesPar = ref({})
+
+async function basculerVariantes(s) {
+  if (ouvert.value === s.id) { ouvert.value = null; return }
+  ouvert.value = s.id
+  if (variantesPar.value[s.id]) return
+  try {
+    const res = await apiFetch(`/api/db/scripts/${s.id}/variants`, { headers: auth.authHeaders() })
+    if (res.ok) variantesPar.value = { ...variantesPar.value, [s.id]: await res.json() }
+  } catch { /* la carte reste dépliée, vide — l'origine reste ouvrable */ }
+}
 
 // ── Computed ───────────────────────────────────────────────────────
 const folderTree = computed(() => {
@@ -280,7 +339,9 @@ async function saveRename() {
 }
 
 async function deleteFolder(id) {
-  if (!confirm('Supprimer ce dossier ? Les sous-dossiers seront remontés.')) return
+  if (!await confirmer({ titre: 'Supprimer ce dossier ?',
+                       message: "Les sous-dossiers seront remontés d'un niveau.",
+                       confirmer: 'Supprimer', danger: true })) return
   error.value = ''
   notice.value = ''
   try {
@@ -300,14 +361,65 @@ function openScript(id) {
 }
 
 async function deleteScript(id) {
-  if (!confirm('Supprimer ce script ?')) return
+  if (!await confirmer({ titre: 'Supprimer ce script ?',
+                       confirmer: 'Supprimer', danger: true })) return
+  await _supprimer(id, false)
+}
+
+/**
+ * Le serveur refuse (409) de supprimer une origine qui porte des déclinaisons,
+ * et dit lesquelles. On relaie sa phrase plutôt que d'en inventer une : elle
+ * les nomme, ce qu'un message générique ne ferait pas. La cascade n'est tentée
+ * que si l'utilisateur a lu ça et confirmé.
+ */
+async function _supprimer(id, cascade) {
   error.value = ''
   notice.value = ''
   try {
-    const res = await apiFetch(`/api/db/scripts/${id}`, { method: 'DELETE', headers: auth.authHeaders() })
+    const url = `/api/db/scripts/${id}${cascade ? '?cascade=true' : ''}`
+    const res = await apiFetch(url, { method: 'DELETE', headers: auth.authHeaders() })
+    if (res.status === 409 && !cascade) {
+      const detail = (await res.json().catch(() => ({}))).detail || ''
+      if (await confirmer({
+        titre: 'Ce deal porte des déclinaisons',
+        // Le serveur les NOMME : reproduire sa phrase vaut mieux que la
+        // résumer, sinon on confirme une cascade à l'aveugle.
+        detail,
+        confirmer: 'Supprimer le deal et ses déclinaisons', danger: true })) {
+        return _supprimer(id, true)
+      }
+      return
+    }
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')
     scripts.value = scripts.value.filter(s => s.id !== id)
-    notice.value = 'Script supprimé'
+    if (ouvert.value === id) ouvert.value = null
+    notice.value = cascade ? 'Deal et déclinaisons supprimés' : 'Script supprimé'
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function supprimerVariante(parent, v) {
+  if (!await confirmer({
+    titre: `Supprimer « ${v.variant_title} » ?`,
+    message: "Son origine et les autres déclinaisons ne sont pas affectées.",
+    confirmer: 'Supprimer', danger: true })) return
+  error.value = ''
+  notice.value = ''
+  try {
+    const res = await apiFetch(`/api/db/scripts/${v.id}`,
+                               { method: 'DELETE', headers: auth.authHeaders() })
+    if (!res.ok && res.status !== 204) {
+      throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')
+    }
+    variantesPar.value = { ...variantesPar.value,
+                           [parent.id]: (variantesPar.value[parent.id] || []).filter(x => x.id !== v.id) }
+    const idx = scripts.value.findIndex(x => x.id === parent.id)
+    if (idx !== -1) {
+      scripts.value[idx] = { ...scripts.value[idx],
+                             variant_count: Math.max(0, (scripts.value[idx].variant_count || 1) - 1) }
+    }
+    notice.value = 'Déclinaison supprimée'
   } catch (e) {
     error.value = e.message
   }

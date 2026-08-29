@@ -57,12 +57,19 @@ def _check_param_exists(compiled, param_name: str):
 @router.post("/solve")
 def solve_endpoint(req: SolverRequest):
     """Bisection solve: find the PARAM value that hits a target price."""
+    from .pricing import analysis_user_params
     compiled, uls, corr, T_eff, r_eff, etat, yc, ctx = _parse_and_validate(req)
     _check_param_exists(compiled, req.param_name)
 
     try:
         res = solve_for_param(
-            compiled, uls, corr, r_eff, T_eff, req.model, req.seed, req.user_params,
+            compiled, uls, corr, r_eff, T_eff, req.model, req.seed,
+            # Les PARAM de la vie restante. `compiled` porte ceux de la
+            # variante quand elle change le SCRIPT ; un delta qui ne change
+            # qu'un PARAM ne passait par aucun des deux, et le solveur
+            # comme la grille repriçaient l'origine sous étiquette de
+            # variante.
+            analysis_user_params(req, ctx),
             req.param_name, req.target_price, req.lo, req.hi,
             N=req.N, tol=req.tol, max_iter=req.max_iter,
             yield_curve=yc, sigma_r=req.sigma_r, a_r=req.a_r,
@@ -80,6 +87,7 @@ def solve_endpoint(req: SolverRequest):
 @router.post("/grid")
 def grid_endpoint(req: GridRequest):
     """2D price heatmap over two PARAM ranges."""
+    from .pricing import analysis_user_params
     compiled, uls, corr, T_eff, r_eff, etat, yc, ctx = _parse_and_validate(req)
     _check_param_exists(compiled, req.param_x)
     _check_param_exists(compiled, req.param_y)
@@ -89,7 +97,13 @@ def grid_endpoint(req: GridRequest):
 
     try:
         res = compute_price_grid(
-            compiled, uls, corr, r_eff, T_eff, req.model, req.seed, req.user_params,
+            compiled, uls, corr, r_eff, T_eff, req.model, req.seed,
+            # Les PARAM de la vie restante. `compiled` porte ceux de la
+            # variante quand elle change le SCRIPT ; un delta qui ne change
+            # qu'un PARAM ne passait par aucun des deux, et le solveur
+            # comme la grille repriçaient l'origine sous étiquette de
+            # variante.
+            analysis_user_params(req, ctx),
             req.param_x, req.x_min, req.x_max, req.x_steps,
             req.param_y, req.y_min, req.y_max, req.y_steps,
             N=req.N,

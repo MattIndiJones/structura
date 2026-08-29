@@ -6,11 +6,12 @@ import json
 import os
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
+
+from dateutil.relativedelta import relativedelta
 from typing import Any
 
 from ..db.models import RfqQuote, RfqRequest
 from .payscript.parser import parse_script, resolve_constats
-from .workflow import QuoteFirmness
 
 
 MODEL_PRICE_MAX_AGE_MINUTES = max(
@@ -102,6 +103,34 @@ def _valid_iso_date(value: Any) -> bool:
         return False
 
 
+def maturity_iso(params: dict) -> str | None:
+    """La date de la DERNIÈRE CONSTATATION — la fin du produit.
+
+    Le calendrier fait foi quand il existe : c'est le term sheet. Sans lui — un
+    script qui dit `AT 3:` sans CONSTAT — la maturité se compte depuis le
+    strike, parce que c'est là que la diffusion démarre, pas au règlement.
+
+    Cette seconde voie est approchée sur la partie fractionnaire de T ; elle ne
+    sert qu'à un contrôle de cohérence, jamais à un prix. Quelques jours d'écart
+    n'y changent rien : ce qu'on cherche à attraper se compte en années.
+    """
+    dates = [
+        str(v.get("end_date") or v.get("date") or "")
+        for v in (params.get("constats") or {}).values() if isinstance(v, dict)
+    ]
+    dates = [d for d in dates if _valid_iso_date(d)]
+    if dates:
+        return max(dates)
+
+    strike, tenor = params.get("strike_date"), params.get("T")
+    if (_valid_iso_date(strike) and isinstance(tenor, (int, float))
+            and not isinstance(tenor, bool) and tenor > 0):
+        entier = int(tenor)
+        depart = date.fromisoformat(str(strike)) + relativedelta(years=entier)
+        return (depart + timedelta(days=round((tenor - entier) * 365.25))).isoformat()
+    return None
+
+
 def rfq_readiness_failures(rfq: RfqRequest) -> list[ControlFailure]:
     """Validate the minimum executable product definition persisted on an RFQ."""
     failures: list[ControlFailure] = []
@@ -157,6 +186,24 @@ def rfq_readiness_failures(rfq: RfqRequest) -> list[ControlFailure]:
         failures.append(ControlFailure(
             "DATES_OUT_OF_ORDER",
             f"La date de paiement ({_payment}) précède la date de valeur ({_value})."))
+    # Et le règlement final ne peut pas précéder la DERNIÈRE CONSTATATION.
+    #
+    # Le contrôle ci-dessus compare à la date de valeur, ce qui laissait passer
+    # une maturité 2029 réglée en 2026 : trois ans d'écart, invisibles jusqu'au
+    # booking, où le deal — qui calcule sa date de paiement depuis la maturité,
+    # lui — divergeait des termes gelés de l'AO. Le refus tombait alors sur
+    # `payment_date` sans dire lequel des deux avait tort.
+    #
+    # Le booking porte déjà ce contrôle (deals.py). L'AO ne l'avait pas : c'est
+    # cette asymétrie qui a produit un AO impossible à booker et impossible à
+    # corriger, ses termes étant gelés par les cotations reçues.
+    _maturite = maturity_iso(params)
+    if _maturite and _valid_iso_date(_payment) and _payment < _maturite:
+        failures.append(ControlFailure(
+            "PAYMENT_BEFORE_MATURITY",
+            f"La date de paiement ({_payment}) précède la maturité ({_maturite}) : "
+            f"le remboursement final ne peut pas tomber avant la dernière constatation."))
+
     tenor = params.get("T")
     if not isinstance(tenor, (int, float)) or isinstance(tenor, bool) or tenor <= 0:
         failures.append(ControlFailure("TENOR_INVALID", "La maturité T de la RFQ doit être positive."))
@@ -201,9 +248,17 @@ def booking_gate_failures(
         if selected.status != "recu":
             failures.append(ControlFailure(
                 "QUOTE_STATUS_INVALID", "La quote sélectionnée n'est pas au statut reçu."))
-        if selected.firmness != QuoteFirmness.FIRM.value:
-            failures.append(ControlFailure(
-                "QUOTE_NOT_FIRM", "La quote sélectionnée doit être explicitement ferme."))
+        # AUCUN contrôle de fermeté ici — décision de Philippe, 29/08/2026.
+        #
+        # Retenir une cotation puis décider de la booker EST l'affirmation
+        # qu'elle engage la contrepartie. Exiger en plus une étiquette bloquait
+        # le booking de la solution retenue sur un mot, sans rien apprendre à
+        # personne : celui qui traite sait s'il traite.
+        #
+        # Le champ n'est pas perdu pour autant. Le booking qualifie la
+        # cotation en FIRM et la provenance garde ce qu'elle valait AVANT
+        # (voir deals.py) : « bookée alors qu'elle était marquée indicative »
+        # reste lisible dans la piste d'audit, sans avoir arrêté le desk.
         if selected.valid_until is None:
             failures.append(ControlFailure(
                 "QUOTE_VALIDITY_UNKNOWN", "La validité de la quote sélectionnée est inconnue."))

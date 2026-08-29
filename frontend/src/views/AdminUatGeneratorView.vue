@@ -395,7 +395,10 @@ async function previewBatch() {
 
 async function generateBatch() {
   if (!preview.value) return
-  if (!confirm(`Générer ${preview.value.rfq_count} RFQ et ${dealCountLabel(preview.value.deal_count)} UAT pour ce compte ?`)) return
+  if (!await confirmer({ titre: 'Générer ce jeu de test ?',
+                       message: `${preview.value.rfq_count} RFQ et `
+                              + `${dealCountLabel(preview.value.deal_count)} seront créés sur ce compte.`,
+                       confirmer: 'Générer' })) return
   generating.value = true
   error.value = ''
   notice.value = ''
@@ -424,7 +427,10 @@ async function refreshBatches() {
 }
 
 async function deleteBatch(batch) {
-  if (!confirm(`Supprimer uniquement les ${batch.rfq_count} RFQ et ${dealCountLabel(batch.deal_count)} du lot ${batch.batch_key} ?`)) return
+  if (!await confirmer({ titre: `Supprimer le lot ${batch.batch_key} ?`,
+                       message: `${batch.rfq_count} RFQ et `
+                              + `${dealCountLabel(batch.deal_count)} de ce lot seulement.`,
+                       confirmer: 'Supprimer le lot', danger: true })) return
   batch.busy = true
   error.value = ''
   notice.value = ''

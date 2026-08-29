@@ -23,7 +23,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.api import deals as deals_api
 from backend.app.api import rfq as rfq_api
-from backend.app.db.models import Counterparty, RfqProvider, RfqQuote, RfqRequest
+from backend.app.db.models import Counterparty, Deal, RfqProvider, RfqQuote, RfqRequest
 from backend.app.core.references import next_reference
 from backend.app.core.rfq_controls import pricing_input_hash
 
@@ -267,7 +267,7 @@ def _booking_body(**over):
     return deals_api.DealCreate(**base)
 
 
-def _book_deal(body, current, s):
+def _book_deal(body, current, s, fermete="FIRM"):
     """Upgrade legacy success fixtures to the now-explicit execution contract.
 
     Tests that exercise missing/foreign/unselected RFQs remain untouched: only
@@ -294,7 +294,7 @@ def _book_deal(body, current, s):
             rfq.model_price = rfq.model_price or body.fair_value
             rfq.model_price_at = datetime.utcnow()
             rfq.model_input_hash = pricing_input_hash(rfq.script_snapshot, params)
-            selected.firmness = "FIRM"
+            selected.firmness = fermete
             selected.valid_until = datetime.utcnow() + timedelta(minutes=30)
             selected.status = "recu"
             cpty = s.exec(select(Counterparty).where(
@@ -1294,3 +1294,213 @@ def test_renaming_a_counterparty_keeps_its_providers_attached():
                                    USER, s)
     # Le fournisseur suit le renommage au lieu de tomber dans le vide.
     assert rfq_api._counterparty_by_provider(s) == {"BNP Paribas": "BNP Paribas SA"}
+
+
+# ── 4. Hypothèses de marché du prix modèle (28/08/2026) ────────────────
+#
+# Un AO doit pouvoir être valorisé avant de solliciter les contreparties, avec
+# une courbe de taux, une courbe de dividende et un spread émetteur. Trois
+# façons de rater ce branchement, une seule s'entend :
+#
+#   — les clés n'atteignent pas les params stockés (fil coupé) ;
+#   — elles les atteignent mais emportent les termes contractuels au passage,
+#     et le contrôle de gel se déclenche sur ce que personne n'a touché ;
+#   — elles arrivent, sont conservées… et ne déplacent pas le prix.
+#
+# Le troisième cas est celui que le projet a déjà connu : une hypothèse
+# saisissable et sans effet. Une courbe de dividende à 8 % vaut −491,6 bps.
+
+_CONTRACTUEL = {
+    "underlyings": [{"name": "STM", "ticker": "STM.PA", "ccy": "EUR",
+                     "sigma": 0.30, "q": 0.04}],
+    "corr_matrix": [[1.0]], "notional": 1_000_000, "currency": "EUR",
+    "strike_date": "2026-01-15", "value_date": "2026-01-20", "T": 3.0,
+    "user_params": {"M_KI": 0.60}, "constats": {},
+    "r": 0.03, "N": 8000, "model": "constant",
+}
+
+
+def _rfq_avec_params(s: Session):
+    # `create_rfq` rend la vue sérialisée ; on veut la ligne.
+    cree = _new_rfq(s)
+    rfq = s.get(RfqRequest, cree["id"])
+    rfq.params_json = json.dumps(_CONTRACTUEL)
+    s.add(rfq)
+    s.commit()
+    s.refresh(rfq)
+    return rfq
+
+
+def _pricer(s: Session, rfq_id: int, hypotheses: dict):
+    """Le vrai chemin de l'écran : PATCH pricing_params, puis lecture."""
+    rfq_api.update_rfq(rfq_id, rfq_api.RfqUpdate(pricing_params=hypotheses), USER, s)
+    return json.loads(s.get(RfqRequest, rfq_id).params_json)
+
+
+def test_les_hypotheses_de_marche_atteignent_les_params_stockes():
+    with _make_session() as s:
+        rfq = _rfq_avec_params(s)
+        params = _pricer(s, rfq.id, {
+            "yield_curve": [[1, 0.05], [3, 0.055], [5, 0.06]],
+            "funding_spread": 0.015,
+            "underlyings": [{"dividend_curve": [[1, 0.04], [2, 0.036]],
+                             "dividend_decay": 0.10}],
+        })
+
+        assert params["yield_curve"] == [[1, 0.05], [3, 0.055], [5, 0.06]]
+        assert params["funding_spread"] == 0.015
+        assert params["underlyings"][0]["dividend_curve"] == [[1, 0.04], [2, 0.036]]
+        assert params["underlyings"][0]["dividend_decay"] == 0.10
+
+
+def test_les_hypotheses_ne_deplacent_aucun_terme_contractuel():
+    # Le contrôle négatif du test précédent : ce qui passe est cantonné aux
+    # hypothèses de modèle. Sans lui, un AO cotations en main deviendrait
+    # impossible à re-pricer — le gel se déclencherait sur des termes intacts.
+    with _make_session() as s:
+        rfq = _rfq_avec_params(s)
+        params = _pricer(s, rfq.id, {
+            "yield_curve": [[1, 0.05]],
+            "strike_date": "2099-12-31",       # contractuel : doit être ignoré
+            "user_params": {"M_KI": 0.99},     # idem
+            "underlyings": [{"ticker": "AAAA.PA", "dividend_decay": 0.10}],
+        })
+
+        assert params["strike_date"] == "2026-01-15"
+        assert params["user_params"] == {"M_KI": 0.60}
+        assert params["underlyings"][0]["ticker"] == "STM.PA"
+        assert params["underlyings"][0]["dividend_decay"] == 0.10   # le fil passe
+
+
+def test_les_hypotheses_survivent_a_un_second_calcul():
+    # Rouvrir un AO recharge les cartes depuis les params ; renvoyer ce
+    # qu'elles portent ne doit rien effacer. Une carte qui rouvrirait décochée
+    # renverrait une courbe vide et le prix changerait sans que personne n'ait
+    # touché à une hypothèse.
+    with _make_session() as s:
+        rfq = _rfq_avec_params(s)
+        _pricer(s, rfq.id, {"yield_curve": [[1, 0.05]], "funding_spread": 0.015})
+        params = _pricer(s, rfq.id, {"yield_curve": [[1, 0.05]],
+                                     "funding_spread": 0.015, "N": 12000})
+
+        assert params["yield_curve"] == [[1, 0.05]]
+        assert params["funding_spread"] == 0.015
+        assert params["N"] == 12000
+
+
+# ── 5. Le booking qualifie la cotation retenue (29/08/2026) ────────────
+#
+# Décider de booker EST l'affirmation que le prix engage la contrepartie : on
+# ne traite pas sur un prix qui n'engage personne. La laisser « à qualifier »
+# ferait mentir l'analyse contrepartie, qui compterait comme non qualifié un
+# prix sur lequel on a effectivement traité.
+#
+# Ce que la provenance doit distinguer, six mois plus tard : une fermeté
+# affirmée par la BANQUE avant le trade, et une fermeté affirmée par l'acte de
+# booking. Les deux se lisent « FIRM » sur la quote ; seule la provenance dit
+# laquelle, et c'est la distinction qui a une valeur probante.
+
+def _rfq_bookee(s, fermete):
+    rfq = _new_rfq(s)
+    quote = _add_quote(s, rfq["id"])
+    rfq_api.update_quote(rfq["id"], quote["id"], rfq_api.QuoteUpdate(
+        price=99.1, quoted_at=datetime.utcnow().isoformat()), USER, s)
+    rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=quote["id"]), USER, s)
+    deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s, fermete=fermete)
+    return (s.get(RfqQuote, quote["id"]),
+            json.loads(s.get(Deal, deal["id"]).rfq_provenance_json))
+
+
+def test_le_booking_qualifie_une_quote_a_qualifier():
+    with _make_session() as s:
+        quote, provenance = _rfq_bookee(s, "UNKNOWN")
+
+        assert quote.firmness == "FIRM"
+        assert provenance["retained"]["firmness_asserted_at_booking"] is True
+
+
+def test_une_quote_deja_ferme_ne_doit_rien_au_booking():
+    # Le contrôle négatif : sans lui, la provenance dirait « affirmée au
+    # booking » de toute cotation, et la distinction ne vaudrait plus rien.
+    with _make_session() as s:
+        quote, provenance = _rfq_bookee(s, "FIRM")
+
+        assert quote.firmness == "FIRM"
+        assert provenance["retained"]["firmness_asserted_at_booking"] is False
+
+
+def test_une_quote_indicative_se_booke_et_laisse_sa_trace():
+    """Le booking n'est plus bloqué, et la piste d'audit ne perd rien.
+
+    C'est tout l'échange du 29/08/2026 : le portillon refusait de booker la
+    solution retenue tant qu'elle n'était pas écrite « ferme ». Retenir puis
+    booker EST l'affirmation qu'elle engage — l'étiquette n'apprenait rien à
+    personne.
+
+    Ce qu'il ne fallait pas perdre en levant le blocage : « on a booké sur une
+    cotation marquée indicative » est un fait qui doit rester lisible six mois
+    plus tard. Il vit maintenant dans la provenance, pas dans un refus.
+    """
+    with _make_session() as s:
+        quote, provenance = _rfq_bookee(s, "INDICATIVE")
+
+        assert quote.firmness == "FIRM"                       # qualifiée au booking
+        retenue = provenance["retained"]
+        assert retenue["firmness_before_booking"] == "INDICATIVE"
+        assert retenue["firmness_asserted_at_booking"] is True
+
+
+# ── Le refus à l'ÉCRITURE (29/08/2026) ────────────────────────────────
+#
+# Le signaler au booking ne suffit pas : un AO reçoit des cotations en quelques
+# minutes, et ses termes sont alors gelés. Une incohérence acceptée à la
+# création devient impossible à corriger.
+
+_SCRIPT_EXPERT = """PARAM COUPON = 8%
+CONSTAT() OBSERVATIONS
+
+AT OBSERVATIONS.last:
+  PAY 1
+"""
+
+_DATES = {
+    "underlyings": [{"name": "SX5E", "ticker": "^STOXX50E", "ccy": "EUR"}],
+    "notional": 1_000_000, "currency": "EUR", "T": 3.0,
+    "strike_date": "2026-08-31", "value_date": "2026-08-31",
+    "constats": {"OBSERVATIONS": {
+        "start_date": "2026-08-31", "end_date": "2029-08-31", "frequency": "1Y"}},
+}
+
+
+def _creer(s, payment_date):
+    return rfq_api.create_rfq(rfq_api.RfqCreate(
+        name="Autocall SX5E", script_snapshot=_SCRIPT_EXPERT,
+        params={**_DATES, "payment_date": payment_date}), USER, s)
+
+
+def test_un_ao_reglant_avant_sa_maturite_est_refuse_a_la_creation():
+    with _make_session() as s:
+        with pytest.raises(HTTPException) as exc:
+            _creer(s, "2026-09-03")
+
+        assert exc.value.status_code == 422
+        assert "précède la maturité" in exc.value.detail
+
+
+def test_un_ao_coherent_se_cree_normalement():
+    # Le contrôle négatif, sans lequel le garde pourrait tout refuser.
+    with _make_session() as s:
+        assert _creer(s, "2029-09-05")["reference"].startswith("RFQ-")
+
+
+def test_le_refus_vaut_aussi_a_la_modification():
+    # L'autre porte d'écriture. Sans elle, on créerait cohérent puis on
+    # rendrait incohérent à la première modification.
+    with _make_session() as s:
+        cree = _creer(s, "2029-09-05")
+        with pytest.raises(HTTPException) as exc:
+            rfq_api.update_rfq(cree["id"], rfq_api.RfqUpdate(
+                params={**_DATES, "payment_date": "2026-09-03"}), USER, s)
+
+        assert exc.value.status_code == 422
+        assert "précède la maturité" in exc.value.detail

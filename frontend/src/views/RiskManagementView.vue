@@ -6,7 +6,7 @@
 
         <div class="page-header">
           <div class="flex items-center gap-3">
-            <RouterLink :to="{ path: '/', query: { category: 'risk_management' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
+            <BackLink :fallback="{ path: '/', query: { category: 'risk_management' } }" />
             <h1 class="page-title">Risk Management</h1>
           </div>
         </div>
@@ -977,6 +977,7 @@
 </template>
 
 <script setup>
+import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
@@ -1037,7 +1038,10 @@ async function renamePortfolio(p) {
 }
 
 async function deletePortfolio(p) {
-  if (!confirm(`Supprimer "${p.name}" ? Les deals qu'il contient seront déplacés vers le portefeuille par défaut.`)) return
+  if (!await confirmer({ titre: `Supprimer « ${p.name} » ?`,
+                       message: "Les deals qu'il contient seront déplacés vers le "
+                              + 'portefeuille par défaut.',
+                       confirmer: 'Supprimer', danger: true })) return
   await pf.remove(p)
 }
 

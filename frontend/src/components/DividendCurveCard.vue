@@ -35,13 +35,13 @@
       </div>
     </div>
 
-    <div v-if="store.underlyings.length > 1" class="flex gap-1 mb-3 flex-wrap">
-      <button v-for="(u, index) in store.underlyings" :key="index"
+    <div v-if="paniers.length > 1" class="flex gap-1 mb-3 flex-wrap">
+      <button v-for="(u, index) in paniers" :key="index"
         class="text-xs px-2.5 py-1 rounded border transition-colors"
-        :class="index === store.activeUnderlyingIdx
+        :class="index === actif
           ? 'bg-blue-600/20 border-blue-500 text-blue-400'
           : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-blue-500'"
-        @click="store.activeUnderlyingIdx = index">
+        @click="choisir(index)">
         {{ demo.underlyingLabel(u.name, index) }}
       </button>
     </div>
@@ -100,6 +100,7 @@ import {
   Chart, LineController, LineElement, LinearScale, PointElement, Tooltip,
 } from 'chart.js'
 import { usePricingStore } from '../stores/pricing.js'
+import { courbeDividende } from '../composables/useDividendCurve.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
@@ -110,14 +111,32 @@ import SensitiveValue from './SensitiveValue.vue'
 Chart.register(LineController, LineElement, PointElement, LinearScale, Tooltip)
 applyChartTheme(Chart)
 
+const props = defineProps({
+  // Le panier à éditer. Absent, celui du Pricer : les usages existants ne
+  // changent pas, et l'appel d'offres passe le sien sans partager d'état.
+  sousJacents: { type: Array, default: null },
+  indexActif: { type: Number, default: null },
+  // Horizon de la courbe, en années. C'est lui qui fixe le nombre de nœuds.
+  horizon: { type: Number, default: null },
+})
+const emit = defineEmits(['update:indexActif'])
+
 const store = usePricingStore()
+const paniers = computed(() => props.sousJacents ?? store.underlyings)
+const actif = computed(() => props.indexActif ?? store.activeUnderlyingIdx)
+const horizonAns = computed(() => props.horizon ?? store.globalParams.T)
+
+function choisir(i) {
+  if (props.sousJacents) emit('update:indexActif', i)
+  else store.activeUnderlyingIdx = i
+}
 const demo = useDemoModeStore()
 const curveCanvas = ref(null)
 let chart = null
 
 const activeUnderlying = computed(() =>
-  store.underlyings[store.activeUnderlyingIdx] ?? store.underlyings[0])
-const nodes = computed(() => store.buildDividendCurve(activeUnderlying.value))
+  paniers.value[actif.value] ?? paniers.value[0])
+const nodes = computed(() => courbeDividende(activeUnderlying.value, horizonAns.value))
 const lastRate = computed(() => nodes.value.at(-1)?.rate ?? activeUnderlying.value?.q ?? 0)
 
 function formatRate(value) {
@@ -140,7 +159,7 @@ async function renderChart() {
   if (!curveCanvas.value) return
   if (chart) { chart.destroy(); chart = null }
 
-  const horizon = Math.max(1, Number(store.globalParams.T) || 1)
+  const horizon = Math.max(1, Number(horizonAns.value) || 1)
   const data = []
   nodes.value.forEach((node, index) => {
     const start = index
@@ -193,7 +212,7 @@ async function renderChart() {
 const chartKey = computed(() => {
   const u = activeUnderlying.value
   if (!u?.dividendCurveEnabled) return null
-  return [store.activeUnderlyingIdx, u.q, u.dividendDecay, store.globalParams.T].join('|')
+  return [actif.value, u.q, u.dividendDecay, horizonAns.value].join('|')
 })
 
 watch(chartKey, renderChart)

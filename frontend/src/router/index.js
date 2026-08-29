@@ -28,6 +28,14 @@ const routes = [
     meta: { title: 'Pricer' },
   },
   {
+    // Une déclinaison s'ouvre par SON identifiant, pas par celui de son
+    // parent : la barre de variantes retrouve l'origine toute seule, et un
+    // lien partagé désigne sans ambiguïté ce qu'on voulait montrer.
+    path: '/pricer/v/:variantId',
+    component: () => import('../views/PricerView.vue'),
+    meta: { title: 'Pricer' },
+  },
+  {
     path: '/documentation',
     component: () => import('../views/DocumentationView.vue'),
     meta: { title: 'Documentation' },
@@ -136,6 +144,35 @@ router.beforeEach(async (to) => {
   if (!auth.user) await auth.fetchMe()
   if (!auth.isAuthenticated) return '/login'
   if (to.meta.requiresAdmin && !auth.isAdmin) return '/'
+
+  // Une déclinaison modifiée et non enregistrée se perd dès qu'on quitte
+  // l'écran. La barre de déclinaisons prévenait pour SES propres boutons, donc
+  // pour un seul chemin sur cinq : le retour navigateur, le lien « ← Retour »,
+  // le menu du haut et les liens du tableau comparatif emportaient tout en
+  // silence. Le garde de route les couvre tous d'un coup, parce qu'il est le
+  // seul endroit que toute navigation traverse.
+  //
+  // Aller d'une déclinaison à une autre est exclu : la barre pose déjà la
+  // question, et la poser deux fois apprend à cliquer sans lire.
+  if (!String(to.path).startsWith('/pricer')) {
+    const { usePricingStore } = await import('../stores/pricing.js')
+    const store = usePricingStore()
+    if (store.variantDirty) {
+      const { confirmer } = await import('../composables/useConfirm.js')
+      const partir = await confirmer({
+        titre: 'Quitter sans enregistrer ?',
+        message: 'La déclinaison ouverte porte des modifications qui ne sont pas '
+               + 'encore écrites. Elles seront perdues.',
+        confirmer: 'Quitter sans enregistrer', danger: true,
+      })
+      if (!partir) return false
+      // Il vient d'abandonner ces modifications. Garder la déclinaison en
+      // mémoire les lui ferait redemander à CHAQUE navigation suivante, alors
+      // qu'il n'est déjà plus sur l'écran — c'est exactement ce qui rend un
+      // avertissement insupportable, puis ignoré.
+      store.relacherVariante()
+    }
+  }
   return true
 })
 

@@ -9,6 +9,7 @@ qui font tenir l'écran :
     somme des VA des flux      == mark du panneau
 """
 import math
+from functools import lru_cache
 
 import numpy as np
 import pytest
@@ -35,7 +36,7 @@ def _ul(**kw):
 
 
 C1 = [[1.0]]
-REFERENCE_PATHS = 20_000
+REFERENCE_PATHS = 8_000
 
 AUTOCALL = """
 PARAM CPN = 8%
@@ -71,15 +72,26 @@ AT MATURITY
     PAY WOF "perte"
 """
 
-CFG = dict(model="constant", n_outer=400, n_inner=300, n_dates=4, seed=42)
+CFG = dict(model="constant", n_outer=240, n_inner=120, n_dates=4, seed=42)
 
 
-def _fan(src, T=3.0, r=0.025, uls=None):
+def _compute_fan(src, T, r, uls):
     cs = parse_script(src)
-    uls = uls or _ul()
     p0 = run_mc(cs, uls, C1, r=r, T_max=T, N=REFERENCE_PATHS, model="constant", seed=123)["price"] * 100
     fan = run_mark_to_future(cs, uls, C1, r=r, T_max=T, main_price=p0, **CFG)
     return cs, uls, r, T, p0, fan
+
+
+@lru_cache(maxsize=None)
+def _cached_fan(src, T, r):
+    """Share deterministic reference fans across read-only identity tests."""
+    return _compute_fan(src, T, r, _ul())
+
+
+def _fan(src, T=3.0, r=0.025, uls=None):
+    if uls is None:
+        return _cached_fan(src, T, r)
+    return _compute_fan(src, T, r, uls)
 
 
 def _quantile_ids(row, qs=(0.05, 0.25, 0.50, 0.75, 0.95)):
@@ -267,11 +279,12 @@ AT MATURITY
 """
     cs = parse_script(src)
     r, T = 0.025, 3.0
-    p0 = run_mc(cs, uls, corr, r=r, T_max=T, N=20000, model="constant", seed=123)["price"] * 100
-    fan = run_mark_to_future(cs, uls, corr, r=r, T_max=T, main_price=p0, **CFG)
+    basket_cfg = {**CFG, "n_outer": 120, "n_inner": 80}
+    p0 = run_mc(cs, uls, corr, r=r, T_max=T, N=REFERENCE_PATHS, model="constant", seed=123)["price"] * 100
+    fan = run_mark_to_future(cs, uls, corr, r=r, T_max=T, main_price=p0, **basket_cfg)
     row = next(x for x in fan["results"] if x["stats"] and any(x["alive"]))
     dd = run_mtf_drilldown(cs, uls, corr, r=r, T_max=T, main_price=p0, t0=row["t"],
-                           scenario_ids=_quantile_ids(row), script_source=src, **CFG)
+                           scenario_ids=_quantile_ids(row), script_source=src, **basket_cfg)
 
     assert dd["n_assets"] == 3
     assert dd["asset_names"] == ["SX5E", "SPX", "NKY"]

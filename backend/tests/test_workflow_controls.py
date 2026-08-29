@@ -79,7 +79,6 @@ def _failure_codes(rfq, quote, expected="Bank", requested="Bank") -> set[str]:
     (lambda r, q: setattr(r, "status", "quote"), "RFQ_STATUS_INVALID"),
     (lambda r, q: setattr(q, "price", None), "QUOTE_PRICE_MISSING"),
     (lambda r, q: setattr(q, "status", "decline"), "QUOTE_STATUS_INVALID"),
-    (lambda r, q: setattr(q, "firmness", "INDICATIVE"), "QUOTE_NOT_FIRM"),
     (lambda r, q: setattr(q, "valid_until", None), "QUOTE_VALIDITY_UNKNOWN"),
     (lambda r, q: setattr(q, "valid_until", datetime.utcnow() - timedelta(seconds=1)), "QUOTE_EXPIRED"),
     (lambda r, q: setattr(r, "model_price", None), "MODEL_PRICE_MISSING"),
@@ -92,6 +91,39 @@ def test_booking_gate_rejects_independent_failures(mutation, expected):
     rfq, quote = _executable_pair()
     mutation(rfq, quote)
     assert expected in _failure_codes(rfq, quote)
+
+
+# ── Fermeté : « à qualifier » n'est pas « indicatif » (29/08/2026) ────
+#
+# Décider de booker EST l'affirmation que le prix engage la contrepartie. Le
+# portillon exigeait en plus une case cochée, ce qui n'ajoutait rien et
+# bloquait systématiquement les last looks : l'enfant naît UNKNOWN, exprès,
+# parce qu'un re-prix ne peut pas hériter de la fermeté du prix qu'il remplace.
+#
+# Aucune étiquette ne bloque plus, INDICATIVE compris : c'est la piste d'audit
+# qui porte l'information, pas un portillon.
+
+def test_un_last_look_frais_passe_le_portillon():
+    # Le cas réel : on retient le last look, dont la fermeté n'a pas été
+    # requalifiée. C'est celui qui refusait de booker.
+    rfq, quote = _executable_pair()
+    quote.parent_quote_id = 99
+    quote.firmness = "UNKNOWN"
+    assert _failure_codes(rfq, quote) == set()
+
+
+@pytest.mark.parametrize("fermete", ["UNKNOWN", "INDICATIVE"])
+def test_aucune_etiquette_de_fermete_ne_bloque_le_booking(fermete):
+    # Retenir une cotation puis décider de la booker EST l'affirmation qu'elle
+    # engage la contrepartie. Le portillon exigeait en plus une étiquette, ce
+    # qui bloquait le booking de la solution retenue sur un mot.
+    #
+    # Ce que le champ devient : le booking qualifie, et la provenance garde ce
+    # qu'il valait avant (voir test_rfq.py). L'information n'est pas perdue,
+    # elle a juste cessé d'arrêter le desk.
+    rfq, quote = _executable_pair()
+    quote.firmness = fermete
+    assert _failure_codes(rfq, quote) == set()
 
 
 def test_booking_gate_rejects_no_selected_quote():
@@ -1033,3 +1065,63 @@ def test_legacy_migration_marks_ambiguous_rows_for_manual_review(tmp_path, monke
     assert event.fixing_status == "MANUAL_REVIEW_REQUIRED"
     assert event.data_category == "UNKNOWN"
     assert event.indicative_spots_json == "{}"
+
+
+# ── Cohérence maturité / règlement (29/08/2026) ───────────────────────
+#
+# Un AO réel a été créé avec une maturité en 2029 et un remboursement en 2026.
+# Rien ne l'a signalé : le contrôle existant ne comparait le règlement qu'à la
+# DATE DE VALEUR, et 2026-09-03 est bien après 2026-08-31.
+#
+# Trois ans d'écart, invisibles à la création, puis un AO impossible à booker
+# ET impossible à corriger — ses termes contractuels étant gelés dès la
+# première cotation reçue. Le booking, lui, portait déjà le contrôle
+# (deals.py) : c'est l'asymétrie entre les deux qui a fabriqué l'impasse.
+
+from backend.app.core.rfq_controls import maturity_iso
+
+
+def _params_dates(**ecrase):
+    p = _params()
+    p.update({
+        "strike_date": "2026-08-31", "value_date": "2026-08-31",
+        "payment_date": "2029-09-03", "T": 3.0007,
+        "constats": {"OBSERVATIONS": {
+            "start_date": "2026-08-31", "end_date": "2029-08-31",
+            "frequency": "1Y", "convention": "following",
+        }},
+    })
+    p.update(ecrase)
+    return p
+
+
+def test_la_maturite_se_lit_dans_le_calendrier_quand_il_existe():
+    assert maturity_iso(_params_dates()) == "2029-08-31"
+
+
+def test_la_maturite_se_deduit_de_T_sans_calendrier():
+    # Un script qui dit `AT 3:` sans CONSTAT : la maturité se compte depuis le
+    # STRIKE, parce que c'est là que la diffusion démarre.
+    p = _params_dates(constats={})
+    assert maturity_iso(p).startswith("2029-08-31")
+
+
+def test_un_reglement_avant_la_maturite_est_signale():
+    rfq, quote = _executable_pair()
+    rfq.params_json = json.dumps(_params_dates(payment_date="2026-09-03"))
+    assert "PAYMENT_BEFORE_MATURITY" in _failure_codes(rfq, quote)
+
+
+def test_un_reglement_apres_la_maturite_ne_signale_rien():
+    # Le contrôle négatif : sans lui, le contrôle pourrait se déclencher
+    # toujours et personne ne le verrait — tout AO serait refusé.
+    rfq, quote = _executable_pair()
+    rfq.params_json = json.dumps(_params_dates(payment_date="2029-09-03"))
+    assert "PAYMENT_BEFORE_MATURITY" not in _failure_codes(rfq, quote)
+
+
+def test_un_reglement_le_jour_meme_de_la_maturite_passe():
+    # Le règlement au comptant existe : J+0 n'est pas une incohérence.
+    rfq, quote = _executable_pair()
+    rfq.params_json = json.dumps(_params_dates(payment_date="2029-08-31"))
+    assert "PAYMENT_BEFORE_MATURITY" not in _failure_codes(rfq, quote)

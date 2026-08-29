@@ -193,6 +193,17 @@
             <SensitiveValue placeholder="···">{{ u.ticker }}</SensitiveValue>
           </span>
         </button>
+
+        <!-- Les titres RETIRÉS par la variante restent affichés, en grisé.
+             C'est la raison d'être du modèle en delta : « on l'a enlevé » et
+             « il n'y a jamais été » sont deux choses différentes, et c'est
+             celle-là qu'on veut pouvoir lire. -->
+        <span v-for="e in marque.retires('underlyings')" :key="e.chemin"
+              class="px-2.5 py-1 rounded-md text-xs border border-slate-800 bg-slate-900
+                     text-slate-600 line-through select-none"
+              title="Retiré du panier par cette variante">
+          {{ e.avant?.name || e.chemin }}
+        </span>
       </div>
 
       <!-- Card du sous-jacent actif -->
@@ -391,6 +402,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
+import { useVariantMark } from '../composables/useVariantMark.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import VolSmile from './VolSmile.vue'
 import DividendCurveCard from './DividendCurveCard.vue'
@@ -401,6 +413,7 @@ import HelpTip from './HelpTip.vue'
 import { formatNumber } from '../utils/format.js'
 
 const store = usePricingStore()
+const marque = useVariantMark(store)
 const demo = useDemoModeStore()
 
 // Active underlying — shared with Deal (store.activeUnderlyingIdx), which owns

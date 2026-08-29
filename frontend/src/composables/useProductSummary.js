@@ -184,14 +184,19 @@ function lignesProbabilites(proba, result) {
     L.push('- P(hors de la monnaie) : ' + pct(proba.ki_pct, 1))
   }
 
-  // Deux mesures que le compte de KI ne donne pas : « remboursé sous le pair »
-  // couvre aussi les chemins qui perdent sans franchir de barrière, et « coupon
-  // plein » dit si le rendement annoncé est réellement atteignable.
+  // Deux mesures que le compte de KI ne donne pas. La première couvre aussi les
+  // chemins qui rendent moins que le pair sans franchir de barrière ; elle se
+  // lit sur le flux NOMINAL, pas sur sa valeur actualisée — cette confusion
+  // faisait annoncer 100 % de perte sur un capital garanti.
   if (proba.capital_loss_pct != null) {
-    L.push('- P(remboursement sous le pair) : ' + pct(proba.capital_loss_pct, 1))
+    L.push('- P(remboursement sous le pair, en nominal) : ' + pct(proba.capital_loss_pct, 1))
   }
+  // La seconde est RELATIVE au tirage : « à 0,5 % du meilleur chemin simulé ».
+  // Le dire évite qu'elle se lise comme une probabilité absolue, et évite
+  // surtout qu'un modèle la compare d'un produit à l'autre.
   if (proba.full_coupon_pct != null) {
-    L.push('- P(payoff maximal atteint) : ' + pct(proba.full_coupon_pct, 1))
+    L.push('- P(meilleur scénario simulé atteint) : ' + pct(proba.full_coupon_pct, 1)
+      + ' — relatif à ce tirage')
   }
 
   const p = proba.percentiles || {}

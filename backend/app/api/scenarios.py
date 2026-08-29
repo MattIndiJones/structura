@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api", tags=["scenarios"])
 @router.post("/scenarios")
 def scenarios_endpoint(req: ScenarioRequest):
     """2D stress grid — price(spot_shock, vol_shock) plus the unshocked base price."""
-    from .pricing import residual_context_or_none
+    from .pricing import analysis_user_params, residual_context_or_none
     ctx = residual_context_or_none(req)
     try:
         if ctx is not None:
@@ -45,12 +45,22 @@ def scenarios_endpoint(req: ScenarioRequest):
         T_eff = effective_T_max(compiled, req.T)
 
     try:
+        # Le TEXTE, les PARAM et le calendrier QUI PRICENT — ceux de la variante
+        # s'il y en a une. `compiled` ci-dessus les portait déjà, mais un
+        # CompiledScript ne traverse pas une frontière de processus : le worker
+        # reçoit du texte et recompile. Passer `req.*` ici revenait donc à
+        # calculer le script de la variante, le valider, puis le jeter — la
+        # grille décrivait le produit d'ORIGINE sous une étiquette de variante,
+        # au dernier chiffre près. C'est la seule des cinq analytiques qui le
+        # faisait ; la grille 2D, de forme identique, passe `compiled`.
         res = compute_scenario_grid(
-            req.script, uls, corr, r_eff, T_eff, req.model, req.seed, req.user_params,
+            ctx.script_text if ctx is not None else req.script,
+            uls, corr, r_eff, T_eff, req.model, req.seed,
+            analysis_user_params(req, ctx),
             req.spot_shocks, req.vol_shocks, N=req.N,
             yield_curve=yc, sigma_r=req.sigma_r, a_r=req.a_r,
             barrier_monitoring=req.barrier_monitoring,
-            constat_values=req.constats or None,
+            constat_values=(ctx.constats if ctx is not None else req.constats) or None,
             constat_anchor=analysis_origin(req).isoformat(),
             constat_currency=req.settlement_ccy,
             residual_state=etat, state_spots=spots,

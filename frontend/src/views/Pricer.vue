@@ -5,7 +5,7 @@
     <div class="sticky top-0 z-30 border-b px-5 py-2.5 flex items-center gap-4 shrink-0"
          style="background: rgba(250,249,246,.90); backdrop-filter: blur(10px); border-color: var(--border); box-shadow: 0 4px 14px rgba(11,26,49,.025);">
 
-      <RouterLink :to="{ path: '/', query: { category: 'pricing' } }" class="btn-secondary text-xs px-3 py-1.5 shrink-0">← Retour</RouterLink>
+      <BackLink :fallback="{ path: '/', query: { category: 'pricing' } }" />
 
       <!-- Progress bar / résumé prix / erreur -->
       <div class="flex-1 min-w-0">
@@ -44,6 +44,10 @@
       </div>
     </div>
 
+    <!-- Les déclinaisons du deal, juste sous la barre d'outils : ce qu'on
+         regarde doit se lire avant ce qu'on lit. -->
+    <VariantBar />
+
     <!-- ── Main 2-col ──────────────────────────────────────────── -->
     <main class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-0 items-stretch">
 
@@ -60,7 +64,13 @@
         <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
           <PayScriptEditor v-show="store.leftTab === 'script'" />
           <MarketParams    v-show="store.leftTab === 'params'" />
-          <DealTab         v-if="store.leftTab === 'deal'" @go-events="goToEvents" />
+          <!-- v-show, PAS v-if : le formulaire de deal porte le sens, la
+               contrepartie, le nominal et le prix traité, qui ne vivent nulle
+               part ailleurs. Le détruire à chaque changement d'onglet les
+               perdait — aller relancer un prix puis revenir suffisait, et le
+               prix traité repartait à la fair value fraîche sans que rien ne
+               le signale. -->
+          <DealTab         v-show="store.leftTab === 'deal'" @go-events="goToEvents" />
           <EventsTab       v-if="store.leftTab === 'events'" :initial-deal-id="eventsInitialDealId" />
         </div>
       </div>
@@ -86,7 +96,9 @@
 </template>
 
 <script setup>
+import BackLink from '../components/ui/BackLink.vue'
 import PayScriptEditor from '../components/PayScriptEditor.vue'
+import VariantBar      from '../components/VariantBar.vue'
 import MarketParams    from '../components/MarketParams.vue'
 import DealTab         from '../components/DealTab.vue'
 import EventsTab       from '../components/EventsTab.vue'
@@ -156,6 +168,7 @@ const rightTabs = [
   { id: 'mtf',      label: '🗺️ Mark to Future' },
   { id: 'simulation', label: '🧮 Simulation' },
   { id: 'scenarios', label: '🎯 Scénarios' },
+  { id: 'variants',  label: '⑂ Déclinaisons' },
   { id: 'kid',       label: '⚖️ KID PRIIPs' },
   { id: 'emt',       label: '🎯 EMT / Marché cible' },
 ]

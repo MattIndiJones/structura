@@ -147,7 +147,9 @@ async function updateCpty(c, payload) {
 }
 
 async function deleteCpty(c) {
-  if (!confirm(`Supprimer "${c.name}" ? Les deals existants gardent leur contrepartie en texte.`)) return
+  if (!await confirmer({ titre: `Supprimer « ${c.name} » ?`,
+                       message: 'Les deals existants gardent leur contrepartie en texte.',
+                       confirmer: 'Supprimer', danger: true })) return
   error.value = ''
   notice.value = ''
   try {

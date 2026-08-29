@@ -121,6 +121,14 @@
         <div v-for="p in store.scriptParams" :key="p.name" class="flex flex-col gap-1"
           :class="p.kind === 'array' ? 'col-span-2 sm:col-span-1' : ''">
           <label class="label">{{ p.name }}
+            <!-- Une valeur ne s'affiche jamais sans dire de quel état elle
+                 relève : un champ modifié qui aurait l'air neutre ferait croire
+                 à une comparaison « toutes choses égales par ailleurs » qui n'en
+                 est pas une. -->
+            <span v-if="marque.etat(cheminParam(p.name)) === 'modifie'"
+                  class="ml-1 text-[9px] font-normal normal-case text-amber-400">
+              ● origine {{ valeurLisible(marque.avant(cheminParam(p.name))) }}
+            </span>
             <span v-if="p.kind === 'array'" class="text-slate-600 font-normal normal-case">
               (par observation)
               <HelpTip text="Une valeur par observation, dans l'ordre des dates AT. La dernière ligne s'étend aux observations suivantes — une seule ligne = valeur constante. Une ligne en trop est ignorée." />
@@ -156,6 +164,7 @@
                 :id="`param-${p.name}`"
                 type="number"
                 class="input pr-7"
+                :class="marque.classe(cheminParam(p.name))"
                 v-model.number="store.paramOverrides[p.name]"
                 step="any"
               />
@@ -212,8 +221,10 @@ import BaseModal from './ui/BaseModal.vue'
 import AlertMessage from './ui/AlertMessage.vue'
 import ScriptAssistantModal from './ScriptAssistantModal.vue'
 import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
+import { useVariantMark, cheminParam, valeurLisible } from '../composables/useVariantMark.js'
 
 const store = usePricingStore()
+const marque = useVariantMark(store)
 const notice = ref('')
 
 const groupedTemplates = computed(() => {

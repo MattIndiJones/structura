@@ -283,7 +283,8 @@ onMounted(async () => {
 watch(() => route.params.table, fetchRows)
 
 async function deleteRow(row) {
-  if (!confirm(`Supprimer l'enregistrement #${row.id} ?`)) return
+  if (!await confirmer({ titre: `Supprimer l'enregistrement #${row.id} ?`,
+                       confirmer: 'Supprimer', danger: true })) return
   error.value = ''
   notice.value = ''
   try {

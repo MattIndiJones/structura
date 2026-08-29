@@ -173,7 +173,8 @@ async function updateProvider(p, payload) {
 }
 
 async function deleteProvider(p) {
-  if (!confirm(`Supprimer "${p.label}" ?`)) return
+  if (!await confirmer({ titre: `Supprimer « ${p.label} » ?`,
+                       confirmer: 'Supprimer', danger: true })) return
   error.value = ''
   notice.value = ''
   try {

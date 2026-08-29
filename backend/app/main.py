@@ -20,6 +20,7 @@ from .api.schedule import router as schedule_router
 from .api.auth import router as auth_router
 from .api.folders import router as folders_router
 from .api.scripts_db import router as scripts_db_router
+from .api.variants import router as variants_router
 from .api.deals import router as deals_router
 from .api.portfolios import router as portfolios_router
 from .api.shocks import router as shocks_router
@@ -80,6 +81,7 @@ app.include_router(inlife_router)
 app.include_router(auth_router)
 app.include_router(folders_router)
 app.include_router(scripts_db_router)
+app.include_router(variants_router)
 app.include_router(deals_router)
 app.include_router(portfolios_router)
 app.include_router(shocks_router)

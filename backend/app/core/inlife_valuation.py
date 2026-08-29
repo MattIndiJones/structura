@@ -16,6 +16,7 @@ un état, et il signale ses refus par ValuationError.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Optional
@@ -54,6 +55,35 @@ class InLifeProduct:
 
 
 @dataclass
+class VariantTerms:
+    """Les termes qui remplacent ceux du parent À PARTIR de la valorisation.
+
+    Une variante ne réécrit pas l'histoire. Le passé s'est produit sous les
+    termes du parent — les coupons versés l'ont été, la mémoire accumulée l'a
+    été, le produit n'a pas été rappelé. Ces termes-là ne décrivent donc que la
+    vie restante, et le rejeu ne les voit jamais.
+
+    C'est ce qui désamorce le piège central de l'exercice : une variante dont
+    le seuil de rappel descend à 50 % ne peut PAS rappeler dans le passé, parce
+    que le passé n'est jamais rejoué avec elle. Ce n'est pas un contrôle qu'on
+    pourrait oublier d'écrire, c'est une impossibilité de structure.
+
+    Tout champ laissé à None est hérité du parent. Un objet vide vaut donc
+    exactement « pas de variante », et `build_residual` se comporte comme
+    avant : c'est la propriété qui garantit qu'aucune valorisation ordinaire ne
+    change de prix en introduisant cette notion.
+    """
+    script: Optional[str] = None
+    user_params: Optional[dict] = None
+    # Calendrier de la variante — porte la prolongation de maturité. Ses dates
+    # passées doivent rester identiques à celles du parent (cf. _refuser_si_le_passe_diverge).
+    constats: Optional[dict] = None
+
+    def est_vide(self) -> bool:
+        return self.script is None and self.user_params is None and self.constats is None
+
+
+@dataclass
 class Residual:
     """Le produit ramené à sa vie restante, prêt pour le Monte Carlo."""
     early_recall: bool = False
@@ -77,6 +107,31 @@ class Residual:
     replay: dict = field(default_factory=dict)
     start_idx: int = 0
     s0_map: dict = field(default_factory=dict)
+    # ── Variante ────────────────────────────────────────────────────
+    # Les PARAM que le Monte Carlo résiduel doit employer. Distincts de
+    # `user_params`, qui sont ceux du rejeu : sur un avenant les deux diffèrent,
+    # et les confondre ferait pricer la vie restante aux conditions d'origine.
+    residual_user_params: dict = field(default_factory=dict)
+    # Le TEXTE et le calendrier qui pricent — ceux de la variante s'il y en a
+    # une. Les analytiques qui repricent dans un processus séparé (grille de
+    # scénarios, VaR) reçoivent le script en texte et le recompilent : sans ces
+    # deux champs, elles n'ont que ceux de la requête, c'est-à-dire ceux de
+    # l'ORIGINE, et décrivent le produit d'origine sous une étiquette de
+    # variante.
+    pricing_script_text: str = ""
+    pricing_constats: dict = field(default_factory=dict)
+    # Fin de la vie restante SOUS LES TERMES QUI PRICENT, sur l'axe résiduel.
+    # None hors variante : la maturité de la requête fait alors foi, et rien ne
+    # change. Une variante qui prolonge doit au contraire déplacer l'horizon —
+    # sans quoi ses constatations tombent hors du Monte Carlo et le
+    # remboursement final n'est jamais versé (mesuré : 46,16 % → 12,23 %, et
+    # deux variantes de protection différentes rendaient le même prix, ce qui
+    # était le seul signe visible).
+    T_residual_max: Optional[float] = None
+    # Ce que la variante fait de l'état repris du passé. Vide hors variante.
+    # Voir `_etat_repris_par_la_variante` : ce n'est pas un refus, c'est un fait
+    # que l'utilisateur doit voir.
+    variant_state_check: dict = field(default_factory=dict)
 
 
 def _engine_underlyings(market: dict, underlyings_json: list) -> list[dict]:
@@ -154,8 +209,112 @@ def _shift_dividend_curve(underlying: dict, elapsed: float) -> None:
 # Voir MEMORY investment-solution-module pour le cadrage complet.
 
 
+def _dates_passees(compiled: CompiledScript, T_elapsed: float) -> list[float]:
+    """Les constatations déjà tombées, en fractions d'année depuis le strike."""
+    return sorted({round(d, 6)
+                   for e in compiled.events for d in (e.dates or [])
+                   if d <= T_elapsed + 1e-9})
+
+
+def _refuser_si_le_passe_diverge(parent: CompiledScript, variante: CompiledScript,
+                                 T_elapsed: float) -> None:
+    """Le calendrier passé de la variante doit être celui du parent, à l'identique.
+
+    Prolonger la maturité est permis — les dates passées restent un préfixe du
+    nouveau calendrier. Changer la FRÉQUENCE ne l'est pas : les constatations
+    déjà tombées ne s'alignent plus, et `INDEX` — que la variante hérite du
+    rejeu — désigne alors une autre observation que celle qu'il compte. Un
+    recalage silencieux donnerait un prix plausible pour un produit qui
+    n'existe pas.
+    """
+    avant, apres = _dates_passees(parent, T_elapsed), _dates_passees(variante, T_elapsed)
+    if avant == apres:
+        return
+    raise ValuationError(
+        f"Le calendrier passé de la variante diffère de celui du deal d'origine "
+        f"({len(avant)} constatation(s) écoulée(s) contre {len(apres)}). Un avenant "
+        f"ne réécrit pas le passé : la prolongation de maturité est possible, le "
+        f"changement de fréquence ou de date initiale ne l'est pas — passez en "
+        f"mode nouvelle note.")
+
+
+def _sans_les_param_semes(memo: dict, compiled: CompiledScript, texte: str) -> dict:
+    """Retire de la mémoire du rejeu les PARAM qui n'y sont que par mécanique.
+
+    Le moteur range les PARAM dans `ctx["memo"]`, aux côtés des variables du
+    script. À la fin du rejeu, la mémoire contient donc les barrières et le
+    coupon EN VIGUEUR PENDANT LE PASSÉ. Or cette mémoire est réinjectée dans le
+    Monte Carlo résiduel *après* la fusion des PARAM — elle écrasait donc les
+    valeurs saisies à l'écran, et toute valorisation en cours de vie priçait aux
+    termes du rejeu quoi qu'on saisisse. Mesuré sur un Phoenix : changer le
+    coupon de 2 % à 10 % ne déplaçait le prix d'aucun centième, là où la même
+    modification vaut +27 points à l'émission.
+
+    C'est fatal pour une variante, dont l'objet même est de changer un PARAM.
+
+    Un PARAM que le script RÉÉCRIT (`SET COUPON = ...`) est une vraie variable
+    d'état et doit, lui, survivre au rejeu. Seuls les PARAM jamais réécrits sont
+    des termes du contrat, et un terme ne s'hérite pas du passé : il se saisit.
+    """
+    ecrits = _variables_ecrites(texte)
+    termes = {p.name for p in compiled.params} - ecrits
+    return {nom: valeur for nom, valeur in (memo or {}).items() if nom not in termes}
+
+
+def _variables_ecrites(texte: str) -> set:
+    """Les variables qu'un script définit — `SET NOM = ...`.
+
+    Lu sur le texte plutôt que sur la forme compilée : `init_fn` et les `fn`
+    d'événement sont des callables, leurs noms de variables n'y survivent pas.
+    Dans ce DSL, `SET` en tête de ligne est sans ambiguïté."""
+    return set(re.findall(r"^\s*SET\s+([A-Za-z_]\w*)", texte or "", re.M))
+
+
+def _etat_repris_par_la_variante(memo: dict, script_variante: str) -> dict:
+    """Ce que la variante fait de l'état accumulé sous les termes d'origine.
+
+    Un avenant qui renomme une variable de mémoire fait disparaître sans un mot
+    ce que le client a accumulé — cinq coupons en mémoire, par exemple. Ce n'est
+    pas forcément une erreur : abandonner la mémoire est une restructuration
+    parfaitement légitime, et fréquente. Impossible de distinguer l'intention
+    de l'étourderie ici, donc on ne refuse pas — on RAPPORTE, et l'écran le
+    montre à côté du prix. Un fait tu vaut moins qu'un fait affiché."""
+    ecrites = _variables_ecrites(script_variante)
+    return {nom: {"valeur": valeur, "lu_par_la_variante": nom in ecrites}
+            for nom, valeur in (memo or {}).items()}
+
+
+def _compiler_variante(variant: VariantTerms, p: InLifeProduct,
+                       parent: CompiledScript) -> CompiledScript:
+    """Le script de la variante, résolu sur le MÊME axe des temps que le parent.
+
+    L'ancrage au strike est non négociable : c'est l'origine de l'axe, et l'état
+    repris du rejeu — index, extrema, mémoire — y est exprimé. Résoudre la
+    variante sur la date de valorisation décalerait tout son calendrier d'un an
+    et neuf mois sans rien signaler."""
+    texte = variant.script if variant.script is not None else p.script_snapshot
+    calendrier = (variant.constats if variant.constats is not None
+                  else (p.market.get("constats") or {}))
+    try:
+        compile_ = parse_script(texte)
+        return resolve_constats(compile_, calendrier, anchor=p.strike_date,
+                                currency=p.currency or None)
+    except ValueError as e:
+        raise ValuationError(f"Script ou calendrier de la variante non exploitables : {e}")
+    except (AttributeError, TypeError, KeyError) as e:
+        # Un calendrier dans la mauvaise FORME — fréquence en objet plutôt qu'en
+        # chaîne, par exemple — ne lève pas ValueError mais AttributeError, et
+        # remontait donc en 500 « Internal Server Error » en texte brut. L'écran
+        # ne savait même pas le lire : « Unexpected token 'I' ». Un refus doit
+        # se lire, surtout celui-là, qui désigne un défaut de l'appelant.
+        raise ValuationError(
+            f"Calendrier de la variante mal formé ({type(e).__name__}: {e}). "
+            f"Attendu une fréquence en chaîne (« 1M »), des dates en YYYY-MM-DD.")
+
+
 def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
-                   T_elapsed: float, asof: date) -> Residual:
+                   T_elapsed: float, asof: date,
+                   variant: Optional[VariantTerms] = None) -> Residual:
     """Rejoue le passé sur cours réels et construit le produit résiduel.
 
     L'historique arrive de l'appelant, en cours NUS : un payoff ne se lit pas
@@ -213,20 +372,39 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
         # message et du code HTTP.
         return Residual(early_recall=True, T_actual=replay["T_actual"])
     state = replay["state"]
+    # Les termes du contrat ne s'héritent pas du passé, ils se saisissent.
+    state["memo"] = _sans_les_param_semes(state.get("memo"), compiled, p.script_snapshot)
     realized_cfs = replay["cash_flows"]
 
-    residual_events = _shift_events_for_mtf(compiled.events, T_elapsed)
+    # ── Le point où le passé et l'avenir cessent d'être le même produit ──
+    #
+    # Jusqu'ici tout a été rejoué sous `compiled`, les termes d'ORIGINE : c'est
+    # sous eux que les coupons ont été versés et que le produit n'a pas été
+    # rappelé. À partir d'ici on price la vie restante, et une variante peut
+    # substituer ses propres termes. Les deux ne se rencontrent jamais.
+    pricing = compiled
+    texte_px = p.script_snapshot
+    calendrier_px = market.get("constats") or {}
+    if variant is not None and not variant.est_vide():
+        pricing = _compiler_variante(variant, p, compiled)
+        _refuser_si_le_passe_diverge(compiled, pricing, T_elapsed)
+        if variant.script is not None:
+            texte_px = variant.script
+        if variant.constats is not None:
+            calendrier_px = variant.constats
+
+    residual_events = _shift_events_for_mtf(pricing.events, T_elapsed)
     if not residual_events:
         raise ValuationError("Aucun événement résiduel — vérifier le calendrier du deal")
     # STRIKE_FIX window split at today: past dates (d <= T_elapsed) were replayed
     # on real closes (state["fix_state"]), only strictly-future dates stay on the
     # residual script — no fixing date is ever counted twice.
-    residual_fix = [round(d - T_elapsed, 6) for d in (compiled.strike_fix_dates or [])
+    residual_fix = [round(d - T_elapsed, 6) for d in (pricing.strike_fix_dates or [])
                     if d > T_elapsed + 1e-9]
     residual_script = CompiledScript(
-        events=residual_events, init_fn=compiled.init_fn,
-        params=compiled.params, constats=compiled.constats,
-        has_stop=compiled.has_stop, monitors=compiled.monitors,
+        events=residual_events, init_fn=pricing.init_fn,
+        params=pricing.params, constats=pricing.constats,
+        has_stop=pricing.has_stop, monitors=pricing.monitors,
         strike_fix_dates=residual_fix or None,
     )
 
@@ -246,6 +424,19 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
     for underlying in engine_uls:
         _shift_dividend_curve(underlying, T_elapsed)
 
+    # Les PARAM de la vie restante. Hors variante, ce sont ceux du rejeu — d'où
+    # l'égalité par défaut, qui laisse toute valorisation ordinaire inchangée.
+    px_params = user_params
+    check, T_res = {}, None
+    if pricing is not compiled:
+        if variant.user_params is not None:
+            px_params = variant.user_params
+        check = _etat_repris_par_la_variante(
+            state.get("memo"),
+            variant.script if variant.script is not None else p.script_snapshot)
+        dates = [d for e in residual_events for d in (e.dates or [])]
+        T_res = max(dates) if dates else None
+
     return Residual(
         compiled=compiled, residual_script=residual_script,
         state=state, realized_flows=realized_cfs,
@@ -253,4 +444,7 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
         T_elapsed=T_elapsed, r_frac=r_frac,
         prices=prices, dates_list=dates_list,
         user_params=user_params, replay=replay, start_idx=start_idx, s0_map=s0_map,
+        residual_user_params=px_params, variant_state_check=check,
+        T_residual_max=T_res,
+        pricing_script_text=texte_px, pricing_constats=calendrier_px,
     )

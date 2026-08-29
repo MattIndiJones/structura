@@ -3,7 +3,7 @@
 
     <main class="flex-1 flex flex-col items-center gap-10 px-6 py-16">
       <div class="w-full max-w-xl">
-        <RouterLink to="/" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
+        <BackLink fallback="/" />
       </div>
       <div class="text-center">
         <h1 class="page-title text-2xl">Administration</h1>
@@ -124,5 +124,6 @@
 </template>
 
 <script setup>
+import BackLink from '../components/ui/BackLink.vue'
 import { RouterLink } from 'vue-router'
 </script>

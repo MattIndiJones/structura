@@ -61,6 +61,19 @@
           <input v-model="regPassword" type="password" class="input" placeholder="••••••••" @keyup.enter="register" />
         </div>
         <div class="flex flex-col gap-1">
+          <label class="label">Confirmer le mot de passe *</label>
+          <input v-model="regPassword2" type="password" class="input" placeholder="••••••••"
+                 :class="motsDePasseDifferents ? 'ring-1 ring-red-500/60' : ''"
+                 @keyup.enter="register" />
+          <!-- Signalé pendant la saisie, pas à la validation : découvrir une
+               faute de frappe après avoir cliqué oblige à tout retaper, et sur
+               un champ masqué on ne sait même pas laquelle des deux est la
+               bonne. -->
+          <span v-if="motsDePasseDifferents" class="text-[10px] text-red-400">
+            Les deux mots de passe diffèrent.
+          </span>
+        </div>
+        <div class="flex flex-col gap-1">
           <label class="label">Entité / équipe <span class="text-slate-600">(optionnel)</span></label>
           <input v-model="regEntity" type="text" class="input" placeholder="ex: Desk Structuration" />
           <span class="text-[10px] text-slate-600">Laissez vide pour rejoindre l'entité Demo.</span>
@@ -100,7 +113,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import AlertMessage from '../components/ui/AlertMessage.vue'
@@ -119,6 +132,11 @@ const password = ref('')
 const regUsername = ref('')
 const regEmail    = ref('')
 const regPassword = ref('')
+const regPassword2 = ref('')
+// Ne s'affiche qu'une fois la confirmation commencée : signaler une
+// différence sur un champ encore vide serait crier avant d'avoir mal.
+const motsDePasseDifferents = computed(() =>
+  !!regPassword2.value && regPassword.value !== regPassword2.value)
 const regEntity   = ref('')
 
 async function submit() {
@@ -144,6 +162,10 @@ async function quickLogin(u, p) {
 async function register() {
   if (!regUsername.value || !regEmail.value || !regPassword.value) {
     error.value = 'Identifiant, e-mail et mot de passe sont obligatoires'
+    return
+  }
+  if (regPassword.value !== regPassword2.value) {
+    error.value = 'Les deux mots de passe ne correspondent pas'
     return
   }
   loading.value = true

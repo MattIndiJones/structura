@@ -148,6 +148,13 @@ export const useRfqStore = defineStore('rfq', () => {
         T: p.T ?? 3.0,
         N: p.N ?? 20000,
         model: p.model || 'constant',
+        // Les hypothèses de marché stockées avec l'AO. Sans ce passage, elles
+        // étaient saisissables, enregistrées… et sans le moindre effet sur le
+        // prix modèle. Le projet a déjà connu ce fil débranché : une courbe de
+        // dividende à 8 % vaut −491,6 bps.
+        yield_curve: p.yield_curve || [],
+        funding_curve: p.funding_curve || [],
+        funding_spread: p.funding_spread ?? 0,
         user_params: p.user_params || {},
         constats: p.constats || {},
         // Trois dates, trois rôles distincts : la diffusion démarre au

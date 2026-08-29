@@ -4,6 +4,7 @@ import { apiFetch } from '../utils/api.js'
 
 function errorMessage(err, fallback) {
   const detail = err?.detail
+  // Une erreur sans contrôles détaillés reste une simple chaîne.
   if (!detail || typeof detail !== 'object') return detail || fallback
   const describe = failure => {
     const field = failure.field ? `Champ « ${failure.field} » — ` : ''
@@ -19,7 +20,25 @@ function errorMessage(err, fallback) {
     ].filter(Boolean)
     return describe(f)
   })
-  return [detail.message || detail.code || fallback, ...failures].join('\n')
+  return { message: detail.message || detail.code || fallback, failures }
+}
+
+/**
+ * L'erreur, avec ses échecs à part.
+ *
+ * Le portillon de booking renvoie TOUS les contrôles en échec d'un coup —
+ * c'est fait pour : on corrige tout en une passe plutôt qu'un refus après
+ * l'autre. Recollés en une seule chaîne, ils arrivaient dans un `<span>` qui
+ * écrase les sauts de ligne : quatre phrases bout à bout sur une ligne. Avec
+ * un seul échec ça ne se voyait pas — c'est bien ce qui rendait le défaut
+ * discret.
+ */
+function erreurDetaillee(err, fallback) {
+  const decrit = errorMessage(err, fallback)
+  if (typeof decrit === 'string') return new Error(decrit)
+  const e = new Error(decrit.message)
+  e.failures = decrit.failures
+  return e
 }
 
 export const useDealsStore = defineStore('deals', () => {
@@ -57,7 +76,7 @@ export const useDealsStore = defineStore('deals', () => {
       })
       if (!res.ok) {
         const err = await res.json()
-        throw new Error(errorMessage(err, 'Erreur booking'))
+        throw erreurDetaillee(err, 'Erreur booking')
       }
       const deal = await res.json()
       deals.value.unshift(deal)
@@ -89,7 +108,7 @@ export const useDealsStore = defineStore('deals', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Erreur')) }
+    if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'Erreur') }
     const updated = await res.json()
     const idx = deals.value.findIndex(d => d.id === id)
     if (idx >= 0) deals.value[idx] = { ...deals.value[idx], ...updated }
@@ -103,7 +122,7 @@ export const useDealsStore = defineStore('deals', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Erreur')) }
+    if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'Erreur') }
     const updated = await res.json()
     if (currentDeal.value?.id === dealId) await selectDeal(dealId)
     return updated
@@ -113,7 +132,7 @@ export const useDealsStore = defineStore('deals', () => {
     loading.value = true; refreshStatus.value = 'Chargement spots…'
     try {
       const res = await apiFetch(`/api/deals/${dealId}/events/refresh`, { method: 'POST' })
-      if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Erreur refresh')) }
+      if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'Erreur refresh') }
       const result = await res.json()
       refreshStatus.value = result.message?.startsWith('⚠')
         ? result.message
@@ -136,7 +155,7 @@ export const useDealsStore = defineStore('deals', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Validation impossible')) }
+    if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'Validation impossible') }
     const updated = await res.json()
     if (currentDeal.value?.id === dealId) await selectDeal(dealId)
     return updated
@@ -148,7 +167,7 @@ export const useDealsStore = defineStore('deals', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Rejet impossible')) }
+    if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'Rejet impossible') }
     const updated = await res.json()
     if (currentDeal.value?.id === dealId) await selectDeal(dealId)
     return updated
@@ -163,7 +182,7 @@ export const useDealsStore = defineStore('deals', () => {
       })
     if (!res.ok) {
       const err = await res.json()
-      throw new Error(errorMessage(err, 'Traitement de l’exception impossible'))
+      throw erreurDetaillee(err, 'Traitement de l’exception impossible')
     }
     const result = await res.json()
     if (currentDeal.value?.id === dealId) {
@@ -179,7 +198,7 @@ export const useDealsStore = defineStore('deals', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason, confirmed_outcome: confirmedOutcome }),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Transition impossible')) }
+    if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'Transition impossible') }
     const result = await res.json()
     currentDeal.value = null
     await selectDeal(dealId)
@@ -192,7 +211,7 @@ export const useDealsStore = defineStore('deals', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Demande impossible')) }
+    if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'Demande impossible') }
     const result = await res.json()
     currentDeal.value = null
     await selectDeal(dealId)
@@ -205,7 +224,7 @@ export const useDealsStore = defineStore('deals', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Transition impossible')) }
+    if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'Transition impossible') }
     const result = await res.json()
     currentDeal.value = null
     await selectDeal(dealId)
@@ -214,7 +233,7 @@ export const useDealsStore = defineStore('deals', () => {
 
   async function loadPendingAmendments() {
     const res = await apiFetch('/api/deals/amendment-requests/pending')
-    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'File checker indisponible')) }
+    if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'File checker indisponible') }
     pendingAmendments.value = await res.json()
     return pendingAmendments.value
   }
@@ -225,7 +244,7 @@ export const useDealsStore = defineStore('deals', () => {
     if (filters.result) params.set('result', filters.result)
     params.set('limit', String(filters.limit || 250))
     const res = await apiFetch(`/api/deals/${dealId}/audit?${params}`)
-    if (!res.ok) { const err = await res.json(); throw new Error(errorMessage(err, 'Audit indisponible')) }
+    if (!res.ok) { const err = await res.json(); throw erreurDetaillee(err, 'Audit indisponible') }
     const data = await res.json()
     auditEvents.value = data.items || []
     return data

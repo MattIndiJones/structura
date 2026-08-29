@@ -151,6 +151,20 @@ class ParseResponse(BaseModel):
 
 # ── Analytics request/response models ──────────────────────────────
 
+class VariantOverrides(BaseModel):
+    """Les termes d'un avenant — ce qui remplace le parent à partir d'aujourd'hui.
+
+    Déclaré ici plutôt que dans l'API pour que le prix ET les analytiques
+    puissent le porter : une variante que seul le prix connaîtrait ferait
+    décrire au profil de payoff et aux probabilités le produit d'ORIGINE, sous
+    un prix d'avenant. C'est précisément l'écart qu'on a passé la session à
+    fermer partout ailleurs."""
+    script: Optional[str] = None
+    user_params: Optional[Dict[str, Any]] = None
+    constats: Optional[Dict[str, Any]] = None
+    mode: str = "avenant"
+
+
 class AnalysisBase(BaseModel):
     """Shared fields for profile / paths / proba / backtest / mtf requests."""
     script: str
@@ -177,6 +191,10 @@ class AnalysisBase(BaseModel):
     # que le prix, lui, passait. Sans devise, resolve_constats n'a aucun
     # calendrier de jours ouvres sur lequel compter le decalage.
     settlement_ccy: Optional[str] = None
+    # Avenant : les termes qui ne valent que pour la vie restante. Portés ici
+    # pour que le profil, les chemins, les probabilités et le MtF décrivent la
+    # MÊME variante que le prix.
+    variant: Optional[VariantOverrides] = None
     strike_date: Optional[date] = None
     value_date: Optional[date] = None
     payment_date: Optional[date] = None

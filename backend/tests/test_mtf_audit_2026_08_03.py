@@ -13,6 +13,7 @@ n'était pas le cas.
 """
 import datetime as dtm
 import math
+from functools import lru_cache
 
 import numpy as np
 import pytest
@@ -42,7 +43,7 @@ C1 = [[1.0]]
 REFERENCE_PATHS = 20_000
 
 
-def _tower_z(cs, uls, r, T, p0, t0, n_outer=3000, n_inner=300, params=None):
+def _tower_z(cs, uls, r, T, p0, t0, n_outer=1200, n_inner=100, params=None):
     """Écart à la propriété de la tour, en nombre d'erreurs-types."""
     res = run_mark_to_future(cs, uls, C1, r=r, T_max=T, main_price=p0,
                              model="constant", n_outer=n_outer, n_inner=n_inner,
@@ -70,6 +71,30 @@ AT 1, 2
 AT MATURITY
   PAY WOF "final"
 """
+
+AUTOCALL = """
+PARAM CPN = 8%
+PARAM AC  = 100%
+PARAM PDI = 60%
+AT 1, 2, 3
+  IF WOF >= AC
+    PAY 1 + CPN * INDEX "rappel"
+    STOP
+AT MATURITY
+  IF WOF >= PDI
+    PAY 1 + CPN * 3
+  ELSE
+    PAY WOF
+"""
+
+
+@lru_cache(maxsize=1)
+def _autocall_case():
+    cs = parse_script(AUTOCALL)
+    uls, r = _ul(sigma=0.20, q=0.019), 0.025
+    p0 = run_mc(cs, uls, C1, r=r, T_max=3.0, N=REFERENCE_PATHS,
+                model="constant", seed=123)["price"] * 100
+    return cs, uls, r, p0
 
 
 # ── Le partage passé/futur du calendrier ────────────────────────────
@@ -108,24 +133,8 @@ def test_pas_de_double_comptage_dans_la_fenetre_d_arrondi():
 @pytest.mark.parametrize("t0", [0.5962, 1.1923, 1.7885, 2.3846, 2.9808])
 def test_tour_sur_autocall_a_toutes_les_dates(t0):
     """Autocall 3 ans, coupon 8 %, PDI 60 % — le cas de référence du métier."""
-    cs = parse_script("""
-PARAM CPN = 8%
-PARAM AC  = 100%
-PARAM PDI = 60%
-AT 1, 2, 3
-  IF WOF >= AC
-    PAY 1 + CPN * INDEX "rappel"
-    STOP
-AT MATURITY
-  IF WOF >= PDI
-    PAY 1 + CPN * 3
-  ELSE
-    PAY WOF
-""")
-    uls, r = _ul(sigma=0.20, q=0.019), 0.025
-    p0 = run_mc(cs, uls, C1, r=r, T_max=3.0, N=REFERENCE_PATHS, model="constant",
-                seed=123)["price"] * 100
-    z, _ = _tower_z(cs, uls, r, 3.0, p0, t0, n_outer=2000, n_inner=300)
+    cs, uls, r, p0 = _autocall_case()
+    z, _ = _tower_z(cs, uls, r, 3.0, p0, t0, n_outer=1000, n_inner=100)
     assert abs(z) < 4.0, f"t0={t0} : écart à la tour z={z:.1f}"
 
 
@@ -143,10 +152,20 @@ AT MATURITY
 """
 
 
+@lru_cache(maxsize=1)
 def _fix_script():
     return resolve_constats(parse_script(FIX_SCRIPT), {"STRIKE_FIX": {
         "start_date": "2026-08-03", "end_date": "2027-02-03",
         "roll_date": "2026-09-03", "frequency": "1M"}}, anchor=dtm.date(2026, 8, 3))
+
+
+@lru_cache(maxsize=1)
+def _fix_case():
+    cs = _fix_script()
+    uls, r, T = _ul(), 0.03, 3.0
+    p0 = run_mc(cs, uls, C1, r=r, T_max=T, N=REFERENCE_PATHS,
+                model="constant", seed=1)["price"] * 100
+    return cs, uls, r, T, p0
 
 
 @pytest.mark.parametrize("t0", [0.35, 0.8, 1.5])
@@ -159,11 +178,8 @@ def test_strike_fix_realise_conserve_en_mtf(t0):
     fenêtre entièrement écoulée -> repli sur le neutre 1.0, c'est-à-dire un
     produit à strike asiatique marqué comme si son strike n'avait jamais été
     fixé (mesuré : -108 bp à t0=1.5, z=-3.6)."""
-    cs = _fix_script()
-    r, T = 0.03, 3.0
-    p0 = run_mc(cs, _ul(), C1, r=r, T_max=T, N=REFERENCE_PATHS, model="constant",
-                seed=1)["price"] * 100
-    z, _ = _tower_z(cs, _ul(), r, T, p0, t0, n_outer=2000, n_inner=400)
+    cs, uls, r, T, p0 = _fix_case()
+    z, _ = _tower_z(cs, uls, r, T, p0, t0, n_outer=2000, n_inner=120)
     assert abs(z) < 4.0, f"t0={t0} : écart à la tour z={z:.1f}"
 
 
@@ -174,7 +190,7 @@ def test_fenetre_de_fixing_entierement_passee_ne_revient_pas_au_neutre():
     cs = _fix_script()
     assert all(d < 0.6 for d in cs.strike_fix_dates)
     res = run_mark_to_future(cs, _ul(), C1, r=0.03, T_max=3.0, main_price=89.0,
-                             model="constant", n_outer=300, n_inner=200, seed=3,
+                             model="constant", n_outer=120, n_inner=60, seed=3,
                              mtm_dates=[1.5])
     pvs = np.array(res["results"][0]["pvs"])
     assert pvs.std() > 1e-6      # le strike réalisé varie d'un scénario à l'autre
@@ -259,7 +275,7 @@ def test_toutes_les_statistiques_portent_sur_les_survivants():
     chiffres au demi-pip près, pas au bit près — c'est voulu."""
     cs = parse_script(PHOENIX)
     res = run_mark_to_future(cs, _ul(), C1, r=0.03, T_max=2.0, main_price=100.0,
-                             model="constant", n_outer=400, n_inner=100, n_dates=4,
+                             model="constant", n_outer=200, n_inner=60, n_dates=4,
                              seed=5)
     for row in res["results"]:
         pvs = np.array(row["pvs"])

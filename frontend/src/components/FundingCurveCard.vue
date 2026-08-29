@@ -95,7 +95,7 @@
          vaut-elle pour moi » mais « à quel spread le marché la traite ».
          N'a de sens qu'en cours de vie : sans passé à rejouer, il n'y a pas
          de prix de marché à inverser. -->
-    <div v-if="enCoursDeVie" class="mt-4 pt-3 border-t border-slate-800">
+    <div v-if="dansLePricer && enCoursDeVie" class="mt-4 pt-3 border-t border-slate-800">
       <div class="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2">
         Spread implicite d'un prix de marché
         <HelpTip width="w-96" text="Résout le spread émetteur qui reproduit exactement le prix saisi, toutes les autres hypothèses restant celles de l'écran. Attention à la lecture : ce spread absorbe TOUT ce que le modèle ne capture pas — smile en tête. C'est un spread implicite au sens propre, pas une mesure de crédit pure. S'il ressort très loin du funding connu de l'émetteur, c'est le modèle qu'il faut regarder, pas le crédit." />
@@ -146,7 +146,18 @@ import SensitiveValue from './SensitiveValue.vue'
 import { formatNumber } from '../utils/format.js'
 
 const store = usePricingStore()
-const c = store.fundingCurve
+const props = defineProps({
+  // La courbe à éditer. Absente, celle du Pricer — les usages existants ne
+  // changent pas, et l'appel d'offres passe la sienne.
+  courbe: { type: Object, default: null },
+})
+
+// L'extraction du spread implicite reprice le produit à spread variable pour
+// retrouver celui qui colle au marché : elle a besoin d'un contexte de pricing
+// complet. Hors du Pricer, elle n'a pas de sens et le bloc disparaît, plutôt
+// que d'offrir un bouton qui échouerait.
+const dansLePricer = computed(() => !props.courbe)
+const c = computed(() => props.courbe ?? store.fundingCurve)
 const prixMarche = ref(null)
 const enCoursDeVie = computed(() => store.isInLife())
 
@@ -155,11 +166,11 @@ const MODES = [
   { id: 'pillars', label: 'Par pilier' },
 ]
 
-const pilier3Y = computed(() => c.pillars.find(p => p.label === '3Y')?.spread ?? c.level)
+const pilier3Y = computed(() => c.value.pillars.find(p => p.label === '3Y')?.spread ?? c.value.level)
 
 const resume = computed(() => {
-  if (c.mode === 'flat') return `${formatNumber(c.level * 100, 0)} bps, plat`
-  const vals = c.pillars.map(p => Number(p.spread) || 0)
+  if (c.value.mode === 'flat') return `${formatNumber(c.value.level * 100, 0)} bps, plat`
+  const vals = c.value.pillars.map(p => Number(p.spread) || 0)
   const lo = Math.min(...vals), hi = Math.max(...vals)
   return lo === hi
     ? `${formatNumber(lo * 100, 0)} bps, plat`
@@ -168,6 +179,6 @@ const resume = computed(() => {
 
 function aplatir() {
   const v = pilier3Y.value
-  c.pillars.forEach(p => { p.spread = v })
+  c.value.pillars.forEach(p => { p.spread = v })
 }
 </script>

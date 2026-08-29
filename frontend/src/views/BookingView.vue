@@ -6,7 +6,7 @@
 
         <div class="page-header">
           <div class="flex items-center gap-3">
-            <RouterLink :to="{ path: '/', query: { category: 'life_cycle' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
+            <BackLink :fallback="{ path: '/', query: { category: 'life_cycle' } }" />
             <h1 class="page-title">Booking — produits bookés</h1>
           </div>
           <div class="page-actions">
@@ -911,6 +911,7 @@
 </template>
 
 <script setup>
+import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'

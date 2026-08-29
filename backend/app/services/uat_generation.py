@@ -957,7 +957,19 @@ def _age_generated_records(
     deal: Deal | None = None,
 ) -> None:
     """Align technical timestamps with the generated business history."""
-    if date.fromisoformat(spec["trade_date"]) >= date.today():
+    # La référence est le dernier jour OUVRÉ, pas la date calendaire.
+    #
+    # `_profile_dates` cale toutes ses dates sur un jour ouvré, en RECULANT :
+    # le profil CURRENT_ACTIVE, qui doit rester frais et bookable, pose
+    # `trade = today` puis se fait ramener au vendredi dès qu'on est un samedi.
+    # Comparer ce jour ouvré à une date calendaire faisait alors vieillir la
+    # RFQ censée être propre — quote expirée, prix modèle périmé — tous les
+    # week-ends, et seulement les week-ends.
+    #
+    # Un trade passé au dernier close est le trade COURANT : il n'a rien
+    # d'historique, et rien à vieillir. En semaine, la référence vaut le jour
+    # même et le comportement ne change pas.
+    if date.fromisoformat(spec["trade_date"]) >= _to_business_day(date.today()):
         return
     ao_at = datetime.combine(date.fromisoformat(spec["ao_date"]), datetime.min.time()) \
         + timedelta(hours=9)

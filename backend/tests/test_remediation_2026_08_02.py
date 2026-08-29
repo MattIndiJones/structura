@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import os
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -242,12 +243,22 @@ def _kid_common():
                 sigma_r=0.0, a_r=0.0)
 
 
+@lru_cache(maxsize=None)
+def _kid_horizon(T_cap):
+    return _horizon_percentiles(**_kid_common(), T_cap=T_cap,
+                                n_outer=400, n_inner=120)
+
+
+@lru_cache(maxsize=1)
+def _kid_maturity():
+    return _mc_percentiles(**_kid_common(), T_cap=5.0, floor_price=0.0)
+
+
 def test_intermediate_horizon_does_not_redeem_the_product():
     """At the 1-year horizon a 5-year autocall used to price at 1.0000 with a
     median gross payoff of 1.0000: the AT MATURITY block fired at the
     truncated date and repaid the capital four years early."""
-    sc = _horizon_percentiles(**_kid_common(), T_cap=1.0,
-                              n_outer=400, n_inner=120)
+    sc = _kid_horizon(1.0)
     assert abs(sc["p50"] - 1.0) > 1e-3
     assert sc["p90"] - sc["p10"] > 0.05          # no longer degenerate
     assert 0.0 < sc["terminated_pct"] < 100.0
@@ -257,10 +268,9 @@ def test_every_horizon_agrees_on_the_present_value():
     """No arbitrage: the value of the position does not depend on the date you
     choose to look at it. The rows used to disagree by 5 points and were not
     even monotone in horizon."""
-    common = _kid_common()
-    v1 = _horizon_percentiles(**common, T_cap=1.0, n_outer=400, n_inner=120)["pv"]
-    vm = _horizon_percentiles(**common, T_cap=2.5, n_outer=400, n_inner=120)["pv"]
-    vf = _mc_percentiles(**common, T_cap=5.0, floor_price=0.0)["pv"]
+    v1 = _kid_horizon(1.0)["pv"]
+    vm = _kid_horizon(2.5)["pv"]
+    vf = _kid_maturity()["pv"]
     assert max(v1, vm, vf) - min(v1, vm, vf) < 0.03, f"{v1:.4f}/{vm:.4f}/{vf:.4f}"
 
 
@@ -289,9 +299,14 @@ def _certain_common():
                 sigma_r=0.0, a_r=0.0)
 
 
+@lru_cache(maxsize=1)
+def _certain_maturity():
+    return _mc_percentiles(**_certain_common(), T_cap=5.0, floor_price=0.0)
+
+
 def test_amount_is_what_the_investor_receives():
     """No discounting and no reinvestment: 1.08 paid at year 1 is 1.08."""
-    sc = _mc_percentiles(**_certain_common(), T_cap=5.0, floor_price=0.0)
+    sc = _certain_maturity()
     assert sc["p50"] == pytest.approx(1.08, abs=1e-4)
 
 
@@ -300,7 +315,7 @@ def test_return_is_the_irr_over_the_scenario_own_life():
     is labelled with. `(amount/notional)^(1/T_h)` published 1.55% because the
     exponent said five years; the scenario had lived one."""
     from backend.app.api.kid import _scenario_row
-    sc = _mc_percentiles(**_certain_common(), T_cap=5.0, floor_price=0.0)
+    sc = _certain_maturity()
     row = _scenario_row(sc, 5.0, 0.0, 0.0, 0.0)
     assert row["modere"]["ann_return"] == pytest.approx(8.0, abs=0.05)
     assert row["modere"]["life"] == pytest.approx(1.0, abs=1e-6)
@@ -321,8 +336,7 @@ def test_each_cell_carries_the_life_it_was_annualised_over():
     """Two cells of one column can legitimately hold different horizons once
     the exponent follows the scenario. That has to be readable, or the table
     looks internally inconsistent."""
-    common = _kid_common()
-    sc = _horizon_percentiles(**common, T_cap=2.5, n_outer=400, n_inner=120)
+    sc = _kid_horizon(2.5)
     from backend.app.api.kid import _scenario_row
     row = _scenario_row(sc, 2.5, 0.0, 0.0, 0.0)
     for cell in ("stress", "defavorable", "modere", "favorable"):
@@ -332,7 +346,7 @@ def test_each_cell_carries_the_life_it_was_annualised_over():
 def test_amount_and_return_come_from_the_same_scenario():
     """Reading the percentile of amounts and the percentile of returns apart
     would pair one scenario's payout with another one's holding period."""
-    sc = _mc_percentiles(**_kid_common(), T_cap=5.0, floor_price=0.0)
+    sc = _kid_maturity()
     for key in ("p1", "p10", "p50", "p90"):
         cell = sc["scenarios"][key]
         assert cell["amount"] == pytest.approx(sum(f["cf"] for f in cell["flows"]))
@@ -349,9 +363,8 @@ def test_per_path_flows_stay_opt_in():
 
 
 def test_uncertainty_widens_with_the_horizon():
-    common = _kid_common()
-    v1 = _horizon_percentiles(**common, T_cap=1.0, n_outer=400, n_inner=120)
-    vm = _horizon_percentiles(**common, T_cap=2.5, n_outer=400, n_inner=120)
+    v1 = _kid_horizon(1.0)
+    vm = _kid_horizon(2.5)
     assert (v1["p90"] - v1["p1"]) < (vm["p90"] - vm["p1"])
 
 
@@ -387,6 +400,7 @@ AT MATURITY
 """
 
 
+@lru_cache(maxsize=1)
 def _mtf():
     from backend.app.core.payscript.engine import run_mark_to_future
     return run_mark_to_future(

@@ -42,7 +42,13 @@
                     : 'bg-emerald-900/50 border-emerald-500 text-emerald-300'
                   : 'border-slate-700 text-slate-500 hover:border-slate-500'
               ]">
-              {{ s === 'vente' ? '↑ Vente (banque vend)' : '↓ Achat (banque achète)' }}
+              <!-- Les DEUX côtés, toujours. Le deal se note du point de vue de
+                   la contrepartie, l'AO du nôtre : un appel d'offres où « nous
+                   achetons » se booke donc en « la banque vend ». C'est juste,
+                   mais illisible tant qu'un seul des deux est écrit — on ne
+                   sait plus qui est qui, et la marge en dépend. -->
+              {{ s === 'vente' ? '↑ Vente — la banque vend, nous achetons'
+                               : '↓ Achat — la banque achète, nous vendons' }}
             </button>
           </div>
         </div>
@@ -134,7 +140,7 @@
         <div class="col-span-2">
           <div class="flex items-center justify-between bg-slate-800/60 rounded-lg px-4 py-2.5">
             <span class="text-xs text-slate-400">Marge
-              <HelpTip text="Prix traité − fair value. Positif = la banque vend plus cher que le prix théorique (ou achète moins cher) — c'est la marge commerciale capturée sur le deal, indépendamment de la performance future du produit." />
+              <HelpTip text="NOTRE marge sur ce deal, dans notre sens. Quand nous achetons, c'est fair value − prix traité : payer 98 un produit qui en vaut 100 nous fait gagner 2. Quand nous vendons, c'est l'inverse. Le sens affiché plus haut décrit la contrepartie ; nous sommes de l'autre côté. Indépendant de la performance future du produit." />
             </span>
             <span class="font-mono font-bold text-sm"
               :class="margin >= 0 ? 'text-emerald-400' : 'text-red-400'">
@@ -162,13 +168,23 @@
           <label class="label">Strike date <span class="text-slate-600 font-normal">(fixing S₀)</span>
             <HelpTip text="Date à laquelle les niveaux initiaux (S₀) des sous-jacents sont constatés — la référence par rapport à laquelle toutes les performances du produit sont mesurées ensuite. Se saisit dans l'onglet Events une fois le deal booké." />
           </label>
-          <input v-model="form.strike_date" type="date" class="input" />
+          <input v-model="form.strike_date" type="date" class="input"
+                 :readonly="datesFigees"
+                 :class="datesFigees ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : ''" />
+          <p v-if="datesFigees" class="text-[10px] text-slate-500 mt-0.5">
+            Figée sur un avenant — le passé a été rejoué dessus.
+          </p>
         </div>
         <div>
           <label class="label">Value date
             <HelpTip text="t=0 pour l'actualisation. Généralement strike + 2j ouvrés." />
           </label>
-          <input v-model="form.value_date" type="date" class="input" />
+          <input v-model="form.value_date" type="date" class="input"
+                 :readonly="datesFigees"
+                 :class="datesFigees ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : ''" />
+          <p v-if="datesFigees" class="text-[10px] text-slate-500 mt-0.5">
+            Figée sur un avenant — le passé a été rejoué dessus.
+          </p>
         </div>
         <div>
           <label class="label">Maturité
@@ -285,19 +301,22 @@
                   <HelpTip text="Début de la première période (typiquement la date de strike) — pas elle-même une date d'observation : le moteur exclut toujours ce premier point généré. Pour N observations réelles à partir d'une date donnée, mets cette date de début un cran AVANT la première observation voulue (ex: date de strike)." />
                 </label>
                 <SensitiveValue mode="input">
-                  <input type="date" v-model="store.constatOverrides[c.name].start_date" class="input" />
+                  <input type="date" v-model="store.constatOverrides[c.name].start_date" class="input"
+                         :class="marque.classe(cheminConstat(c.name, 'start_date'))" />
                 </SensitiveValue>
               </div>
               <div>
                 <label class="label">Date de fin</label>
                 <SensitiveValue mode="input">
-                  <input type="date" v-model="store.constatOverrides[c.name].end_date" class="input" />
+                  <input type="date" v-model="store.constatOverrides[c.name].end_date" class="input"
+                         :class="marque.classe(cheminConstat(c.name, 'end_date'))" />
                 </SensitiveValue>
               </div>
               <div>
                 <label class="label">Date de roll</label>
                 <SensitiveValue mode="input">
-                  <input type="date" v-model="store.constatOverrides[c.name].roll_date" class="input" />
+                  <input type="date" v-model="store.constatOverrides[c.name].roll_date" class="input"
+                         :class="marque.classe(cheminConstat(c.name, 'roll_date'))" />
                 </SensitiveValue>
               </div>
               <div>
@@ -450,9 +469,15 @@
 
     <!-- ── Booking ─────────────────────────────────────────── -->
     <div class="card">
+      <!-- Le portillon renvoie TOUS les contrôles en échec d'un coup : la
+           liste existe pour qu'une seule tentative suffise à savoir quoi
+           corriger. Recollés en une phrase, ils se lisaient bout à bout. -->
       <div v-if="bookingError"
         class="bg-red-900/30 border border-red-700/50 rounded-lg px-4 py-3 mb-3 text-red-300 text-sm">
-        ⚠ {{ bookingError }}
+        <p class="font-semibold">⚠ {{ bookingError }}</p>
+        <ul v-if="bookingFailures.length" class="mt-2 space-y-1 list-disc pl-5 text-[13px]">
+          <li v-for="(echec, i) in bookingFailures" :key="i">{{ echec }}</li>
+        </ul>
       </div>
       <div v-if="bookedDeal"
         class="bg-emerald-900/30 border border-emerald-700/50 rounded-lg px-4 py-3 mb-3">
@@ -496,6 +521,7 @@
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { RouterLink } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
+import { useVariantMark, cheminConstat, cheminGlobal } from '../composables/useVariantMark.js'
 import { useDealsStore } from '../stores/deals.js'
 import { useAuthStore } from '../stores/auth.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
@@ -512,11 +538,37 @@ onMounted(ensureUnderlyings)
 const emit = defineEmits(['go-events'])
 
 const store = usePricingStore()
+const marque = useVariantMark(store)
+
+// Un avenant ne peut pas déplacer l'origine de son axe des temps : le rejeu du
+// passé s'appuie dessus. Le serveur le refuse, le delta ne le capture plus —
+// mais laisser le champ saisissable ferait taper une valeur qui sera écartée
+// sans un mot. Mieux vaut qu'il se voie non modifiable.
+const datesFigees = computed(() =>
+  store.variantInfo && (store.variantInfo.mode || 'avenant') === 'avenant')
 const dealsStore = useDealsStore()
 const auth = useAuthStore()
 const demo = useDemoModeStore()
 
 const today = new Date().toISOString().split('T')[0]
+
+/**
+ * Une date sur laquelle on accepte de calculer.
+ *
+ * Un `<input type="date">` émet des valeurs INTERMÉDIAIRES pendant qu'on tape
+ * l'année : saisir « 2027 » produit successivement 0002, 0020, 0202 puis 2027.
+ * Chacune déclenche les calculs en aval — d'où une maturité en l'an 0202 et une
+ * date de règlement en 0205.
+ *
+ * On borne donc à une plage où un produit structuré a un sens. Ce n'est pas une
+ * validation de saisie : c'est un refus de CALCULER sur ce que l'utilisateur
+ * n'a pas fini d'écrire.
+ */
+function dateUtilisable(iso) {
+  if (!iso) return false
+  const annee = Number(String(iso).slice(0, 4))
+  return Number.isFinite(annee) && annee >= 1990 && annee <= 2200
+}
 
 function addBizDays(isoDate, n) {
   const d = new Date(isoDate)
@@ -619,6 +671,9 @@ watch(() => store.result, (r) => {
 // morte temporelle. L'exception passait inaperçue, le drapeau restait faux, et
 // la proposition à J+3 écrasait la date de règlement d'un script rouvert.
 const paymentDateDirty = ref(false)
+// Vrai le temps qu'une proposition s'écrive — pas un `ref` : on le lit dans
+// des watchers synchrones déclenchés par l'écriture elle-même.
+let propositionEnCours = false
 
 for (const champ of ['trade_date', 'strike_date', 'value_date', 'payment_date']) {
   watch(() => store.globalParams[champ], (v) => {
@@ -627,7 +682,9 @@ for (const champ of ['trade_date', 'strike_date', 'value_date', 'payment_date'])
     // bibliothèque, deal rechargé — est un fait, pas un défaut. Sans ce
     // drapeau, la proposition à J+3 ouvrés l'écrasait au chargement : un
     // term sheet à J+7 revenait silencieusement à J+3.
-    if (champ === 'payment_date' && v) paymentDateDirty.value = true
+    // Notre propre proposition n'est pas une saisie : la compter comme telle
+    // verrouillait le drapeau et figeait la première valeur calculée.
+    if (champ === 'payment_date' && v && !propositionEnCours) paymentDateDirty.value = true
   }, { immediate: true })
   watch(() => form[champ], (v) => {
     if (v && store.globalParams[champ] !== v) store.globalParams[champ] = v
@@ -698,7 +755,23 @@ function formatCcy(val) {
 }
 
 // ── Computed ─────────────────────────────────────────────
-const margin = computed(() => (form.price_traded || 0) - (form.fair_value || 0))
+/**
+ * Notre marge, du côté qui est le NÔTRE.
+ *
+ * Elle se calculait `prix traité − fair value` quel que soit le sens. Juste
+ * quand nous vendons — encaisser plus que la valeur théorique est un gain —
+ * mais de signe inverse quand nous achetons : payer 98 un produit qui en vaut
+ * 100 nous fait gagner 2, et l'écran affichait −2.
+ *
+ * `form.sens` décrit la CONTREPARTIE (« la banque vend »), donc nous sommes de
+ * l'autre côté : `vente` veut dire que nous achetons.
+ */
+const nousAchetons = computed(() => form.sens === 'vente')
+const margin = computed(() => {
+  const traite = form.price_traded || 0
+  const juste = form.fair_value || 0
+  return nousAchetons.value ? juste - traite : traite - juste
+})
 
 // Mode expert (calendrier CONSTAT) : la maturité est la date de fin la plus
 // tardive parmi les calendriers du script, pas value_date + T. Toujours
@@ -720,7 +793,7 @@ const maturityDate = computed(() => {
   // value date décalait toute l'échéance de (value − strike) — quelques jours
   // sur un produit réel, systématiquement dans le même sens.
   const origine = form.strike_date || form.value_date
-  if (!origine || !store.globalParams.T) return ''
+  if (!dateUtilisable(origine) || !store.globalParams.T) return ''
   const d = new Date(origine)
   d.setDate(d.getDate() + Math.round(store.globalParams.T * 365.25))
   return d.toISOString().split('T')[0]
@@ -734,7 +807,7 @@ const maturityDate = computed(() => {
 const SETTLEMENT_LAG_DEFAULT = 3
 
 async function proposePaymentDate(maturite) {
-  if (!maturite || paymentDateDirty.value) return
+  if (!dateUtilisable(maturite) || paymentDateDirty.value) return
   const devise = form.devise || store.globalParams.deal_ccy || 'EUR'
   try {
     const res = await fetch('/api/calendar/resolve', {
@@ -743,10 +816,27 @@ async function proposePaymentDate(maturite) {
       body: JSON.stringify({ date: maturite, currency: devise,
                              business_days: SETTLEMENT_LAG_DEFAULT }),
     })
-    if (res.ok) { form.payment_date = (await res.json()).date; return }
+    if (res.ok) { _poserProposition((await res.json()).date); return }
   } catch { /* serveur muet : on retombe sur le décompte local ci-dessous */ }
   // Repli hors ligne — week-ends seulement, donc potentiellement un jour férié.
-  form.payment_date = addBizDays(maturite, SETTLEMENT_LAG_DEFAULT)
+  _poserProposition(addBizDays(maturite, SETTLEMENT_LAG_DEFAULT))
+}
+
+/**
+ * Écrit la date proposée SANS la faire passer pour une saisie.
+ *
+ * La proposition alimentait `form.payment_date`, ce qui la recopiait dans le
+ * contexte, ce qui déclenchait le garde qui lève `paymentDateDirty`. Le drapeau
+ * se verrouillait donc sur notre propre écriture : la première valeur calculée
+ * — souvent celle d'une année à moitié tapée — devenait définitive, et la bonne
+ * n'arrivait jamais.
+ */
+function _poserProposition(date) {
+  propositionEnCours = true
+  form.payment_date = date
+  // Relâché après le cycle de réactivité, sinon les watchers déclenchés par
+  // l'écriture le trouveraient déjà remis à faux.
+  nextTick(() => { propositionEnCours = false })
 }
 
 watch(maturityDate, proposePaymentDate, { immediate: true })
@@ -898,6 +988,7 @@ const previewEvents = computed(() => {
 // ── Validation & booking ──────────────────────────────────
 const errors = reactive({})
 const bookingError = ref(null)
+const bookingFailures = ref([])
 const bookedDeal = ref(null)
 
 // Le deal existe déjà — soit on vient de le booker, soit on a rouvert un deal
@@ -926,6 +1017,7 @@ function validate() {
 
 async function book() {
   bookingError.value = null
+  bookingFailures.value = []
   bookedDeal.value = null
   if (!validate()) return
 
@@ -993,6 +1085,7 @@ async function book() {
     bookedDeal.value = deal
   } catch (e) {
     bookingError.value = e.message
+    bookingFailures.value = e.failures || []
   }
 }
 </script>

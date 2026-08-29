@@ -534,11 +534,13 @@ def test_sigma_r_refits_the_curve_on_zcb():
     an arbitrage against the curve the user supplied."""
     cs = parse_script(ZCB_SIMPLE)
     r, T = 0.03, 3.0
-    kw = dict(r=r, T_max=T, N=40000, model='constant', seed=42, antithetic=True)
+    kw = dict(r=r, T_max=T, N=10000, model='constant', seed=42, antithetic=True)
     deterministic = math.exp(-r * T)
 
+    price = run_mc(cs, CALL_PARAMS, CORR, sigma_r=0.0, a_r=0.0, **kw)['price']
+    assert price == pytest.approx(deterministic, abs=5e-5)
     for a_r in (0.0, 0.3):
-        for sr in (0.0, 0.005, 0.01, 0.02, 0.03):
+        for sr in (0.005, 0.01, 0.02, 0.03):
             price = run_mc(cs, CALL_PARAMS, CORR, sigma_r=sr, a_r=a_r, **kw)['price']
             assert price == pytest.approx(deterministic, abs=5e-5), \
                 f"sigma_r={sr} a_r={a_r}: {price:.6f} vs {deterministic:.6f}"

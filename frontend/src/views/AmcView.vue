@@ -4,7 +4,7 @@
     <!-- Barre d'outils : titre + switch de mode (reste local, pas d'état
          cross-vue dans le shell) -->
     <div class="border-b px-5 py-2.5 flex items-center gap-4 shrink-0" style="border-color: var(--border);">
-      <RouterLink :to="{ path: '/', query: { category: 'studies' } }" class="btn-secondary text-xs px-3 py-1.5 shrink-0">← Retour</RouterLink>
+      <BackLink :fallback="{ path: '/', query: { category: 'studies' } }" />
       <h1 class="page-title text-lg shrink-0">Analyse AMC</h1>
       <div class="tabs shrink-0">
         <button @click="mainTab = 'classic'" class="tab-btn" :class="{ active: mainTab === 'classic' }">
@@ -4319,6 +4319,7 @@
 </template>
 
 <script setup>
+import BackLink from '../components/ui/BackLink.vue'
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { Chart, registerables } from 'chart.js'
@@ -5123,7 +5124,8 @@ async function loadStudyById(id) {
 }
 
 async function deleteStudy(id) {
-  if (!confirm('Supprimer cette étude sauvegardée ?')) return
+  if (!await confirmer({ titre: 'Supprimer cette étude sauvegardée ?',
+                       confirmer: 'Supprimer', danger: true })) return
   try {
     await apiFetch(`/api/amc/studies/${id}`, { method: 'DELETE' })
     await fetchSavedStudies()

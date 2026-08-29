@@ -12,7 +12,7 @@ from ..db.models import RfqRequest, RfqQuote, RfqProvider, Counterparty, Deal, U
 from ..core.references import next_reference
 from ..core.audit import record_audit_event
 from ..core.rfq_controls import (
-    pricing_input_hash, product_terms, product_terms_hash,
+    maturity_iso, pricing_input_hash, product_terms, product_terms_hash,
     rfq_readiness_failures,
 )
 from ..core.payscript.parser import parse_script
@@ -465,6 +465,28 @@ def _is_expert_script(script_text: str) -> bool:
         ev.constat_ref in declared for ev in compiled.events if ev.constat_ref))
 
 
+def _refuser_reglement_avant_maturite(params: dict) -> None:
+    """Le remboursement final ne peut pas précéder la dernière constatation.
+
+    Refusé à l'ÉCRITURE, pas seulement au booking. Un AO peut recevoir des
+    cotations en quelques minutes, et ses termes contractuels sont alors gelés :
+    une incohérence acceptée à la création devient impossible à corriger, et ne
+    se révèle qu'au refus de booking — sur un message qui parle d'un écart de
+    `payment_date` sans dire lequel des deux côtés a tort.
+
+    C'est exactement ce qui est arrivé à RFQ-20260829-001 : maturité 2029,
+    règlement 2026.
+    """
+    paiement = params.get("payment_date")
+    maturite = maturity_iso(params)
+    if paiement and maturite and str(paiement) < maturite:
+        raise HTTPException(
+            422,
+            f"Le règlement ({paiement}) précède la maturité ({maturite}). "
+            f"La date de paiement date l'échange final des flux : elle suit la "
+            f"dernière constatation, elle ne la précède pas.")
+
+
 def _create_rfq(
     body: RfqCreate,
     current: User,
@@ -478,6 +500,8 @@ def _create_rfq(
             422, "Une RFQ 'to trade' doit utiliser un script en mode Expert (calendrier "
                  "CONSTAT réel) pour la précision requise — sauvegardez-le dans le Pricer, "
                  "ou repartez du script d'un deal déjà booké en mode Expert.")
+
+    _refuser_reglement_avant_maturite(body.params or {})
 
     reference = (next_reference(session, RfqRequest, reference_prefix)
                  if reference_prefix else _gen_ref(session))
@@ -632,6 +656,7 @@ def update_rfq(
     if "params" in data:
         _refuse_if_booked(rfq, session, "les termes et paramètres de l'AO")
         new_params = data.pop("params") or {}
+        _refuser_reglement_avant_maturite(new_params)
         existing_terms = product_terms(rfq.script_snapshot, json.loads(rfq.params_json))
         new_terms = product_terms(rfq.script_snapshot, new_params)
         if _get_quotes(rfq_id, session) and new_terms != existing_terms:

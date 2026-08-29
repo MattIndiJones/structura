@@ -238,7 +238,8 @@ async function loadDocs() {
 }
 
 async function deleteDoc(id) {
-  if (!confirm('Supprimer ce document ?')) return
+  if (!await confirmer({ titre: 'Supprimer ce document ?',
+                       confirmer: 'Supprimer', danger: true })) return
   await apiFetch(`/api/documents/${id}`, { method: 'DELETE' })
   docs.value = docs.value.filter(d => d.id !== id)
 }

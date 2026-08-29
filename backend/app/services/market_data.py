@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 import math
+import time
 import numpy as np
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -104,6 +105,28 @@ def load_hist_vol(tickers: list[str], period: str = "1y") -> dict:
         return {"error": str(e)}
 
 
+# ── Cache d'historique ──────────────────────────────────────────────
+#
+# Une valorisation en cours de vie reconstruit son contexte résiduel, donc
+# retélécharge tout l'historique depuis le strike. Chaque analytique le refait,
+# et le comparateur de déclinaisons le refait UNE FOIS PAR LIGNE : sur un panier
+# de quatre noms avec sept déclinaisons, cela donnait trente-deux requêtes Yahoo
+# séquentielles pour un historique rigoureusement identique — plusieurs minutes
+# d'attente, et le régime où Yahoo se met à limiter les appels.
+#
+# TTL court plutôt que cache de session : en séance, un cours doit pouvoir
+# bouger. Deux minutes couvrent largement un tableau comparatif complet tout en
+# gardant l'application vivante sur un marché ouvert.
+_TTL_PRIX = 120.0
+_cache_prix: dict[tuple, tuple[float, dict]] = {}
+
+
+def vider_cache_prix() -> None:
+    """Force le prochain appel à repartir de la source. Pour les tests, et pour
+    un rafraîchissement explicite demandé par l'utilisateur."""
+    _cache_prix.clear()
+
+
 def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
                       adjusted: bool = False) -> dict:
     """Daily close prices for backtest replay.
@@ -125,6 +148,15 @@ def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
     calibration. Never for anything a payoff reads."""
     if not _HAS_YF:
         return {"error": "yfinance non installé"}
+
+    # La clé porte les tickers TRIÉS : deux appels au même panier dans un ordre
+    # différent décrivent le même historique.
+    cle = (tuple(sorted(tickers)), start, end, adjusted)
+    fige = _cache_prix.get(cle)
+    if fige is not None and (time.monotonic() - fige[0]) < _TTL_PRIX:
+        # Copie superficielle : l'appelant ne doit pas pouvoir muter le cache.
+        return {**fige[1]}
+
     try:
         end = end or datetime.today().strftime("%Y-%m-%d")
         price_series: dict = {}
@@ -190,7 +222,10 @@ def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
         elif prices.empty and not frame.empty:
             return {"error": "Aucune séance où tous les sous-jacents cotent "
                              "simultanément sur la période demandée."}
-        return payload
+        # Seuls les SUCCÈS sont mis en cache : figer une erreur réseau la
+        # rejouerait pendant deux minutes alors qu'un simple réessai passerait.
+        _cache_prix[cle] = (time.monotonic(), payload)
+        return {**payload}
     except Exception as e:
         logger.exception("load_hist_prices")
         return {"error": str(e)}

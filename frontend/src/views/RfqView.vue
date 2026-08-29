@@ -3,7 +3,7 @@
 
     <div class="page-header px-6 pt-6 pb-0 mb-0">
       <div class="flex items-center gap-3">
-        <RouterLink :to="{ path: '/', query: { category: 'competitive_bidding' } }" class="btn-secondary text-xs px-3 py-1.5">← Retour</RouterLink>
+        <BackLink :fallback="{ path: '/', query: { category: 'competitive_bidding' } }" />
         <h1 class="page-title">RFQ Fournisseurs</h1>
       </div>
       <div class="page-actions">
@@ -60,7 +60,27 @@
 
         <!-- Formulaire de création -->
         <div v-if="showCreateForm" class="flex flex-col gap-4 max-w-2xl xl:max-w-[1500px]">
-          <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider">Nouvelle RFQ</h2>
+          <!-- Le titre ET les actions dans un bandeau collé en haut.
+               Choisir un template ajoute les termes du produit et le calendrier
+               CONSTAT — près de 400 px — et le bouton « Créer » descendait
+               d'autant, sous le curseur de qui venait de choisir. Placé en bas,
+               même collant, il bougeait encore entre un formulaire court et un
+               formulaire long. En haut, il ne dépend plus du contenu du tout —
+               c'est déjà où le Pricer met son action principale. -->
+          <div class="sticky top-0 z-20 -mx-6 -mt-6 px-6 py-3 mb-1 flex items-center gap-3 flex-wrap border-b"
+               style="background: rgba(250,249,246,.94); backdrop-filter: blur(10px);
+                      border-color: var(--border); box-shadow: 0 4px 14px rgba(11,26,49,.04);">
+            <h2 class="text-sm font-bold text-slate-300 uppercase tracking-wider">Nouvelle RFQ</h2>
+            <span v-if="champsManquants.length" class="text-[11px] text-amber-600">
+              À compléter : {{ champsManquants.join(', ') }}
+            </span>
+            <div class="ml-auto flex gap-2">
+              <button class="btn-secondary text-sm" @click="showCreateForm = false">Annuler</button>
+              <button class="btn-primary text-sm" :disabled="creating" @click="submitCreate">
+                {{ creating ? 'Création…' : 'Créer la RFQ' }}
+              </button>
+            </div>
+          </div>
 
           <AlertMessage v-if="createError" kind="error">{{ createError }}</AlertMessage>
 
@@ -216,7 +236,7 @@
                   <label class="label"
                          title="Échange final des flux de cash. Proposée à trois jours ouvrés après la dernière constatation — modifiable, c'est le term sheet qui tranche.">Date de paiement *</label>
                   <input v-model="form.payment_date" type="date" class="input"
-                         @change="resolveFormDate('payment_date')" />
+                         @change="paymentDateSaisie = true; resolveFormDate('payment_date')" />
                   <select v-model="form.payment_date_convention" class="select py-1 text-[11px]"
                           title="Ce que devient cette date si elle tombe un week-end ou un jour férié du calendrier de la devise."
                           @change="resolveFormDate('payment_date')">
@@ -279,16 +299,21 @@
                     </select>
                   </div>
                 </div>
+
+                <!-- Les mêmes cartes que Marché & Paramètres, dans le MÊME ORDRE,
+                     sur l'état de l'AO. Elles acceptent leur courbe en prop et retombent sur
+                     le Pricer quand on ne leur en donne pas : une seule
+                     implémentation, deux écrans, aucun état partagé. -->
+                <div class="flex flex-col gap-3 mt-3 pt-3 border-t border-slate-800">
+                  <DividendCurveCard :sous-jacents="ao.panier" :index-actif="0"
+                                     :horizon="form.T" />
+                  <YieldCurveCard :courbe="ao.yieldCurve" :taux-plat="advanced.r" />
+                  <FundingCurveCard :courbe="ao.fundingCurve" />
+                </div>
               </details>
             </div>
           </div>
 
-          <div class="flex gap-2">
-            <button class="btn-primary text-sm" :disabled="creating" @click="submitCreate">
-              {{ creating ? 'Création…' : 'Créer la RFQ' }}
-            </button>
-            <button class="btn-secondary text-sm" @click="showCreateForm = false">Annuler</button>
-          </div>
         </div>
 
         <!-- Détail RFQ -->
@@ -324,6 +349,46 @@
                qu'exige la table des flux pour ne pas défiler. -->
           <div class="flex flex-col gap-4 min-[1650px]:grid min-[1650px]:grid-cols-[minmax(0,1fr)_560px] min-[1650px]:items-start">
             <div class="flex flex-col gap-4 min-w-0">
+              <!-- ── L'état de l'écran par rapport à la BASE ────────────
+                   Les termes saisis dans « Paramètres de pricing » ne vivent
+                   qu'en mémoire : « Calculer prix modèle » n'envoie que les
+                   hypothèses de modèle, jamais les termes. Le seul bouton qui
+                   les persistait vivait à l'INTÉRIEUR du bloc replié — modifier
+                   une date puis quitter la perdait sans un mot, et l'écran
+                   continuait d'afficher une valeur que la base n'avait pas.
+
+                   Rendue TOUJOURS visible, et pas seulement en cas d'écart :
+                   une barre qui n'apparaît qu'au moment du problème ne se
+                   cherche pas, elle se remarque — ou pas. Là, la question
+                   « est-ce que ce que je vois est en base ? » a une réponse
+                   affichée en permanence, sans rien déplier. -->
+              <div class="card flex flex-wrap items-center gap-3"
+                   :class="detailTermsDirty ? 'border-amber-600/50 bg-amber-900/10' : ''">
+                <span class="text-xs font-semibold"
+                      :class="detailTermsDirty ? 'text-amber-400' : 'text-emerald-500'">
+                  {{ detailTermsDirty ? '⚠ Modifications non enregistrées' : '✓ Écran conforme à la base' }}
+                </span>
+                <span class="text-[11px] flex-1 min-w-40"
+                      :class="detailTermsDirty ? 'text-slate-400' : 'text-slate-600'">
+                  {{ detailTermsDirty
+                    ? 'Ce qui est affiché ne correspond pas à la base. Quitter cette page le perd.'
+                    : 'Les termes affichés sont ceux enregistrés.' }}
+                </span>
+                <button type="button" class="btn-primary text-xs px-3 py-1.5 shrink-0"
+                        :disabled="!detailTermsDirty || savingTerms"
+                        title="Écrit les termes contractuels de l'AO en base. Refusé par le serveur si une cotation existe déjà — ils sont alors figés."
+                        @click="saveDetailTerms">
+                  {{ savingTerms ? 'Enregistrement…' : '💾 Enregistrer les termes' }}
+                </button>
+                <button type="button" class="text-[11px] underline shrink-0"
+                        :class="detailTermsDirty ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-400'"
+                        title="Recharger les termes tels qu'ils sont enregistrés en base"
+                        @click="refreshDetailParams">
+                  {{ detailTermsDirty ? 'Abandonner' : 'Recharger' }}
+                </button>
+              </div>
+              <AlertMessage v-if="termsError" kind="error" dismissible @dismiss="termsError = ''">{{ termsError }}</AlertMessage>
+
               <!-- Détails du produit -->
               <div class="card grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
@@ -354,6 +419,18 @@
                   <div class="text-xs text-slate-200">
                     {{ fmtDateOnly(detailMaturityDate) || '—' }}
                     <span v-if="rfq.current.params?.T" class="text-slate-500">({{ fmtTenor(rfq.current.params.T) }} ans)</span>
+                  </div>
+                </div>
+                <!-- La date de paiement est un terme CONTRACTUEL, gelé comme le
+                     strike et la maturité. La cacher dans « paramètres de
+                     pricing (modifiables) », parmi les hypothèses de modèle, a
+                     produit un AO réglé trois ans avant son échéance sans que
+                     rien ne se voie. Sa place est ici, avec les trois autres. -->
+                <div>
+                  <div class="label mb-0.5">Date de paiement</div>
+                  <div class="text-xs" :class="reglementIncoherent ? 'text-red-400 font-semibold' : 'text-slate-200'">
+                    {{ fmtDateOnly(rfq.current.params?.payment_date) || '—' }}
+                    <span v-if="reglementIncoherent" :title="`Le règlement précède la maturité du ${fmtDateOnly(detailMaturityDate)}`">⚠</span>
                   </div>
                 </div>
                 <div>
@@ -434,7 +511,6 @@
                               title="Recharger les termes tels qu'ils sont enregistrés sur l'AO"
                               @click="refreshDetailParams">Recharger</button>
                     </div>
-                    <AlertMessage v-if="termsError" kind="error" dismissible @dismiss="termsError = ''">{{ termsError }}</AlertMessage>
 
                     <div class="flex items-center gap-3 border-t border-slate-800 pt-3">
                       <button type="button" class="btn-secondary text-xs px-3 py-1.5"
@@ -495,6 +571,17 @@
                         <input v-model="detailAdvanced.payment_date" type="date" class="input"
                                :disabled="!!rfq.current.quotes?.length" />
                       </div>
+                    </div>
+
+                    <!-- Les mêmes cartes qu'à la création, dans l'ordre du Pricer,
+                         sur l'état du détail. Ce sont des hypothèses de MODÈLE : elles
+                         restent ajustables cotations en main, contrairement
+                         aux dates ci-dessus qui, elles, sont contractuelles. -->
+                    <div class="flex flex-col gap-3 mt-3 pt-3 border-t border-slate-800">
+                      <DividendCurveCard :sous-jacents="aoDetail.panier" :index-actif="0"
+                                         :horizon="detailHorizon" />
+                      <YieldCurveCard :courbe="aoDetail.yieldCurve" :taux-plat="detailAdvanced.r" />
+                      <FundingCurveCard :courbe="aoDetail.fundingCurve" />
                     </div>
                   </div>
                 </details>
@@ -690,9 +777,14 @@
 </template>
 
 <script setup>
+import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useRfqStore } from '../stores/rfq.js'
+import { useMarketAssumptions } from '../composables/useMarketAssumptions.js'
+import YieldCurveCard from '../components/YieldCurveCard.vue'
+import FundingCurveCard from '../components/FundingCurveCard.vue'
+import DividendCurveCard from '../components/DividendCurveCard.vue'
 import { apiFetch } from '../utils/api.js'
 import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
 import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
@@ -863,6 +955,16 @@ const form = reactive({
 })
 const dateNotices = reactive({ strike_date: '', value_date: '', payment_date: '' })
 
+// Vrai dès que l'utilisateur saisit la date de paiement lui-même.
+//
+// Sans ce drapeau, le seul garde-fou de la proposition était « le champ est-il
+// vide » — qui ne distingue pas une saisie d'une proposition faite depuis une
+// maturité qui a bougé depuis. La date se verrouillait donc sur la première
+// maturité vue, souvent celle d'un calendrier CONSTAT à moitié rempli, et ne
+// suivait plus jamais. C'est ce qui a produit un AO à maturité 2029 réglé en
+// 2026.
+const paymentDateSaisie = ref(false)
+
 // Read-only preview of the maturity date, same rule DealTab.vue books with:
 // the latest CONSTAT schedule end date if the script has one (to_trade),
 // else value_date + T years.
@@ -888,6 +990,31 @@ function onKindToggle(kind) {
 }
 
 const advanced = reactive({ sigma: 20, q: 2, r: 3, N: 20000, model: 'constant' })
+
+// ── Hypothèses de marché de l'appel d'offres ──────────────────────
+//
+// LOCALES, pas celles du Pricer. Les trois cartes acceptent désormais leur état
+// en prop et retombent sur le store quand on ne leur en donne pas : le Pricer
+// n'a rien changé, et l'AO édite les siennes sans que les deux écrans se
+// marchent dessus.
+//
+// Deux jeux indépendants — un pour la saisie, un pour le détail — rendus par
+// la même fabrique, qui porte aussi la conversion vers le moteur et le chemin
+// du retour. Voir `useMarketAssumptions`.
+// Le panier d'un AO est mono-sous-jacent : la carte de dividende édite sa
+// courbe à travers cette fiche, qui reflète `advanced`.
+const ao = useMarketAssumptions(computed(() => [{
+  name: form.underlying_name || form.underlying_ticker || 'Sous-jacent',
+  q: advanced.q,
+}]))
+
+// Le détail a son PROPRE jeu. Le partager avec le formulaire de création
+// ferait qu'ouvrir un AO existant écrase les hypothèses d'un AO en cours de
+// saisie — et l'inverse.
+const aoDetail = useMarketAssumptions(computed(() => [{
+  name: underlyingSummary.value?.name || 'Sous-jacent',
+  q: detailAdvanced.q,
+}]))
 
 function onUnderlyingSelect(ticker) {
   form.underlying_ticker = ticker
@@ -1027,6 +1154,9 @@ function openCreateForm() {
     // pas de celle d avant.
     strike_date: '', value_date: '', payment_date: '',
   })
+  // Le drapeau de saisie suit les dates : sans ça, avoir saisi une date de
+  // paiement sur une affaire empêcherait toute proposition sur la suivante.
+  paymentDateSaisie.value = false
   Object.assign(advanced, { sigma: 20, q: 2, r: 3, N: 20000, model: 'constant' })
   nominalRaw.value = '1 000 000'
   parsedParams.value = []
@@ -1058,6 +1188,9 @@ async function duplicateRfq(source) {
     // pas de celle d avant.
     strike_date: '', value_date: '', payment_date: '',
   })
+  // Le drapeau de saisie suit les dates : sans ça, avoir saisi une date de
+  // paiement sur une affaire empêcherait toute proposition sur la suivante.
+  paymentDateSaisie.value = false
   Object.assign(advanced, {
     sigma: Math.round((u.sigma ?? 0.20) * 1000) / 10,
     q: Math.round((u.q ?? 0.02) * 1000) / 10,
@@ -1103,6 +1236,9 @@ async function convertToTrade(source) {
     // pas de celle d avant.
     strike_date: '', value_date: '', payment_date: '',
   })
+  // Le drapeau de saisie suit les dates : sans ça, avoir saisi une date de
+  // paiement sur une affaire empêcherait toute proposition sur la suivante.
+  paymentDateSaisie.value = false
   Object.assign(advanced, {
     sigma: Math.round((u.sigma ?? 0.20) * 1000) / 10,
     q: Math.round((u.q ?? 0.02) * 1000) / 10,
@@ -1158,6 +1294,10 @@ async function _loadDetailParams() {
     value_date: p.value_date || '',
     payment_date: p.payment_date || '',
   })
+  // Les hypothèses de marché avec lesquelles cet AO a été pricé, remises dans
+  // les cartes. Sans ce retour, elles rouvriraient décochées et le prochain
+  // « Calculer prix modèle » les effacerait sans un mot.
+  aoDetail.depuisParams(p)
   Object.keys(detailParamOverrides).forEach(k => delete detailParamOverrides[k])
   if (!script.trim()) { detailParsedParams.value = []; detailScriptConstats.value = []; return }
   try {
@@ -1238,6 +1378,14 @@ function contractualSubset(p) {
     T: p.T ?? null,
   }))
 }
+
+// Le règlement final ne peut pas précéder la dernière constatation. Le serveur
+// le refuse à l'écriture ; ici on le SIGNALE sur les AO déjà en base, que ce
+// refus n'atteint plus — leurs termes sont gelés dès la première cotation.
+const reglementIncoherent = computed(() => {
+  const paiement = rfq.current?.params?.payment_date
+  return !!(paiement && detailMaturityDate.value && paiement < detailMaturityDate.value)
+})
 
 const detailTermsDirty = computed(() => {
   if (!rfq.current || !termsBaseline.value) return false
@@ -1351,6 +1499,14 @@ const detailMaturityDate = computed(() => {
   return addYears(p.value_date, p.T)
 })
 
+// L'horizon du détail, pour la courbe de dividende : la même règle que
+// `detailTermsPayload` — le calendrier fait foi, le T stocké prend le relais.
+const detailHorizon = computed(() => (
+  detailCalendarEnd.value && detailAdvanced.strike_date
+    ? yearsBetween(detailAdvanced.strike_date, detailCalendarEnd.value)
+    : (rfq.current?.params?.T ?? 1)
+))
+
 const fmtNominal = formatInt
 
 // Une date saisie ne se déplace jamais en silence : le serveur la résout sur
@@ -1377,8 +1533,13 @@ async function resolveFormDate(field) {
 
 // Trois jours ouvrés après la dernière constatation : l'usage courant. Une
 // proposition, jamais un écrasement — un term sheet qui dit autre chose gagne.
+// Vrai dès que l'utilisateur saisit la date lui-même. Sans ce drapeau, le seul
+// garde-fou était « le champ est-il vide » — qui ne distingue pas une saisie
+// d'une proposition faite depuis une maturité qui a bougé depuis. La date se
+// verrouillait donc sur la première maturité vue, souvent celle d'un calendrier
+// à moitié rempli, et ne suivait plus jamais.
 async function proposePaymentDate() {
-  if (form.payment_date || !createMaturityDate.value) return
+  if (paymentDateSaisie.value || !createMaturityDate.value) return
   try {
     const res = await apiFetch('/api/calendar/resolve', {
       method: 'POST',
@@ -1392,22 +1553,50 @@ async function proposePaymentDate() {
 
 watch(createMaturityDate, proposePaymentDate)
 
+/**
+ * Ce qui manque encore, dans l'ordre du formulaire.
+ *
+ * Une SEULE liste de règles, lue par la barre d'actions et par la soumission :
+ * deux listes finiraient par diverger, et le bouton refuserait pour une raison
+ * que l'écran n'annonce pas.
+ */
+const champsManquants = computed(() => {
+  const trous = []
+  if (!form.name.trim()) trous.push('nom')
+  if (form.source === 'template' && !form.template_type && !duplicateSourceScript.value) {
+    trous.push('template')
+  }
+  if (form.source === 'script' && !form.script_id && !form.source_deal_id
+      && !duplicateSourceScript.value) {
+    trous.push('script')
+  }
+  for (const [champ, libelle] of [['strike_date', 'date de strike'],
+                                  ['value_date', 'date de valeur'],
+                                  ['payment_date', 'date de paiement']]) {
+    if (!form[champ]) trous.push(libelle)
+  }
+  return trous
+})
+
 async function submitCreate() {
   createError.value = ''
-  if (!form.name.trim()) { createError.value = 'Le nom est requis'; return }
-  if (form.source === 'template' && !form.template_type && !duplicateSourceScript.value) {
-    createError.value = 'Choisissez un template'; return
-  }
-  if (form.source === 'script' && !form.script_id && !form.source_deal_id && !duplicateSourceScript.value) {
-    createError.value = 'Choisissez un script'; return
-  }
-  for (const [champ, libelle] of [['strike_date', 'de strike'],
-                                  ['value_date', 'de valeur'],
-                                  ['payment_date', 'de paiement']]) {
-    if (!form[champ]) { createError.value = `La date ${libelle} est requise`; return }
+  if (champsManquants.value.length) {
+    createError.value = `À compléter : ${champsManquants.value.join(', ')}`
+    return
   }
   if (form.payment_date < form.value_date) {
     createError.value = 'La date de paiement ne peut pas précéder la date de valeur'; return
+  }
+  // Et surtout pas la MATURITÉ. Le contrôle ci-dessus comparait à la date de
+  // valeur, ce qui laissait passer une maturité 2029 réglée en 2026 : trois ans
+  // d'écart, sans un mot, jusqu'au refus de booking — et l'AO était alors
+  // impossible à corriger, ses termes gelés par la première cotation reçue.
+  // Le serveur refuse aussi ; ici c'est pour le dire avant d'envoyer.
+  if (createMaturityDate.value && form.payment_date < createMaturityDate.value) {
+    createError.value = `Le règlement (${fmtDateOnly(form.payment_date)}) précède la maturité `
+      + `(${fmtDateOnly(createMaturityDate.value)}). La date de paiement date l'échange final `
+      + `des flux : elle suit la dernière constatation.`
+    return
   }
   const script_snapshot = currentScriptText()
   if (form.kind === 'to_trade' && !script_snapshot.includes('CONSTAT')) {
@@ -1435,6 +1624,8 @@ async function submitCreate() {
         underlyings: [{
           name: form.underlying_name, ticker: form.underlying_ticker,
           ccy: form.currency, sigma: advanced.sigma / 100, q: advanced.q / 100,
+          ...ao.dividendeDuSousJacent(0, createMaturityDate.value
+            ? yearsBetween(form.strike_date, createMaturityDate.value) : form.T),
         }],
         corr_matrix: [[1]],
         // T dérivé du calendrier CONSTAT quand il y en a un, et non du ténor
@@ -1451,6 +1642,11 @@ async function submitCreate() {
             ? yearsBetween(form.strike_date, createMaturityDate.value)
             : form.T),
         N: advanced.N, model: advanced.model,
+        // Les trois hypothèses de marché saisies au-dessus. Sans elles dans le
+        // payload, les cartes seraient éditables sans le moindre effet sur le
+        // prix — le projet a déjà connu ça avec la courbe de dividende, qui vaut
+        // pourtant −491,6 bps.
+        ...ao.hypothesesDeMarche(),
         user_params,
         constats: buildConstatsPayload(scriptConstats.value, constatOverrides),
         notional: nominalValue.value, currency: form.currency,
@@ -1540,6 +1736,10 @@ async function computeModelPrice() {
     const pricingUnderlyings = Array.from({ length: nUnderlyings }, () => ({
       sigma: detailAdvanced.sigma / 100,
       q: detailAdvanced.q / 100,
+      // Le dividende se porte par SOUS-JACENT. Le hisser au niveau du produit
+      // le ferait ignorer en silence — une courbe à 8 % vaut pourtant
+      // −491,6 bps.
+      ...aoDetail.dividendeDuSousJacent(0, detailHorizon.value),
     }))
     await rfq.update(rfq.current.id, {
       pricing_params: {
@@ -1547,6 +1747,9 @@ async function computeModelPrice() {
         r: detailAdvanced.r / 100,
         N: detailAdvanced.N,
         model: detailAdvanced.model,
+        // Hypothèses de modèle, donc admises par `_merge_pricing_params` :
+        // elles n'appartiennent pas au périmètre contractuel gelé.
+        ...aoDetail.hypothesesDeMarche(),
       },
     })
     await rfq.computeModelPrice(rfq.current)

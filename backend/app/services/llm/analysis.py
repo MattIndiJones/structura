@@ -60,18 +60,20 @@ compte d'abord, le reste ensuite. Pas de généralités sur les autocalls.""",
         "label": "Pistes de restructuration",
         "consigne": """Une restructuration a UN but : dégager de la valeur pour
 redonner au détenteur un chemin réaliste vers le pair. Ce n'est pas un exercice
-de réduction de sensibilité — c'est la question « le client est assis sur une
-note qui vaut 46 %, que peut-on lui proposer qui lui rende une chance de
-récupérer ». Réponds à CETTE question.
+de réduction de sensibilité — c'est la question « le détenteur est assis sur
+cette note, que peut-on lui proposer qui améliore sa position ». Réponds à CETTE
+question, à partir du prix et des probabilités du résumé, sans supposer que la
+note est décotée ni qu'elle ne l'est pas.
 
 Le levier est toujours le même : vendre de l'optionnalité que le détenteur ne
 valorise plus, et racheter avec le produit de cette vente quelque chose qui le
-rapproche du pair. Sur une note dont le worst-of a décroché très bas, les pistes
-usuelles sont d'abaisser la barrière de capital, d'abaisser le seuil de rappel
-pour rendre le rappel atteignable, d'allonger la maturité pour laisser au
-sous-jacent le temps de revenir, de retirer du panier le sous-jacent qui a
-décroché, ou d'échanger le coupon conditionnel contre de la participation à la
-hausse. Choisis celles qui ont du sens ICI, pas une liste générique.
+rapproche de son objectif. Les pistes usuelles — à retenir seulement si elles
+ont du sens pour CE produit — sont d'abaisser une barrière de protection,
+d'abaisser un seuil de rappel pour le rendre atteignable, d'allonger la maturité
+pour laisser du temps au sous-jacent, de retirer d'un panier le nom qui bloque,
+ou d'échanger un coupon conditionnel contre de la participation. Un produit à
+capital garanti, un produit proche du pair et un produit effondré n'appellent
+pas les mêmes leviers : lis le résumé avant de choisir.
 
 Propose deux ou trois pistes. Pour chacune : ce qu'elle coûte au détenteur (ce
 qu'il abandonne), ce qu'elle lui rend (le chemin vers le pair qu'elle ouvre), et

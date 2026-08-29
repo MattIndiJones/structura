@@ -62,6 +62,9 @@ AT MATURITY:
 """
 
 
+NOM_INDICATIVE_BOOKABLE = "UAT 03 — Quote indicative, bookable quand même"
+
+
 def _iso(dt: datetime) -> str:
     return dt.replace(microsecond=0).isoformat() + "Z"
 
@@ -210,7 +213,7 @@ def _create_rfq_scenarios(session: Session, user: User) -> None:
     )
     _create_executable_rfq(
         session, user,
-        name="UAT 03 — Quote indicative non bookable",
+        name=NOM_INDICATIVE_BOOKABLE,
         provider="Société Générale", price=99.10, firmness="INDICATIVE",
         quoted_at=now - timedelta(minutes=10),
         valid_until=now + timedelta(minutes=20), select_quote=True,
@@ -619,7 +622,6 @@ def _verify_uat_dataset(session: Session) -> list[str]:
 
     expected_failures = {
         "UAT 02 — Quote expirée": "QUOTE_EXPIRED",
-        "UAT 03 — Quote indicative non bookable": "QUOTE_NOT_FIRM",
         "UAT 04 — Validité inconnue": "QUOTE_VALIDITY_UNKNOWN",
         "UAT 05 — Quote reçue non sélectionnée": "QUOTE_NOT_SELECTED",
         "UAT 06 — Exploration indicative": "RFQ_NOT_EXECUTABLE",
@@ -628,7 +630,20 @@ def _verify_uat_dataset(session: Session) -> list[str]:
         codes = failure_codes(name)
         if code not in codes:
             raise RuntimeError(f"{name}: blocage {code} absent ({sorted(codes)})")
-    checks.append("cinq scénarios de refus booking")
+    checks.append("quatre scénarios de refus booking")
+
+    # UAT 03 a changé de camp le 29/08/2026. Une cotation marquée indicative se
+    # booke désormais : retenir puis booker EST l'affirmation qu'elle engage la
+    # contrepartie, et l'étiquette n'apprenait rien à personne. Ce qu'elle
+    # valait avant reste dans la provenance du deal.
+    #
+    # Le scénario est gardé, pas supprimé : c'est un état de donnée réel, et il
+    # vérifie maintenant que rien ne bloque.
+    codes = failure_codes(NOM_INDICATIVE_BOOKABLE)
+    if codes:
+        raise RuntimeError(
+            f"{NOM_INDICATIVE_BOOKABLE} : ne devrait plus rien bloquer ({sorted(codes)})")
+    checks.append("quote indicative bookable")
 
     proposed = deals["UAT-LC-001-PROPOSITION"]
     proposed_row = session.exec(select(LifecycleProposal).where(

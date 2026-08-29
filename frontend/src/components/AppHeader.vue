@@ -31,11 +31,13 @@
 <script setup>
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
+import { usePricingStore } from '../stores/pricing.js'
 import DemoModeToggle from './DemoModeToggle.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const pricing = usePricingStore()
 
 // Regroupement par domaine métier — un lien par grande zone fonctionnelle,
 // actif dès qu'on est sur une de ses sous-pages (préfixe de route).
@@ -54,9 +56,29 @@ function isActive(item) {
   return item.prefixes.some(p => route.path.startsWith(p))
 }
 
+/**
+ * Déconnexion : on RECHARGE, on ne navigue pas.
+ *
+ * Naviguer vers /login ne vidait que le store d'authentification. Les quatre
+ * autres — pricing, deals, RFQ, portefeuilles, une cinquantaine d'états —
+ * gardaient les données du compte précédent, et le compte suivant les voyait
+ * jusqu'à ce qu'on rafraîchisse la page à la main.
+ *
+ * Écrire une remise à zéro par store serait une promesse à tenir pour chaque
+ * `ref` ajouté un jour : le premier oubli ferait fuiter les deals d'un
+ * utilisateur chez un autre. Sur une application qui porte des positions et
+ * des prix par entité, la garantie doit être structurelle, pas disciplinaire.
+ * Un rechargement la rend inconditionnelle — et la déconnexion n'est pas un
+ * chemin où la milliseconde compte.
+ */
 function logout() {
   auth.logout()
-  router.push('/login')
+  // Le jeton est parti ; la déclinaison éventuellement ouverte aussi, sinon
+  // l'avertissement de fermeture du navigateur s'interposerait sur une sortie
+  // délibérée.
+  pricing.relacherVariante()
+  window.location.hash = '#/login'
+  window.location.reload()
 }
 </script>
 
