@@ -58,7 +58,14 @@ def _build_shock_arrays(underlyings_json: list, shock: ShockRequest,
     at 130% of its strike, shocked -10%, must be repriced at 117%, not at 90%.
     Building the multiplier from 1.0 instead repriced every live deal as though
     it were freshly struck at par — so the tab reported a non-zero impact even
-    under a zero shock, because it was subtracting two different products."""
+    under a zero shock, because it was subtracting two different products.
+
+    Avant le strike, aucun cas particulier n'est nécessaire et c'est voulu : le
+    fixing étant simulé, le multiplicateur met à l'échelle la trajectoire ET le
+    strike qu'elle constatera. Un stress -20 % ne fait donc pas décrocher un
+    produit dont la protection n'a pas commencé à courir — il ne laisse que le
+    déplacement du skew, nul sous un modèle invariant d'échelle. C'est
+    l'homogénéité qui rend le bon chiffre, pas une branche."""
     spot_mult, vol_add = [], []
     for u, ns in zip(underlyings_json, norm_spots):
         ov = shock.shock_overrides.get(u.get("name", ""))
@@ -121,6 +128,9 @@ def _run_shock_on_deal(deal: Deal, session: Session, n_paths: int, shock: ShockR
         ctx["residual_script"], ctx["engine_uls"], corr_shocked,
         ctx["r_frac"], ctx["T_remaining"], ctx["N_used"], ctx["model_used"],
         seed=42, antithetic=ctx["antithetic"], user_params=ctx["user_params"],
+        # La jambe choquée doit simuler le MÊME produit que le MtM auquel
+        # elle se compare : forward-start si le strike n'est pas constaté.
+        strike_set_t=ctx.get("strike_set_t"),
         spot_mult=spot_mult, spot_base=ctx["norm_spots"], vol_add=vol_add, dr=dr,
         yield_curve=ctx["yc"], sigma_r=ctx["sigma_r"], a_r=ctx["a_r"],
         barrier_monitoring=ctx["barrier_monitoring"],
@@ -149,6 +159,14 @@ def _run_shock_on_deal(deal: Deal, session: Session, n_paths: int, shock: ShockR
         # on the cash figure, which is the one that gets summed across a book.
         "delta_eur": round(delta_pts * position_sign(deal) * deal.nominal * fx_rate, 2),
         "n_paths": result["n_paths"],
+        # Ce que le choc de spot a REELLEMENT fait a ce deal. Avant le strike
+        # il ne met pas le produit dans ou hors de la monnaie : le strike suit
+        # le spot, seul le skew qui s'appliquera se deplace.
+        "spot_shock_scope": (
+            None if not ctx.get("pre_strike") else
+            ("smile" if ctx["model_used"] in ("localvol", "lsv", "sabr")
+             else "sans_effet")
+        ),
     }
 
 

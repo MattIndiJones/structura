@@ -31,10 +31,16 @@ en français. Code, commentaires, noms de fichiers/variables : anglais.
   (nœud, fichier ou petit groupe de fichiers pertinent). Ne pas relancer
   automatiquement toute la suite `backend\tests` après chaque modification ou à
   chaque fin de tâche.
-- La suite backend complète est réservée à une demande explicite de Philippe ou à
-  un changement réellement transversal susceptible d'affecter plusieurs domaines
-  (moteur de pricing partagé, schémas/API centraux, lifecycle commun). Dans ce
-  dernier cas, annoncer la raison avant de la lancer.
+- **La suite backend complète ne se lance que si Philippe la demande.** C'est la
+  formulation qui fait foi ; toute autre justification a déjà servi à la lancer
+  à tort. En particulier, ne comptent **pas** comme un prétexte suffisant :
+  ajouter un routeur à `main.py`, ajouter une table à `models.py`, modifier un
+  module `core/` partagé par un seul domaine, ou « vérifier la non-régression »
+  en fin de tâche. Dans tous ces cas : les tests du domaine touché, et rien de
+  plus.
+- Si un doute subsiste sur la portée réelle d'un changement, le dire en une
+  phrase et proposer la commande — c'est à Philippe de décider de payer les six
+  minutes, pas à la session.
 - Une modification de documentation seule ne justifie aucun pytest. Une modification
   de tests seule se valide d'abord avec les tests modifiés ; la suite complète n'est
   pas requise par défaut.

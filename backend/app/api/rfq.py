@@ -8,7 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import RfqRequest, RfqQuote, RfqProvider, Counterparty, Deal, User
+from ..db.models import (
+    Deal, Opportunity, RfqRequest, RfqQuote, RfqProvider,
+    Counterparty, User,
+)
+from ..core.client_controls import (
+    ClientRuleError, OPPORTUNITY_TERMINAL, client_provenance_snapshot,
+    require_deal_attribution_coherent, require_opportunity_rfq_ready,
+)
 from ..core.references import next_reference
 from ..core.audit import record_audit_event
 from ..core.rfq_controls import (
@@ -38,6 +45,19 @@ class RfqCreate(BaseModel):
     script_id: Optional[int] = None
     script_snapshot: str
     params: dict = {}
+    # Le besoin client à l'origine de cet appel d'offres, s'il y en a un.
+    # Optionnel et sans effet sur le reste du module : une RFQ créée hors de
+    # tout parcours client se comporte exactement comme avant. Sert à remonter
+    # Trade → RFQ → Opportunity → Client → Affiliation.
+    opportunity_id: Optional[int] = None
+    client_id: Optional[int] = None
+    mandate_id: Optional[int] = None
+    primary_affiliation_id: Optional[int] = None
+    transaction_format: Optional[str] = None
+    instrument_family: Optional[str] = None
+    payoff_family: Optional[str] = None
+    payoff_description: Optional[str] = None
+    documentation_reference: Optional[str] = None
 
 
 class RfqUpdate(BaseModel):
@@ -54,6 +74,19 @@ class RfqUpdate(BaseModel):
     status: Optional[str] = None
     model_price: Optional[float] = None
     selected_quote_id: Optional[int] = None
+    selection_reason_code: Optional[str] = Field(
+        default=None,
+        pattern="^(client_request|documentation|credit|concentration|relationship|execution_quality|other)$")
+    selection_reason_note: Optional[str] = None
+    opportunity_id: Optional[int] = None
+    client_id: Optional[int] = None
+    mandate_id: Optional[int] = None
+    primary_affiliation_id: Optional[int] = None
+    transaction_format: Optional[str] = None
+    instrument_family: Optional[str] = None
+    payoff_family: Optional[str] = None
+    payoff_description: Optional[str] = None
+    documentation_reference: Optional[str] = None
 
 
 class QuoteCreate(BaseModel):
@@ -153,6 +186,20 @@ def _rfq_row(r: RfqRequest, quotes: list | None = None, cpty_map: dict | None = 
         "sens": r.sens,
         "template_type": r.template_type,
         "script_id": r.script_id,
+        # Le besoin client à l'origine de l'appel d'offres, quand il y en a un.
+        # Exposé pour que l'écran puisse remonter à l'opportunité ; None sur une
+        # RFQ créée hors parcours client, ce qui reste le cas courant.
+        "opportunity_id": r.opportunity_id,
+        "client_id": r.client_id,
+        "mandate_id": r.mandate_id,
+        "primary_affiliation_id": r.primary_affiliation_id,
+        "commercial_context": (json.loads(r.commercial_context_json)
+                               if r.commercial_context_json else None),
+        "transaction_format": r.transaction_format,
+        "instrument_family": r.instrument_family,
+        "payoff_family": r.payoff_family,
+        "payoff_description": r.payoff_description,
+        "documentation_reference": r.documentation_reference,
         "script_snapshot": r.script_snapshot,
         "params": json.loads(r.params_json),
         "model_price": r.model_price,
@@ -160,13 +207,18 @@ def _rfq_row(r: RfqRequest, quotes: list | None = None, cpty_map: dict | None = 
         "status": r.status,
         "business_status": business_status,
         "selected_quote_id": r.selected_quote_id,
+        "selection_reason_code": r.selection_reason_code,
+        "selection_reason_note": r.selection_reason_note,
         # {id, reference} of the deal already booked from this tender, or None.
         "booked_deal": (booked_by_rfq or {}).get(r.id),
         "created_at": _utc_iso(r.created_at),
         "updated_at": _utc_iso(r.updated_at),
     }
     if quotes is not None:
-        row["quotes"] = [_quote_row(q, cpty_map) for q in quotes]
+        superseded = superseded_quote_ids(quotes)
+        row["quotes"] = [
+            _quote_row(q, cpty_map, superseded=q.id in superseded)
+            for q in quotes]
     return row
 
 
@@ -197,7 +249,13 @@ def _counterparty_by_provider(session: Session) -> dict:
     return mapping
 
 
-def _quote_row(q: RfqQuote, cpty_map: dict | None = None) -> dict:
+def _quote_row(q: RfqQuote, cpty_map: dict | None = None, *,
+               superseded: bool = False) -> dict:
+    comparable = (
+        not superseded and q.price is not None
+        and q.status not in {"decline", "expire"}
+        and (q.valid_until is None or q.valid_until > datetime.utcnow())
+    )
     return {
         "id": q.id,
         "rfq_id": q.rfq_id,
@@ -217,6 +275,8 @@ def _quote_row(q: RfqQuote, cpty_map: dict | None = None) -> dict:
         "created_at": _utc_iso(q.created_at),
         "last_look": q.last_look,
         "parent_quote_id": q.parent_quote_id,
+        "superseded": superseded,
+        "comparable": comparable,
     }
 
 
@@ -229,6 +289,15 @@ def _rfq_audit_state(rfq: RfqRequest) -> dict:
         "model_price": rfq.model_price,
         "model_price_at": _utc_iso(rfq.model_price_at),
         "model_input_hash": rfq.model_input_hash,
+        "client_id": rfq.client_id,
+        "mandate_id": rfq.mandate_id,
+        "primary_affiliation_id": rfq.primary_affiliation_id,
+        "opportunity_id": rfq.opportunity_id,
+        "transaction_format": rfq.transaction_format,
+        "instrument_family": rfq.instrument_family,
+        "payoff_family": rfq.payoff_family,
+        "selection_reason_code": rfq.selection_reason_code,
+        "selection_reason_note": rfq.selection_reason_note,
     }
 
 
@@ -487,6 +556,94 @@ def _refuser_reglement_avant_maturite(params: dict) -> None:
             f"dernière constatation, elle ne la précède pas.")
 
 
+_COMMERCIAL_CONTEXT_FIELDS = {
+    "client_id", "mandate_id", "primary_affiliation_id", "opportunity_id",
+}
+_LEGAL_CONTEXT_FIELDS = {
+    "transaction_format", "instrument_family", "payoff_family",
+    "payoff_description", "documentation_reference",
+}
+
+
+def _resolve_commercial_context(
+    *,
+    opportunity_id: int | None,
+    client_id: int | None,
+    mandate_id: int | None,
+    primary_affiliation_id: int | None,
+    current: User,
+    session: Session,
+    explicit_fields: set[str] | None = None,
+    qualification_required: bool = True,
+) -> tuple[dict, Opportunity | None]:
+    """Resolve one optional Client context without affecting product-only RFQs."""
+    explicit_fields = explicit_fields or set()
+    opportunity = None
+    if opportunity_id is not None:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None or opportunity.entity_id != current.entity_id:
+            raise HTTPException(404, "Opportunité introuvable")
+        if opportunity.status in OPPORTUNITY_TERMINAL:
+            raise HTTPException(409, detail={
+                "code": "OPPORTUNITY_CLOSED",
+                "message": "Cette Opportunity est clôturée. Rouvrez-la avant de lancer un RFQ.",
+            })
+        if qualification_required:
+            try:
+                require_opportunity_rfq_ready(session, opportunity)
+            except ClientRuleError as error:
+                raise HTTPException(422, detail=error.as_dict())
+
+        inherited = {
+            "client_id": opportunity.client_id,
+            "mandate_id": opportunity.mandate_id,
+            "primary_affiliation_id": opportunity.primary_affiliation_id,
+        }
+        supplied = {
+            "client_id": client_id,
+            "mandate_id": mandate_id,
+            "primary_affiliation_id": primary_affiliation_id,
+        }
+        for field, expected in inherited.items():
+            if (field in explicit_fields and supplied[field] is not None
+                    and supplied[field] != expected):
+                raise HTTPException(422, detail={
+                    "code": "RFQ_OPPORTUNITY_CONTEXT_MISMATCH",
+                    "message": (f"Le champ {field} contredit l'Opportunity. "
+                                "Le contexte RFQ est déduit côté serveur."),
+                    "field": field, "expected": expected,
+                    "received": supplied[field],
+                })
+        client_id = inherited["client_id"]
+        mandate_id = inherited["mandate_id"]
+        primary_affiliation_id = inherited["primary_affiliation_id"]
+
+    try:
+        require_deal_attribution_coherent(
+            session, client_id=client_id, mandate_id=mandate_id,
+            affiliation_id=primary_affiliation_id,
+            opportunity_id=opportunity_id, entity_id=current.entity_id)
+    except ClientRuleError as error:
+        raise HTTPException(422, detail=error.as_dict())
+
+    snapshot = client_provenance_snapshot(
+        session, client_id=client_id, mandate_id=mandate_id,
+        affiliation_id=primary_affiliation_id,
+        opportunity_id=opportunity_id)
+    return {
+        "client_id": client_id,
+        "mandate_id": mandate_id,
+        "primary_affiliation_id": primary_affiliation_id,
+        "opportunity_id": opportunity_id,
+        "commercial_context_json": snapshot,
+    }, opportunity
+
+
+def _clean_optional(value) -> str | None:
+    cleaned = str(value or "").strip()
+    return cleaned or None
+
+
 def _create_rfq(
     body: RfqCreate,
     current: User,
@@ -503,6 +660,28 @@ def _create_rfq(
 
     _refuser_reglement_avant_maturite(body.params or {})
 
+    # Rattachement commercial facultatif. L'absence complète de contexte est
+    # un parcours Produit autonome valide. Dès qu'une référence existe, le
+    # couple Client/Mandat devient obligatoire et cohérent.
+    context, opportunity = _resolve_commercial_context(
+        opportunity_id=body.opportunity_id,
+        client_id=body.client_id,
+        mandate_id=body.mandate_id,
+        primary_affiliation_id=body.primary_affiliation_id,
+        current=current, session=session,
+        explicit_fields=set(body.model_fields_set),
+    )
+
+    transaction_format = (_clean_optional(body.transaction_format)
+                          or (opportunity.transaction_format if opportunity else None))
+    instrument_family = (_clean_optional(body.instrument_family)
+                         or (opportunity.instrument_family if opportunity else None))
+    payoff_family = (_clean_optional(body.payoff_family)
+                     or (opportunity.payoff_family if opportunity else None)
+                     or _clean_optional(body.template_type))
+    payoff_description = (_clean_optional(body.payoff_description)
+                          or (opportunity.payoff_description if opportunity else None))
+
     reference = (next_reference(session, RfqRequest, reference_prefix)
                  if reference_prefix else _gen_ref(session))
     rfq = RfqRequest(
@@ -518,6 +697,12 @@ def _create_rfq(
         script_id=body.script_id,
         script_snapshot=body.script_snapshot,
         params_json=json.dumps(body.params),
+        **context,
+        transaction_format=transaction_format,
+        instrument_family=instrument_family,
+        payoff_family=payoff_family,
+        payoff_description=payoff_description,
+        documentation_reference=_clean_optional(body.documentation_reference),
     )
     session.add(rfq)
     session.flush()
@@ -644,6 +829,40 @@ def update_rfq(
     before_audit = _rfq_audit_state(rfq)
     data = body.model_dump(exclude_unset=True)
     requested_fields = set(data)
+    context_changes = requested_fields & _COMMERCIAL_CONTEXT_FIELDS
+    if context_changes:
+        _refuse_if_booked(rfq, session, "le contexte Client")
+        if _get_quotes(rfq_id, session):
+            raise HTTPException(
+                409, "Le contexte Client d'une RFQ est figé dès qu'un fournisseur "
+                     "est sollicité. Créez une nouvelle RFQ ou retirez les "
+                     "sollicitations avant de le corriger.")
+        candidate = {
+            "opportunity_id": data.get("opportunity_id", rfq.opportunity_id),
+            "client_id": data.get("client_id", rfq.client_id),
+            "mandate_id": data.get("mandate_id", rfq.mandate_id),
+            "primary_affiliation_id": data.get(
+                "primary_affiliation_id", rfq.primary_affiliation_id),
+        }
+        context, _ = _resolve_commercial_context(
+            **candidate, current=current, session=session,
+            explicit_fields=requested_fields,
+        )
+        for field, value in context.items():
+            setattr(rfq, field, value)
+        for field in _COMMERCIAL_CONTEXT_FIELDS:
+            data.pop(field, None)
+
+    legal_changes = requested_fields & _LEGAL_CONTEXT_FIELDS
+    if legal_changes:
+        _refuse_if_booked(rfq, session, "la structure juridique du produit")
+        if _get_quotes(rfq_id, session):
+            raise HTTPException(
+                409, "La structure juridique et produit est figée dès qu'un "
+                     "fournisseur est sollicité. Créez une nouvelle RFQ pour la modifier.")
+        for field in _LEGAL_CONTEXT_FIELDS:
+            if field in data:
+                setattr(rfq, field, _clean_optional(data.pop(field)))
     if "pricing_params" in data:
         _refuse_if_booked(rfq, session, "les hypothèses de pricing")
         merged = _merge_pricing_params(rfq, data.pop("pricing_params") or {})
@@ -708,12 +927,38 @@ def update_rfq(
             if q.status in {"decline", "expire"}:
                 raise HTTPException(
                     422, f"Une réponse au statut « {q.status} » ne peut pas être retenue.")
+            if q.valid_until is not None and q.valid_until <= datetime.utcnow():
+                raise HTTPException(
+                    422, "Cette cotation a expiré. Demandez une réponse ferme à jour "
+                         "avant de la retenir.")
             quotes = _get_quotes(rfq_id, session)
             if q.id in superseded_quote_ids(quotes):
                 raise HTTPException(
                     422, "Cette cotation a été remplacée par son last look : retenez la "
                          "contre-cotation finale.")
+        if (qid != rfq.selected_quote_id
+                and not requested_fields & {
+                    "selection_reason_code", "selection_reason_note"}):
+            # Un motif explique UNE décision de sélection. Le conserver en
+            # changeant de réponse retenue attribuerait au nouveau choix la
+            # justification de l'ancien, ce qui est pire qu'un motif absent.
+            rfq.selection_reason_code = None
+            rfq.selection_reason_note = None
         rfq.selected_quote_id = qid
+        if qid is None:
+            rfq.selection_reason_code = None
+            rfq.selection_reason_note = None
+    selection_reason_fields = {"selection_reason_code", "selection_reason_note"}
+    if requested_fields & selection_reason_fields:
+        reason_code = data.pop(
+            "selection_reason_code", rfq.selection_reason_code)
+        reason_note = data.pop(
+            "selection_reason_note", rfq.selection_reason_note)
+        if rfq.selected_quote_id is None and (reason_code or reason_note):
+            raise HTTPException(
+                422, "Un motif de sélection exige d'abord une réponse retenue.")
+        rfq.selection_reason_code = _clean_optional(reason_code)
+        rfq.selection_reason_note = _clean_optional(reason_note)
     if "status" in data:
         _refuse_if_booked(rfq, session, "le statut")
         want = data.pop("status")
@@ -730,10 +975,19 @@ def update_rfq(
     _sync_status(rfq, session)
     rfq.updated_at = datetime.utcnow()
     session.add(rfq)
-    critical = requested_fields & {"params", "model_price", "selected_quote_id", "status"}
+    critical = requested_fields & (
+        {"params", "model_price", "selected_quote_id", "status",
+         "selection_reason_code", "selection_reason_note"}
+        | _COMMERCIAL_CONTEXT_FIELDS | _LEGAL_CONTEXT_FIELDS)
     if critical:
-        if "selected_quote_id" in requested_fields:
+        if context_changes:
+            action = "RFQ_COMMERCIAL_CONTEXT_CHANGED"
+        elif legal_changes:
+            action = "RFQ_LEGAL_CONTEXT_CHANGED"
+        elif "selected_quote_id" in requested_fields:
             action = "QUOTE_SELECTED" if rfq.selected_quote_id else "QUOTE_DESELECTED"
+        elif requested_fields & selection_reason_fields:
+            action = "QUOTE_SELECTION_EXPLAINED"
         elif "model_price" in requested_fields:
             action = "MODEL_PRICE_RECORDED"
         elif "params" in requested_fields:

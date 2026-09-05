@@ -96,6 +96,14 @@ class Residual:
     engine_uls: list = field(default_factory=list)
     T_elapsed: float = 0.0
     r_frac: float = 0.0
+    # Le produit n'a pas encore commencé : la date de valorisation précède la
+    # constatation initiale. Il n'y a alors pas de passé à rejouer et S₀ n'est
+    # pas connu — voir la branche du même nom dans build_residual.
+    pre_strike: bool = False
+    # Années d'ici la constatation initiale, sur l'axe résiduel. None dès que le
+    # strike est connu. Se transmet tel quel à run_mc, qui en tire le pas où
+    # chaque trajectoire fixe son propre niveau de référence.
+    strike_set_t: Optional[float] = None
     # L'historique effectivement utilisé, rendu à l'appelant : la note de
     # valorisation et l'explication de P&L le réaffichent.
     prices: dict = field(default_factory=dict)
@@ -343,7 +351,29 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
         raise ValuationError(f"Script/calendriers non exploitables pour le MtM résiduel "
                                  f"(deal booké avant la persistance des CONSTAT ?) : {e}")
 
-    if not dates_list:
+    # ── Avant le strike : il n'y a pas de passé, et pas encore de S₀ ───
+    #
+    # Le produit n'a pas commencé. Aucune constatation n'a eu lieu, aucun coupon
+    # n'a été versé, aucune barrière n'a pu être franchie — et le niveau initial
+    # n'existe pas : il sera constaté à la date de strike.
+    #
+    # L'axe des temps commence donc à la date de VALORISATION, et le fixing est
+    # simulé comme le reste : `T_elapsed` est négatif, ce qui décale les
+    # constatations vers l'avenir de l'écart au strike, et `strike_set_t` dit au
+    # moteur à quel pas chaque trajectoire fixe SON strike. Le payoff, écrit en
+    # pourcentage du strike, se lit ensuite sans rien savoir de tout cela.
+    #
+    # Cette diffusion-là n'est pas une élégance : elle porte la dispersion du
+    # fixing (donc la convexité sous vol locale), l'état de variance atteint à
+    # la date de strike sous Heston, et le départ de la courbe de taux
+    # d'aujourd'hui plutôt que du strike. Elle donne aussi le delta juste, sans
+    # mécanisme dédié — bumper le spot met le fixing à l'échelle avec le reste.
+    #
+    # L'état rendu est l'état neutre du jour 0, valeur par valeur celui que
+    # run_mc prend quand aucun état n'est injecté.
+    pre_strike = asof < p.strike_date
+
+    if not dates_list and not pre_strike:
         raise ValuationError("Données historiques vides")
 
     start_idx = 0
@@ -355,6 +385,24 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
 
     user_params = market.get("user_params", {}) or {}
     r_frac = snapshot_rate(market)
+
+    if pre_strike:
+        replay = {}
+        realized_cfs = []
+        start_idx = 0
+        state = {
+            "memo": {}, "index": 0, "accum": 0.0, "wof_last": 1.0,
+            # None = comportement jour 0 de run_mc, cf. _eval_paths : rien
+            # d'hérité, rien de neutralisé à la main.
+            "wof_min": None, "bof_max": None,
+            "s_min": None, "s_max": None, "s_prev": None,
+            "realvol_state": None, "fix_state": None,
+        }
+        return _assembler_residuel(
+            p, market, underlyings_json, compiled, variant, T_elapsed, state,
+            realized_cfs, [1.0] * len(underlyings_json), {}, prices, dates_list,
+            user_params, replay, start_idx, r_frac, pre_strike=True,
+            strike_set_t=-T_elapsed)
 
     replay = eval_script_on_history(
         compiled, dates_list, prices, start_idx, p.tenor, user_params, tickers, r_frac
@@ -375,6 +423,40 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
     # Les termes du contrat ne s'héritent pas du passé, ils se saisissent.
     state["memo"] = _sans_les_param_semes(state.get("memo"), compiled, p.script_snapshot)
     realized_cfs = replay["cash_flows"]
+
+    # Paths start at today's spot in % of strike — the barriers written in %
+    # of strike then bite at the right distance without any rescaling.
+    s0_map: dict = p.strike_levels
+    norm_spots = []
+    for u in underlyings_json:
+        tk, name = u.get("ticker", ""), u["name"]
+        s0 = s0_map.get(name, 0.0)
+        series = [float(px) for px in prices.get(tk, []) if px]
+        if not (tk and series and s0 > 0):
+            raise ValuationError(f"Spot/S₀ manquant pour {name} — compléter l'event Strike")
+        norm_spots.append(series[-1] / s0)
+
+    return _assembler_residuel(
+        p, market, underlyings_json, compiled, variant, T_elapsed, state,
+        realized_cfs, norm_spots, s0_map, prices, dates_list,
+        user_params, replay, start_idx, r_frac, pre_strike=False)
+
+
+def _assembler_residuel(p: InLifeProduct, market: dict, underlyings_json: list,
+                        compiled: CompiledScript, variant: Optional[VariantTerms],
+                        T_elapsed: float, state: dict, realized_cfs: list,
+                        norm_spots: list, s0_map: dict, prices: dict,
+                        dates_list: list, user_params: dict, replay: dict,
+                        start_idx: int, r_frac: float, pre_strike: bool,
+                        strike_set_t: Optional[float] = None) -> Residual:
+    """Monte le produit à pricer une fois le passé connu — ou une fois établi
+    qu'il n'y en a pas.
+
+    Les deux régimes se rejoignent ici parce qu'à partir de ce point ils sont
+    le même exercice : substituer les termes d'une variante, décaler le
+    calendrier de `T_elapsed`, conditionner la courbe de dividende. Avant le
+    strike `T_elapsed` vaut zéro, donc le décalage et le conditionnement sont
+    des identités et le produit à pricer est le produit d'origine."""
 
     # ── Le point où le passé et l'avenir cessent d'être le même produit ──
     #
@@ -408,18 +490,6 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
         strike_fix_dates=residual_fix or None,
     )
 
-    # Paths start at today's spot in % of strike — the barriers written in %
-    # of strike then bite at the right distance without any rescaling.
-    s0_map: dict = p.strike_levels
-    norm_spots = []
-    for u in underlyings_json:
-        tk, name = u.get("ticker", ""), u["name"]
-        s0 = s0_map.get(name, 0.0)
-        series = [float(p) for p in prices.get(tk, []) if p]
-        if not (tk and series and s0 > 0):
-            raise ValuationError(f"Spot/S₀ manquant pour {name} — compléter l'event Strike")
-        norm_spots.append(series[-1] / s0)
-
     engine_uls = _engine_underlyings(market, underlyings_json)
     for underlying in engine_uls:
         _shift_dividend_curve(underlying, T_elapsed)
@@ -445,6 +515,6 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
         prices=prices, dates_list=dates_list,
         user_params=user_params, replay=replay, start_idx=start_idx, s0_map=s0_map,
         residual_user_params=px_params, variant_state_check=check,
-        T_residual_max=T_res,
+        T_residual_max=T_res, pre_strike=pre_strike, strike_set_t=strike_set_t,
         pricing_script_text=texte_px, pricing_constats=calendrier_px,
     )

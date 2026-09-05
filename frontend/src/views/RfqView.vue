@@ -11,6 +11,24 @@
         <button class="btn-primary text-xs px-3 py-1.5" @click="openCreateForm">+ Nouvelle RFQ</button>
       </div>
     </div>
+    <!-- Contexte commercial, quand on arrive depuis une fiche d'opportunité.
+         L'appel d'offres créé ici portera le lien, ce qui permettra plus tard
+         de remonter du trade jusqu'au client et à la personne qui l'a porté. -->
+    <AlertMessage v-if="opportuniteContexte" kind="info" class="mx-6 mt-3">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <span>
+          Appel d'offres pour
+          <span class="font-semibold">{{ opportuniteContexte.title || opportuniteContexte.reference }}</span>
+          — {{ opportuniteContexte.client_name }}
+          <template v-if="opportuniteContexte.mandate?.name">
+            · {{ opportuniteContexte.mandate.name }}
+          </template>.
+          La RFQ créée restera rattachée à cette opportunité.
+        </span>
+        <RouterLink :to="`/clients/opportunites/${opportuniteContexte.id}`"
+                    class="btn-ghost btn-sm shrink-0">Revenir au dossier</RouterLink>
+      </div>
+    </AlertMessage>
     <AlertMessage v-if="listError" kind="error" dismissible class="mx-6 mt-3" @dismiss="listError = ''">{{ listError }}</AlertMessage>
     <AlertMessage v-if="notice" kind="success" dismissible class="mx-6 mt-3" @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
@@ -123,6 +141,97 @@
                           @click="form.sens = 'vente'">↑ Vente (nous vendons)</button>
                 </div>
                 <p class="text-[10px] text-slate-600 mt-0.5">{{ sensHint(form.sens) }}</p>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div class="flex flex-col gap-1">
+                  <label class="label">Format juridique</label>
+                  <input v-model="form.transaction_format" class="input" list="rfq-formats"
+                         placeholder="EMTN, BMTN, OTC…" />
+                  <datalist id="rfq-formats">
+                    <option value="EMTN" /><option value="BMTN" /><option value="OTC" />
+                  </datalist>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="label">Instrument</label>
+                  <input v-model="form.instrument_family" class="input" list="rfq-instruments"
+                         placeholder="Note, Swap…" />
+                  <datalist id="rfq-instruments">
+                    <option value="Note" /><option value="Certificat" />
+                    <option value="Swap" /><option value="Option" />
+                  </datalist>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="label">Famille de payoff</label>
+                  <input v-model="form.payoff_family" class="input"
+                         placeholder="Phoenix, Autocall…" />
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="label">Référence documentaire</label>
+                  <input v-model="form.documentation_reference" class="input"
+                         placeholder="Term sheet / ISDA / confirmation" />
+                </div>
+                <div class="col-span-2 flex flex-col gap-1">
+                  <label class="label">Description du payoff</label>
+                  <textarea v-model="form.payoff_description" class="input" rows="2"
+                            placeholder="Précisions propres à cette RFQ"></textarea>
+                </div>
+              </div>
+
+              <div v-if="!opportuniteContexte" class="rounded-lg border p-3 flex flex-col gap-3"
+                   style="border-color: var(--border); background: var(--surface2)">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-xs font-semibold">Contexte Client facultatif</div>
+                    <p class="text-[10px] mt-0.5" style="color: var(--subtle)">
+                      Laissez désactivé pour une RFQ Produit autonome.
+                    </p>
+                  </div>
+                  <button class="btn-ghost btn-sm" @click="toggleDirectCommercial">
+                    {{ commercialLinkEnabled ? 'Retirer le contexte' : 'Rattacher à un Client' }}
+                  </button>
+                </div>
+                <div v-if="commercialLinkEnabled" class="grid grid-cols-2 gap-2">
+                  <div class="col-span-2">
+                    <label class="label">Client</label>
+                    <select v-model="form.client_id" class="select" @change="onDirectClientChange">
+                      <option :value="null">— Choisir —</option>
+                      <option v-for="client in directClients" :key="client.id" :value="client.id">
+                        {{ client.name }}
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="label">Mandat / périmètre</label>
+                    <select v-model="form.mandate_id" class="select" :disabled="!form.client_id">
+                      <option :value="null">— Obligatoire —</option>
+                      <option v-for="mandat in directMandates" :key="mandat.id" :value="mandat.id">
+                        {{ mandat.name }}
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="label">Opportunity éventuelle</label>
+                    <select v-model="form.opportunity_id" class="select"
+                            :disabled="!form.client_id" @change="onDirectOpportunityChange">
+                      <option :value="null">— Aucune —</option>
+                      <option v-for="opp in directOpportunities" :key="opp.id" :value="opp.id">
+                        {{ opp.title || opp.reference }}
+                      </option>
+                    </select>
+                  </div>
+                  <div class="col-span-2">
+                    <label class="label">Contact principal éventuel</label>
+                    <select v-model="form.primary_affiliation_id" class="select"
+                            :disabled="!form.client_id">
+                      <option :value="null">— Aucun —</option>
+                      <option v-for="contact in directContacts" :key="contact.affiliation_id"
+                              :value="contact.affiliation_id">
+                        {{ contact.first_name }} {{ contact.last_name }}
+                      </option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
@@ -334,6 +443,25 @@
                       @click="duplicateRfq(rfq.current)">⎘ Dupliquer</button>
               <button class="icon-btn-danger" title="Supprimer" aria-label="Supprimer la RFQ" @click="deleteRfq(rfq.current.id)">🗑</button>
             </div>
+          </div>
+          <div v-if="rfq.current.commercial_context || rfq.current.transaction_format
+                     || rfq.current.instrument_family || rfq.current.payoff_family"
+               class="card py-2.5 px-3 flex items-center gap-2 flex-wrap text-xs">
+            <span v-if="rfq.current.commercial_context?.client" class="badge badge-accent">
+              Client · {{ rfq.current.commercial_context.client.name }}
+            </span>
+            <span v-if="rfq.current.commercial_context?.mandate" class="badge badge-muted">
+              Mandat · {{ rfq.current.commercial_context.mandate.name }}
+            </span>
+            <span v-if="rfq.current.transaction_format" class="badge badge-muted">
+              {{ rfq.current.transaction_format }}
+            </span>
+            <span v-if="rfq.current.instrument_family" class="badge badge-muted">
+              {{ rfq.current.instrument_family }}
+            </span>
+            <span v-if="rfq.current.payoff_family" class="badge badge-muted">
+              {{ rfq.current.payoff_family }}
+            </span>
           </div>
 
           <!-- Deux colonnes figées : à gauche tout l'AO (produit, prix,
@@ -622,9 +750,31 @@
                           @click="openBookedDeal">→ Voir le booking</button>
                 </div>
 
+                <div v-if="rfq.current.booked_deal && rfq.current.selected_quote_id"
+                     class="flex items-start gap-3 flex-wrap rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
+                  <div class="min-w-0 flex-1">
+                    <div class="text-xs font-bold text-slate-300">
+                      Motif de sélection figé au booking
+                      <span v-if="!selectedIsBest" class="ml-1 text-amber-400">
+                        · meilleur prix non retenu
+                      </span>
+                    </div>
+                    <div v-if="rfq.current.selection_reason_note"
+                         class="text-[11px] text-slate-500 mt-1">
+                      {{ rfq.current.selection_reason_note }}
+                    </div>
+                  </div>
+                  <span class="badge badge-muted shrink-0">
+                    {{ selectionReasonLabel(rfq.current.selection_reason_code) }}
+                  </span>
+                </div>
+
                 <div v-else-if="rfq.current.selected_quote_id" class="flex items-center justify-between gap-3 rounded-lg border border-amber-800/60 bg-amber-950/20 px-3 py-2">
                   <span class="text-xs text-amber-300">
-                    ⭐ Réponse retenue — prête à booker.
+                    ⭐ Réponse retenue —
+                    {{ modelPriceRecorded
+                      ? 'prix modèle enregistré, prête à contrôler dans le Pricer.'
+                      : 'calculez le prix modèle Structura avant le booking.' }}
                     <span v-if="rfq.current.kind === 'indicatif'" class="text-amber-500/80">
                       RFQ indicative — pensée pour explorer, pas pour trader.
                     </span>
@@ -632,9 +782,44 @@
                   <div class="flex items-center gap-2 shrink-0">
                     <button v-if="rfq.current.kind === 'indicatif'" class="btn-secondary text-xs px-3 py-1.5"
                             @click="convertToTrade(rfq.current)">📐 Convertir en RFQ to trade</button>
-                    <button class="btn-primary text-xs px-3 py-1.5" @click="bookFromRfq">📋 Booker cette réponse</button>
+                    <button v-if="!modelPriceRecorded" class="btn-secondary text-xs px-3 py-1.5"
+                            :disabled="computing" @click="computeModelPrice">
+                      {{ computing ? 'Calcul…' : 'Calculer prix modèle' }}
+                    </button>
+                    <button v-else class="btn-primary text-xs px-3 py-1.5"
+                            @click="bookFromRfq">📋 Booker cette réponse</button>
                   </div>
                 </div>
+
+                <div v-if="rfq.current.selected_quote_id && !rfq.current.booked_deal"
+                     class="flex items-end gap-3 flex-wrap rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
+                  <div class="min-w-0">
+                    <div class="text-xs font-bold text-slate-300">
+                      Motif de sélection
+                      <span v-if="!selectedIsBest" class="ml-1 text-amber-400">
+                        · meilleur prix non retenu
+                      </span>
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-0.5">
+                      Facultatif et non bloquant. Il documente le choix sans transformer
+                      une habitude en interdiction fournisseur.
+                    </div>
+                  </div>
+                  <select v-model="selectionReasonCode" class="select py-1.5 text-xs min-w-[190px]">
+                    <option value="">Non renseigné</option>
+                    <option v-for="reason in SELECTION_REASONS" :key="reason.value"
+                            :value="reason.value">{{ reason.label }}</option>
+                  </select>
+                  <input v-model="selectionReasonNote" class="input py-1.5 text-xs min-w-[230px] flex-1"
+                         placeholder="Précision factuelle (facultative)" />
+                  <button class="btn-secondary text-xs px-3 py-1.5 shrink-0"
+                          :disabled="!selectionReasonChanged"
+                          @click="saveSelectionReason">Enregistrer</button>
+                </div>
+                <AlertMessage v-if="selectionReasonError" kind="error" dismissible
+                              @dismiss="selectionReasonError = ''">
+                  {{ selectionReasonError }}
+                </AlertMessage>
 
                 <div v-if="!rfq.current.quotes?.length" class="text-xs text-slate-600 py-2">
                   Aucun fournisseur sollicité pour l'instant.
@@ -716,8 +901,8 @@
                       </td>
                       <td class="py-1.5 pr-2 text-right whitespace-nowrap">
                         <button :class="['text-xs mr-2', q.id === rfq.current.selected_quote_id ? 'text-amber-400 font-semibold' : 'text-slate-600 hover:text-amber-400']"
-                                :disabled="!!rfq.current.booked_deal || q.price == null || ['decline', 'expire'].includes(q.status)"
-                                :title="q.price == null ? 'Saisissez un prix final avant de retenir la réponse' : (q.id === rfq.current.selected_quote_id ? 'Réponse retenue — cliquer pour désélectionner' : 'Retenir cette réponse')"
+                                :disabled="!!rfq.current.booked_deal || !q.comparable"
+                                :title="!q.comparable ? 'Seule une cotation finale, active et non remplacée peut être retenue' : (q.id === rfq.current.selected_quote_id ? 'Réponse retenue — cliquer pour désélectionner' : 'Retenir cette réponse')"
                                 @click="onSelectQuote(q)">
                           {{ q.id === rfq.current.selected_quote_id ? '★ Retenue' : '☆ Retenir' }}
                         </button>
@@ -779,7 +964,7 @@
 <script setup>
 import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useRfqStore } from '../stores/rfq.js'
 import { useMarketAssumptions } from '../composables/useMarketAssumptions.js'
 import YieldCurveCard from '../components/YieldCurveCard.vue'
@@ -875,6 +1060,23 @@ function restoreConstatOverrides(constats, overridesObj, saved) {
 
 const rfq = useRfqStore()
 const router = useRouter()
+const route = useRoute()
+
+// Contexte commercial, quand on arrive depuis une fiche d'opportunité
+// (`/rfq?opportunity=12`). Purement additif : sans ce paramètre, l'écran se
+// comporte exactement comme avant, et le champ part à null.
+const opportuniteContexte = ref(null)
+const commercialLinkEnabled = ref(false)
+const directClients = ref([])
+const directMandates = ref([])
+const directOpportunities = ref([])
+const directContacts = ref([])
+onMounted(async () => {
+  const id = Number(route.query.opportunity)
+  if (!id) return
+  const reponse = await apiFetch(`/api/opportunities/${id}`)
+  if (reponse.ok) opportuniteContexte.value = await reponse.json()
+})
 
 const loadingList    = ref(true)
 const listError      = ref('')
@@ -936,6 +1138,15 @@ const form = reactive({
   sens: 'achat',
   source: 'template',
   template_type: '',
+  transaction_format: '',
+  instrument_family: '',
+  payoff_family: '',
+  payoff_description: '',
+  documentation_reference: '',
+  opportunity_id: null,
+  client_id: null,
+  mandate_id: null,
+  primary_affiliation_id: null,
   script_id: null,
   source_deal_id: null,  // set instead of script_id when sourced from expertDeals
   underlying_name: 'Sous-jacent',
@@ -1122,7 +1333,20 @@ const quoteForm = reactive({ provider: '', customProvider: '', contact: '' })
 onMounted(async () => {
   loadingList.value = true
   try {
+    // Le store Pinia survit à la navigation RFQ → Pricer → RFQ. Le détail
+    // conservé peut donc dater d'avant le booking alors que la liste, elle,
+    // vient d'être relue. On recharge explicitement l'AO courant pour ne pas
+    // laisser apparaître une seconde fois le bouton de booking.
+    const currentId = rfq.current?.id || null
     await Promise.all([rfq.fetchList(), rfq.fetchProviders(), fetchScripts(), fetchDealsForScripts()])
+    if (currentId && rfq.list.some(item => item.id === currentId)) {
+      selectedId.value = currentId
+      await rfq.fetchOne(currentId)
+      await refreshDetailParams()
+    } else if (currentId) {
+      selectedId.value = null
+      rfq.current = null
+    }
   } finally {
     loadingList.value = false
   }
@@ -1145,9 +1369,20 @@ function openCreateForm() {
   createError.value = ''
   notice.value = ''
   duplicateSourceScript.value = null
+  commercialLinkEnabled.value = false
   Object.assign(form, {
     name: '', ao_date: todayIso(), kind: 'indicatif', sens: 'achat', source: 'template', template_type: '',
     script_id: null, source_deal_id: null,
+    transaction_format: opportuniteContexte.value?.transaction_format || '',
+    instrument_family: opportuniteContexte.value?.instrument_family || '',
+    payoff_family: opportuniteContexte.value?.payoff_family || '',
+    payoff_description: opportuniteContexte.value?.payoff_description || '',
+    documentation_reference: '',
+    opportunity_id: opportuniteContexte.value?.id ?? null,
+    client_id: opportuniteContexte.value?.client_id ?? null,
+    mandate_id: opportuniteContexte.value?.mandate_id ?? null,
+    primary_affiliation_id:
+      opportuniteContexte.value?.primary_contact?.affiliation_id ?? null,
     underlying_name: 'Sous-jacent', underlying_ticker: '', currency: 'CHF', T: 3,
     // Aucune date inventee : ni a l ouverture du formulaire, ni en dupliquant,
     // ni en convertissant. Elles viennent du term sheet de l affaire en cours,
@@ -1160,6 +1395,57 @@ function openCreateForm() {
   Object.assign(advanced, { sigma: 20, q: 2, r: 3, N: 20000, model: 'constant' })
   nominalRaw.value = '1 000 000'
   parsedParams.value = []
+}
+
+async function toggleDirectCommercial() {
+  commercialLinkEnabled.value = !commercialLinkEnabled.value
+  if (!commercialLinkEnabled.value) {
+    Object.assign(form, {
+      client_id: null, mandate_id: null, opportunity_id: null,
+      primary_affiliation_id: null,
+    })
+    directMandates.value = []
+    directOpportunities.value = []
+    directContacts.value = []
+    return
+  }
+  if (!directClients.value.length) {
+    const response = await apiFetch('/api/clients')
+    if (response.ok) directClients.value = await response.json()
+  }
+}
+
+async function loadDirectCommercialOptions(clientId) {
+  directMandates.value = []
+  directOpportunities.value = []
+  directContacts.value = []
+  if (!clientId) return
+  const [mandates, opportunities, contacts] = await Promise.all([
+    apiFetch(`/api/clients/${clientId}/mandates`),
+    apiFetch(`/api/opportunities?client_id=${clientId}&open_only=true`),
+    apiFetch(`/api/clients/${clientId}/contacts`),
+  ])
+  if (mandates.ok) directMandates.value = await mandates.json()
+  if (opportunities.ok) directOpportunities.value = await opportunities.json()
+  if (contacts.ok) directContacts.value = await contacts.json()
+}
+
+async function onDirectClientChange() {
+  Object.assign(form, {
+    mandate_id: null, opportunity_id: null, primary_affiliation_id: null,
+  })
+  await loadDirectCommercialOptions(form.client_id)
+}
+
+function onDirectOpportunityChange() {
+  const selected = directOpportunities.value.find(opp => opp.id === form.opportunity_id)
+  if (!selected) return
+  form.mandate_id = selected.mandate_id ?? null
+  form.primary_affiliation_id = selected.primary_contact?.affiliation_id ?? null
+  form.transaction_format ||= selected.transaction_format || ''
+  form.instrument_family ||= selected.instrument_family || ''
+  form.payoff_family ||= selected.payoff_family || ''
+  form.payoff_description ||= selected.payoff_description || ''
 }
 
 // Pre-fills the create form from an existing RFQ (new tender round on the
@@ -1177,6 +1463,15 @@ async function duplicateRfq(source) {
     sens: source.sens || 'achat',
     source: source.script_id ? 'script' : 'template',
     template_type: source.template_type || '',
+    opportunity_id: source.opportunity_id ?? null,
+    client_id: source.client_id ?? null,
+    mandate_id: source.mandate_id ?? null,
+    primary_affiliation_id: source.primary_affiliation_id ?? null,
+    transaction_format: source.transaction_format || '',
+    instrument_family: source.instrument_family || '',
+    payoff_family: source.payoff_family || '',
+    payoff_description: source.payoff_description || '',
+    documentation_reference: source.documentation_reference || '',
     script_id: source.script_id || null,
     source_deal_id: null,
     underlying_name: u.name || 'Sous-jacent',
@@ -1201,6 +1496,14 @@ async function duplicateRfq(source) {
   nominalRaw.value = String(p.notional ?? 1000000)
   formatNominal()
   duplicateSourceScript.value = source.script_snapshot
+  if (source.client_id && !opportuniteContexte.value) {
+    commercialLinkEnabled.value = true
+    if (!directClients.value.length) {
+      const response = await apiFetch('/api/clients')
+      if (response.ok) directClients.value = await response.json()
+    }
+    await loadDirectCommercialOptions(source.client_id)
+  }
   await refreshParsedParams(p.user_params || {}, p.constats || {})
 }
 
@@ -1225,6 +1528,15 @@ async function convertToTrade(source) {
     sens: source.sens || 'achat',
     source: keepsScriptId ? 'script' : 'template',
     template_type: source.template_type || '',
+    opportunity_id: source.opportunity_id ?? null,
+    client_id: source.client_id ?? null,
+    mandate_id: source.mandate_id ?? null,
+    primary_affiliation_id: source.primary_affiliation_id ?? null,
+    transaction_format: source.transaction_format || '',
+    instrument_family: source.instrument_family || '',
+    payoff_family: source.payoff_family || '',
+    payoff_description: source.payoff_description || '',
+    documentation_reference: source.documentation_reference || '',
     script_id: keepsScriptId ? source.script_id : null,
     source_deal_id: null,
     underlying_name: u.name || 'Sous-jacent',
@@ -1249,6 +1561,14 @@ async function convertToTrade(source) {
   nominalRaw.value = String(p.notional ?? 1000000)
   formatNominal()
   duplicateSourceScript.value = null
+  if (source.client_id && !opportuniteContexte.value) {
+    commercialLinkEnabled.value = true
+    if (!directClients.value.length) {
+      const response = await apiFetch('/api/clients')
+      if (response.ok) directClients.value = await response.json()
+    }
+    await loadDirectCommercialOptions(source.client_id)
+  }
   await refreshParsedParams(null, keepsScriptId ? (p.constats || {}) : null)
 }
 
@@ -1617,6 +1937,17 @@ async function submitCreate() {
       ao_date: form.ao_date,
       kind: form.kind,
       sens: form.sens,
+      // Le besoin client à l'origine, s'il y en a un. Null sinon — le cas
+      // courant, et celui de tout l'existant.
+      opportunity_id: form.opportunity_id,
+      client_id: form.client_id,
+      mandate_id: form.mandate_id,
+      primary_affiliation_id: form.primary_affiliation_id,
+      transaction_format: form.transaction_format || null,
+      instrument_family: form.instrument_family || null,
+      payoff_family: form.payoff_family || null,
+      payoff_description: form.payoff_description || null,
+      documentation_reference: form.documentation_reference || null,
       template_type: form.source === 'template' ? form.template_type : '',
       script_id: form.source === 'script' ? form.script_id : null,
       script_snapshot,
@@ -1914,12 +2245,64 @@ const lastLookError = ref('')
 // unconditionally (the previous behaviour) designates the WORST offer as best
 // on a buy tender — this module's normal direction.
 const bestQuote = computed(() => {
-  const priced = (rfq.current?.quotes || []).filter(q => q.price !== null && q.price !== undefined)
+  const priced = (rfq.current?.quotes || []).filter(q => q.comparable)
   if (!priced.length) return null
   const selling = rfq.current?.sens === 'vente'
   return priced.reduce((best, q) =>
     (selling ? q.price > best.price : q.price < best.price) ? q : best)
 })
+const selectedQuote = computed(() => (rfq.current?.quotes || []).find(
+  q => q.id === rfq.current?.selected_quote_id) || null)
+const selectedIsBest = computed(
+  () => !!selectedQuote.value && !!bestQuote.value
+        && Math.abs(selectedQuote.value.price - bestQuote.value.price) <= 1e-9)
+
+const SELECTION_REASONS = [
+  { value: 'client_request', label: 'Demande du Client' },
+  { value: 'documentation', label: 'Documentation / programme' },
+  { value: 'credit', label: 'Crédit / contrepartie' },
+  { value: 'concentration', label: 'Concentration' },
+  { value: 'relationship', label: 'Relation fournisseur' },
+  { value: 'execution_quality', label: "Qualité d'exécution" },
+  { value: 'other', label: 'Autre' },
+]
+function selectionReasonLabel(code) {
+  return SELECTION_REASONS.find(reason => reason.value === code)?.label || 'Non renseigné'
+}
+const selectionReasonCode = ref('')
+const selectionReasonNote = ref('')
+const selectionReasonError = ref('')
+watch([
+  () => rfq.current?.id,
+  () => rfq.current?.selection_reason_code,
+  () => rfq.current?.selection_reason_note,
+], () => {
+  selectionReasonCode.value = rfq.current?.selection_reason_code || ''
+  selectionReasonNote.value = rfq.current?.selection_reason_note || ''
+})
+const selectionReasonChanged = computed(() => (
+  selectionReasonCode.value !== (rfq.current?.selection_reason_code || '')
+  || selectionReasonNote.value.trim() !== (rfq.current?.selection_reason_note || '')
+))
+
+async function saveSelectionReason() {
+  selectionReasonError.value = ''
+  try {
+    await rfq.update(rfq.current.id, {
+      selection_reason_code: selectionReasonCode.value || null,
+      selection_reason_note: selectionReasonNote.value.trim() || null,
+    })
+  } catch (e) {
+    selectionReasonError.value = e.message || 'Le motif n’a pas pu être enregistré.'
+  }
+}
+
+// Le backend refuse à juste titre un booking sans prix modèle horodaté et
+// relié au snapshot RFQ. Ne pas annoncer « prête à booker » avant que ces deux
+// faits visibles existent : le contrôle cryptographique final reste côté
+// serveur, mais l'utilisateur n'entre plus dans un parcours condamné d'avance.
+const modelPriceRecorded = computed(() =>
+  Number(rfq.current?.model_price) > 0 && !!rfq.current?.model_price_at)
 
 async function onLastLookToggle(q, value) {
   lastLookError.value = ''

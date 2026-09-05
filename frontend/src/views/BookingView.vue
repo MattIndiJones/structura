@@ -113,8 +113,24 @@
             </RouterLink>
           </div>
 
+          <div v-if="commercialScope.active && activeTab === 'watchlist'"
+               class="flex items-center justify-between gap-3 rounded-lg border border-blue-800/50 bg-blue-950/20 px-3 py-2 text-xs">
+            <div>
+              <span class="font-semibold text-blue-300">Surveillance filtrée</span>
+              <span class="text-slate-400"> · {{ commercialScope.label }}</span>
+              <span class="text-slate-600"> — mêmes événements et statuts que le Life Cycle.</span>
+            </div>
+            <RouterLink to="/booking" class="text-blue-400 hover:text-blue-300 whitespace-nowrap">
+              Afficher tout
+            </RouterLink>
+          </div>
+
           <!-- ── Onglet Surveillance : watchlist barrières ──────── -->
           <template v-if="activeTab === 'watchlist'">
+
+          <EmptyState v-if="commercialScope.active && !watchlistLoading && !watchlist.length && !watchlistError"
+                      icon="✓" title="Aucun deal actif sur ce périmètre"
+                      hint="Les transactions importées restent dans Clients : elles ne sont pas des positions du book et n'ont pas de Life Cycle." />
 
           <!-- ── Watchlist barrières (deals actifs) ───────────── -->
           <div v-if="watchlist.length || watchlistError" class="card">
@@ -142,8 +158,8 @@
                     <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Réf
                       <HelpTip text="Référence du deal. Cliquez sur la référence pour ouvrir sa fiche détaillée dans l'onglet Deals ; l'icône ⇥ l'ouvre directement dans le Pricer." />
                     </th>
-                    <th class="text-left text-slate-500 font-medium pb-2 pr-3">Client
-                      <HelpTip text="Contrepartie faisant face au deal." />
+                    <th class="text-left text-slate-500 font-medium pb-2 pr-3">Contrepartie
+                      <HelpTip text="Entité juridique faisant face au deal. Le client commercial éventuel est porté séparément par le filtre de contexte." />
                     </th>
                     <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Sous-jacent
                       <HelpTip text="Sous-jacent(s) du deal. Pour un worst-of, tous les sous-jacents du panier sont listés." />
@@ -457,10 +473,14 @@
                 <span class="text-slate-500">
                   vie restante <span class="font-mono text-slate-300">{{ mtmResults[d.id].T_remaining.toFixed(2) }} an(s)</span>
                 </span>
-                <span class="text-slate-500">
+                <span v-if="mtmResults[d.id].pre_strike" class="text-sky-400">
+                  avant strike
+                  <HelpTip :text="`Le niveau initial sera constaté le ${mtmResults[d.id].strike_date}. Il est simulé comme le reste : chaque trajectoire diffuse jusqu'à cette date et y fixe son propre strike, auquel le payoff se réfère ensuite. Rien n'est encore réalisé : ni observation, ni coupon, ni barrière.`" />
+                </span>
+                <span v-if="!mtmResults[d.id].pre_strike" class="text-slate-500">
                   obs passées <span class="font-mono text-slate-300">{{ mtmResults[d.id].obs_passees }}</span>
                 </span>
-                <span class="text-slate-500">
+                <span v-if="mtmResults[d.id].wof_min_realized != null" class="text-slate-500">
                   WOF min réalisé <span class="font-mono text-slate-300">{{ (mtmResults[d.id].wof_min_realized * 100).toFixed(1) }}%</span>
                 </span>
                 <span v-if="mtmResults[d.id].realized_total" class="text-slate-500">
@@ -509,7 +529,10 @@
                   </span>
                   <span v-for="(g, name) in greeksFor(d).per_underlying" :key="name" class="font-mono">
                     <span class="text-slate-500">{{ name }}</span>
-                    <span class="text-slate-300 ml-1">δ {{ g.delta?.toFixed(3) }}</span>
+                    <span class="ml-1"
+                      :class="greeksFor(d).pre_strike ? 'text-sky-300' : 'text-slate-300'">
+                      δ {{ g.delta?.toFixed(3) }}<span v-if="greeksFor(d).pre_strike" class="text-[10px]"> {{ greeksFor(d).pre_strike.modele_porte_le_smile ? 'smile' : 'nul' }}</span>
+                    </span>
                     <span v-if="g.gamma != null" class="text-slate-400 ml-1">γ {{ g.gamma?.toFixed(3) }}</span>
                     <span v-if="g.vega != null" class="text-slate-400 ml-1">ν {{ g.vega?.toFixed(3) }}</span>
                   </span>
@@ -523,6 +546,11 @@
                   <span v-if="greeksFor(d).scalar?.rho != null" class="font-mono text-slate-400">
                     ρ {{ greeksFor(d).scalar.rho.toFixed(4) }}
                   </span>
+                </div>
+                <div v-if="greeksFor(d).pre_strike"
+                  class="flex items-start gap-1.5 text-xs text-sky-300/80">
+                  <span class="shrink-0">↳</span>
+                  <span>{{ greeksFor(d).pre_strike.message }}</span>
                 </div>
                 <div v-if="greeksFor(d).theta_event?.pv_pts != null"
                   class="flex flex-wrap items-center gap-x-2 text-xs text-amber-300/80">
@@ -594,6 +622,14 @@
                     <span class="font-mono text-slate-400 ml-1">({{ formatNominal(shockResults[d.id].delta_pts * d.nominal) }} {{ d.devise }})</span>
                   </span>
                   <span class="text-slate-500">{{ shockResults[d.id].label }}</span>
+                  <span v-if="shockResults[d.id].spot_shock_scope === 'sans_effet'" class="text-sky-400">
+                    choc de spot sans effet
+                    <HelpTip text="Le strike n'est pas encore constaté : il est simulé sur chaque trajectoire, donc un spot qui décroche l'emmène avec lui et le produit reste identique en pourcentage de son propre strike. Le seul canal réel serait le déplacement du skew, que le modèle booké (invariant d'échelle) ne porte pas. Les chocs de vol, de taux et de corrélation restent, eux, pleinement valides." />
+                  </span>
+                  <span v-else-if="shockResults[d.id].spot_shock_scope === 'smile'" class="text-sky-400">
+                    choc de spot = smile
+                    <HelpTip text="Le strike n'est pas encore constaté : le choc de spot ne met pas le produit hors de la monnaie, il déplace le skew qui s'appliquera au produit une fois le strike fixé. C'est bien un impact réel, mais d'une autre nature qu'un décrochage." />
+                  </span>
                 </div>
               </div>
 
@@ -912,7 +948,7 @@
 
 <script setup>
 import BackLink from '../components/ui/BackLink.vue'
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
 import { usePortfoliosStore, shockPresets, blankShockForm } from '../stores/portfolios.js'
@@ -1458,15 +1494,53 @@ function marketUsedLabel(mu) {
 
 const watchlist = ref([])
 const watchlistError = ref('')
+const watchlistLoading = ref(false)
+
+function queryId(value) {
+  const parsed = Number(Array.isArray(value) ? value[0] : value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+const commercialClientId = computed(() => queryId(route.query.client_id))
+const commercialMandateId = computed(() => queryId(route.query.mandate_id))
+const commercialScope = computed(() => {
+  const clientId = commercialClientId.value
+  const mandateId = commercialMandateId.value
+  if (!clientId && !mandateId) return { active: false, label: '' }
+
+  const matchingDeal = dealsStore.deals.find(deal =>
+    (!clientId || deal.client_id === clientId)
+    && (!mandateId || deal.mandate_id === mandateId))
+  const snapshot = matchingDeal?.client_attribution_current
+    || matchingDeal?.client_provenance
+    || {}
+  const clientLabel = snapshot.client?.name || (clientId ? `Client #${clientId}` : null)
+  const mandateLabel = snapshot.mandate?.name || (mandateId ? `Mandat #${mandateId}` : null)
+  return {
+    active: true,
+    label: [clientLabel, mandateLabel].filter(Boolean).join(' · '),
+  }
+})
 
 async function loadWatchlist() {
   watchlistError.value = ''
+  watchlistLoading.value = true
   try {
-    watchlist.value = await dealsStore.getWatchlist()
+    watchlist.value = await dealsStore.getWatchlist({
+      clientId: commercialClientId.value,
+      mandateId: commercialMandateId.value,
+    })
   } catch (e) {
     watchlistError.value = e.message
+  } finally {
+    watchlistLoading.value = false
   }
 }
+
+watch(
+  () => [route.query.client_id, route.query.mandate_id],
+  () => loadWatchlist(),
+)
 
 // Default watchlist order = next observation soonest first (backend sorts by
 // barrier urgency instead — kept for the daily alert scan, not for this view).
@@ -1496,9 +1570,9 @@ function watchlistProductName(row) {
 // voir composables/useDataFilter.
 const wlFilterFields = [
   { key: 'q', label: 'Recherche', kind: 'text', width: 'min-w-[180px]',
-    placeholder: 'Référence, produit, client…',
+    placeholder: 'Référence, produit, contrepartie…',
     get: w => [w.reference, w.product_name, w.contrepartie] },
-  { key: 'contrepartie', label: 'Client', kind: 'select' },
+  { key: 'contrepartie', label: 'Contrepartie', kind: 'select' },
   { key: 'ticker', label: 'Sous-jacent', kind: 'select',
     get: w => (w.underlyings || []).map(u => u.ticker).filter(Boolean) },
   { key: 'product_type', label: 'Type', kind: 'select' },

@@ -277,6 +277,191 @@ def _migrate():
             conn.execute(text("ALTER TABLE rfq_providers ADD COLUMN counterparty_id INTEGER"))
             conn.commit()
 
+        # ── Client Intelligence ───────────────────────────────────────
+        # Les tables du module arrivent seules par create_all(). Seules
+        # ces colonnes-ci s'ajoutent à des tables déjà déployées. Toutes
+        # nullables sans valeur par défaut : une ligne existante reste
+        # exactement ce qu'elle était, non rattachée, et aucun code existant
+        # ne lit ces colonnes. C'est ce qui rend la migration réversible de
+        # fait — les ignorer revient à revenir en arrière.
+        for name, ddl in (
+            ("client_id", "INTEGER"),
+            ("opportunity_id", "INTEGER"),
+            ("primary_affiliation_id", "INTEGER"),
+            ("mandate_id", "INTEGER"),
+            ("client_provenance_json", "TEXT"),
+            ("client_attribution_json", "TEXT"),
+            ("transaction_format", "TEXT"),
+            ("instrument_family", "TEXT"),
+            ("payoff_family", "TEXT"),
+            ("payoff_description", "TEXT"),
+            ("documentation_reference", "TEXT"),
+            ("commercial_reason", "TEXT"),
+        ):
+            if name not in cols:
+                conn.execute(text(f"ALTER TABLE deals ADD COLUMN {name} {ddl}"))
+                conn.commit()
+        for idx, col in (
+            ("ix_deals_client_id", "client_id"),
+            ("ix_deals_opportunity_id", "opportunity_id"),
+            ("ix_deals_primary_affiliation_id", "primary_affiliation_id"),
+            ("ix_deals_mandate_id", "mandate_id"),
+            ("ix_deals_transaction_format", "transaction_format"),
+            ("ix_deals_instrument_family", "instrument_family"),
+            ("ix_deals_payoff_family", "payoff_family"),
+        ):
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS {idx} ON deals ({col})"))
+            conn.commit()
+
+        rfq_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_requests)"))}
+        for name, ddl in (
+            ("opportunity_id", "INTEGER"),
+            ("client_id", "INTEGER"),
+            ("mandate_id", "INTEGER"),
+            ("primary_affiliation_id", "INTEGER"),
+            ("commercial_context_json", "TEXT"),
+            ("transaction_format", "TEXT"),
+            ("instrument_family", "TEXT"),
+            ("payoff_family", "TEXT"),
+            ("payoff_description", "TEXT"),
+            ("documentation_reference", "TEXT"),
+            ("selection_reason_code", "TEXT"),
+            ("selection_reason_note", "TEXT"),
+        ):
+            if rfq_cols and name not in rfq_cols:
+                conn.execute(text(f"ALTER TABLE rfq_requests ADD COLUMN {name} {ddl}"))
+                conn.commit()
+        if rfq_cols:
+            for idx, col in (
+                ("ix_rfq_requests_opportunity_id", "opportunity_id"),
+                ("ix_rfq_requests_client_id", "client_id"),
+                ("ix_rfq_requests_mandate_id", "mandate_id"),
+                ("ix_rfq_requests_primary_affiliation_id", "primary_affiliation_id"),
+                ("ix_rfq_requests_transaction_format", "transaction_format"),
+                ("ix_rfq_requests_instrument_family", "instrument_family"),
+                ("ix_rfq_requests_payoff_family", "payoff_family"),
+                ("ix_rfq_requests_selection_reason_code", "selection_reason_code"),
+            ):
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS {idx} ON rfq_requests ({col})"))
+            conn.commit()
+
+        opportunity_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(opportunities)"))}
+        for name, ddl in (
+            ("mandate_id", "INTEGER"),
+            ("transaction_format", "TEXT"),
+            ("instrument_family", "TEXT"),
+            ("payoff_family", "TEXT"),
+            ("payoff_description", "TEXT"),
+            ("data_origin", "TEXT DEFAULT 'demo'"),
+        ):
+            if opportunity_cols and name not in opportunity_cols:
+                conn.execute(text(f"ALTER TABLE opportunities ADD COLUMN {name} {ddl}"))
+                conn.commit()
+        if opportunity_cols:
+            for idx, col in (
+                ("ix_opportunities_mandate_id", "mandate_id"),
+                ("ix_opportunities_transaction_format", "transaction_format"),
+                ("ix_opportunities_instrument_family", "instrument_family"),
+                ("ix_opportunities_payoff_family", "payoff_family"),
+                ("ix_opportunities_data_origin", "data_origin"),
+            ):
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS {idx} ON opportunities ({col})"))
+            conn.commit()
+
+        # `clients` est une table neuve, donc create_all() la pose entière sur
+        # une base à jour. Ce garde-fou ne sert qu'à la fenêtre étroite où une
+        # base aurait été créée avec la première version de la table, avant que
+        # les contraintes scalaires et leur verrou n'y soient ajoutés :
+        # create_all() ne complète jamais une table qui existe déjà.
+        client_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(clients)"))}
+        for name, ddl in (
+            ("ticket_min", "REAL"),
+            ("ticket_max", "REAL"),
+            ("ticket_currency", "TEXT DEFAULT 'EUR'"),
+            ("maturity_min_months", "INTEGER"),
+            ("maturity_max_months", "INTEGER"),
+            ("min_rating", "TEXT"),
+            ("max_concentration_pct", "REAL"),
+            ("constraints_version", "INTEGER DEFAULT 1"),
+            # Les données commerciales présentes lors de l'introduction du
+            # Lot 0 sont fictives. Une donnée réelle sera requalifiée
+            # explicitement, jamais supposée telle par la migration.
+            ("data_origin", "TEXT DEFAULT 'demo'"),
+        ):
+            if client_cols and name not in client_cols:
+                conn.execute(text(f"ALTER TABLE clients ADD COLUMN {name} {ddl}"))
+                conn.commit()
+
+        # La première version de ClientMandate appelait le texte libre
+        # `notes`. Le Lot 1 l'expose sous le nom métier `comment`. Une base
+        # existante doit donc recevoir la nouvelle colonne et conserver le
+        # contenu déjà saisi ; create_all() ne modifie pas une table existante.
+        mandate_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(client_mandates)"))}
+        if mandate_cols and "comment" not in mandate_cols:
+            conn.execute(text(
+                "ALTER TABLE client_mandates ADD COLUMN comment TEXT"))
+            if "notes" in mandate_cols:
+                conn.execute(text(
+                    "UPDATE client_mandates SET comment = notes "
+                    "WHERE notes IS NOT NULL"))
+            conn.commit()
+
+        # Même garde-fou que pour `clients` : tables neuves posées entières par
+        # create_all(), ces ALTER ne servent qu'à une base créée entre deux
+        # versions du module.
+        histo_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(client_trade_history)"))}
+        for name, ddl in (
+            ("import_batch_id", "INTEGER"),
+            ("traded_with_us", "BOOLEAN"),   # NULL = on ne sait pas
+            ("price_pct", "REAL"),
+            ("mandate_id", "INTEGER"),
+            ("transaction_format", "TEXT"),
+            ("instrument_family", "TEXT"),
+            ("payoff_family", "TEXT"),
+            ("payoff_description", "TEXT"),
+            ("documentation_reference", "TEXT"),
+        ):
+            if histo_cols and name not in histo_cols:
+                conn.execute(text(
+                    f"ALTER TABLE client_trade_history ADD COLUMN {name} {ddl}"))
+                conn.commit()
+        if histo_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_client "
+                "ON client_trade_history (client_id)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_affiliation "
+                "ON client_trade_history (affiliation_id)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_mandate "
+                "ON client_trade_history (mandate_id)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_transaction_format "
+                "ON client_trade_history (transaction_format)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_instrument_family "
+                "ON client_trade_history (instrument_family)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_payoff_family "
+                "ON client_trade_history (payoff_family)"))
+            conn.commit()
+
+        indic_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(indicatives)"))}
+        if indic_cols and "opportunity_id" not in indic_cols:
+            conn.execute(text("ALTER TABLE indicatives ADD COLUMN opportunity_id INTEGER"))
+            conn.commit()
+        if indic_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_indicatives_opportunity_id "
+                "ON indicatives (opportunity_id)"))
+            conn.commit()
+
         for table in ("deals", "indicatives", "rfq_requests"):
             _ensure_unique_reference(conn, table)
         _ensure_one_deal_per_rfq(conn)

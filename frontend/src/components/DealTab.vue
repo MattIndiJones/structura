@@ -12,6 +12,16 @@
          :class="['text-[10px] border rounded-lg px-3 py-1.5 w-fit',
                   (fairValueFromRfq || rfqUnmatchedProvider) ? 'border-amber-700/60 bg-amber-950/20 text-amber-300' : 'border-slate-700 text-slate-500']">
       📨 Pré-rempli depuis la RFQ #{{ store.currentRfqId }} — contrepartie et prix traité repris de la réponse retenue.
+      <template v-if="form.commercial_context?.client">
+        <br />
+        👤 {{ form.commercial_context.client.name }}
+        <template v-if="form.commercial_context.mandate">
+          · {{ form.commercial_context.mandate.name }}
+        </template>
+        <template v-if="form.commercial_context.opportunity">
+          · {{ form.commercial_context.opportunity.reference }}
+        </template>
+      </template>
       <template v-if="rfqUnmatchedProvider">
         <br />
         ⚠ Le fournisseur <b>{{ rfqUnmatchedProvider }}</b> ne correspond à aucune contrepartie éligible —
@@ -76,6 +86,101 @@
             <option value="Autocall" /><option value="Options" />
             <option value="Produits à capital" /><option value="Sharks" />
           </datalist>
+        </div>
+
+        <div>
+          <label class="label">Format juridique</label>
+          <input v-model="form.transaction_format" class="input" list="deal-formats"
+                 placeholder="EMTN, BMTN, OTC…" />
+          <datalist id="deal-formats">
+            <option value="EMTN" /><option value="BMTN" /><option value="OTC" />
+          </datalist>
+        </div>
+        <div>
+          <label class="label">Instrument</label>
+          <input v-model="form.instrument_family" class="input" list="deal-instruments"
+                 placeholder="Note, Swap…" />
+          <datalist id="deal-instruments">
+            <option value="Note" /><option value="Certificat" />
+            <option value="Swap" /><option value="Option" />
+          </datalist>
+        </div>
+        <div class="col-span-2">
+          <label class="label">Famille de payoff</label>
+          <input v-model="form.payoff_family" class="input"
+                 placeholder="Phoenix, Autocall, Swap…" />
+        </div>
+        <div class="col-span-2">
+          <label class="label">Description du payoff</label>
+          <textarea v-model="form.payoff_description" class="input" rows="2"
+                    placeholder="Précisions contractuelles utiles"></textarea>
+        </div>
+        <div class="col-span-2">
+          <label class="label">Référence documentaire</label>
+          <input v-model="form.documentation_reference" class="input"
+                 placeholder="Term sheet / ISDA / confirmation" />
+        </div>
+
+        <div v-if="!store.currentRfqId" class="col-span-2 rounded-lg border p-3 flex flex-col gap-3"
+             style="border-color: var(--border); background: var(--surface2)">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-semibold">Attribution Client facultative</div>
+              <p class="text-[10px] mt-0.5" style="color: var(--subtle)">
+                Désactivée : le Deal reste un Deal Produit autonome normal.
+              </p>
+            </div>
+            <button class="btn-ghost btn-sm" @click="toggleDirectClient">
+              {{ directClientEnabled ? 'Retirer le contexte' : 'Rattacher à un Client' }}
+            </button>
+          </div>
+          <div v-if="directClientEnabled" class="grid grid-cols-2 gap-2">
+            <div class="col-span-2">
+              <label class="label">Client</label>
+              <select v-model="form.client_id" class="select" @change="onDirectDealClientChange">
+                <option :value="null">— Choisir —</option>
+                <option v-for="client in directDealClients" :key="client.id" :value="client.id">
+                  {{ client.name }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="label">Mandat / périmètre</label>
+              <select v-model="form.mandate_id" class="select" :disabled="!form.client_id">
+                <option :value="null">— Obligatoire —</option>
+                <option v-for="mandat in directDealMandates" :key="mandat.id" :value="mandat.id">
+                  {{ mandat.name }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="label">Opportunity éventuelle</label>
+              <select v-model="form.opportunity_id" class="select"
+                      :disabled="!form.client_id" @change="onDirectDealOpportunityChange">
+                <option :value="null">— Aucune —</option>
+                <option v-for="opp in directDealOpportunities" :key="opp.id" :value="opp.id">
+                  {{ opp.title || opp.reference }}
+                </option>
+              </select>
+            </div>
+            <div class="col-span-2">
+              <label class="label">Contact principal éventuel</label>
+              <select v-model="form.primary_affiliation_id" class="select"
+                      :disabled="!form.client_id">
+                <option :value="null">— Aucun —</option>
+                <option v-for="contact in directDealContacts" :key="contact.affiliation_id"
+                        :value="contact.affiliation_id">
+                  {{ contact.first_name }} {{ contact.last_name }}
+                </option>
+              </select>
+            </div>
+            <div v-if="form.client_id && !form.opportunity_id" class="col-span-2">
+              <label class="label">Motif du rattachement direct</label>
+              <textarea v-model="form.commercial_reason" class="input" rows="2"
+                        placeholder="Pourquoi ce Deal est rattaché directement, sans RFQ ni Opportunity"></textarea>
+            </div>
+          </div>
+          <p v-if="errors.commercial" class="text-red-400 text-xs">{{ errors.commercial }}</p>
         </div>
 
         <div class="col-span-2">
@@ -593,6 +698,17 @@ const form = reactive({
   sens: 'vente',
   contrepartie: '',
   product_type: '',
+  transaction_format: '',
+  instrument_family: '',
+  payoff_family: '',
+  payoff_description: '',
+  documentation_reference: '',
+  client_id: null,
+  mandate_id: null,
+  opportunity_id: null,
+  primary_affiliation_id: null,
+  commercial_context: null,
+  commercial_reason: '',
   fixing_policy: 'AUTO_YAHOO',
   fair_value: 0,
   price_traded: 0,
@@ -601,6 +717,64 @@ const form = reactive({
   value_date: addBizDays(today, 2),
   payment_date: '',
 })
+const directClientEnabled = ref(false)
+const directDealClients = ref([])
+const directDealMandates = ref([])
+const directDealOpportunities = ref([])
+const directDealContacts = ref([])
+
+async function toggleDirectClient() {
+  directClientEnabled.value = !directClientEnabled.value
+  if (!directClientEnabled.value) {
+    Object.assign(form, {
+      client_id: null, mandate_id: null, opportunity_id: null,
+      primary_affiliation_id: null, commercial_reason: '', commercial_context: null,
+    })
+    directDealMandates.value = []
+    directDealOpportunities.value = []
+    directDealContacts.value = []
+    return
+  }
+  if (!directDealClients.value.length) {
+    const response = await apiFetch('/api/clients')
+    if (response.ok) directDealClients.value = await response.json()
+  }
+}
+
+async function loadDirectDealOptions(clientId) {
+  directDealMandates.value = []
+  directDealOpportunities.value = []
+  directDealContacts.value = []
+  if (!clientId) return
+  const [mandates, opportunities, contacts] = await Promise.all([
+    apiFetch(`/api/clients/${clientId}/mandates`),
+    apiFetch(`/api/opportunities?client_id=${clientId}&open_only=true`),
+    apiFetch(`/api/clients/${clientId}/contacts`),
+  ])
+  if (mandates.ok) directDealMandates.value = await mandates.json()
+  if (opportunities.ok) directDealOpportunities.value = await opportunities.json()
+  if (contacts.ok) directDealContacts.value = await contacts.json()
+}
+
+async function onDirectDealClientChange() {
+  Object.assign(form, {
+    mandate_id: null, opportunity_id: null,
+    primary_affiliation_id: null, commercial_reason: '',
+  })
+  await loadDirectDealOptions(form.client_id)
+}
+
+function onDirectDealOpportunityChange() {
+  const selected = directDealOpportunities.value.find(opp => opp.id === form.opportunity_id)
+  if (!selected) return
+  form.mandate_id = selected.mandate_id ?? null
+  form.primary_affiliation_id = selected.primary_contact?.affiliation_id ?? null
+  form.transaction_format ||= selected.transaction_format || ''
+  form.instrument_family ||= selected.instrument_family || ''
+  form.payoff_family ||= selected.payoff_family || ''
+  form.payoff_description ||= selected.payoff_description || ''
+  form.commercial_reason = ''
+}
 
 // ── Sous-jacents (picker — identité, la calibration se fait dans Marché & Paramètres) ──
 const activeUIdx = computed(() => store.activeUnderlyingIdx)
@@ -1012,6 +1186,12 @@ function validate() {
   // priced in this session (the RFQ→booking path arrives with the results
   // cleared). Booking it would set the deal's whole P&L baseline to 0.
   if (!form.fair_value) errors.fair_value = 'Fair value requise — lancez ▶ Pricer, ou saisissez-la'
+  if (form.client_id && !form.mandate_id) {
+    errors.commercial = 'Sélectionnez le mandat ou périmètre du Client.'
+  } else if (form.client_id && !form.opportunity_id
+             && form.commercial_reason.trim().length < 10) {
+    errors.commercial = 'Expliquez le rattachement direct (10 caractères minimum).'
+  }
   return Object.keys(errors).length === 0
 }
 
@@ -1081,6 +1261,16 @@ async function book() {
       market_snapshot: marketSnapshot,
       indicative_id: store.currentIndicativeId || null,
       rfq_id: store.currentRfqId || null,
+      client_id: form.client_id,
+      mandate_id: form.mandate_id,
+      opportunity_id: form.opportunity_id,
+      primary_affiliation_id: form.primary_affiliation_id,
+      transaction_format: form.transaction_format || null,
+      instrument_family: form.instrument_family || null,
+      payoff_family: form.payoff_family || null,
+      payoff_description: form.payoff_description || null,
+      documentation_reference: form.documentation_reference || null,
+      commercial_reason: form.commercial_reason || null,
     })
     bookedDeal.value = deal
   } catch (e) {

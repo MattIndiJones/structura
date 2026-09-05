@@ -1606,6 +1606,24 @@ export const usePricingStore = defineStore('pricing', () => {
       } : {}),
       ...(p.notional != null ? { nominal: p.notional } : {}),
       product_type: rfqObj.template_type || '',
+      // Le DealTab est déjà monté dans certains parcours et possède ses
+      // propres watchers de proposition de règlement. Lui remettre les dates
+      // dans le handoff final ferme la course entre ces propositions et le
+      // chargement asynchrone de la RFQ : les dates du term sheet gagnent
+      // toujours, même si un ancien produit était encore dans le store.
+      ...(p.strike_date ? { strike_date: p.strike_date } : {}),
+      ...(p.value_date ? { value_date: p.value_date } : {}),
+      ...(p.payment_date ? { payment_date: p.payment_date } : {}),
+      client_id: rfqObj.client_id ?? null,
+      mandate_id: rfqObj.mandate_id ?? null,
+      opportunity_id: rfqObj.opportunity_id ?? null,
+      primary_affiliation_id: rfqObj.primary_affiliation_id ?? null,
+      commercial_context: rfqObj.commercial_context || null,
+      transaction_format: rfqObj.transaction_format || '',
+      instrument_family: rfqObj.instrument_family || '',
+      payoff_family: rfqObj.payoff_family || '',
+      payoff_description: rfqObj.payoff_description || '',
+      documentation_reference: rfqObj.documentation_reference || '',
       // Deal.sens is written from the COUNTERPARTY's side ("Vente (banque
       // vend)"), the RFQ's from ours — so an RFQ where WE buy books as a deal
       // whose sens is 'vente'. Inverted here rather than unifying the two

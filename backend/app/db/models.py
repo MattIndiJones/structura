@@ -196,6 +196,50 @@ class Deal(SQLModel, table=True):
     # None for a deal booked outside any tender.
     rfq_provenance_json: Optional[str] = Field(default=None, sa_column=Column(Text))
 
+    # ── Rattachement commercial (Client Intelligence) ──────────────────
+    # À QUI le produit a été vendu. Le reste du modèle décrit l'offre :
+    # contrepartie est l'émetteur qui fait face au trade, rfq_id l'appel
+    # d'offres aux banques, user_id notre commercial. Sans ces colonnes, aucun
+    # trade n'est attribuable à un investisseur et le Cycle Engine n'a rien à
+    # mesurer.
+    #
+    # Les trois sont nullables : un deal booké avant ce module, ou hors de
+    # tout parcours client, reste parfaitement valide et non rattaché.
+    client_id: Optional[int] = Field(default=None, foreign_key="clients.id", index=True)
+    opportunity_id: Optional[int] = Field(
+        default=None, foreign_key="opportunities.id", index=True)
+    # L'AFFILIATION, pas la personne — c'est ce qui rend impossible qu'un trade
+    # de 2024 chez Bank A devienne un trade Bank B le jour où son interlocuteur
+    # change d'employeur. L'affiliation ne se réaffecte jamais.
+    primary_affiliation_id: Optional[int] = Field(
+        default=None, foreign_key="affiliations.id", index=True)
+    mandate_id: Optional[int] = Field(
+        default=None, foreign_key="client_mandates.id", index=True)
+    # Même raison d'être que rfq_provenance_json juste au-dessus : le pointeur
+    # garantit la justesse, le cliché garantit la preuve. Une fiche client peut
+    # être corrigée, une personne renommée, une affiliation supprimée par
+    # erreur — ce qu'on a écrit au booking, lui, ne bouge plus. Porte le nom du
+    # client, celui de la personne et sa fonction au moment du trade.
+    client_provenance_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+    # Attribution courante après une éventuelle rectification gouvernée. Le
+    # cliché initial ci-dessus n'est jamais réécrit ; celui-ci est versionné
+    # avec le contrat et ne change que via le workflow d'amendement.
+    client_attribution_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+    # ── Structure juridique et produit ───────────────────────────────
+    # Ces champs ne sont PAS commerciaux : un deal Produit autonome les porte
+    # aussi. Ils sont gelés au booking et restent nullables pour tout
+    # l'historique antérieur au Lot 1.
+    transaction_format: Optional[str] = Field(default=None, index=True)
+    instrument_family: Optional[str] = Field(default=None, index=True)
+    payoff_family: Optional[str] = Field(default=None, index=True)
+    payoff_description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    documentation_reference: Optional[str] = Field(default=None, sa_column=Column(Text))
+    # Requis seulement lorsqu'un booking direct est volontairement rattaché à
+    # un Client sans Opportunity ni RFQ. Un booking Produit autonome n'a rien à
+    # justifier.
+    commercial_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+
     # Risk-aggregation grouping (api/portfolios.py) — one portfolio at a time,
     # reassignable. Always set going forward (book_deal assigns the user's
     # default portfolio at creation); column stays nullable only so a
@@ -355,6 +399,13 @@ class Indicative(SQLModel, table=True):
 
     status: str = Field(default="ouvert")  # ouvert | converti | abandonné
 
+    # Le besoin commercial qui a motivé ce prix, s'il est connu. Nullable :
+    # un indicatif se price très bien sans dossier client, et c'était le seul
+    # mode de fonctionnement avant ce module. Une opportunité porte plusieurs
+    # indicatifs — on price trois idées, une seule se traite.
+    opportunity_id: Optional[int] = Field(
+        default=None, foreign_key="opportunities.id", index=True)
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -439,6 +490,28 @@ class RfqRequest(SQLModel, table=True):
     #   see api/rfq.py create_rfq. It may originate from the script library,
     #   an expert template, or a previously booked deal snapshot.
     kind: str = Field(default="indicatif")  # indicatif | to_trade
+    # Le besoin client à l'origine de cet appel d'offres, s'il y en a un.
+    # Nullable et sans effet sur le reste du module : une RFQ créée hors de
+    # tout parcours client se comporte exactement comme avant. Le lien sert
+    # à remonter Trade → RFQ → Opportunity → Client → Affiliation.
+    opportunity_id: Optional[int] = Field(
+        default=None, foreign_key="opportunities.id", index=True)
+    # Contexte Client facultatif. Les pointeurs restent NULL sur une RFQ
+    # Produit autonome. Quand une Opportunity est fournie, le serveur les
+    # déduit d'elle plutôt que de faire confiance au navigateur.
+    client_id: Optional[int] = Field(default=None, foreign_key="clients.id", index=True)
+    mandate_id: Optional[int] = Field(
+        default=None, foreign_key="client_mandates.id", index=True)
+    primary_affiliation_id: Optional[int] = Field(
+        default=None, foreign_key="affiliations.id", index=True)
+    commercial_context_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+    # Identité juridique/produit, utilisable avec ou sans contexte Client.
+    transaction_format: Optional[str] = Field(default=None, index=True)
+    instrument_family: Optional[str] = Field(default=None, index=True)
+    payoff_family: Optional[str] = Field(default=None, index=True)
+    payoff_description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    documentation_reference: Optional[str] = Field(default=None, sa_column=Column(Text))
     # Our own side of the trade — deliberately NOT the same convention as
     # Deal.sens, which is written from the counterparty's point of view
     # ("Vente (banque vend)"). Here 'achat' means WE buy from the solicited
@@ -471,6 +544,12 @@ class RfqRequest(SQLModel, table=True):
     # status "retenue". Points at either a top-level quote or a last-look child
     # (RfqQuote.parent_quote_id) — whichever price/time actually got traded.
     selected_quote_id: Optional[int] = Field(default=None, foreign_key="rfq_quotes.id")
+    # Optional factual explanation recorded by the desk when the retained
+    # response is not the best executable price.  It never changes the quote
+    # ranking and never blocks selection: an absent explanation must stay
+    # visible as unknown rather than being guessed by Client Intelligence.
+    selection_reason_code: Optional[str] = Field(default=None, index=True)
+    selection_reason_note: Optional[str] = Field(default=None, sa_column=Column(Text))
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -812,3 +891,517 @@ class ComputeJob(SQLModel, table=True):
     error: Optional[str] = Field(default=None)
     started_at: Optional[datetime] = Field(default=None)
     finished_at: Optional[datetime] = Field(default=None)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Client Intelligence — la couche commerciale.
+#
+# Tout le reste de l'application décrit l'OFFRE : Counterparty est l'entité
+# éligible à porter un deal, RfqProvider la banque qu'on sollicite,
+# Deal.contrepartie l'émetteur qui fait face au trade. Rien n'y représentait
+# l'investisseur final. Ces tables décrivent la DEMANDE, et se raccordent à
+# l'existant par les seules colonnes ajoutées à deals/rfq_requests/indicatives.
+#
+# Règle structurante — les objets commerciaux pointent sur l'AFFILIATION,
+# jamais sur la Person. Une affiliation lie une personne à un client sur une
+# période, et ce lien ne se réécrit jamais. Un historique ne PEUT donc pas
+# suivre une personne qui change d'employeur : créer l'affiliation suivante
+# n'écrit rien sur la précédente. C'est une garantie de structure, pas une
+# convention qu'un appelant pourrait oublier de respecter.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class Client(SQLModel, table=True):
+    """Une organisation cliente — jamais une personne.
+
+    Portée par l'entité, pas par l'utilisateur : deux commerciaux qui couvrent
+    tous deux « ABC Asset Management » doivent voir UNE ligne, pas deux. Qui
+    couvre quoi se lit dans ClientCoverage.
+
+    constraints_json est le nom technique historique du profil courant :
+    devises, formats, instruments, payoffs, univers et habitudes d'émetteurs.
+    Ces informations guident le commercial mais ne bloquent aucun RFQ ni Deal.
+    Une restriction opérationnelle réelle reste explicitement distinguée dans
+    le référentiel. JSON plutôt que colonnes parce que le vocabulaire bouge
+    avec le métier, comme market_snapshot_json ailleurs.
+    """
+    __tablename__ = "clients"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    name: str = Field(index=True)
+    legal_name: Optional[str] = Field(default=None)
+    # private_bank | asset_manager | family_office | insurance | corporate
+    # | institutional | distributor | bank | other
+    client_type: str = Field(default="other", index=True)
+    country: Optional[str] = Field(default=None)
+    # prospect | active | dormant | inactive | archived
+    status: str = Field(default="prospect", index=True)
+    external_ref: Optional[str] = Field(default=None, index=True)
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    # demo | imported | native. Toute la base commerciale actuelle étant
+    # fictive, `demo` est volontairement le défaut de migration. Le passage
+    # à une donnée réelle est un geste explicite, jamais une déduction.
+    data_origin: str = Field(default="demo", index=True)
+
+    # ── Contraintes institutionnelles ─────────────────────────────────
+    # Scalaires en colonnes, listes en JSON. La coupure n'est pas
+    # esthétique, elle suit deux critères :
+    #
+    #   • ces sept-là entrent dans la question « chez quels clients cette idée
+    #     est-elle cohérente avec les habitudes connues ? » et se trient dans
+    #     une liste, sans jamais devenir un filtre bloquant ;
+    #   • surtout, ils se modifient INDÉPENDAMMENT : deux UPDATE sur deux
+    #     colonnes différentes survivent tous les deux, là où deux
+    #     écritures du même blob JSON se perdent l'une l'autre en silence.
+    #
+    # Le second point est la vraie raison. Les listes, elles, restent en
+    # JSON et sont protégées par constraints_version plus bas.
+    ticket_min: Optional[float] = Field(default=None)
+    ticket_max: Optional[float] = Field(default=None)
+    ticket_currency: str = Field(default="EUR")
+    # En MOIS, pas en années : un 18 mois doit être exprimable.
+    maturity_min_months: Optional[int] = Field(default=None)
+    maturity_max_months: Optional[int] = Field(default=None)
+    # Échelle S&P/Fitch, comparée par rang (core/client_controls.rating_rank),
+    # jamais par ordre alphabétique — 'BBB' précède 'A' dans l'alphabet.
+    min_rating: Optional[str] = Field(default=None)
+    max_concentration_pct: Optional[float] = Field(default=None)
+
+    # Devises, classes d'actifs, formats, instruments, univers, payoffs,
+    # habitudes d'émetteurs, références juridiques et remarques. Schéma strict
+    # validé à l'écriture (client_controls.validate_constraints) : une clé
+    # inconnue ou un vocabulaire hors liste est refusé, sans quoi 'A-' et
+    # 'a-' coexisteraient sans que rien ne proteste.
+    constraints_json: str = Field(default="{}", sa_column=Column(Text))
+    # Verrou optimiste sur le blob ci-dessus. Deux utilisateurs qui éditent
+    # les contraintes du même client font tous deux un lire-modifier-
+    # réécrire de l'objet entier : sans ce compteur, le second écrase le
+    # premier sans erreur ni trace. Même mécanisme que Deal.contract_version
+    # sur les amendements, et même refus explicite plutôt qu'une perte
+    # silencieuse.
+    constraints_version: int = Field(default=1)
+
+    created_by_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ClientMandate(SQLModel, table=True):
+    """Mandat, fonds, compte ou desk couvert pour un Client.
+
+    L'objet précise le périmètre d'une attribution commerciale mais ne devient
+    jamais une dépendance du moteur Produit. Il s'archive lorsqu'il n'est plus
+    utilisable ; les objets historiques gardent leur lien et leurs snapshots.
+    """
+    __tablename__ = "client_mandates"
+    __table_args__ = (
+        UniqueConstraint("client_id", "name", name="uq_client_mandate_name"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    client_id: int = Field(foreign_key="clients.id", index=True)
+    # mandate | fund | account | desk | other
+    mandate_type: str = Field(default="mandate", index=True)
+    name: str = Field(index=True)
+    # active | archived
+    status: str = Field(default="active", index=True)
+    reference_currency: Optional[str] = Field(default=None)
+    comment: Optional[str] = Field(default=None, sa_column=Column(Text))
+    # demo | imported | native
+    data_origin: str = Field(default="demo", index=True)
+    created_by_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ClientPreferenceStatement(SQLModel, table=True):
+    """Append-only evidence for a declared or commercially recorded preference.
+
+    `Client.constraints_json` remains the compatibility projection used by the
+    existing form.  This table answers the questions that a current JSON blob
+    cannot: who said what, for which mandate/contact, on which date, and what
+    statement superseded the previous understanding.
+
+    Rows are never updated to mark them obsolete.  The current view is derived
+    deterministically from the latest effective statement for a scope/key;
+    older rows therefore remain auditable without a mutable status flag.
+    """
+    __tablename__ = "client_preference_statements"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    client_id: int = Field(foreign_key="clients.id", index=True)
+    mandate_id: Optional[int] = Field(
+        default=None, foreign_key="client_mandates.id", index=True)
+    affiliation_id: Optional[int] = Field(
+        default=None, foreign_key="affiliations.id", index=True)
+    preference_key: str = Field(index=True)
+    # JSON scalar/list/object, or JSON null for an explicit retraction.
+    value_json: str = Field(default="null", sa_column=Column(Text))
+    # client_declared | client_confirmed | client_contradicted | sales_note
+    # | legacy_snapshot (system-created, explicitly undated baseline)
+    statement_kind: str = Field(default="client_declared", index=True)
+    statement_date: str = Field(default="", index=True)  # ISO date of the statement
+    source_affiliation_id: Optional[int] = Field(
+        default=None, foreign_key="affiliations.id", index=True)
+    # meeting | phone | email | other
+    channel: Optional[str] = Field(default=None, index=True)
+    interaction_id: Optional[int] = Field(
+        default=None, foreign_key="interactions.id", index=True)
+    note: Optional[str] = Field(default=None, sa_column=Column(Text))
+    recorded_by_user_id: int = Field(foreign_key="users.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class Person(SQLModel, table=True):
+    """Une personne physique, dont l'identité ne dépend d'aucun employeur.
+
+    Pas de client_id ici, délibérément : l'employeur du jour se lit dans
+    l'affiliation ouverte (end_date IS NULL). Poser un client_id permanent
+    serait exactement le raccourci qui fait basculer un historique entier
+    d'une société à l'autre le jour d'un changement de poste.
+
+    email est indexé mais PAS unique : la détection de doublons avertit, elle
+    ne bloque pas. Deux homonymes existent, et une adresse peut être ressaisie
+    légitimement — une contrainte dure interdirait à l'utilisateur de confirmer
+    qu'il s'agit bien d'une nouvelle personne.
+    """
+    __tablename__ = "persons"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    first_name: str = Field(default="", index=True)
+    last_name: str = Field(default="", index=True)
+    email: Optional[str] = Field(default=None, index=True)
+    phone: Optional[str] = Field(default=None)
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    is_active: bool = Field(default=True, index=True)
+    created_by_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Affiliation(SQLModel, table=True):
+    """Le pivot historique : une personne, chez un client, sur une période.
+
+    C'est l'objet sur lequel pointent Interaction, Opportunity et Deal. Son
+    couple (person_id, client_id) est immuable après création — le corriger
+    reviendrait à réécrire un passé. Une erreur de saisie se répare en
+    supprimant l'affiliation tant qu'elle ne porte rien, jamais en la
+    réaffectant à un autre client.
+
+    « Actuelle » n'est pas stockée : elle se DÉDUIT de end_date IS NULL, comme
+    RfqRequest.status se déduit des faits du dossier. Un booléen redondant peut
+    diverger de la date qui fait foi, et la question « qui travaille ici
+    aujourd'hui » n'aurait alors plus une seule réponse.
+
+    preferences_json porte ce qui est propre à cette personne DANS cette
+    société — Jean aime les autocalls, mais chez Bank B il est tenu à une
+    maturité ≤ 3 ans. Les préférences durables de la personne restent sur
+    Person, les contraintes de la société sur Client.constraints_json : les
+    trois niveaux existent et ne doivent pas être confondus.
+    """
+    __tablename__ = "affiliations"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    person_id: int = Field(foreign_key="persons.id", index=True)
+    client_id: int = Field(foreign_key="clients.id", index=True)
+    job_title: str = Field(default="")
+    # decision_maker | cio | portfolio_manager | investment_advisor
+    # | influencer | execution | originator | other
+    commercial_role: str = Field(default="other", index=True)
+    start_date: str = Field(default="")                        # ISO
+    end_date: Optional[str] = Field(default=None, index=True)   # ISO ; NULL = en cours
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    preferences_json: str = Field(default="{}", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ClientCoverage(SQLModel, table=True):
+    """Qui, chez nous, couvre ce client. Le client reste une identité unique ;
+    seule la couverture est propre à un utilisateur."""
+    __tablename__ = "client_coverage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_id", name="uq_client_coverage_user_client"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    client_id: int = Field(foreign_key="clients.id", index=True)
+    # primary | secondary | read_only
+    coverage_role: str = Field(default="primary", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ContactCoverage(SQLModel, table=True):
+    """Qui couvre quel contact. Porte sur l'AFFILIATION et non la Person :
+    deux commerciaux peuvent couvrir le même client sur des contacts
+    différents — l'un le CIO, l'autre les conseillers."""
+    __tablename__ = "contact_coverage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "affiliation_id",
+                         name="uq_contact_coverage_user_affiliation"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    affiliation_id: int = Field(foreign_key="affiliations.id", index=True)
+    # primary | secondary | read_only
+    coverage_role: str = Field(default="primary", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Interaction(SQLModel, table=True):
+    """Un événement commercial daté.
+
+    opportunity_id est nullable et le restera : une prospection initiale n'a
+    aucune opportunité derrière elle, et l'exiger obligerait à ouvrir un
+    dossier vide pour enregistrer un premier appel.
+    """
+    __tablename__ = "interactions"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)          # auteur
+    client_id: int = Field(foreign_key="clients.id", index=True)
+    opportunity_id: Optional[int] = Field(
+        default=None, foreign_key="opportunities.id", index=True)
+    interaction_date: str = Field(default="", index=True)             # ISO
+    # call | meeting | email | idea_sent | client_feedback
+    # | indicative_request | follow_up | other
+    interaction_type: str = Field(default="other", index=True)
+    summary: str = Field(default="")
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    next_action: Optional[str] = Field(default=None)
+    next_action_date: Optional[str] = Field(default=None, index=True)  # ISO
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class InteractionParticipant(SQLModel, table=True):
+    """Les personnes présentes, désignées par leur affiliation du moment."""
+    __tablename__ = "interaction_participants"
+    __table_args__ = (
+        UniqueConstraint("interaction_id", "affiliation_id",
+                         name="uq_interaction_participant"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    interaction_id: int = Field(foreign_key="interactions.id", index=True)
+    affiliation_id: int = Field(foreign_key="affiliations.id", index=True)
+    role: str = Field(default="other")
+
+
+class Opportunity(SQLModel, table=True):
+    """Une intention d'investissement — distincte d'une RFQ et d'un Indicative.
+
+    Un Indicative est un PRIX figé avec son script, son snapshot de marché et
+    son KID ; une Opportunity est le BESOIN commercial qui a motivé ce prix.
+    Un même besoin fait souvent pricer trois idées dont une seule se traite :
+    les fondre écraserait cette cardinalité. Indicative.opportunity_id et
+    RfqRequest.opportunity_id portent le rattachement, tous deux nullables pour
+    que ces deux modules continuent de fonctionner sans client identifié.
+
+    primary_affiliation_id est nullable : un besoin institutionnel peut arriver
+    par la société sans qu'une personne en particulier le porte. Quand il est
+    posé, il doit désigner une affiliation DE CE CLIENT — contrôle serveur,
+    parce qu'un contrôle d'écran se contourne par un appel direct.
+    """
+    __tablename__ = "opportunities"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    reference: str = Field(index=True, unique=True)      # OPP-AAAAMMJJ-nnn
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    owner_user_id: int = Field(foreign_key="users.id", index=True)
+    client_id: int = Field(foreign_key="clients.id", index=True)
+    primary_affiliation_id: Optional[int] = Field(
+        default=None, foreign_key="affiliations.id", index=True)
+    mandate_id: Optional[int] = Field(
+        default=None, foreign_key="client_mandates.id", index=True)
+
+    title: str = Field(default="")
+    description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    amount: Optional[float] = Field(default=None)
+    currency: str = Field(default="EUR")
+    horizon: Optional[str] = Field(default=None)
+    expected_trade_date: Optional[str] = Field(default=None, index=True)   # ISO
+    expected_window_start: Optional[str] = Field(default=None)             # ISO
+    expected_window_end: Optional[str] = Field(default=None)               # ISO
+    # low | medium | high
+    priority: str = Field(default="medium", index=True)
+    source: Optional[str] = Field(default=None)
+    # Structure envisagée. Les champs restent ouverts : l'interface propose
+    # les standards, mais une valeur spécifique Client doit rester exprimable.
+    transaction_format: Optional[str] = Field(default=None, index=True)
+    instrument_family: Optional[str] = Field(default=None, index=True)
+    payoff_family: Optional[str] = Field(default=None, index=True)
+    payoff_description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    data_origin: str = Field(default="demo", index=True)
+    # lead | need_identified | idea | client_interest | structuring
+    # | rfq | negotiation | partially_won | won | lost | cancelled | archived
+    status: str = Field(default="lead", index=True)
+    # Renseignée quand le statut devient 'lost' — c'est la matière première de
+    # Client Intelligence : savoir POURQUOI vaut mieux que savoir combien.
+    lost_reason: Optional[str] = Field(default=None, index=True)
+    lost_comment: Optional[str] = Field(default=None, sa_column=Column(Text))
+    next_action: Optional[str] = Field(default=None)
+    next_action_date: Optional[str] = Field(default=None, index=True)      # ISO
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    last_activity_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class OpportunityParticipant(SQLModel, table=True):
+    """Les autres personnes impliquées, hors contact principal.
+
+    Une opportunité n'est presque jamais l'affaire d'une seule personne : le
+    gérant décide, le CIO valide, le middle exécute. L'unicité empêche qu'une
+    même affiliation figure deux fois ; que le contact principal n'y figure pas
+    est un contrôle applicatif, la base ne voit pas cette colonne.
+    """
+    __tablename__ = "opportunity_participants"
+    __table_args__ = (
+        UniqueConstraint("opportunity_id", "affiliation_id",
+                         name="uq_opportunity_participant"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    opportunity_id: int = Field(foreign_key="opportunities.id", index=True)
+    affiliation_id: int = Field(foreign_key="affiliations.id", index=True)
+    # originator | decision_maker | influencer | advisor | execution | other
+    role: str = Field(default="other")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Import d'historique commercial.
+#
+# Un client arrive presque toujours avec un passé stocké ailleurs — un
+# classeur Excel, un export de son ancien outil. Sans lui, le moteur de
+# cycles n'a rien à mesurer et dit « historique insuffisant » pendant des
+# mois. Ces deux tables permettent de le verser.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class ClientImportBatch(SQLModel, table=True):
+    """Un versement, avec de quoi le défaire.
+
+    Chaque ligne écrite par un import porte l'identifiant de son lot. C'est
+    ce qui rend un import RÉVERSIBLE : sans cela, un fichier mal formaté
+    versé sur une base déjà peuplée laisserait des lignes qu'on ne saurait
+    plus distinguer des vraies, et le seul remède serait de repartir d'une
+    sauvegarde.
+
+    `report_json` conserve le compte rendu tel qu'il a été montré avant la
+    validation — combien de lignes lues, créées, mises à jour, ignorées, et
+    pourquoi. Une reprise six mois plus tard doit pouvoir répondre à « d'où
+    sort cette ligne » sans reconstituer le fichier d'origine.
+    """
+    __tablename__ = "client_import_batches"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    filename: str = Field(default="")
+    source_format: str = Field(default="xlsx")     # xlsx | json
+    status: str = Field(default="applied", index=True)  # applied | reverted
+    rows_created: int = Field(default=0)
+    rows_updated: int = Field(default=0)
+    rows_skipped: int = Field(default=0)
+    report_json: str = Field(default="{}", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    reverted_at: Optional[datetime] = Field(default=None)
+
+
+class ClientTradeHistory(SQLModel, table=True):
+    """Une transaction passée d'un client, versée depuis un fichier.
+
+    **Délibérément PAS un `Deal`.** Un Deal est une position que nous portons :
+    il alimente le booking, l'agrégation de risque, le MtM et le cycle de vie,
+    et il suppose un script, un instantané de marché et un calendrier de
+    constatations. Une ligne d'historique client n'a rien de tout cela — c'est
+    le fait qu'un investisseur a acheté quelque chose, souvent par un autre
+    canal que nous.
+
+    Les fondre créerait de fausses positions dans le book : exactement le
+    défaut relevé sur les deals UAT, qui entrent aujourd'hui dans l'exposition
+    contrepartie et le HHI sans être des trades réels. Cette table est lue par
+    Client Intelligence et par personne d'autre.
+
+    Comme un Deal rattaché, elle pointe sur l'AFFILIATION : une transaction
+    faite chez Bank A en 2024 y reste, même si son auteur travaille ailleurs
+    aujourd'hui.
+    """
+    __tablename__ = "client_trade_history"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    import_batch_id: Optional[int] = Field(
+        default=None, foreign_key="client_import_batches.id", index=True)
+    client_id: int = Field(foreign_key="clients.id", index=True)
+    affiliation_id: Optional[int] = Field(
+        default=None, foreign_key="affiliations.id", index=True)
+    mandate_id: Optional[int] = Field(
+        default=None, foreign_key="client_mandates.id", index=True)
+
+    trade_date: str = Field(default="", index=True)          # ISO
+    maturity_date: Optional[str] = Field(default=None)       # ISO
+    product_type: str = Field(default="")
+    transaction_format: Optional[str] = Field(default=None, index=True)
+    instrument_family: Optional[str] = Field(default=None, index=True)
+    payoff_family: Optional[str] = Field(default=None, index=True)
+    payoff_description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    documentation_reference: Optional[str] = Field(default=None, sa_column=Column(Text))
+    underlying: Optional[str] = Field(default=None)
+    issuer: Optional[str] = Field(default=None)
+    currency: str = Field(default="EUR")
+    notional: Optional[float] = Field(default=None)
+    coupon_pct: Optional[float] = Field(default=None)
+    barrier_pct: Optional[float] = Field(default=None)
+
+    # ── Traité avec nous, ou ailleurs ? ────────────────────────────────
+    # Trois états, pas deux. `None` veut dire « on ne sait pas », et c'est le
+    # défaut : un historique versé qui ne le précise pas ne doit PAS être
+    # présumé traité ailleurs. Le compter comme perdu gonflerait artificiellement
+    # la part de marché qu'on croit ne pas avoir, et fausserait exactement la
+    # lecture pour laquelle ce champ existe.
+    traded_with_us: Optional[bool] = Field(default=None, index=True)
+    # Prix traité, en pourcentage du nominal — même convention que
+    # Deal.price_traded. Sur une ligne traitée ailleurs, c'est le renseignement
+    # le plus utile du module : il dit à quel niveau la concurrence a servi.
+    price_pct: Optional[float] = Field(default=None)
+
+    external_ref: Optional[str] = Field(default=None, index=True)
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConstraintDefinition(SQLModel, table=True):
+    """Un champ du profil déclaré — par l'admin, ou pour un client précis.
+
+    Le profil se stocke dans le blob historique `constraints_json` sur `Client`, et
+    `validate_constraints` refuse toute clé qu'aucune définition ne décrit.
+    Cette table est ce qui rend le refus extensible sans le rendre laxiste : une
+    clé devient connue parce qu'elle a été DÉCLARÉE, jamais parce qu'elle a été
+    envoyée.
+
+    `client_id` porte toute la nuance du besoin. Nul, le champ vaut pour toute
+    la maison — un vocabulaire interne, une catégorie suivie partout.
+    Renseigné, c'est un nom convenu entre l'utilisateur et ce client-là : sa
+    « poche défensive », sa « limite Rouge ». Ce vocabulaire n'a de sens que
+    dans cette relation ; le proposer aux autres clients serait du bruit, et le
+    ranger dans un champ de notes le rendrait illisible par le module.
+
+    Rien n'est jamais supprimé, seulement `archived` : la valeur déjà saisie
+    chez un client survivrait à la définition, et la validation suivante la
+    refuserait comme clé inconnue.
+    """
+    __tablename__ = "constraint_definitions"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    # Nul = toute l'entité. Renseigné = ce client seulement.
+    client_id: Optional[int] = Field(default=None, foreign_key="clients.id", index=True)
+
+    key: str = Field(index=True)              # snake_case, jamais renommée
+    label: str                                 # libellé français affiché
+    kind: str = Field(default="text")          # cf. client_constraints_ref.KINDS
+    options_json: str = Field(default="[]")    # list_enum : les valeurs admises
+    catalog: Optional[str] = Field(default=None)   # underlyings, counterparties…
+    unit: Optional[str] = Field(default=None)
+    help_text: Optional[str] = Field(default=None, sa_column=Column(Text))
+    free_entry: bool = Field(default=True)
+
+    archived: bool = Field(default=False, index=True)
+    created_by_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

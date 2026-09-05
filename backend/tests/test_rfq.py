@@ -23,7 +23,10 @@ from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.api import deals as deals_api
 from backend.app.api import rfq as rfq_api
-from backend.app.db.models import Counterparty, Deal, RfqProvider, RfqQuote, RfqRequest
+from backend.app.db.models import (
+    Client, ClientMandate, Counterparty, Deal, Opportunity,
+    RfqProvider, RfqQuote, RfqRequest,
+)
 from backend.app.core.references import next_reference
 from backend.app.core.rfq_controls import pricing_input_hash
 
@@ -154,6 +157,22 @@ def test_selecting_an_unpriced_quote_is_rejected():
     assert "sans prix" in exc.value.detail
 
 
+def test_selecting_an_expired_quote_is_rejected():
+    s = _make_session()
+    rfq = _new_rfq(s)
+    q = _add_quote(s, rfq["id"])
+    rfq_api.update_quote(
+        rfq["id"], q["id"], rfq_api.QuoteUpdate(
+            price=98.0, quoted_at="2025-12-31T10:00:00.000Z",
+            valid_until="2026-01-01T10:00:00.000Z"), USER, s)
+
+    with pytest.raises(HTTPException) as exc:
+        rfq_api.update_rfq(
+            rfq["id"], rfq_api.RfqUpdate(selected_quote_id=q["id"]), USER, s)
+    assert exc.value.status_code == 422
+    assert "expiré" in exc.value.detail
+
+
 def test_selecting_a_quote_from_another_rfq_is_rejected():
     s = _make_session()
     rfq_a = _new_rfq(s)
@@ -178,6 +197,27 @@ def test_deleting_the_selected_quote_clears_the_selection():
 
     refreshed = rfq_api.get_rfq(rfq["id"], USER, s)
     assert refreshed["selected_quote_id"] is None
+
+
+def test_changing_the_selected_quote_does_not_reuse_the_previous_reason():
+    s = _make_session()
+    rfq = _new_rfq(s)
+    first = _add_quote(s, rfq["id"], "BNP Paribas")
+    second = _add_quote(s, rfq["id"], "Marex")
+    rfq_api.update_quote(
+        rfq["id"], first["id"], rfq_api.QuoteUpdate(price=99.0), USER, s)
+    rfq_api.update_quote(
+        rfq["id"], second["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
+    rfq_api.update_rfq(
+        rfq["id"], rfq_api.RfqUpdate(
+            selected_quote_id=first["id"],
+            selection_reason_code="documentation"), USER, s)
+
+    changed = rfq_api.update_rfq(
+        rfq["id"], rfq_api.RfqUpdate(selected_quote_id=second["id"]), USER, s)
+    assert changed["selected_quote_id"] == second["id"]
+    assert changed["selection_reason_code"] is None
+    assert changed["selection_reason_note"] is None
 
 
 def test_deleting_a_quote_cascades_to_its_last_look_child():
@@ -249,6 +289,46 @@ def test_booking_from_an_rfq_links_deal_and_closes_the_rfq():
     assert deal["rfq_id"] == rfq["id"]
     closed_rfq = s.get(RfqRequest, rfq["id"])
     assert closed_rfq.status == "clos"
+
+
+def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority():
+    s = _make_session()
+    client = Client(name="Banque privée A", entity_id=1, data_origin="native")
+    s.add(client); s.flush()
+    mandate = ClientMandate(
+        entity_id=1, client_id=client.id, mandate_type="fund",
+        name="Fonds Rendement", status="active", data_origin="native",
+        created_by_user_id=USER.id,
+    )
+    s.add(mandate); s.flush()
+    opportunity = Opportunity(
+        reference="OPP-20260901-001", entity_id=1, owner_user_id=USER.id,
+        client_id=client.id, mandate_id=mandate.id, title="Phoenix 3Y",
+        transaction_format="EMTN", instrument_family="Note",
+        payoff_family="Phoenix", data_origin="native",
+    )
+    s.add(opportunity); s.commit(); s.refresh(opportunity)
+
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+        name="AO Client", opportunity_id=opportunity.id,
+        script_snapshot="AT MATURITY\n  PAY 1",
+    ), USER, s)
+    quote = _add_quote(s, rfq["id"], "BNP Paribas")
+    rfq_api.update_quote(
+        rfq["id"], quote["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
+    rfq_api.update_rfq(
+        rfq["id"], rfq_api.RfqUpdate(selected_quote_id=quote["id"]), USER, s)
+
+    deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    assert deal["client_id"] == client.id
+    assert deal["mandate_id"] == mandate.id
+    assert deal["opportunity_id"] == opportunity.id
+    assert deal["transaction_format"] == "EMTN"
+    assert deal["instrument_family"] == "Note"
+    assert deal["payoff_family"] == "Phoenix"
+    assert deal["client_provenance"]["mandate"]["name"] == "Fonds Rendement"
+    assert s.get(Opportunity, opportunity.id).status == "partially_won"
+
 
 
 def _booking_body(**over):
@@ -700,6 +780,44 @@ def test_booking_freezes_the_competitive_picture_on_the_deal():
     assert reread["rfq_provenance"]["competition"] == [{"provider": "BNP Paribas", "price": 98.7}]
 
 
+def test_booking_freezes_selection_reason_and_every_final_response():
+    """Le meilleur prix non retenu est un fait explicable, pas une exclusion.
+
+    Les non-réponses et déclins restent aussi dans le cliché : sans eux on ne
+    pourrait distinguer « non sollicité » de « sollicité sans prix ».
+    """
+    s = _make_session()
+    rfq = _new_rfq(s)
+    retained = _add_quote(s, rfq["id"], "BNP Paribas")
+    best = _add_quote(s, rfq["id"], "Marex")
+    declined = _add_quote(s, rfq["id"], "UBS")
+    rfq_api.update_quote(
+        rfq["id"], retained["id"], rfq_api.QuoteUpdate(price=99.0), USER, s)
+    rfq_api.update_quote(
+        rfq["id"], best["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
+    rfq_api.update_quote(
+        rfq["id"], declined["id"], rfq_api.QuoteUpdate(status="decline"), USER, s)
+    rfq_api.update_rfq(
+        rfq["id"], rfq_api.RfqUpdate(
+            selected_quote_id=retained["id"],
+            selection_reason_code="documentation",
+            selection_reason_note="Programme EMTN déjà référencé chez le Client."),
+        USER, s)
+
+    deal = _book_deal(_booking_body(rfq_id=rfq["id"], price_traded=99.0), USER, s)
+    provenance = deal["rfq_provenance"]
+
+    assert provenance["selection_reason_code"] == "documentation"
+    assert provenance["selection_reason_note"].startswith("Programme EMTN")
+    assert {row["provider"] for row in provenance["responses"]} == {
+        "BNP Paribas", "Marex", "UBS"}
+    by_provider = {row["provider"]: row for row in provenance["responses"]}
+    assert by_provider["BNP Paribas"]["selected"] is True
+    assert by_provider["Marex"]["comparable"] is True
+    assert by_provider["UBS"]["status"] == "decline"
+    assert by_provider["UBS"]["comparable"] is False
+
+
 def test_provenance_keeps_only_final_quotes_as_competition():
     """Une cotation remplacée par le last look du même fournisseur n'est pas
     un concurrent de plus."""
@@ -714,6 +832,8 @@ def test_provenance_keeps_only_final_quotes_as_competition():
 
     deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
     assert deal["rfq_provenance"]["competition"] == [{"provider": "BNP Paribas", "price": 98.4}]
+    responses = deal["rfq_provenance"]["responses"]
+    assert next(row for row in responses if row["quote_id"] == rival["id"])["is_final"] is False
 
 
 def test_a_deal_booked_outside_any_tender_has_no_provenance():

@@ -256,8 +256,12 @@ export const useDealsStore = defineStore('deals', () => {
     return res.json()
   }
 
-  async function getWatchlist() {
-    const res = await apiFetch('/api/deals/watchlist')
+  async function getWatchlist({ clientId = null, mandateId = null } = {}) {
+    const params = new URLSearchParams()
+    if (clientId) params.set('client_id', clientId)
+    if (mandateId) params.set('mandate_id', mandateId)
+    const suffix = params.toString() ? `?${params}` : ''
+    const res = await apiFetch(`/api/deals/watchlist${suffix}`)
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur watchlist') }
     return res.json()
   }

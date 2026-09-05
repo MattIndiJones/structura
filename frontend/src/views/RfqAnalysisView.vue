@@ -6,8 +6,11 @@
         <div>
           <h1 class="page-title">Analyse Contreparties</h1>
         </div>
+        <!-- Le retour ramène au menu du module, pas au sous-module voisin :
+             RFQ Fournisseurs et Analyse Contreparties sont deux entrées de la
+             même grille, aucune n'est le parent de l'autre. -->
         <div class="page-actions">
-          <RouterLink to="/rfq" class="btn-ghost btn-sm">← Retour aux RFQ</RouterLink>
+          <BackLink :fallback="{ path: '/', query: { category: 'competitive_bidding' } }" />
         </div>
       </div>
 
@@ -108,9 +111,9 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
-import { RouterLink } from 'vue-router'
 import { Chart, registerables } from 'chart.js'
 import { useRfqStore } from '../stores/rfq.js'
+import BackLink from '../components/ui/BackLink.vue'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'

@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent,
                           Entity, User, Counterparty, Portfolio, LifecycleProposal,
-                          OfficialFixingVersion, RfqQuote, RfqRequest, Script,
+                          OfficialFixingVersion, Opportunity, RfqQuote, RfqRequest, Script,
                           TradeAmendmentRequest)
 from .auth import get_current_user
 from ..services.market_data import load_hist_prices, load_yahoo_reference_closes
@@ -30,6 +30,9 @@ from ..core.inlife_valuation import (
 from ..core.calibration import realized_market
 from ..core.references import next_reference
 from ..core.audit import commit_rejection, record_audit_event
+from ..core.client_controls import (
+    ClientRuleError, client_provenance_snapshot, require_deal_attribution_coherent,
+)
 from ..core.lifecycle_controls import (
     official_input_hash, replay_official_fixings, semantic_maturity_outcome,
 )
@@ -74,6 +77,23 @@ class DealCreate(BaseModel):
     # Winning RFQ response this deal was booked from, if any — see
     # db/models.py:Deal.rfq_id.
     rfq_id: Optional[int] = None
+    # ── Rattachement commercial (Client Intelligence) ──────────────────
+    # À QUI le produit est vendu. Le reste du modèle décrit l'offre —
+    # contrepartie est l'émetteur qui fait face au trade. Les trois sont
+    # optionnels : un deal booké hors parcours client reste parfaitement
+    # valide, simplement non rattaché.
+    client_id: Optional[int] = None
+    opportunity_id: Optional[int] = None
+    # L'AFFILIATION, jamais la personne : c'est ce qui empêche qu'un trade
+    # change de société le jour où son interlocuteur change d'employeur.
+    primary_affiliation_id: Optional[int] = None
+    mandate_id: Optional[int] = None
+    transaction_format: Optional[str] = None
+    instrument_family: Optional[str] = None
+    payoff_family: Optional[str] = None
+    payoff_description: Optional[str] = None
+    documentation_reference: Optional[str] = None
+    commercial_reason: Optional[str] = None
 
 
 class DealUpdate(BaseModel):
@@ -165,6 +185,7 @@ class AmendmentRequestCreate(BaseModel):
         "nominal", "devise", "contrepartie", "price_traded", "status",
         "trade_date", "strike_date", "value_date", "maturity_date",
         "payment_date", "script_snapshot", "market_snapshot",
+        "commercial_attribution",
     ]
     new_value: object
     reason: str = Field(min_length=10, max_length=2000)
@@ -390,6 +411,7 @@ def _rfq_provenance(rfq, price_traded: float, session: Session,
     quotes = session.exec(select(RfqQuote).where(RfqQuote.rfq_id == rfq.id)).all()
     superseded = superseded_quote_ids(quotes)
     won = next((q for q in quotes if q.id == rfq.selected_quote_id), None)
+    booked_at = datetime.utcnow()
     frozen_terms = product_terms(rfq.script_snapshot, json.loads(rfq.params_json or "{}"))
     return json.dumps({
         "rfq_id": rfq.id,
@@ -398,8 +420,10 @@ def _rfq_provenance(rfq, price_traded: float, session: Session,
         "kind": rfq.kind,
         "model_price": rfq.model_price,
         "model_price_at": rfq.model_price_at.isoformat() if rfq.model_price_at else None,
-        "booked_at": datetime.utcnow().isoformat(),
+        "booked_at": booked_at.isoformat(),
         "price_traded": price_traded,
+        "selection_reason_code": rfq.selection_reason_code,
+        "selection_reason_note": rfq.selection_reason_note,
         "product_terms": frozen_terms,
         "product_terms_sha256": product_terms_hash(frozen_terms),
         "retained": {
@@ -426,6 +450,33 @@ def _rfq_provenance(rfq, price_traded: float, session: Session,
              if q.id not in superseded and q.id != rfq.selected_quote_id and q.price is not None],
             key=lambda x: x["price"],
         ),
+        # Complete final-response evidence for Client Intelligence.  The old
+        # `retained`/`competition` keys stay for backward compatibility, while
+        # this list also preserves solicitations without a price, declines,
+        # firmness and validity.  Later RFQ edits therefore cannot rewrite the
+        # observed provider behaviour of an executed deal.
+        "responses": [
+            {
+                "quote_id": q.id,
+                "provider": q.provider,
+                "price": q.price,
+                "currency": q.currency,
+                "status": q.status,
+                "firmness": q.firmness,
+                "quoted_at": q.quoted_at.isoformat() if q.quoted_at else None,
+                "valid_until": q.valid_until.isoformat() if q.valid_until else None,
+                "is_last_look": q.parent_quote_id is not None,
+                "is_final": q.id not in superseded,
+                "selected": q.id == rfq.selected_quote_id,
+                "comparable": (
+                    q.id not in superseded
+                    and q.price is not None
+                    and q.status not in {"decline", "expire"}
+                    and (q.valid_until is None or q.valid_until > booked_at)
+                ),
+            }
+            for q in quotes
+        ],
     }, ensure_ascii=False)
 
 
@@ -445,6 +496,27 @@ def _deal_row(d: Deal, events: list | None = None) -> dict:
         # Frozen best-execution record — see _rfq_provenance. None outside
         # the tender path.
         "rfq_provenance": json.loads(d.rfq_provenance_json) if d.rfq_provenance_json else None,
+        # Rattachement commercial — à qui le produit a été vendu. None sur un
+        # deal booké hors parcours client, ce qui reste valide.
+        "client_id": d.client_id,
+        "opportunity_id": d.opportunity_id,
+        "primary_affiliation_id": d.primary_affiliation_id,
+        "mandate_id": d.mandate_id,
+        # Cliché figé au booking, même rôle que rfq_provenance juste au-dessus :
+        # il dit ce qui était vrai le jour du trade, même si la fiche a bougé.
+        "client_provenance": (json.loads(d.client_provenance_json)
+                               if d.client_provenance_json else None),
+        "client_attribution_current": (
+            json.loads(d.client_attribution_json)
+            if d.client_attribution_json else (
+                json.loads(d.client_provenance_json)
+                if d.client_provenance_json else None)),
+        "transaction_format": d.transaction_format,
+        "instrument_family": d.instrument_family,
+        "payoff_family": d.payoff_family,
+        "payoff_description": d.payoff_description,
+        "documentation_reference": d.documentation_reference,
+        "commercial_reason": d.commercial_reason,
         "portfolio_id": d.portfolio_id,
         "sens": d.sens,
         "contrepartie": d.contrepartie,
@@ -667,15 +739,52 @@ def _contract_snapshot(deal: Deal) -> dict:
         "script_snapshot": deal.script_snapshot,
         "market_snapshot": json.loads(deal.market_snapshot_json or "{}"),
         "status": deal.status,
+        "commercial_attribution_initial": (
+            json.loads(deal.client_provenance_json)
+            if deal.client_provenance_json else None),
+        "commercial_attribution_current": (
+            json.loads(deal.client_attribution_json)
+            if deal.client_attribution_json else None),
+        "client_id": deal.client_id,
+        "mandate_id": deal.mandate_id,
+        "opportunity_id": deal.opportunity_id,
+        "primary_affiliation_id": deal.primary_affiliation_id,
+        "transaction_format": deal.transaction_format,
+        "instrument_family": deal.instrument_family,
+        "payoff_family": deal.payoff_family,
+        "payoff_description": deal.payoff_description,
+        "documentation_reference": deal.documentation_reference,
     }
 
 
 _IN_PLACE_AMENDMENT_FIELDS = {
     "nominal", "contrepartie", "price_traded", "payment_date",
+    "commercial_attribution",
 }
 
 
-def _validated_amendment_value(deal: Deal, request: TradeAmendmentRequest):
+def _commercial_attribution_ids(deal: Deal) -> dict:
+    return {
+        "client_id": deal.client_id,
+        "mandate_id": deal.mandate_id,
+        "opportunity_id": deal.opportunity_id,
+        "primary_affiliation_id": deal.primary_affiliation_id,
+    }
+
+
+def _amendment_current_value(deal: Deal, field: str):
+    if field == "commercial_attribution":
+        return _commercial_attribution_ids(deal)
+    if field == "market_snapshot":
+        return json.loads(deal.market_snapshot_json or "{}")
+    return getattr(deal, field, None)
+
+
+def _validated_amendment_value(
+    deal: Deal,
+    request: TradeAmendmentRequest,
+    session: Session,
+):
     field = request.field_name
     value = json.loads(request.new_value_json)
     if field not in _IN_PLACE_AMENDMENT_FIELDS:
@@ -716,6 +825,41 @@ def _validated_amendment_value(deal: Deal, request: TradeAmendmentRequest):
                 "message": "La date de paiement ne peut pas précéder la maturité.",
             })
         return value
+    if field == "commercial_attribution":
+        if not isinstance(value, dict):
+            raise HTTPException(422, {
+                "code": "AMENDMENT_VALUE_INVALID", "field": field,
+                "message": "L'attribution commerciale doit être un objet structuré.",
+            })
+        allowed = {
+            "client_id", "mandate_id", "opportunity_id", "primary_affiliation_id",
+        }
+        unexpected = sorted(set(value) - allowed)
+        if unexpected:
+            raise HTTPException(422, {
+                "code": "AMENDMENT_VALUE_INVALID", "field": field,
+                "message": "L'attribution contient des champs non autorisés.",
+                "unexpected_fields": unexpected,
+            })
+        normalized = {key: value.get(key) for key in allowed}
+        for key, item in normalized.items():
+            if item is not None and (isinstance(item, bool) or not isinstance(item, int)):
+                raise HTTPException(422, {
+                    "code": "AMENDMENT_VALUE_INVALID", "field": key,
+                    "message": f"Le champ {key} doit être un identifiant entier ou null.",
+                })
+        try:
+            require_deal_attribution_coherent(
+                session,
+                client_id=normalized["client_id"],
+                mandate_id=normalized["mandate_id"],
+                affiliation_id=normalized["primary_affiliation_id"],
+                opportunity_id=normalized["opportunity_id"],
+                entity_id=deal.entity_id,
+            )
+        except ClientRuleError as error:
+            raise HTTPException(422, error.as_dict()) from error
+        return normalized
     raise HTTPException(422, {"code": "AMENDMENT_VALUE_INVALID", "field": field})
 
 
@@ -1105,7 +1249,11 @@ def _checker_request(
     if not deal or not request or request.deal_id != deal_id:
         raise HTTPException(404, "Demande d'amendement introuvable")
 
-    if not amendment_four_eyes_enabled():
+    strict_four_eyes = (
+        amendment_four_eyes_enabled()
+        or request.field_name == "commercial_attribution"
+    )
+    if not strict_four_eyes:
         # Single-signature mode: whoever may act on the deal may decide on its
         # amendments, including the maker. Every other guarantee still applies.
         if not _can_access_deal(deal, current, session):
@@ -1155,6 +1303,13 @@ def _booking_request_summary(body: DealCreate) -> dict:
         "payment_date": body.payment_date,
         "T": body.T,
         "fixing_policy": body.fixing_policy,
+        "client_id": body.client_id,
+        "mandate_id": body.mandate_id,
+        "opportunity_id": body.opportunity_id,
+        "primary_affiliation_id": body.primary_affiliation_id,
+        "transaction_format": body.transaction_format,
+        "instrument_family": body.instrument_family,
+        "payoff_family": body.payoff_family,
     }
 
 
@@ -1206,8 +1361,23 @@ def _book_deal(
     # trail (which tender this trade came out of), so a stale or foreign id
     # must be refused outright rather than persisted on the deal and merely
     # skipped when closing the RFQ below.
+    client_id = body.client_id
+    mandate_id = body.mandate_id
+    opportunity_id = body.opportunity_id
+    primary_affiliation_id = body.primary_affiliation_id
+    commercial_reason = str(body.commercial_reason or "").strip() or None
+    legal_context = {
+        "transaction_format": str(body.transaction_format or "").strip() or None,
+        "instrument_family": str(body.instrument_family or "").strip() or None,
+        "payoff_family": str(body.payoff_family or "").strip() or None,
+        "payoff_description": str(body.payoff_description or "").strip() or None,
+        "documentation_reference": str(body.documentation_reference or "").strip() or None,
+    }
+
     source_rfq = None
     rfq_provenance = None
+    rfq_context_to_apply = None
+    quote_to_qualify = None
     if body.rfq_id:
         source_rfq = session.get(RfqRequest, body.rfq_id)
         if not source_rfq or source_rfq.user_id != current.id:
@@ -1243,6 +1413,79 @@ def _book_deal(
         except HTTPException as exc:
             _reject_booking(session, current, body, exc.status_code, exc.detail)
 
+        # The RFQ is the authoritative pre-trade record.  A browser cannot
+        # silently replace its Client/Mandate/Opportunity while booking.  For
+        # a legacy or product-only RFQ with no context at all, the desk may
+        # attach a coherent context at booking; that attachment is persisted
+        # on the RFQ in the same transaction so the chain remains complete.
+        rfq_commercial = {
+            "client_id": source_rfq.client_id,
+            "mandate_id": source_rfq.mandate_id,
+            "opportunity_id": source_rfq.opportunity_id,
+            "primary_affiliation_id": source_rfq.primary_affiliation_id,
+        }
+        requested_commercial = {
+            "client_id": client_id,
+            "mandate_id": mandate_id,
+            "opportunity_id": opportunity_id,
+            "primary_affiliation_id": primary_affiliation_id,
+        }
+        if any(value is not None for value in rfq_commercial.values()):
+            for field, expected in rfq_commercial.items():
+                received = requested_commercial[field]
+                if received is not None and received != expected:
+                    _reject_booking(session, current, body, 422, {
+                        "code": "RFQ_COMMERCIAL_CONTEXT_MISMATCH",
+                        "message": (
+                            f"Le champ {field} contredit le contexte commercial "
+                            "figé sur la RFQ. Corrigez la RFQ avant le booking."),
+                        "field": field,
+                        "expected": expected,
+                        "received": received,
+                    })
+            client_id = rfq_commercial["client_id"]
+            mandate_id = rfq_commercial["mandate_id"]
+            opportunity_id = rfq_commercial["opportunity_id"]
+            primary_affiliation_id = rfq_commercial["primary_affiliation_id"]
+        elif any(value is not None for value in requested_commercial.values()):
+            from .rfq import _resolve_commercial_context
+            try:
+                rfq_context_to_apply, _ = _resolve_commercial_context(
+                    opportunity_id=opportunity_id,
+                    client_id=client_id,
+                    mandate_id=mandate_id,
+                    primary_affiliation_id=primary_affiliation_id,
+                    current=current,
+                    session=session,
+                    explicit_fields={
+                        field for field, value in requested_commercial.items()
+                        if value is not None
+                    },
+                    qualification_required=True,
+                )
+            except HTTPException as exc:
+                _reject_booking(session, current, body, exc.status_code, exc.detail)
+            client_id = rfq_context_to_apply["client_id"]
+            mandate_id = rfq_context_to_apply["mandate_id"]
+            opportunity_id = rfq_context_to_apply["opportunity_id"]
+            primary_affiliation_id = rfq_context_to_apply["primary_affiliation_id"]
+
+        for field in legal_context:
+            rfq_value = str(getattr(source_rfq, field, None) or "").strip() or None
+            requested_value = legal_context[field]
+            if rfq_value is not None:
+                if requested_value is not None and requested_value != rfq_value:
+                    _reject_booking(session, current, body, 422, {
+                        "code": "RFQ_LEGAL_CONTEXT_MISMATCH",
+                        "message": (
+                            f"Le champ {field} contredit la structure produit "
+                            "portée par la RFQ."),
+                        "field": field,
+                        "expected": rfq_value,
+                        "received": requested_value,
+                    })
+                legal_context[field] = rfq_value
+
         # Le booking qualifie la cotation retenue. Une quote encore « à
         # qualifier » qui vient d'être tradée EST ferme — c'est le trade qui le
         # dit. La laisser UNKNOWN ferait mentir l'analyse contrepartie, qui
@@ -1253,8 +1496,7 @@ def _book_deal(
             selected is not None
             and selected.firmness != QuoteFirmness.FIRM.value)
         if qualifiee_au_booking:
-            selected.firmness = QuoteFirmness.FIRM.value
-            session.add(selected)
+            quote_to_qualify = selected
 
         rfq_provenance = _rfq_provenance(
             source_rfq, body.price_traded, session,
@@ -1293,6 +1535,45 @@ def _book_deal(
             "Le calendrier contractuel dépasse la maturité du deal "
             f"({body.maturity_date}) : {', '.join(after_maturity)}.")
 
+    # Rattachement commercial — cohérence vérifiée AVANT toute allocation, avec
+    # les autres refus : écrire « client B / contact chez A » corromprait toutes
+    # les statistiques par affiliation sans jamais se signaler.
+    try:
+        require_deal_attribution_coherent(
+            session, client_id=client_id, mandate_id=mandate_id,
+            affiliation_id=primary_affiliation_id,
+            opportunity_id=opportunity_id,
+            entity_id=current.entity_id)
+    except ClientRuleError as erreur:
+        _reject_booking(session, current, body, 422, erreur.as_dict())
+
+    opportunity = None
+    if opportunity_id is not None:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None or opportunity.entity_id != current.entity_id:
+            _reject_booking(session, current, body, 404, "Opportunité introuvable")
+        if opportunity.status in {"won", "lost", "cancelled", "archived"}:
+            _reject_booking(session, current, body, 409, {
+                "code": "OPPORTUNITY_CLOSED_FOR_BOOKING",
+                "message": (
+                    "Cette Opportunity est clôturée. Rouvrez-la avant de "
+                    "booker une nouvelle tranche."),
+                "status": opportunity.status,
+            })
+
+    if client_id is not None and opportunity_id is None and source_rfq is None:
+        if not commercial_reason or len(commercial_reason) < 10:
+            _reject_booking(session, current, body, 422, {
+                "code": "DIRECT_CLIENT_LINK_REASON_REQUIRED",
+                "message": (
+                    "Un Deal rattaché directement à un Client, sans RFQ ni "
+                    "Opportunity, exige un motif commercial de 10 caractères minimum."),
+            })
+    client_provenance = client_provenance_snapshot(
+        session, client_id=client_id, mandate_id=mandate_id,
+        affiliation_id=primary_affiliation_id,
+        opportunity_id=opportunity_id)
+
     # Allocate persistent objects only after every rejection-prone validation.
     # A rejected booking can then commit its audit row without also consuming a
     # reference or creating a default portfolio as a side effect.
@@ -1310,6 +1591,20 @@ def _book_deal(
         indicative_id=body.indicative_id,
         rfq_id=body.rfq_id,
         rfq_provenance_json=rfq_provenance,
+        client_id=client_id,
+        mandate_id=mandate_id,
+        opportunity_id=opportunity_id,
+        primary_affiliation_id=primary_affiliation_id,
+        # Le pointeur donne la justesse, le cliché donne la preuve : une fiche
+        # client corrigée plus tard ne réécrit pas ce que ce trade raconte.
+        client_provenance_json=client_provenance,
+        client_attribution_json=client_provenance,
+        transaction_format=legal_context["transaction_format"],
+        instrument_family=legal_context["instrument_family"],
+        payoff_family=legal_context["payoff_family"],
+        payoff_description=legal_context["payoff_description"],
+        documentation_reference=legal_context["documentation_reference"],
+        commercial_reason=commercial_reason,
         script_snapshot=body.script_snapshot,
         script_id=body.script_id,
         sens=body.sens,
@@ -1331,6 +1626,55 @@ def _book_deal(
     )
     session.add(deal)
     session.flush()
+
+    if quote_to_qualify is not None:
+        quote_to_qualify.firmness = QuoteFirmness.FIRM.value
+        session.add(quote_to_qualify)
+
+    if source_rfq is not None and rfq_context_to_apply is not None:
+        source_rfq.client_id = client_id
+        source_rfq.mandate_id = mandate_id
+        source_rfq.opportunity_id = opportunity_id
+        source_rfq.primary_affiliation_id = primary_affiliation_id
+        source_rfq.commercial_context_json = rfq_context_to_apply["commercial_context_json"]
+        record_audit_event(
+            session,
+            action="RFQ_COMMERCIAL_CONTEXT_ATTACHED_AT_BOOKING",
+            object_type="RFQ",
+            object_id=source_rfq.id,
+            actor_user_id=current.id,
+            after={
+                "client_id": client_id,
+                "mandate_id": mandate_id,
+                "opportunity_id": opportunity_id,
+                "primary_affiliation_id": primary_affiliation_id,
+            },
+            result="SUCCESS",
+            metadata={"deal_id": deal.id},
+        )
+
+    if source_rfq is not None:
+        for field, value in legal_context.items():
+            if getattr(source_rfq, field, None) is None and value is not None:
+                setattr(source_rfq, field, value)
+
+    if opportunity is not None and opportunity.status != "partially_won":
+        previous_status = opportunity.status
+        opportunity.status = "partially_won"
+        opportunity.last_activity_at = datetime.utcnow()
+        opportunity.updated_at = datetime.utcnow()
+        session.add(opportunity)
+        record_audit_event(
+            session,
+            action="OPPORTUNITY_PARTIALLY_WON",
+            object_type="OPPORTUNITY",
+            object_id=opportunity.id,
+            actor_user_id=current.id,
+            before={"status": previous_status},
+            after={"status": "partially_won", "deal_id": deal.id},
+            result="SUCCESS",
+            metadata={"rfq_id": body.rfq_id},
+        )
 
     if body.indicative_id:
         from ..db.models import Indicative
@@ -1383,7 +1727,15 @@ def _book_deal(
             object_type="DEAL",
             object_id=deal.id,
             actor_user_id=current.id,
-            after={**_booking_request_summary(body), "reference": deal.reference},
+            after={
+                **_booking_request_summary(body),
+                "reference": deal.reference,
+                "client_id": client_id,
+                "mandate_id": mandate_id,
+                "opportunity_id": opportunity_id,
+                "primary_affiliation_id": primary_affiliation_id,
+                **legal_context,
+            },
             result="SUCCESS",
             metadata={"rfq_id": body.rfq_id},
         )
@@ -1495,6 +1847,8 @@ def eligible_counterparties(
 def watchlist(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    client_id: int | None = None,
+    mandate_id: int | None = None,
 ):
     """Barrier-proximity watchlist over the accessible ACTIVE deals: for each,
     the next observation date, the current worst-of performance vs S₀, and
@@ -1503,6 +1857,13 @@ def watchlist(
     observation). Uses the script's PARAM defaults — user overrides typed in
     the UI at pricing time are not persisted on the deal (known limitation)."""
     statement = select(Deal).where(Deal.status == "actif")
+    # Commercial context is an optional projection over the lifecycle book,
+    # never a prerequisite for it.  These filters let Client Intelligence
+    # open the existing watchlist without maintaining a second event list.
+    if client_id is not None:
+        statement = statement.where(Deal.client_id == client_id)
+    if mandate_id is not None:
+        statement = statement.where(Deal.mandate_id == mandate_id)
     current_role = getattr(current, "role", "user")
     if current_role not in {"ops_maker", "checker", "admin"}:
         statement = statement.where(Deal.user_id == current.id)
@@ -1691,6 +2052,11 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
                    if b["gap_pts"] is not None), default=None)
     return {
         "deal_id": deal.id,
+        # Stable commercial identifiers for projections and deep links.  The
+        # counterparty below remains the legal trading counterparty; it must
+        # not be reused as a client identity.
+        "client_id": deal.client_id,
+        "mandate_id": deal.mandate_id,
         "reference": deal.reference,
         "contrepartie": deal.contrepartie,
         "product_name": _product_name(deal, session),
@@ -1931,10 +2297,7 @@ def request_amendment(
     deal = session.get(Deal, deal_id)
     if not deal or deal.user_id != current.id:
         raise HTTPException(404, "Deal introuvable")
-    if body.field_name == "market_snapshot":
-        old_value = json.loads(deal.market_snapshot_json or "{}")
-    else:
-        old_value = getattr(deal, body.field_name)
+    old_value = _amendment_current_value(deal, body.field_name)
     if old_value == body.new_value:
         commit_rejection(
             session,
@@ -2048,14 +2411,14 @@ def approve_amendment(
                 "current_version": deal.contract_version,
             })
     old_value = json.loads(request.old_value_json)
-    if getattr(deal, request.field_name, None) != old_value:
+    if _amendment_current_value(deal, request.field_name) != old_value:
         _amendment_action_rejection(session, request, current,
             "AMENDMENT_APPROVAL_REJECTED", {
                 "code": "AMENDMENT_BASE_VALUE_CHANGED",
                 "message": "La valeur contractuelle de départ a changé.",
             })
     try:
-        normalized = _validated_amendment_value(deal, request)
+        normalized = _validated_amendment_value(deal, request, session)
     except HTTPException as exc:
         commit_rejection(
             session,
@@ -2154,13 +2517,13 @@ def apply_amendment(
                 "current_version": deal.contract_version,
             })
     old_value = json.loads(request.old_value_json)
-    if getattr(deal, request.field_name, None) != old_value:
+    if _amendment_current_value(deal, request.field_name) != old_value:
         _amendment_action_rejection(session, request, current,
             "AMENDMENT_APPLICATION_REJECTED", {
                 "code": "AMENDMENT_BASE_VALUE_CHANGED",
                 "message": "La valeur contractuelle de départ a changé.",
             })
-    normalized = _validated_amendment_value(deal, request)
+    normalized = _validated_amendment_value(deal, request, session)
     before_contract = _contract_snapshot(deal)
     current_version = deal.contract_version
     if not session.exec(select(DealContractVersion).where(
@@ -2175,15 +2538,29 @@ def apply_amendment(
         ))
         session.flush()
     applied_at = datetime.utcnow()
+    update_values = {
+        "contract_version": current_version + 1,
+        "updated_at": applied_at,
+    }
+    if request.field_name == "commercial_attribution":
+        current_attribution = client_provenance_snapshot(
+            session,
+            client_id=normalized["client_id"],
+            mandate_id=normalized["mandate_id"],
+            affiliation_id=normalized["primary_affiliation_id"],
+            opportunity_id=normalized["opportunity_id"],
+        )
+        update_values.update({
+            **normalized,
+            "client_attribution_json": current_attribution,
+        })
+    else:
+        update_values[request.field_name] = normalized
     deal_cas = session.exec(
         update(Deal).where(
             Deal.id == deal.id,
             Deal.contract_version == current_version,
-        ).values(**{
-            request.field_name: normalized,
-            "contract_version": current_version + 1,
-            "updated_at": applied_at,
-        }).execution_options(synchronize_session=False)
+        ).values(**update_values).execution_options(synchronize_session=False)
     )
     if deal_cas.rowcount != 1:
         session.rollback()
@@ -5721,11 +6098,19 @@ def _mtm_core(
     # Meme origine que les temps d observation : la date de strike. Compter le
     # temps ecoule depuis la value date decalerait tout le residuel.
     _elapsed_origin = (date.fromisoformat(deal.strike_date) if deal.strike_date else value_d)
-    T_elapsed = max(0.0, (today - _elapsed_origin).days / 365.25)
+    # Avant la constatation initiale, `T_elapsed` devient NÉGATIF : rien ne
+    # s'est écoulé, et l'écart au strike décale les constatations vers l'avenir
+    # (_shift_events_for_mtf soustrait T_elapsed). L'axe commence dans les deux
+    # cas à la date de valorisation ; ce qui change est qu'avant le strike il
+    # commence AVANT le produit, et que le fixing est alors simulé comme le
+    # reste — `strike_set_t` dit au moteur à quel pas il tombe.
+    pre_strike = today < _elapsed_origin
+    T_elapsed = (today - _elapsed_origin).days / 365.25
     T_remaining = max(1 / 52, (maturity - today).days / 365.25)
     residual_payment_t = (
         (date.fromisoformat(deal.payment_date) - today).days / 365.25
         if deal.payment_date else None)
+    strike_set_t = -T_elapsed if pre_strike else None
 
     # Le rejeu du passé et la construction du résiduel vivent dans le cœur
     # (core/inlife_valuation) : le Pricer doit pouvoir les appeler sans qu'un
@@ -5748,7 +6133,11 @@ def _mtm_core(
     tickers = [u["ticker"] for u in produit.underlyings if u.get("ticker")]
     if not tickers:
         raise HTTPException(422, "Aucun ticker défini sur ce deal")
-    fetch_start = (produit.strike_date - timedelta(days=7)).isoformat()
+    # Avant le strike, la fenêtre partirait d'une date postérieure à sa propre
+    # fin : Yahoo refuse l'intervalle et le MtM s'arrêtait là. On borne au jour
+    # de valorisation — l'historique ne sert alors qu'à la recalibration
+    # réalisée et à l'affichage, le rejeu n'ayant rien à rejouer.
+    fetch_start = (min(produit.strike_date, today) - timedelta(days=7)).isoformat()
     px_data = load_hist_prices(tickers, fetch_start, today.isoformat())
     if "error" in px_data:
         raise HTTPException(422, px_data["error"])
@@ -5845,6 +6234,7 @@ def _mtm_core(
         result = run_mc(
             residual_script, engine_uls, corr, r_frac, T_remaining,
             maturity_payment_t=residual_payment_t,
+            strike_set_t=strike_set_t,
             N=max(1000, min(100000, n_paths)),
             model=model_used, seed=42,
             antithetic=bool(market.get("antithetic", True)),
@@ -5905,10 +6295,17 @@ def _mtm_core(
         "fugit": result["fugit"],
         "T_elapsed": round(T_elapsed, 4),
         "T_remaining": round(T_remaining, 4),
+        # Avant le strike il n'y a pas de constatation passée : les champs
+        # « réalisé » sont vides plutôt que nuls — 0 se lirait comme un
+        # plus-bas à zéro, ce qui est l'inverse de ce qu'ils décrivent.
+        "pre_strike": pre_strike,
+        "strike_date": deal.strike_date,
         "obs_passees": state["index"],
-        "wof_min_realized": round(state["wof_min"], 4),
-        "s_min_realized": {u["name"]: round(v, 4)
-                           for u, v in zip(underlyings_json, state["s_min"])},
+        "wof_min_realized": (None if state["wof_min"] is None
+                             else round(state["wof_min"], 4)),
+        "s_min_realized": (None if state["s_min"] is None else
+                           {u["name"]: round(v, 4)
+                            for u, v in zip(underlyings_json, state["s_min"])}),
         "norm_spots": {u["name"]: round(s, 4) for u, s in zip(underlyings_json, norm_spots)},
         "realized_cash_flows": realized_cfs,
         "realized_total": round(sum(cf["cf"] for cf in realized_cfs), 4),
@@ -5954,6 +6351,12 @@ def _mtm_core(
         "T_elapsed": T_elapsed,
         "T_remaining": T_remaining,
         "residual_payment_t": residual_payment_t,
+        # Tout repricing dérivé (chocs, Greeks, explication de P&L) doit
+        # simuler le MÊME produit que le MtM auquel il se compare : sans ce
+        # report, la jambe choquée pricerait un produit déjà striké contre un
+        # forward-start, et l'écart mesurerait surtout cette différence-là.
+        "strike_set_t": strike_set_t,
+        "pre_strike": pre_strike,
         "n_mc": result["n_paths"],
         # Everything needed to re-run this photo's MC (or a mix of two photos)
         # for the P&L explain waterfall:
@@ -6035,6 +6438,7 @@ def deal_greeks(
         # already accrued. Repricing it as a brand new product, which is what
         # omitting this does, answers a question nobody asked.
         antithetic=ctx["antithetic"], state=_greeks_state(ctx),
+        strike_set_t=ctx.get("strike_set_t"),
     )
 
     per_underlying: dict[str, dict] = {}
@@ -6075,6 +6479,9 @@ def deal_greeks(
         "corr_pairs": corr_pairs,
         "market_used": mtm_payload["market_used"],
     }
+    if ctx.get("pre_strike"):
+        payload["pre_strike"] = _avertissement_greeks_pre_strike(
+            deal.strike_date, ctx["model_used"])
 
     deal.greeks_json = json.dumps(payload)
     deal.greeks_computed_at = datetime.utcnow()
@@ -6095,6 +6502,54 @@ class MtmExplainRequest(BaseModel):
     window_days: int = 252
 
 
+# Modèles dont la volatilité dépend du NIVEAU du sous-jacent. Eux seuls portent
+# une dynamique de smile, donc un delta de forward-start : quand le spot bouge
+# avant le strike, le niveau auquel le strike sera constaté se déplace dans une
+# surface cotée en strikes absolus, et le skew qui s'appliquera au produit
+# change. Sous vol constante ou Heston — tous deux invariants d'échelle — cet
+# effet n'existe pas dans le modèle, et un delta nul y est une propriété du
+# modèle, pas une absence de risque.
+# Modèles dont la volatilité dépend du NIVEAU du sous-jacent. Le delta d'un
+# forward-start ne mesure pas l'existence d'un smile mais sa DYNAMIQUE : ancrée
+# en strikes absolus (vol locale) elle en donne un, flottante avec le spot
+# (Heston, sticky-moneyness) elle n'en donne aucun. Heston a bien un smile et
+# rendra pourtant zéro — ce n'est pas une anomalie.
+_MODELES_DEPENDANT_DU_NIVEAU = {"localvol", "lsv", "sabr"}
+
+
+def _avertissement_greeks_pre_strike(strike_date: str | None, model: str) -> dict:
+    """Comment lire les sensibilités d'un produit dont le strike n'est pas fixé.
+
+    Tout est calculé, rien n'est retiré : le fixing étant simulé trajectoire par
+    trajectoire, un bump de spot met le strike à l'échelle avec le reste et le
+    delta sort juste de lui-même. Reste à dire ce qu'il MESURE, car un même
+    nombre — zéro — veut dire deux choses opposées selon le modèle, et un
+    delta non nul ne se couvre pas comme un delta directionnel."""
+    porte_le_smile = model in _MODELES_DEPENDANT_DU_NIVEAU
+    if porte_le_smile:
+        detail = ("Le delta affiché est un delta de SMILE : le strike suivra le "
+                  "spot, seul se déplace le skew qui s'appliquera au produit. "
+                  "Il ne se couvre pas comme un delta directionnel — et sous "
+                  "vol locale il en surestime l'ampleur, ce modèle faisant "
+                  "bouger son smile trop vite.")
+    else:
+        detail = ("Le modèle booké est invariant d'échelle : la dynamique de "
+                  "smile qui donnerait un delta de forward-start n'y existe "
+                  "pas, et le delta sort à zéro. Ce n'est pas une absence de "
+                  "risque, c'est une limite du modèle.")
+    return {
+        "strike_date": strike_date,
+        "model": model,
+        "delta_type": "smile" if porte_le_smile else "nul_par_construction",
+        "modele_porte_le_smile": porte_le_smile,
+        "message": (
+            "Avant strike — le niveau initial n'est pas encore constaté et il "
+            "est simulé, un par trajectoire. Véga, thêta, rho et corrélation se "
+            "lisent normalement. " + detail
+        ),
+    }
+
+
 def _run_explain_step(cal: dict, spot: dict, uls: list, corr, model: str,
                       common: dict) -> float:
     """One waterfall revaluation: calendar bundle (residual script, T_remaining,
@@ -6107,6 +6562,7 @@ def _run_explain_step(cal: dict, spot: dict, uls: list, corr, model: str,
     return run_mc(
         cal["residual_script"], uls, corr, common["r_frac"], cal["T_remaining"],
         maturity_payment_t=cal.get("residual_payment_t"),
+        strike_set_t=cal.get("strike_set_t"),
         N=common["N"], model=model, seed=42, antithetic=common["antithetic"],
         user_params=common["user_params"], spot_mult=spot["norm_spots"],
         spot_base=spot["norm_spots"],
@@ -6157,6 +6613,7 @@ def _residual_greeks(ctx: dict, n_paths: int) -> list[dict]:
         sigma_r=ctx["sigma_r"], a_r=ctx["a_r"], yield_curve=ctx["yc"],
         barrier_monitoring=ctx["barrier_monitoring"],
         antithetic=ctx["antithetic"], state=_greeks_state(ctx),
+        strike_set_t=ctx.get("strike_set_t"),
     )
     out = []
     for i, u in enumerate(ctx["underlyings_json"]):
@@ -6195,6 +6652,17 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
     if d2 > today:
         raise HTTPException(422, "La date 2 est dans le futur — un MtM ne se calcule "
                                  "que sur des données réalisées")
+    # Sur un deal non striké les deux bornes par défaut arrivent à l'envers (la
+    # value date suit la constatation initiale, donc le présent), et le refus
+    # générique sur l'ordre des dates se lit comme une saisie fautive. Ce n'est
+    # pas une saisie : il n'y a rien à expliquer tant que le produit n'a pas
+    # commencé — aucun temps écoulé, aucun flux, aucun mouvement de marché subi.
+    if deal.strike_date and today < date.fromisoformat(deal.strike_date):
+        raise HTTPException(
+            422, f"Deal non striké — constatation initiale le {deal.strike_date}. "
+                 f"L'explication de P&L compare deux photos du produit EN VIE ; "
+                 f"avant sa première constatation il n'a pas encore d'histoire à "
+                 f"décomposer. Le MtM et les Greeks, eux, sont disponibles.")
     if d2 <= d1:
         raise HTTPException(422, "La date 2 doit être strictement postérieure à la date 1")
 
@@ -6216,10 +6684,16 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
               "a_r": c1["a_r"], "antithetic": c1["antithetic"],
               "user_params": c1["user_params"], "bm": c1["barrier_monitoring"],
               "N": c1["N_used"]}
+    # strike_set_t : None en cours de vie, donc sans effet sur une cascade
+    # existante. Avant le strike, l'omettre ferait pricer chaque étage comme un
+    # produit déjà striké pendant que les deux /mtm encadrants pricent un
+    # forward-start — la cascade ne télescoperait plus vers ΔMtM.
     cal1 = {"residual_script": c1["residual_script"], "T_remaining": c1["T_remaining"],
-            "index_offset": c1["state"]["index"]}
+            "index_offset": c1["state"]["index"],
+            "strike_set_t": c1.get("strike_set_t")}
     cal2 = {"residual_script": c2["residual_script"], "T_remaining": c2["T_remaining"],
-            "index_offset": c2["state"]["index"]}
+            "index_offset": c2["state"]["index"],
+            "strike_set_t": c2.get("strike_set_t")}
     spot1 = {"norm_spots": c1["norm_spots"], "state": c1["state"]}
     spot2 = {"norm_spots": c2["norm_spots"], "state": c2["state"]}
 

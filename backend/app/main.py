@@ -19,6 +19,13 @@ from .api.scenarios import router as scenarios_router
 from .api.schedule import router as schedule_router
 from .api.auth import router as auth_router
 from .api.folders import router as folders_router
+from .api.clients import router as clients_router
+from .api.persons import router as persons_router
+from .api.opportunities import router as opportunities_router
+from .api.interactions import router as interactions_router
+from .api.client_intelligence import router as client_intelligence_router
+from .api.client_import import router as client_import_router
+from .api.constraint_definitions import router as constraint_definitions_router
 from .api.scripts_db import router as scripts_db_router
 from .api.variants import router as variants_router
 from .api.deals import router as deals_router
@@ -80,6 +87,13 @@ async def start_lifecycle_scheduler():
 app.include_router(inlife_router)
 app.include_router(auth_router)
 app.include_router(folders_router)
+app.include_router(clients_router)
+app.include_router(persons_router)
+app.include_router(opportunities_router)
+app.include_router(interactions_router)
+app.include_router(client_intelligence_router)
+app.include_router(client_import_router)
+app.include_router(constraint_definitions_router)
 app.include_router(scripts_db_router)
 app.include_router(variants_router)
 app.include_router(deals_router)

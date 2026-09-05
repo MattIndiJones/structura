@@ -19,8 +19,8 @@ from backend.app.core.lifecycle_controls import (
 from backend.app.core.payscript.parser import parse_script
 from backend.app.core.workflow import DataCategory, FixingStatus
 from backend.app.db.models import (
-    Alert, AuditEvent, Deal, DealContractVersion, DealEvent, LifecycleProposal,
-    OfficialFixingVersion, TradeAmendmentRequest,
+    Alert, AuditEvent, Client, ClientMandate, Deal, DealContractVersion,
+    DealEvent, LifecycleProposal, OfficialFixingVersion, TradeAmendmentRequest,
 )
 
 
@@ -294,7 +294,54 @@ def test_admin_watchlist_includes_foreign_uat_deals(monkeypatch):
     )
 
     assert [row["id"] for row in deals_api.watchlist(admin, session)] == [deal.id]
+    assert [row["id"] for row in deals_api.watchlist(MAKER, session)] == [deal.id]
     assert deals_api.watchlist(regular_user, session) == []
+
+
+def test_watchlist_filters_on_commercial_ids_without_requiring_them(monkeypatch):
+    """Clients narrows the existing lifecycle view; an unfiltered call keeps
+    the product-only behaviour unchanged."""
+    session = _session()
+    client = Client(name="ABC AM", entity_id=7, status="active")
+    session.add(client); session.flush()
+    mandate = ClientMandate(
+        client_id=client.id, name="Fonds Rendement", status="active")
+    session.add(mandate); session.flush()
+    deal = _deal(session)
+    deal.client_id = client.id
+    deal.mandate_id = mandate.id
+    session.add(deal); session.commit()
+    admin = SimpleNamespace(id=99, entity_id=None, role="admin")
+    monkeypatch.setattr(
+        deals_api, "build_watchlist_row",
+        lambda row, _session, _today: {
+            "id": row.id, "min_gap": None, "days_to_next": None,
+        },
+    )
+
+    assert [row["id"] for row in deals_api.watchlist(admin, session)] == [deal.id]
+    assert [row["id"] for row in deals_api.watchlist(
+        admin, session, client_id=client.id)] == [deal.id]
+    assert deals_api.watchlist(admin, session, client_id=client.id + 999) == []
+    assert [row["id"] for row in deals_api.watchlist(
+        admin, session, client_id=client.id, mandate_id=mandate.id)] == [deal.id]
+    assert deals_api.watchlist(
+        admin, session, client_id=client.id, mandate_id=mandate.id + 999) == []
+
+
+def test_watchlist_row_exposes_commercial_ids_without_changing_counterparty():
+    session = _session()
+    deal = Deal(
+        reference="DEAL-COMMERCIAL-PROJECTION", entity_id=7, user_id=1,
+        client_id=12, mandate_id=34, status="actif", contrepartie="Issuer SA",
+        underlyings_json="[]", script_snapshot="")
+    session.add(deal); session.commit(); session.refresh(deal)
+
+    row = deals_api.build_watchlist_row(deal, session, date.today())
+
+    assert row["client_id"] == 12
+    assert row["mandate_id"] == 34
+    assert row["contrepartie"] == "Issuer SA"
 
 
 def test_validation_freezes_official_replay_and_application_uses_it():
@@ -454,6 +501,66 @@ def test_amendment_requires_four_eyes_and_applies_exactly_once(four_eyes_armed):
             deals_api.AmendmentDecisionRequest(reason="Deuxième application interdite"),
             CHECKER, session)
     assert duplicate.value.detail["code"] == "AMENDMENT_STATUS_INVALID"
+
+
+def test_commercial_attribution_always_requires_four_eyes(monkeypatch):
+    """Commercial rectification keeps the initial booking snapshot immutable.
+
+    This control stays armed even on a mono-operator deployment where ordinary
+    amendments may be self-carried.
+    """
+    monkeypatch.delenv("STRUCTURA_AMENDMENT_FOUR_EYES", raising=False)
+    session = _session()
+    deal = _deal(session)
+    client = Client(name="Client rectifié", entity_id=7, data_origin="native")
+    session.add(client)
+    session.flush()
+    mandate = ClientMandate(
+        entity_id=7, client_id=client.id, mandate_type="account",
+        name="Compte principal", status="active", data_origin="native",
+        created_by_user_id=1,
+    )
+    session.add(mandate)
+    session.commit()
+
+    requested = deals_api.request_amendment(
+        deal.id,
+        deals_api.AmendmentRequestCreate(
+            field_name="commercial_attribution",
+            new_value={
+                "client_id": client.id,
+                "mandate_id": mandate.id,
+                "opportunity_id": None,
+                "primary_affiliation_id": None,
+            },
+            reason="Correction de l'attribution commerciale documentée",
+        ),
+        MAKER,
+        session,
+    )
+    self_checker = SimpleNamespace(id=1, entity_id=7, role="checker")
+    with pytest.raises(HTTPException) as exc:
+        deals_api.approve_amendment(
+            deal.id, requested["id"],
+            deals_api.AmendmentDecisionRequest(reason="Auto-validation interdite"),
+            self_checker, session,
+        )
+    assert exc.value.detail["code"] == "FOUR_EYES_VIOLATION"
+
+    deals_api.approve_amendment(
+        deal.id, requested["id"],
+        deals_api.AmendmentDecisionRequest(reason="Attribution contrôlée indépendamment"),
+        CHECKER, session,
+    )
+    result = deals_api.apply_amendment(
+        deal.id, requested["id"],
+        deals_api.AmendmentDecisionRequest(reason="Application de la correction contrôlée"),
+        CHECKER, session,
+    )
+    assert result["deal"]["client_id"] == client.id
+    assert result["deal"]["mandate_id"] == mandate.id
+    assert result["deal"]["client_provenance"] is None
+    assert result["deal"]["client_attribution_current"]["client"]["name"] == "Client rectifié"
 
 
 def test_amendment_is_carried_through_by_its_own_maker_by_default():

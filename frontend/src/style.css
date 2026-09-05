@@ -149,6 +149,16 @@
     color: var(--text);
   }
 
+  /* La phrase qui dit ce que la carte montre et ce qu'elle refuse de montrer.
+     Elle etait employee dans tout le module Clients sans jamais avoir ete
+     definie : chacune de ces explications s'affichait donc en corps de texte
+     plein, au meme poids que la donnee qu'elle commente. */
+  .card-hint {
+    @apply text-xs leading-relaxed;
+    color: var(--muted);
+    max-width: 62ch;
+  }
+
   /* ── Champs de formulaire ── */
   .label {
     @apply block text-xs font-semibold uppercase tracking-wider mb-1;

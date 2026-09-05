@@ -52,6 +52,21 @@
           </div>
         </div>
 
+        <div v-if="deal.client_provenance || deal.client_attribution_current"
+             class="mt-3 pt-3 border-t border-slate-700 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div>
+            <div class="text-slate-500 mb-0.5">Attribution au booking · figée</div>
+            <div class="text-slate-300">{{ attributionLabel(deal.client_provenance) }}</div>
+          </div>
+          <div>
+            <div class="text-slate-500 mb-0.5">
+              Attribution actuelle
+              <span v-if="attributionCorrigee" class="badge badge-gold ml-1">rectifiée</span>
+            </div>
+            <div class="text-slate-200">{{ attributionLabel(deal.client_attribution_current) }}</div>
+          </div>
+        </div>
+
         <!-- S₀ — seulement si l'event strike (t=0) existe -->
         <template v-if="strikeEvent">
           <div v-if="hasS0" class="mt-3 pt-3 border-t border-slate-700">
@@ -426,16 +441,52 @@
         </div>
 
         <div v-if="isDealOwner" class="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
-          <select v-model="amendmentForm.field_name" class="select text-xs">
+          <select v-model="amendmentForm.field_name" class="select text-xs"
+                  @change="onAmendmentFieldChange">
             <option value="nominal">Nominal</option>
             <option value="contrepartie">Contrepartie</option>
             <option value="price_traded">Prix traité</option>
             <option value="payment_date">Date de paiement</option>
+            <option value="commercial_attribution">Attribution commerciale</option>
           </select>
-          <input v-model="amendmentForm.new_value" class="input text-xs" placeholder="Nouvelle valeur" />
+          <input v-if="amendmentForm.field_name !== 'commercial_attribution'"
+                 v-model="amendmentForm.new_value" class="input text-xs"
+                 placeholder="Nouvelle valeur" />
+          <div v-else class="sm:col-span-3 grid grid-cols-1 sm:grid-cols-4 gap-2">
+            <select v-model="commercialAmendment.client_id" class="select text-xs"
+                    @change="onCommercialClientChange">
+              <option :value="null">— Aucun Client —</option>
+              <option v-for="client in commercialClients" :key="client.id" :value="client.id">
+                {{ client.name }}
+              </option>
+            </select>
+            <select v-model="commercialAmendment.mandate_id" class="select text-xs"
+                    :disabled="!commercialAmendment.client_id">
+              <option :value="null">— Mandat —</option>
+              <option v-for="mandat in commercialMandates" :key="mandat.id" :value="mandat.id">
+                {{ mandat.name }}
+              </option>
+            </select>
+            <select v-model="commercialAmendment.opportunity_id" class="select text-xs"
+                    :disabled="!commercialAmendment.client_id">
+              <option :value="null">— Sans Opportunity —</option>
+              <option v-for="opp in commercialOpportunities" :key="opp.id" :value="opp.id">
+                {{ opp.title || opp.reference }}
+              </option>
+            </select>
+            <select v-model="commercialAmendment.primary_affiliation_id" class="select text-xs"
+                    :disabled="!commercialAmendment.client_id">
+              <option :value="null">— Sans contact —</option>
+              <option v-for="contact in commercialContacts" :key="contact.affiliation_id"
+                      :value="contact.affiliation_id">
+                {{ contact.first_name }} {{ contact.last_name }}
+              </option>
+            </select>
+          </div>
           <input v-model="amendmentForm.reason" class="input text-xs" placeholder="Motif contractuel détaillé" />
           <button class="btn-secondary text-xs" @click="createAmendment">
-            {{ authStore.user?.amendment_four_eyes ? 'Soumettre au checker' : 'Créer la demande' }}
+            {{ amendmentForm.field_name === 'commercial_attribution'
+               || authStore.user?.amendment_four_eyes ? 'Soumettre au checker' : 'Créer la demande' }}
           </button>
         </div>
         <div v-if="!deal.amendment_requests?.length" class="text-xs text-slate-600">Aucun amendement.</div>
@@ -635,6 +686,14 @@ const savingEventId = ref(null)
 const saveMsg = ref('')
 const auditResult = ref('')
 const amendmentForm = reactive({ field_name: 'nominal', new_value: '', reason: '' })
+const commercialAmendment = reactive({
+  client_id: null, mandate_id: null, opportunity_id: null,
+  primary_affiliation_id: null,
+})
+const commercialClients = ref([])
+const commercialMandates = ref([])
+const commercialOpportunities = ref([])
+const commercialContacts = ref([])
 const fixingEventId = ref(null)
 const autoExceptionOpen = ref(false)
 const autoExceptionEvent = ref(null)
@@ -654,6 +713,14 @@ let saveMsgTimer = null
 const deal = computed(() => dealsStore.currentDeal)
 const strikeEvent = computed(() => deal.value?.events?.find(e => e.t_years === 0) ?? null)
 const hasS0 = computed(() => !!strikeEvent.value && Object.keys(strikeEvent.value.spots).length > 0)
+const attributionCorrigee = computed(() => JSON.stringify(deal.value?.client_provenance || null)
+  !== JSON.stringify(deal.value?.client_attribution_current || null))
+
+function attributionLabel(snapshot) {
+  if (!snapshot) return 'Aucune — parcours produit autonome'
+  return [snapshot.client?.name, snapshot.mandate?.name,
+    snapshot.opportunity?.reference, snapshot.contact?.name].filter(Boolean).join(' · ') || '—'
+}
 const isDealOwner = computed(() => deal.value?.user_id === authStore.user?.id)
 const isOpsMaker = computed(() => authStore.user?.role === 'ops_maker' &&
   deal.value?.entity_id === authStore.user?.entity_id)
@@ -1008,6 +1075,10 @@ function canCheck(request) {
   // Désactivé — le cas par défaut sur un poste mono-opérateur — celui qui a
   // ouvert la demande peut la mener à son terme ; tout le reste (versionnement
   // contractuel, refus sur version périmée, piste d'audit) est inchangé.
+  if (request.field_name === 'commercial_attribution') {
+    return ['checker', 'admin'].includes(authStore.user?.role)
+      && request.requested_by !== authStore.user?.id
+  }
   if (!authStore.user?.amendment_four_eyes) return isDealOwner.value
   return ['checker', 'admin'].includes(authStore.user?.role) &&
     request.requested_by !== authStore.user?.id
@@ -1073,12 +1144,16 @@ async function validateProposal(proposal) {
 }
 
 async function createAmendment() {
-  if (!deal.value || !amendmentForm.new_value || amendmentForm.reason.trim().length < 10) {
+  const isCommercial = amendmentForm.field_name === 'commercial_attribution'
+  if (!deal.value || (!isCommercial && !amendmentForm.new_value)
+      || amendmentForm.reason.trim().length < 10) {
     showSaveMsg('⚠ Nouvelle valeur et motif détaillé (10 caractères minimum) requis')
     return
   }
   const numeric = ['nominal', 'price_traded'].includes(amendmentForm.field_name)
-  const value = numeric ? Number(amendmentForm.new_value) : amendmentForm.new_value
+  const value = isCommercial
+    ? { ...commercialAmendment }
+    : numeric ? Number(amendmentForm.new_value) : amendmentForm.new_value
   if (numeric && (!Number.isFinite(value) || value <= 0)) {
     showSaveMsg('⚠ La nouvelle valeur doit être strictement positive')
     return
@@ -1096,6 +1171,43 @@ async function createAmendment() {
   } catch (e) {
     showSaveMsg(`⚠ Demande refusée : ${e.message}`)
   }
+}
+
+async function onAmendmentFieldChange() {
+  if (amendmentForm.field_name !== 'commercial_attribution') return
+  Object.assign(commercialAmendment, {
+    client_id: deal.value?.client_id ?? null,
+    mandate_id: deal.value?.mandate_id ?? null,
+    opportunity_id: deal.value?.opportunity_id ?? null,
+    primary_affiliation_id: deal.value?.primary_affiliation_id ?? null,
+  })
+  if (!commercialClients.value.length) {
+    const response = await apiFetch('/api/clients')
+    if (response.ok) commercialClients.value = await response.json()
+  }
+  await loadCommercialOptions(commercialAmendment.client_id, true)
+}
+
+async function onCommercialClientChange() {
+  Object.assign(commercialAmendment, {
+    mandate_id: null, opportunity_id: null, primary_affiliation_id: null,
+  })
+  await loadCommercialOptions(commercialAmendment.client_id, false)
+}
+
+async function loadCommercialOptions(clientId) {
+  commercialMandates.value = []
+  commercialOpportunities.value = []
+  commercialContacts.value = []
+  if (!clientId) return
+  const [mandates, opportunities, contacts] = await Promise.all([
+    apiFetch(`/api/clients/${clientId}/mandates`),
+    apiFetch(`/api/opportunities?client_id=${clientId}`),
+    apiFetch(`/api/clients/${clientId}/contacts`),
+  ])
+  if (mandates.ok) commercialMandates.value = await mandates.json()
+  if (opportunities.ok) commercialOpportunities.value = await opportunities.json()
+  if (contacts.ok) commercialContacts.value = await contacts.json()
 }
 
 async function transitionAmendment(request, action) {

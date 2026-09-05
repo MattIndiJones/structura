@@ -224,33 +224,57 @@ def _bs_call_n(K: float, r: float, q: float, sigma: float, T: float) -> float:
 
 def _dupire_vol(K: float, T: float, sigma0: float, skew: float, curvature: float,
                 r: float, q: float) -> float:
-    """Dupire local vol via 2nd-order FD on parametric smile."""
+    """Vol locale de Dupire, exprimée en VARIANCE TOTALE (Gatheral, éq. 1.10) :
+
+        σ²_loc = ∂w/∂T / [1 − (y/w)·∂w/∂y
+                          + ¼(−¼ − 1/w + y²/w²)(∂w/∂y)² + ½·∂²w/∂y²]
+
+    avec w(y,T) = σ_imp(y,T)²·T la variance totale et y = log(K/F_T) la
+    log-moneyness par rapport au forward.
+
+    Elle remplace une inversion par différences finies sur des prix
+    Black-Scholes, qui divisait par un ∂²C/∂K² minuscule dans les ailes et
+    approchait ∂C/∂T par une différence AVANT sur un pas valant jusqu'à 23 % de
+    la maturité (`max(3/52, 6 % de T)`). Sur une nappe implicite PLATE à 20 % —
+    cas où la réponse exacte est 20 % partout, par identité — elle rendait
+    jusqu'à 150 % de vol locale à K = 60 % et T = 3 mois, le plafond de la
+    fonction transformant la divergence en un nombre d'allure plausible. Un
+    autocall phoenix à constatations trimestrielles y perdait 26,7 bps ; un
+    autocall à constatations annuelles, qui ne visite pas cette zone, 5 bps
+    seulement — le défaut ne se signalait donc sur aucun produit en particulier.
+
+    Ici l'identité est ALGÉBRIQUE et non numérique : nappe plate ⇒ ∂w/∂y = 0 et
+    ∂²w/∂y² = 0 ⇒ dénominateur = 1 ⇒ σ²_loc = ∂w/∂T = σ₀². Aucun prix n'est
+    construit, aucune petite quantité n'est mise au dénominateur."""
     fb = _smile_vol(math.log(max(K, 1e-8)), sigma0, skew, curvature)
     if T < 3/52 or K <= 0:
+        # Très court terme : la vol locale d'une nappe paramétrique en skew
+        # devient mal posée (le terme en 1/w diverge). L'implicite au même
+        # strike est la valeur de repli, et elle vaut σ₀ sur nappe plate.
         return fb
-    h = K * 0.012
-    dT = max(3/52, T * 0.06)
 
-    def getC(Kv: float, Tv: float) -> float:
-        if Kv <= 0 or Tv <= 0:
-            return 0.0
-        sig = _smile_vol(math.log(max(Kv, 1e-8)), sigma0, skew, curvature)
-        c = _bs_call_n(Kv, r, q, sig, Tv)
-        return c if math.isfinite(c) else 0.0
+    def w(y_v: float, T_v: float) -> float:
+        """Variance totale à log-moneyness constante. Le forward suit T : le
+        figer ferait dériver le strike en même temps que la maturité, et le
+        ∂w/∂T mesurerait aussi la pente en strike."""
+        K_v = math.exp((r - q) * T_v) * math.exp(y_v)
+        s = _smile_vol(math.log(max(K_v, 1e-12)), sigma0, skew, curvature)
+        return s * s * T_v
 
-    C, CT = getC(K, T), getC(K, T + dT)
-    Ku, Kd = getC(K+h, T), getC(K-h, T)
-    dCdT   = (CT - C) / dT
-    dCdK   = (Ku - Kd) / (2*h)
-    d2CdK2 = (Ku - 2*C + Kd) / (h*h)
-    num = dCdT + (r - q)*K*dCdK + q*C
-    den = 0.5 * K * K * d2CdK2
-    if not (math.isfinite(num) and math.isfinite(den)) or den < 1e-9 or num <= 0:
+    y = math.log(max(K, 1e-12)) - (r - q) * T
+    dy, dT = 0.01, max(1e-4, T * 0.01)
+    w0 = w(y, T)
+    if not math.isfinite(w0) or w0 <= 1e-12:
         return fb
-    v = num / den
-    if not math.isfinite(v) or v <= 0:
+    dwdT = (w(y, T + dT) - w(y, max(T - dT, 1e-6))) / (2 * dT)
+    dwdy = (w(y + dy, T) - w(y - dy, T)) / (2 * dy)
+    d2wdy2 = (w(y + dy, T) - 2 * w0 + w(y - dy, T)) / (dy * dy)
+    den = (1.0 - y * dwdy / w0
+           + 0.25 * (-0.25 - 1.0 / w0 + y * y / (w0 * w0)) * dwdy ** 2
+           + 0.5 * d2wdy2)
+    if not (math.isfinite(dwdT) and math.isfinite(den)) or den <= 1e-9 or dwdT <= 0:
         return fb
-    sig = math.sqrt(v)
+    sig = math.sqrt(dwdT / den)
     return max(0.005, min(sig, 1.5)) if math.isfinite(sig) else fb
 
 
@@ -588,7 +612,8 @@ def _simulate_lv(ts: int, n: int, N: int, dt: float, sq_dt: float,
     """Vectorized Dupire local vol simulation using precomputed grid.
 
     r_path/Z_r: see _simulate_gbm — optional stochastic-rate level/shock, no-op
-    when both None (default)."""
+    when both None (default).
+"""
     if n > 1:
         Z_flat = Z.reshape(ts, n, N).transpose(1, 0, 2).reshape(n, ts*N)
         Zc = (L @ Z_flat).reshape(n, ts, N).transpose(1, 0, 2)
@@ -1179,6 +1204,41 @@ class _RunningState(NamedTuple):
     rv_t0: object
 
 
+def _fixer_le_strike_sur_les_trajectoires(S: np.ndarray, k: int, bridge_min=None,
+                                          bridge_max=None) -> tuple:
+    """Le niveau initial n'est pas connu : chaque trajectoire porte le sien.
+
+    Jusqu'au pas `k` on diffuse depuis le spot du jour ; c'est là que le fixing
+    est constaté, et il vaut ce que CETTE trajectoire a atteint. On ramène donc
+    tout le tenseur en pourcentage de ce niveau-là, une référence par chemin :
+    le payoff, écrit en pourcentage du strike, se lit ensuite sans rien savoir
+    de tout cela.
+
+    L'opération vient APRÈS la simulation, jamais pendant. Les vols locales ont
+    déjà été lues aux vrais niveaux — c'est ce qui laisse subsister le delta de
+    smile, seul canal par lequel un forward-start en a un. Normaliser avant
+    aurait fait voyager toutes les trajectoires dans la même région de la nappe
+    et l'aurait effacé.
+
+    Le segment antérieur au fixing est ensuite aplati à 1,0. Le contrat ne
+    regarde rien avant sa constatation initiale : sans cet aplatissement, les
+    extrema courants et le pont brownien compteraient des excursions qui n'ont
+    aucune existence contractuelle — une barrière franchie avant que le produit
+    existe."""
+    if not k:
+        return S, bridge_min, bridge_max
+    ref = S[k, :, :].copy()              # (n, N) — une référence par chemin
+    S = S / ref[None, :, :]
+    S[:k + 1] = 1.0
+    if bridge_min is not None:
+        bridge_min = bridge_min / ref[None, :, :]
+        bridge_max = bridge_max / ref[None, :, :]
+        # Index j du pont = pas j+1 : les pas 1..k sont les indices 0..k-1.
+        bridge_min[:k] = 1.0
+        bridge_max[:k] = 1.0
+    return S, bridge_min, bridge_max
+
+
 def _running_state(script, S, n: int, N: int, bridge_min, bridge_max,
                    wof_min_init=None, bof_max_init=None,
                    s_min_init=None, s_max_init=None, wof0_init=None,
@@ -1245,6 +1305,11 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 wof0_init: float | None = None,
                 realvol_state_init: dict | None = None,
                 fix_state_init: dict | None = None,
+                # Pas de grille où le produit COMMENCE. Non nul seulement quand
+                # la constatation initiale est encore à venir : le tenseur
+                # démarre alors avant elle, et le temps antérieur ne doit
+                # compter dans aucun état contractuel (REALVOL au premier chef).
+                state_start_step: int = 0,
                 state_out: list | None = None) -> list[float]:
     """Evaluate PayScript on pre-computed spot paths. Observation-only loop.
 
@@ -1358,10 +1423,14 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             ctx["s_max"] = list(S_max[step - 1, :, path])
             # Combined quadratic variation past+future when a realized state is
             # inherited; the historical formula kept bit-identical otherwise.
-            ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[step - 1, path] / step)
+            # Ecoule DEPUIS LA CONSTATATION INITIALE. Avant le strike les
+            # rendements sont nuls par aplatissement, mais le temps, lui,
+            # continuerait de courir : la vol realisee sortirait diluee.
+            _vecu = max(1, step - state_start_step)
+            ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[step - 1, path] / _vecu)
                               if realvol_state_init is None else
                               math.sqrt((_rv_s0 + cum_sq_ret[step - 1, path])
-                                        / (_rv_t + step * dt)))
+                                        / (_rv_t + _vecu * dt)))
             ctx["t"] = step * dt
             ctx["wof_min"] = float(WOF_min[step - 1, path])
             ctx["bof_max"] = float(BOF_max[step - 1, path])
@@ -1424,10 +1493,11 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             ctx["spots"] = list(S[ts, :, path])
             ctx["s_min"] = list(S_min[ts - 1, :, path])
             ctx["s_max"] = list(S_max[ts - 1, :, path])
-            ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[ts - 1, path] / ts)
+            _vecu_mat = max(1, ts - state_start_step)
+            ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[ts - 1, path] / _vecu_mat)
                               if realvol_state_init is None else
                               math.sqrt((_rv_s0 + cum_sq_ret[ts - 1, path])
-                                        / (_rv_t + ts * dt)))
+                                        / (_rv_t + _vecu_mat * dt)))
             ctx["t"] = ts * dt
             ctx["wof_min"] = float(WOF_min[ts - 1, path])
             ctx["bof_max"] = float(BOF_max[ts - 1, path])
@@ -1507,7 +1577,8 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                           s_min_init=None, s_max_init=None, s_prev_init=None,
                           wof0_init: float | None = None,
                           realvol_state_init: dict | None = None,
-                          fix_state_init: dict | None = None) -> dict:
+                          fix_state_init: dict | None = None,
+                          state_start_step: int = 0) -> dict:
     """Like _eval_paths but returns per-path outcome classification.
 
     df_arr (ts+1,) — optional deterministic discount curve; None falls back to
@@ -1588,10 +1659,11 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
             # Variation quadratique passe+futur combinee quand un etat realise
             # est herite ; formule historique gardee bit a bit sinon, exactement
             # comme dans _eval_paths.
-            ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[step-1, path] / step)
+            _vecu = max(1, step - state_start_step)
+            ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[step-1, path] / _vecu)
                               if realvol_state_init is None else
                               math.sqrt((_rv_s0 + cum_sq_ret[step-1, path])
-                                        / (_rv_t + step * dt)))
+                                        / (_rv_t + _vecu * dt)))
             ctx["t"] = step * dt
             ctx["wof_min"] = float(WOF_min[step-1, path])
             ctx["bof_max"] = float(BOF_max[step-1, path])
@@ -1625,10 +1697,11 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
             ctx["spots"] = list(S[ts, :, path])
             ctx["s_min"] = list(S_min[ts-1, :, path])
             ctx["s_max"] = list(S_max[ts-1, :, path])
-            ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[ts-1, path] / ts)
+            _vecu_mat = max(1, ts - state_start_step)
+            ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[ts-1, path] / _vecu_mat)
                               if realvol_state_init is None else
                               math.sqrt((_rv_s0 + cum_sq_ret[ts-1, path])
-                                        / (_rv_t + ts * dt)))
+                                        / (_rv_t + _vecu_mat * dt)))
             ctx["t"] = ts * dt
             ctx["wof_min"] = float(WOF_min[ts-1, path])
             ctx["bof_max"] = float(BOF_max[ts-1, path])
@@ -1695,6 +1768,12 @@ def run_mc(script: CompiledScript,
            spot_mult=None,
            spot_base=None,
            vol_add=None,
+           # Annees d'ici la constatation initiale, quand elle n'a pas encore eu
+           # lieu. Les trajectoires diffusent alors depuis le spot du jour et
+           # chacune fixe SON strike a cette date — cf.
+           # _fixer_le_strike_sur_les_trajectoires. None = strike deja connu,
+           # comportement inchange.
+           strike_set_t: float | None = None,
            dr: float = 0.0,
            dt_add: float = 0.0,
            corr_delta=None,
@@ -1895,6 +1974,12 @@ def run_mc(script: CompiledScript,
 
     vol_base = np.empty((ts, n, N_pairs), dtype=np.float64) if use_bridge else None
 
+    # Pas de grille où tombe la constatation initiale. Même quantification
+    # hebdomadaire que les dates d'observation : les deux doivent s'accorder,
+    # sans quoi une constatation pourrait précéder le strike qui la référence.
+    strike_step = (0 if not strike_set_t
+                   else min(max(round(strike_set_t * SY), 1), ts))
+
     if use_heston:
         S_base = _simulate_heston(ts, n, N_pairs, dt, sq_dt, underlyings,
                                    r_eff, L, Z, Zv, _sim_spot_mult, vol_add, r_path_base, Z_r,
@@ -1923,6 +2008,10 @@ def run_mc(script: CompiledScript,
     # draws happen only in continuous mode: the weekly path consumes the exact
     # same rng stream as before this feature existed.
     br_min_b, br_max_b = _bridge_extrema(S_base, vol_base, dt, rng) if use_bridge else (None, None)
+    # Puis, si le strike n'est pas encore constaté, chaque trajectoire fixe le
+    # sien. Après le pont, qui se tire lui aussi aux vrais niveaux.
+    S_base, br_min_b, br_max_b = _fixer_le_strike_sur_les_trajectoires(
+        S_base, strike_step, br_min_b, br_max_b)
 
     stop_times_base: list[float] | None = [] if script.has_stop else None
     flows_base: list | None = [] if per_path_flows else None
@@ -1962,7 +2051,8 @@ def run_mc(script: CompiledScript,
                                           s_min_init=s_min_init, s_max_init=s_max_init,
                                           s_prev_init=s_prev_init, wof0_init=wof0_init,
                                           realvol_state_init=realvol_state_init,
-                                          fix_state_init=fix_state_init)
+                                          fix_state_init=fix_state_init,
+                                          state_start_step=strike_step)
 
     payoffs_anti: list[float] = []
     raw_anti:     list[float] = []
@@ -2010,6 +2100,8 @@ def run_mc(script: CompiledScript,
                                     vol_out=vol_anti)
         S_anti = _apply_delayed_bump(S_anti)
         br_min_a, br_max_a = _bridge_extrema(S_anti, vol_anti, dt, rng) if use_bridge else (None, None)
+        S_anti, br_min_a, br_max_a = _fixer_le_strike_sur_les_trajectoires(
+            S_anti, strike_step, br_min_a, br_max_a)
         stop_times_anti: list[float] | None = [] if script.has_stop else None
         flows_anti = [] if per_path_flows else None
         payoffs_anti, raw_anti = _eval_paths(script, S_anti, ts, n, N_pairs, dt, r_eff,
@@ -2030,7 +2122,8 @@ def run_mc(script: CompiledScript,
                                               s_min_init=s_min_init, s_max_init=s_max_init,
                                               s_prev_init=s_prev_init, wof0_init=wof0_init,
                                               realvol_state_init=realvol_state_init,
-                                              fix_state_init=fix_state_init)
+                                              fix_state_init=fix_state_init,
+                                              state_start_step=strike_step)
 
     # Price: antithetic average of paired paths (lower variance).
     payoffs_avg = [(p1 + p2) / 2 for p1, p2 in zip(payoffs_base, payoffs_anti)] \
@@ -2127,7 +2220,8 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
                    selected: list | None = None, sigma_r: float = 0.0, a_r: float = 0.0,
                    yield_curve=None, barrier_monitoring: str = "weekly",
                    antithetic: bool = True, state: dict | None = None,
-                   funding_curve=None, funding_spread: float = 0.0):
+                   funding_curve=None, funding_spread: float = 0.0,
+                   strike_set_t: float | None = None):
     """CRN bump-and-reprice greeks.
 
     Every term of every finite difference — including the CENTER of gamma/
@@ -2155,6 +2249,16 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
       - realized extrema, memory and fixings do NOT move. They are facts, not
         model outputs. (And the running extrema accumulate over S[1:], so the
         bumped t=0 slice never enters them in the first place.)
+
+    Avant la constatation initiale (`strike_set_t` passé dans `bumps` par
+    l'appelant), le bump de spot garde exactement le même sens et ne demande
+    aucun traitement particulier : il met à l'échelle toute la trajectoire, le
+    fixing simulé compris, si bien que le payoff — écrit en pourcentage de ce
+    fixing — est rigoureusement inchangé. Le delta tombe donc de lui-même à
+    zéro sous un modèle invariant d'échelle, et ne garde sous vol locale que le
+    déplacement de la trajectoire dans une nappe cotée en strikes absolus,
+    c'est-à-dire le delta de SMILE. C'est l'homogénéité qui fait le travail,
+    pas un cas particulier.
     """
     if selected is None:
         selected = ["delta", "gamma", "vega", "theta", "rho"]
@@ -2174,6 +2278,7 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
             antithetic=antithetic, user_params=user_params, sigma_r=sigma_r, a_r=a_r,
             yield_curve=yield_curve or [], barrier_monitoring=barrier_monitoring,
             funding_curve=funding_curve or [], funding_spread=funding_spread,
+            strike_set_t=strike_set_t,
             spot_mult=sv, spot_base=base_spots,
             wof_min_init=st.get("wof_min"), bof_max_init=st.get("bof_max"),
             index_offset=st.get("index", 0) if index_ is None else index_,

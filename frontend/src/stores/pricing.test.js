@@ -278,6 +278,9 @@ describe('le préremplissage depuis un AO garde ses dates', () => {
     expect(store.globalParams.strike_date).toBe('2026-08-31')
     expect(store.globalParams.value_date).toBe('2026-08-31')
     expect(store.globalParams.payment_date).toBe('2029-09-05')
+    expect(store.pendingDealPrefill.strike_date).toBe('2026-08-31')
+    expect(store.pendingDealPrefill.value_date).toBe('2026-08-31')
+    expect(store.pendingDealPrefill.payment_date).toBe('2029-09-05')
   })
 
   it('ne laisse pas traîner la date de l’affaire précédente', async () => {

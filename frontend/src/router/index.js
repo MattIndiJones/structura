@@ -65,6 +65,43 @@ const routes = [
     component: () => import('../views/FifoView.vue'),
     meta: { title: "Carnet d'ordres — FIFO" },
   },
+  // ── Module Clients ────────────────────────────────────────────────
+  // Chaque section est une ROUTE, pas un onglet local. Trois conséquences,
+  // toutes voulues : le retour du navigateur ramène à la section précédente
+  // et non hors du module, une section se partage par son lien, et revenir
+  // d'une fiche retrouve l'onglet d'où l'on venait.
+  //
+  // La fiche client vit sous `/clients/fiche/:id` et non `/clients/:id` :
+  // sinon `/clients/contacts` serait capturé comme une fiche d'identifiant
+  // « contacts ». Un segment explicite vaut mieux qu'un ordre de déclaration
+  // qu'on finit toujours par casser.
+  // `/clients` n'est PAS une page : le menu du module est la grille de
+  // l'accueil, catégorie Clients. Deux écrans qui font le même choix divergent
+  // au premier sous-module ajouté — celui qu'on n'ajoute qu'à un seul des deux.
+  {
+    path: '/clients',
+    redirect: { path: '/', query: { category: 'clients' } },
+  },
+  {
+    path: '/clients/fiche/:id/:section?',
+    component: () => import('../views/ClientDetailView.vue'),
+    meta: { title: 'Client' },
+  },
+  {
+    path: '/clients/contacts/:id(\\d+)',
+    component: () => import('../views/PersonDetailView.vue'),
+    meta: { title: 'Contact' },
+  },
+  {
+    path: '/clients/opportunites/:id(\\d+)',
+    component: () => import('../views/OpportunityDetailView.vue'),
+    meta: { title: 'Opportunité' },
+  },
+  {
+    path: '/clients/:section(apercu|liste|contacts|opportunites|signaux|analytics|import)',
+    component: () => import('../views/ClientsView.vue'),
+    meta: { title: 'Clients' },
+  },
   {
     path: '/rfq',
     component: () => import('../views/RfqView.vue'),

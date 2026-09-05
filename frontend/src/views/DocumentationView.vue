@@ -5,7 +5,11 @@
 
       <!-- Sidebar -->
       <aside class="w-52 shrink-0 border-r border-slate-800 p-4 flex flex-col gap-1">
-        <RouterLink to="/pricer" class="btn-ghost btn-sm mb-2 text-center">← Pricer</RouterLink>
+        <!-- La règle générale : depuis un sous-module, le retour ramène au
+             menu de SON module. « ← Pricer » menait à un sous-module voisin,
+             ce qui était un déplacement latéral déguisé en retour. -->
+        <BackLink class="mb-2"
+                  :fallback="{ path: '/', query: { category: 'pricing' } }" />
         <button v-for="s in sections" :key="s.id"
           @click="activeSection = s.id"
           :class="[
@@ -199,6 +203,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
+import BackLink from '../components/ui/BackLink.vue'
 import { useDealsStore } from '../stores/deals.js'
 import { formatDate } from '../utils/format.js'
 

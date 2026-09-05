@@ -78,6 +78,23 @@ def _price(script_text, *, model="constant", antithetic=True, curve=None,
 
 # ── G1 — les cinq modèles, avec et sans antithétique ────────────────────────
 
+# Les quatre valeurs localvol/lsv ont été déplacées le 03/09/2026, et c'est le
+# seul motif que ce fichier admet : une correction délibérée et documentée.
+#
+# `UL` ne porte ni skew ni curvature — la nappe implicite y est donc PLATE à
+# 20 %, cas où la vol locale de Dupire vaut 20 % partout par identité, et où
+# localvol doit rendre EXACTEMENT le prix de la vol constante. Il ne le rendait
+# pas : 0,087306 contre 0,087814, soit −0,58 %. L'inversion par différences
+# finies sur prix Black-Scholes approchait ∂C/∂T par une différence avant sur un
+# pas atteignant 23 % de la maturité et divisait par un ∂²C/∂K² minuscule dans
+# les ailes — jusqu'à 150 % de vol locale rendue à K = 60 %, T = 3 mois.
+# Reformulée en variance totale (Gatheral 1.10), la calibration rétablit
+# l'identité au dernier chiffre : localvol == constant ci-dessous, à tout N.
+# Voir test_dupire_calibration.py, qui exige l'identité plutôt qu'une valeur.
+#
+# lsv bouge par conséquence — sa cible de vol locale a changé. Son écart à la
+# vol constante reste du bruit Monte Carlo (+1,21 % à N=2000, +0,06 % à 40 000),
+# pas un biais : la leverage y est bien conditionnée par E[V|S].
 GOLDEN_MODELES = {
     ("constant", True):  0.087814,
     ("constant", False): 0.083430,
@@ -85,10 +102,10 @@ GOLDEN_MODELES = {
     ("heston",   False): 0.082602,
     ("sabr",     True):  0.090228,
     ("sabr",     False): 0.086724,
-    ("localvol", True):  0.087306,
-    ("localvol", False): 0.083047,
-    ("lsv",      True):  0.088256,
-    ("lsv",      False): 0.084337,
+    ("localvol", True):  0.087814,   # == constant, et ce n'est pas un hasard
+    ("localvol", False): 0.083430,   # == constant
+    ("lsv",      True):  0.088875,
+    ("lsv",      False): 0.084951,
 }
 
 
