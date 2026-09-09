@@ -53,8 +53,10 @@ PROVIDERS = {
     ),
     "anthropic": ProviderInfo(
         key="anthropic", label="Claude (Anthropic)", needs_key=True,
-        default_model="claude-sonnet-4-5",
-        models=("claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"),
+        # Famille Claude 5 (rafraîchie le 08/09/2026). L'identifiant du Haiku
+        # porte sa date de version, contrairement aux deux autres.
+        default_model="claude-sonnet-5",
+        models=("claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5-20251001"),
     ),
 }
 

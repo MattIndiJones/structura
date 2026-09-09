@@ -1,9 +1,11 @@
 """Clés d'API des fournisseurs de modèles.
 
 Même politique que la clé de signature JWT (`api/auth.py`) : l'environnement
-d'abord, puis un fichier dans `backend/data/` — le répertoire déjà non versionné
-qui héberge la base. Jamais dans le dépôt, jamais en base, et **jamais dans le
-bundle frontend** : c'est pour cela que l'appel au modèle part du serveur. Un
+d'abord, puis un fichier dans `backend/data/` — le répertoire qui héberge la
+base. Attention : `backend/data/` n'est **pas** ignoré en bloc par git, seuls
+certains motifs le sont ; les deux fichiers ci-dessous ont donc leur ligne
+nommément dans `.gitignore`, comme `.jwt_secret`. Jamais dans le dépôt, jamais
+en base, et **jamais dans le bundle frontend** : c'est pour cela que l'appel au modèle part du serveur. Un
 appel navigateur → OpenAI expédierait la clé à chaque utilisateur de
 l'application.
 

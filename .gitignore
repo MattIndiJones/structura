@@ -23,6 +23,12 @@ node_modules/
 # Signing key generated per machine — must never be versioned (cf. auth.py)
 backend/data/.jwt_secret
 
+# LLM provider API keys read by services/llm/keys.py. backend/data/ is NOT
+# ignored as a whole — only the patterns listed here — so each secret file
+# needs its own line.
+backend/data/.openai_key
+backend/data/.anthropic_key
+
 # Runtime data (price store, FF series — auto-generated)
 backend/data/*.db
 backend/data/*.sqlite
@@ -30,6 +36,7 @@ backend/data/*.sqlite3
 backend/data/*.db-shm
 backend/data/*.db-wal
 backend/data/underlying_prices/
+backend/data/whisper_models/
 backend/data/fx_rates/
 backend/data/ff_data/
 
@@ -52,3 +59,8 @@ test_parse.py
 # OS
 .DS_Store
 Thumbs.db
+
+# Intermediaires de production de la video de demonstration : prises brutes,
+# segments, sous-titres et images de controle. Tout est regenerable par les
+# scripts de demo-video/ (cf. son README) et pese une centaine de megaoctets.
+demo-video/build/
