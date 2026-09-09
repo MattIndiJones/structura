@@ -329,6 +329,9 @@ export const usePricingStore = defineStore('pricing', () => {
   const scriptGenLoading = ref(false)
   const scriptGenError   = ref(null)
   const scriptProviders  = ref(null)
+  // Dictée : état du moteur local (installé ? poids téléchargés ?). Sondé une
+  // seule fois, le paquet ne s'installe pas en cours de session.
+  const transcribeEngines = ref(null)
   // Corps de requête ayant produit `mtf`, rejoué à l'identique par le drill-down.
   const mtfBody   = ref(null)
   const mtfDrill  = ref(null)
@@ -1069,6 +1072,52 @@ export const usePricingStore = defineStore('pricing', () => {
       scriptGenError.value = e.message
       scriptGen.value = null
     } finally { scriptGenLoading.value = false }
+  }
+
+  // ── Dictée ─────────────────────────────────────────────────────────
+  // Pas de `force` ici, contrairement aux moteurs de scripting : un
+  // `ollama pull` change la liste des modèles en cours de session, alors qu'un
+  // `pip install faster-whisper` impose de toute façon un redémarrage du
+  // serveur — donc un rechargement de la page.
+  async function loadTranscribeEngines(force = false) {
+    if (transcribeEngines.value && !force) return transcribeEngines.value
+    try {
+      const res = await fetch('/api/script/transcribe/engines')
+      if (res.ok) transcribeEngines.value = await res.json()
+    } catch { /* le micro restera grisé */ }
+    return transcribeEngines.value
+  }
+
+  // Télécharge et charge le moteur hors dictée. Rend { error } en cas d'échec.
+  // Sans cette étape le premier clic sur le micro déclenchait 480 Mo au milieu
+  // d'une requête de transcription, qui n'y survivait pas.
+  async function prepareTranscribe() {
+    try {
+      const res = await fetch('/api/script/transcribe/prepare', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) return { error: data.detail || 'Erreur serveur' }
+      await loadTranscribeEngines(true)
+      return data
+    } catch (e) {
+      return { error: e.message }
+    }
+  }
+
+  // Rend { text } ou { error }. L'erreur est rédigée côté serveur, en français
+  // et pour l'utilisateur (paquet absent, poids non téléchargés, décodage) :
+  // on la remonte telle quelle plutôt que d'en fabriquer une seconde.
+  async function transcribeAudio(blob) {
+    try {
+      const form = new FormData()
+      // Le nom de fichier porte l'extension dont le décodeur se sert pour
+      // choisir son démultiplexeur — un blob sans nom arrive en `.bin`.
+      form.append('audio', blob, 'dictee.webm')
+      const res = await fetch('/api/script/transcribe', { method: 'POST', body: form })
+      const data = await res.json()
+      return res.ok ? data : { error: data.detail || 'Erreur serveur' }
+    } catch (e) {
+      return { error: e.message }
+    }
   }
 
   // Adoption explicite : le script ne descend dans l'éditeur que sur action de
@@ -1928,6 +1977,7 @@ export const usePricingStore = defineStore('pricing', () => {
     mtfDrill, mtfDrillLoading, mtfDrillError, runMtfDrilldown,
     scriptGen, scriptGenLoading, scriptGenError, scriptProviders,
     loadScriptProviders, generateScript, adoptGeneratedScript, previewScriptPrompt,
+    transcribeEngines, loadTranscribeEngines, transcribeAudio, prepareTranscribe,
     comparator, comparatorError, comparatorLoading, runBacktestCompare, adoptBasket,
     loading, error, progress, yfStatus,
     currentScriptId, currentScriptName,

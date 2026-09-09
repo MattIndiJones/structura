@@ -18,8 +18,11 @@
     <!-- Saisie -->
     <div class="flex flex-col gap-3">
       <div>
-        <label class="label">Décrivez le produit en français</label>
-        <textarea v-model="description" rows="4" class="input font-normal"
+        <div class="flex items-center gap-2 flex-wrap mb-1">
+          <label class="label !mb-0">Décrivez le produit en français</label>
+          <MicDictation v-model="description" :target-el="descriptionEl" class="ml-auto" />
+        </div>
+        <textarea ref="descriptionEl" v-model="description" rows="4" class="input font-normal"
                   :placeholder="placeholder"></textarea>
         <div class="text-[11px] text-slate-500 mt-1">
           Précisez maturité, fréquence d'observation, niveaux de barrière et coupon.
@@ -198,9 +201,12 @@
 
     <!-- Affinage -->
     <div v-if="gen && !gen.parse_error" class="flex flex-col gap-2 pt-1">
-      <label class="label">Affiner sans repartir de zéro</label>
+      <div class="flex items-center gap-2 flex-wrap">
+        <label class="label !mb-0">Affiner sans repartir de zéro</label>
+        <MicDictation v-model="refinement" :target-el="refinementEl" class="ml-auto" />
+      </div>
       <div class="flex gap-2">
-        <input v-model="refinement" type="text" class="input text-xs"
+        <input ref="refinementEl" v-model="refinement" type="text" class="input text-xs"
                placeholder="ex. : la barrière de protection doit être observée en continu"
                @keyup.enter="runRefine" />
         <button class="btn-secondary text-xs px-3 whitespace-nowrap"
@@ -227,6 +233,7 @@ import { usePricingStore } from '../stores/pricing.js'
 import BaseModal from './ui/BaseModal.vue'
 import AlertMessage from './ui/AlertMessage.vue'
 import HelpTip from './HelpTip.vue'
+import MicDictation from './MicDictation.vue'
 import { formatPercent, formatNumber } from '../utils/format.js'
 
 const props = defineProps({ modelValue: { type: Boolean, required: true } })
@@ -235,6 +242,10 @@ const emit = defineEmits(['update:modelValue', 'adopted'])
 const store = usePricingStore()
 const description = ref('')
 const refinement = ref('')
+// Les champs eux-mêmes : la dictée s'insère à la position du curseur, elle a
+// donc besoin de l'élément, pas seulement de sa valeur.
+const descriptionEl = ref(null)
+const refinementEl = ref(null)
 const provider = ref('ollama')
 const model = ref('')
 

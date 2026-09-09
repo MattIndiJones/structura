@@ -1,8 +1,11 @@
 import itertools
 from datetime import date
 import math
+import os
+from pathlib import Path
+import tempfile
 import numpy as np
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from ..core.schemas import (
     PricingRequest, PricingResponse, ParseRequest, ParseResponse,
@@ -490,6 +493,84 @@ def script_generate_endpoint(req: ScriptGenerateRequest):
         # message est déjà rédigé pour l'utilisateur (Ollama éteint, clé
         # absente, modèle non installé, quota).
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/script/transcribe/engines")
+def script_transcribe_engines_endpoint():
+    """Le moteur de dictée est-il utilisable, et faut-il annoncer un
+    téléchargement ?
+
+    L'écran s'en sert pour griser le micro plutôt que de laisser cliquer sur un
+    bouton qui échouera après coup — même raison que la sonde des modèles
+    Ollama : un sélecteur doit annoncer ce qui existe."""
+    from ..services.transcription import available_engines, DEFAULT_ENGINE
+    return {"engines": available_engines(), "default": DEFAULT_ENGINE}
+
+
+@router.post("/script/transcribe/prepare")
+def script_transcribe_prepare_endpoint():
+    """Charge le moteur — et télécharge ses poids si besoin — HORS dictée.
+
+    Sans cette route, les ~480 Mo du premier usage partaient à l'intérieur de la
+    requête de transcription : elle pendait plusieurs minutes et le navigateur
+    lâchait la connexion (« Failed to fetch ») pendant que le téléchargement,
+    lui, allait à son terme. L'utilisateur voyait une dictée en échec alors que
+    rien n'était cassé.
+
+    Idempotent : une fois les poids là et le modèle en mémoire, l'appel est
+    instantané."""
+    from ..services.transcription import TranscriptionError, warmup
+
+    try:
+        return warmup()
+    except TranscriptionError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/script/transcribe")
+def script_transcribe_endpoint(audio: UploadFile = File(...)):
+    """Un enregistrement de dictée vers du texte brut.
+
+    Endpoint SYNCHRONE volontairement : la transcription est du calcul CPU de
+    plusieurs secondes. En `async def` elle bloquerait la boucle d'événements et
+    figerait tout le serveur pendant la dictée ; en `def`, FastAPI l'exécute
+    dans son pool de threads.
+
+    Le texte remonte tel quel, ni reformulé ni relu par un modèle de langage :
+    il atterrit dans le champ de description où l'utilisateur le corrige. Une
+    dictée qui avale « à tout moment » décrit un autre produit — c'est à l'écran
+    de le montrer, pas au serveur de le deviner.
+    """
+    from ..services.transcription import (MAX_UPLOAD_MB, TranscriptionError,
+                                          transcribe)
+
+    data = audio.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Enregistrement vide.")
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Enregistrement trop long (limite {MAX_UPLOAD_MB} Mo).")
+
+    # Fichier temporaire plutôt qu'un flux mémoire : le décodage de l'Opus passe
+    # par ffmpeg, qui veut un chemin. `delete=False` puis suppression explicite —
+    # sous Windows un NamedTemporaryFile encore ouvert ne peut pas être rouvert
+    # par un autre processus.
+    suffix = Path(audio.filename or "").suffix or ".webm"
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
+        tmp.write(data)
+        tmp.close()
+        return transcribe(tmp.name)
+    except TranscriptionError as e:
+        # 502 comme pour l'assistant : c'est le moteur qui est en cause, pas la
+        # requête, et le message est déjà rédigé pour l'utilisateur.
+        raise HTTPException(status_code=502, detail=str(e))
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
 
 
 @router.post("/mtf/drilldown")

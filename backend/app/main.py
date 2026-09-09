@@ -135,4 +135,15 @@ if DIST.exists():
 
     @app.get("/")
     async def root():
-        return FileResponse(str(DIST / "index.html"))
+        # `no-cache` = revalider avant de servir, PAS « ne pas stocker » : le
+        # navigateur garde le fichier et ne redemande qu'un 304, donc le coût
+        # est nul. Sans cet en-tête, FileResponse n'envoie qu'un ETag et un
+        # Last-Modified, et le navigateur applique sa mise en cache
+        # HEURISTIQUE — il garde index.html plusieurs minutes de son propre
+        # chef. Il pointe alors sur des bundles à empreinte que le build
+        # suivant a supprimés : l'écran affiche l'ancienne version, ou rien.
+        # C'est ce qui imposait un Ctrl+Shift+R après chaque `npm run build`.
+        # Les fichiers de /assets, eux, portent leur empreinte dans leur nom et
+        # peuvent rester en cache indéfiniment — on ne touche pas à leur mount.
+        return FileResponse(str(DIST / "index.html"),
+                            headers={"Cache-Control": "no-cache"})
