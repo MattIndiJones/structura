@@ -232,7 +232,37 @@ def smoke_price(compiled: CompiledScript, underlyings, corr, r: float,
         return None, f"{type(e).__name__}: {e}", None
 
 
-def price_check(prix: float | None, err: str | None, *, note_like: bool) -> Check:
+def _contexte_marche(underlyings, corr) -> str:
+    """Ce que le pricing de contrôle a RÉELLEMENT utilisé.
+
+    Le suffixe annonçait « paramètres par défaut ». C'était faux : `smoke_price`
+    reçoit les sous-jacents et la matrice de corrélation de l'écran. Tant que
+    l'utilisateur règle ses hypothèses avant de générer, la nuance est sans
+    conséquence — mais l'ordre naturel du métier est l'inverse, on ajuste le
+    marché une fois le produit défini. La fiche affichait donc des statistiques
+    calculées à corrélation NULLE en les présentant comme des défauts, et sur un
+    worst-of une corrélation nulle maximise la dispersion : rappel anticipé,
+    barrière touchée et perte en capital sortaient toutes trois à 30,9 %, un
+    résultat juste sous une hypothèse que rien à l'écran ne révélait.
+
+    D'où la corrélation dans le libellé : c'est l'hypothèse qui pèse le plus
+    lourd ici, et la seule qu'on puisse taire sans que personne s'en aperçoive.
+    """
+    bouts = ["2 000 chemins", "volatilité constante"]
+    try:
+        n = len(underlyings)
+        hors_diag = [float(corr[i][j]) for i in range(n) for j in range(n) if i != j]
+        if hors_diag:
+            lo, hi = min(hors_diag), max(hors_diag)
+            bouts.append(f"ρ = {lo:.2f}" if abs(hi - lo) < 1e-9
+                         else f"ρ de {lo:.2f} à {hi:.2f}")
+    except (TypeError, IndexError, ValueError):
+        pass                      # un seul sous-jacent, ou matrice incomplète
+    return " (" + ", ".join(bouts) + ")."
+
+
+def price_check(prix: float | None, err: str | None, *, note_like: bool,
+                contexte: str = " (2 000 chemins, volatilité constante).") -> Check:
     """`note_like` : le produit rembourse-t-il un nominal (note, autocall,
     capital garanti) plutôt que de coter une prime (option) ?
 
@@ -245,7 +275,7 @@ def price_check(prix: float | None, err: str | None, *, note_like: bool) -> Chec
                      f"Le script compile mais ne price pas — {err}")
     if prix is None:
         return Check("Pricing de contrôle", WARN, "Pas de prix.")
-    suffixe = " (2 000 chemins, paramètres par défaut)."
+    suffixe = contexte
     if not -50.0 < prix < 400.0:
         return Check("Pricing de contrôle", WARN,
                      f"{prix:.2f} % du nominal — hors de toute plausibilité, "
@@ -313,5 +343,6 @@ def validate(raw_response: str, *, description: str, underlyings, corr,
     prix, err, proba = smoke_price(compiled, underlyings, corr, r, T, user_params)
     v.price_pct, v.price_error, v.proba = prix, err, proba
     v.checks.append(price_check(
-        prix, err, note_like=_looks_like_a_note(compiled, script, description)))
+        prix, err, note_like=_looks_like_a_note(compiled, script, description),
+        contexte=_contexte_marche(underlyings, corr)))
     return v

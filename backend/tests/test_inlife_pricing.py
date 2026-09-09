@@ -350,3 +350,121 @@ def test_un_prix_hors_d_atteinte_le_dit_au_lieu_de_converger_a_cote(marche):
             target_price=5.0), USER)
     assert exc.value.status_code == 422
     assert "hors d'atteinte" in exc.value.detail
+
+# ── Règle A7 — les deux origines de l'axe des temps ─────────────────
+#
+# En cours de vie, une réponse porte DEUX origines à la fois, et les confondre
+# est l'erreur qui est revenue le plus souvent pendant le chantier des 26-27/08 :
+#
+#   · le FUTUR — horizon simulé, `t` de la table de flux — se compte depuis la
+#     DATE DE VALORISATION, parce que le Monte-Carlo résiduel ne simule que la
+#     vie restante ;
+#   · le PASSÉ — `years_elapsed`, flux réalisés, observations faites — se compte
+#     depuis le STRIKE, qui reste l'origine du produit.
+#
+# Le symptôme d'un mauvais ancrage ne se lit pas dans une valeur isolée : le
+# prix reste plausible. Il se lit en RECONSTRUISANT une date. C'est pourquoi ces
+# tests ne comparent pas des nombres à des nombres — ils reconvertissent un `t`
+# en date de calendrier et regardent où il tombe. La maturité d'un trois ans
+# s'affichait dix mois trop tôt sans que rien d'autre ne bouge.
+#
+# Les dates de valorisation évitent volontairement les jours de constatation :
+# une constatation ajustée qui tomberait le jour même rendrait « déjà faite ou
+# pas encore » ambigu, et le test dirait alors quelque chose d'autre que ce
+# qu'il prétend.
+
+TENOR = (MATURITE - STRIKE).days / 365.25
+
+
+def _annees(depuis: date, jusqu_a: date) -> float:
+    return (jusqu_a - depuis).days / 365.25
+
+
+@pytest.mark.parametrize("valuation", [
+    date(2025, 7, 15),          # ~1 an écoulé
+    date(2026, 7, 15),          # ~2 ans écoulés
+    date(2027, 4, 15),          # dernier trimestre
+])
+def test_A7_l_horizon_simule_est_la_vie_restante_et_non_le_tenor(marche, valuation):
+    """Ce qui est simulé, c'est ce qu'il reste — jamais le tenor d'origine."""
+    res = api.price_in_life(_requete(valuation_date=valuation), USER)
+
+    restant = _annees(valuation, MATURITE)
+    assert res["t_max_effective"] == pytest.approx(restant, abs=0.01)
+    # Et franchement inférieur au tenor : un horizon resté au tenor signifierait
+    # que la vie déjà écoulée est simulée une seconde fois.
+    assert res["t_max_effective"] < TENOR - 0.5
+
+
+@pytest.mark.parametrize("valuation", [
+    date(2025, 7, 15),
+    date(2026, 7, 15),
+])
+def test_A7_les_t_du_flux_se_recomptent_depuis_la_valorisation(marche, valuation):
+    """LE test de la règle : reconvertir le dernier `t` en date de calendrier.
+
+    Ancré sur la valorisation, il tombe sur la maturité ; ancré sur le strike,
+    il tombe trop tôt, exactement du temps déjà écoulé. Les deux lectures
+    donnent le MÊME nombre et des dates différentes — d'où la reconstruction,
+    qui est la seule façon de les distinguer."""
+    res = api.price_in_life(_requete(valuation_date=valuation), USER)
+    flux = res["flux_table"]
+    assert flux, "aucun flux : le test ne prouverait rien"
+
+    t_max = max(f["t"] for f in flux.values())
+    jours = round(t_max * 365.25)
+    depuis_valorisation = valuation + timedelta(days=jours)
+    depuis_strike = STRIKE + timedelta(days=jours)
+
+    assert abs((depuis_valorisation - MATURITE).days) <= 4, (
+        f"le dernier flux tombe le {depuis_valorisation}, pas sur la maturité "
+        f"{MATURITE} — l'axe du futur n'est pas ancré sur la valorisation")
+
+    # Contrôle du contrôle : les deux lectures doivent être franchement
+    # distinctes, sinon la première assertion passerait pour de mauvaises
+    # raisons le jour où les deux origines se rapprochent.
+    assert abs((depuis_strike - MATURITE).days) > 300, (
+        "les deux ancrages donnent presque la même date : le test ne discrimine "
+        "plus rien")
+
+
+@pytest.mark.parametrize("valuation,faites", [
+    (date(2025, 7, 15), 4),     # 4 constatations trimestrielles écoulées
+    (date(2026, 7, 15), 8),
+])
+def test_A7_le_passe_se_compte_depuis_le_strike(marche, valuation, faites):
+    """L'autre moitié de la règle : le passé garde le strike pour origine.
+
+    Deux origines dans une même réponse — c'est précisément ce qui rend
+    l'erreur facile, et ce qu'aucun test ne vérifiait."""
+    res = api.price_in_life(_requete(valuation_date=valuation), USER)
+    passe = res["past"]
+
+    assert passe["years_elapsed"] == pytest.approx(
+        _annees(STRIKE, valuation), abs=0.01)
+    # Les deux moitiés doivent recomposer le produit : ni trou, ni recouvrement.
+    assert passe["years_elapsed"] + passe["years_remaining"] == pytest.approx(
+        TENOR, abs=0.02)
+    assert passe["observations_done"] == faites
+
+
+def test_A7_avancer_la_valorisation_deplace_la_frontiere(marche):
+    """Le passé grossit, la vie restante fond, et la somme ne bouge pas.
+
+    Une seule date de valorisation ne verrait pas un axe figé : il en faut trois
+    pour prouver que la frontière se déplace, et qu'elle se déplace sans perdre
+    ni dupliquer de temps."""
+    total, reste_prec, faites_prec = None, None, -1
+    for valuation in (date(2025, 7, 15), date(2026, 7, 15), date(2027, 4, 15)):
+        passe = api.price_in_life(_requete(valuation_date=valuation), USER)["past"]
+        reste, faites = passe["years_remaining"], passe["observations_done"]
+
+        if reste_prec is not None:
+            assert reste < reste_prec, "la vie restante ne diminue pas"
+            assert faites > faites_prec, "les constatations faites n'augmentent pas"
+
+        somme = passe["years_elapsed"] + reste
+        if total is not None:
+            assert somme == pytest.approx(total, abs=0.02), (
+                "la somme passé + futur dérive : les deux axes ne se rejoignent plus")
+        total, reste_prec, faites_prec = somme, reste, faites

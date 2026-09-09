@@ -65,8 +65,10 @@ d'un prix faux qui ne se signalait pas. Le détail est dans `REPRISE_2026-08-27.
 2. **En cours de vie, l'origine devient la date de valorisation** — le MC résiduel ne
    simule que la vie restante. Le passé est dans `past.realized_flows`, lui compté depuis
    le strike.
-3. **Actualiser à la date de PAIEMENT, pas à l'observation** (~5,7 bps sur un autocall
-   type). `t_pay` est exposé à côté de `t` dans la table de flux.
+3. **Actualiser à la date de PAIEMENT, pas à l'observation.** `t_pay` est exposé à côté
+   de `t` dans la table de flux. L'effet dépend du produit : **5,7 bps sur la note
+   Marex**, dont chaque constatation porte son propre règlement ; **0,9 bps** sur un
+   autocall annuel où seul le remboursement final est décalé (3 jours ouvrés).
 4. **Une convention de jour ouvré se saisit, elle n'a pas de défaut global.** Référentiel
    par devise dans `core/calendars.py` (EUR→TARGET, USD, GBP, CHF, JPY, SGD) ; il lève
    `UnsupportedCurrency` plutôt que de retomber sur « week-ends seulement ».
@@ -77,11 +79,29 @@ La **courbe de taux** alimente le drift ET l'actualisation (`_RateTerm` les unif
 exprès). La **courbe de funding** n'entre **que** dans l'actualisation
 (`engine._funding_df_arr`, appliqué après).
 
-Le crédit de l'émetteur ne déplace pas le forward du sous-jacent. Mesuré : monter la
-courbe de taux fait **monter** le prix (le forward l'emporte) ; monter le spread émetteur
-le fait **baisser** (−0,48 pt / 100 bps). Les fondre donnerait le **signe inverse** — une
-note qui vaut plus cher à mesure que son émetteur se dégrade. Si le comportement de la
-courbe de taux est un jour revu, **le funding doit rester exclu du drift**.
+Le crédit de l'émetteur ne déplace pas le forward du sous-jacent. Les fondre reviendrait
+à faire monter le sous-jacent à mesure que l'émetteur se dégrade.
+
+**Le contrôle qui le prouve, sur n'importe quel produit** : 100 bps de spread émetteur
+doivent coûter **nettement plus** que 100 bps de taux, puisque le spread n'apporte aucun
+drift pour compenser ce qu'il retire à l'actualisation. Mesuré sur un autocall 3 ans
+worst-of : taux **−41 bps**, spread **−181 bps**. Les 140 bps d'écart *sont* la
+contribution du drift. Si le funding rejoignait la courbe de taux, les deux chiffres se
+confondraient.
+
+L'amplitude du spread suit la duration, elle ne se retient pas comme une constante :
+**−1,81 pt / 100 bps** sur cet autocall (vie espérée 2,27 ans), **−0,48 pt / 100 bps** sur
+la note Marex en cours de vie, plus proche de son échéance.
+
+Raisonner en **écart de magnitude**, pas en écart de signe. Les deux effets peuvent être
+de même signe : sur un autocall, le payoff est plafonné au pair plus coupon, donc monter
+le taux augmente la probabilité de rappel sans augmenter le montant reçu, pendant que
+l'actualisation frappe tous les flux — le prix **baisse**. Sur la note Marex le forward
+l'emportait et le prix montait ; ce n'est pas une propriété générale, et une règle fondée
+sur le signe se serait retournée au premier produit plafonné.
+
+Si le comportement de la courbe de taux est un jour revu, **le funding doit rester exclu
+du drift**.
 
 À ne pas confondre non plus avec le coût d'emprunt du titre (repo), qui lui déplace bien
 le forward et se saisit aujourd'hui dans `q`.
@@ -108,9 +128,17 @@ le forward et se saisit aujourd'hui dans `q`.
 Quand une hypothèse de marché est ajoutée à l'écran, vérifier qu'elle atteint le moteur
 avant de la croire active. Courbe de taux, courbe de dividende et calibration
 Heston/SABR/Dupire ont toutes été saisissables sans le moindre effet sur le prix pendant
-un temps — une courbe de dividende à 8 % vaut pourtant **−491,6 bps**. Un test qui ne
-vérifie qu'une valeur ne voit pas un fil débranché : écrire un test qui exige que le prix
-**bouge**.
+un temps — une courbe de dividende à 8 % vaut pourtant **−491,6 bps sur la note Marex**,
+et **−1 325 bps** sur un autocall 3 ans worst-of. Un test qui ne vérifie qu'une valeur ne
+voit pas un fil débranché : écrire un test qui exige que le prix **bouge**.
+
+**Et écrire les magnitudes comme ce qu'elles sont : des mesures d'instance.** Les quatre
+chiffres de cette page — 5,7 bps, −491,6 bps, −0,48 pt, le sens de la courbe de taux —
+venaient tous de la note Marex et se lisaient comme des constantes. Aucun ne se reproduit
+sur un autocall générique (audit du 08/09/2026, `AUDIT_CONVENTIONS_PRICING_2026-09-08.md`).
+Les quatre règles, elles, tiennent : c'est leur illustration qui était trop étroite. Un
+chiffre présenté comme général et qu'on ne retrouve pas fait douter de la règle qu'il
+devait servir.
 
 ## Base de données
 

@@ -140,8 +140,8 @@ const acStats = computed(() => {
   if (!store.proba) return []
   const { autocall_count, ki_count, normal_count, total, expected_life } = store.proba
   return [
-    { label: 'P(rappel autocall)', val: pct(autocall_count, total), cls: 'text-green-400',
-      tip: "Fraction des chemins où le produit a été rappelé anticipativement à l'une des dates d'observation (condition d'autocall remplie avant l'échéance)." },
+    { label: 'P(rappel) cumulée', val: pct(autocall_count, total), cls: 'text-green-400',
+      tip: "CUMUL sur toutes les dates d'observation : fraction des chemins rappelés à l'une QUELCONQUE d'entre elles. Ce n'est pas la probabilité de rappel à la première constatation, qui est toujours plus basse — sur un autocall 3 ans annuel, une cumulée de 50 % se décompose typiquement en 31 % à 1 an, 12 % à 2 ans et 7 % à 3 ans. Le graphe « P(rappel) par date » ci-dessus donne la répartition ; le libellé disait seulement « P(rappel autocall) » et se lisait comme la première date." },
     { label: 'P(KI / perte)',      val: pct(ki_count, total),       cls: 'text-red-400',
       tip: "Fraction des chemins qui atteignent l'échéance ET franchissent la barrière de perte en capital (jamais rappelés avant, barrière KI touchée)." },
     { label: 'P(remb. normal)',    val: pct(normal_count, total),   cls: 'text-slate-300',
