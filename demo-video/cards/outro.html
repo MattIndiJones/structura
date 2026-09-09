@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STRUCTURA — outro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;700;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="brand.css">
+<style>
+  .wordmark { font-size: 118px; letter-spacing: -.035em; line-height: 1; }
+  .steps { display: flex; gap: 0; align-items: center; font-size: 40px; font-weight: 600; }
+  .steps b { font-weight: 600; padding: 0 30px; }
+  .steps i { font-style: normal; color: var(--accent-soft); opacity: .55; }
+  .claim {
+    font-size: 30px; font-weight: 300; color: var(--muted);
+    max-width: 1180px; text-align: center; line-height: 1.5;
+  }
+  .sig { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .sig .co { font-family: 'Fraunces', Georgia, serif; font-weight: 700; font-size: 38px; }
+  .sig .url { font-size: 25px; color: var(--accent-soft); letter-spacing: .01em; }
+  .foot {
+    position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%);
+    font-size: 17px; letter-spacing: .26em; text-transform: uppercase; color: var(--subtle);
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="display wordmark fx" id="o-word" style="margin-bottom: 24px;">STRUCTURA</div>
+  <div class="rule fade" id="o-rule" style="margin-bottom: 40px;"></div>
+
+  <div class="steps fx" id="o-steps" style="margin-bottom: 52px;">
+    <b>Describe</b><i>&mdash;</i><b>Generate</b><i>&mdash;</i><b>Price</b><i>&mdash;</i><b>Monitor</b>
+  </div>
+
+  <div class="claim fade" id="o-claim" style="margin-bottom: 62px;">
+    AI-assisted structured product implementation,<br>
+    built on a controlled quantitative architecture
+  </div>
+
+  <div class="sig fx" id="o-sig">
+    <img src="tp_logo.png" alt="" style="width: 62px; height: 62px; border-radius: 13px; margin-bottom: 6px;">
+    <div class="co">TP Advisory Services</div>
+    <div class="url">www.tpadvisoryservices.com</div>
+  </div>
+
+  <div class="foot fade" id="o-foot">
+    Structured Products &nbsp;•&nbsp; Quantitative Engineering &nbsp;•&nbsp; Financial Technology
+  </div>
+
+</div>
+<script src="seq.js"></script>
+<script>
+run([
+  [  150, () => show('#o-word')],
+  [  700, () => show('#o-rule')],
+  [ 1000, () => show('#o-steps')],
+  [ 2200, () => show('#o-claim')],
+  [ 4000, () => show('#o-sig')],
+  [ 5000, () => show('#o-foot')],
+  // On laisse la signature respirer : c'est la seule image que le spectateur
+  // gardera s'il ne retient qu'une chose.
+], 11000);
+</script>
+</body>
+</html>

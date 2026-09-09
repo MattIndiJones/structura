@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STRUCTURA — intro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;700;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="brand.css">
+<style>
+  .wordmark { font-size: 132px; letter-spacing: -.035em; line-height: 1; }
+  .sub { font-size: 30px; color: var(--muted); font-weight: 400; letter-spacing: .01em; }
+  .line { font-size: 46px; font-weight: 300; color: var(--ink); letter-spacing: -.01em; }
+  .triad { display: flex; gap: 30px; font-size: 38px; font-weight: 600; letter-spacing: -.01em; align-items: center; }
+  .triad span:nth-child(3) { color: var(--accent-soft); }
+  .triad i { font-style: normal; color: var(--subtle); opacity: .6; font-size: 28px; }
+  .slot { height: 120px; display: flex; align-items: center; justify-content: center; }
+  /* Centrage par la BOITE, pas par une transformation : les classes
+     d'animation (.fx / .fx.in) pilotent `transform` et ecrasaient un
+     `translateX(-50%)` pose ici — le bloc partait alors d'une demi-largeur
+     vers la droite des l'apparition. Une regle de mise en page ne doit pas
+     dependre d'une propriete que l'animation s'approprie. */
+  .topbrand { position: absolute; top: 64px; left: 0; right: 0; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="topbrand brand fx" id="s-brand">
+    <img src="tp_logo.png" alt="">
+    <span class="word">TP Advisory Services</span>
+  </div>
+
+  <div class="display wordmark fx" id="s-word" style="margin-bottom: 26px;">STRUCTURA</div>
+  <div class="rule fade" id="s-rule" style="margin-bottom: 30px;"></div>
+  <div class="kicker fx" id="s-kicker">Structured Products&nbsp;&nbsp;·&nbsp;&nbsp;Pricing &amp; Lifecycle</div>
+
+  <div class="slot" style="margin-top: 74px;">
+    <div class="line fade" id="s-line" style="position: absolute;">
+      From product idea to quantitative implementation
+    </div>
+    <!-- Separateurs en tiret plutot qu'en point : trois mots ponctues se lisent
+         comme trois phrases tronquees ; separes, ils se lisent comme une suite. -->
+    <div class="triad fade" id="s-triad" style="position: absolute;">
+      <span>Structure</span><i>&mdash;</i><span>Price</span><i>&mdash;</i><span>Monitor</span>
+    </div>
+  </div>
+
+</div>
+<script src="seq.js"></script>
+<script>
+run([
+  [   150, () => show('#s-brand')],
+  [   650, () => show('#s-word')],
+  [  1250, () => show('#s-rule')],
+  [  1550, () => show('#s-kicker')],
+  [  2900, () => show('#s-line')],
+  // Chaque message reste ~2,6 s a l'ecran : la video doit se lire sans son, et
+  // sans le temps de lire, un carton ne sert a rien.
+  [  6000, () => hide('#s-line')],
+  [  6500, () => show('#s-triad')],
+  [  9300, () => { hide('#s-triad'); hide('#s-word'); hide('#s-kicker'); hide('#s-rule'); hide('#s-brand'); }],
+], 10200);
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "structura-demo-video",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Outillage isole de production de la video de demonstration STRUCTURA. N'est pas une dependance de l'application.",
+  "scripts": {
+    "record": "node record.mjs",
+    "assemble": "node assemble.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

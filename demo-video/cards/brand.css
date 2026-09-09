@@ -1,0 +1,101 @@
+/* Identite visuelle STRUCTURA / TP Advisory Services.
+   Valeurs reprises telles quelles de frontend/src/style.css : les cartons de la
+   video et l'application doivent etre la meme marque, pas deux interpretations. */
+
+:root {
+  --bg-deep: #0b1a31;          /* navy institutionnel, la trame de fond de l'app */
+  --bg-deep-2: #071223;
+  --ink: #f5f3ee;
+  --muted: #93a4bd;
+  --subtle: #6b7d97;
+  --accent: #1a5fa0;
+  --accent-vivid: #2563eb;
+  --accent-soft: #7fb0e8;
+  --positive: #34d399;
+  --gold: #d9a520;
+  --line: rgba(245, 243, 238, .12);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: var(--bg-deep);
+  color: var(--ink);
+  font-family: 'Plus Jakarta Sans', -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* La meme trame de 64 px que le fond de l'application. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(245, 243, 238, .035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(245, 243, 238, .035) 1px, transparent 1px);
+  background-size: 64px 64px;
+  pointer-events: none;
+}
+
+/* Halo tres doux derriere le contenu — profondeur sans effet de gadget. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(1100px 620px at 50% 42%,
+              rgba(37, 99, 235, .16) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.stage {
+  position: relative;
+  z-index: 2;
+  width: 1920px;
+  height: 1080px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.display { font-family: 'Fraunces', Georgia, serif; font-weight: 900; }
+
+/* Marque : logo TP + mot-signe Structura, exactement comme l'en-tete de l'app. */
+.brand { display: flex; align-items: center; gap: 18px; }
+.brand img { width: 56px; height: 56px; border-radius: 12px; }
+.brand .word {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 900;
+  font-size: 40px;
+  letter-spacing: -.02em;
+}
+
+.kicker {
+  font-size: 19px;
+  letter-spacing: .34em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-weight: 600;
+}
+
+.rule {
+  width: 132px;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent-vivid), var(--accent-soft));
+  border-radius: 2px;
+}
+
+/* --- Apparitions ---------------------------------------------------------
+   Tout passe par une classe posee en JS : la video est enregistree en direct,
+   donc le sequencement doit etre explicite et reproductible, pas suspendu a
+   des delais CSS qui derivent d'une machine a l'autre. */
+.fx { opacity: 0; transform: translateY(16px); }
+.fx.in { opacity: 1; transform: none; transition: opacity .62s ease, transform .62s cubic-bezier(.22, .8, .28, 1); }
+.fx.out { opacity: 0; transform: translateY(-12px); transition: opacity .45s ease, transform .45s ease; }
+
+.fade { opacity: 0; }
+.fade.in { opacity: 1; transition: opacity .55s ease; }
+.fade.out { opacity: 0; transition: opacity .45s ease; }

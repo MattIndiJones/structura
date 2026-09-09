@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+const original=fs.readFileSync(new URL('./record.mjs',import.meta.url),'utf8');
+let revised=original.replace("'of the initial level, and a 60% protection barrier observed at any time.';", "'of the initial level, and a 60% protection barrier observed continuously throughout the product life. ' +\n  'The knock-in depends on the minimum over the full path, not only the final level. ' +\n  'If not autocalled, repay par when no knock-in occurred; otherwise repay the final worst-of performance. ' +\n  'Explicitly explain this continuous observation in the French product summary.';");
+revised=revised.replace("mark('s4_script_ready');",`mark('s4_script_ready');
+  fs.writeFileSync(path.join(HERE, 'build', 'retake', 'generated-review.txt'), await modal.innerText());
+  await page.screenshot({path:path.join(HERE, 'build', 'retake', 'generated-review.png')});
+  const generatedScript = await modal.locator('pre, .code-editor').first().innerText();
+  if (!generatedScript.includes('WOF_MIN')) throw new Error('Continuous barrier missing from generated script');
+`);
+fs.writeFileSync(new URL('./record-retake.mjs',import.meta.url),revised);

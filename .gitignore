@@ -64,3 +64,7 @@ Thumbs.db
 # segments, sous-titres et images de controle. Tout est regenerable par les
 # scripts de demo-video/ (cf. son README) et pese une centaine de megaoctets.
 demo-video/build/
+
+# Rendus alternatifs de la video de demonstration : seul structura-ai-demo.mp4
+# est versionne. Les variantes pesent ~6 Mo piece et se regenerent par assemble.
+demo-video/structura-ai-demo-linkedin*.mp4

@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+let assembly=fs.readFileSync(new URL('./assemble.mjs',import.meta.url),'utf8');
+assembly=assembly.replace("const SEG = path.join(B, 'seg');","const SEG = path.join(B, 'retake', 'seg');");
+assembly=assembly.replace("path.join(HERE, 'structura-ai-demo.mp4')","path.join(B, 'retake', 'full-retake.mp4')");
+fs.writeFileSync(new URL('./assemble-retake.mjs',import.meta.url),assembly);
+let linkedin=fs.readFileSync(new URL('./assemble-linkedin.mjs',import.meta.url),'utf8');
+linkedin=linkedin.replace("'build','linkedin'","'build','linkedin-retake'");
+linkedin=linkedin.replace("'build','seg'","'build','retake','seg'");
+linkedin=linkedin.replace('structura-ai-demo-linkedin-v3.mp4','structura-ai-demo-linkedin-v4.mp4');
+fs.writeFileSync(new URL('./assemble-linkedin-retake.mjs',import.meta.url),linkedin);

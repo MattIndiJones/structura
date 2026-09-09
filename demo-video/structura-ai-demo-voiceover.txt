@@ -1,0 +1,73 @@
+STRUCTURA — AI-assisted structured product implementation
+Voice-over script (English) — TP Advisory Services
+
+NOTE ON THIS FILE
+-----------------
+No voice-over was recorded for the delivered MP4. No professional text-to-speech
+engine was available in the build environment, and a poor synthetic voice would
+have cost more credibility than silence gains. The video is therefore designed
+to be fully self-sufficient without sound: every message appears on screen.
+
+This script is provided so a human voice can be recorded later and laid over
+"structura-ai-demo-no-voice.mp4" without re-editing the picture. Timings match
+the delivered cut.
+
+Reading pace: unhurried, low-key, institutional. Roughly 145 words per minute.
+Pause on each full stop. Do not "sell" — state.
+
+
+[00:00 - 00:10]  OPENING
+Structured products start as a financial idea.
+Turning that idea into a working quantitative implementation is where the time
+goes.
+
+[00:10 - 00:26]  ARCHITECTURE
+STRUCTURA shortens that step.
+Its AI-assisted layer translates a product description, or a term sheet, into an
+executable product script — built from predefined quantitative building blocks.
+The AI does not price anything. It writes the definition.
+
+[00:26 - 00:47]  PRODUCT INPUT
+Here, a five-year worst-of autocall on three indices.
+The structurer states the product in plain financial terms — maturity,
+observation frequency, coupon, autocall level, protection barrier.
+The model runs locally: the description never leaves the desk.
+
+[00:47 - 01:10]  AI TO SCRIPT
+The generated script is the product definition, in full.
+Observation schedule, coupon, autocall condition, barrier, redemption logic —
+all explicit, all editable.
+A control sheet states what the script actually does, so a plausible script that
+describes the wrong product cannot pass unnoticed.
+Change a parameter, and it is the structurer's change, not the model's.
+
+[01:10 - 01:24]  PRICING
+From here, the quantitative engine takes over.
+Monte Carlo pricing, with a confidence interval — on twenty thousand paths, in
+about two seconds.
+
+[01:24 - 01:40]  RISK AND SCENARIOS
+Sensitivities, payoff profile, simulated paths.
+Understanding the product beyond a single price.
+
+[01:40 - 01:52]  LIFECYCLE
+The same definition carries through to the observation schedule and to lifecycle
+monitoring.
+One product definition. One consistent workflow.
+
+[01:52 - 02:03]  CLOSE
+STRUCTURA.
+Describe. Generate. Price. Monitor.
+AI-assisted implementation, built on a controlled quantitative architecture.
+By TP Advisory Services.
+
+
+WORDS TO AVOID — non-negotiable
+-------------------------------
+Never say, in any variation:
+  "the AI prices the product"
+  "AI-powered pricing"
+  "the model calculates the value"
+The AI writes the product definition. The engine computes the price. The whole
+positioning rests on that distinction; blurring it in the narration undoes what
+the picture is showing.

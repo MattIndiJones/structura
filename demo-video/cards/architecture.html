@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STRUCTURA — architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;700;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="brand.css">
+<style>
+  .stage { justify-content: flex-start; padding-top: 66px; }
+  .flow { display: flex; flex-direction: column; align-items: center; }
+
+  .node {
+    width: 640px; padding: 17px 30px; border-radius: 14px;
+    background: rgba(245, 243, 238, .045);
+    border: 1px solid var(--line);
+    text-align: center; font-size: 25px; font-weight: 500; letter-spacing: -.005em;
+  }
+  .node .hint { display: block; font-size: 15px; color: var(--subtle); font-weight: 400; margin-top: 3px; }
+
+  /* L'etape IA est distinguee — c'est le differenciant — mais en bleu d'accent,
+     pas en couleur "gadget" : elle reste une etape parmi cinq. */
+  .node.ai {
+    border-color: rgba(127, 176, 232, .55);
+    background: rgba(37, 99, 235, .13);
+    color: #cfe2fa;
+  }
+  /* Le moteur est plein : c'est lui qui produit les chiffres. */
+  .node.engine {
+    border-color: rgba(52, 211, 153, .4);
+    background: rgba(52, 211, 153, .1);
+    color: #d6f5e8;
+  }
+  .node.out {
+    border-style: dashed; font-size: 23px; color: var(--muted);
+    letter-spacing: .05em;
+  }
+
+  .arrow { height: 30px; width: 2px; background: linear-gradient(180deg, var(--line), rgba(127,176,232,.5)); margin: 7px 0; }
+
+  .msgslot { position: relative; height: 132px; width: 1500px; margin-top: 34px; }
+  .msg {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  }
+  .big { font-size: 50px; font-weight: 700; letter-spacing: -.02em; }
+  .big em { font-style: normal; color: var(--accent-soft); }
+  .small { font-size: 27px; font-weight: 300; color: var(--muted); max-width: 1260px; text-align: center; line-height: 1.42; }
+  .triad { display: flex; gap: 30px; font-size: 40px; font-weight: 600; align-items: center; }
+  .triad span { color: var(--accent-soft); }
+  .triad i { font-style: normal; color: var(--subtle); opacity: .6; font-size: 30px; }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="kicker fx" id="a-kick" style="margin-bottom: 30px;">How it works</div>
+
+  <div class="flow">
+    <div class="node fx" id="n1">Product description&nbsp;/&nbsp;Term sheet
+      <span class="hint">stated in financial terms</span></div>
+    <div class="arrow fade" id="r1"></div>
+
+    <div class="node ai fx" id="n2">AI-assisted translation
+      <span class="hint">into predefined quantitative building blocks</span></div>
+    <div class="arrow fade" id="r2"></div>
+
+    <div class="node fx" id="n3">Executable product script
+      <span class="hint">transparent · editable · reproducible</span></div>
+    <div class="arrow fade" id="r3"></div>
+
+    <div class="node engine fx" id="n4">STRUCTURA quantitative engine
+      <span class="hint">Monte Carlo · GBM · Heston · SABR · Local Vol</span></div>
+    <div class="arrow fade" id="r4"></div>
+
+    <div class="node out fx" id="n5">PRICING&nbsp; · &nbsp;RISK&nbsp; · &nbsp;SCENARIOS&nbsp; · &nbsp;LIFECYCLE</div>
+  </div>
+
+  <div class="msgslot">
+    <!-- Formulation POSITIVE. « AI-assisted, not AI-priced » disait la bonne
+         chose de la mauvaise maniere : une video commerciale qui commence par
+         nier laisse le doute qu'elle voulait lever. La meme distinction se dit
+         en affirmant qui price. -->
+    <div class="msg fade" id="m1">
+      <div class="big">AI-assisted &mdash; <em>STRUCTURA-priced</em></div>
+    </div>
+    <div class="msg fade" id="m2">
+      <div class="small">The AI translates the product specification into STRUCTURA's
+        controlled quantitative building blocks &mdash; the engine computes the price</div>
+    </div>
+    <div class="msg fade" id="m3">
+      <div class="triad"><span>Transparent</span><i>&mdash;</i><span>Editable</span><i>&mdash;</i><span>Reproducible</span></div>
+    </div>
+  </div>
+
+</div>
+<script src="seq.js"></script>
+<script>
+run([
+  [  120, () => show('#a-kick')],
+  // Le flux se construit etape par etape : montre d'un coup, il se lit comme un
+  // schema decoratif ; construit, il se lit comme un enchainement.
+  [  520, () => show('#n1')],
+  [  980, () => show('#r1')],
+  [ 1160, () => show('#n2')],
+  [ 1620, () => show('#r2')],
+  [ 1800, () => show('#n3')],
+  [ 2260, () => show('#r3')],
+  [ 2440, () => show('#n4')],
+  [ 2900, () => show('#r4')],
+  [ 3080, () => show('#n5')],
+
+  [ 4000, () => show('#m1')],
+  [ 6900, () => hide('#m1')],
+  [ 7400, () => show('#m2')],
+  [11000, () => hide('#m2')],
+  [11500, () => show('#m3')],
+  [14200, () => { hide('#m3'); hide('.node'); hide('.arrow'); hide('#a-kick'); }],
+], 15100);
+</script>
+</body>
+</html>
