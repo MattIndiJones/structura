@@ -131,7 +131,21 @@ export function useObservationPreview(store, strikeDate, devise) {
     } catch { /* pas d'historique : les cellules restent vides */ }
   }
 
-  /** Lignes prêtes à afficher : strike, constatations, maturité. */
+  /**
+   * Les relevés de chaque constatation moyennée, indexés par date de
+   * constatation. Ils viennent de l'échéancier que le backend résout — la
+   * MÊME structure que celle figée au booking — plutôt que d'une arithmétique
+   * de dates refaite ici : c'est tout l'intérêt d'avoir une source unique.
+   */
+  const relevesParConstatation = computed(() => {
+    const par = {}
+    for (const c of store.result?.schedule?.constatations || []) {
+      if (c.reduction && c.releves?.length && c.date) par[c.date] = c
+    }
+    return par
+  })
+
+  /** Lignes prêtes à afficher : strike, constatations, leurs relevés, maturité. */
   const previewEvents = computed(() => {
     const origine = strikeDate()
     if (!origine) return []
@@ -145,10 +159,24 @@ export function useObservationPreview(store, strikeDate, devise) {
       label: 'Strike / Fixing S₀', date: origine, t: 0, isFuture: origine > aujourdhui,
     }]
     lignes.forEach(({ date, t }, idx) => {
+      const label = idx === lignes.length - 1 ? 'Maturité' : `Obs. ${idx + 1}`
+      const constatee = relevesParConstatation.value[date]
       events.push({
-        label: idx === lignes.length - 1 ? 'Maturité' : `Obs. ${idx + 1}`,
-        date, t, isFuture: date > aujourdhui,
+        label, date, t, isFuture: date > aujourdhui,
+        reduction: constatee?.reduction || null,
+        nbReleves: constatee?.releves?.length || 0,
       })
+      // Une constatation moyennée n'est pas observable directement : elle se
+      // calcule depuis ces cours-là. Les montrer, c'est montrer le produit —
+      // et ce sont eux dont il faudra relever le fixing en vie.
+      for (const [j, r] of (constatee?.releves || []).entries()) {
+        if (r.date === date) continue     // le dernier relevé EST la constatation
+        events.push({
+          label: `relevé ${j + 1}/${constatee.releves.length}`,
+          date: r.date, t: r.t, isFuture: r.date > aujourdhui,
+          estReleve: true, evenement: !!r.evenement,
+        })
+      }
     })
     return events
   })

@@ -338,6 +338,61 @@ def _validate_rfq_booking_identity(rfq: RfqRequest, body: DealCreate,
                  "pour un autre produit, créez une nouvelle RFQ.")
 
 
+def _resoudre_pour_booking(body) -> tuple:
+    """Le script du deal, calendrier résolu, et l'origine de son axe des temps.
+
+    Ancré sur la constatation initiale, pas sur le règlement : le produit
+    commence quand son niveau de référence est fixé. Repli sur la value date
+    pour les bookings qui n'ont pas encore de date de strike.
+
+    Extrait pour que l'échéancier figé et les temps d'observation viennent de
+    la MÊME résolution. Deux résolutions séparées, c'est deux calendriers qui
+    peuvent diverger — exactement ce que le figement doit empêcher."""
+    origin = body.strike_date or body.value_date
+    compiled = resolve_constats(
+        parse_script(body.script_snapshot),
+        (body.market_snapshot or {}).get("constats") or {},
+        anchor=date.fromisoformat(origin) if origin else None,
+        currency=(body.devise or "").strip().upper() or None,
+    )
+    return compiled, origin
+
+
+def _fenetres_par_date(schedule_json: str) -> dict:
+    """{t arrondi: {reduction, releves}} pour les constatations MOYENNÉES.
+
+    Lu depuis l'échéancier figé, pas recalculé : c'est lui qui fait foi une fois
+    le deal booké."""
+    try:
+        ech = json.loads(schedule_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return {round(c["t"], 4): {"reduction": c["reduction"], "releves": c["releves"]}
+            for c in ech.get("constatations") or []
+            if c.get("reduction") and c.get("releves")}
+
+
+def _figer_echeancier(body) -> str:
+    """L'échéancier contractuel du deal, en JSON, tel qu'il sera figé.
+
+    Figé et non recalculé : les dates d'un deal booké se reconstruisaient
+    jusqu'ici à chaque valorisation depuis ses CONSTAT. Une convention de jour
+    ouvré modifiée, un référentiel de fériés mis à jour, ou un changement dans
+    la génération de calendrier déplaçaient donc rétroactivement les
+    constatations d'un contrat signé. Ce que le term sheet dit ne doit dépendre
+    d'aucun code exécuté plus tard.
+
+    Un script qu'on ne sait pas résoudre ne bloque pas le booking : le champ
+    reste vide, ce qui se lit comme « pas d'échéancier figé » — la vérité — au
+    lieu d'un échéancier reconstruit après coup."""
+    try:
+        compiled, _ = _resoudre_pour_booking(body)
+        ech = getattr(compiled, "echeancier", None)
+        return json.dumps(ech.to_dict()) if ech is not None else "{}"
+    except Exception:
+        return "{}"
+
+
 def _derive_observation_times(body) -> List[float]:
     """The deal's observation schedule, read off the product itself rather than
     off a pricing run.
@@ -353,17 +408,7 @@ def _derive_observation_times(body) -> List[float]:
 
     Resolving the script's own calendar gives both — the true contractual
     dates, and no dependency on having clicked ▶ Pricer."""
-    compiled = parse_script(body.script_snapshot)
-    market = body.market_snapshot or {}
-    # Ancré sur la constatation initiale, pas sur le règlement : le produit
-    # commence quand son niveau de référence est fixé. Repli sur la value date
-    # pour les bookings qui n'ont pas encore de date de strike.
-    origin = body.strike_date or body.value_date
-    compiled = resolve_constats(
-        compiled, market.get("constats") or {},
-        anchor=date.fromisoformat(origin) if origin else None,
-        currency=(body.devise or "").strip().upper() or None,
-    )
+    compiled, origin = _resoudre_pour_booking(body)
     # AT_MATURITY carries no date of its own: it fires at the end of the
     # horizon. Which end? The deal's OWN maturity date, not the tenor typed in
     # the pricing form — the two diverge as soon as a CONSTAT calendar is in
@@ -738,6 +783,10 @@ def _contract_snapshot(deal: Deal) -> dict:
         "underlyings": json.loads(deal.underlyings_json or "[]"),
         "script_snapshot": deal.script_snapshot,
         "market_snapshot": json.loads(deal.market_snapshot_json or "{}"),
+        # L'échéancier contractuel figé au booking. Vide — donc `None` ici —
+        # sur un deal antérieur à ce champ : l'écran doit le dire plutôt que
+        # d'en afficher un reconstruit, qui pourrait différer du term sheet.
+        "schedule": json.loads(deal.schedule_json or "{}") or None,
         "status": deal.status,
         "commercial_attribution_initial": (
             json.loads(deal.client_provenance_json)
@@ -1623,6 +1672,7 @@ def _book_deal(
         T=body.T,
         underlyings_json=json.dumps(body.underlyings),
         market_snapshot_json=json.dumps(body.market_snapshot),
+        schedule_json=_figer_echeancier(body),
     )
     session.add(deal)
     session.flush()
@@ -1703,13 +1753,20 @@ def _book_deal(
         label="Strike / Fixing S₀",
     ))
 
+    # L'échéancier figé dit quelles constatations sont MOYENNÉES, et sur quels
+    # relevés. Sans lui, on retombe sur des constatations ponctuelles — ce que
+    # sont l'immense majorité des produits.
+    _fenetres = _fenetres_par_date(deal.schedule_json)
+
+    _index = 0
     for idx, t in enumerate(times):
         ev_date = _date_plus_years(_obs_origin, t)
         is_maturity = (idx == len(times) - 1)
         label = "Maturité" if is_maturity else f"Obs. {idx + 1} ({t:.2f}Y)"
-        session.add(DealEvent(
+        _index += 1
+        constatation = DealEvent(
             deal_id=deal.id,
-            event_index=idx + 1,
+            event_index=_index,
             event_date=ev_date,
             t_years=round(t, 4),
             spots_json="{}",
@@ -1718,7 +1775,36 @@ def _book_deal(
             fixing_status=FixingStatus.EXPECTED.value,
             data_category=DataCategory.UNKNOWN.value,
             label=label,
-        ))
+        )
+        fenetre = _fenetres.get(round(t, 4))
+        if fenetre:
+            constatation.reduction = fenetre["reduction"]
+        session.add(constatation)
+        if not fenetre:
+            continue
+        # Une constatation moyennée se calcule depuis les cours de sa fenêtre :
+        # ces cours doivent exister comme lignes, sinon ils n'ont ni fixing
+        # officiel, ni provenance, ni preuve — et l'agrégat n'a rien à lire.
+        session.flush()
+        for j, releve in enumerate(fenetre["releves"], start=1):
+            if releve["date"] == ev_date:
+                # Le dernier relevé EST la constatation : une seule ligne, donc
+                # un seul fixing officiel pour les deux usages.
+                continue
+            _index += 1
+            session.add(DealEvent(
+                deal_id=deal.id,
+                event_index=_index,
+                event_date=releve["date"] or "",
+                t_years=round(releve["t"], 4),
+                spots_json="{}",
+                source="pending",
+                status="futur",
+                fixing_status=FixingStatus.EXPECTED.value,
+                data_category=DataCategory.UNKNOWN.value,
+                parent_event_id=constatation.id,
+                label=f"{label} · relevé {j}/{len(fenetre['releves'])}",
+            ))
 
     try:
         record_audit_event(

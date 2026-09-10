@@ -136,6 +136,11 @@ class PricingResponse(BaseModel):
     # clique sans lire ; un décompte se lit — et c'est la seule façon de voir
     # qu'une fenêtre trop courte pour la grille hebdomadaire n'a pas moyenné.
     constatation_windows: Optional[List[Dict[str, Any]]] = None
+    # L'échéancier contractuel résolu — la MÊME structure que celle figée au
+    # booking (Deal.schedule_json). L'aperçu pré-trade et le deal booké
+    # montrent donc le même objet, ce qui est le seul moyen que l'écran ne
+    # raconte pas deux histoires selon qu'on a cliqué « Booker » ou non.
+    schedule: Optional[Dict[str, Any]] = None
 
 
 class ParseRequest(BaseModel):

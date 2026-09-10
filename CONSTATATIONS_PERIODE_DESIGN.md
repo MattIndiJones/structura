@@ -483,12 +483,14 @@ moteur exprime déjà tout en pourcentage de `S0`.
 
 ---
 
-## 13. `INDEX` par échéancier — décidé, **pas encore codé**
+## 13. `INDEX` par échéancier — **codé**
 
-Cette section ne décrit pas le code actuel. Elle fige des décisions prises avec
-Philippe le 10/09/2026, à appliquer dans l'ordre du §14.
+Décisions prises avec Philippe le 10/09/2026, appliquées le même jour. Les trois
+défauts ci-dessous ont d'abord été figés en tests `xfail(strict=True)` dans
+`test_caracterisation_echeancier.py` ; la correction les a rendus verts, et
+`strict` a fait échouer la suite jusqu'à ce que les marqueurs soient retirés.
 
-### 13.1 Le défaut, mesuré
+### 13.1 Les défauts, mesurés avant correction
 
 `INDEX` s'incrémente aujourd'hui une fois par **pas de grille portant un
 événement**, et non par constatation. Deux mesures sur un `PAY INDEX` :
@@ -568,25 +570,27 @@ que pour `.last.last` contre deux CONSTAT au §12.3.
 Arrêté avec Philippe le 10/09/2026. Le moteur Monte-Carlo reste **hors
 périmètre** tant qu'un test ne démontre pas un défaut précis.
 
-1. **Tests de caractérisation** — le comportement actuel, figé avant toute
-   modification. Partir de `backend/tests/test_constatations_periode.py`, qui
+1. ~~**Tests de caractérisation**~~ — **fait**. Le comportement actuel, figé avant
+   toute modification. Partir de `backend/tests/test_constatations_periode.py`, qui
    couvre déjà le ponctuel contre fenêtre d'un point, MIN/MAX/AVG, la réduction
    par sous-jacent avant worst-of et les deux lectures d'une même date. À
    ajouter : `INDEX` à deux calendriers, `INDEX` avec un bloc sur une sous-date,
    un événement sur une sous-date ne coïncidant avec aucune constatation, et un
    `STOP` entre deux blocs du même jour. **Les deux premiers échoueront** — c'est
    ce qui autorise à ouvrir le moteur, et rien d'autre.
-2. **`INDEX` par échéancier** (§13), la correction que ces échecs justifient.
-3. **Représentation unique des dates** — l'échéancier résolu comme objet de
-   premier ordre : par date, son rôle (relevé, constatation, ou les deux), son
-   rang, sa réduction, les blocs qu'elle déclenche, sa date de paiement, son lien
-   parent-enfant. Le rang du point 2 y trouve sa place ; ce n'est pas un chantier
-   séparé.
-4. **Backtest** — remonté ici parce qu'il est l'oracle le moins cher : il rejoue
-   un script sur un historique réel, donc un lifecycle sans fixings officiels ni
-   booking. Il vérifie « mêmes décisions dans le pricing, le backtest et le
-   lifecycle » **avant** qu'on ait construit le modèle de fixings.
-5. Puis figement au booking, fixings, lifecycle, Events, vie résiduelle, KIDs.
+2. ~~**`INDEX` par échéancier**~~ (§13) — **fait**, avec la suppression de
+   l'héritage de compteur qu'il rend inutile.
+3. ~~**Représentation unique des dates**~~ — **fait**, voir §16. L'échéancier
+   résolu est un objet de premier ordre : par date, son rôle (relevé,
+   constatation, ou les deux), son rang, sa réduction, les blocs qu'elle
+   déclenche, sa date de paiement, son lien parent-enfant.
+4. ~~**Backtest**~~ — **fait**, voir §17. L'oracle le moins cher : il rejoue un
+   script sur un historique réel, donc un cycle de vie sans fixings officiels ni
+   booking, et il vérifie « mêmes décisions » **avant** le modèle de fixings.
+5. ~~**Figement au booking**~~ — **fait**, voir §18.
+6. ~~**Fixings et agrégats officiels**~~ — **fait**, voir §19.
+7. ~~**Lifecycle**~~ — **fait**, voir §20.
+8. Puis Events, vie résiduelle, KIDs.
 
 **L'invariant « mêmes décisions » est à affaiblir**, et à publier tel quel : le
 lifecycle et le backtest travaillent sur des dates réelles, le moteur sur une
@@ -602,3 +606,258 @@ indisponible, titre suspendu — sinon un produit se bloque sans recours) ; les
 opérations sur titres, qui rendent non homogènes les relevés d'une fenêtre à
 cheval sur un split ; et une dégradation propre des deals bookés sans échéancier
 figé, qui doivent s'afficher comme tels plutôt que casser Events.
+
+---
+
+## 15. `INDEX` — ce que l'implémentation a appris
+
+**Un troisième défaut est sorti de l'écriture des tests.** `PARAM()` étant
+indexé par `INDEX`, il héritait de sa dérive : sur deux calendriers, une
+**barrière dégressive** lisait les lignes 2, 4, 6 de son propre tableau au lieu
+de 1, 2, 3. Personne ne l'avait vu, et c'est un produit courant. Ce n'est pas la
+relecture qui l'a trouvé mais le fait d'écrire le cas à deux calendriers.
+
+**`index_offset` n'est plus lu.** Trois tests le mettaient en scène — un
+autocall à coupon progressif, une barrière dégressive, un delta de mi-vie — et
+tous vérifiaient la même chose : que transmettre le compteur changeait le prix.
+Ils ont été réécrits pour vérifier la propriété inverse, plus forte : **le prix
+correct sort sans qu'aucun état ne soit transmis**, parce que le rang voyage
+avec la date à travers `_shift_events_for_mtf`. Oublier de transmettre un état
+ne peut donc plus produire un prix faux silencieux.
+
+`index_offset` reste dans les signatures pour l'instant : le retirer touche six
+fichiers hors moteur (`deals.py`, `inlife.py`, `shocks.py`, `var_scenario.py`,
+`scenario_grid.py`) et mérite son propre passage. À ne pas confondre avec
+`state["index"]`, qui reste **utile** : c'est le nombre d'observations déjà
+passées, affiché à l'écran comme information métier.
+
+**Deux pièges d'outillage, notés pour ne pas les refaire.** Un heredoc Python a
+transformé `` en caractère backspace dans une regex : la fonction se lisait
+juste, ne matchait rien, et `inspect.getsource` affichait le bon code puisqu'il
+lit le fichier. Et un `__pycache__` périmé a masqué la correction suivante. Sur
+du code écrit par script, vérifier le comportement — pas seulement relire.
+
+---
+
+## 16. L'échéancier contractuel — `schedule_model.py`
+
+**Ce qui n'existait pas.** « Ce que le produit observe » ne vivait nulle part
+comme objet : l'information se dispersait entre `CompiledEvent.dates`,
+`.window_dates`, `.payment_dates`, `.ranks` et `CompiledScript.strike_fix_dates`,
+puis se reconstituait différemment dans chaque consommateur — `step_map` côté
+Monte Carlo, une autre boucle côté rejeu historique, une troisième côté
+Mark-to-Future. C'est ainsi que trois chemins finissent par décrire trois
+produits légèrement différents.
+
+**Trois notions, et leurs rôles ne se confondent pas.** Une **constatation** est
+ce que le contrat observe : rang, réduction éventuelle, date de paiement, blocs
+qui s'y exécutent dans l'ordre du script. Un **relevé** alimente la réduction
+d'une constatation — il ne paie rien et ne compte pas dans le rang — sauf si un
+bloc le vise (`AT OBS[2][1]`), auquel cas il porte les deux rôles et la structure
+le dit. La **fenêtre de départ** fixe `S0` et n'est pas une constatation : rien
+ne s'y déclenche.
+
+**Les dates sont portées sous deux formes**, et les deux sont nécessaires : la
+year-fraction, sur laquelle le moteur travaille, et la date calendaire, seule
+opposable — c'est elle qu'un term sheet porte et qu'un deal booké figera. C'est
+pourquoi l'échéancier est bâti **dans `resolve_constats`** : c'est le dernier
+endroit où les dates calendaires existent encore. Après lui, tout est en
+year-fractions, et les reconstruire supposerait de re-choisir une origine —
+l'erreur d'ancrage qui est revenue cinq fois en une session.
+
+**Une conséquence sur le contrat du parser** : `constat_ref` survit désormais à
+la résolution. Il était effacé, les dates suffisant au moteur ; sans lui, rien
+ne rattache un bloc à son calendrier une fois les dates converties. Un test qui
+vérifiait l'effacement a été retourné pour vérifier la conservation.
+
+**Le mode normal aussi.** `resolve_constats` sortait par un raccourci quand il
+n'y avait rien à résoudre — dates écrites en dur. L'échéancier s'y construit
+maintenant également : un produit en mode normal se booke, se suit et s'affiche
+comme les autres.
+
+**Ce que la structure ne fait pas.** Le moteur n'en dépend pas : il garde ses
+tables. Elle existe pour que les autres chemins — booking, cycle de vie, Events,
+backtest — cessent de reconstruire chacun la leur. Le raccordement est le point
+suivant du §14.
+
+---
+
+## 17. Le backtest comme oracle — et ce qu'il a trouvé
+
+**Le dispositif.** Une **série plate** rend le rejeu et le Monte-Carlo
+comparables : à cours constant, le niveau constaté vaut 1,0 partout, quelle que
+soit la fenêtre et quelle que soit la grille. Ce qui reste comparable est
+précisément ce qui nous intéresse — les décisions : quels blocs se déclenchent,
+avec quel rang, où tombe le `STOP`.
+
+**Ce qu'il a trouvé du premier coup.** Le rejeu historique comptait ses propres
+passages là où le moteur lit désormais le rang porté par la date. Sur un script
+à deux calendriers, il lisait **2, 4, 6** quand le pricing lisait **1, 2, 3** :
+le même produit se décidait autrement selon qu'on le pricait ou qu'on le
+rejouait. C'est exactement ce que l'invariant du §11 interdit, et c'est le genre
+d'écart qu'aucune relecture ne trouve — il fallait faire tourner les deux
+chemins côte à côte sur la même trajectoire.
+
+La correction est la même que côté moteur : un rang par événement, aligné sur
+`step_map`. Le rejeu et le pricing lisent maintenant la même chose, et deux
+tests le figent — sur le rang, et sur la ligne de `PARAM()` que ce rang
+sélectionne.
+
+**Les six cas du plan sont couverts** : événement sur agrégat, événement direct
+sur une sous-date, même fixing consommé dans les deux rôles, `STOP`
+intermédiaire, plusieurs sous-jacents, historique insuffisant — plus l'absence
+totale d'historique, qui doit renoncer proprement et non lever.
+
+**La convention de transposition est figée sans être jugée.** Le rejeu convertit
+les year-fractions en séances à 252 par an ; un test l'enregistre telle quelle.
+La changer déplacerait toutes les constatations de tout backtest existant, donc
+elle mérite d'être visible avant d'être discutée.
+
+**Ce que l'invariant ne peut pas être.** Le rejeu travaille sur 252 séances, le
+moteur sur 52 pas : les tests ne comparent jamais des dates au jour près, mais
+des décisions et des rangs. C'est la formulation affaiblie du §14, et elle est
+maintenant appliquée plutôt qu'annoncée.
+
+---
+
+## 18. Le figement au booking
+
+**Ce qui n'allait pas.** Les dates d'un deal booké se reconstruisaient à chaque
+valorisation, depuis ses CONSTAT et son ancrage. Une convention de jour ouvré
+modifiée, un référentiel de fériés mis à jour, ou simplement un changement dans
+la génération de calendrier déplaçaient donc **rétroactivement** les
+constatations d'un contrat déjà signé. Ce que le term sheet dit ne peut pas
+dépendre d'un code exécuté plus tard.
+
+**Ce qui est figé** : `Deal.schedule_json`, alimenté au booking depuis
+l'échéancier du §16 — par constatation, sa date calendaire, son rang, sa
+réduction, ses relevés datés, et les blocs du script qu'elle déclenche dans
+l'ordre contractuel. Plus la fenêtre de départ, à part, puisqu'elle n'est pas
+une constatation.
+
+**La résolution est faite une seule fois** : `_resoudre_pour_booking` a été
+extraite pour que les temps d'observation et l'échéancier figé viennent du même
+calcul. Deux résolutions séparées, ce sont deux calendriers qui peuvent diverger
+— exactement ce que le figement doit empêcher.
+
+**Dégradation assumée.** Un script qu'on ne sait pas résoudre laisse le champ
+vide, et le booking passe : `{}` se lit comme « pas d'échéancier figé », ce qui
+est la vérité, plutôt que d'enregistrer un calendrier partiel. Les deals
+antérieurs au champ sont dans le même cas — aucune migration n'est prévue, comme
+convenu, et l'API rend `schedule: null` pour qu'un écran puisse le dire.
+
+**Un défaut préexistant trouvé en passant, et réparé.** Sept tests de
+`test_rfq.py` — tout le booking en mode expert — échouaient déjà avant ce
+chantier : une `value_date` écrite en dur au 2026-09-03, devenue antérieure à
+`date.today()`. Le booking expert n'était donc plus testé depuis cette date. La
+date est maintenant relative au strike, comme `T` l'était déjà juste à côté — et
+le commentaire de `T` disait précisément pourquoi : « une constante deviendrait
+fausse dès le lendemain ».
+
+---
+
+## 19. Fixings des relevés, et agrégats officiels
+
+**Le modèle de fixings existait déjà**, et il couvre le cahier des charges :
+valeur indicative séparée de l'officielle (`indicative_spots_json` contre
+`spots_json`), provenance, statut, versions immuables avec `supersedes_id`,
+preuve (`evidence_sha256`), validation à quatre yeux. Rien à reconstruire.
+
+**Ce qui manquait** : les `DealEvent` ne couvraient que les **constatations**.
+Sur un produit à moyenne, les quatre relevés trimestriels d'une constatation
+n'avaient aucune ligne — donc ni fixing officiel, ni provenance, ni preuve, et
+l'agrégat n'avait rien à lire. Le booking crée désormais une ligne par relevé,
+rattachée à sa constatation par `parent_event_id`, la constatation portant sa
+règle d'agrégation dans `reduction`.
+
+**L'invariant « aucun fixing compté deux fois » est tenu par construction.** Le
+dernier relevé d'une fenêtre EST la constatation : il n'est pas dédoublé, donc
+un cours servant deux usages ne produit qu'un seul fixing officiel — et donc une
+seule vérité. C'est une propriété du schéma, pas une vérification à faire tourner.
+
+**L'agrégat officiel** (`core/agregats_officiels.py`) réduit une fenêtre en un
+niveau **par sous-jacent** ; l'agrégation panier vient après, dans le payoff.
+Il refuse plutôt qu'il n'approxime :
+
+- **fenêtre incomplète** → pas d'agrégat, et la liste nommée des relevés
+  manquants. Une moyenne partielle qui se présente comme une moyenne est
+  exactement le chiffre faux qui ne se signale pas ;
+- **un sous-jacent sans cours sur toute la fenêtre** → blocage aussi. Le réduire
+  sur les seules dates où il en a le comparerait à ses pairs sur une autre base,
+  dans le calcul même du worst-of ;
+- **réduction inconnue** → refus.
+
+**La neutralisation, seule issue au blocage.** Un férié imprévu, une source
+indisponible, un titre suspendu bloqueraient sinon un produit que personne ne
+pourrait débloquer. Un relevé peut être écarté — mais jamais silencieusement :
+motif et auteur voyagent avec le calcul et ressortent dans sa sérialisation.
+
+**Périmé par version, pas par valeur.** Un agrégat retient les versions de
+fixing qui l'ont produit. Une correction en crée une nouvelle, et l'agrégat
+devient périmé — **même si la correction rend le même cours**. Comparer les
+valeurs laisserait passer une correction sans effet numérique, que l'auditeur
+doit pourtant voir.
+
+---
+
+## 20. Le cycle de vie face aux fenêtres
+
+**La machinerie existait**, et elle est solide : rejeu officiel depuis les
+fixings validés, propositions séparées des validations, Maker/Checker, refus
+explicite d'un payoff qui dépend du chemin entre les constatations. Rien à
+reconstruire ici non plus.
+
+**Une référence morte de ce chantier y traînait.** `path_dependency_reasons`
+bloquait le rejeu officiel sur `FIX_MIN|FIX_MAX|FIX_AVG` — un vocabulaire
+supprimé au §7. Le retirer ne fait pas que nettoyer : une constatation sur
+période se prouve désormais depuis les fixings de ses relevés, donc la bloquer
+reviendrait à refuser un produit parfaitement rejouable. Les barrières
+américaines (`WOF_MIN`, `S_MIN[i]`, `REALVOL`) restent refusées, elles lisent
+bien le chemin.
+
+**Le rejeu marchait déjà**, à une condition près. Il reconstitue une série à
+252 pas depuis **tous** les événements fixés : les relevés créés au §19 y entrent
+donc naturellement, chacun posant son cours à sa date, et la moyenne d'une
+fenêtre devient exacte.
+
+**Le trou, et il était dangereux.** Si les relevés d'une fenêtre n'ont pas leurs
+fixings, la série reste constante par morceaux entre les constatations — et la
+moyenne se calcule alors sur des valeurs **reportées**, pas sur les cours du
+contrat. Le rejeu rendait un nombre parfaitement plausible, et rien ne disait
+qu'il était faux. C'est précisément le silence que la règle « aucune moyenne
+partielle silencieuse » interdit.
+
+**La décision : report, pas refus.** Bloquer ferait qu'on n'aurait jamais rien —
+arbitrage de Philippe, et il a raison sur l'usage. Le rejeu aboutit donc
+toujours : un relevé sans fixing hérite du dernier cours connu, ce qui est la
+convention de place pour un jour sans cotation. Ce qui n'est pas négociable,
+c'est le silence : `releves_sans_fixing` **nomme les dates reportées**, et
+l'avertissement `OFFICIAL_WINDOW_CARRIED_FORWARD` voyage AVEC le résultat, pas à
+côté. Un cours à zéro ou absent ne compte pas comme un fixing — c'est l'état d'un
+événement créé au booking et jamais saisi.
+
+**L'avertissement n'est pas générique, parce que le report ne coûte pas la même
+chose partout.** Sur `AVG`, un cours reporté pèse 1/N : l'erreur est bornée. Sur
+`MIN` ou `MAX`, elle ne l'est pas — si le cours manquant était justement
+l'extrême de la fenêtre, le niveau constaté ressort faux **dans le sens
+favorable**, et le produit ne knock-in pas. Ce n'est plus une imprécision, c'est
+un basculement de décision : `peut_renverser_la_decision` le porte
+explicitement.
+
+**Le backtest avait le défaut inverse**, et personne ne l'avait vu : quand un
+cours manquait, il le **sautait** au lieu de le reporter. La moyenne portait
+alors sur trois relevés au lieu de quatre, sans que rien ne le dise — la
+« moyenne partielle silencieuse », au backtest plutôt qu'en vie. Il reporte
+désormais, et remonte `releves_reportes` dans son résultat.
+
+**Reste ouvert** : la séparation proposition / application (point 7 du plan) —
+voir le résultat probable avec report, mais exiger le fixing ou une
+neutralisation motivée avant qu'un montant parte chez le client. Et l'idée de
+l'**encadrement** : un cours manquant n'est pas inconnu, il est borné ; si la
+décision est la même dans tout l'encadrement, elle est certaine malgré le trou,
+et seuls les cas où le manque change l'issue mériteraient d'être bloqués.
+
+**Ce qui n'est pas concerné** : un produit ponctuel ne déclare aucune fenêtre, et
+un deal booké avant l'échéancier figé n'en déclare pas non plus. Les deux
+continuent de vivre exactement comme avant — la dégradation reste propre, et un
+échéancier illisible ne fait pas tomber le cycle de vie d'un deal.

@@ -581,7 +581,8 @@
             </h2>
             <p class="text-[10px] text-slate-500 mt-0.5">
               Basée sur le pricing en cours · {{ store.underlyings.length }} sous-jacent(s) ·
-              {{ previewEvents.length }} constatation(s)
+              {{ nbConstatations }} constatation(s)<template v-if="nbReleves">,
+              dont {{ nbReleves }} relevé(s) de fenêtre</template>
             </p>
           </div>
           <button class="btn-primary text-xs px-3 py-1.5" @click="goToDeal">
@@ -616,11 +617,29 @@
                 :class="[
                   'border-b border-slate-800/50',
                   ev.t === 0 ? 'bg-amber-950/20' : (ev.isFuture ? 'opacity-60' : ''),
+                  ev.estReleve ? 'text-[11px]' : '',
                 ]">
-                <td class="py-2 pr-3 text-slate-500">{{ i + 1 }}</td>
+                <td class="py-2 pr-3 text-slate-500">
+                  <span v-if="!ev.estReleve">{{ numeroConstatation(i) }}</span>
+                </td>
                 <td class="py-2 pr-3 whitespace-nowrap"
-                  :class="ev.t === 0 ? 'text-amber-400 font-semibold' : 'text-slate-300'">
+                  :class="ev.t === 0 ? 'text-amber-400 font-semibold'
+                          : (ev.estReleve ? 'text-slate-500 pl-6' : 'text-slate-300')">
+                  <!-- Un relevé n'est pas une observation : il alimente la
+                       réduction de la constatation au-dessus de lui. Le mettre
+                       en retrait plutôt que dans la numérotation évite de faire
+                       croire à douze constatations là où il y en a trois. -->
+                  <span v-if="ev.estReleve" class="text-slate-700 mr-1">↳</span>
                   {{ ev.label }}
+                  <span v-if="ev.reduction"
+                        class="ml-1.5 text-[9px] rounded px-1 py-0.5 border border-blue-800/60 text-blue-400">
+                    {{ ev.reduction }} sur {{ ev.nbReleves }} relevés
+                  </span>
+                  <span v-if="ev.evenement"
+                        class="ml-1.5 text-[9px] rounded px-1 py-0.5 border border-amber-800/60 text-amber-500"
+                        title="Un bloc du script vise directement ce relevé : il porte les deux rôles, et n'aura qu'un seul fixing officiel.">
+                    événement
+                  </span>
                 </td>
                 <td class="py-2 pr-3 font-mono text-slate-400 whitespace-nowrap">{{ ev.date }}</td>
                 <td class="py-2 pr-3 font-mono num text-slate-400">{{ ev.t.toFixed(2) }}</td>
@@ -823,6 +842,16 @@ function sourceClass(s) {
 }
 
 // Bandeau refresh
+/** Les relevés ne sont pas des constatations : ils ne sont pas numérotés. */
+function numeroConstatation(i) {
+  return previewEvents.value.slice(0, i + 1).filter(e => !e.estReleve).length
+}
+
+const nbConstatations = computed(
+  () => previewEvents.value.filter(e => !e.estReleve).length)
+const nbReleves = computed(
+  () => previewEvents.value.filter(e => e.estReleve).length)
+
 const refreshBanner = computed(() => {
   const s = dealsStore.refreshStatus
   if (!s) return null

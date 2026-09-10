@@ -258,7 +258,11 @@ def test_resolve_constats_single():
     target = date.today() + timedelta(days=365)
     resolved = resolve_constats(cs, {'TRADEDATE': target.isoformat()})
     assert resolved.events[0].dates == [pytest.approx(1.0, abs=0.01)]
-    assert resolved.events[0].constat_ref is None
+    # La provenance SURVIT à la résolution. Elle était effacée auparavant, les
+    # dates suffisant au moteur ; l'échéancier contractuel en a besoin pour dire
+    # de quel calendrier vient chaque bloc — sans quoi rien ne rattache une
+    # constatation à son CONSTAT une fois les dates converties.
+    assert resolved.events[0].constat_ref == 'TRADEDATE'
 
 
 def test_resolve_constats_schedule_excludes_start_date():

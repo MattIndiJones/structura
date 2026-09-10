@@ -248,6 +248,12 @@ class CompiledScript:
     # script did its own `WOF / FIX_AVG`); None with no dates is the ordinary
     # product whose S0 is the strike-date close.
     strike_fix_reduction: str | None = None
+    # L'échéancier contractuel résolu — voir schedule_model.Echeancier. Rempli
+    # par resolve_constats(), qui est le seul endroit où les dates CALENDAIRES
+    # sont encore disponibles : après lui, tout est en year-fractions. C'est
+    # cette structure que le booking fige et que le cycle de vie relit, plutôt
+    # que de reconstruire chacun la sienne.
+    echeancier: object | None = None
 
 
 @dataclass
@@ -278,6 +284,20 @@ class CompiledEvent:
     # every observation reads a single point.
     window_dates: list[list[float]] | None = None
     reduction: str | None = None
+    # Rang de chaque date DANS L'ÉCHÉANCIER QUE LE BLOC NOMME, aligné index par
+    # index avec `dates` comme payment_dates et window_dates le sont déjà.
+    # C'est ce que le script lit sous le nom `INDEX`.
+    #
+    # Le rang est une propriété de la DATE, pas un compteur d'exécution : la
+    # troisième constatation porte 3 qu'on la price neuve ou à mi-vie, et un
+    # bloc posé sur une sous-date ne décale plus rien. Un compteur global, lui,
+    # additionnait les calendriers (2/4/6 au lieu de 1/2/3 sur deux calendriers)
+    # et devait être réamorcé à la main en vie résiduelle — d'où `index_offset`,
+    # que ceci rend inutile. Voir CONSTATATIONS_PERIODE_DESIGN.md §13.
+    #
+    # None sur AT_MATURITY, qui ne nomme aucun échéancier : `INDEX` y est refusé
+    # à la compilation plutôt que de valoir un rang inventé.
+    ranks: list[int] | None = None
 
 
 # ── Expression transpiler ─────────────────────────────────────────
@@ -725,8 +745,11 @@ def parse_script(code: str) -> CompiledScript:
             try:
                 ns = {}
                 exec(compile(fn_src, '<payscript>', 'exec'), exec_globals, ns)
-                events.append(CompiledEvent(type='AT', dates=dates, fn=ns['_fn'],
-                                             constat_ref=constat_ref, constat_qualifier=constat_qualifier))
+                events.append(CompiledEvent(
+                    type='AT', dates=dates, fn=ns['_fn'],
+                    constat_ref=constat_ref, constat_qualifier=constat_qualifier,
+                    # `AT 1, 2, 3:` — le calendrier du bloc EST sa liste de dates.
+                    ranks=list(range(1, len(dates) + 1)) if dates else None))
             except SyntaxError as e:
                 errors.append(f'AT compile: {e}')
             continue
@@ -737,6 +760,9 @@ def parse_script(code: str) -> CompiledScript:
     for name, line_no in unknown.items():
         if name not in declared:
             errors.append(f'Ligne {line_no}: identifiant inconnu "{name}" (ni PARAM ni SET déclaré — faute de frappe ?)')
+
+    # Portée du rang d'observation : deux écritures le rendent indéfini.
+    errors.extend(_verifier_portee_du_rang(_blocs_et_references(lines), array_params))
 
     if errors:
         raise ValueError('\n'.join(errors))
@@ -774,6 +800,68 @@ def parse_script(code: str) -> CompiledScript:
 # from the payoff itself. Conflicting usages → direction None (the watchlist
 # shows a neutral gap, no color).
 _MONITOR_OBS = r'(WOF_MIN|BOF_MAX|WOF|BOF|BASKET(?:\(\))?|S\[\d+\]|S_MIN\[\d+\]|S_MAX\[\d+\])'
+
+
+def _blocs_et_references(lines: list[dict]) -> list[tuple[str | None, set[str]]]:
+    """(échéancier visé, identifiants lus) pour chaque bloc `AT` du script.
+
+    Analyse du TEXTE, comme `_analyze_monitors` : ce qu'on cherche ici — quel
+    bloc lit quoi — n'existe pas dans les fonctions compilées, qui ne sont plus
+    que du code Python.
+
+    L'échéancier visé est le nom du CONSTAT (qualificateurs retirés : `OBS.last`
+    et `OBS[2][1]` visent tous deux OBS), `None` pour un bloc à dates littérales
+    — dont l'échéancier est sa propre liste de dates, donc le rang y est défini —
+    et la chaîne `MATURITY` pour `AT MATURITY`, seul bloc qui ne relève d'aucun
+    échéancier."""
+    out: list[tuple[str | None, set[str]]] = []
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        m = re.match(r'^AT\s+(.+?)\s*:?\s*$', ln['text'], re.I) if ln['indent'] == 0 else None
+        if not m:
+            i += 1
+            continue
+        cible = m.group(1).strip()
+        if re.match(r'^MATURITY$', cible, re.I):
+            nom = 'MATURITY'
+        else:
+            mc = re.match(r'^([A-Za-z_]\w*)', cible)
+            nom = mc.group(1).upper() if mc and not cible[0].isdigit() else None
+        refs: set[str] = set()
+        i += 1
+        while i < len(lines) and lines[i]['indent'] > 0:
+            refs.update(w.upper() for w in re.findall(r'[A-Za-z_]\w*', lines[i]['text']))
+            i += 1
+        out.append((nom, refs))
+    return out
+
+
+def _verifier_portee_du_rang(blocs, array_param_names) -> list[str]:
+    """Erreurs de portée du rang d'observation — voir §13 de la note de
+    conception. `INDEX` est le rang de la date dans l'échéancier que le bloc
+    nomme ; deux écritures rendent ce rang indéfini, et sont refusées plutôt que
+    servies par un nombre inventé."""
+    errs = []
+    for nom, refs in blocs:
+        if nom == 'MATURITY' and 'INDEX' in refs:
+            errs.append(
+                "INDEX dans un bloc qui ne nomme aucun échéancier : le rang "
+                "d'observation se compte DANS un calendrier. Utilisez "
+                "`AT <Calendrier>.last:` plutôt que `AT MATURITY:`.")
+    # Un PARAM() lu depuis deux calendriers différents n'a plus de nombre de
+    # lignes défini : trois valeurs ici, une autre là. Refusé plutôt que deviné.
+    for nom_param in array_param_names:
+        cals = {nom for nom, refs in blocs
+                if nom and nom != 'MATURITY' and nom_param in refs}
+        if len(cals) > 1:
+            errs.append(
+                f"PARAM() {nom_param} est lu depuis plusieurs calendriers "
+                f"({', '.join(sorted(cals))}) : « une valeur par observation » "
+                f"n'a alors plus de nombre de lignes défini. Déclarez un "
+                f"PARAM() par calendrier, ou visez une date précise avec "
+                f"`AT <Calendrier>.last:`.")
+    return errs
 
 
 def _analyze_monitors(code: str, m_param_names: list[str]) -> list[dict]:
@@ -885,7 +973,12 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
     since both share the same per-path `done` flag)."""
     has_strike_fix = any(c.name == 'STRIKE_FIX' for c in script.constats)
     if not has_strike_fix and not any(getattr(ev, 'constat_ref', None) for ev in script.events):
-        return script   # nothing to resolve — common/simple-mode case
+        # Rien à résoudre — mode simple, dates écrites en dur. L'échéancier se
+        # construit quand même : un produit en mode normal se booke, se suit et
+        # s'affiche comme les autres, et ses dates sont déjà là.
+        from .schedule_model import construire as _construire_echeancier
+        script.echeancier = _construire_echeancier(script)
+        return script
 
     from datetime import date
     from ..calendars import BusinessDayConvention, add_business_days, adjust
@@ -1076,6 +1169,8 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
             [_to_year_frac(d) for d in w] for w in win_dates]
         quals = ev.constat_qualifier or []
         reduction = constat_by_name[name].reduction
+        # Le rang suit la CONSTATATION, jamais le relevé : `AT X[2][1]` parle du
+        # deuxième coupon même s'il lit le premier relevé de sa fenêtre.
         if len(quals) >= 2:
             # Deuxième niveau : on ne vise plus une constatation mais UN RELEVÉ
             # dans sa fenêtre. L'événement lit alors le cours de ce jour-là, pas
@@ -1093,18 +1188,26 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
             # Le règlement suit la CONSTATATION, pas le relevé : c'est elle qui
             # déclenche le flux.
             resolved_pay, resolved_win, reduction = [payments[k]], None, None
+            resolved_ranks = [k + 1]
         elif quals:
             k = _qualifier_index(quals[0], len(dates), name)
             resolved, resolved_pay = [dates[k]], [payments[k]]
             resolved_win = [windows[k]] if windows else None
+            # Le rang dans le CALENDRIER, pas dans le bloc : `AT X.last:` sur un
+            # calendrier de trois dates vaut 3, sinon l'idiome Athena — dernier
+            # coupon `COUPON * INDEX` — paierait un coupon au lieu de trois.
+            resolved_ranks = [k + 1]
         else:
             # plain `AT Name:` — every date, unfiltered
             resolved, resolved_pay = list(dates), list(payments)
             resolved_win = list(windows) if windows else None
+            resolved_ranks = list(range(1, len(dates) + 1))
         new_events.append(CompiledEvent(
             type=ev.type, dates=resolved, fn=ev.fn,
+            constat_ref=name, constat_qualifier=ev.constat_qualifier,
             payment_dates=resolved_pay if currency else None,
-            window_dates=resolved_win, reduction=reduction))
+            window_dates=resolved_win, reduction=reduction,
+            ranks=resolved_ranks))
 
     strike_fix_dates = strike_fix_reduction = None
     if has_strike_fix:
@@ -1119,11 +1222,35 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         else:
             strike_fix_dates = _full_dates('STRIKE_FIX')[0]
 
-    return CompiledScript(events=new_events, init_fn=script.init_fn,
-                           params=script.params, constats=script.constats,
-                           has_stop=script.has_stop, monitors=script.monitors,
-                           strike_fix_dates=strike_fix_dates,
-                           strike_fix_reduction=strike_fix_reduction)
+    resolu = CompiledScript(events=new_events, init_fn=script.init_fn,
+                            params=script.params, constats=script.constats,
+                            has_stop=script.has_stop, monitors=script.monitors,
+                            strike_fix_dates=strike_fix_dates,
+                            strike_fix_reduction=strike_fix_reduction)
+
+    # L'échéancier contractuel, bâti ICI parce que c'est le dernier endroit où
+    # les dates calendaires existent encore : `_full_dates` les a, `_windows_dates`
+    # aussi, et tout ce qui suit ne manipule plus que des year-fractions. Les
+    # reconstruire plus tard supposerait de re-choisir une origine — l'erreur
+    # d'ancrage qui est revenue cinq fois en une seule session.
+    from .schedule_model import construire as _construire_echeancier
+    jours, fenetres = {}, {}
+    for c in script.constats:
+        if c.name not in constat_values:
+            continue
+        try:
+            _, _, observed = _full_dates(c.name)
+        except ValueError:
+            continue
+        # Les dates de paiement calendaires ne sont pas conservées par
+        # _full_dates — seules leurs year-fractions le sont. La constatation les
+        # portera le jour où le booking en aura besoin.
+        jours[c.name] = (observed, [])
+        w = _windows_dates(c.name, observed)
+        if w is not None:
+            fenetres[c.name] = w
+    resolu.echeancier = _construire_echeancier(resolu, jours, fenetres)
+    return resolu
 
 
 def effective_T_max(script: CompiledScript, requested_T: float) -> float:

@@ -104,18 +104,36 @@ def test_barriere_deja_franchie_rend_le_produit_lineaire():
     assert abs(sans["delta_1"]) < 0.05, sans
 
 
-def test_le_compteur_d_observations_choisit_la_bonne_ligne_de_barriere():
+def test_le_rang_d_observation_choisit_la_bonne_ligne_de_barriere():
     """Barrière de rappel dégressive [110 %, 100 %, 90 %] : à la troisième
-    observation (index hérité = 2), un spot à 95 % rappelle. Sans l'état, le
-    produit se croit à sa première observation, teste 110 %, ne rappelle pas —
-    et livre le delta d'un produit qui court encore un an et demi."""
+    observation, un spot à 95 % rappelle ; à la première, il teste 110 % et ne
+    rappelle pas — deux produits, deux deltas.
+
+    Ce que le test vérifie a changé avec le rang par échéancier. Avant, la
+    troisième observation se désignait en héritant un compteur (`index=2`) ;
+    désormais le rang est porté par la DATE et survit au décalage résiduel, donc
+    il n'y a plus rien à hériter : le script résiduel de ce deal à mi-vie ne
+    contient que sa dernière date, et cette date porte le rang 3.
+
+    C'est une propriété plus forte que l'ancienne — le produit ne peut plus se
+    tromper de ligne parce qu'un appelant a oublié de transmettre un état."""
     up = {"M_AC_BAR": [1.10, 1.00, 0.90]}
-    avec = _greeks(DEGRESSIF, sigma=0.05, T=1.5, user_params=up,
-                   state=_state(0.95, index=2))
-    sans = _greeks(DEGRESSIF, sigma=0.05, T=1.5, user_params=up,
-                   state=_state(0.95))
-    assert abs(avec["delta_1"] - sans["delta_1"]) > 0.2 * max(
-        abs(sans["delta_1"]), 1e-6), f"avec={avec}, sans={sans}"
+    cs = parse_script(DEGRESSIF)
+    assert cs.events[0].ranks == [1, 2, 3]
+
+    # Le deal vu à un an : il ne reste que la constatation de 1,5 an, qui porte
+    # le rang 3 et lit donc 90 %.
+    residuel = CompiledScript(events=_shift_events_for_mtf(cs.events, 1.0),
+                              init_fn=cs.init_fn, params=cs.params,
+                              constats=cs.constats, has_stop=cs.has_stop)
+    assert residuel.events[0].ranks == [3], residuel.events[0].ranks
+
+    a_mi_vie = _greeks(None, compiled=residuel, sigma=0.05, T=0.5,
+                       user_params=up, state=_state(0.95))
+    au_depart = _greeks(DEGRESSIF, sigma=0.05, T=1.5, user_params=up,
+                        state=_state(0.95))
+    assert abs(a_mi_vie["delta_1"] - au_depart["delta_1"]) > 0.2 * max(
+        abs(au_depart["delta_1"]), 1e-6), f"mi-vie={a_mi_vie}, départ={au_depart}"
 
 
 def test_le_niveau_de_reference_de_la_vol_realisee_suit_le_bump():

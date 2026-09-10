@@ -162,6 +162,8 @@ def price_endpoint(req: PricingRequest):
         t_max_effective=round(T_eff, 4),
         fugit=result.get("fugit"),
         constatation_windows=result.get("constatation_windows"),
+        schedule=(compiled.echeancier.to_dict()
+                  if getattr(compiled, "echeancier", None) else None),
     )
 
 

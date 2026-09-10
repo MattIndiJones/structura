@@ -1139,28 +1139,41 @@ def _run_residual(script_text, t0, spot, sigma=0.05, r=0.03, T_res=0.5,
 
 def test_residual_autocall_certain_recall_and_index():
     """3Y annual autocall vu à 2.5 ans, spot à 130% du strike, σ=5% : le rappel
-    à l'obs résiduelle (t=0.5) est quasi certain. Avec index_offset=2 l'INDEX
-    vaut 3 → coupon 15% : MtM ≈ df(0.5)·1.15. Sans héritage d'index le produit
-    croit en être à sa 1ère obs et paie 5%."""
+    à l'obs résiduelle (t=0.5) est quasi certain, et c'est la TROISIÈME
+    observation — donc `CPN * INDEX` paie 15 %, pas 5 %.
+
+    Ce que le test vérifie a changé avec le rang par échéancier : le rang est
+    porté par la DATE et survit au décalage résiduel, donc il n'y a plus d'état
+    à hériter. Le produit paie 15 % qu'on lui transmette un compteur ou non —
+    propriété plus forte que l'ancienne, où oublier `index_offset` faisait payer
+    5 % sans que rien ne le signale."""
     r = 0.03
-    with_idx = _run_residual(RESIDUAL_AUTOCALL, 2.5, 1.3, index_offset=2)
-    assert abs(with_idx - math.exp(-r * 0.5) * 1.15) < 0.005, f"{with_idx:.4f}"
-    without = _run_residual(RESIDUAL_AUTOCALL, 2.5, 1.3)
-    assert abs(without - math.exp(-r * 0.5) * 1.05) < 0.005, f"{without:.4f}"
+    attendu = math.exp(-r * 0.5) * 1.15
+    sans_etat = _run_residual(RESIDUAL_AUTOCALL, 2.5, 1.3)
+    assert abs(sans_etat - attendu) < 0.005, f"{sans_etat:.4f}"
+    # Le compteur hérité, s'il est encore transmis, ne change plus rien.
+    avec_etat = _run_residual(RESIDUAL_AUTOCALL, 2.5, 1.3, index_offset=2)
+    assert abs(avec_etat - sans_etat) < 1e-9, f"{avec_etat:.4f} vs {sans_etat:.4f}"
 
 
 def test_residual_degressive_param_reads_right_row():
-    """Barrière dégressive [110%, 100%, 90%] : à la 3ème obs (index_offset=2),
-    WOF=95% doit rappeler (barrière 90%) ; sans l'offset la ligne lue est la
-    1ère (110%) et le produit court jusqu'à maturité."""
+    """Barrière dégressive [110 %, 100 %, 90 %] : la constatation résiduelle est
+    la 3ᵉ, donc la ligne lue est 90 % et un WOF à 95 % rappelle.
+
+    `PARAM()` est indexé par le rang d'observation : il hérite donc de sa
+    propriété — le rang vient de la date, pas d'un compteur, et la bonne ligne
+    est lue sans qu'aucun état n'ait à être transmis. C'était le défaut mesuré
+    à 0,22/0,44/0,66 au lieu de 0,11/0,22/0,33 sur deux calendriers (voir
+    test_caracterisation_echeancier.py)."""
     r = 0.03
     up = {"M_AC_BAR": [1.10, 1.00, 0.90]}
-    called = _run_residual(RESIDUAL_DEGRESSIVE, 2.5, 0.95, sigma=0.01,
-                           index_offset=2, user_params=up)
-    assert abs(called - math.exp(-r * 0.5) * 1.05) < 0.005, f"{called:.4f}"
-    not_called = _run_residual(RESIDUAL_DEGRESSIVE, 2.5, 0.95, sigma=0.01,
-                               user_params=up)
-    assert abs(not_called - math.exp(-r * 0.5) * 1.00) < 0.005, f"{not_called:.4f}"
+    attendu = math.exp(-r * 0.5) * 1.05           # rappel : nominal + coupon
+    sans_etat = _run_residual(RESIDUAL_DEGRESSIVE, 2.5, 0.95, sigma=0.01,
+                              user_params=up)
+    assert abs(sans_etat - attendu) < 0.005, f"{sans_etat:.4f}"
+    avec_etat = _run_residual(RESIDUAL_DEGRESSIVE, 2.5, 0.95, sigma=0.01,
+                              index_offset=2, user_params=up)
+    assert abs(avec_etat - sans_etat) < 1e-9, f"{avec_etat:.4f} vs {sans_etat:.4f}"
 
 
 def test_residual_memory_coupons_inherited():

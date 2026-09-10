@@ -50,6 +50,25 @@ def _migrate():
             conn.execute(text("ALTER TABLE deals ADD COLUMN indicative_id INTEGER"))
             conn.commit()
 
+        ev_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deal_events)"))}
+        if ev_cols and "parent_event_id" not in ev_cols:
+            # Les relevés d'une constatation moyennée : ils portent leur propre
+            # fixing officiel, et pointent la constatation qu'ils alimentent.
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN parent_event_id INTEGER"))
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN reduction TEXT DEFAULT ''"))
+            conn.commit()
+
+        if "schedule_json" not in cols:
+            # L'échéancier contractuel figé au booking. Vide sur les deals
+            # antérieurs : ils s'afficheront comme dépourvus d'échéancier figé,
+            # ce qui est la vérité, plutôt que d'en voir un reconstruit après
+            # coup et donc potentiellement différent de leur term sheet.
+            conn.execute(text(
+                "ALTER TABLE deals ADD COLUMN schedule_json TEXT DEFAULT '{}'"))
+            conn.commit()
+
         if "payment_date" not in cols:
             conn.execute(text("ALTER TABLE deals ADD COLUMN payment_date TEXT DEFAULT ''"))
             conn.commit()

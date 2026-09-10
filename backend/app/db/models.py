@@ -291,6 +291,22 @@ class Deal(SQLModel, table=True):
     underlyings_json: str = Field(default="[]", sa_column=Column(Text))   # [{name, ticker, s0_abs}]
     market_snapshot_json: str = Field(default="{}", sa_column=Column(Text))
 
+    # L'échéancier contractuel, FIGÉ au booking — voir
+    # core/payscript/schedule_model.Echeancier et CONSTATATIONS_PERIODE_DESIGN.md.
+    # Par constatation : sa date calendaire, son rang, sa réduction, ses relevés
+    # et les blocs du script qu'elle déclenche, dans l'ordre contractuel.
+    #
+    # Figé, et non recalculé : les dates d'un deal booké se reconstruisaient
+    # jusqu'ici à chaque valorisation depuis ses CONSTAT et son ancrage. Une
+    # convention de jour ouvré modifiée, un référentiel de fériés mis à jour, ou
+    # simplement un changement dans la génération de calendrier déplaçaient donc
+    # rétroactivement les constatations d'un contrat déjà signé. Ce que le
+    # term sheet dit ne doit dépendre d'aucun code exécuté plus tard.
+    #
+    # Vide sur un deal booké avant ce champ : les écrans doivent le dire plutôt
+    # que d'échouer — aucune migration des anciens deals n'est prévue.
+    schedule_json: str = Field(default="{}", sa_column=Column(Text))
+
     # Last computed Greeks (bump-and-reprice, see api/deals.py POST /{id}/greeks) —
     # overwritten at each recompute, no history kept. None while never computed.
     greeks_json: str = Field(default="{}", sa_column=Column(Text))
@@ -739,6 +755,25 @@ class DealEvent(SQLModel, table=True):
     validated_at: Optional[datetime] = Field(default=None)
     applied_at: Optional[datetime] = Field(default=None)
     label: str = Field(default="")
+
+    # ── Constatation sur période ───────────────────────────────────────
+    # Une constatation moyennée n'est pas observable directement : elle se
+    # calcule depuis les cours de sa fenêtre. Ces cours-là doivent donc exister
+    # comme lignes à part entière — sinon ils n'ont ni fixing officiel, ni
+    # provenance, ni preuve, et l'agrégat n'est calculable depuis rien.
+    #
+    # `parent_event_id` non nul = cette ligne est un RELEVÉ, qui alimente la
+    # réduction de la constatation qu'il désigne. Nul = c'est une constatation.
+    #
+    # Un relevé peut par ailleurs déclencher un bloc (`AT OBS[2][1]`) : il reste
+    # alors UNE SEULE ligne, donc un seul fixing officiel pour les deux usages.
+    # C'est l'invariant « aucun fixing compté deux fois », tenu par construction
+    # plutôt que par vérification.
+    parent_event_id: Optional[int] = Field(
+        default=None, foreign_key="deal_events.id", index=True)
+    # Règle d'agrégation de CETTE constatation : 'MIN' | 'MAX' | 'AVG', vide
+    # pour une constatation ponctuelle ou pour un relevé.
+    reduction: str = Field(default="")
 
 
 class OfficialFixingVersion(SQLModel, table=True):

@@ -19,7 +19,7 @@ from .payscript.parser import parse_script, resolve_constats
 
 
 _PATH_OBSERVABLE = re.compile(
-    r"\b(?:WOF_MIN|BOF_MAX|S_MIN\s*\[|S_MAX\s*\[|REALVOL|FIX_(?:MIN|MAX|AVG))",
+    r"\b(?:WOF_MIN|BOF_MAX|S_MIN\s*\[|S_MAX\s*\[|REALVOL)",
     re.IGNORECASE,
 )
 _KI_STATE = re.compile(r"(?:^|_)(?:KI|KNOCK_?IN|BREACH(?:ED)?)(?:$|_)", re.IGNORECASE)
@@ -95,6 +95,78 @@ def semantic_maturity_outcome(compiled, replay: dict) -> tuple[str, str]:
     if breached:
         return "ki", "EXPLICIT_SCRIPT_STATE:" + ",".join(sorted(breached))
     return "final", "MATURITY_NO_EXPLICIT_KI_STATE"
+
+
+def releves_sans_fixing(deal, events: list) -> list[str]:
+    """Dates de relevé qu'une constatation moyennée exige et qui n'ont pas de
+    cours officiel.
+
+    Le rejeu construit une série constante par morceaux entre les événements
+    fixés. C'est exact tant qu'un script ne lit que ces dates-là ; ça cesse de
+    l'être dès qu'une constatation moyenne sa fenêtre, puisque les relevés non
+    fixés y entreraient avec la valeur reportée du dernier cours connu. La
+    moyenne serait alors calculée sur des valeurs inventées, et rien ne le
+    dirait — exactement le défaut que la règle « aucune moyenne partielle
+    silencieuse » interdit.
+
+    Un deal sans échéancier figé — booké avant ce champ, ou script non
+    résoluble — ne déclare aucune fenêtre : rien à vérifier."""
+    try:
+        ech = json.loads(getattr(deal, "schedule_json", "") or "{}")
+    except (TypeError, ValueError):
+        return []
+    attendus: set[str] = set()
+    for c in ech.get("constatations") or []:
+        if c.get("reduction") and c.get("releves"):
+            attendus.update(r["date"] for r in c["releves"] if r.get("date"))
+    if not attendus:
+        return []
+    fixes = {
+        e.event_date for e in events
+        if e.event_date and any(
+            float(v or 0) > 0 for v in json.loads(e.spots_json or "{}").values())
+    }
+    return sorted(attendus - fixes)
+
+
+def _reductions_declarees(deal) -> set[str]:
+    """Les règles d'agrégation que l'échéancier figé déclare."""
+    try:
+        ech = json.loads(getattr(deal, "schedule_json", "") or "{}")
+    except (TypeError, ValueError):
+        return set()
+    return {c["reduction"] for c in ech.get("constatations") or [] if c.get("reduction")}
+
+
+def _avertissement_report(deal, dates: list[str]) -> dict:
+    """Ce que le report a coûté, et il ne coûte pas la même chose partout.
+
+    Sur `AVG`, un cours reporté pèse 1/N : l'erreur est bornée et généralement
+    petite. Sur `MIN` ou `MAX`, elle ne l'est pas — si le cours manquant était
+    justement le plus bas, le minimum reporté ressort trop haut et le produit
+    ne knock-in pas. Ce n'est plus une imprécision, c'est un basculement de
+    décision, et l'avertissement doit le dire au lieu de rester générique."""
+    reductions = _reductions_declarees(deal)
+    extremes = reductions & {"MIN", "MAX"}
+    message = (
+        f"{len(dates)} relevé(s) de fenêtre sans fixing officiel : le cours de "
+        f"la dernière date connue a été reporté. La constatation porte donc en "
+        f"partie sur une valeur reportée, pas sur un cours du contrat."
+    )
+    if extremes:
+        message += (
+            f" Réduction {'/'.join(sorted(extremes))} : un report peut RENVERSER "
+            f"la décision — si le cours manquant était l'extrême de la fenêtre, "
+            f"le niveau constaté est faux dans le sens favorable. À confirmer "
+            f"avant toute application."
+        )
+    return {
+        "code": "OFFICIAL_WINDOW_CARRIED_FORWARD",
+        "dates": dates,
+        "reductions": sorted(reductions),
+        "peut_renverser_la_decision": bool(extremes),
+        "message": message,
+    }
 
 
 def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]]:
@@ -182,6 +254,14 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
     )
     if replay is None:
         return None, [{"code": "OFFICIAL_REPLAY_UNAVAILABLE"}]
+
+    # Un relevé sans fixing hérite du dernier cours connu — la série est
+    # constante par morceaux. Le rejeu aboutit donc toujours, mais il ne doit
+    # pas se taire : la moyenne porte alors sur une valeur reportée, pas sur un
+    # cours du contrat. L'avertissement voyage AVEC le résultat, jamais à côté.
+    reportes = releves_sans_fixing(deal, events)
+    if reportes:
+        replay["avertissements"] = [_avertissement_report(deal, reportes)]
 
     realized_payout = round(sum(flow["cf"] for flow in replay["cash_flows"]), 8)
     non_strike = [event for event in ordered if event.t_years > 0]

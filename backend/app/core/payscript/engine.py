@@ -1270,6 +1270,30 @@ def _constater(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
     return S, bridge_min, bridge_max, _niveaux_constates(script, S, ts, step_map)
 
 
+def _rangs_observation(step_map: dict) -> dict:
+    """Rang que chaque événement lit sous le nom `INDEX`, aligné index par index
+    sur `step_map` — même patron que `pay_map` et les niveaux constatés.
+
+    Le rang vient de la DATE, pas d'un compteur : chaque bloc lit sa position
+    dans l'échéancier qu'il nomme. Deux calendriers ne s'additionnent donc plus
+    (c'était 2/4/6 au lieu de 1/2/3), un bloc posé sur une sous-date ne décale
+    plus les constatations (1/3/4), et rien n'est à réamorcer en vie résiduelle
+    puisque la troisième date porte 3 où qu'on la price.
+
+    None à une entrée : l'événement n'a pas de rang — un script qui y lit
+    `INDEX` est refusé à la compilation, jamais servi par un nombre inventé."""
+    out: dict[int, list] = {}
+    for step, evs in step_map.items():
+        rangs = []
+        for ev in evs:
+            k = next((j for j, d in enumerate(ev.dates)
+                      if max(1, round(d * SY)) == step), None)
+            rangs.append(ev.ranks[k] if ev.ranks and k is not None
+                         and k < len(ev.ranks) else None)
+        out[step] = rangs
+    return out
+
+
 def _niveaux_constates(script: CompiledScript, S: np.ndarray, ts: int,
                         step_map: dict) -> dict:
     """Niveau constaté de chaque ÉVÉNEMENT, aligné index par index sur
@@ -1450,6 +1474,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 wof0_init: float | None = None,
                 realvol_state_init: dict | None = None,
                 lvl_map: dict | None = None,
+                rank_map: dict | None = None,
                 # Pas de grille où le produit COMMENCE. Non nul seulement quand
                 # la constatation initiale est encore à venir : le tenseur
                 # démarre alors avant elle, et le temps antérieur ne doit
@@ -1598,6 +1623,12 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 # sur moyenne, protection sur clôture.
                 _lv = lvl_map[step][ev_i] if lvl_map and step in lvl_map else None
                 ctx["spots"] = _spot_row if _lv is None else list(_lv[:, path])
+                # Le rang que CET événement lit : sa position dans l'échéancier
+                # qu'il nomme. Deux blocs du même jour rattachés à deux
+                # calendriers différents voient donc deux rangs différents.
+                _rg = rank_map[step][ev_i] if rank_map and step in rank_map else None
+                if _rg is not None:
+                    ctx["index"] = _rg
                 st: dict = {"flows": [], "done": False}
                 try:
                     ev.fn(ctx, st)
@@ -1726,6 +1757,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                           wof0_init: float | None = None,
                           realvol_state_init: dict | None = None,
                           lvl_map: dict | None = None,
+                          rank_map: dict | None = None,
                           state_start_step: int = 0) -> dict:
     """Like _eval_paths but returns per-path outcome classification.
 
@@ -1826,6 +1858,12 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                 # sur moyenne, protection sur clôture.
                 _lv = lvl_map[step][ev_i] if lvl_map and step in lvl_map else None
                 ctx["spots"] = _spot_row if _lv is None else list(_lv[:, path])
+                # Le rang que CET événement lit : sa position dans l'échéancier
+                # qu'il nomme. Deux blocs du même jour rattachés à deux
+                # calendriers différents voient donc deux rangs différents.
+                _rg = rank_map[step][ev_i] if rank_map and step in rank_map else None
+                if _rg is not None:
+                    ctx["index"] = _rg
                 st = {"flows": [], "done": False}
                 try:
                     ev.fn(ctx, st)
@@ -2209,6 +2247,7 @@ def run_mc(script: CompiledScript,
                                           s_prev_init=s_prev_init, wof0_init=wof0_init,
                                           realvol_state_init=realvol_state_init,
                                           lvl_map=lvl_b,
+                                          rank_map=_rangs_observation(step_map),
                                           state_start_step=strike_step)
 
     payoffs_anti: list[float] = []
@@ -2283,6 +2322,7 @@ def run_mc(script: CompiledScript,
                                               s_prev_init=s_prev_init, wof0_init=wof0_init,
                                               realvol_state_init=realvol_state_init,
                                               lvl_map=lvl_a,
+                                              rank_map=_rangs_observation(step_map),
                                               state_start_step=strike_step)
 
     # Price: antithetic average of paired paths (lower variance).
@@ -2800,6 +2840,7 @@ def run_mc_paths(script: CompiledScript, underlyings, corr_matrix,
     df_arr_pay = None   # visualisation a taux plat, cf. commentaire ci-dessus
     det = _eval_paths_detailed(script, S, ts, n, N_stat, dt, r, user_params, step_map, mat_events,
                                 bridge_min=br_min, bridge_max=br_max, lvl_map=lvl,
+                                rank_map=_rangs_observation(step_map),
                                 pay_map=pay_map,
                                 pay_df={t: _df_at_time(df_arr_pay, t, dt, ts, r)
                                         for entries in pay_map.values()
@@ -2930,6 +2971,7 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
     df_arr_pay = df_arr
     det = _eval_paths_detailed(script, S, ts, n, N_p, dt, r, user_params, step_map, mat_events,
                                 df_arr=df_arr, bridge_min=br_min, bridge_max=br_max, lvl_map=lvl,
+                                rank_map=_rangs_observation(step_map),
                                 pay_map=pay_map,
                                 pay_df={t: _df_at_time(df_arr_pay, t, dt, ts, r)
                                         for entries in pay_map.values()
@@ -3101,7 +3143,13 @@ def _shift_events_for_mtf(events: list[CompiledEvent], t0: float) -> list[Compil
                 # observation encore a venir aurait ete repricee comme un point.
                 window_dates=([[round(d - t0, 6) for d in wins[i]] for i in keep]
                               if wins and len(wins) == len(ev.dates) else None),
-                reduction=ev.reduction))
+                reduction=ev.reduction,
+                # Le rang suit sa date dans le décalage — c'est tout l'intérêt
+                # de le porter par la date : la troisième constatation reste la
+                # troisième quand on la reprice à mi-vie, sans qu'aucun compteur
+                # n'ait à être réamorcé.
+                ranks=([ev.ranks[i] for i in keep]
+                       if ev.ranks and len(ev.ranks) == len(ev.dates) else None)))
     return shifted
 
 
@@ -3386,7 +3434,8 @@ def run_mark_to_future(script: CompiledScript,
         _eval_paths(script, _S_past, step_k, n, n_outer, dt, r,
                     user_params, past_step_map, [], {}, record=False,
                     state_out=outer_states, flows_out=outer_flows,
-                    lvl_map=_lvl_past, **_state)
+                    lvl_map=_lvl_past,
+                    rank_map=_rangs_observation(past_step_map), **_state)
 
         alive = np.array([not st["done"] for st in outer_states])
         # Cash already paid out, expressed at t0 (the replay discounts to t=0).
@@ -3487,6 +3536,7 @@ def run_mark_to_future(script: CompiledScript,
                 realvol_state_init={"sumsq": np.repeat(rv_sumsq_k[sl], n_inner),
                                     "t": np.repeat(rv_t_k[sl], n_inner)},
                 lvl_map=lvl_in,
+                rank_map=_rangs_observation(step_map),
             )
 
             # Each outer scenario's MTF value = mean of its N_inner inner PVs (% notional).
@@ -3729,7 +3779,8 @@ def run_mtf_drilldown(script: CompiledScript,
         None, _mtf_past_step_map(script, step_k))
     _eval_paths(script, _S_past, step_k, n, n_outer, dt, r, user_params,
                 _mtf_past_step_map(script, step_k), [], {}, record=False,
-                state_out=outer_states, flows_out=outer_flows, lvl_map=_lvl_past)
+                state_out=outer_states, flows_out=outer_flows, lvl_map=_lvl_past,
+                rank_map=_rangs_observation(_mtf_past_step_map(script, step_k)))
     alive = np.array([not st["done"] for st in outer_states])
     fix_state_k, _ = _mtf_realized_fix(script, S_outer, step_k)
     residual_script, step_map, mat_events, ts_eff = _mtf_residual_script(script, t0, T_max)
@@ -3771,7 +3822,8 @@ def run_mtf_drilldown(script: CompiledScript,
         pay_full, pay_raw = _eval_paths(
             script, _p_i, ts_full, n, 1, dt, r, user_params,
             full_step_map, full_mat, flux_full, record=True,
-            stop_times_out=stops, flows_out=flows_full, lvl_map=_p_lvl)
+            stop_times_out=stops, flows_out=flows_full, lvl_map=_p_lvl,
+            rank_map=_rangs_observation(full_step_map))
         stop_t = float(stops[0]) if stops else float(ts_full * dt)
         stop_step = int(round(stop_t * SY))
         fired: dict[int, list] = {}
@@ -3871,6 +3923,7 @@ def run_mtf_drilldown(script: CompiledScript,
                 realvol_state_init={"sumsq": float(outer_states[i]["realvol_sumsq"]),
                                     "t": float(outer_states[i]["realvol_t"])},
                 lvl_map=_lvl_i,
+                rank_map=_rangs_observation(step_map),
             )
             mtf_i = float(np.mean(payoffs)) * 100
             rows = _mtf_flux_rows(flux, n_inner, t0)
@@ -3985,6 +4038,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     # step_map — meme regle que dans le moteur MC : deux blocs au meme jour
     # peuvent constater differemment.
     win_map: dict = {}
+    rank_map: dict = {}
     mat_events = []
     for ev in compiled.events:
         if ev.type == "AT_MATURITY":
@@ -3997,19 +4051,47 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                     (ev.reduction, ev.window_dates[i])
                     if ev.reduction and ev.window_dates and i < len(ev.window_dates)
                     else None)
+                # Le rang que CET evenement lit, comme dans le moteur MC : sa
+                # position dans l'echeancier qu'il nomme. Le rejeu comptait ses
+                # propres passages, si bien qu'un second calendrier lui faisait
+                # lire 2/4/6 la ou le pricing lisait 1/2/3 — le meme produit se
+                # decidait donc autrement selon qu'on le pricait ou qu'on le
+                # rejouait. Voir test_backtest_oracle.py.
+                rank_map.setdefault(step, []).append(
+                    ev.ranks[i] if ev.ranks and i < len(ev.ranks) else None)
 
     end_idx_all = len(dates) - 1
 
+    reportes: set = set()
+
     def _closes_on(tk: str, ds: list[float]) -> list[float]:
         """Closes of `tk` at a window's dates — "last close <= date", the same
-        convention as _closest_price. Dates still in the future are skipped."""
+        convention as _closest_price.
+
+        Un cours absent est REPORTÉ depuis la dernière séance connue, jamais
+        sauté : sauter réduisait la fenêtre en silence, et une moyenne sur trois
+        relevés au lieu de quatre se présentait comme une moyenne. Le report est
+        la convention de place pour un jour sans cotation ; ce qu'il faut, c'est
+        qu'il se dise — d'où `reportes`, remonté dans le résultat.
+
+        Les dates encore dans le futur restent hors de la fenêtre : il n'y a
+        rien à reporter d'un cours qui n'existe pas encore."""
         px = prices_by_ticker.get(tk, [])
         out = []
         for d in ds:
             hi = min(start_idx + round(d * SY_H), end_idx_all)
-            if hi < start_idx or hi >= len(px) or px[hi] <= 0:
+            if hi < start_idx or hi >= len(px):
                 continue
-            out.append(px[hi])
+            if px[hi] > 0:
+                out.append(px[hi])
+                continue
+            # Remonter jusqu'au dernier cours coté avant cette date.
+            k = hi - 1
+            while k >= start_idx and not (k < len(px) and px[k] > 0):
+                k -= 1
+            if k >= start_idx:
+                out.append(px[k])
+                reportes.add(round(d, 6))
         return out
 
     def _reduce(vals: list[float], reduction: str) -> float:
@@ -4163,6 +4245,10 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                 break
             _w = win_map.get(step, [])
             ctx["spots"] = _levels(_w[ev_i] if ev_i < len(_w) else None)
+            _r = rank_map.get(step, [])
+            _rg = _r[ev_i] if ev_i < len(_r) else None
+            if _rg is not None:
+                ctx["index"] = _rg
             st = {"flows": [], "done": False}
             try:
                 ev.fn(ctx, st)
@@ -4233,6 +4319,10 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
         # can chart the PRODUCT's actual path (not just the raw underlying),
         # e.g. the reinvestment proposal backtest (api/deals.py).
         "wof_series": {"dates": [dates[d] for d in wof_days], "values": [round(v, 4) for v in wof_vals]},
+        # Relevés dont le cours a été reporté faute de cotation ce jour-là. Le
+        # rejeu aboutit, mais la constatation porte en partie sur une valeur
+        # reportée : une liste vide est la seule qui autorise à n'en rien dire.
+        "releves_reportes": sorted(reportes),
         # Final replayed state — what a residual-MtM Monte Carlo must inherit
         # to continue this product's life instead of restarting it: script
         # variables (SET / memory coupons live in memo), the observation

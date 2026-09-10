@@ -912,7 +912,11 @@ def _expert_booking(**over):
     base = dict(
         script_snapshot=_EXPERT_SCRIPT,
         market_snapshot={"constats": _CALENDAR},
-        value_date="2026-09-03",
+        # Relative au strike, comme T juste en dessous. Figée, elle est devenue
+        # antérieure au strike le jour où `date.today()` l'a dépassée, et tout
+        # le booking expert a cessé d'être testé — le commentaire de T disait
+        # déjà pourquoi : « une constante deviendrait fausse dès le lendemain ».
+        value_date=(date.today() + timedelta(days=4)).isoformat(),
         maturity_date="2029-08-30",
         # T se compte depuis la date de strike (celle de _booking_body, soit
         # aujourd hui). Calcule, jamais fige : une constante deviendrait

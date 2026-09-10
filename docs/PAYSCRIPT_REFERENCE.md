@@ -79,7 +79,7 @@ trajectoire jamais rappelée ne paie rien.
 
 | Nom | Sens |
 |---|---|
-| `INDEX` | Compteur d'observations, **base 1**. Inchangé pendant `AT MATURITY` (il garde la valeur de la dernière observation) |
+| `INDEX` | **Rang de la date dans l'échéancier que le bloc nomme**, base 1 — voir §4.3. Refusé dans `AT MATURITY`, qui ne nomme aucun échéancier |
 | `T` | Temps écoulé depuis l'origine, en années |
 | `N` | Nombre de sous-jacents |
 | `ACCUM` | Accumulateur alimenté par `ACCRUE` |
@@ -222,6 +222,45 @@ Il n'y a alors pas de longueur à saisir — seulement la fréquence de relevé 
 les bornes sont ouvertes à gauche, fermées à droite, si bien qu'une date de roll
 partagée par deux périodes n'est comptée qu'une fois. `PERIOD` suppose un
 calendrier : sur une date unique il n'y a pas de période précédente.
+
+### 4.3 `INDEX` — le rang, pas un compteur
+
+`INDEX` est le **rang de la date dans l'échéancier que le bloc nomme**. `AT
+OBSERVATIONS:` sur un calendrier de trois dates donne 1, 2, 3 — et les relevés
+d'une constatation sur période n'y changent rien : ce sont des relevés, pas des
+observations.
+
+| écriture | `INDEX` |
+|---|---|
+| `AT OBSERVATIONS:` | 1, 2, 3 |
+| `AT OBSERVATIONS.last:` | **3** — le rang dans le calendrier, pas dans le bloc |
+| `AT OBSERVATIONS[2][1]:` | **2** — celui de la constatation parente, pas du relevé |
+| `AT 1, 2, 3:` | 1, 2, 3 — l'échéancier est la liste du bloc |
+| `AT MATURITY:` | **refusé** — ce bloc ne nomme aucun échéancier |
+
+Deux conséquences qui comptent :
+
+**Le rang est indépendant par échéancier.** Si un `CONSTAT MATURITE` tombe le
+même jour que la dernière date d'`OBSERVATIONS`, alors `AT OBSERVATIONS:` y voit
+3 et `AT MATURITE:` y voit 1. Deux façons d'écrire la même date, deux
+sémantiques, et c'est le nom du calendrier qui tranche. Pour l'idiome Athena —
+dernier coupon `COUPON * INDEX` — c'est `AT OBSERVATIONS.last:` qu'il faut.
+
+**Le rang appartient à la date, pas à l'exécution.** La troisième constatation
+porte 3 qu'on price le produit neuf ou à mi-vie : rien n'est à réamorcer quand
+un deal est valorisé en cours de vie. Un script qui veut compter autre chose —
+coupons effectivement versés, observations sous barrière — l'écrit avec `SET` :
+
+```
+SET PASSAGE = 0
+
+AT OBSERVATIONS:
+  SET PASSAGE = PASSAGE + 1
+```
+
+`PARAM()` suit la même règle : « une valeur par observation » désigne les
+observations du calendrier que le bloc nomme. Un `PARAM()` lu depuis deux
+calendriers différents est refusé — son nombre de lignes ne serait plus défini.
 
 #### Quand prendre `CONSTAT()()` — §4.2
 
