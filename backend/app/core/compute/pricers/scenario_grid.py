@@ -66,6 +66,7 @@ def price_scenario_grid_job(payload: dict) -> dict:
             strike_fix_dates=[round(d - _elapsed, 6)
                               for d in (compiled.strike_fix_dates or [])
                               if d > _elapsed + 1e-9] or None,
+            strike_fix_reduction=compiled.strike_fix_reduction,
         )
 
     n = len(payload["underlyings"])

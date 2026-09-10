@@ -65,6 +65,7 @@ def price_var_scenario_job(payload: dict) -> dict:
         events=residual_events, init_fn=compiled.init_fn, params=compiled.params,
         constats=compiled.constats, has_stop=compiled.has_stop, monitors=compiled.monitors,
         strike_fix_dates=residual_fix or None,
+        strike_fix_reduction=compiled.strike_fix_reduction,
     )
 
     norm_spots = payload["norm_spots"]

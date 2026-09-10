@@ -45,7 +45,8 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in rows" :key="row.date" :class="row.index === null ? 'opacity-60' : ''">
+            <template v-for="row in rows" :key="row.date">
+            <tr :class="row.index === null ? 'opacity-60' : ''">
               <td class="num text-slate-600 tabular-nums">{{ row.index ?? '—' }}</td>
               <td class="whitespace-nowrap">
                 <span class="font-mono" :class="row.index === null ? 'text-slate-500' : 'text-slate-200'">
@@ -70,6 +71,22 @@
                 <span v-if="row.isLast" class="ml-1.5 text-[10px] rounded px-1 py-0.5 border border-slate-700 text-slate-400">maturité</span>
               </td>
             </tr>
+            <!-- Les relevés que cette constatation moyenne. Repliés dans la
+                 ligne plutôt qu'ailleurs : on les lit là où on lit la date. -->
+            <tr v-if="row.fenetre">
+              <td></td>
+              <td :colspan="hasPayments ? 4 : 3" class="pb-1.5 pt-0">
+                <span class="text-slate-600">↳ {{ row.fenetre.n }} relevé(s)</span>
+                <span class="font-mono text-slate-500 ml-1.5">
+                  <SensitiveValue>{{ row.fenetre.dates.slice(0, 6).join(' · ') }}</SensitiveValue>
+                  <template v-if="row.fenetre.tronque">
+                    <span class="text-slate-600"> … </span>
+                    <SensitiveValue>{{ row.fenetre.dates.slice(-3).join(' · ') }}</SensitiveValue>
+                  </template>
+                </span>
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
       </div>
@@ -90,12 +107,18 @@ const props = defineProps({
   // Corps de requête de /api/schedule/generate, tel que l'appelant le compose.
   request: { type: Object, required: true },
   label:   { type: String, default: "Échéancier d'observation" },
+  // Fréquence de relevé d'une constatation sur PÉRIODE ("3M"). Quand elle est
+  // fournie, chaque constatation affiche les relevés qu'elle moyenne : c'est la
+  // seule façon de vérifier qu'un calendrier annuel relevé trimestriellement
+  // fait bien 3 constatations de 4 relevés, et non 12 observations.
+  windowFrequency: { type: String, default: null },
 })
 
 const open    = ref(false)
 const loading = ref(false)
 const error   = ref('')
 const data    = ref(null)
+const fenetres = ref(null)
 
 const STUB_LABELS = {
   short_last: 'stub court en fin', long_last: 'stub long en fin',
@@ -108,9 +131,15 @@ const CONVENTION_LABELS = {
   modified_preceding: 'précédent sauf changement de mois',
 }
 
+// Paramètres ayant servi au dernier chargement. Se fier à la seule présence de
+// `data` laissait afficher un échéancier périmé : replié, modifié, redéplié, il
+// remontrait le calcul d'avant — des relevés qui ne correspondaient plus aux
+// constatations affichées juste au-dessus.
+let chargePour = null
+
 function onToggle(event) {
   open.value = event.target.open
-  if (open.value && !data.value) load()
+  if (open.value && (!data.value || chargePour !== signature.value)) load()
 }
 
 async function load() {
@@ -129,6 +158,8 @@ async function load() {
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur serveur')
     data.value = await res.json()
+    fenetres.value = props.windowFrequency ? await loadFenetres(r) : null
+    chargePour = signature.value
   } catch (e) {
     error.value = e.message
     data.value = null
@@ -137,11 +168,36 @@ async function load() {
   }
 }
 
+/** Les relevés de chaque constatation. Un échec ici n'invalide pas
+    l'échéancier : on perd le détail, pas les dates. */
+async function loadFenetres(r) {
+  try {
+    const res = await fetch('/api/schedule/period-window', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        start_date: r.start_date, end_date: r.end_date, roll_date: r.roll_date,
+        frequency: r.frequency, window_frequency: props.windowFrequency,
+        stub: r.stub, currency: r.currency, convention: r.convention || 'none',
+      }),
+    })
+    if (!res.ok) return null
+    const d = await res.json()
+    return Object.fromEntries((d.fenetres || []).map(f => [f.constatation, f]))
+  } catch (e) {
+    return null
+  }
+}
+
+/** Signature des paramètres — scalaire, donc comparable. */
+const signature = computed(() =>
+  JSON.stringify(props.request) + '|' + (props.windowFrequency || ''))
+
 // Ouvert, l'échéancier suit les champs qu'on modifie — après une pause, pour
 // ne pas lancer un appel par frappe de clavier.
 let timer = null
-watch(() => JSON.stringify(props.request), () => {
-  if (!open.value) { data.value = null; return }
+watch(signature, () => {
+  if (!open.value) { data.value = null; fenetres.value = null; return }
   clearTimeout(timer)
   timer = setTimeout(load, 400)
 })
@@ -172,6 +228,7 @@ const rows = computed(() => {
     adjustedFrom: d.raw_dates?.[i] && d.raw_dates[i] !== date ? d.raw_dates[i] : null,
     isStub: median != null && periods[i] != null && Math.abs(periods[i] - median) > median * 0.2,
     isLast: i === d.dates.length - 1,
+    fenetre: fenetres.value?.[date] || null,
   }))
 })
 

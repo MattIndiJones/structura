@@ -9,6 +9,12 @@ export const templateMeta = [
   { key: 'autocall_gear_put',          label: 'Autocall Gear Put 3Y',                    group: 'Autocall' },
   { key: 'autocall_gear_put_worst_of', label: 'Autocall Gear Put worst-of 2 actifs',     group: 'Autocall' },
   { key: 'call_vanilla',               label: 'Call Vanille',                            group: 'Options' },
+  // expertOnly : ces produits constatent sur une PÉRIODE, et la fenêtre se
+  // saisit dans le panneau CONSTAT — le mode normal, qui écrit ses dates en
+  // dur et ne déclare aucun CONSTAT, n'a nulle part où la porter.
+  { key: 'autocall_moyenne_periode',   label: 'Autocall coupon moyenné sur la période', group: 'Autocall', expertOnly: true },
+  { key: 'call_moyenne',               label: 'Call panier, strike et final moyennés',   group: 'Options', expertOnly: true },
+  { key: 'call_lookback',              label: 'Call à strike lookback (min période)',    group: 'Options', expertOnly: true },
   { key: 'put_vanilla',                label: 'Put Vanille',                             group: 'Options' },
   { key: 'call_spread',                label: 'Call Spread',                             group: 'Options' },
   { key: 'digital',                    label: 'Digital (binaire)',                       group: 'Options' },
@@ -274,28 +280,45 @@ AT OBSERVATIONS.last:
   PAY (1 - KI) * 1
   PAY KI * WOF`,
 
+  autocall_moyenne_periode: `# Autocall 3 ans — coupon constaté sur la MOYENNE de la période — mode expert
+# Chaque constatation annuelle est la moyenne des relevés trimestriels de
+# l'année, par sous-jacent, avant que WOF n'agrège. La protection finale, elle,
+# regarde le COURS de clôture : .last.last descend de la constatation à son
+# dernier relevé.
+PARAM COUPON    = 8%
+PARAM M_AC_BAR   = 100%
+PARAM M_PDI_BAR  = 60%
+
+CONSTAT() OBSERVATIONS AVG PERIOD
+
+AT OBSERVATIONS:
+  SET CALL = INDIC(WOF >= M_AC_BAR)
+  PAY CALL * (1 + COUPON * INDEX) "Rappel + coupon sur moyenne de période"
+  IF CALL = 1:
+    STOP
+
+AT OBSERVATIONS.last.last:
+  SET KI = INDIC(WOF < M_PDI_BAR)
+  PAY 1 - KI * (1 - WOF) "Remboursement, PDI sur le cours final"`,
+
   autocall_gear_put: `# Autocall 3 ans — gear put avec levier sur strike — mode expert
 PARAM COUPON     = 10%
 PARAM M_AC_BAR     = 100%
 PARAM M_PUT_STRIKE = 80%
 PARAM GEARING    = 150%
 
-CONSTAT() STRIKE_FIX
+CONSTAT STRIKE_FIX AVG
 CONSTAT() OBSERVATIONS
 
-SET REF = FIX_AVG
-
 AT OBSERVATIONS:
-  SET PERF = WOF / REF
-  SET CALL = INDIC(PERF >= M_AC_BAR)
+  SET CALL = INDIC(WOF >= M_AC_BAR)
   PAY CALL * COUPON
   PAY CALL * 1
   IF CALL = 1:
     STOP
 
 AT OBSERVATIONS.last:
-  SET PERF = WOF / REF
-  SET LOSS = MIN(1, GEARING * MAX(0, 1 - PERF/M_PUT_STRIKE))
+  SET LOSS = MIN(1, GEARING * MAX(0, 1 - WOF/M_PUT_STRIKE))
   PAY 1 "Remboursement nominal"
   PAY -1 * LOSS "Put vendu à effet de levier (plafonné à 100% du capital)"`,
 
@@ -305,24 +328,42 @@ PARAM M_AC_BAR     = 100%
 PARAM M_PUT_STRIKE = 80%
 PARAM GEARING    = 150%
 
-CONSTAT() STRIKE_FIX
+CONSTAT STRIKE_FIX AVG
 CONSTAT() OBSERVATIONS
 
-SET REF = FIX_AVG
-
 AT OBSERVATIONS:
-  SET PERF = WOF / REF
-  SET CALL = INDIC(PERF >= M_AC_BAR)
+  SET CALL = INDIC(WOF >= M_AC_BAR)
   PAY CALL * COUPON
   PAY CALL * 1
   IF CALL = 1:
     STOP
 
 AT OBSERVATIONS.last:
-  SET PERF = WOF / REF
-  SET LOSS = MIN(1, GEARING * MAX(0, 1 - PERF/M_PUT_STRIKE))
+  SET LOSS = MIN(1, GEARING * MAX(0, 1 - WOF/M_PUT_STRIKE))
   PAY 1 "Remboursement nominal"
   PAY -1 * LOSS "Put vendu à effet de levier (plafonné à 100% du capital)"`,
+
+  call_moyenne: `# Call panier — strike et niveau final moyennés — mode expert
+# S0 et SF sont constatés PAR SOUS-JACENT sur leur fenêtre (longueur et
+# fréquence saisies dans le panneau CONSTAT), et BASKET agrège ensuite.
+PARAM STRIKE = 100%
+
+CONSTAT STRIKE_FIX  AVG
+CONSTAT MATURITE    AVG
+
+AT MATURITE:
+  PAY MAX(0, BASKET - STRIKE) "Call panier, strike et final moyennés"`,
+
+  call_lookback: `# Call à strike lookback — mode expert
+# Le strike est le PLUS BAS de chaque sous-jacent sur la période de départ :
+# le niveau de référence le plus favorable à l'acheteur du call.
+PARAM STRIKE = 100%
+
+CONSTAT STRIKE_FIX  MIN
+CONSTAT MATURITE
+
+AT MATURITE:
+  PAY MAX(0, WOF - STRIKE) "Call sur perf vs plus bas de la période de départ"`,
 
   call_vanilla: `# Call Vanille — mode expert
 PARAM STRIKE = 100%

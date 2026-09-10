@@ -312,7 +312,9 @@ def test_at_qualifier_parsing_first_last_index():
         'AT Observations:\n  PAY 4\n'
     )
     quals = [ev.constat_qualifier for ev in cs.events]
-    assert quals == [('first',), ('last',), ('index', 3), None]
+    # Une LISTE de niveaux : le premier indexe les constatations du
+    # calendrier, un second (`.last.last`) descend dans la fenêtre.
+    assert quals == [[('first',)], [('last',)], [('index', 3)], None]
     assert all(ev.constat_ref == 'OBSERVATIONS' for ev in cs.events)
 
 

@@ -25,10 +25,14 @@ CORR = [[1.0]]
 # Strike asiatique : le payoff est un RATIO entre le niveau final et le niveau
 # fixé pendant la fenêtre. Le spot de départ se simplifie exactement — le prix
 # est donc indépendant du niveau de seeding, ce qui en fait l'oracle idéal.
+#
+# Le ratio ne s'écrit plus dans le script : depuis la constatation sur période,
+# c'est le MOTEUR qui rebase le tenseur sur S0_i (la réduction de la fenêtre de
+# départ, par sous-jacent), et `WOF` EST la performance. L'oracle est le même —
+# seul l'endroit où la division a lieu a changé.
 ASIAN = """
 AT MATURITY
-  SET STRIKE = FIX_AVG
-  PAY WOF / STRIKE "perf vs strike moyen"
+  PAY WOF "perf vs strike moyen"
 """
 
 
@@ -36,7 +40,8 @@ def _asian(strike_fix=True):
     cs = parse_script(ASIAN)
     return CompiledScript(events=cs.events, init_fn=cs.init_fn, params=cs.params,
                           constats=cs.constats,
-                          strike_fix_dates=[4 / 52] if strike_fix else None)
+                          strike_fix_dates=[4 / 52] if strike_fix else None,
+                          strike_fix_reduction='AVG' if strike_fix else None)
 
 
 def _price(spot_mult, spot_base=None, strike_fix=True):

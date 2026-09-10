@@ -214,6 +214,21 @@
             </div>
           </div>
 
+          <!-- Constatations sur période : ce que la fenêtre a réellement pesé -->
+          <div v-if="fenetresConstatation.length" class="bg-slate-800/50 rounded-lg px-3 py-2">
+            <div class="text-slate-500 mb-1">Fenêtres de constatation
+              <HelpTip width="w-80" text="Nombre de points de grille réellement retenus par chaque fenêtre, contre le nombre demandé. La grille de simulation est hebdomadaire : une fenêtre déclarée quotidienne s'y ramène (30 jours ouvrés ≈ 6 points), ce qui coûte quelques points de base par rapport à un moyennage quotidien. En dessous d'une semaine il ne reste qu'un point et le moyennage n'a pas eu lieu du tout." />
+            </div>
+            <div v-for="(w, i) in fenetresConstatation" :key="i"
+                 class="text-[11px] font-mono flex items-baseline gap-1.5"
+                 :class="w.degeneree ? 'text-amber-400' : 'text-slate-300'">
+              <span class="text-slate-500">{{ w.constatation === 'STRIKE_FIX' ? 'départ' : 'obs' }}</span>
+              <span class="font-bold">{{ w.reduction }}</span>
+              <span>{{ w.points_retenus }}/{{ w.points_demandes }} pts</span>
+              <span v-if="w.degeneree" class="text-[10px]">— pas de moyennage</span>
+            </div>
+          </div>
+
           <!-- Fugit — seulement si le script a un STOP -->
           <div v-if="inputs.hasStop && store.result.fugit != null" class="bg-slate-800/50 rounded-lg px-3 py-2">
             <div class="text-slate-500 mb-1">Fugit <span class="text-slate-600 font-normal">(durée moy.)</span>
@@ -557,6 +572,11 @@ function addDaysStr(isoDate, days) {
 }
 
 const enCoursDeVie = computed(() => !!store.result?.in_life)
+
+// Ce qu'une fenêtre de constatation a réellement pesé. Publié pour TOUTES les
+// fenêtres, pas seulement les trop courtes : un décompte se lit, là où une
+// alerte générique se clique sans lire.
+const fenetresConstatation = computed(() => store.result?.constatation_windows || [])
 
 /** Maturité à afficher : résiduelle en cours de vie, pleine sinon. */
 const maturiteAffichee = computed(() => {

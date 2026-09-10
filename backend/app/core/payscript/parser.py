@@ -70,8 +70,6 @@ _SAFE_MATH = {
 MARKET_VARS = {
     'WOF': 'min(_c["spots"])', 'BOF': 'max(_c["spots"])',
     'WOF_MIN': '_c["wof_min"]', 'BOF_MAX': '_c["bof_max"]',
-    'FIX_MIN': '_c["fix_min"]', 'FIX_MAX': '_c["fix_max"]',
-    'FIX_AVG': '_c["fix_avg"]',
     'ACCUM': '_c["accum"]', 'INDEX': '_c["index"]',
     'T': '_c["t"]', 'N': 'len(_c["spots"])',
     'REALVOL': '_c["realvol"]',
@@ -79,6 +77,38 @@ MARKET_VARS = {
 
 # Variables par sous-jacent, indicées de 1 à N : S[i], S_MIN[i], ...
 INDEXED_VARS = ('S', 'S_MIN', 'S_MAX', 'S_PREV')
+
+# Réductions d'une constatation sur période. Se posent sur la déclaration
+# CONSTAT, jamais sur un bloc AT : la longueur de la fenêtre se saisit à
+# l'écran, et un `AT 3 AVG:` n'aurait aucun endroit où la porter.
+REDUCTIONS = ('MIN', 'MAX', 'AVG')
+# Portée de la fenêtre. Sans ce mot, elle a une LONGUEUR, saisie à l'écran :
+# « les 30 derniers jours de bourse ». Avec, elle est la PÉRIODE écoulée depuis
+# la constatation précédente : « la moyenne de l'année ». Deux mots pour deux
+# choses, parce qu'un lecteur ne doit pas avoir à deviner laquelle en regardant
+# ailleurs dans la déclaration.
+PERIOD_SCOPE = 'PERIOD'
+# Le CONSTAT qui porte la fenetre de depart, celle qui fixe S0.
+STRIKE_FIX_NAME = 'STRIKE_FIX'
+_RED_SUFFIX = r'(?:\s+(MIN|MAX|AVG)(\s+PERIOD)?)?\s*$'
+
+
+def _parse_qualifiers(raw: str) -> list[tuple] | None:
+    """".last.last" / "[3]" / "" -> liste de niveaux, ou None si aucun."""
+    if not raw:
+        return None
+    out = []
+    for m in re.finditer(r'\.(first|last)|\[(\d+)\]', raw, re.I):
+        out.append((m.group(1).lower(),) if m.group(1) else ('index', int(m.group(2))))
+    return out or None
+
+
+def _reduction_of(m: re.Match) -> tuple[str | None, str]:
+    """(réduction, portée) d'une regex CONSTAT — absentes le plus souvent."""
+    red, scope = m.groups()[-2], m.groups()[-1]
+    if not red:
+        return None, 'length'
+    return red.upper(), ('period' if scope else 'length')
 
 # Nom PayScript -> fonction du bac à sable _SAFE_MATH.
 FUNCTIONS = {
@@ -107,6 +137,7 @@ BODY_STATEMENTS = ('IF', 'ELSE IF', 'ELSE', 'PAY', 'FLOW', 'ACCRUE', 'SET', 'STO
 RESERVED_NAMES = (
     frozenset(MARKET_VARS) | frozenset(FUNCTIONS) | frozenset(INDEXED_VARS)
     | frozenset(LOGIC_KEYWORDS) | {BASKET_KEYWORD}
+    | frozenset(REDUCTIONS) | {PERIOD_SCOPE, STRIKE_FIX_NAME}
     | {'PARAM', 'CONSTAT', 'SET', 'AT', 'MATURITY', 'IF', 'ELSE',
        'PAY', 'FLOW', 'ACCRUE', 'STOP'}
 )
@@ -130,6 +161,7 @@ def language_vocabulary() -> dict[str, tuple]:
         'indexed': INDEXED_VARS,
         'functions': tuple(sorted(FUNCTIONS)),
         'basket': (BASKET_KEYWORD,),
+        'reductions': REDUCTIONS + (PERIOD_SCOPE, STRIKE_FIX_NAME),
         'logic': LOGIC_KEYWORDS,
         'top_level': TOP_LEVEL_STATEMENTS,
         'body': BODY_STATEMENTS,
@@ -173,9 +205,24 @@ class Constat:
     kind: 'single' (CONSTAT, one date) | 'schedule' (CONSTAT(), a CONSTAT()
     calendar) | 'nested_schedule' (CONSTAT()(), adds a sub-frequency).
     Referenced from AT via `AT Name:` (every date) or a qualifier — see
-    CompiledEvent.constat_qualifier and resolve_constats."""
+    CompiledEvent.constat_qualifier and resolve_constats.
+
+    reduction ('MIN' | 'MAX' | 'AVG' | None) turns every date of this CONSTAT
+    into a constatation over a WINDOW instead of a single point: each
+    underlying is reduced over its own window, and only then do WOF/BOF/BASKET
+    aggregate. None keeps the historical behaviour, which is exactly the
+    degenerate case of a one-point window. The window's LENGTH and SAMPLING
+    FREQUENCY are not in the script — they are term-sheet data filled in
+    through the UI, alongside the dates, so changing 10 days to 30 never edits
+    a payoff. See CONSTATATIONS_PERIODE_DESIGN.md."""
     name: str
     kind: str
+    reduction: str | None = None
+    # 'length' — la fenêtre a une longueur, saisie à l'écran (le défaut).
+    # 'period' — elle court de la constatation précédente à celle-ci, bornes
+    # ouverte à gauche et fermée à droite ; seule la fréquence de relevé se
+    # saisit alors, la longueur n'a plus de sens.
+    window_scope: str = 'length'
 
 
 @dataclass
@@ -191,10 +238,16 @@ class CompiledScript:
     # level — autocall-like), 'down' (fires below — KI-like) or None when the
     # usage is ambiguous/undetected. See _analyze_monitors.
     monitors: list | None = None
-    # Resolved dates (year-fractions) of the reserved `CONSTAT() STRIKE_FIX`
-    # fixing window, if declared — filled in by resolve_constats(), None until
-    # then (and None permanently for scripts that don't declare it).
+    # Resolved dates (year-fractions) of the reserved `CONSTAT STRIKE_FIX`
+    # window, if declared — filled in by resolve_constats(), None until then
+    # (and None permanently for scripts that don't declare it). The window
+    # DEPARTS from the strike date, unlike every other one.
     strike_fix_dates: list[float] | None = None
+    # How those dates reduce to the initial level S0_i of each underlying:
+    # 'MIN' | 'MAX' | 'AVG'. None with dates present is the legacy shape (the
+    # script did its own `WOF / FIX_AVG`); None with no dates is the ordinary
+    # product whose S0 is the strike-date close.
+    strike_fix_reduction: str | None = None
 
 
 @dataclass
@@ -206,10 +259,11 @@ class CompiledEvent:
     # dates — `dates` is then empty until resolve_constats() fills it in from
     # the user-provided CONSTAT values (not available at parse time).
     constat_ref: str | None = None
-    # Narrows constat_ref to one specific date: None (every date) |
-    # ('first',) | ('last',) | ('index', N) for `AT Name.first:` /
-    # `AT Name.last:` / `AT Name[N]:` (N is 1-indexed, like S[i]).
-    constat_qualifier: tuple | None = None
+    # Narrows constat_ref down. A LIST of levels: the first indexes the
+    # calendar's constatations, an optional second indexes the relevés inside
+    # that constatation's window. Each level is ('first',) | ('last',) |
+    # ('index', N), N 1-indexed like S[i]. None means every date, unfiltered.
+    constat_qualifier: list | None = None
     # When each date's cash actually moves, as year-fractions on the same
     # anchor as `dates` — one entry per observation. A coupon observed on the
     # 15th and paid five business days later is worth its discounted value at
@@ -217,6 +271,13 @@ class CompiledEvent:
     # literal `AT 1, 2, 3:` events, and CONSTAT calendars resolved without a
     # settlement calendar.
     payment_dates: list[float] | None = None
+    # Constatation over a window: one list of year-fractions PER observation
+    # date, aligned index by index with `dates` exactly like payment_dates.
+    # Each underlying is reduced over its own window (see `reduction`) before
+    # WOF/BOF/BASKET aggregate. None — the overwhelming common case — means
+    # every observation reads a single point.
+    window_dates: list[list[float]] | None = None
+    reduction: str | None = None
 
 
 # ── Expression transpiler ─────────────────────────────────────────
@@ -563,19 +624,25 @@ def parse_script(code: str) -> CompiledScript:
         # Pure declarations (no inline default, unlike PARAM) — checked from
         # most to least specific so anchoring isn't load-bearing, but the
         # trailing \s+ after the parens already prevents any ambiguity.
-        m = re.match(r'^CONSTAT\(\)\(\)\s+([A-Za-z_]\w*)\s*$', text, re.I)
+        m = re.match(r'^CONSTAT\(\)\(\)\s+([A-Za-z_]\w*)' + _RED_SUFFIX, text, re.I)
         if m:
-            constats.append(Constat(name=m.group(1).upper(), kind='nested_schedule'))
+            _red, _scope = _reduction_of(m)
+            constats.append(Constat(name=m.group(1).upper(), kind='nested_schedule',
+                                    reduction=_red, window_scope=_scope))
             i += 1; continue
 
-        m = re.match(r'^CONSTAT\(\)\s+([A-Za-z_]\w*)\s*$', text, re.I)
+        m = re.match(r'^CONSTAT\(\)\s+([A-Za-z_]\w*)' + _RED_SUFFIX, text, re.I)
         if m:
-            constats.append(Constat(name=m.group(1).upper(), kind='schedule'))
+            _red, _scope = _reduction_of(m)
+            constats.append(Constat(name=m.group(1).upper(), kind='schedule',
+                                    reduction=_red, window_scope=_scope))
             i += 1; continue
 
-        m = re.match(r'^CONSTAT\s+([A-Za-z_]\w*)\s*$', text, re.I)
+        m = re.match(r'^CONSTAT\s+([A-Za-z_]\w*)' + _RED_SUFFIX, text, re.I)
         if m:
-            constats.append(Constat(name=m.group(1).upper(), kind='single'))
+            _red, _scope = _reduction_of(m)
+            constats.append(Constat(name=m.group(1).upper(), kind='single',
+                                    reduction=_red, window_scope=_scope))
             i += 1; continue
 
         m = re.match(r'^SET\s+([A-Za-z_]\w*)\s*=\s*(.+)$', text, re.I)
@@ -615,19 +682,29 @@ def parse_script(code: str) -> CompiledScript:
             # AT <ConstatName>:              -> every date
             # AT <ConstatName>.first/.last:  -> just the first/last date
             # AT <ConstatName>[N]:           -> just the Nth date (1-indexed)
+            # AT <ConstatName>.last.last:    -> the last RELEVÉ of the last
+            #   constatation — a second level descends from the calendar into
+            #   the window. One qualifier names a constatation, and reads what
+            #   the CONSTAT declares (the reduction); two name one fixing
+            #   inside its window, and read the raw close. That is how a PDI
+            #   observed on the closing price coexists with a coupon observed
+            #   on an average, at the same date, in the same calendar — and
+            #   with a single set of dates, which two CONSTAT would not give.
             # Dates aren't known yet (the real values live in the UI, not the
             # script text) — resolved later by resolve_constats(), once the
             # request supplies them.
-            constat_match = re.match(r'^([A-Za-z_]\w*)(?:\.(first|last)|\[(\d+)\])?$', at_arg, re.I)
+            constat_match = re.match(
+                r'^([A-Za-z_]\w*)((?:\.(?:first|last)|\[\d+\])*)$', at_arg, re.I)
             constat_names = {c.name for c in constats}
             if constat_match and constat_match.group(1).upper() in constat_names:
                 constat_ref = constat_match.group(1).upper()
-                if constat_match.group(2):
-                    constat_qualifier = (constat_match.group(2).lower(),)
-                elif constat_match.group(3):
-                    constat_qualifier = ('index', int(constat_match.group(3)))
-                else:
-                    constat_qualifier = None
+                constat_qualifier = _parse_qualifiers(constat_match.group(2))
+                if constat_qualifier and len(constat_qualifier) > 2:
+                    errors.append(
+                        f'Ligne {no}: "{at_arg}" — au plus deux niveaux de '
+                        f'qualificateur (le calendrier, puis la fenêtre de '
+                        f'constatation).')
+                    i += 1; continue
                 dates = []
             else:
                 try:
@@ -812,7 +889,8 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
 
     from datetime import date
     from ..calendars import BusinessDayConvention, add_business_days, adjust
-    from ..schedule import generate_schedule, parse_tenor, StubConvention
+    from ..schedule import (generate_schedule, observation_window, parse_tenor,
+                            period_windows, StubConvention)
 
     today = anchor or date.today()
 
@@ -839,8 +917,12 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         except ValueError:
             raise ValueError(f"CONSTAT {constat_name}: '{field}' invalide (attendu YYYY-MM-DD): {raw!r}")
 
-    def _resolve_full(name: str) -> tuple[list[float], list[float]]:
-        """Observation dates and their payment dates for a CONSTAT, unfiltered."""
+    def _resolve_full(name: str) -> tuple[list[float], list[float], list[date]]:
+        """Observation dates and their payment dates for a CONSTAT, unfiltered.
+
+        The absolute observation dates come back alongside the year-fractions
+        because a constatation window is built in calendar space — business
+        days off the observation date — and only then converted."""
         if name not in constat_by_name:
             raise ValueError(f"CONSTAT inconnu référencé par AT: {name}")
         if name not in constat_values:
@@ -863,7 +945,7 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
                     f"précisez la devise de règlement.")
             else:
                 paid = observed
-            return [_to_year_frac(observed)], [_to_year_frac(paid)]
+            return [_to_year_frac(observed)], [_to_year_frac(paid)], [observed]
 
         start = _parse_date_field(v.get('start_date'), name, 'start_date')
         end = _parse_date_field(v.get('end_date'), name, 'end_date')
@@ -883,49 +965,165 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         # Drop the schedule's own start_date: it's the start of the first
         # accrual period, not itself an observation/payment date.
         return ([_to_year_frac(d) for d in result['dates'][1:]],
-                [_to_year_frac(d) for d in result['payment_dates'][1:]])
+                [_to_year_frac(d) for d in result['payment_dates'][1:]],
+                list(result['dates'][1:]))
 
-    _cache: dict[str, tuple[list[float], list[float]]] = {}
+    _cache: dict[str, tuple[list[float], list[float], list[date]]] = {}
 
-    def _full_dates(name: str) -> tuple[list[float], list[float]]:
+    def _full_dates(name: str) -> tuple[list[float], list[float], list[date]]:
         if name not in _cache:
             _cache[name] = _resolve_full(name)
         return _cache[name]
 
-    def _qualifier_index(qualifier: tuple, n: int, name: str) -> int:
-        if constat_by_name[name].kind == 'single':
+    def _window_tenors(name: str) -> tuple:
+        """(length, frequency) of a CONSTAT's constatation window, from the UI.
+
+        A PERIOD window has no length — it runs from one constatation to the
+        next — so only the sampling frequency is read."""
+        v = constat_values.get(name) or {}
+        if not isinstance(v, dict):
+            v = {}
+        freq = parse_tenor(v.get('window_frequency') or '1D')
+        if constat_by_name[name].window_scope == 'period':
+            return None, freq
+        raw_len = v.get('window_length')
+        if not raw_len:
             raise ValueError(
-                f"CONSTAT {name} est une date unique — .first/.last/[N] ne s'appliquent "
-                f"qu'à un CONSTAT()/CONSTAT()() (plusieurs dates).")
+                f"CONSTAT {name}: une réduction {constat_by_name[name].reduction} est "
+                f"déclarée dans le script mais la longueur de la fenêtre de constatation "
+                f"n'est pas renseignée (champ 'window_length', ex. '30D').")
+        return parse_tenor(raw_len), freq
+
+    def _period_grid(name: str) -> tuple[list[date], list[list[date]]]:
+        """Constatations et relevés d'un CONSTAT à fenêtre de PÉRIODE."""
+        v = constat_values[name]
+        _, freq = _window_tenors(name)
+        return period_windows(
+            _parse_date_field(v.get('start_date'), name, 'start_date'),
+            _parse_date_field(v.get('end_date'), name, 'end_date'),
+            _parse_date_field(v.get('roll_date'), name, 'roll_date'),
+            parse_tenor(v['frequency']),
+            StubConvention(v.get('stub', 'short_last')),
+            freq, currency=currency, convention=_convention(name, v))
+
+    def _windows_dates(name: str, observed: list[date]) -> list[list[date]] | None:
+        """Une fenêtre par constatation, en dates. None si ce CONSTAT ne
+        déclare aucune réduction — le cas ponctuel ordinaire."""
+        c = constat_by_name[name]
+        if not c.reduction:
+            return None
+        if c.window_scope == 'period':
+            if c.kind == 'single':
+                raise ValueError(
+                    f"CONSTAT {name}: une fenêtre de PÉRIODE court d'une constatation "
+                    f"à la suivante — elle suppose un calendrier CONSTAT(), pas une "
+                    f"date unique. Retirez PERIOD et donnez une longueur de fenêtre.")
+            if c.kind == 'nested_schedule':
+                # Deux grilles fines pour un seul calendrier : la sous-fréquence
+                # du CONSTAT()() et la fréquence de relevé de la fenêtre. Elles
+                # ne peuvent pas décrire la même chose, et l'une serait ignorée
+                # en silence — le genre d'hypothèse saisissable et sans effet
+                # que la règle A7 dit de traquer.
+                raise ValueError(
+                    f"CONSTAT {name}: PERIOD et une sous-fréquence CONSTAT()() se "
+                    f"contredisent — la sous-fréquence produit des OBSERVATIONS, la "
+                    f"fenêtre de période des RELEVÉS moyennés. Choisissez : "
+                    f"CONSTAT() {name} {c.reduction} PERIOD pour moyenner sur la "
+                    f"période, ou CONSTAT()() {name} sans PERIOD pour observer à la "
+                    f"sous-fréquence.")
+            return _period_grid(name)[1]
+        length, freq = _window_tenors(name)
+        v = constat_values.get(name) or {}
+        conv = _convention(name, v)
+        # STRIKE_FIX is the one window that DEPARTS from its date: it fixes S0
+        # going forward. Every other constatation ARRIVES at its date.
+        forward = (name == 'STRIKE_FIX')
+        return [observation_window(obs, length, freq, forward=forward,
+                                   currency=currency, convention=conv)
+                for obs in observed]
+
+    def _windows_for(name: str, observed: list[date]) -> list[list[float]] | None:
+        w = _windows_dates(name, observed)
+        return None if w is None else [[_to_year_frac(d) for d in win] for win in w]
+
+    def _pick(qualifier: tuple, n: int, label: str) -> int:
+        """Index 0-based désigné par un niveau de qualificateur."""
         if qualifier[0] == 'first':
             return 0
         if qualifier[0] == 'last':
             return n - 1
         idx = qualifier[1]   # ('index', N), 1-indexed like S[i]
         if idx < 1 or idx > n:
-            raise ValueError(f"CONSTAT {name}[{idx}]: index hors limites ({n} date(s) au total).")
+            raise ValueError(f"{label}[{idx}]: index hors limites ({n} date(s) au total).")
         return idx - 1
+
+    def _qualifier_index(qualifier: tuple, n: int, name: str) -> int:
+        if constat_by_name[name].kind == 'single':
+            raise ValueError(
+                f"CONSTAT {name} est une date unique — .first/.last/[N] ne s'appliquent "
+                f"qu'à un CONSTAT()/CONSTAT()() (plusieurs dates).")
+        return _pick(qualifier, n, f"CONSTAT {name}")
 
     new_events = []
     for ev in script.events:
         if not ev.constat_ref:
             new_events.append(ev)
             continue
-        dates, payments = _full_dates(ev.constat_ref)
-        if ev.constat_qualifier:
-            idx = _qualifier_index(ev.constat_qualifier, len(dates), ev.constat_ref)
-            resolved, resolved_pay = [dates[idx]], [payments[idx]]
+        name = ev.constat_ref
+        dates, payments, observed = _full_dates(name)
+        win_dates = _windows_dates(name, observed)
+        windows = None if win_dates is None else [
+            [_to_year_frac(d) for d in w] for w in win_dates]
+        quals = ev.constat_qualifier or []
+        reduction = constat_by_name[name].reduction
+        if len(quals) >= 2:
+            # Deuxième niveau : on ne vise plus une constatation mais UN RELEVÉ
+            # dans sa fenêtre. L'événement lit alors le cours de ce jour-là, pas
+            # la réduction — c'est ce qui permet à un PDI sur clôture de cohabiter
+            # avec un coupon sur moyenne, même date, même calendrier.
+            if win_dates is None:
+                raise ValueError(
+                    f"CONSTAT {name}: un second qualificateur descend dans la fenêtre "
+                    f"de constatation, mais ce CONSTAT n'en déclare aucune (il faudrait "
+                    f"MIN, MAX ou AVG sur sa déclaration).")
+            k = _qualifier_index(quals[0], len(dates), name)
+            w = win_dates[k]
+            j = _pick(quals[1], len(w), f"CONSTAT {name} (relevés)")
+            resolved = [_to_year_frac(w[j])]
+            # Le règlement suit la CONSTATATION, pas le relevé : c'est elle qui
+            # déclenche le flux.
+            resolved_pay, resolved_win, reduction = [payments[k]], None, None
+        elif quals:
+            k = _qualifier_index(quals[0], len(dates), name)
+            resolved, resolved_pay = [dates[k]], [payments[k]]
+            resolved_win = [windows[k]] if windows else None
         else:
             # plain `AT Name:` — every date, unfiltered
             resolved, resolved_pay = list(dates), list(payments)
-        new_events.append(CompiledEvent(type=ev.type, dates=resolved, fn=ev.fn,
-                                        payment_dates=resolved_pay if currency else None))
+            resolved_win = list(windows) if windows else None
+        new_events.append(CompiledEvent(
+            type=ev.type, dates=resolved, fn=ev.fn,
+            payment_dates=resolved_pay if currency else None,
+            window_dates=resolved_win, reduction=reduction))
 
-    strike_fix_dates = _full_dates('STRIKE_FIX')[0] if has_strike_fix else None
+    strike_fix_dates = strike_fix_reduction = None
+    if has_strike_fix:
+        red = constat_by_name['STRIKE_FIX'].reduction
+        if red:
+            # A reduction turns STRIKE_FIX into a real window around one date;
+            # its own schedule (if it was declared as CONSTAT()) is then only
+            # the anchor, and the window is what the UI supplies.
+            _, _, observed = _full_dates('STRIKE_FIX')
+            strike_fix_dates = _windows_for('STRIKE_FIX', observed)[0]
+            strike_fix_reduction = red
+        else:
+            strike_fix_dates = _full_dates('STRIKE_FIX')[0]
 
     return CompiledScript(events=new_events, init_fn=script.init_fn,
                            params=script.params, constats=script.constats,
-                           has_stop=script.has_stop, strike_fix_dates=strike_fix_dates)
+                           has_stop=script.has_stop, monitors=script.monitors,
+                           strike_fix_dates=strike_fix_dates,
+                           strike_fix_reduction=strike_fix_reduction)
 
 
 def effective_T_max(script: CompiledScript, requested_T: float) -> float:

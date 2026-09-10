@@ -23,7 +23,7 @@ AT MATURITY:
 
 export const usePricingStore = defineStore('pricing', () => {
   // ── Tabs ──────────────────────────────────────────────────────────
-  const leftTab = ref('script')   // 'script' | 'params' | 'deal' | 'events'
+  const leftTab = ref('script')   // 'script' | 'economics' | 'params' | 'deal' | 'events'
   const rightTab = ref('empty')   // 'empty' | 'results' | 'flux' | 'greeks' | 'profile' | 'paths' | 'proba' | 'backtest' | 'mtf' | 'simulation' | 'scenarios' | 'kid' | 'emt'
 
   // ── Script ────────────────────────────────────────────────────────
@@ -83,8 +83,28 @@ export const usePricingStore = defineStore('pricing', () => {
   // frequency/sub_frequency are {value, unit} pairs in the UI (a number input +
   // a D/M/Y select) rather than a single "3M"-style text field — _tenorStr()
   // combines them into the tenor string the backend expects.
-  function _defaultConstatValue(kind) {
-    if (kind === 'single') return ''
+  // Une constatation sur période (le script a écrit MIN/MAX/AVG après le nom)
+  // porte en plus la fenêtre sur laquelle elle réduit : longueur et fréquence
+  // d'échantillonnage. Ce sont des données de term sheet, pas de payoff — d'où
+  // leur place ici et non dans le script. `10D` = 10 observations, la date de
+  // constatation comprise.
+  function _defaultWindow(scope = 'length') {
+    // Une fenêtre de PÉRIODE n'a pas de longueur — elle court d'une
+    // constatation à la suivante — donc seule la fréquence de relevé se saisit.
+    return {
+      window_length: scope === 'period' ? null : { value: 10, unit: 'D' },
+      window_frequency: { value: scope === 'period' ? 3 : 1,
+                          unit: scope === 'period' ? 'M' : 'D' },
+    }
+  }
+
+  function _defaultConstatValue(kind, reduction = null, scope = 'length') {
+    // Une date unique se stocke comme une chaîne — sauf si elle porte une
+    // fenêtre, auquel cas il lui faut un objet pour l'accueillir. Le serveur
+    // accepte les deux formes.
+    if (kind === 'single') {
+      return reduction ? reactive({ date: '', ..._defaultWindow(scope) }) : ''
+    }
     return reactive({
       start_date: '', end_date: '', roll_date: '',
       frequency: { value: 3, unit: 'M' }, stub: 'short_last',
@@ -93,6 +113,7 @@ export const usePricingStore = defineStore('pricing', () => {
       // suppose faute de valeur, donc rien ne bouge pour un script existant.
       // Un term sheet qui dit autre chose le dit maintenant explicitement.
       convention: 'none', settlement_lag: 0,
+      ...(reduction ? _defaultWindow(scope) : {}),
     })
   }
 
@@ -103,7 +124,21 @@ export const usePricingStore = defineStore('pricing', () => {
   /** Même règle que `_syncParamOverrides` : on complète, on ne supprime pas. */
   function _syncConstatOverrides() {
     for (const c of scriptConstats.value) {
-      if (!(c.name in constatOverrides)) constatOverrides[c.name] = _defaultConstatValue(c.kind)
+      if (!(c.name in constatOverrides)) {
+        constatOverrides[c.name] = _defaultConstatValue(c.kind, c.reduction, c.window_scope)
+        continue
+      }
+      // Le script a pu gagner ou perdre sa réduction depuis la dernière frappe.
+      // On promeut/rétrograde la valeur collante au lieu de la perdre : c'est la
+      // même règle que pour PARAM -> PARAM().
+      const v = constatOverrides[c.name]
+      if (c.reduction && typeof v === 'string') {
+        constatOverrides[c.name] = reactive({ date: v, ..._defaultWindow(c.window_scope) })
+      } else if (c.reduction && v && typeof v === 'object' && !v.window_frequency) {
+        Object.assign(v, _defaultWindow(c.window_scope))
+      } else if (!c.reduction && c.kind === 'single' && v && typeof v === 'object') {
+        constatOverrides[c.name] = v.date || ''
+      }
     }
   }
 
@@ -134,6 +169,11 @@ export const usePricingStore = defineStore('pricing', () => {
     seed: 42,
     model: 'constant',
     antithetic: true,
+    // Terme économique du deal, partagé entre l'onglet Economics et le
+    // booking. Il ne rentre pas dans le moteur (qui price en fraction du
+    // nominal), mais il doit survivre aux changements d'onglet et aux
+    // parcours RFQ / réouverture exactement comme les dates contractuelles.
+    nominal: 1_000_000,
     deal_ccy: 'EUR',
     trade_date: new Date().toISOString().split('T')[0],
     strike_date: new Date().toISOString().split('T')[0],
@@ -273,14 +313,15 @@ export const usePricingStore = defineStore('pricing', () => {
   // sent as Deal.rfq_id at booking time so the winning quote's RFQ can be
   // traced back from the deal, and so book_deal can close out that RFQ.
   const currentRfqId = ref(null)
-  // One-shot handoff to DealTab.vue's form (contrepartie/price_traded from
-  // the RFQ's selected quote) — consumed and cleared on mount, since those
-  // fields live in the component, not the store.
+  // One-shot handoff to DealTab.vue's commercial form. Les economics sont
+  // déjà autoritatifs dans globalParams/underlyings/overrides ; dates et
+  // nominal restent aussi dans ce handoff pour fermer les courses de
+  // chargement asynchrones. Consumed and cleared by DealTab.
   const pendingDealPrefill = ref(null)
-  // Booked deal this session was reopened from (loadFromDeal). Its commercial
-  // terms are NOT the store's — they live in DealTab's form — so reopening a
-  // deal has to hand them over through pendingDealPrefill like the RFQ path
-  // does. Also what tells DealTab this deal already exists: booking again
+  // Booked deal this session was reopened from (loadFromDeal). Its economics
+  // are in the store, while its commercial terms live in DealTab's form and
+  // pass through pendingDealPrefill like the RFQ path does. Also what tells
+  // DealTab this deal already exists: booking again
   // from here would silently create a duplicate under a new reference.
   const openedDeal = ref(null)
 
@@ -451,12 +492,23 @@ export const usePricingStore = defineStore('pricing', () => {
     for (const c of liste) {
       const v = (overrides || {})[c.name]
       if (v == null) continue
-      if (c.kind === 'single' || typeof v === 'string') {
+      if (typeof v === 'string') {
         out[c.name] = v
+      } else if (c.kind === 'single') {
+        // Date unique portant une fenêtre de constatation.
+        out[c.name] = {
+          date: v.date,
+          window_length: _tenorStr(v.window_length),
+          window_frequency: _tenorStr(v.window_frequency),
+          convention: v.convention || 'none',
+          settlement_lag: v.settlement_lag || 0,
+        }
       } else {
         out[c.name] = {
           start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
           frequency: _tenorStr(v.frequency), stub: v.stub,
+          window_length: _tenorStr(v.window_length),
+          window_frequency: _tenorStr(v.window_frequency),
           sub_frequency: c.kind === 'nested_schedule' ? _tenorStr(v.sub_frequency) : null,
           // Le serveur les attend depuis le chantier des dates ; ils ne
           // partaient pas d'ici, si bien qu'une convention saisie dans le
@@ -467,6 +519,20 @@ export const usePricingStore = defineStore('pricing', () => {
       }
     }
     return out
+  }
+
+  /** Une longueur/fréquence de fenêtre, de la forme serveur "10D" vers {value, unit}. */
+  function _restoreTenor(ov, saved, key, fallback) {
+    const raw = saved[key]
+    if (raw == null) return
+    if (!ov[key]) ov[key] = reactive({ ...fallback })
+    if (typeof raw === 'object') {
+      ov[key].value = raw.value ?? fallback.value
+      ov[key].unit  = raw.unit  ?? fallback.unit
+    } else {
+      const m = String(raw).match(/^(\d+)([DWMY])$/i)
+      if (m) { ov[key].value = parseInt(m[1]); ov[key].unit = m[2].toUpperCase() }
+    }
   }
 
   // Mirrors _buildConstats()'s output shape back into constatOverrides —
@@ -481,6 +547,11 @@ export const usePricingStore = defineStore('pricing', () => {
       } else if (v && typeof v === 'object') {
         const ov = constatOverrides[k]
         if (ov && typeof ov === 'object') {
+          // Une date unique portant une fenêtre est stockée comme objet : sa
+          // date vit dans `date`, pas dans start_date.
+          if (v.date !== undefined) ov.date = v.date || ''
+          _restoreTenor(ov, v, 'window_length', { value: 10, unit: 'D' })
+          _restoreTenor(ov, v, 'window_frequency', { value: 1, unit: 'D' })
           ov.start_date = v.start_date || ''
           ov.end_date   = v.end_date   || ''
           ov.roll_date  = v.roll_date  || ''
@@ -676,6 +747,11 @@ export const usePricingStore = defineStore('pricing', () => {
     d.setDate(d.getDate() + Math.round(globalParams.T * 365.25))
     return d.toISOString().split('T')[0]
   }
+
+  // Une source unique pour l'affichage Economics et le payload de booking.
+  // Dupliquer cette dérivation dans deux composants ferait tôt ou tard
+  // diverger la date affichée de celle effectivement figée sur le deal.
+  const maturityDate = computed(() => _maturityDate() || '')
 
   /** Corps de requête de la valorisation en cours de vie — partagé par le
    *  prix et les Greeks, pour qu'ils décrivent forcément le même produit. */
@@ -1452,11 +1528,14 @@ export const usePricingStore = defineStore('pricing', () => {
     script.value = DEFAULT_SCRIPT
     underlyings.value = [_defaultUnderlying(1)]
     corrMatrix.value  = [[1.0]]
+    const today = new Date().toISOString().split('T')[0]
     Object.assign(globalParams, {
       r: 3.0, T: 3.0, N: 20000, seed: 42, model: 'constant',
       antithetic: true, deal_ccy: 'EUR', rateModel: 'deterministic',
       sigma_r: 1.5, a_r: 0.3, barrierMonitoring: 'weekly',
-      value_date: new Date().toISOString().split('T')[0],
+      nominal: 1_000_000,
+      trade_date: today, strike_date: today, value_date: today,
+      payment_date: '', valuation_date: '',
     })
     yieldCurve.enabled = false
     _clearResults()
@@ -1492,12 +1571,14 @@ export const usePricingStore = defineStore('pricing', () => {
       model: market.model ?? globalParams.model,
       antithetic: market.antithetic ?? globalParams.antithetic,
       deal_ccy: market.deal_ccy ?? deal.devise,
+      nominal: deal.nominal ?? globalParams.nominal,
       rateModel: market.rateModel ?? globalParams.rateModel,
       sigma_r: market.sigma_r ?? globalParams.sigma_r,
       a_r: market.a_r ?? globalParams.a_r,
       trade_date: deal.trade_date,
       strike_date: deal.strike_date,
       value_date: deal.value_date,
+      payment_date: deal.payment_date || '',
     })
 
     if (market.yieldCurve?.length) {
@@ -1533,9 +1614,9 @@ export const usePricingStore = defineStore('pricing', () => {
       }
     }
 
-    // The deal's commercial terms live in DealTab's own form, not here — so
-    // reopening a booked deal has to hand them over the same way the RFQ path
-    // does. Without this the Deal tab showed an empty booking form
+    // The deal's commercial terms live in DealTab's own form, while its
+    // economics live in this shared store. Reopening hands the commercial
+    // terms over the same way as the RFQ path. Without this Deal showed an empty booking form
     // (contrepartie "— Choisir —", fair value and prix traité at 0) on a deal
     // that carries all of it, and re-booking from there produced a duplicate.
     openedDeal.value = { id: deal.id, reference: deal.reference }
@@ -1555,9 +1636,9 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   // Pre-fill the Pricer from an RFQ's retained ("retenue") quote — script,
-  // underlyings, params from the RFQ itself; contrepartie/price_traded from
-  // the selected quote, handed off to DealTab.vue via pendingDealPrefill
-  // since those live in the component's own form, not this store. Mirrors
+  // underlyings, params and economics from the RFQ itself; contrepartie and
+  // price_traded from the selected quote are handed to DealTab.vue via
+  // pendingDealPrefill because they remain local to that component. Mirrors
   // loadFromDeal, but the RFQ's params blob is the lighter shape RfqView.vue
   // builds at creation (single r/T/N/model, no Heston/SABR/curve fields) —
   // same defensive merge-over-defaults as loadFromDeal handles that fine.
@@ -1598,6 +1679,7 @@ export const usePricingStore = defineStore('pricing', () => {
       T: p.T ?? globalParams.T,
       model: p.model || globalParams.model,
       deal_ccy: p.currency || globalParams.deal_ccy,
+      nominal: p.notional ?? globalParams.nominal,
       strike_date: p.strike_date || globalParams.strike_date,
       value_date: p.value_date || globalParams.value_date,
       // La date de paiement AUSSI, et c'est la troisième du même term sheet :
@@ -1972,7 +2054,7 @@ export const usePricingStore = defineStore('pricing', () => {
     leftTab, rightTab,
     script, scriptParams, parseError, paramOverrides, scriptConstats, constatOverrides, scriptHasStop,
     underlyings, corrMatrix, activeUnderlyingIdx,
-    globalParams, yieldCurve, greekSel, selectedGreeks,
+    globalParams, maturityDate, yieldCurve, greekSel, selectedGreeks,
     result, profile, paths, proba, backtest, mtf, solver, grid, scenarios, kid,
     mtfDrill, mtfDrillLoading, mtfDrillError, runMtfDrilldown,
     scriptGen, scriptGenLoading, scriptGenError, scriptProviders,

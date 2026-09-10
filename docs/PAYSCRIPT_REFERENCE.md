@@ -84,9 +84,6 @@ trajectoire jamais rappelée ne paie rien.
 | `N` | Nombre de sous-jacents |
 | `ACCUM` | Accumulateur alimenté par `ACCRUE` |
 | `REALVOL` | Volatilité réalisée annualisée du worst-of depuis l'origine |
-| `FIX_MIN` | Minimum du worst-of sur la fenêtre `CONSTAT() STRIKE_FIX` |
-| `FIX_MAX` | Maximum du worst-of sur cette même fenêtre |
-| `FIX_AVG` | Moyenne du worst-of sur cette même fenêtre (strike asiatique) |
 
 ### 3.3 Fonctions
 
@@ -119,9 +116,14 @@ trajectoire jamais rappelée ne paie rien.
 |---|---|
 | `PARAM` | `PARAM NOM = valeur[%] ["description"]` — paramètre scalaire, surchargeable depuis l'interface |
 | `PARAM()` | `PARAM() NOM [= amorce[%]]` — **une valeur par observation** (barrière dégressive, coupon progressif). Les valeurs se saisissent dans l'interface ; la dernière ligne s'étend aux observations suivantes |
-| `CONSTAT` | `CONSTAT Nom` — une date unique, renseignée depuis l'interface |
-| `CONSTAT()` | `CONSTAT() Nom` — un calendrier (début / fin / roll / fréquence / stub) |
-| `CONSTAT()()` | `CONSTAT()() Nom` — un calendrier avec sous-fréquence |
+| `CONSTAT` | `CONSTAT Nom [MIN\|MAX\|AVG]` — une date unique, renseignée depuis l'interface |
+| `CONSTAT()` | `CONSTAT() Nom [MIN\|MAX\|AVG]` — un calendrier (début / fin / roll / fréquence / stub) |
+| `CONSTAT()()` | `CONSTAT()() Nom` — un calendrier dont chaque intervalle est subdivisé. La sous-grille **se recale** sur chaque date principale au lieu de courir en continu — voir §4.2 |
+| `MIN` | Réduction d'une constatation sur période — voir §4.1 |
+| `MAX` | Réduction d'une constatation sur période — voir §4.1 |
+| `AVG` | Réduction d'une constatation sur période — voir §4.1 |
+| `PERIOD` | Portée de la fenêtre : la période écoulée, et non une longueur — voir §4.1 |
+| `STRIKE_FIX` | Nom de `CONSTAT` réservé : il porte la fenêtre de départ, celle qui fixe `S0` |
 | `AT` | `AT 1, 2, 3:` — bloc d'observation à des dates en années. Voir §4 |
 | `AT MATURITY` | Bloc exécuté à maturité si le contrat n'a pas été arrêté |
 | `SET` | Au niveau 0 : initialise une variable avant toute observation |
@@ -170,6 +172,113 @@ AT Observations:          toutes les dates du calendrier
 AT Observations.first:    uniquement la première
 AT Observations.last:     uniquement la dernière
 AT Observations[3]:       uniquement la 3ᵉ (indicé à partir de 1)
+AT Observations.last.last: le dernier RELEVÉ de la dernière constatation
+```
+
+Un **second** qualificateur descend d'un niveau : du calendrier vers la fenêtre
+de constatation. Un seul niveau désigne une constatation, et lit ce que le
+CONSTAT déclare — donc la réduction. Deux niveaux désignent un fixing dans sa
+fenêtre, et lisent le **cours brut** de ce jour-là. Voir §4.1.
+
+### 4.1 Constatations sur période
+
+Une constatation n'est pas forcément un point. Ajoutez `MIN`, `MAX` ou `AVG`
+après le nom d'un `CONSTAT` et chacune de ses dates devient une réduction sur
+une **fenêtre** :
+
+```
+CONSTAT STRIKE_FIX  AVG      niveau initial = moyenne de la fenêtre de départ
+CONSTAT MATURITE    AVG      niveau final   = moyenne des N derniers jours
+CONSTAT() OBSERVATIONS MIN   chaque date du calendrier porte sa fenêtre
+```
+
+Trois règles, et elles suffisent :
+
+1. **La réduction est toujours par sous-jacent.** Chaque actif est réduit sur sa
+   propre fenêtre ; `WOF`, `BOF` et `BASKET` agrègent **ensuite**. Réduire
+   l'agrégat au lieu de chaque actif donne un autre produit : `moyenne(min)` et
+   `min(moyennes)` ne sont pas la même chose, et l'écart se chiffre en dizaines
+   de points de base sur un worst-of.
+2. **La longueur de la fenêtre n'est pas dans le script.** Elle se saisit à
+   l'écran avec les dates (longueur et fréquence d'échantillonnage), parce que
+   c'est une donnée de term sheet : passer de 10 à 30 jours ne doit pas modifier
+   un payoff. Ce qui change le payoff — `MIN` contre `AVG` — reste ici.
+3. **La fenêtre de départ part de sa date, les autres y arrivent.**
+   `STRIKE_FIX` regarde en avant à partir du strike ; toute autre constatation
+   regarde en arrière jusqu'à sa date, incluse.
+
+#### Fenêtre de longueur, fenêtre de période
+
+Une fenêtre a par défaut une **longueur** — « les 30 derniers jours de bourse ».
+Le mot `PERIOD` en fait la **période écoulée depuis la constatation
+précédente** :
+
+```
+CONSTAT() OBSERVATIONS AVG PERIOD
+```
+
+Trois constatations annuelles, chacune moyennée sur les relevés de son année.
+Il n'y a alors pas de longueur à saisir — seulement la fréquence de relevé — et
+les bornes sont ouvertes à gauche, fermées à droite, si bien qu'une date de roll
+partagée par deux périodes n'est comptée qu'une fois. `PERIOD` suppose un
+calendrier : sur une date unique il n'y a pas de période précédente.
+
+#### Quand prendre `CONSTAT()()` — §4.2
+
+`CONSTAT()()` subdivise chaque intervalle du calendrier principal, et **toutes**
+les dates obtenues sont des observations. Sa seule propriété propre est que la
+sous-grille **repart de chaque date principale** au lieu de courir en continu.
+
+Quand la sous-fréquence divise la fréquence — 3M dans 1Y — elle donne
+exactement le même calendrier qu'un `CONSTAT()` en 3M : dans ce cas courant,
+`CONSTAT()()` n'apporte rien. Elle se distingue sur une fréquence **non
+divisible** : en 1Y sous-fréquencé 5M, les observations repassent par chaque
+anniversaire annuel, là où un 5M continu dérive et tombe à des dates
+différentes chaque année.
+
+Donc :
+
+| Ce que la grille fine doit faire | À écrire |
+|---|---|
+| **observer** (chaque date paie ou teste) | `CONSTAT()() Nom` |
+| **moyenner** (une constatation par période) | `CONSTAT() Nom AVG PERIOD` |
+
+Les deux ensemble sont refusés : ce serait deux grilles fines pour un seul
+calendrier, et l'une serait ignorée sans rien dire.
+
+#### Deux lectures d'une même date
+
+Un coupon constaté sur une moyenne et une protection constatée sur le cours de
+clôture tombent le même jour. Le second niveau de qualificateur les sépare :
+
+```
+AT OBSERVATIONS:            → la constatation, donc la moyenne
+AT OBSERVATIONS.last.last:  → son dernier relevé, donc le cours
+```
+
+Deux blocs, un seul calendrier, donc une seule source de dates : deux `CONSTAT`
+distincts auraient deux dates à saisir, qui peuvent cesser de coïncider sans que
+rien ne le signale.
+
+Après réduction, `WOF`, `BOF`, `BASKET` et `S[i]` valent directement la
+performance contre `S0` — il n'y a aucun rapport à écrire à la main.
+
+Tant que la fenêtre de départ n'est pas close, `S0` n'existe pas : les
+observations américaines (`WOF_MIN`, `BOF_MAX`, `S_MIN[i]`, `S_MAX[i]`) ne
+commencent à accumuler qu'après elle. Il n'y a rien dont une barrière puisse
+être le pourcentage avant.
+
+Un call panier à strike moyenné 10 jours et niveau final moyenné 30 jours
+s'écrit donc en entier ainsi :
+
+```
+PARAM STRIKE = 100%
+
+CONSTAT STRIKE_FIX  AVG
+CONSTAT MATURITE    AVG
+
+AT MATURITE:
+  PAY MAX(0, BASKET - STRIKE) "Call panier, strike et final moyennés"
 ```
 
 ---

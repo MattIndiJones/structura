@@ -68,3 +68,8 @@ demo-video/build/
 # Rendus alternatifs de la video de demonstration : seul structura-ai-demo.mp4
 # est versionne. Les variantes pesent ~6 Mo piece et se regenerent par assemble.
 demo-video/structura-ai-demo-linkedin*.mp4
+
+# Bac a sable de production video et de captures : binaire ffmpeg vendorise,
+# MP4 et PNG de controle. Meme regle que demo-video/build/ ci-dessus — se
+# regenere par les scripts, et pese des dizaines de mega.
+artifacts/

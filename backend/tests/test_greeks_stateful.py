@@ -198,9 +198,10 @@ def test_theta_absent_plutot_que_faux_sur_un_etat_non_roulable():
     d'y être replié) et un script à volatilité réalisée (la variance de la
     semaine est simulée d'un côté, il faudrait la deviner de l'autre). Mieux
     vaut pas de theta qu'un theta faux."""
-    cs = parse_script('AT MATURITY\n  SET K = FIX_AVG\n  PAY WOF / K "asiatique"')
+    cs = parse_script('AT MATURITY\n  PAY WOF \"asiatique\"')
     fixe = CompiledScript(events=cs.events, init_fn=cs.init_fn, params=cs.params,
-                          constats=cs.constats, strike_fix_dates=[1 / 104])
+                          constats=cs.constats, strike_fix_dates=[1 / 104],
+                          strike_fix_reduction='AVG')
     g = _greeks(None, compiled=fixe, selected=("theta",), state=_state(1.0))
     assert g["theta"] is None and g["theta_event"]["reason"] == "fenetre_strike_fix"
 

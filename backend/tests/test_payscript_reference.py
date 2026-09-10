@@ -72,10 +72,11 @@ def test_le_vocabulaire_couvre_les_categories_attendues():
     vérifiant plus rien."""
     vocab = language_vocabulary()
     assert set(vocab) == {"market", "indexed", "functions", "basket",
-                          "logic", "top_level", "body"}
+                          "reductions", "logic", "top_level", "body"}
     assert all(vocab[k] for k in vocab), "catégorie de vocabulaire vide"
     # Les mots dont dépendent les pièges documentés au §5 doivent exister.
-    for essentiel in ("WOF", "WOF_MIN", "INDEX", "INDIC", "STOP", "AT MATURITY", "PAY"):
+    for essentiel in ("WOF", "WOF_MIN", "INDEX", "INDIC", "STOP", "AT MATURITY", "PAY",
+                      "AVG", "PERIOD", "STRIKE_FIX"):
         assert essentiel in _real_vocabulary()
 
 

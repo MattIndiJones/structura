@@ -49,11 +49,18 @@ def extract(js_text: str) -> tuple[dict[str, tuple[str, str]], list[tuple[str, s
     meta_block = re.search(r"export const templateMeta = \[(.*?)\n\]", js_text, re.S)
     if not meta_block:
         raise SystemExit("templateMeta introuvable dans le fichier JS.")
+    # `expertOnly` sort du corpus : ces modèles constatent sur une période, et
+    # leur fenêtre vit dans un CONSTAT dont les valeurs sont à l'écran. Le
+    # modèle ne pourrait pas les reproduire seul, et ils ne se pricent pas tels
+    # quels. Le filtre est explicite pour ne pas dépendre du fait qu'une regex
+    # plus étroite les rate — elle finirait par les rattraper.
     meta = {
         k: (label, group)
-        for k, label, group in re.findall(
-            r"\{\s*key:\s*'([^']+)',\s*label:\s*'([^']+)',\s*group:\s*'([^']+)'\s*\}",
+        for k, label, group, expert_only in re.findall(
+            r"\{\s*key:\s*'([^']+)',\s*label:\s*'([^']+)',\s*group:\s*'([^']+)'"
+            r"(\s*,\s*expertOnly:\s*true)?\s*\}",
             meta_block.group(1))
+        if not expert_only
     }
     ex_block = re.search(r"export const examples = \{(.*?)\n\}", js_text, re.S)
     if not ex_block:

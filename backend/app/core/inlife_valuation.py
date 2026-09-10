@@ -488,6 +488,7 @@ def _assembler_residuel(p: InLifeProduct, market: dict, underlyings_json: list,
         params=pricing.params, constats=pricing.constats,
         has_stop=pricing.has_stop, monitors=pricing.monitors,
         strike_fix_dates=residual_fix or None,
+        strike_fix_reduction=pricing.strike_fix_reduction,
     )
 
     engine_uls = _engine_underlyings(market, underlyings_json)

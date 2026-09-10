@@ -51,25 +51,24 @@
     <!-- ── Main 2-col ──────────────────────────────────────────── -->
     <main class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-0 items-stretch">
 
-      <!-- LEFT: Script + Params tabs -->
+      <!-- LEFT: définition produit, marché, booking et cycle de vie -->
       <div class="border-r border-slate-800 flex flex-col">
-        <div class="flex gap-1 border-b border-slate-800 bg-slate-900/50 px-2 py-1.5">
+        <div class="flex gap-1 border-b border-slate-800 bg-slate-900/50 px-2 py-1.5 overflow-x-auto">
           <button
             v-for="tab in leftTabs" :key="tab.id"
-            class="tab-btn" :class="{ active: store.leftTab === tab.id }"
+            class="tab-btn shrink-0 whitespace-nowrap" :class="{ active: store.leftTab === tab.id }"
             @click="store.leftTab = tab.id">
             {{ tab.label }}
           </button>
         </div>
         <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
           <PayScriptEditor v-show="store.leftTab === 'script'" />
+          <EconomicsTab    v-show="store.leftTab === 'economics'" />
           <MarketParams    v-show="store.leftTab === 'params'" />
-          <!-- v-show, PAS v-if : le formulaire de deal porte le sens, la
-               contrepartie, le nominal et le prix traité, qui ne vivent nulle
-               part ailleurs. Le détruire à chaque changement d'onglet les
-               perdait — aller relancer un prix puis revenir suffisait, et le
-               prix traité repartait à la fair value fraîche sans que rien ne
-               le signale. -->
+          <!-- v-show, PAS v-if : les economics vivent dans le store, mais les
+               champs commerciaux de Deal restent locaux au composant. Le
+               détruire à chaque changement d'onglet ferait perdre le sens,
+               la contrepartie et le prix traité. -->
           <DealTab         v-show="store.leftTab === 'deal'" @go-events="goToEvents" />
           <EventsTab       v-if="store.leftTab === 'events'" :initial-deal-id="eventsInitialDealId" />
         </div>
@@ -98,6 +97,7 @@
 <script setup>
 import BackLink from '../components/ui/BackLink.vue'
 import PayScriptEditor from '../components/PayScriptEditor.vue'
+import EconomicsTab    from '../components/EconomicsTab.vue'
 import VariantBar      from '../components/VariantBar.vue'
 import MarketParams    from '../components/MarketParams.vue'
 import DealTab         from '../components/DealTab.vue'
@@ -152,8 +152,9 @@ onMounted(async () => {
 
 const leftTabs = [
   { id: 'script', label: '✏️ Script PayScript' },
-  { id: 'deal',   label: '📋 Deal' },
+  { id: 'economics', label: '💶 Economics' },
   { id: 'params', label: '⚙️ Marché & Paramètres' },
+  { id: 'deal',   label: '📋 Deal' },
   { id: 'events', label: '📅 Events' },
 ]
 const rightTabs = [

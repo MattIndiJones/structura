@@ -63,7 +63,8 @@ def parse_endpoint(req: ParseRequest):
                 "desc": p.desc,
                 "kind": p.kind,
             } for p in compiled.params],
-            constats=[{"name": c.name, "kind": c.kind} for c in compiled.constats],
+            constats=[{"name": c.name, "kind": c.kind, "reduction": c.reduction,
+                       "window_scope": c.window_scope} for c in compiled.constats],
             events_count=len(compiled.events),
             has_stop=compiled.has_stop,
             monitors=compiled.monitors or [],
@@ -160,6 +161,7 @@ def price_endpoint(req: PricingRequest):
         n_eff=result["n_eff"],
         t_max_effective=round(T_eff, 4),
         fugit=result.get("fugit"),
+        constatation_windows=result.get("constatation_windows"),
     )
 
 

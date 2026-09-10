@@ -278,6 +278,7 @@ describe('le préremplissage depuis un AO garde ses dates', () => {
     expect(store.globalParams.strike_date).toBe('2026-08-31')
     expect(store.globalParams.value_date).toBe('2026-08-31')
     expect(store.globalParams.payment_date).toBe('2029-09-05')
+    expect(store.globalParams.nominal).toBe(1_000_000)
     expect(store.pendingDealPrefill.strike_date).toBe('2026-08-31')
     expect(store.pendingDealPrefill.value_date).toBe('2026-08-31')
     expect(store.pendingDealPrefill.payment_date).toBe('2029-09-05')
@@ -300,5 +301,37 @@ describe('le préremplissage depuis un AO garde ses dates', () => {
     await store.loadFromRfq(AO)
 
     expect(store.pricingBody().payment_date).toBe('2029-09-05')
+  })
+})
+
+describe('les economics d’un deal rouvert restent autoritatifs', () => {
+  it('restaure nominal, devise et dates dans le store partagé', async () => {
+    const store = await storeRenseigne()
+    await store.loadFromDeal({
+      id: 7,
+      reference: 'DEAL-7',
+      script_snapshot: VALIDE,
+      market_snapshot: { deal_ccy: 'USD', user_params: { COUPON: 0.0175 }, constats: {} },
+      T: 3,
+      devise: 'USD',
+      nominal: 2_500_000,
+      sens: 'vente',
+      contrepartie: 'Banque Test',
+      product_type: 'Autocall',
+      fixing_policy: 'AUTO_YAHOO',
+      fair_value: 99.25,
+      price_traded: 98.9,
+      trade_date: '2026-09-01',
+      strike_date: '2026-09-03',
+      value_date: '2026-09-07',
+      payment_date: '2029-09-06',
+    })
+
+    expect(store.globalParams.nominal).toBe(2_500_000)
+    expect(store.globalParams.deal_ccy).toBe('USD')
+    expect(store.globalParams.strike_date).toBe('2026-09-03')
+    expect(store.globalParams.value_date).toBe('2026-09-07')
+    expect(store.globalParams.payment_date).toBe('2029-09-06')
+    expect(store.paramOverrides.COUPON).toBeCloseTo(1.75, 10)
   })
 })

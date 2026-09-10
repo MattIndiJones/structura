@@ -140,23 +140,25 @@ def test_tour_sur_autocall_a_toutes_les_dates(t0):
 
 # ── Fenêtre de fixing réalisée ──────────────────────────────────────
 
+# Le rebasage sur S0 est fait par le moteur : `WOF` est la performance contre
+# le niveau initial constaté, moyenné sur la fenêtre de départ.
 FIX_SCRIPT = """
-CONSTAT() STRIKE_FIX
+CONSTAT STRIKE_FIX AVG
 PARAM AC = 100%
 AT 2, 3
-  IF WOF / FIX_AVG >= AC
+  IF WOF >= AC
     PAY 1 + 0.08 * INDEX "rappel"
     STOP
 AT MATURITY
-  PAY WOF / FIX_AVG "final"
+  PAY WOF "final"
 """
 
 
 @lru_cache(maxsize=1)
 def _fix_script():
     return resolve_constats(parse_script(FIX_SCRIPT), {"STRIKE_FIX": {
-        "start_date": "2026-08-03", "end_date": "2027-02-03",
-        "roll_date": "2026-09-03", "frequency": "1M"}}, anchor=dtm.date(2026, 8, 3))
+        "date": "2026-08-03", "window_length": "6M",
+        "window_frequency": "1M"}}, anchor=dtm.date(2026, 8, 3))
 
 
 @lru_cache(maxsize=1)

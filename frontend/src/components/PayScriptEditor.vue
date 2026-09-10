@@ -112,85 +112,29 @@
       {{ Array.isArray(store.parseError) ? store.parseError.join('\n') : store.parseError }}
     </div>
 
-    <!-- Dynamic PARAM inputs -->
-    <div v-if="store.scriptParams.length > 0" class="card">
-      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Paramètres du script
-        <HelpTip text="Détectés automatiquement depuis les lignes PARAM du script (parsing à chaque modification). Les valeurs saisies ici surchargent les valeurs par défaut du script pour le pricing courant, sans modifier le texte du script lui-même." />
-      </div>
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <div v-for="p in store.scriptParams" :key="p.name" class="flex flex-col gap-1"
-          :class="p.kind === 'array' ? 'col-span-2 sm:col-span-1' : ''">
-          <label class="label">{{ p.name }}
-            <!-- Une valeur ne s'affiche jamais sans dire de quel état elle
-                 relève : un champ modifié qui aurait l'air neutre ferait croire
-                 à une comparaison « toutes choses égales par ailleurs » qui n'en
-                 est pas une. -->
-            <span v-if="marque.etat(cheminParam(p.name)) === 'modifie'"
-                  class="ml-1 text-[9px] font-normal normal-case text-amber-400">
-              ● origine {{ valeurLisible(marque.avant(cheminParam(p.name))) }}
+    <!-- Les déclarations restent visibles ici, mais leur valeur n'a qu'un
+         seul lieu d'édition : Economics. Deux contrôles reliés à la même
+         surcharge rendaient ambiguë la valeur réellement utilisée. -->
+    <div v-if="store.scriptParams.length || store.scriptConstats.length" class="card">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Déclarations économiques</div>
+          <div class="flex flex-wrap gap-1.5 mt-2">
+            <span v-for="p in store.scriptParams" :key="p.name" class="badge badge-muted font-mono">
+              {{ p.kind === 'array' ? 'PARAM()' : 'PARAM' }} {{ p.name }}
             </span>
-            <span v-if="p.kind === 'array'" class="text-slate-600 font-normal normal-case">
-              (par observation)
-              <HelpTip text="Une valeur par observation, dans l'ordre des dates AT. La dernière ligne s'étend aux observations suivantes — une seule ligne = valeur constante. Une ligne en trop est ignorée." />
+            <span v-for="c in store.scriptConstats" :key="c.name" class="badge badge-muted font-mono">
+              CONSTAT {{ c.name }}
             </span>
-          </label>
-
-          <!-- PARAM() : une ligne par observation -->
-          <template v-if="p.kind === 'array'">
-            <div v-for="(v, ri) in store.paramOverrides[p.name]" :key="ri"
-              class="flex items-center gap-1.5">
-              <span class="text-[10px] text-slate-600 font-mono w-9 shrink-0">Obs {{ ri + 1 }}</span>
-              <SensitiveValue mode="input">
-                <div class="relative flex-1">
-                  <input type="number" class="input pr-7 text-xs py-1" step="any"
-                    v-model.number="store.paramOverrides[p.name][ri]" />
-                  <span v-if="p.is_pct" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">%</span>
-                </div>
-              </SensitiveValue>
-              <button v-if="store.paramOverrides[p.name].length > 1"
-                class="text-slate-600 hover:text-red-400 text-xs shrink-0"
-                @click="store.paramOverrides[p.name].splice(ri, 1)">✕</button>
-            </div>
-            <button class="text-xs text-blue-400 hover:underline self-start"
-              @click="store.paramOverrides[p.name].push(store.paramOverrides[p.name].at(-1) ?? p.display_default)">
-              + Ajouter une observation
-            </button>
-          </template>
-
-          <!-- PARAM scalaire -->
-          <SensitiveValue v-else mode="input">
-            <div class="relative">
-              <input
-                :id="`param-${p.name}`"
-                type="number"
-                class="input pr-7"
-                :class="marque.classe(cheminParam(p.name))"
-                v-model.number="store.paramOverrides[p.name]"
-                step="any"
-              />
-              <span v-if="p.is_pct" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">%</span>
-            </div>
-          </SensitiveValue>
-          <span v-if="p.desc && p.desc !== p.name" class="text-xs text-slate-600">{{ p.desc }}</span>
+          </div>
+          <p class="text-[10px] text-slate-600 mt-2">
+            Le script déclare les termes ; leurs valeurs et échéanciers sont pilotés dans Economics.
+          </p>
         </div>
+        <button class="btn-secondary text-xs shrink-0" @click="store.leftTab = 'economics'">
+          Ouvrir Economics
+        </button>
       </div>
-    </div>
-
-    <!-- Rappel calendrier (mode expert — CONSTAT) — édition dans l'onglet Deal -->
-    <div v-if="store.scriptConstats.length > 0" class="card">
-      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Calendrier du script (CONSTAT)
-        <HelpTip width="w-72" text="Les dates concrètes (début/fin/roll/fréquence) de chaque calendrier référencé ici se saisissent dans l'onglet Deal, à côté de l'aperçu des constatations — pas dans le script lui-même." />
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <span v-for="c in store.scriptConstats" :key="c.name"
-          class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono border"
-          :class="isConstatResolved(c) ? 'border-slate-700 text-slate-400' : 'border-amber-800/60 text-amber-400'">
-          {{ c.name }}
-          <span v-if="isConstatResolved(c)" class="text-emerald-500">✓</span>
-          <span v-else>⚠ non défini</span>
-        </span>
-      </div>
-      <p class="text-[10px] text-slate-600 mt-2">→ défini dans l'onglet Deal</p>
     </div>
 
     <!-- PayScript quick reference -->
@@ -221,16 +165,18 @@ import BaseModal from './ui/BaseModal.vue'
 import AlertMessage from './ui/AlertMessage.vue'
 import ScriptAssistantModal from './ScriptAssistantModal.vue'
 import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
-import { useVariantMark, cheminParam, valeurLisible } from '../composables/useVariantMark.js'
 
 const store = usePricingStore()
-const marque = useVariantMark(store)
 const notice = ref('')
 
 const groupedTemplates = computed(() => {
   const groups = {}
   for (const t of templateMeta) {
-    (groups[t.group] ||= []).push(t)
+    // Un modèle `expertOnly` constate sur une période : sa fenêtre vit dans un
+    // CONSTAT, que le mode normal ne déclare pas. Le proposer là chargerait un
+    // script vide.
+    if (t.expertOnly && !expertMode.value) continue
+    ;(groups[t.group] ||= []).push(t)
   }
   return groups
 })
@@ -291,13 +237,6 @@ async function doSave() {
   }
 }
 
-function isConstatResolved(c) {
-  const v = store.constatOverrides[c.name]
-  if (!v) return false
-  if (c.kind === 'single') return !!v
-  return !!(v.start_date && v.end_date)
-}
-
 // ── Date helpers ───────────────────────────────────────────────────
 function isoToday() {
   return new Date().toISOString().slice(0, 10)
@@ -343,12 +282,33 @@ function getExpertConstatDefaults(key) {
     zcb:                 1,
     shark_note:          3,
     shark_note_worst_of: 3,
+    call_moyenne:        1,
+    call_lookback:       1,
   }
 
-  // Products with CONSTAT() STRIKE_FIX (fixing window, always before OBSERVATIONS)
+  // Produits portant une fenêtre de départ (STRIKE_FIX). La valeur est la
+  // longueur par défaut de la fenêtre, en jours ouvrés — elle se re-saisit à
+  // l'écran, c'est une donnée de term sheet.
   const strikeFixMap = {
-    autocall_gear_put:          1,
-    autocall_gear_put_worst_of: 1,
+    autocall_gear_put:          10,
+    autocall_gear_put_worst_of: 10,
+    call_moyenne:               10,
+    call_lookback:              10,
+  }
+  // Constatation finale sur période : longueur par défaut, même unité.
+  const finalWindowMap = { call_moyenne: 30 }
+
+  // Calendrier à fenêtre de PÉRIODE : la sous-fréquence de relevé remplace la
+  // longueur, qui n'a pas de sens quand la fenêtre est la période elle-même.
+  const periodMap = { autocall_moyenne_periode: { years: 3, sample: { value: 3, unit: 'M' } } }
+  if (key in periodMap) {
+    const endDate = addYears(periodMap[key].years)
+    defs.push({ name: 'OBSERVATIONS', kind: 'schedule', values: {
+      start_date: t0, end_date: endDate, roll_date: endDate,
+      frequency: { value: 1, unit: 'Y' }, stub: 'short_last',
+      window_frequency: periodMap[key].sample,
+    }})
+    return defs
   }
 
   if (key in scheduleMap) {
@@ -360,14 +320,20 @@ function getExpertConstatDefaults(key) {
   }
 
   if (key in singleMap) {
-    defs.push({ name: 'MATURITE', kind: 'single', values: addYears(singleMap[key]) })
+    const win = finalWindowMap[key]
+    defs.push({ name: 'MATURITE', kind: 'single',
+                values: win
+                  ? { date: addYears(singleMap[key]),
+                      window_length: { value: win, unit: 'D' },
+                      window_frequency: { value: 1, unit: 'D' } }
+                  : addYears(singleMap[key]) })
   }
 
   if (key in strikeFixMap) {
-    const endDate = addMonths(strikeFixMap[key])
-    defs.push({ name: 'STRIKE_FIX', kind: 'schedule', values: {
-      start_date: t0, end_date: endDate, roll_date: endDate,
-      frequency: { value: 1, unit: 'D' }, stub: 'short_last',
+    defs.push({ name: 'STRIKE_FIX', kind: 'single', values: {
+      date: t0,
+      window_length: { value: strikeFixMap[key], unit: 'D' },
+      window_frequency: { value: 1, unit: 'D' },
     }})
   }
 
@@ -397,25 +363,44 @@ async function loadExample(key) {
   if (expertMode.value) {
     store.script = expertExamples[key] || examples[key] || ''
     await store.parseScript()
-
-    for (const def of getExpertConstatDefaults(key)) {
-      if (!(def.name in store.constatOverrides)) continue
-      if (def.kind === 'single') {
-        store.constatOverrides[def.name] = def.values
-      } else {
-        const ov = store.constatOverrides[def.name]
-        ov.start_date = def.values.start_date
-        ov.end_date   = def.values.end_date
-        ov.roll_date  = def.values.roll_date
-        ov.frequency.value = def.values.frequency.value
-        ov.frequency.unit  = def.values.frequency.unit
-        ov.stub = def.values.stub
-      }
-    }
+    applyConstatDefaults(key)
   } else {
     store.script = examples[key] || ''
-    store.parseScript()
+    await store.parseScript()
+    applyConstatDefaults(key)
   }
+}
+
+/** Pré-remplit les CONSTAT déclarés par le modèle qu'on vient de charger. */
+function applyConstatDefaults(key) {
+  for (const def of getExpertConstatDefaults(key)) {
+    if (!(def.name in store.constatOverrides)) continue
+    const ov = store.constatOverrides[def.name]
+    if (def.kind === 'single') {
+      // Un modèle à fenêtre stocke un objet : on le remplit plutôt que de
+      // l'écraser, sinon la réactivité du panneau saute.
+      if (typeof def.values === 'object' && ov && typeof ov === 'object') {
+        ov.date = def.values.date
+        _applyTenor(ov, 'window_length', def.values.window_length)
+        _applyTenor(ov, 'window_frequency', def.values.window_frequency)
+      } else {
+        store.constatOverrides[def.name] = def.values
+      }
+    } else if (ov && typeof ov === 'object') {
+      ov.start_date = def.values.start_date
+      ov.end_date   = def.values.end_date
+      ov.roll_date  = def.values.roll_date
+      ov.frequency.value = def.values.frequency.value
+      ov.frequency.unit  = def.values.frequency.unit
+      ov.stub = def.values.stub
+    }
+  }
+}
+
+function _applyTenor(ov, key, tenor) {
+  if (!tenor) return
+  if (!ov[key]) ov[key] = { value: tenor.value, unit: tenor.unit }
+  else { ov[key].value = tenor.value; ov[key].unit = tenor.unit }
 }
 
 // ── Misc ───────────────────────────────────────────────────────────
@@ -447,7 +432,10 @@ const referenceSections = [
       { kw: 'AT Nom.first:', desc: 'Événement additionnel à la 1ère date du calendrier' },
       { kw: 'AT Nom.last:', desc: 'Événement additionnel à la dernière date (ex : check KI à maturité)' },
       { kw: 'AT Nom[3]:', desc: 'Événement additionnel à la 3e date (1-indexé)' },
-      { kw: 'CONSTAT() STRIKE_FIX', desc: 'Nom réservé : fenêtre de fixing du strike (toujours avant le calendrier d\'autocall). Pas de bloc AT — utiliser FIX_MIN/FIX_MAX/FIX_AVG' },
+      { kw: 'CONSTAT Nom MIN|MAX|AVG', desc: 'Constatation sur PERIODE : chaque date devient le min/max/moyenne des cours de CHAQUE sous-jacent sur une fenetre, et WOF/BOF/BASKET n\'agregent qu\'ensuite. Longueur et frequence de la fenetre se saisissent a l\'ecran : ce sont des donnees de term sheet, pas du payoff' },
+      { kw: 'CONSTAT STRIKE_FIX AVG', desc: 'Nom reserve : la fenetre de depart, celle qui fixe S0 par sous-jacent. Elle PART de sa date vers l\'avant, la ou toute autre fenetre arrive a la sienne. Ensuite WOF/BOF/BASKET valent directement la performance contre S0. Tant qu\'elle n\'est pas close, les barrieres americaines (WOF_MIN) ne courent pas' },
+      { kw: 'CONSTAT() Nom AVG PERIOD', desc: 'Fenêtre = LA PÉRIODE, d\'une constatation à la suivante, échantillonnée à la fréquence de relevé saisie à l\'écran. Trois constatations annuelles moyennées sur leurs relevés trimestriels, par exemple. Sans PERIOD, la fenêtre a une longueur fixe avant chaque date' },
+      { kw: 'AT Nom.last.last:', desc: 'Deux niveaux de qualificateur : le premier désigne une constatation, le second UN RELEVÉ dans sa fenêtre. .last = la dernière constatation (donc la moyenne), .last.last = son dernier relevé (donc le cours). C\'est ainsi qu\'un PDI sur clôture cohabite avec un coupon sur moyenne, même date, même calendrier' },
     ],
   },
   {
@@ -467,7 +455,6 @@ const referenceSections = [
       { kw: 'BOF', desc: 'Best-of actuel (max des spots)' },
       { kw: 'WOF_MIN', desc: 'Min historique du WoF depuis t=0' },
       { kw: 'BOF_MAX', desc: 'Max historique du BoF depuis t=0' },
-      { kw: 'FIX_MIN / FIX_MAX / FIX_AVG', desc: 'Min/max/moyenne du WoF sur la fenêtre CONSTAT() STRIKE_FIX — niveau de référence (fixing), indépendant du strike du put. Ex: SET REF = FIX_AVG puis SET PERF = WOF/REF, et utiliser PERF (pas WOF) partout ensuite' },
       { kw: 'ACCUM', desc: 'Valeur accumulée via ACCRUE' },
       { kw: 'INDEX', desc: 'Numéro d\'observation (1, 2, …)' },
       { kw: 'T', desc: 'Temps actuel (en années)' },

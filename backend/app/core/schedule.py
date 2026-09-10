@@ -227,6 +227,102 @@ def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
     }
 
 
+def period_windows(start: date, end: date, roll_date: date, frequency: Tenor,
+                    stub: StubConvention, sample: Tenor, *,
+                    currency: str | None = None,
+                    convention: BusinessDayConvention = BusinessDayConvention.NONE,
+                    ) -> tuple[list[date], list[list[date]]]:
+    """Constatations d'un calendrier, et les relevés que chacune moyenne.
+
+    Une fenêtre de PÉRIODE n'a pas de longueur : elle court d'une constatation
+    à la suivante. On ne peut donc pas la construire en remontant pas à pas
+    depuis la date de constatation — celle-ci est déjà roulée sur un jour
+    ouvré, et remonter de 3M depuis un lundi qui était un dimanche décale
+    toute la fenêtre, définitivement. On la bâtit sur la grille du calendrier
+    lui-même : `generate_schedule` roule d'abord sur les dates brutes puis
+    ajuste, ce qui est l'ordre du marché et le seul qui garde un trimestriel
+    trimestriel.
+
+    C'est exactement la grille qu'un `CONSTAT()()` produirait avec `sample`
+    comme sous-fréquence — la même, à ceci près que ces dates ne sont pas des
+    observations mais les relevés d'une constatation.
+
+    Retourne (constatations, fenêtres) : une fenêtre par constatation, chacune
+    ouverte à gauche et fermée à droite, si bien qu'une date de roll partagée
+    par deux périodes n'est comptée qu'une fois.
+    """
+    full = generate_schedule(start, end, roll_date, frequency, stub,
+                             sub_frequency=sample, currency=currency,
+                             convention=convention)
+    mains = full["main_dates"]
+    alls = full["dates"]
+    obs = list(mains[1:])            # le start ouvre la 1re période, il n'est pas constaté
+    windows = []
+    for lo, hi in zip(mains[:-1], mains[1:]):
+        windows.append([d for d in alls if lo < d <= hi] or [hi])
+    return obs, windows
+
+
+def observation_window(anchor: date, length: Tenor, frequency: Tenor, *,
+                        forward: bool = False, currency: str | None = None,
+                        convention: BusinessDayConvention = BusinessDayConvention.NONE,
+                        ) -> list[date]:
+    """The dates a single constatation reduces over — an averaging-in or
+    averaging-out window, sorted ascending, `anchor` always included.
+
+    `forward=False` (the usual case) walks BACKWARD from the observation date:
+    the window ARRIVES at its date. `forward=True` is the initial fixing
+    window, which DEPARTS from the strike date and walks forward. See
+    CONSTATATIONS_PERIODE_DESIGN.md — one looks ahead at the start, back at
+    the finish.
+
+    Length semantics differ by unit, deliberately, because term sheets do:
+      'D'  — a COUNT of observations, anchor included. "30D" at a 1D frequency
+             is 30 fixings, not 31, and they are BUSINESS days whenever a
+             currency is supplied (a calendar-day reading would silently drop
+             weekends and return ~21).
+      W/M/Y — a calendar span: the window is the interval [anchor - length,
+             anchor], both bounds included.
+    Sampling always starts AT the anchor and steps away from it, so the
+    observation date itself is a fixing — never an off-by-one that quietly
+    shifts the whole window by one period.
+
+    A window whose extent is a PERIOD rather than a duration is built by
+    `period_windows` instead — it must ride the calendar's own grid, not step
+    back from an already-adjusted date.
+    """
+    if length.unit == "D":
+        span = length.value - 1          # anchor already counts as one point
+        limit = (add_business_days(anchor, span if forward else -span, currency)
+                 if currency else
+                 anchor + timedelta(days=span if forward else -span))
+    else:
+        limit = _step(anchor, length, 1 if forward else -1)
+
+    out: list[date] = []
+    k = 0
+    while True:
+        if frequency.unit == "D" and currency:
+            step = frequency.value * k
+            d = add_business_days(anchor, step if forward else -step, currency)
+        else:
+            d = _step(anchor, frequency, k if forward else -k)
+        if (d > limit) if forward else (d < limit):
+            break
+        out.append(d)
+        k += 1
+        if k > 10_000:                   # a mis-typed length must not hang the parse
+            raise ValueError(
+                f"Fenêtre de constatation trop longue : plus de 10 000 points à la "
+                f"fréquence {frequency.value}{frequency.unit}. Vérifiez la longueur "
+                f"de fenêtre, ou la fréquence de relevé si la fenêtre est une période.")
+    if not out:
+        out = [anchor]
+    if currency:
+        out = [adjust(d, currency, convention) for d in out]
+    return _dedupe(sorted(out))
+
+
 def _dedupe(dates: list[date]) -> list[date]:
     """Two calendar dates can adjust onto the same business day — a daily
     schedule spanning a weekend lands Saturday, Sunday and Monday all on the

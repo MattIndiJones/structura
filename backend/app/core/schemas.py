@@ -131,6 +131,11 @@ class PricingResponse(BaseModel):
     # See core/payscript/parser.effective_T_max.
     t_max_effective: float = 0.0
     fugit: Optional[float] = None
+    # Ce qu'une fenêtre de constatation a réellement pesé : points de grille
+    # retenus contre points demandés, par constatation. Une alerte générique se
+    # clique sans lire ; un décompte se lit — et c'est la seule façon de voir
+    # qu'une fenêtre trop courte pour la grille hebdomadaire n'a pas moyenné.
+    constatation_windows: Optional[List[Dict[str, Any]]] = None
 
 
 class ParseRequest(BaseModel):
@@ -435,4 +440,44 @@ class ScheduleRequest(BaseModel):
     settlement_lag: int = Field(default=0, ge=0, le=30)
     convention: str = Field(
         default="modified_following",
+        pattern="^(following|modified_following|preceding|modified_preceding|none)$")
+
+
+class PeriodWindowPreviewRequest(BaseModel):
+    """Aperçu d'une fenêtre de PÉRIODE : combien de constatations le calendrier
+    produit, et combien de relevés chacune moyenne.
+
+    C'est la question que se pose l'utilisateur en saisissant « 1Y » et « 3M » :
+    ai-je bien 3 constatations de 4 relevés, ou 12 observations ?"""
+    start_date: str
+    end_date: str
+    roll_date: str
+    frequency: str
+    window_frequency: str
+    stub: str = Field(default="short_last",
+                       pattern="^(short_first|short_last|long_first|long_last)$")
+    currency: Optional[str] = None
+    convention: str = Field(
+        default="none",
+        pattern="^(following|modified_following|preceding|modified_preceding|none)$")
+
+
+class WindowPreviewRequest(BaseModel):
+    """Aperçu d'une fenêtre de constatation : les dates qu'elle retient
+    vraiment, avant tout pricing.
+
+    L'écran saisit une LONGUEUR en jours ouvrés ; un term sheet dit « du 10 au
+    20 septembre ». Les deux ne tombent pas au même endroit — 10 jours ouvrés à
+    partir du 10/09 vont jusqu'au 23, parce qu'ils sautent deux week-ends. Faire
+    la conversion de tête est une source d'erreur silencieuse : cet aperçu la
+    supprime en montrant la première date, la dernière et le compte."""
+    date: str
+    window_length: str
+    window_frequency: str = "1D"
+    # La fenêtre de départ (STRIKE_FIX) part de sa date vers l'avant ; toute
+    # autre arrive à la sienne.
+    forward: bool = False
+    currency: Optional[str] = None
+    convention: str = Field(
+        default="none",
         pattern="^(following|modified_following|preceding|modified_preceding|none)$")

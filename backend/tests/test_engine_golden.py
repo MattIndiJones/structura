@@ -51,10 +51,11 @@ AT MATURITY
   PAY 1 "capital"
 """
 
+# Le rebasage sur S0 (réduction de la fenêtre de départ, par sous-jacent) est
+# fait par le moteur : `WOF` EST la performance contre le niveau initial.
 ASIAN = """
 AT MATURITY
-  SET STRIKE = FIX_AVG
-  PAY WOF / STRIKE "perf vs strike moyen"
+  PAY WOF "perf vs strike moyen"
 """
 
 BARRIER = """
@@ -201,11 +202,20 @@ def test_prix_inchange_etat_residuel_complet():
 # bouger ces trois valeurs — c'est le canari du refactoring.
 
 def test_prix_inchange_fenetre_strike_fix():
-    """Strike asiatique : la fenêtre de fixing consomme la grille temporelle et
-    déclenche le mécanisme de bump différé."""
+    """Strike asiatique : la fenêtre de départ consomme la grille temporelle et
+    déclenche le mécanisme de bump différé.
+
+    Valeur INCHANGÉE par le passage à la constatation sur période, et c'est le
+    résultat qui valide la refonte : le rebasage sur S0 est passé du script
+    (`WOF / FIX_AVG`) au moteur, et sur un mono sous-jacent — où réduire chaque
+    actif puis agréger et faire l'inverse coïncident — il reproduit le prix au
+    bit près. L'écart n'apparaît qu'à partir de deux sous-jacents, là où
+    moyenne(min) et min(moyennes) divergent, et c'est précisément le défaut que
+    la refonte corrige."""
     cs = parse_script(ASIAN)
     fixe = CompiledScript(events=cs.events, init_fn=cs.init_fn, params=cs.params,
-                          constats=cs.constats, strike_fix_dates=[2 / 52, 4 / 52])
+                          constats=cs.constats, strike_fix_dates=[2 / 52, 4 / 52],
+                          strike_fix_reduction='AVG')
     assert _price(None, compiled=fixe) == 0.988224
 
 

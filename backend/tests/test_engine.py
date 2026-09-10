@@ -1119,17 +1119,19 @@ AT MATURITY
 """
 
 
-def _residual_script(cs, t0):
+def _residual_script(cs, t0, strike_fix_reduction=None):
     """Shift a compiled script to a valuation date t0 — same construction as
     api/deals.py:deal_mtm."""
     return CompiledScript(events=_shift_events_for_mtf(cs.events, t0),
                           init_fn=cs.init_fn, params=cs.params,
-                          constats=cs.constats, has_stop=cs.has_stop)
+                          constats=cs.constats, has_stop=cs.has_stop,
+                          strike_fix_reduction=strike_fix_reduction)
 
 
-def _run_residual(script_text, t0, spot, sigma=0.05, r=0.03, T_res=0.5, **kw):
+def _run_residual(script_text, t0, spot, sigma=0.05, r=0.03, T_res=0.5,
+                  strike_fix_reduction=None, **kw):
     cs = parse_script(script_text)
-    rs = _residual_script(cs, t0)
+    rs = _residual_script(cs, t0, strike_fix_reduction)
     params = [dict(CALL_PARAMS[0], sigma=sigma, q=0.0)]
     return run_mc(rs, params, CORR, r=r, T_max=T_res, N=20000, model='constant',
                   seed=42, antithetic=True, spot_mult=[spot], **kw)['price']
@@ -1213,7 +1215,7 @@ def test_resolve_constats_anchor():
 # ── MtM résiduel — héritage d'état complet (s_min/s_max/s_prev/realvol/
 #    strike_fix) : combinaison passé réel / futur simulé ────────────────
 
-from backend.app.core.payscript.engine import _compute_strike_fix
+from backend.app.core.payscript.engine import _niveau_initial
 
 RESIDUAL_S_MIN_KI = """
 PARAM KI_BAR = 60%  "barriere KI per-asset"
@@ -1228,10 +1230,11 @@ AT MATURITY
   PAY REALVOL "vol realisee"
 """
 
+# Le rebasage sur S0 est fait par le moteur depuis la constatation sur période :
+# `WOF` EST la performance contre le niveau initial constaté.
 RESIDUAL_ASIAN_STRIKE = """
 AT MATURITY
-  SET STRIKE = FIX_AVG
-  PAY WOF / STRIKE "perf vs strike moyen"
+  PAY WOF "perf vs strike moyen"
 """
 
 RESIDUAL_MOMENTUM = """
@@ -1283,29 +1286,39 @@ def test_residual_wof0_seed_kills_phantom_return():
 
 
 def test_residual_strike_fix_past_window():
-    """Fenêtre STRIKE_FIX entièrement réalisée (fix_state hérité, moyenne 0.8,
-    aucune date résiduelle) : FIX_AVG constant à 0.8 → payoff WOF/0.8 vaut
-    spot/0.8 = 1.25 actualisé au forward (martingale, q=0)."""
+    """Fenêtre de départ entièrement réalisée (réduction héritée par actif à
+    0.8, aucune date résiduelle) : le moteur rebase le tenseur sur 0.8, donc
+    WOF vaut spot/0.8 = 1.25 actualisé au forward (martingale, q=0)."""
     past = _run_residual(RESIDUAL_ASIAN_STRIKE, 2.5, 1.0, sigma=0.01,
-                         fix_state_init={"n": 2, "sum": 1.6,
-                                         "min": 0.7, "max": 0.9})
+                         strike_fix_reduction="AVG",
+                         fix_state_init={"n": 2, "sum": [1.6],
+                                         "min": [0.7], "max": [0.9]})
     assert abs(past - 1.0 / 0.8) < 0.01, f"{past:.4f}"
 
 
-def test_compute_strike_fix_combines_past_and_future():
+def test_niveau_initial_combines_past_and_future():
     """Fenêtre à cheval : 2 fixings réalisés (somme 1.6) + 1 futur simulé à
     0.9 → moyenne pondérée par comptes (1.6+0.9)/3, min/max croisés. Sans état
-    hérité la réduction reste celle de la fenêtre future seule."""
+    hérité la réduction reste celle de la fenêtre future seule. La réduction
+    est PAR SOUS-JACENT : c'est ce qui la distingue de l'ancien FIX_AVG, qui
+    réduisait le worst-of."""
     cs = parse_script(RESIDUAL_ASIAN_STRIKE)
     rs = CompiledScript(events=cs.events, init_fn=cs.init_fn, params=cs.params,
-                        constats=cs.constats, strike_fix_dates=[4 / 52])
-    WOF = np.full((26, 8), 0.9)
-    f_min, f_max, f_avg = _compute_strike_fix(
-        rs, WOF, fix_state_init={"n": 2, "sum": 1.6, "min": 0.7, "max": 0.95})
-    assert np.allclose(f_min, 0.7) and np.allclose(f_max, 0.95)
-    assert np.allclose(f_avg, (1.6 + 0.9) / 3)
-    f_min2, _f_max2, f_avg2 = _compute_strike_fix(rs, WOF)
-    assert np.allclose(f_min2, 0.9) and np.allclose(f_avg2, 0.9)
+                        constats=cs.constats, strike_fix_dates=[4 / 52],
+                        strike_fix_reduction="AVG")
+    S = np.full((27, 1, 8), 0.9)
+    avg = _niveau_initial(rs, S, 26, 1, 8,
+                          {"n": 2, "sum": [1.6], "min": [0.7], "max": [0.95]})
+    assert np.allclose(avg, (1.6 + 0.9) / 3)
+    for red, expected in (("MIN", 0.7), ("MAX", 0.95)):
+        rs2 = CompiledScript(events=cs.events, init_fn=cs.init_fn, params=cs.params,
+                             constats=cs.constats, strike_fix_dates=[4 / 52],
+                             strike_fix_reduction=red)
+        got = _niveau_initial(rs2, S, 26, 1, 8,
+                              {"n": 2, "sum": [1.6], "min": [0.7], "max": [0.95]})
+        assert np.allclose(got, expected), f"{red}: {got}"
+    seul = _niveau_initial(rs, S, 26, 1, 8, None)
+    assert np.allclose(seul, 0.9)
 
 
 def test_residual_s_prev_inherited():
@@ -1357,13 +1370,14 @@ def test_history_replay_fix_window_realized():
     dates = [f"2020-01-{i:04d}" for i in range(n_days)]
     cs = parse_script(BACKTEST_KI_SCRIPT)
     cs.strike_fix_dates = [10 / 252, 20 / 252, 1.5]   # 2 passées, 1 future
+    cs.strike_fix_reduction = "AVG"
     res = eval_script_on_history(cs, dates, prices, start_idx=0, T_max=2.0,
                                  user_params={'B': 0.7}, tickers=["TK1"], r=0.03)
     fs = res["state"]["fix_state"]
     assert fs is not None and fs["n"] == 2
-    assert fs["sum"] == pytest.approx(2.0)
-    assert fs["min"] == pytest.approx(0.9)
-    assert fs["max"] == pytest.approx(1.1)
+    assert fs["sum"] == pytest.approx([2.0])
+    assert fs["min"] == pytest.approx([0.9])
+    assert fs["max"] == pytest.approx([1.1])
 
 
 S_MIN_PAST_SCRIPT = """
