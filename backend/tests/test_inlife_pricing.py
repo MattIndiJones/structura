@@ -48,9 +48,9 @@ CALENDRIER = {"OBS": {"start_date": "2024-06-14", "end_date": "2027-06-14",
 def _historique(depart: date, fin: date, apres: float, s0: float = 100.0):
     """Historique fabriqué, en cours NUS et sur JOURS OUVRÉS.
 
-    La densité compte : le rejeu travaille sur une grille de 252 pas par an et
-    positionne les constatations dessus. Un historique en jours calendaires —
-    365 lignes par an — les ferait tomber trop tôt d'un bon tiers.
+    Le rejeu lit chaque constatation à sa date, sur la dernière clôture à cette
+    date ou avant : un historique en jours ouvrés est celui qu'un fournisseur
+    de cours rendrait.
 
     Le titre vaut s0 jusqu'à la constatation initiale incluse, puis le niveau
     passé en second argument : un décrochage franc, pour que le test dise
@@ -98,11 +98,11 @@ def test_sans_date_de_valorisation_on_price_a_l_emission(marche):
 def test_avec_une_date_passee_le_produit_a_une_histoire(marche):
     res = api.price_in_life(_requete(valuation_date=date(2026, 6, 14)), USER)
     assert res["in_life"] is True
-    # Huit, et non sept : le rejeu place les constatations sur une grille de
-    # 252 pas par an, si bien que celle du 15/06/2026 partage le pas de la
-    # date de valorisation du 14. Même quantification que la grille Monte
-    # Carlo — à un jour près sur une date, pas sur un montant.
-    assert res["past"]["observations_done"] == 8
+    # Sept : la constatation du 15/06/2026 tombe le lendemain de la
+    # valorisation, sans clôture encore. Transposé à 252 séances par an, le
+    # rejeu la lisait sur la clôture du 21/05 et la comptait comme passée ;
+    # chaque date se lit désormais à sa date, et celle-ci reste à simuler.
+    assert res["past"]["observations_done"] == 7
     assert res["past"]["years_elapsed"] == pytest.approx(2.0, abs=0.01)
     assert res["past"]["years_remaining"] == pytest.approx(1.0, abs=0.01)
 
@@ -131,8 +131,8 @@ def test_la_memoire_accumulee_entre_dans_la_valeur(marche):
     res = api.price_in_life(_requete(valuation_date=date(2026, 6, 14)), USER)
     memoire = res["past"]["memory"]
     assert memoire.get("DUE", 0) > 0, memoire
-    # Huit constatations à 2 % jamais versées : la mémoire les a toutes.
-    assert memoire["DUE"] == pytest.approx(0.16, abs=1e-6)
+    # Sept constatations à 2 % jamais versées : la mémoire les a toutes.
+    assert memoire["DUE"] == pytest.approx(0.14, abs=1e-6)
 
 
 def test_valoriser_avant_la_constatation_initiale_est_refuse(marche):
@@ -200,7 +200,7 @@ def test_un_produit_a_memoire_garde_la_sienne(marche):
     """Le filtre ne doit pas emporter ce qu'il est censé préserver."""
     res = api.price_in_life(_requete(valuation_date=date(2026, 6, 14)), USER)
     memoire = res["past"]["memory"]
-    assert memoire["DUE"] == pytest.approx(0.16, abs=1e-6)
+    assert memoire["DUE"] == pytest.approx(0.14, abs=1e-6)
     assert "COUPON" not in memoire and "M_CPN_BAR" not in memoire
 
 

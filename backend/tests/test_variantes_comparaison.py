@@ -361,7 +361,8 @@ def test_le_corps_de_l_ecran_ne_rappelle_pas_dans_le_passe(client):
     assert res.status_code == 200, res.text
     corps = res.json()
     assert not corps.get("early_recall"), corps
-    assert corps["past"]["observations_done"] == 8
+    # Sept : la constatation du 15/06/2026 tombe le lendemain de la valorisation.
+    assert corps["past"]["observations_done"] == 7
 
 
 def test_sans_la_separation_le_passe_rappelle_bien(client):

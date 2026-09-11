@@ -91,8 +91,9 @@ def _historique_en_deux_temps():
     """100 au strike, 80 pendant deux ans, puis 34 — cours NUS, jours ouvrés.
 
     Les six premières constatations tombent à 80 % du strike, donc bien au-
-    dessus d'un seuil de rappel à 50 %. Les deux dernières sont à 34 %. C'est
-    la forme du dossier Marex, en plus net."""
+    dessus d'un seuil de rappel à 50 %. La septième, le 16/03/2026, est à 34 % ;
+    la huitième, le 15/06/2026, tombe le lendemain de la valorisation. C'est la
+    forme du dossier Marex, en plus net."""
     dates, serie = [], []
     jour = STRIKE - timedelta(days=7)
     fin = VALORISATION
@@ -140,13 +141,14 @@ def test_le_passe_ne_rappelle_pas_sous_le_seuil_de_la_variante(marche):
     largement dans le passé si le rejeu l'employait — et le moteur rendrait le
     prix d'une note remboursée depuis mars 2025.
 
-    Le contrat est double : aucun rappel anticipé, et les huit constatations
+    Le contrat est double : aucun rappel anticipé, et les sept constatations
     écoulées sont toutes là. Un rappel les aurait tronquées."""
     ctx = api.build_request_residual(
         _requete(), variant=VariantTerms(script=PHOENIX_AC50))
 
     assert ctx.residuel.early_recall is False
-    assert ctx.residuel.state["index"] == 8
+    # Sept : la constatation du 15/06/2026 tombe le lendemain de la valorisation.
+    assert ctx.residuel.state["index"] == 7
 
 
 def test_le_meme_seuil_au_rejeu_aurait_bien_rappele(marche):
@@ -224,7 +226,8 @@ def test_prolonger_la_maturite_est_permis(marche):
     ctx = api.build_request_residual(_requete(), variant=VariantTerms(constats=jusqu_en_2029))
 
     assert ctx.residuel.early_recall is False
-    assert ctx.residuel.state["index"] == 8
+    # Sept : la constatation du 15/06/2026 tombe le lendemain de la valorisation.
+    assert ctx.residuel.state["index"] == 7
     # Le reliquat porte bien les constatations supplémentaires.
     futures = sum(len(e.dates or []) for e in ctx.script.events)
     origine = api.build_request_residual(_requete())

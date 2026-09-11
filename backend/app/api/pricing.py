@@ -16,7 +16,7 @@ from ..core.payscript.parser import analysis_origin, parse_script, resolve_analy
 from ..core.payscript.engine import (
     run_mc, compute_greeks,
     run_payoff_profile, run_mc_paths, run_mc_proba,
-    eval_script_on_history, compute_irr,
+    eval_script_on_history, compute_irr, derniere_fenetre, seances_jusqu_a,
     run_mark_to_future, run_mtf_drilldown,
 )
 from ..services.market_data import load_hist_prices
@@ -650,11 +650,14 @@ def backtest_endpoint(req: BacktestRequest):
         raise HTTPException(status_code=422, detail=f"Tickers manquants dans l'historique: {missing}")
 
     T_eff = effective_T_max(compiled, req.T)
-    SY_H = 252
-    days_T = round(T_eff * SY_H)
-    max_start = len(dates) - days_T - 1
+    # Chaque fenêtre lit ses dates à leur date, calendrier du contrat translaté
+    # sur son jour de départ. Trois ans couvrent donc ~765 séances et non 756 :
+    # compter l'horizon à 252 par an laisserait les dernières fenêtres finir
+    # au-delà de l'historique, sans remboursement, avec un rendement faux.
+    max_start = derniere_fenetre(compiled, dates, T_eff)
     if max_start < 1:
         raise HTTPException(status_code=422, detail="Historique trop court pour la maturité du produit.")
+    days_T = seances_jusqu_a(compiled, dates, 0, T_eff) or 0
 
     windows = list(range(0, max_start + 1, req.freq))
     results = []
@@ -746,9 +749,7 @@ def _windowed_backtest(compiled, dates, prices, tickers, T_eff, freq, r, invest_
     proposal to plot the product's realized outcome against the underlying's
     price history (opt-in: keeps /backtest/compare's response light across
     its up-to-20-candidate pool)."""
-    SY_H = 252
-    days_T = round(T_eff * SY_H)
-    max_start = len(dates) - days_T - 1
+    max_start = derniere_fenetre(compiled, dates, T_eff)
     if max_start < 1:
         return None
 

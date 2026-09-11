@@ -771,7 +771,8 @@
                 <div>
                   <div class="flex items-center justify-between gap-3 mb-1.5">
                     <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                      Constatations ({{ details[d.id].events?.length ?? 0 }})
+                      Constatations ({{ compterConstatations(details[d.id].events) }})<template
+                        v-if="compterReleves(details[d.id].events)"> · {{ compterReleves(details[d.id].events) }} relevé(s)</template>
                     </div>
                     <button v-if="autoExceptionEvents(d.id).length"
                       class="btn-secondary text-[10px] px-2 py-1 text-red-300 border-red-800/60"
@@ -805,11 +806,19 @@
                         </tr>
                       </thead>
                       <tbody>
-                        <tr v-for="ev in details[d.id].events" :key="ev.id"
+                        <tr v-for="ev in ordonnerEvenements(details[d.id].events)" :key="ev.id"
                           class="border-b border-slate-800/50"
                           :class="ev.status === 'annulé' ? 'opacity-40' : ev.status === 'futur' ? 'opacity-60' : ''">
-                          <td class="py-1.5 pr-3 text-slate-500">{{ ev.event_index + 1 }}</td>
-                          <td class="py-1.5 pr-3 text-slate-300 whitespace-nowrap">{{ ev.label }}</td>
+                          <!-- Un relevé alimente la constatation au-dessus de lui : ni
+                               numéroté, ni au même niveau (utils/dealEvents.js). -->
+                          <td class="py-1.5 pr-3 text-slate-500">{{ rangConstatation(details[d.id].events, ev) ?? '' }}</td>
+                          <td class="py-1.5 pr-3 whitespace-nowrap"
+                            :class="estReleve(ev) ? 'text-slate-500 pl-6 text-[11px]' : 'text-slate-300'">
+                            <span v-if="estReleve(ev)" class="text-slate-700 mr-1">↳</span>{{ ev.label }}
+                            <span v-if="ev.reduction"
+                              class="ml-1.5 text-[9px] rounded px-1 py-0.5 border border-blue-800/60 text-blue-400"
+                              :title="`Niveau constaté : ${libelleReduction(ev.reduction)} des cours de ses relevés, sous-jacent par sous-jacent.`">{{ ev.reduction }}</span>
+                          </td>
                           <td class="py-1.5 pr-3 font-mono text-slate-300 whitespace-nowrap">{{ ev.event_date }}</td>
                           <td v-for="u in details[d.id].underlyings" :key="u.name" class="py-1.5 pr-3 font-mono">
                             <template v-if="ev.spots[u.name]">
@@ -962,6 +971,10 @@ import AutoFixingExceptionModal from '../components/AutoFixingExceptionModal.vue
 import { useDataFilter } from '../composables/useDataFilter.js'
 import { formatInt, formatPercent, formatDate } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
+import {
+  compterConstatations, compterReleves, estReleve, libelleReduction, ordonnerEvenements,
+  rangConstatation,
+} from '../utils/dealEvents.js'
 
 const route = useRoute()
 const dealsStore = useDealsStore()
@@ -1105,7 +1118,8 @@ function lifePct(d) {
 }
 
 function obsEvents(id) {
-  return (details[id]?.events || []).filter(e => e.t_years > 0)
+  // Les relevés ne sont pas des constatations : pas de point sur la frise.
+  return (details[id]?.events || []).filter(e => e.t_years > 0 && !estReleve(e))
 }
 
 function eventPct(d, ev) {

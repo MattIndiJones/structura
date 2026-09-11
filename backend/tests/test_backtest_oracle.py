@@ -12,9 +12,10 @@ soit la grille. Ce qui reste comparable, c'est ce qui nous intéresse — les
 décisions : quels blocs se déclenchent, dans quel ordre, avec quel rang
 d'observation, et où le `STOP` tombe.
 
-L'invariant s'entend **à la résolution de la grille près** (§14) : le rejeu
-travaille sur 252 séances, le moteur sur 52 pas. Les tests ci-dessous ne
-comparent donc jamais des dates au jour près, mais des décisions et des rangs.
+L'invariant s'entend **à la résolution de la grille près** (§14) : le rejeu lit
+chaque date à sa date (§23), le moteur la quantifie sur 52 pas par an. Les tests
+ci-dessous ne comparent donc jamais des dates au jour près entre les deux, mais
+des décisions et des rangs.
 """
 from datetime import date, timedelta
 
@@ -26,9 +27,11 @@ from backend.app.core.payscript.engine import eval_script_on_history, run_mc
 DEBUT = date(2026, 9, 10)
 
 
-def _serie(n_jours=800, niveau=100.0):
-    """Une série plate : le niveau constaté vaut 1,0 partout, ce qui rend le
-    rejeu et le Monte-Carlo comparables décision par décision."""
+def _serie(n_jours=1200, niveau=100.0):
+    """Une série plate, une clôture par jour CALENDAIRE depuis l'ancre : le
+    niveau constaté vaut 1,0 partout, ce qui rend le rejeu et le Monte-Carlo
+    comparables décision par décision. 1 200 jours couvrent les trois ans du
+    calendrier annuel, lus à leur date."""
     jours = [(DEBUT + timedelta(days=i)).isoformat() for i in range(n_jours)]
     return jours, [niveau] * n_jours
 
@@ -37,7 +40,7 @@ def _resolu(src, constats, currency="EUR"):
     return resolve_constats(parse_script(src), constats, anchor=DEBUT, currency=currency)
 
 
-def _rejeu(src, constats, user_params=None, T=3.0, tickers=("TK1",), n_jours=900):
+def _rejeu(src, constats, user_params=None, T=3.0, tickers=("TK1",), n_jours=1200):
     jours, px = _serie(n_jours)
     compiled = _resolu(src, constats)
     return eval_script_on_history(
@@ -190,28 +193,28 @@ def test_historique_absent_ne_leve_pas():
                                   tickers=["TK1"], r=0.0) is None
 
 
-# ── La convention de transposition, vérifiée sans la modifier ──────────
+# ── La lecture par date ────────────────────────────────────────────────
 
-def test_la_convention_252_place_les_constatations_ou_on_les_attend():
-    """Le rejeu convertit les year-fractions en séances à 252 par an. Une
-    constatation à un an tombe donc autour de la 252ᵉ séance de la série — pas
-    à sa date calendaire, puisque la série est en jours calendaires ici.
+def test_chaque_constatation_se_lit_a_sa_date():
+    """Le rejeu lit une constatation à SA date, sur la dernière clôture à cette
+    date ou avant — la convention de `_closest_price`.
 
-    Le test fige la convention SANS la juger : c'est elle qui décide si un
-    fixing du 10 septembre est lu au bon endroit, et la changer déplacerait
-    toutes les constatations d'un backtest."""
+    Il la lisait à `round(t × 252)` séances du départ (§17). Sur cette série en
+    jours calendaires, la constatation du 10/09/2027 se lisait donc le
+    20/05/2027 ; sur un vrai historique de séances, quelques jours trop tôt par
+    année écoulée. La convention a été tranchée au §23 : par date."""
     src = "CONSTAT() OBS\nAT OBS:\n  PAY INDEX \"rang\"\n"
-    res = _rejeu(src, CAL_ANNUEL, n_jours=1200)
-    ts = [round(c["t"], 4) for c in res["cash_flows"]]
+    res = _rejeu(src, CAL_ANNUEL)
+    assert [c["date"] for c in res["cash_flows"]] == [
+        "2027-09-10", "2028-09-10", "2029-09-10"]
     # Les year-fractions du script sont conservées telles quelles dans les flux.
-    assert ts == [pytest.approx(0.9993, abs=0.02),
-                  pytest.approx(2.0014, abs=0.02),
-                  pytest.approx(3.0007, abs=0.02)], ts
+    assert [round(c["t"], 6) for c in res["cash_flows"]] == [
+        round(365 / 365.25, 6), round(731 / 365.25, 6), round(1096 / 365.25, 6)]
 
 
 # ── Le report d'un cours manquant, et son signalement ──────────────────
 
-def _serie_trouee(n_jours=900, trous=()):
+def _serie_trouee(n_jours=1200, trous=()):
     """Une série plate dont certaines séances n'ont pas coté (cours à 0)."""
     jours, px = _serie(n_jours)
     px = list(px)
@@ -229,10 +232,11 @@ def test_un_cours_manquant_est_reporte_et_non_saute():
     compiled = _resolu(src, CAL_ANNUEL)
     # La série est plate : le report rend exactement le même niveau, ce qui
     # isole ce qu'on veut vérifier — le signalement, pas la valeur.
-    # Trouer une séance qui porte VRAIMENT un relevé : le rejeu convertit les
-    # year-fractions en séances à 252 par an, donc l'index se calcule.
+    # Trouer la séance qui porte VRAIMENT un relevé : le rejeu lit chaque relevé
+    # à sa date, et la série compte une clôture par jour depuis l'ancre — son
+    # index est donc son écart en jours.
     releve = compiled.events[0].window_dates[0][1]
-    jours, px = _serie_trouee(trous=(round(releve * 252),))
+    jours, px = _serie_trouee(trous=(round(releve * 365.25),))
     res = eval_script_on_history(compiled, jours, {"TK1": px}, start_idx=0,
                                  T_max=3.0, user_params={}, tickers=["TK1"], r=0.0)
     assert _montants_rejeu(res) == [1.0, 1.0, 1.0]

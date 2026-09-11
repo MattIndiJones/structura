@@ -48,6 +48,8 @@ def compute_scenario_grid(script_text: str, underlyings, corr_matrix, r: float, 
                            residual_state: dict | None = None,
                            state_spots: list | None = None,
                            residual_elapsed: float | None = None,
+                           residual_passe: float | None = None,
+                           residual_releves: dict | None = None,
                            max_workers: int = DEFAULT_MAX_WORKERS) -> dict:
     """2D stress grid: price(spot_shock, vol_shock) for every combination, plus
     the unshocked base price for reference (computed independently of whether
@@ -70,7 +72,8 @@ def compute_scenario_grid(script_text: str, underlyings, corr_matrix, r: float, 
             yield_curve=yield_curve or [], sigma_r=sigma_r, a_r=a_r,
             barrier_monitoring=barrier_monitoring,
             residual_state=residual_state, state_spots=state_spots,
-            residual_elapsed=residual_elapsed,
+            residual_elapsed=residual_elapsed, residual_passe=residual_passe,
+            residual_releves=residual_releves,
         )
 
     # job 0 = unshocked base price; jobs 1.. = grid cells in row-major order

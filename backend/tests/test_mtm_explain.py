@@ -98,14 +98,20 @@ def test_explain_flat_market_only_time_effect(monkeypatch):
 
 
 def test_explain_spot_ramp_spot_effect_dominates(monkeypatch):
-    """Spot 100 → 130 sur les 60 derniers jours (σ inchangé) : l'effet spot
-    est positif (autocall se rapproche du rappel) et domine, véga nul."""
-    ramp_start = TODAY - timedelta(days=60)
+    """Spot 100 → 130 sur les 30 derniers jours (σ inchangé) : l'effet spot
+    est positif (autocall se rapproche du rappel) et domine, véga nul.
+
+    La rampe commence APRÈS la première constatation, qui se lit à sa date :
+    J-35 ici. Étalée sur 60 jours, elle la faisait tomber à 112,5 %, au-dessus
+    de la barrière de rappel — le produit était rappelé et il n'y avait plus de
+    P&L à expliquer. Le rejeu la lisait auparavant 252 jours après le strike,
+    sur cette série en jours calendaires : cinq mois trop tôt, à 100."""
+    ramp_start = TODAY - timedelta(days=30)
 
     def price_at(d):
         if d <= ramp_start:
             return 100.0
-        frac = (d - ramp_start).days / 60.0
+        frac = (d - ramp_start).days / 30.0
         return 100.0 + 30.0 * min(1.0, frac)
 
     res = _explain(monkeypatch, price_at)

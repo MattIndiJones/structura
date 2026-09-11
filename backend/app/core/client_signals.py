@@ -238,7 +238,10 @@ def build_signals(session: Session, *, entity_id: Optional[int],
             .where(DealEvent.deal_id.in_(deal_ids),
                    DealEvent.event_date >= asof.isoformat(),
                    DealEvent.event_date <= fin_horizon.isoformat(),
-                   DealEvent.status == "futur")
+                   DealEvent.status == "futur",
+                   # Un relevé de fenêtre ne décide rien — ni coupon, ni
+                   # rappel : le prochain fait contractuel est sa constatation.
+                   DealEvent.parent_event_id.is_(None))
             .order_by(DealEvent.event_date, DealEvent.event_index)
         ).all()
         for evenement in evenements:

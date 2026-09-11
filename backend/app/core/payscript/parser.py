@@ -254,6 +254,19 @@ class CompiledScript:
     # cette structure que le booking fige et que le cycle de vie relit, plutôt
     # que de reconstruire chacun la sienne.
     echeancier: object | None = None
+    # La date calendaire de t = 0 : l'ancre depuis laquelle resolve_constats a
+    # compté les year-fractions. C'est ce qui permet au rejeu de relire chaque
+    # date de l'échéancier dans un historique de clôtures, à sa date, plutôt que
+    # de la transposer en séances. None hors résolution de calendrier : des
+    # year-fractions littérales (`AT 1, 2:`) n'ont pas de jours à préserver.
+    origine: object | None = None
+    # Script RÉSIDUEL seulement : la part déjà constatée des fenêtres à cheval
+    # sur son origine, par fenêtre — clé `calendrier#rang` (voir
+    # engine.cle_de_fenetre) — et par sous-jacent : {"n", "sum", "min", "max"}.
+    # Les relevés correspondants ont quitté `window_dates` (voir
+    # CompiledEvent.releves_passes) ; les deux parts se recombinent à la
+    # constatation, comme la fenêtre de départ avec `fix_state`.
+    releves_realises: dict | None = None
 
 
 @dataclass
@@ -298,6 +311,11 @@ class CompiledEvent:
     # None sur AT_MATURITY, qui ne nomme aucun échéancier : `INDEX` y est refusé
     # à la compilation plutôt que de valoir un rang inventé.
     ranks: list[int] | None = None
+    # Script RÉSIDUEL seulement, aligné sur `dates` : combien de relevés de la
+    # fenêtre de chaque occurrence sont déjà derrière la coupe. Ils ont quitté
+    # `window_dates`, et leur réduction voyage dans
+    # `CompiledScript.releves_realises`. None hors d'une fenêtre à cheval.
+    releves_passes: list[int] | None = None
 
 
 # ── Expression transpiler ─────────────────────────────────────────
@@ -1226,7 +1244,8 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
                             params=script.params, constats=script.constats,
                             has_stop=script.has_stop, monitors=script.monitors,
                             strike_fix_dates=strike_fix_dates,
-                            strike_fix_reduction=strike_fix_reduction)
+                            strike_fix_reduction=strike_fix_reduction,
+                            origine=today)
 
     # L'échéancier contractuel, bâti ICI parce que c'est le dernier endroit où
     # les dates calendaires existent encore : `_full_dates` les a, `_windows_dates`

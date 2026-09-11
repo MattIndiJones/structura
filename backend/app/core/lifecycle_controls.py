@@ -15,7 +15,7 @@ from datetime import date, timedelta
 
 from .market_snapshot import snapshot_rate
 from .payscript.engine import eval_script_on_history
-from .payscript.parser import parse_script, resolve_constats
+from .payscript.parser import effective_T_max, parse_script, resolve_constats
 
 
 _PATH_OBSERVABLE = re.compile(
@@ -97,9 +97,33 @@ def semantic_maturity_outcome(compiled, replay: dict) -> tuple[str, str]:
     return "final", "MATURITY_NO_EXPLICIT_KI_STATE"
 
 
+def _fenetres(ech: dict) -> list[dict]:
+    """Les fenêtres réduites d'un échéancier figé : celles des constatations, et
+    celle de départ. La fenêtre de départ fixe S₀ — l'oublier ici laissait le
+    rejeu reporter le cours du strike sur toute la fenêtre sans rien dire, sur
+    le niveau même contre lequel toutes les constatations se mesurent."""
+    fenetres = list(ech.get("constatations") or [])
+    if ech.get("depart"):
+        fenetres.append(ech["depart"])
+    return [f for f in fenetres if f.get("reduction") and f.get("releves")]
+
+
+def _dates_de_releve(ech: dict) -> set[str]:
+    return {r["date"] for f in _fenetres(ech) for r in f["releves"] if r.get("date")}
+
+
+def _dates_de_depart(deal) -> set[str]:
+    try:
+        ech = json.loads(getattr(deal, "schedule_json", "") or "{}") or {}
+    except (TypeError, ValueError):
+        return set()
+    depart = ech.get("depart") or {}
+    return {r["date"] for r in depart.get("releves") or [] if r.get("date")}
+
+
 def releves_sans_fixing(deal, events: list) -> list[str]:
-    """Dates de relevé qu'une constatation moyennée exige et qui n'ont pas de
-    cours officiel.
+    """Dates de relevé qu'une fenêtre réduite exige — d'une constatation ou de
+    départ — et qui n'ont pas de cours officiel.
 
     Le rejeu construit une série constante par morceaux entre les événements
     fixés. C'est exact tant qu'un script ne lit que ces dates-là ; ça cesse de
@@ -115,10 +139,7 @@ def releves_sans_fixing(deal, events: list) -> list[str]:
         ech = json.loads(getattr(deal, "schedule_json", "") or "{}")
     except (TypeError, ValueError):
         return []
-    attendus: set[str] = set()
-    for c in ech.get("constatations") or []:
-        if c.get("reduction") and c.get("releves"):
-            attendus.update(r["date"] for r in c["releves"] if r.get("date"))
+    attendus = _dates_de_releve(ech)
     if not attendus:
         return []
     fixes = {
@@ -135,7 +156,7 @@ def _reductions_declarees(deal) -> set[str]:
         ech = json.loads(getattr(deal, "schedule_json", "") or "{}")
     except (TypeError, ValueError):
         return set()
-    return {c["reduction"] for c in ech.get("constatations") or [] if c.get("reduction")}
+    return {f["reduction"] for f in _fenetres(ech)}
 
 
 def _avertissement_report(deal, dates: list[str]) -> dict:
@@ -148,11 +169,18 @@ def _avertissement_report(deal, dates: list[str]) -> dict:
     décision, et l'avertissement doit le dire au lieu de rester générique."""
     reductions = _reductions_declarees(deal)
     extremes = reductions & {"MIN", "MAX"}
+    touche_s0 = bool(set(dates) & _dates_de_depart(deal))
     message = (
         f"{len(dates)} relevé(s) de fenêtre sans fixing officiel : le cours de "
         f"la dernière date connue a été reporté. La constatation porte donc en "
         f"partie sur une valeur reportée, pas sur un cours du contrat."
     )
+    if touche_s0:
+        message += (
+            " La fenêtre de départ est concernée : S₀ lui-même porte en partie "
+            "sur une valeur reportée, et toutes les constatations se mesurent "
+            "contre lui."
+        )
     if extremes:
         message += (
             f" Réduction {'/'.join(sorted(extremes))} : un report peut RENVERSER "
@@ -165,16 +193,41 @@ def _avertissement_report(deal, dates: list[str]) -> dict:
         "dates": dates,
         "reductions": sorted(reductions),
         "peut_renverser_la_decision": bool(extremes),
+        "fenetre_de_depart": touche_s0,
         "message": message,
     }
+
+
+def horizon_contractuel(deal, compiled) -> float:
+    """L'horizon d'`AT MATURITY`, en années depuis le strike.
+
+    La date de maturité du deal, comme au booking (`_derive_observation_times`),
+    et non `deal.T`, la maturité saisie dans le formulaire de pricing : les deux
+    divergent dès qu'un calendrier est en jeu. Un rejeu qui lit chaque date à sa
+    date lirait sinon le remboursement quelques jours après la maturité — ou ne
+    le lirait pas du tout, l'historique s'arrêtant avant."""
+    origine = deal.strike_date or deal.value_date
+    horizon = float(deal.T or 0.0)
+    if origine and deal.maturity_date:
+        jours = (date.fromisoformat(deal.maturity_date) - date.fromisoformat(origine)).days
+        if jours > 0:
+            horizon = jours / 365.25
+    return effective_T_max(compiled, horizon)
 
 
 def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]]:
     """Replay a terminal proposal from validated observation-date fixings.
 
-    The synthetic 252-step series is piecewise constant between contractual
-    observations. This is exact for scripts that only read values at those
-    observations. Any running/path observable is rejected before construction.
+    La série est celle des fixings officiels, UN COURS PAR DATE de fixing, et le
+    rejeu y lit chaque date de l'échéancier à sa date : le dernier fixing à
+    cette date ou avant. Constante par morceaux entre deux fixings, elle est
+    exacte tant que le script ne lit que des dates fixées. Any running/path
+    observable is rejected before construction.
+
+    Elle était posée auparavant sur une grille synthétique de 252 pas par an.
+    Deux relevés quotidiens y partageaient un pas : le second fixing écrasait le
+    premier, et la moyenne comptait un cours deux fois et l'autre jamais
+    (CONSTATATIONS_PERIODE_DESIGN.md §22, §23).
     """
     reasons = path_dependency_reasons(deal.script_snapshot)
     if reasons:
@@ -210,8 +263,6 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
     if any(float(strike_spots.get(name, 0) or 0) <= 0 for name in names):
         return None, [{"code": "OFFICIAL_REPLAY_STRIKE_INVALID"}]
 
-    last_step = max(round(float(event.t_years) * 252) for event in ordered)
-    maturity_step = round(float(deal.T) * 252)
     # A replay over an incomplete fixing prefix must stop at the last fixing
     # actually observed.  Padding every prefix to maturity used to manufacture
     # a terminal path by carrying the latest spot forward, which could mature
@@ -221,17 +272,18 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
         event.event_date >= deal.maturity_date
         for event in ordered
     )
-    terminal_step = max(last_step, maturity_step) if maturity_reached else last_step
-    grid_size = terminal_step + 1
-    anchor = date.fromisoformat(deal.value_date or deal.strike_date)
-    dates = [(anchor + timedelta(days=index)).isoformat() for index in range(grid_size)]
-    prices = {
-        ticker: [float(strike_spots[name])] * grid_size
-        for name, ticker in zip(names, tickers)
-    }
+
+    # Un cours par date. Deux lignes à la même date — deux fenêtres qui se
+    # chevauchent — doivent porter le même fixing : un sous-jacent n'a qu'une
+    # clôture par jour, et en garder une en silence déciderait peut-être sur la
+    # mauvaise.
+    par_date: dict[str, dict[str, float]] = {}
     for event in ordered:
-        step = min(max(round(float(event.t_years) * 252), 0), grid_size - 1)
+        if not event.event_date:
+            return None, [{"code": "OFFICIAL_REPLAY_EVENT_DATE_MISSING",
+                           "event_id": event.id}]
         spots = json.loads(event.spots_json or "{}")
+        cours = {}
         for name, ticker in zip(names, tickers):
             value = float(spots.get(name, 0) or 0)
             if value <= 0:
@@ -240,17 +292,43 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
                     "event_id": event.id,
                     "underlying": name,
                 }]
-            prices[ticker][step:] = [value] * (grid_size - step)
+            cours[ticker] = value
+        deja = par_date.get(event.event_date)
+        if deja is not None and any(abs(deja[tk] - cours[tk]) > 1e-9 for tk in tickers):
+            return None, [{
+                "code": "OFFICIAL_REPLAY_FIXING_CONFLICT",
+                "event_id": event.id,
+                "event_date": event.event_date,
+                "message": (
+                    "Deux fixings officiels différents pour la même date : le "
+                    "rejeu ne choisit pas entre eux."
+                ),
+            }]
+        par_date[event.event_date] = cours
+    dates = sorted(par_date)
+    prices = {ticker: [par_date[jour][ticker] for jour in dates] for ticker in tickers}
+
+    origine = date.fromisoformat(origin)
+    horizon = horizon_contractuel(deal, compiled)
+    if maturity_reached:
+        # Le fixing de maturité est fourni : `AT MATURITY` se lit à l'horizon,
+        # sur ce dernier fixing, même si l'horizon tombe un jour après lui.
+        fin = (origine + timedelta(days=round(horizon * 365.25))).isoformat()
+        if fin > dates[-1]:
+            dates.append(fin)
+            for ticker in tickers:
+                prices[ticker].append(prices[ticker][-1])
 
     replay = eval_script_on_history(
         compiled,
         dates,
         prices,
-        0,
-        deal.T,
+        dates.index(strike.event_date),
+        horizon,
         market.get("user_params") or {},
         tickers,
         snapshot_rate(market),
+        origine=origine,
     )
     if replay is None:
         return None, [{"code": "OFFICIAL_REPLAY_UNAVAILABLE"}]
@@ -291,7 +369,7 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
         outcome, basis = semantic_maturity_outcome(compiled, replay)
         maturity_payout = sum(
             flow["cf"] for flow in replay["cash_flows"]
-            if abs(flow["t"] - deal.T) < 1e-6)
+            if abs(flow["t"] - horizon) < 1e-6)
         result = {
             "outcome": outcome,
             "outcome_basis": basis,

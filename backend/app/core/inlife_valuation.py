@@ -22,7 +22,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from .market_snapshot import snapshot_rate
-from .payscript.engine import eval_script_on_history, _shift_events_for_mtf
+from .payscript.engine import cle_de_fenetre, eval_script_on_history, _shift_events_for_mtf
 from .payscript.parser import CompiledScript, parse_script, resolve_constats
 
 
@@ -115,6 +115,11 @@ class Residual:
     replay: dict = field(default_factory=dict)
     start_idx: int = 0
     s0_map: dict = field(default_factory=dict)
+    # La dernière date que le rejeu a pu lire, en années depuis le strike : la
+    # coupe entre passé et vie restante. Ce qui tombe après est simulé, ce qui
+    # tombe avant a été rejoué — ni trou, ni recouvrement. None avant le
+    # strike, où rien n'a été rejoué.
+    passe_jusqu_a: Optional[float] = None
     # ── Variante ────────────────────────────────────────────────────
     # Les PARAM que le Monte Carlo résiduel doit employer. Distincts de
     # `user_params`, qui sont ceux du rejeu : sur un avenant les deux diffèrent,
@@ -404,8 +409,13 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
             user_params, replay, start_idx, r_frac, pre_strike=True,
             strike_set_t=-T_elapsed)
 
+    # Chaque date de l'échéancier se lit à sa date, depuis le strike. Transposée
+    # à 252 séances par an, une constatation postérieure à la valorisation
+    # pouvait tomber dans l'historique : rejouée sur un cours antérieur à sa
+    # date, et simulée une seconde fois par le script résiduel.
     replay = eval_script_on_history(
-        compiled, dates_list, prices, start_idx, p.tenor, user_params, tickers, r_frac
+        compiled, dates_list, prices, start_idx, p.tenor, user_params, tickers, r_frac,
+        origine=p.strike_date,
     )
     if replay is None:
         raise ValuationError("Replay impossible — S₀ introuvable dans l'historique")
@@ -426,7 +436,13 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
 
     # Paths start at today's spot in % of strike — the barriers written in %
     # of strike then bite at the right distance without any rescaling.
-    s0_map: dict = p.strike_levels
+    s0_map: dict = dict(p.strike_levels)
+    # Une fenêtre de départ close fixe S₀ sur la réduction de ses relevés, et le
+    # rejeu a exprimé tout l'état hérité dans CES unités. Mesurer le spot du
+    # jour contre le seul fixing du strike faisait partir les trajectoires d'un
+    # autre niveau que leur propre passé, et lire chaque barrière à la distance
+    # du premier cours de la fenêtre au lieu de S₀.
+    niveaux_rejeu = replay.get("niveaux_initiaux") or {}
     norm_spots = []
     for u in underlyings_json:
         tk, name = u.get("ticker", ""), u["name"]
@@ -434,6 +450,9 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
         series = [float(px) for px in prices.get(tk, []) if px]
         if not (tk and series and s0 > 0):
             raise ValuationError(f"Spot/S₀ manquant pour {name} — compléter l'event Strike")
+        if niveaux_rejeu.get(tk, 0) > 0:
+            s0 = niveaux_rejeu[tk]
+            s0_map[name] = s0
         norm_spots.append(series[-1] / s0)
 
     return _assembler_residuel(
@@ -475,21 +494,47 @@ def _assembler_residuel(p: InLifeProduct, market: dict, underlyings_json: list,
         if variant.constats is not None:
             calendrier_px = variant.constats
 
-    residual_events = _shift_events_for_mtf(pricing.events, T_elapsed)
+    # La coupe entre passé et vie restante est celle du rejeu : ce qu'il a pu
+    # lire à sa date est passé, le reste se simule. La coupe au pas hebdomadaire
+    # du Mark-to-Future rangeait avec le passé une constatation tombant le
+    # lendemain de la valorisation, que le rejeu n'avait pas lue faute de
+    # clôture : ni rejouée ni simulée, elle disparaissait du produit. Avant le
+    # strike, rien n'a été rejoué et tout reste à simuler.
+    passe = None if pre_strike else replay.get("passe_jusqu_a")
+    residual_events = _shift_events_for_mtf(pricing.events, T_elapsed, passe_jusqu_a=passe)
     if not residual_events:
         raise ValuationError("Aucun événement résiduel — vérifier le calendrier du deal")
-    # STRIKE_FIX window split at today: past dates (d <= T_elapsed) were replayed
-    # on real closes (state["fix_state"]), only strictly-future dates stay on the
-    # residual script — no fixing date is ever counted twice.
+    # STRIKE_FIX window split at the same cut: past dates were replayed on real
+    # closes (state["fix_state"]), only the later ones stay on the residual
+    # script — no fixing date is counted twice, none is dropped.
     residual_fix = [round(d - T_elapsed, 6) for d in (pricing.strike_fix_dates or [])
-                    if d > T_elapsed + 1e-9]
+                    if (d > passe + 1e-6 if passe is not None else d > T_elapsed + 1e-9)]
     residual_script = CompiledScript(
         events=residual_events, init_fn=pricing.init_fn,
         params=pricing.params, constats=pricing.constats,
         has_stop=pricing.has_stop, monitors=pricing.monitors,
         strike_fix_dates=residual_fix or None,
         strike_fix_reduction=pricing.strike_fix_reduction,
+        # La part déjà constatée des fenêtres à cheval sur la valorisation : le
+        # résiduel n'en garde que les relevés à venir.
+        releves_realises=state.get("releves_realises") or None,
     )
+    # Une fenêtre dont des relevés sont passés sans que le rejeu en ait les cours
+    # se réduirait sur ses seuls relevés à venir. Mieux vaut le dire ici que
+    # rendre une moyenne partielle comme si c'était la moyenne.
+    realises = residual_script.releves_realises or {}
+    sans_cours = sorted({
+        cle_de_fenetre(ev.constat_ref, ev.ranks[i] if ev.ranks and i < len(ev.ranks) else None)
+        for ev in residual_events if ev.type == "AT" and ev.releves_passes
+        for i, passes in enumerate(ev.releves_passes)
+        if passes and cle_de_fenetre(
+            ev.constat_ref, ev.ranks[i] if ev.ranks and i < len(ev.ranks) else None)
+        not in realises})
+    if sans_cours:
+        raise ValuationError(
+            f"Fenêtre(s) de constatation à cheval sur la valorisation sans les cours "
+            f"de leurs relevés passés : {', '.join(sans_cours)}. L'historique ne les "
+            f"couvre pas ; la moyenne ne peut pas être reconstituée.")
 
     engine_uls = _engine_underlyings(market, underlyings_json)
     for underlying in engine_uls:
@@ -515,6 +560,7 @@ def _assembler_residuel(p: InLifeProduct, market: dict, underlyings_json: list,
         T_elapsed=T_elapsed, r_frac=r_frac,
         prices=prices, dates_list=dates_list,
         user_params=user_params, replay=replay, start_idx=start_idx, s0_map=s0_map,
+        passe_jusqu_a=passe,
         residual_user_params=px_params, variant_state_check=check,
         T_residual_max=T_res, pre_strike=pre_strike, strike_set_t=strike_set_t,
         pricing_script_text=texte_px, pricing_constats=calendrier_px,

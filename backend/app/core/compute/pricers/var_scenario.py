@@ -58,14 +58,19 @@ def price_var_scenario_job(payload: dict) -> dict:
         )
 
     T_elapsed = payload["T_elapsed"]
-    residual_events = _shift_events_for_mtf(compiled.events, T_elapsed)
+    # Le passé a été rejoué sur l'historique jusqu'à `passe_jusqu_a` : le
+    # calendrier se coupe là, comme dans le MtM que ce scénario choque.
+    passe = payload.get("passe_jusqu_a")
+    residual_events = _shift_events_for_mtf(compiled.events, T_elapsed, passe_jusqu_a=passe)
     residual_fix = [round(d - T_elapsed, 6) for d in (compiled.strike_fix_dates or [])
-                    if d > T_elapsed + 1e-9]
+                    if (d > passe + 1e-6 if passe is not None else d > T_elapsed + 1e-9)]
     residual_script = CompiledScript(
         events=residual_events, init_fn=compiled.init_fn, params=compiled.params,
         constats=compiled.constats, has_stop=compiled.has_stop, monitors=compiled.monitors,
         strike_fix_dates=residual_fix or None,
         strike_fix_reduction=compiled.strike_fix_reduction,
+        # La part déjà constatée des fenêtres à cheval, rejouée avec l'état.
+        releves_realises=payload["state"].get("releves_realises") or None,
     )
 
     norm_spots = payload["norm_spots"]

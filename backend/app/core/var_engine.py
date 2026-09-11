@@ -81,6 +81,10 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
             "strike_date": deal.strike_date,
             "settlement_ccy": (deal.devise or "").strip().upper() or None,
             "T_elapsed": ctx["T_elapsed"],
+            # La coupe passé / vie restante du MtM : le worker doit couper le
+            # calendrier au même endroit, sinon la jambe choquée reprice un
+            # autre produit que celui dont elle mesure le choc.
+            "passe_jusqu_a": ctx.get("passe_jusqu_a"),
             "state": ctx["state"],
             "norm_spots": list(ctx["norm_spots"]),
             "engine_uls": ctx["engine_uls"],

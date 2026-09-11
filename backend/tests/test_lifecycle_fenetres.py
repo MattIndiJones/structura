@@ -1,7 +1,7 @@
 """Le cycle de vie face aux constatations sur période — point 7 du §14.
 
-Le rejeu officiel reconstitue une série à 252 pas, **constante par morceaux
-entre les événements fixés**. Un relevé sans fixing hérite donc du dernier cours
+Le rejeu officiel reconstitue la série des fixings, un cours par date,
+**constante par morceaux entre les événements fixés**. Un relevé sans fixing hérite donc du dernier cours
 connu : la constatation porte en partie sur une valeur reportée.
 
 **Le report est assumé** — décision de Philippe : bloquer ferait qu'on n'aurait
@@ -145,3 +145,40 @@ def test_sur_un_extreme_le_report_peut_renverser_la_decision(reduction):
     assert a["peut_renverser_la_decision"] is True
     assert "RENVERSER" in a["message"]
     assert reduction in a["message"]
+
+
+# ── La fenêtre de départ est une fenêtre comme les autres ───────────────
+
+def _echeancier_avec_depart(reduction="AVG"):
+    ech = _echeancier()
+    ech["depart"] = {"reduction": reduction, "releves": [
+        {"t": 0.0, "date": "2026-09-14", "evenement": False},
+        {"t": 0.0027, "date": "2026-09-15", "evenement": False},
+        {"t": 0.0055, "date": "2026-09-16", "evenement": False},
+    ]}
+    return ech
+
+
+def test_les_releves_de_la_fenetre_de_depart_sont_verifies_aussi():
+    """S0 d'un `STRIKE_FIX AVG` se calcule sur ses relevés. Sans leurs fixings,
+    le rejeu officiel reportait le cours du strike sur toute la fenêtre : S0
+    valait le premier cours et non la moyenne, et rien ne le disait — le
+    contrôle ne lisait que les fenêtres des constatations."""
+    events = [_Event(d, {"A": 100.0}) for d in
+              ("2026-09-14", "2026-12-10", "2027-03-10", "2027-06-10", "2027-09-10")]
+    assert releves_sans_fixing(_Deal(_echeancier_avec_depart()), events) == [
+        "2026-09-15", "2026-09-16"]
+
+
+def test_le_report_sur_la_fenetre_de_depart_dit_qu_il_touche_s0():
+    """Un report dans la fenêtre de départ ne fausse pas une constatation : il
+    fausse S0, donc TOUTES les constatations qui se mesurent contre lui."""
+    from backend.app.core.lifecycle_controls import _avertissement_report
+    a = _avertissement_report(_Deal(_echeancier_avec_depart("MIN")), ["2026-09-15"])
+    assert "MIN" in a["reductions"]
+    assert a["peut_renverser_la_decision"] is True
+    assert a["fenetre_de_depart"] is True
+    assert "S₀" in a["message"]
+
+    b = _avertissement_report(_Deal(_echeancier_avec_depart()), ["2027-03-10"])
+    assert b["fenetre_de_depart"] is False

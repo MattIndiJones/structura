@@ -339,6 +339,36 @@ def test_la_prochaine_constatation_lifecycle_remplace_la_maturite_lointaine():
     assert "probable" not in lifecycle[0].reason.lower()
 
 
+def test_un_releve_de_fenetre_ne_se_signale_pas_comme_une_constatation():
+    """Un relevé ne décide rien : ni coupon, ni rappel. Le projeter annoncerait
+    au commercial un fait contractuel qui n'existe pas, dix jours trop tôt, et
+    masquerait derrière lui la constatation qui compte."""
+    session = _session()
+    client = _client(session, "ABC AM")
+    jean = _personne(session, "Jean", "D")
+    affiliation = _affiliation(session, jean, client, "2024-01-01")
+    deal = _trade(
+        session, client, affiliation, "2024-10-15", maturite="2027-10-15")
+    constatation = DealEvent(
+        deal_id=deal.id, event_index=2, event_date="2026-09-20",
+        t_years=2.0, status="futur", label="Obs. 2 (2.00Y)", reduction="AVG")
+    session.add(constatation); session.flush()
+    session.add(DealEvent(
+        deal_id=deal.id, event_index=3, event_date="2026-09-10",
+        t_years=1.97, status="futur", label="Obs. 2 (2.00Y) · relevé 3/4",
+        parent_event_id=constatation.id))
+    session.commit(); session.refresh(constatation)
+
+    signaux = build_signals(session, entity_id=1, user_id=1,
+                            asof=date(2026, 9, 1))
+    lifecycle = [s for s in signaux if s.kind == UPCOMING_MATURITY]
+
+    assert len(lifecycle) == 1
+    assert lifecycle[0].due_date == "2026-09-20"
+    assert lifecycle[0].deal_event_id == constatation.id
+    assert "relevé" not in lifecycle[0].title
+
+
 def test_une_maturite_importee_reste_commerciale_et_sans_lien_lifecycle():
     session = _session()
     client = _client(session, "ABC AM")

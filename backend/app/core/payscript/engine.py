@@ -12,6 +12,7 @@ from __future__ import annotations
 import bisect
 import math
 import time
+from datetime import date, timedelta
 from typing import NamedTuple
 import numpy as np
 from numpy.random import default_rng
@@ -1202,6 +1203,36 @@ def _combine_reduction(window: np.ndarray | None, reduction: str,
     return (window * n_fut + _row(state["sum"])) / (n_fut + p_n)
 
 
+def cle_de_fenetre(calendrier: str | None, rang: int | None) -> str:
+    """L'identifiant d'une fenêtre de constatation : son calendrier et son rang.
+    `AT OBS:` et `AT OBS.last:` visent la même constatation à la dernière date,
+    donc la même fenêtre — et la même part déjà constatée."""
+    return f"{calendrier}#{rang}"
+
+
+def _fusionner_realise(a: dict | None, b: dict | None) -> dict | None:
+    """Deux parts déjà constatées d'une même fenêtre, en une seule.
+
+    En Mark-to-Future sur un produit vivant, une fenêtre a pu commencer dans
+    l'historique — une part commune à tous les scénarios, par sous-jacent (n,) —
+    puis continuer sur chaque scénario extérieur jusqu'à la date de marque — une
+    part par scénario (n, N). Les deux ne se recouvrent pas : la date de
+    valorisation les sépare."""
+    if not a:
+        return b
+    if not b:
+        return a
+
+    def _col(v) -> np.ndarray:
+        v = np.asarray(v, dtype=float)
+        return v.reshape(v.shape[0], -1)
+
+    return {"n": a["n"] + b["n"],
+            "sum": _col(a["sum"]) + _col(b["sum"]),
+            "min": np.minimum(_col(a["min"]), _col(b["min"])),
+            "max": np.maximum(_col(a["max"]), _col(b["max"]))}
+
+
 def _niveau_initial(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                      N: int, fix_state_init: dict | None) -> np.ndarray | None:
     """S0_i — the initial level each underlying is measured against, (n, N).
@@ -1249,7 +1280,7 @@ def _rebaser_sur_le_niveau_initial(S: np.ndarray, ref: np.ndarray, end_step: int
 
 def _constater(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 bridge_min, bridge_max, fix_state_init: dict | None,
-                step_map: dict) -> tuple:
+                step_map: dict, releves_realises: dict | None = None) -> tuple:
     """Toute la chaîne de constatation d'un jeu de trajectoires.
 
     1. réduire la fenêtre de départ en S0_i, par sous-jacent ;
@@ -1267,7 +1298,8 @@ def _constater(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
         steps = _strike_fix_steps(script, ts)
         S, bridge_min, bridge_max = _rebaser_sur_le_niveau_initial(
             S, ref, max(steps) if steps else 0, bridge_min, bridge_max)
-    return S, bridge_min, bridge_max, _niveaux_constates(script, S, ts, step_map)
+    return S, bridge_min, bridge_max, _niveaux_constates(script, S, ts, step_map,
+                                                         releves_realises)
 
 
 def _rangs_observation(step_map: dict) -> dict:
@@ -1295,7 +1327,7 @@ def _rangs_observation(step_map: dict) -> dict:
 
 
 def _niveaux_constates(script: CompiledScript, S: np.ndarray, ts: int,
-                        step_map: dict) -> dict:
+                        step_map: dict, releves_realises: dict | None = None) -> dict:
     """Niveau constaté de chaque ÉVÉNEMENT, aligné index par index sur
     `step_map` — exactement comme `pay_map` l'est déjà.
 
@@ -1308,7 +1340,19 @@ def _niveaux_constates(script: CompiledScript, S: np.ndarray, ts: int,
     `None` à une entrée veut dire « le cours du jour » — le cas de l'écrasante
     majorité des événements, et celui qui ne coûte rien. Seules les entrées à
     fenêtre matérialisent un tableau (n, N), et il y en a une poignée : on ne
-    recopie jamais le tenseur entier."""
+    recopie jamais le tenseur entier.
+
+    Une fenêtre À CHEVAL sur l'origine d'un script résiduel n'a plus dans
+    `window_dates` que ses relevés à venir ; les autres ont été constatés — sur
+    l'historique, ou sur le scénario extérieur d'un Mark-to-Future — et leur
+    réduction arrive par `releves_realises` (à défaut, celle que le script
+    porte). Les deux parts se combinent comme pour la fenêtre de départ : par
+    min/max, ou en moyenne pondérée par le nombre de relevés. Une fenêtre dont
+    la part réalisée manque est refusée : réduite sur ses seuls relevés à
+    venir, elle rendrait une moyenne partielle présentée comme la moyenne."""
+    realises = (releves_realises if releves_realises is not None
+                else getattr(script, "releves_realises", None)) or {}
+    n, N = S.shape[1], S.shape[2]
     lvl: dict[int, list] = {step: [None] * len(evs) for step, evs in step_map.items()}
     cache: dict[tuple, np.ndarray] = {}
     for step, evs in step_map.items():
@@ -1323,11 +1367,29 @@ def _niveaux_constates(script: CompiledScript, S: np.ndarray, ts: int,
             if k is None or k >= len(ev.window_dates):
                 continue
             w = tuple(_window_steps(ev.window_dates[k], ts))
-            if not w:
+            passes = (ev.releves_passes[k] if ev.releves_passes
+                      and k < len(ev.releves_passes) else 0)
+            cle = None
+            if passes:
+                cle = cle_de_fenetre(ev.constat_ref,
+                                     ev.ranks[k] if ev.ranks and k < len(ev.ranks) else None)
+                if cle not in realises:
+                    raise ValueError(
+                        f"Constatation {cle} : {passes} relevé(s) de sa fenêtre sont "
+                        f"déjà constatés, mais leurs cours ne sont pas transmis. La "
+                        f"réduire sur ses seuls relevés à venir rendrait une moyenne "
+                        f"partielle présentée comme la moyenne.")
+            if not w and cle is None:
                 continue
-            key = (ev.reduction, w)
+            key = (ev.reduction, w, cle)
             if key not in cache:
-                cache[key] = _reduce_window(S, list(w), ev.reduction)
+                fenetre = _reduce_window(S, list(w), ev.reduction) if w else None
+                if cle is None:
+                    cache[key] = fenetre
+                else:
+                    etat = dict(realises[cle])
+                    etat["n_future"] = len(w)
+                    cache[key] = _combine_reduction(fenetre, ev.reduction, etat, n, N)
             lvl[step][i] = cache[key]
     return lvl
 
@@ -2744,6 +2806,12 @@ def run_payoff_profile(script: CompiledScript, underlyings, corr_matrix,
     payoffs = []
     annualized_coupons = []
     realization_times = []
+    # La fenêtre de départ réalisée ne s'applique pas ici : le balayage épingle
+    # le niveau lui-même, en pourcentage de S0, et un S0 recomposé depuis les
+    # relevés passés redéfinirait l'axe qu'on dessine. Elle ne va pas non plus à
+    # l'évaluateur, qui ne la prend plus — la lui passer faisait tomber le profil
+    # de tout produit en cours de vie.
+    etat_evaluateur = {k: v for k, v in (state or {}).items() if k != "fix_state_init"}
     for x in levels:
         S = S_neutral.copy()
         S[fix_end_step + 1:] = x
@@ -2754,7 +2822,7 @@ def run_payoff_profile(script: CompiledScript, underlyings, corr_matrix,
         # coupons accumulés et redessine des barrières déjà franchies.
         _, pfs_raw = _eval_paths(script, S, ts, n, N_p, dt, r, user_params,
                                   step_map, mat_events, {}, record=False,
-                                  stop_times_out=stop_times, **(state or {}))
+                                  stop_times_out=stop_times, **etat_evaluateur)
         payoff = round(sum(pfs_raw) / N_p * 100, 3)
         t_realized = (sum(stop_times) / len(stop_times)) if stop_times else T_max
         t_realized = max(t_realized, 1 / 365)  # guard against div-by-~0 for a same-day trigger
@@ -2785,6 +2853,10 @@ def run_mc_paths(script: CompiledScript, underlyings, corr_matrix,
     state = dict(state or {})
     _spot0 = state.pop("spot_mult", None)
     state.pop("spot_base", None)
+    # La part déjà réalisée de la fenêtre de départ va à la CONSTATATION, qui en
+    # tire S0 : les évaluateurs ne la prennent plus depuis que S0 se constate
+    # avant eux, et la leur passer faisait tomber toute analyse en cours de vie.
+    _fix_state = state.pop("fix_state_init", None)
     user_params = user_params or {}
     n = len(underlyings)
     ts = max(1, round(T_max * SY))
@@ -2836,7 +2908,7 @@ def run_mc_paths(script: CompiledScript, underlyings, corr_matrix,
 
     br_min, br_max = _bridge_extrema(S, vol_used, dt, rng) if use_bridge else (None, None)
     S, br_min, br_max, lvl = _constater(script, S, ts, n, N_stat, br_min, br_max,
-                                        None, step_map)
+                                        _fix_state, step_map)
     df_arr_pay = None   # visualisation a taux plat, cf. commentaire ci-dessus
     det = _eval_paths_detailed(script, S, ts, n, N_stat, dt, r, user_params, step_map, mat_events,
                                 bridge_min=br_min, bridge_max=br_max, lvl_map=lvl,
@@ -2909,6 +2981,9 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
     state = dict(state or {})
     _spot0 = state.pop("spot_mult", None)
     state.pop("spot_base", None)
+    # Même partage que run_mc_paths : la fenêtre de départ réalisée va à la
+    # constatation, pas à l'évaluateur.
+    _fix_state = state.pop("fix_state_init", None)
     user_params = user_params or {}
     n = len(underlyings)
     N_p = min(10000, max(2000, N))
@@ -2966,7 +3041,7 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
 
     br_min, br_max = _bridge_extrema(S, vol_used, dt, rng) if use_bridge else (None, None)
     S, br_min, br_max, lvl = _constater(script, S, ts, n, N_p, br_min, br_max,
-                                        None, step_map)
+                                        _fix_state, step_map)
     df_arr = rates.df
     df_arr_pay = df_arr
     det = _eval_paths_detailed(script, S, ts, n, N_p, dt, r, user_params, step_map, mat_events,
@@ -3105,7 +3180,8 @@ def _mtf_step(t0: float) -> int:
     return round(t0 * SY)
 
 
-def _shift_events_for_mtf(events: list[CompiledEvent], t0: float) -> list[CompiledEvent]:
+def _shift_events_for_mtf(events: list[CompiledEvent], t0: float,
+                          passe_jusqu_a: float | None = None) -> list[CompiledEvent]:
     """Re-anchor a script's events at t0 for residual pricing: AT event dates already
     resolved by the outer scenario are dropped; remaining dates are shifted by -t0.
     AT_MATURITY is left untouched — it always fires at the end of the residual
@@ -3120,36 +3196,68 @@ def _shift_events_for_mtf(events: list[CompiledEvent], t0: float) -> list[Compil
     once into the mark — and the autocall barrier was tested twice a week apart.
     On a realistic CONSTAT calendar (year-fractions in ACT/365.25, so almost never
     exactly on the weekly lattice) this hit ~17% of MTM dates and moved the mark by
-    several hundred basis points."""
+    several hundred basis points.
+
+    `passe_jusqu_a` : quand le passé a été rejoué sur un HISTORIQUE et non simulé
+    par un scénario extérieur, la coupe suit ce rejeu, qui lit une date dès que
+    sa clôture existe (`_LectureParDate`). C'est la dernière date qu'il a lue, en
+    années depuis le strike : ce qui tombe après reste à simuler, même dans la
+    semaine de la valorisation. Le pas hebdomadaire est le complément exact d'un
+    scénario extérieur, pas celui d'un historique : une constatation du lendemain
+    de la valorisation, sans clôture encore, n'était ni rejouée ni simulée."""
     step_k = _mtf_step(t0)
+
+    def _a_venir(d: float) -> bool:
+        if passe_jusqu_a is not None:
+            return d > passe_jusqu_a + 1e-6
+        return max(1, round(d * SY)) > step_k
+
     shifted = []
     for ev in events:
         if ev.type != "AT":
             shifted.append(ev)
             continue
-        keep = [i for i, d in enumerate(ev.dates) if max(1, round(d * SY)) > step_k]
+        keep = [i for i, d in enumerate(ev.dates) if _a_venir(d)]
         future_dates = [round(ev.dates[i] - t0, 6) for i in keep]
         if future_dates:
             # Les dates de paiement suivent leur constatation dans le decalage :
             # les perdre ici ferait actualiser au fixing tout le residuel, donc
             # un MtM incoherent avec le prix d origine du meme produit.
             pays = ev.payment_dates
-            wins = ev.window_dates
+            wins = (ev.window_dates
+                    if ev.window_dates and len(ev.window_dates) == len(ev.dates) else None)
+            deja = (ev.releves_passes
+                    if ev.releves_passes and len(ev.releves_passes) == len(ev.dates) else None)
+            # La fenetre d'une constatation la suit, mais seulement par ses
+            # relevés À VENIR. Ceux qui sont derrière la coupe sont constatés :
+            # leur réduction voyage à part (`CompiledScript.releves_realises`),
+            # et on retient combien il y en avait. Décalés avec les autres, ils
+            # tombaient à un temps négatif, que la grille ramène au premier pas :
+            # trois cours réalisés remplacés par un seul point simulé une
+            # semaine plus tard.
+            fenetres = passes = None
+            if wins:
+                fenetres, passes = [], []
+                for i in keep:
+                    a_venir = [d for d in wins[i] if _a_venir(d)]
+                    fenetres.append([round(d - t0, 6) for d in a_venir])
+                    passes.append((deja[i] if deja else 0) + len(wins[i]) - len(a_venir))
             shifted.append(CompiledEvent(
                 type=ev.type, dates=future_dates, fn=ev.fn,
+                # Le calendrier nomme la fenêtre, avec le rang : c'est la clé de
+                # sa part réalisée.
+                constat_ref=ev.constat_ref,
                 payment_dates=([round(pays[i] - t0, 6) for i in keep]
                                if pays and len(pays) == len(ev.dates) else None),
-                # La fenetre d'une constatation la suit : sans ce decalage, une
-                # observation encore a venir aurait ete repricee comme un point.
-                window_dates=([[round(d - t0, 6) for d in wins[i]] for i in keep]
-                              if wins and len(wins) == len(ev.dates) else None),
+                window_dates=fenetres,
                 reduction=ev.reduction,
                 # Le rang suit sa date dans le décalage — c'est tout l'intérêt
                 # de le porter par la date : la troisième constatation reste la
                 # troisième quand on la reprice à mi-vie, sans qu'aucun compteur
                 # n'ait à être réamorcé.
                 ranks=([ev.ranks[i] for i in keep]
-                       if ev.ranks and len(ev.ranks) == len(ev.dates) else None)))
+                       if ev.ranks and len(ev.ranks) == len(ev.dates) else None),
+                releves_passes=passes if passes and any(passes) else None))
     return shifted
 
 
@@ -3212,6 +3320,75 @@ def _mtf_realized_fix(script: CompiledScript, S_outer: np.ndarray,
     w = S_outer[1:step_k + 1][[s - 1 for s in past], :, :]   # (len(past), n, N_outer)
     return ({"n": len(past), "sum": w.sum(axis=0),
              "min": w.min(axis=0), "max": w.max(axis=0)}, past)
+
+
+def _mtf_releves_realises(script: CompiledScript, S_past: np.ndarray,
+                          step_k: int) -> dict:
+    """La part déjà constatée, par scénario extérieur, des fenêtres de
+    constatation à cheval sur la date de marque.
+
+    Chaque scénario extérieur a relevé les cours de ses dates passées ; le
+    résiduel ne simule que les relevés à venir (_shift_events_for_mtf). Il faut
+    donc lui transmettre ceux-là, réduits par sous-jacent, une valeur par
+    scénario (n, N_outer), lus sur `S_past` — la trajectoire extérieure déjà
+    exprimée contre S0. Les pas se comptent DISTINCTS, comme dans la fenêtre
+    entière : parts passée et à venir partitionnent le même ensemble de pas.
+
+    La part que le script porte déjà — l'historique d'un produit vivant —
+    s'y ajoute."""
+    realises = dict(getattr(script, "releves_realises", None) or {})
+    vus: set[str] = set()
+    for ev in script.events:
+        if ev.type != "AT" or not ev.reduction or not ev.window_dates:
+            continue
+        for i, d in enumerate(ev.dates[:len(ev.window_dates)]):
+            if max(1, round(d * SY)) <= step_k:
+                continue            # constatation passée : rejouée à l'extérieur
+            cle = cle_de_fenetre(ev.constat_ref,
+                                 ev.ranks[i] if ev.ranks and i < len(ev.ranks) else None)
+            if cle in vus:
+                continue
+            vus.add(cle)
+            pas = sorted({max(1, round(t * SY)) for t in ev.window_dates[i]
+                          if max(1, round(t * SY)) <= step_k})
+            if not pas:
+                continue
+            w = S_past[pas, :, :]                         # (len(pas), n, N_outer)
+            realises[cle] = _fusionner_realise(
+                realises.get(cle),
+                {"n": len(pas), "sum": w.sum(axis=0),
+                 "min": w.min(axis=0), "max": w.max(axis=0)})
+    return realises
+
+
+def _tranche_realise(etat: dict | None, sl: slice, repeat: int) -> dict | None:
+    """Une part réalisée restreinte à un lot de scénarios extérieurs, chacun
+    répété sur ses chemins intérieurs. Une part commune à tous les scénarios —
+    (n,) ou (n, 1) — se diffuse telle quelle."""
+    if etat is None:
+        return None
+
+    def _t(v) -> np.ndarray:
+        v = np.asarray(v, dtype=float)
+        v = v.reshape(v.shape[0], -1)
+        return v if v.shape[1] == 1 else np.repeat(v[:, sl], repeat, axis=1)
+
+    return {"n": etat["n"], "sum": _t(etat["sum"]),
+            "min": _t(etat["min"]), "max": _t(etat["max"])}
+
+
+def _scenario_realise(etat: dict | None, i: int) -> dict | None:
+    """La part réalisée d'UN scénario extérieur, par sous-jacent (n,)."""
+    if etat is None:
+        return None
+
+    def _t(v) -> np.ndarray:
+        v = np.asarray(v, dtype=float)
+        v = v.reshape(v.shape[0], -1)
+        return v[:, 0] if v.shape[1] == 1 else v[:, i]
+
+    return {"n": etat["n"], "sum": _t(etat["sum"]),
+            "min": _t(etat["min"]), "max": _t(etat["max"])}
 
 
 def _simulate_mtf_outer(underlyings, corr_matrix, r: float, mtm_dates: list[float],
@@ -3390,6 +3567,10 @@ def run_mark_to_future(script: CompiledScript,
     _state = dict(state or {})
     _spot0 = _state.pop("spot_mult", None)
     _state.pop("spot_base", None)
+    # La part de fenêtre de départ déjà constatée dans l'historique d'un produit
+    # vivant va à la CONSTATATION, pas à l'évaluateur : transmise telle quelle au
+    # rejeu extérieur, elle faisait tomber tout Mark-to-Future en cours de vie.
+    fix_hist = _state.pop("fix_state_init", None)
     S_outer = _simulate_mtf_outer(
         underlyings, corr_matrix, r, mtm_dates, n_outer, seed, spot_mult=_spot0
     )
@@ -3430,7 +3611,7 @@ def run_mark_to_future(script: CompiledScript,
         outer_flows: list[list] = []
         _S_past, _, _, _lvl_past = _constater(
             script, S_outer[:step_k + 1], step_k, n, n_outer, None, None,
-            None, past_step_map)
+            fix_hist, past_step_map)
         _eval_paths(script, _S_past, step_k, n, n_outer, dt, r,
                     user_params, past_step_map, [], {}, record=False,
                     state_out=outer_states, flows_out=outer_flows,
@@ -3460,14 +3641,24 @@ def run_mark_to_future(script: CompiledScript,
         s_prev_k = np.asarray([st["s_prev"] for st in outer_states], dtype=float).T
         rv_sumsq_k = np.array([st["realvol_sumsq"] for st in outer_states])
         rv_t_k = np.array([st["realvol_t"] for st in outer_states])
-        wof0_k = spot_k.min(axis=0)             # (N_outer,) — worst-of at the mark date
+        # Le worst-of à la date de marque, dans les unités des chemins intérieurs :
+        # contre S0, et 1,0 tant que la fenêtre de départ n'est pas close — les
+        # chemins y sont rebasés puis aplatis. Pris sur le spot brut, il faisait
+        # partir la vol réalisée intérieure d'un rendement fantôme de -log(S0).
+        wof0_k = _S_past[step_k].min(axis=0)    # (N_outer,)
 
         # has_stop and the fixing window used to be dropped when rebuilding the
         # residual script, which silently lost its early-redemption flag and its
         # STRIKE_FIX dates. Both now live in _mtf_residual_script, alongside the
         # snapped-step past/future split — a fixing date already averaged into
         # fix_state_k below must not also be re-simulated, or it counts twice.
-        fix_state_k, _past_fix = _mtf_realized_fix(script, S_outer, step_k)
+        # La fenêtre de départ : la part de l'historique d'un produit vivant, puis
+        # celle que chaque scénario extérieur a constatée jusqu'au mark.
+        fix_state_k = _fusionner_realise(
+            fix_hist, _mtf_realized_fix(script, S_outer, step_k)[0])
+        # Et les fenêtres de constatation à cheval sur la date de marque, dont le
+        # résiduel ne simule que les relevés à venir.
+        releves_k = _mtf_releves_realises(script, _S_past, step_k)
         residual_script, step_map, mat_events, ts_eff = _mtf_residual_script(
             script, t0, T_max)
 
@@ -3510,17 +3701,15 @@ def run_mark_to_future(script: CompiledScript,
                                       Z, spot_chunk)
 
             # Chaque scenario exterieur arrive au mark avec SA part de fenetre
-            # de depart deja fixee : la reduction se combine par scenario, d'ou
-            # le fix_state_init decoupe et repete comme tous les autres etats.
+            # de depart deja fixee, et SES releves deja constates des fenetres a
+            # cheval : les reductions se combinent par scenario, d'ou ces parts
+            # decoupees et repetees comme tous les autres etats.
             S_in, _, _, lvl_in = _constater(
                 residual_script, S_in, ts_eff, n, N_chunk, None, None,
-                (None if fix_state_k is None else {
-                    "n": fix_state_k["n"],
-                    "sum": np.repeat(fix_state_k["sum"][:, sl], n_inner, axis=1),
-                    "min": np.repeat(fix_state_k["min"][:, sl], n_inner, axis=1),
-                    "max": np.repeat(fix_state_k["max"][:, sl], n_inner, axis=1),
-                }),
-                step_map)
+                _tranche_realise(fix_state_k, sl, n_inner),
+                step_map,
+                {cle: _tranche_realise(etat, sl, n_inner)
+                 for cle, etat in releves_k.items()})
             payoffs, _ = _eval_paths(
                 residual_script, S_in, ts_eff, n, N_chunk, dt, r, user_params,
                 step_map, mat_events, {}, record=False,
@@ -3783,6 +3972,8 @@ def run_mtf_drilldown(script: CompiledScript,
                 rank_map=_rangs_observation(_mtf_past_step_map(script, step_k)))
     alive = np.array([not st["done"] for st in outer_states])
     fix_state_k, _ = _mtf_realized_fix(script, S_outer, step_k)
+    # Mêmes relevés déjà constatés que l'éventail, scénario par scénario.
+    releves_k = _mtf_releves_realises(script, _S_past, step_k)
     residual_script, step_map, mat_events, ts_eff = _mtf_residual_script(script, t0, T_max)
 
     use_heston, use_lv, use_sabr = model == "heston", model == "localvol", model == "sabr"
@@ -3901,12 +4092,9 @@ def run_mtf_drilldown(script: CompiledScript,
             _S_i = np.ascontiguousarray(S_in[:, :, cols])
             _S_i, _, _, _lvl_i = _constater(
                 residual_script, _S_i, ts_eff, n, n_inner, None, None,
-                (None if fix_state_k is None else {
-                    "n": fix_state_k["n"],
-                    "sum": np.asarray(fix_state_k["sum"][:, i], dtype=float),
-                    "min": np.asarray(fix_state_k["min"][:, i], dtype=float),
-                    "max": np.asarray(fix_state_k["max"][:, i], dtype=float)}),
-                step_map)
+                _scenario_realise(fix_state_k, i),
+                step_map,
+                {cle: _scenario_realise(etat, i) for cle, etat in releves_k.items()})
             payoffs, _ = _eval_paths(
                 residual_script, _S_i, ts_eff, n,
                 n_inner, dt, r, user_params, step_map, mat_events, flux, record=True,
@@ -3919,7 +4107,8 @@ def run_mtf_drilldown(script: CompiledScript,
                 s_min_init=np.asarray(outer_states[i]["s_min"], dtype=float),
                 s_max_init=np.asarray(outer_states[i]["s_max"], dtype=float),
                 s_prev_init=np.asarray(outer_states[i]["s_prev"], dtype=float),
-                wof0_init=float(S_full[step_k, :, i].min()),
+                # Même point de départ que l'éventail : contre S0, pas le spot brut.
+                wof0_init=float(_S_past[step_k, :, i].min()),
                 realvol_state_init={"sumsq": float(outer_states[i]["realvol_sumsq"]),
                                     "t": float(outer_states[i]["realvol_t"])},
                 lvl_map=_lvl_i,
@@ -4025,14 +4214,143 @@ def _historical_per_asset_extrema(prices_by_ticker: dict, tickers: list[str], re
     return mins, maxs
 
 
+def _jours_de_semaine_entre(debut: date, fin: date) -> int:
+    """Jours du lundi au vendredi dans ]debut, fin] — négatif si `fin` précède."""
+    if fin < debut:
+        return -_jours_de_semaine_entre(fin, debut)
+    semaines, reste = divmod((fin - debut).days, 7)
+    jour = debut.weekday()
+    return semaines * 5 + sum(1 for k in range(1, reste + 1) if (jour + k) % 7 < 5)
+
+
+def _ajouter_jours_de_semaine(jour: date, n: int) -> date:
+    """Le jour atteint en avançant (n > 0) ou en reculant (n < 0) de n jours de
+    semaine — l'inverse de `_jours_de_semaine_entre`. Un samedi ou un dimanche
+    part du vendredi qui le précède."""
+    if n == 0:
+        return jour
+    semaine = jour.weekday()
+    if semaine > 4:
+        jour -= timedelta(days=semaine - 4)
+        semaine = 4
+    semaines, reste = divmod(abs(n), 5)
+    if n > 0:
+        return jour + timedelta(days=semaines * 7 + reste + (2 if semaine + reste > 4 else 0))
+    return jour - timedelta(days=semaines * 7 + reste + (2 if semaine - reste < 0 else 0))
+
+
+class _LectureParDate:
+    """Où chaque temps du script se lit dans un historique de clôtures : à sa DATE.
+
+    Le rejeu lisait une date à `round(t × 252)` séances de son départ. C'était
+    une transposition, pas une date : une constatation à trois ans tombait une
+    dizaine de séances avant son jour, et une fenêtre quotidienne voyait deux
+    relevés partager une séance — le même cours compté deux fois, un autre
+    jamais (CONSTATATIONS_PERIODE_DESIGN.md §22, §23).
+
+    Chaque `t` redevient la date dont il vient — l'ancre de résolution plus
+    `round(t × 365,25)` jours, l'inverse exact de la conversion faite par
+    `resolve_constats` — et se lit sur la dernière clôture à cette date ou
+    avant, la convention de `_closest_price`.
+
+    Deux régimes, une seule règle :
+      - le rejeu d'UN contrat (vie d'un deal, rejeu officiel) part de l'ancre
+        elle-même : chaque date se lit telle quelle ;
+      - un backtest glissant translate le même calendrier sur chaque jour de
+        départ. La translation se fait en jours de semaine : une fenêtre de dix
+        jours ouvrés reste dix séances consécutives quel que soit le jour où
+        elle démarre, là où une translation calendaire la poserait sur des
+        week-ends et lirait trois fois le même vendredi.
+    """
+
+    def __init__(self, dates: list[str], start_idx: int, ancre=None, origine=None):
+        self._dates = dates
+        if isinstance(origine, str):
+            origine = date.fromisoformat(origine)
+        self._origine = origine or date.fromisoformat(dates[start_idx])
+        self._ancre = ancre or self._origine
+        self._indices: dict[float, int | None] = {}
+
+    def jour(self, t: float) -> date:
+        """La date à laquelle `t` se lit."""
+        contrat = self._ancre + timedelta(days=round(t * 365.25))
+        if self._ancre == self._origine:
+            return contrat
+        return _ajouter_jours_de_semaine(
+            self._origine, _jours_de_semaine_entre(self._ancre, contrat))
+
+    def indice(self, t: float) -> int | None:
+        """La dernière séance à la date de `t` ou avant, -1 si cette date précède
+        tout l'historique. None si elle lui est postérieure : un cours qui
+        n'existe pas encore ne se lit pas, et ne se reporte pas non plus."""
+        if t not in self._indices:
+            iso = self.jour(t).isoformat()
+            self._indices[t] = (None if iso > self._dates[-1]
+                                else bisect.bisect_right(self._dates, iso) - 1)
+        return self._indices[t]
+
+    def a_sa_date(self, t: float, k: int) -> bool:
+        """La séance `k` est-elle celle du jour de `t` ? Faux quand l'historique
+        n'a pas coté ce jour-là — férié de la place, trou de données : le cours
+        lu est alors celui d'une séance antérieure, donc reporté."""
+        return self._dates[k] == self.jour(t).isoformat()
+
+    def passe_jusqu_a(self) -> float | None:
+        """La dernière date lisible, en années depuis l'origine du contrat : tout
+        `t` dont la date tombe après reste à venir. None pour un calendrier
+        translaté — une fenêtre de backtest —, dont le passé n'a pas de date
+        propre."""
+        if self._ancre != self._origine:
+            return None
+        return (date.fromisoformat(self._dates[-1]) - self._origine).days / 365.25
+
+
+def derniere_fenetre(compiled: CompiledScript, dates: list[str], horizon: float) -> int:
+    """Le dernier départ d'un backtest glissant dont tout l'horizon se lit dans
+    l'historique, -1 s'il n'y en a aucun.
+
+    L'horizon se compte comme le rejeu le lit, à sa date. Compté à 252 séances
+    par an, il laissait les dernières fenêtres finir au-delà de l'historique :
+    un rendement sans remboursement, dans les statistiques comme les autres."""
+    ancre = getattr(compiled, "origine", None)
+    bas, haut, trouve = 0, len(dates) - 1, -1
+    while bas <= haut:
+        milieu = (bas + haut) // 2
+        if _LectureParDate(dates, milieu, ancre).indice(horizon) is not None:
+            trouve, bas = milieu, milieu + 1
+        else:
+            haut = milieu - 1
+    return trouve
+
+
+def seances_jusqu_a(compiled: CompiledScript, dates: list[str], start_idx: int,
+                    t: float) -> int | None:
+    """Séances entre un départ et la date de `t`, lue comme le rejeu la lit —
+    None au-delà de l'historique."""
+    k = _LectureParDate(dates, start_idx, getattr(compiled, "origine", None)).indice(t)
+    return None if k is None else k - start_idx
+
+
 def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                             prices_by_ticker: dict, start_idx: int,
                             T_max: float, user_params: dict,
-                            tickers: list[str], r: float = 0.03) -> dict | None:
-    """Replay PayScript using actual historical close prices."""
+                            tickers: list[str], r: float = 0.03,
+                            origine: date | str | None = None) -> dict | None:
+    """Replay PayScript using actual historical close prices.
+
+    Chaque date de l'échéancier se lit à sa DATE — voir `_LectureParDate`.
+    `origine` est la date calendaire de t = 0 quand on rejoue UN contrat : son
+    strike, qui peut être un jour sans cotation. Absente — une fenêtre de
+    backtest glissant —, le départ est la séance `start_idx` elle-même."""
     SY_H = 252
     n = len(tickers)
+    if not dates or not 0 <= start_idx < len(dates):
+        return None
+    lecture = _LectureParDate(dates, start_idx, getattr(compiled, "origine", None), origine)
 
+    # Les blocs d'une même DATE s'exécutent ensemble, dans l'ordre du script —
+    # le regroupement du `step_map` du moteur, par date et non par pas : deux
+    # dates distinctes ne partagent plus rien, même un jour d'écart.
     step_map: dict = {}
     # Fenetre de constatation de chaque EVENEMENT, alignee index par index sur
     # step_map — meme regle que dans le moteur MC : deux blocs au meme jour
@@ -4045,9 +4363,9 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             mat_events.append(ev)
         else:
             for i, d in enumerate(ev.dates):
-                step = round(d * SY_H)
-                step_map.setdefault(step, []).append(ev)
-                win_map.setdefault(step, []).append(
+                cle = round(d, 9)
+                step_map.setdefault(cle, []).append(ev)
+                win_map.setdefault(cle, []).append(
                     (ev.reduction, ev.window_dates[i])
                     if ev.reduction and ev.window_dates and i < len(ev.window_dates)
                     else None)
@@ -4057,10 +4375,8 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                 # lire 2/4/6 la ou le pricing lisait 1/2/3 — le meme produit se
                 # decidait donc autrement selon qu'on le pricait ou qu'on le
                 # rejouait. Voir test_backtest_oracle.py.
-                rank_map.setdefault(step, []).append(
+                rank_map.setdefault(cle, []).append(
                     ev.ranks[i] if ev.ranks and i < len(ev.ranks) else None)
-
-    end_idx_all = len(dates) - 1
 
     reportes: set = set()
 
@@ -4072,25 +4388,26 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
         sauté : sauter réduisait la fenêtre en silence, et une moyenne sur trois
         relevés au lieu de quatre se présentait comme une moyenne. Le report est
         la convention de place pour un jour sans cotation ; ce qu'il faut, c'est
-        qu'il se dise — d'où `reportes`, remonté dans le résultat.
+        qu'il se dise — d'où `reportes`, remonté dans le résultat. Un jour où
+        l'historique n'a pas coté du tout est un report au même titre qu'un
+        cours nul.
 
         Les dates encore dans le futur restent hors de la fenêtre : il n'y a
         rien à reporter d'un cours qui n'existe pas encore."""
         px = prices_by_ticker.get(tk, [])
         out = []
         for d in ds:
-            hi = min(start_idx + round(d * SY_H), end_idx_all)
-            if hi < start_idx or hi >= len(px):
+            hi = lecture.indice(d)
+            if hi is None or hi < start_idx or hi >= len(px):
                 continue
-            if px[hi] > 0:
-                out.append(px[hi])
-                continue
-            # Remonter jusqu'au dernier cours coté avant cette date.
-            k = hi - 1
-            while k >= start_idx and not (k < len(px) and px[k] > 0):
+            # Remonter jusqu'au dernier cours coté à cette date ou avant.
+            k = hi
+            while k >= start_idx and not px[k] > 0:
                 k -= 1
-            if k >= start_idx:
-                out.append(px[k])
+            if k < start_idx:
+                continue
+            out.append(px[k])
+            if k != hi or not lecture.a_sa_date(d, hi):
                 reportes.add(round(d, 6))
         return out
 
@@ -4110,7 +4427,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     _fix_dates = compiled.strike_fix_dates or []
     _fix_red = compiled.strike_fix_reduction
     _fix_all_past = bool(_fix_red and _fix_dates
-                          and start_idx + round(max(_fix_dates) * SY_H) <= end_idx_all)
+                          and lecture.indice(max(_fix_dates)) is not None)
     ref: dict = {}
     for tk in tickers:
         px = prices_by_ticker.get(tk, [])
@@ -4165,7 +4482,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     # ramenerait le niveau initial a 1,0.
     fix_state = None
     if _fix_red and _fix_dates and not _fix_all_past:
-        past = [d for d in _fix_dates if start_idx + round(d * SY_H) <= end_idx]
+        past = [d for d in _fix_dates if lecture.indice(d) is not None]
         if past:
             sums, mins, maxs, ok = [], [], [], True
             for tk in tickers:
@@ -4177,6 +4494,41 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                 sums.append(sum(vals)); mins.append(min(vals)); maxs.append(max(vals))
             if ok:
                 fix_state = {"n": len(past), "sum": sums, "min": mins, "max": maxs}
+
+    # Les fenêtres de constatation À CHEVAL sur la fin de l'historique : la part
+    # déjà cotée, réduite par sous-jacent en unités de `ref`. Le script résiduel
+    # n'en gardera que les relevés à venir (_shift_events_for_mtf) et la
+    # recombinera avec celle-ci. Sans elle, le résiduel ramenait les relevés
+    # passés au premier pas simulé. Rien pour une fenêtre de backtest glissant,
+    # dont le calendrier est translaté et le passé sans date propre.
+    releves_realises: dict = {}
+    if lecture.passe_jusqu_a() is not None:
+        for ev in compiled.events:
+            if ev.type == "AT_MATURITY" or not ev.reduction or not ev.window_dates:
+                continue
+            for i, fenetre in enumerate(ev.window_dates[:len(ev.dates)]):
+                lus = [d for d in fenetre if lecture.indice(d) is not None]
+                if not lus or len(lus) == len(fenetre):
+                    continue
+                cle = cle_de_fenetre(ev.constat_ref,
+                                     ev.ranks[i] if ev.ranks and i < len(ev.ranks) else None)
+                if cle in releves_realises:
+                    continue
+                par_actif = []
+                for tk in tickers:
+                    r0 = ref.get(tk, 0)
+                    par_actif.append([v / r0 for v in _closes_on(tk, lus)] if r0 > 0 else [])
+                # Un sous-jacent sans cours sur un relevé laisserait les autres
+                # se réduire sur plus de points que lui : pas de part réalisée,
+                # et le résiduel le refusera en le disant.
+                if any(len(v) != len(lus) for v in par_actif):
+                    continue
+                releves_realises[cle] = {
+                    "n": len(lus),
+                    "sum": [sum(v) for v in par_actif],
+                    "min": [min(v) for v in par_actif],
+                    "max": [max(v) for v in par_actif],
+                }
 
     ctx = {
         "spots": [1.0]*n, "accum": 0.0, "index": 0,
@@ -4197,10 +4549,12 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     T_actual = T_max
     prev_hi = start_idx   # last day scanned for running extrema (inception = spot 1.0, already the seed)
 
-    for step in sorted(step_map.keys()):
-        hi = start_idx + step
-        if hi >= len(dates):
-            break
+    for t_obs in sorted(step_map.keys()):
+        hi = lecture.indice(t_obs)
+        if hi is None:
+            break                   # cette date n'est pas encore dans l'historique
+        if hi < 0:
+            continue                # antérieure à tout l'historique
         # Fold in every trading day since the last observation (or inception)
         # before evaluating the script's condition at this date — see
         # _historical_running_extrema.
@@ -4233,19 +4587,21 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             return out
 
         spots = _levels(None)
-        t_y = step / SY_H
+        # Le temps du contrat, pas celui de la séance lue : un flux garde la
+        # year-fraction de sa constatation, et un rappel désigne sa date.
+        t_y = t_obs
         ctx.update({"spots": spots, "s_prev": list(ctx["spots"]),
                     "s_min": list(s_min_run), "s_max": list(s_max_run),
                     "realvol": _rv_at(hi),
                     "t": t_y, "wof_min": wof_run,
                     "bof_max": bof_run, "index": obs_idx + 1})
         obs_idx += 1
-        for ev_i, ev in enumerate(step_map[step]):
+        for ev_i, ev in enumerate(step_map[t_obs]):
             if done:
                 break
-            _w = win_map.get(step, [])
+            _w = win_map.get(t_obs, [])
             ctx["spots"] = _levels(_w[ev_i] if ev_i < len(_w) else None)
-            _r = rank_map.get(step, [])
+            _r = rank_map.get(t_obs, [])
             _rg = _r[ev_i] if ev_i < len(_r) else None
             if _rg is not None:
                 ctx["index"] = _rg
@@ -4257,16 +4613,17 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                     f"Erreur d'exécution du script (événement {ev.type}, t={ctx['t']:.4f}) : {e}"
                 ) from e
             for fl in st["flows"]:
-                cfs.append({"t": t_y, "cf": fl["v"]})
+                # La séance lue voyage avec le flux : un écran qui la
+                # recalculerait depuis `t` referait la transposition.
+                cfs.append({"t": t_y, "cf": fl["v"], "date": dates[hi]})
             if st["done"]:
                 done = True
                 ctx["done"] = True
                 T_actual = t_y
 
     if not done and mat_events:
-        ms = round(T_max * SY_H)
-        mhi = start_idx + ms
-        if mhi < len(dates):
+        mhi = lecture.indice(T_max)
+        if mhi is not None and mhi >= 0:
             w_win, b_win = _historical_running_extrema(prices_by_ticker, tickers, ref, prev_hi, mhi)
             wof_run = min(wof_run, w_win)
             bof_run = max(bof_run, b_win)
@@ -4294,7 +4651,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                         f"Erreur d'exécution du script (événement {ev.type}, t={ctx['t']:.4f}) : {e}"
                     ) from e
                 for fl in st["flows"]:
-                    cfs.append({"t": T_max, "cf": fl["v"]})
+                    cfs.append({"t": T_max, "cf": fl["v"], "date": dates[mhi]})
                 if st["done"]:
                     done = True
 
@@ -4323,6 +4680,16 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
         # rejeu aboutit, mais la constatation porte en partie sur une valeur
         # reportée : une liste vide est la seule qui autorise à n'en rien dire.
         "releves_reportes": sorted(reportes),
+        # S₀ par ticker, en cours, quand la fenêtre de départ est CLOSE : la
+        # réduction de ses relevés. Tout l'état ci-dessous est exprimé dans ces
+        # unités — un MtM résiduel qui mesurerait le spot du jour contre le seul
+        # fixing du strike partirait d'un autre niveau que son propre passé.
+        # Vide sans fenêtre de départ, ou tant qu'elle est ouverte.
+        "niveaux_initiaux": dict(ref) if _fix_all_past else {},
+        # La dernière date que ce rejeu a pu lire, en années depuis l'origine du
+        # contrat : la coupe entre passé et vie restante (_shift_events_for_mtf).
+        # None pour une fenêtre de backtest, dont le calendrier est translaté.
+        "passe_jusqu_a": lecture.passe_jusqu_a(),
         # Final replayed state — what a residual-MtM Monte Carlo must inherit
         # to continue this product's life instead of restarting it: script
         # variables (SET / memory coupons live in memo), the observation
@@ -4344,6 +4711,9 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             "realvol_state": {"sumsq": rv_cum[-1] if rv_cum else 0.0,
                               "t": max(0.0, (end_idx - start_idx) / SY_H)},
             "fix_state": fix_state,
+            # La part déjà cotée des fenêtres à cheval sur la fin de
+            # l'historique, par fenêtre (`calendrier#rang`) — voir plus haut.
+            "releves_realises": releves_realises,
         },
     }
 

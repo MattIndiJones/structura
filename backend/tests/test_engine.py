@@ -952,7 +952,16 @@ def test_sabr_vectorized_matches_reference_loop():
 
 # ── Audit 2026-07 (4th pass): backtest scans daily closes between AT dates ──
 
+from datetime import date as _date, timedelta as _timedelta
 from backend.app.core.payscript.engine import eval_script_on_history, _historical_running_extrema
+
+
+def _jours_calendaires(n: int) -> list[str]:
+    """Des dates ISO consécutives, une par jour calendaire. Le rejeu lit chaque
+    date du script à sa date : un libellé factice ne se relit pas, et l'indice
+    d'un jour est ici son écart à la première date."""
+    debut = _date(2020, 1, 1)
+    return [(debut + _timedelta(days=i)).isoformat() for i in range(n)]
 
 
 def test_historical_running_extrema_finds_mid_window_dip():
@@ -995,15 +1004,15 @@ def test_backtest_replay_captures_intra_period_barrier_breach():
     though the daily history is already loaded in prices_by_ticker.
 
     Price path: flat at the reference level (spot=1.0) on every day EXCEPT
-    day 100 (roughly 5 months in, strictly between the two AT dates), which
+    day 100 (about three months in, before the 0.5y AT date), which
     dips to 50% before recovering the next day. Neither AT date's own spot
     (both exactly 1.0) shows the breach — only scanning the days in between
     does. Barrier B=70% -> WOF_MIN must dip to 0.50 < 0.70 -> hit=1.0."""
-    n_days = 260
+    n_days = 400                  # AT MATURITY à 1 an se lit à sa date, jour 365
     px = [100.0] * n_days
     px[100] = 50.0
     prices_by_ticker = {"TK1": px}
-    dates = [f"2020-01-{i:04d}" for i in range(n_days)]   # placeholder labels, content unused
+    dates = _jours_calendaires(n_days)
 
     cs = parse_script(BACKTEST_KI_SCRIPT)
     res = eval_script_on_history(cs, dates, prices_by_ticker, start_idx=0, T_max=1.0,
@@ -1017,11 +1026,11 @@ def test_backtest_replay_no_breach_when_price_stays_above_barrier():
     """Sanity counterpart: if the price never dips below the barrier (not even
     intra-period), the indicator must correctly stay at 0 — guards against a
     trivial always-fire bug in the fix above."""
-    n_days = 260
+    n_days = 400                  # AT MATURITY à 1 an se lit à sa date, jour 365
     px = [100.0] * n_days
     px[100] = 80.0   # dips, but stays above the 70% barrier
     prices_by_ticker = {"TK1": px}
-    dates = [f"2020-01-{i:04d}" for i in range(n_days)]
+    dates = _jours_calendaires(n_days)
 
     cs = parse_script(BACKTEST_KI_SCRIPT)
     res = eval_script_on_history(cs, dates, prices_by_ticker, start_idx=0, T_max=1.0,
@@ -1045,11 +1054,11 @@ def test_backtest_bof_max_accumulates_across_observations():
     regression for a second bug found alongside the intra-period one: the old
     code recomputed bof_max fresh from just the CURRENT step's spot every
     time, discarding whatever high was reached on a previous observation."""
-    n_days = 260
+    n_days = 400                  # AT MATURITY à 1 an se lit à sa date, jour 365
     px = [100.0] * n_days
-    px[50] = 150.0    # a spike well before the first AT date (day 126 = 0.5y)
+    px[50] = 150.0    # a spike well before the first AT date (day 183 = 0.5y)
     prices_by_ticker = {"TK1": px}
-    dates = [f"2020-01-{i:04d}" for i in range(n_days)]
+    dates = _jours_calendaires(n_days)
 
     cs = parse_script(BACKTEST_CAP_SCRIPT)
     res = eval_script_on_history(cs, dates, prices_by_ticker, start_idx=0, T_max=1.0,
@@ -1356,7 +1365,7 @@ def test_history_replay_extended_state():
     px[100] = 40.0
     px[-1] = 120.0
     prices = {"TK1": px}
-    dates = [f"2020-01-{i:04d}" for i in range(n_days)]
+    dates = _jours_calendaires(n_days)
     cs = parse_script(BACKTEST_KI_SCRIPT)
     res = eval_script_on_history(cs, dates, prices, start_idx=0, T_max=2.0,
                                  user_params={'B': 0.7}, tickers=["TK1"], r=0.03)
@@ -1364,7 +1373,7 @@ def test_history_replay_extended_state():
     st = res["state"]
     assert st["s_min"][0] == pytest.approx(0.4)
     assert st["s_max"][0] == pytest.approx(1.2)
-    assert st["s_prev"][0] == pytest.approx(1.0)   # spots à l'obs 0.5y (jour 126)
+    assert st["s_prev"][0] == pytest.approx(1.0)   # spots à l'obs 0.5y (jour 183)
     assert st["wof_last"] == pytest.approx(1.2)
     exp_sumsq = math.log(0.4)**2 + math.log(2.5)**2 + math.log(1.2)**2
     assert st["realvol_state"]["sumsq"] == pytest.approx(exp_sumsq)
@@ -1380,9 +1389,9 @@ def test_history_replay_fix_window_realized():
     px[10] = 90.0
     px[20] = 110.0
     prices = {"TK1": px}
-    dates = [f"2020-01-{i:04d}" for i in range(n_days)]
+    dates = _jours_calendaires(n_days)
     cs = parse_script(BACKTEST_KI_SCRIPT)
-    cs.strike_fix_dates = [10 / 252, 20 / 252, 1.5]   # 2 passées, 1 future
+    cs.strike_fix_dates = [10 / 365.25, 20 / 365.25, 1.5]   # jours 10 et 20 passés, 1,5 an futur
     cs.strike_fix_reduction = "AVG"
     res = eval_script_on_history(cs, dates, prices, start_idx=0, T_max=2.0,
                                  user_params={'B': 0.7}, tickers=["TK1"], r=0.03)
@@ -1410,7 +1419,7 @@ def test_history_replay_script_using_s_min_no_crash():
     px = [100.0] * n_days
     px[100] = 40.0
     prices = {"TK1": px}
-    dates = [f"2020-01-{i:04d}" for i in range(n_days)]
+    dates = _jours_calendaires(n_days)
     cs = parse_script(S_MIN_PAST_SCRIPT)
     res = eval_script_on_history(cs, dates, prices, start_idx=0, T_max=2.0,
                                  user_params={}, tickers=["TK1"], r=0.03)

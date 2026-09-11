@@ -590,7 +590,11 @@ périmètre** tant qu'un test ne démontre pas un défaut précis.
 5. ~~**Figement au booking**~~ — **fait**, voir §18.
 6. ~~**Fixings et agrégats officiels**~~ — **fait**, voir §19.
 7. ~~**Lifecycle**~~ — **fait**, voir §20.
-8. Puis Events, vie résiduelle, KIDs.
+8. ~~**Events**~~ — **fait**, voir §21, avec quatre consommateurs des relevés
+   qu'il a fallu corriger.
+9. **Vie résiduelle** — commencée par la fenêtre de départ (§22), la lecture de
+   chaque date à sa date, qui a tranché la convention de rejeu (§23), et le
+   Mark-to-Future (§24). Restent theta, P&L explain, puis les KIDs.
 
 **L'invariant « mêmes décisions » est à affaiblir**, et à publier tel quel : le
 lifecycle et le backtest travaillent sur des dates réelles, le moteur sur une
@@ -711,7 +715,8 @@ totale d'historique, qui doit renoncer proprement et non lever.
 **La convention de transposition est figée sans être jugée.** Le rejeu convertit
 les year-fractions en séances à 252 par an ; un test l'enregistre telle quelle.
 La changer déplacerait toutes les constatations de tout backtest existant, donc
-elle mérite d'être visible avant d'être discutée.
+elle mérite d'être visible avant d'être discutée. *Jugée depuis, et abandonnée :
+chaque date se lit à sa date (§23).*
 
 **Ce que l'invariant ne peut pas être.** Le rejeu travaille sur 252 séances, le
 moteur sur 52 pas : les tests ne comparent jamais des dates au jour près, mais
@@ -861,3 +866,302 @@ et seuls les cas où le manque change l'issue mériteraient d'être bloqués.
 un deal booké avant l'échéancier figé n'en déclare pas non plus. Les deux
 continuent de vivre exactement comme avant — la dégradation reste propre, et un
 échéancier illisible ne fait pas tomber le cycle de vie d'un deal.
+
+---
+
+## 21. Events d'un deal booké, et les consommateurs des relevés
+
+**L'écran.** L'onglet Events et la page Booking lisent les relevés comme ce
+qu'ils sont : des lignes de fixing rattachées à une constatation, affichées sous
+elle, indentées, non numérotées. L'en-tête annonce « Constatations (4) · 9
+relevé(s) » là où il aurait annoncé treize constatations. La constatation porte
+le badge de sa règle (`AVG`, `MIN`, `MAX`), que l'infobulle dit en français. La
+lecture vit dans `frontend/src/utils/dealEvents.js`, partagée par les deux écrans
+et testée : deux écrans qui recomptent chacun de leur côté finissent par
+annoncer deux nombres. L'API expose `parent_event_id` et `reduction` sur chaque
+événement ; un deal servi sans ces clés se lit exactement comme avant.
+
+**Ce que les relevés ont cassé ailleurs — et qu'il aurait fallu chercher dès le
+§19.** Créer des lignes `DealEvent` sous les constatations a rendu fausse une
+hypothèse que personne n'avait écrite : « une ligne = une constatation ». Quatre
+consommateurs la faisaient. Un test par consommateur le démontrait avant
+correction (`test_releves_consommateurs.py`, et un test dans
+`test_client_intelligence.py`) :
+
+- **la watchlist lisait la barrière `PARAM()` à la mauvaise ligne.** Elle prenait
+  `event_index` pour le rang de la prochaine observation ; les relevés le
+  décalent, et la constatation 2 se lisait à la ligne 6. Un autocall dégressif
+  affichait sa barrière de maturité, 90 %, au lieu de 95 % — et le planificateur
+  d'alertes lit les mêmes écarts. C'est le défaut `INDEX` du §13, réapparu une
+  couche plus haut : le rang se compte désormais parmi les constatations ;
+- **« Prochaine obs. » et l'alerte de rappel visaient le premier relevé** :
+  « rappel probable à l'observation dans 56 j » sur un produit qui ne peut
+  rappeler que dans 330 ;
+- **la note de valorisation client** listait les relevés dans sa table
+  « Constatation » et présentait le premier comme la prochaine date
+  d'observation. Elle ne liste plus que les constatations, qualifiées de leur
+  fenêtre — « Obs. 2 (2.00Y) — moyenne de 4 relevés », le nombre venant de
+  l'échéancier figé ;
+- **les signaux Client Intelligence** projetaient un relevé comme « constatation
+  contractuelle… le coupon ou le rappel éventuel dépendra du fixing ».
+
+En passant, la piste d'audit d'une modification post-booking refusée citait
+douze temps d'observation sur un contrat qui en a trois : l'auditeur y aurait lu
+une divergence inexistante entre le booking et le deal.
+
+**Vérifié, et laissé tel quel.** `obs_passees` et les niveaux de barrière de la
+note viennent de l'état moteur (`_running_state`), pas des lignes. Le
+déclencheur d'un rappel et l'événement de maturité (`_evaluate_lifecycle`) se
+choisissent par proximité de `t` : la constatation y est à distance nulle, un
+relevé à un jour au moins — aucun défaut possible, donc aucune modification.
+*Faux tant que le rejeu rendait le temps du pas à 252 séances : un relevé
+pouvait en être plus proche que sa constatation, et le rappel lui était
+attribué. Corrigé par la lecture par date, §23.* Les
+fixings exigés par une proposition et le préfixe officiel incluent les relevés,
+et c'est voulu : l'agrégat en a besoin.
+
+**Non vérifié à l'écran** : le rendu d'un deal booké à constatations moyennées.
+Aucun deal existant n'en porte, et en booker un écrirait dans la base réelle. La
+logique est couverte par sept tests vitest et le template compile ; la
+vérification visuelle reste à faire sur le premier deal de ce type.
+
+---
+
+## 22. La fenêtre de départ, oubliée au §19 — et une convention à trancher
+
+**Le trou.** Le §19 a booké les relevés des constatations moyennées, pas ceux
+de la fenêtre de départ. Sur un `CONSTAT STRIKE_FIX AVG 10D`, le fixing du jour
+de strike est le relevé 1/10 — et les neuf autres n'avaient aucune ligne. Trois
+conséquences, chacune démontrée par un test avant correction :
+
+- **le rejeu officiel calculait S0 sur le seul cours du strike.** La série étant
+  constante par morceaux entre les événements fixés, les neuf relevés absents
+  héritaient du premier cours : la moyenne de dix fois le même nombre. Et
+  `releves_sans_fixing` ne lisait que les fenêtres des constatations, donc
+  aucun avertissement. C'est la moyenne partielle silencieuse, sur le niveau
+  même contre lequel toutes les constatations se mesurent ;
+- **la watchlist mesurait les barrières contre le cours du strike.** Sur le cas
+  du test — spot à 61,5, barrière à 60 % —, la barrière tient à +1,5 pt contre
+  le cours du strike (100) et elle est **franchie** à −1,1 pt contre S0 = 104,5.
+  Le planificateur d'alertes lisait la première version ;
+- **le MtM résiduel mélangeait deux unités.** Dès que la fenêtre est close, le
+  rejeu exprime tout l'état hérité — plus-bas réalisés, spots de la dernière
+  constatation — en unités de S0 réduit, pendant que `build_residual` faisait
+  partir les trajectoires de `spot / cours du strike`. Sur le test : 1,100 au
+  lieu de 1,059.
+
+**Les corrections.** Le booking crée les relevés de départ sous l'événement du
+strike, qui porte la réduction ; le jour de strike reste une seule ligne quand
+il est lui-même un relevé. Les contrôles de report lisent la fenêtre de départ
+comme les autres, et l'avertissement dit quand S0 est touché
+(`fenetre_de_depart`). La watchlist lit S0 par `_niveau_initial_constate` :
+la réduction des fixings de la fenêtre par l'agrégat officiel du §19, et `{}`
+tant qu'elle est incomplète — rien ne se mesure contre une moyenne partielle.
+Le rejeu expose `niveaux_initiaux` quand la fenêtre est close, et
+`build_residual` mesure le spot du jour contre eux. Un deal sans fenêtre de
+départ ne passe par aucune de ces branches.
+
+**Décision à prendre : la transposition à 252 pas.** Le rejeu — backtest, rejeu
+officiel, MtM résiduel — lit chaque date à `round(t × 252)` séances du strike.
+Le §17 a enregistré cette convention sans la juger. Sur une fenêtre quotidienne
+elle cesse d'être anodine : dix jours ouvrés tombent sur les pas
+0, 1, 1, 2, 3, 5, 6, 6, 7, 8. Le 15/09 est lu deux fois, le 25/09 jamais — **un
+même cours compté deux fois**, exactement ce que le plan interdit. Sur une
+tendance d'un point par séance, S0 ressort à 103,9 au lieu de 104,5. Au rejeu
+officiel c'est plus net encore : les fixings y sont posés à ces mêmes pas, deux
+relevés en collision s'écrasent, et l'un des deux fixings officiels disparaît
+du calcul. Un test `xfail(strict)` le fige dans `test_fenetre_de_depart_vie.py`.
+
+Deux voies :
+
+1. **lire les relevés par date** : chaque relevé porte sa date calendaire dans
+   l'échéancier (§16), et « dernier cours ≤ date » est déjà la convention de
+   `_closest_price`. C'est exact, mais la grille synthétique du rejeu officiel
+   — un jour calendaire par pas de 252 — devra porter les vraies dates, et tout
+   backtest de produit à fenêtre fine bougera ;
+2. **garder la grille**, et refuser ou signaler les fenêtres plus fines qu'elle.
+
+La première est recommandée : la seconde conserve un écart connu sur le
+contrat même, et une fenêtre quotidienne de dix jours est un cas courant de
+strike moyenné, pas une curiosité.
+
+**Tranché le 11/09/2026 : par date.** Voir §23.
+
+---
+
+## 23. Chaque date se lit à sa date
+
+**La décision.** Philippe a retenu la première voie du §22 : le rejeu lit ses
+relevés par date. La règle ne pouvait pas s'arrêter aux relevés : le dernier
+relevé d'une fenêtre EST sa constatation (§19), et un même jour ne peut pas se
+lire à deux séances selon le rôle qu'il joue. Elle vaut donc pour toutes les
+dates du contrat — constatations, relevés, fenêtre de départ, maturité.
+
+**La règle.** Chaque year-fraction redevient la date dont elle vient — l'ancre
+de résolution plus `round(t × 365,25)` jours, l'inverse exact de
+`resolve_constats`, qui porte désormais cette ancre (`CompiledScript.origine`) —
+et se lit sur la dernière clôture à cette date ou avant, la convention de
+`_closest_price`. Une date postérieure à l'historique n'est pas encore passée.
+Un jour ouvré du contrat sans cotation est un report, et `releves_reportes` le
+dit. Un seul objet porte cette lecture pour les trois rejeux : `_LectureParDate`
+(`payscript/engine.py`).
+
+**Deux régimes, une seule règle.**
+
+- Le rejeu d'UN contrat — MtM résiduel, surveillance, rejeu officiel — part de
+  son strike : chaque date se lit telle quelle.
+- Le backtest glissant translate le calendrier du contrat sur chaque jour de
+  départ, **en jours de semaine**. En jours calendaires, une fenêtre de dix jours
+  ouvrés démarrée un mercredi tomberait sur deux week-ends et lirait trois fois
+  le même vendredi ; en jours de semaine, ce sont dix séances consécutives quel
+  que soit le jour de départ.
+
+**Ce que la transposition cachait.** Six défauts, chacun rejoué sur le code du
+commit précédent avant d'être corrigé, et tous du genre silencieux — un nombre
+plausible, aucun avertissement (`test_lecture_par_date.py`) :
+
+1. **Rejeu officiel, fenêtre de départ.** Dix fixings validés, dix cours
+   distincts : S0 = 104,7 au lieu de 104,5. Deux relevés partageaient un pas de
+   la grille synthétique, le second fixing écrasait le premier, et deux fixings
+   officiels ne comptaient pour rien.
+2. **Rejeu officiel, rappel moyenné** sur le 14 et le 15/12 : les deux au pas 63,
+   niveau 1,06 au lieu de 1,05, et le rappel **attribué au relevé du 14**. Le
+   temps rendu était celui du pas, 0,25, plus proche du relevé que de la
+   constatation. Le §21 tenait ce choix par proximité de `t` pour sûr : il l'est
+   sur les temps du contrat, pas sur ceux d'une grille.
+3. **Rejeu officiel, knock-in à maturité calendaire** — calendrier au 07/09/2029,
+   tenor saisi 3 ans : **0 % remboursé**. Les flux de maturité se reconnaissaient
+   à un temps égal à `deal.T`, que le pas 751 ne rendait pas.
+4. **Surveillance sur historique** : la constatation du 15/12/2026 se lisait à 63
+   séances du strike, le 10/12. Le sous-jacent passant de 100 à 110 le 14, le
+   rappel se décidait à 1,00 au lieu de 1,10.
+5. **MtM résiduel au dimanche 14/06/2026** : la constatation du lundi 15, sans
+   clôture encore, se rejouait sur celle du 21/05 — huit constatations comptées
+   au lieu de sept.
+6. **MtM résiduel au vendredi 05/06/2026** : la même constatation, à dix jours,
+   était rejouée ET gardée par le script résiduel. **Son coupon mémoire comptait
+   deux fois.**
+
+Sur un historique réel, une constatation à trois ans lue à `round(t × 252)`
+séances tombait une dizaine de séances avant sa date.
+
+**Ce que la lecture par date a demandé ailleurs.**
+
+- **La coupe entre passé et vie restante.** Le résiduel écartait les dates au pas
+  hebdomadaire du Mark-to-Future — le complément exact d'un scénario simulé, pas
+  celui d'un historique. Lue à sa date, la constatation du lendemain de la
+  valorisation n'était plus rejouée, et restait écartée : ni rejouée ni simulée.
+  Le rejeu rend désormais `passe_jusqu_a`, la dernière date qu'il a lue, et
+  `_shift_events_for_mtf` coupe là quand on la lui donne. Le MtM, le Pricer en
+  vie, la VaR et la grille de stress reçoivent la même borne ; le Mark-to-Future
+  garde sa coupe au pas.
+- **L'horizon d'`AT MATURITY`** est celui de la date de maturité du deal
+  (`horizon_contractuel`), comme au booking, et non le tenor du formulaire : lu
+  à sa date, un tenor de 3,0 ans tombait après une maturité calendaire à 2,98.
+- **Le rejeu officiel** reconstitue la série des fixings, un cours par date. Deux
+  fixings différents à la même date — deux fenêtres qui se chevauchent — sont
+  refusés (`OFFICIAL_REPLAY_FIXING_CONFLICT`) plutôt que départagés en silence ;
+  une ligne sans date aussi.
+- **Le backtest compte ses fenêtres avec la même lecture** (`derniere_fenetre`) :
+  un an lu à sa date couvre 261 jours de semaine, pas 252. L'ancien décompte
+  laissait les dernières fenêtres finir au-delà de l'historique — sans
+  remboursement, dans les statistiques comme les autres.
+- **Chaque flux rendu porte la séance lue** (`date`) : la proposition de
+  réinvestissement la recalculait à 252 séances par an.
+
+**Un défaut sans rapport, trouvé en chemin.** Depuis `ee8a879`, toute analyse en
+cours de vie — probabilités, chemins, profil — tombait sur une `TypeError` :
+`fix_state_init` avait quitté les évaluateurs pour la constatation, mais l'état
+transmis aux analyses le portait toujours. 28 tests de
+`test_coherence_analytiques` et `test_variantes_*` tombaient sur cette erreur,
+dès le commit précédent (vérifié sur deux d'entre eux) : ces fichiers n'avaient
+pas été relancés. La fenêtre de départ réalisée va désormais à `_constater` ; le
+profil, qui épingle le niveau en pourcentage de S0, l'ignore.
+
+**Ce qui bouge — plus que ne l'annonçait le §22.** Tout backtest déplace ses
+constatations de quelques séances par année écoulée, pas seulement ceux à
+fenêtre fine. Le MtM, la surveillance et le rejeu officiel d'un deal vivant
+lisent les cours de leurs dates. Des attendus de tests encodaient la
+transposition, et chacun a été corrigé pour ce qu'il cachait :
+`test_backtest_oracle` (séries en jours calendaires dimensionnées pour 252 pas),
+`test_engine` (libellés de dates factices), `test_inlife_pricing` et les
+variantes (« huit constatations », dont un commentaire justifiait le compte),
+`test_mtm_explain` (une rampe de spot qui enjambait la constatation de J-35 — le
+produit y est bel et bien rappelé).
+
+**Reste ouvert.**
+
+- Une date du contrat postérieure à la dernière clôture mais antérieure à la
+  valorisation — un férié de place la veille — est simulée plutôt que reportée :
+  la coupe suit la dernière clôture. Rare, et l'écart se limite à une semaine de
+  diffusion autour d'un cours connu.
+- La suite backend complète n'a pas été lancée ; les domaines touchés l'ont été.
+
+---
+
+## 24. Le Mark-to-Future face aux fenêtres
+
+**Le périmètre.** Premier morceau du point 9 : le Mark-to-Future. Le moteur ne
+s'est ouvert que sur défaut démontré, par des sondes déterministes
+(`test_mtf_fenetres.py`) : vol à 0,01 %, dérive de 10 % par an, taux nul, quatre
+chemins. La trajectoire est connue d'avance, la valeur attendue se calcule à la
+main, et un écart ne peut pas se cacher dans le bruit.
+
+**Trois défauts, tous antérieurs à la lecture par date** — rejoués sur le code du
+commit précédent :
+
+1. **Une fenêtre de constatation à cheval sur la date de marque perdait ses
+   relevés déjà constatés**, dans le Mark-to-Future comme dans le MtM résiduel
+   d'un deal, qui partagent le script résiduel. Décalés avec leur constatation,
+   les relevés passés tombaient à un temps négatif que la grille ramène au
+   premier pas : sur une moyenne finale de cinq relevés trimestriels dont trois
+   passés, les trois cours constatés étaient remplacés par un seul point simulé
+   une semaine après la date. Mark à 119,59 au lieu de 116,26, MtM à 1,1959 au
+   lieu de 1,1627 : **3,3 points de nominal**, sur un produit tout à fait
+   ordinaire.
+2. **Le Mark-to-Future d'un produit vivant ne tournait pas** : `TypeError` sur
+   `fix_state_init`, la régression `ee8a879` du §23 — l'état rejoué passait tel
+   quel aux évaluateurs. Le seul test qui l'exerce, `test_analytics_calendrier`,
+   interroge Yahoo et ne tourne pas hors réseau.
+3. **`REALVOL` avec fenêtre de départ** : les chemins intérieurs sont rebasés sur
+   S0, mais leur worst-of de départ était pris sur le spot brut. Le premier
+   rendement intérieur embarquait un saut de −log(S0) : mark à un an à 1,80 pour
+   un prix de 1,62, là où, trajectoire déterministe et taux nul, les deux
+   coïncident.
+
+**Les corrections.**
+
+- **La part constatée voyage avec le script résiduel.** Une fenêtre à cheval ne
+  garde dans `window_dates` que ses relevés à venir ; chaque occurrence retient
+  combien sont passés (`CompiledEvent.releves_passes`), et leur réduction par
+  sous-jacent arrive dans `CompiledScript.releves_realises`, clé `calendrier#rang`.
+  `_niveaux_constates` recombine les deux parts comme la fenêtre de départ : par
+  min/max, ou en moyenne pondérée par le nombre de relevés.
+- **Sa source dépend du passé.** Pour un deal, le rejeu historique réduit les
+  clôtures des relevés déjà cotés. En Mark-to-Future, chaque scénario extérieur
+  fournit les siens, lus sur sa trajectoire rebasée ; sur un produit vivant, les
+  deux se cumulent (`_fusionner_realise`).
+- **Une fenêtre privée de sa part constatée est refusée**, au résiduel comme au
+  moteur : réduite sur ses seuls relevés à venir, elle rendrait une moyenne
+  partielle présentée comme la moyenne.
+- **Tous les lecteurs du résiduel la reçoivent** : MtM, Pricer en vie et ses
+  analytiques, Greeks, explication de P&L et chocs, par le script ; les workers
+  de VaR et de grille, qui recompilent le texte, par leur charge sérialisée.
+- **L'état d'un produit vivant entre dans le Mark-to-Future par la
+  constatation** : la fenêtre de départ de l'historique se combine à celle que
+  chaque scénario constate ensuite.
+- **Le worst-of de départ des chemins intérieurs** se lit sur la trajectoire
+  extérieure rebasée, donc 1,0 tant que la fenêtre de départ est ouverte. Le
+  drill-down fait de même et reste réconcilié avec l'éventail.
+
+**Ce qui ne bouge pas.** Un produit sans fenêtre à cheval garde le même résiduel :
+les tests golden du moteur, l'audit du Mark-to-Future et sa propriété de la tour
+passent inchangés.
+
+**Reste ouvert.**
+
+- `REALVOL` sur un deal vivant dont la fenêtre de départ n'est pas close : le rejeu
+  historique compte les rendements pendant la fenêtre, le Monte-Carlo les aplatit.
+  Non sondé.
+- Le theta vieillit le produit par `_respan`, qui reconstruit les événements sans
+  fenêtres, sans rangs et sans dates de paiement : c'est le point suivant du plan.

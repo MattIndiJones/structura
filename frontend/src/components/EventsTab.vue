@@ -122,7 +122,10 @@
         <div class="flex items-center justify-between mb-3">
           <div>
             <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Constatations ({{ deal.events?.length ?? 0 }})
+              <!-- Compter les relevés parmi les constatations ferait annoncer
+                   douze observations là où le contrat en a trois. -->
+              Constatations ({{ nbConstatationsBookees }})<template
+                v-if="nbRelevesBookes"> · {{ nbRelevesBookes }} relevé(s)</template>
             </h2>
             <p class="text-[10px] text-slate-600 mt-0.5">
               Sous-jacents figés au booking · {{ deal.underlyings.map(u => u.ticker || u.name).join(', ') }}
@@ -220,17 +223,33 @@
                   Aucune constatation.
                 </td>
               </tr>
-              <tr v-for="ev in deal.events" :key="ev.id"
+              <tr v-for="ev in evenementsOrdonnes" :key="ev.id"
                 :class="[
                   'border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors',
                   ev.t_years === 0 ? 'bg-amber-950/20' : '',
                   savingEventId === ev.id ? 'opacity-40' : '',
                   ev.event_date > today && ev.t_years !== 0 ? 'opacity-50' : '',
                 ]">
-                <td class="py-2 pr-3 text-slate-500">{{ ev.event_index + 1 }}</td>
+                <!-- Un relevé n'est pas une observation : il alimente la
+                     réduction de la constatation au-dessus de lui. Ni numéroté,
+                     ni au même niveau — sinon l'écran annonce douze
+                     constatations là où le contrat en a trois. Il garde en
+                     revanche sa ligne de saisie : c'est de son cours que
+                     l'agrégat se calcule. -->
+                <td class="py-2 pr-3 text-slate-500">
+                  <span v-if="!ev.parent_event_id">{{ rangAffiche(ev) }}</span>
+                </td>
                 <td class="py-2 pr-3 whitespace-nowrap">
-                  <span :class="ev.t_years === 0 ? 'text-amber-400 font-semibold' : 'text-slate-300'">
+                  <span :class="ev.t_years === 0 ? 'text-amber-400 font-semibold'
+                                : (ev.parent_event_id ? 'text-slate-500 pl-6 text-[11px]'
+                                                      : 'text-slate-300')">
+                    <span v-if="ev.parent_event_id" class="text-slate-700 mr-1">↳</span>
                     {{ ev.label }}
+                  </span>
+                  <span v-if="ev.reduction"
+                        class="ml-1.5 text-[9px] rounded px-1 py-0.5 border border-blue-800/60 text-blue-400"
+                        :title="`Niveau constaté : ${libelleReduction(ev.reduction)} des cours de ses relevés, sous-jacent par sous-jacent.`">
+                    {{ ev.reduction }}
                   </span>
                 </td>
                 <td class="py-2 pr-3 font-mono text-slate-300 whitespace-nowrap">
@@ -691,6 +710,9 @@ import AutoFixingExceptionModal from './AutoFixingExceptionModal.vue'
 import { formatDate, formatNumber } from '../utils/format.js'
 import { apiFetch } from '../utils/api.js'
 import { useObservationPreview } from '../composables/useObservationPreview.js'
+import {
+  compterConstatations, compterReleves, libelleReduction, ordonnerEvenements, rangConstatation,
+} from '../utils/dealEvents.js'
 
 const props = defineProps({ initialDealId: { type: Number, default: null } })
 
@@ -730,6 +752,17 @@ const fixingForm = reactive({
 let saveMsgTimer = null
 
 const deal = computed(() => dealsStore.currentDeal)
+// Relevés sous leur constatation, comptage et rang : lecture partagée avec la
+// page Booking (utils/dealEvents.js), pour que les deux écrans ne divergent pas.
+const evenementsOrdonnes = computed(() => ordonnerEvenements(deal.value?.events))
+const nbConstatationsBookees = computed(() => compterConstatations(deal.value?.events))
+const nbRelevesBookes = computed(() => compterReleves(deal.value?.events))
+
+/** Les relevés ne sont pas numérotés : ils ne sont pas des constatations. */
+function rangAffiche(ev) {
+  return rangConstatation(deal.value?.events, ev)
+}
+
 const strikeEvent = computed(() => deal.value?.events?.find(e => e.t_years === 0) ?? null)
 const hasS0 = computed(() => !!strikeEvent.value && Object.keys(strikeEvent.value.spots).length > 0)
 const attributionCorrigee = computed(() => JSON.stringify(deal.value?.client_provenance || null)

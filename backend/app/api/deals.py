@@ -22,7 +22,7 @@ from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent
 from .auth import get_current_user
 from ..services.market_data import load_hist_prices, load_yahoo_reference_closes
 from ..core.payscript.parser import parse_script, resolve_constats, CompiledScript, effective_T_max
-from ..core.payscript.engine import eval_script_on_history
+from ..core.payscript.engine import derniere_fenetre, eval_script_on_history
 from ..core.inlife_valuation import (
     InLifeProduct, ValuationError, build_residual,
     _engine_underlyings, _shift_dividend_curve,
@@ -34,9 +34,11 @@ from ..core.client_controls import (
     ClientRuleError, client_provenance_snapshot, require_deal_attribution_coherent,
 )
 from ..core.lifecycle_controls import (
-    official_input_hash, replay_official_fixings, semantic_maturity_outcome,
+    horizon_contractuel, official_input_hash, replay_official_fixings,
+    semantic_maturity_outcome,
 )
 from ..core.market_snapshot import snapshot_rate, snapshot_rate_is_default
+from ..core.agregats_officiels import calculer as calculer_agregat
 from ..core.rfq_controls import (
     booking_gate_failures, failures_payload, product_terms, product_terms_hash,
 )
@@ -372,6 +374,76 @@ def _fenetres_par_date(schedule_json: str) -> dict:
             if c.get("reduction") and c.get("releves")}
 
 
+def _fenetre_de_depart(schedule_json: str) -> dict | None:
+    """{reduction, releves} de la fenêtre qui fixe S₀, lue dans l'échéancier
+    FIGÉ — None pour un S₀ ponctuel, ce que sont l'immense majorité des
+    produits."""
+    try:
+        depart = (json.loads(schedule_json or "{}") or {}).get("depart")
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if not depart or not depart.get("reduction") or not depart.get("releves"):
+        return None
+    return {"reduction": depart["reduction"], "releves": depart["releves"]}
+
+
+def _niveau_initial_constate(events: list, schedule_json: str) -> dict:
+    """S₀ par sous-jacent tel que le contrat le définit — {} tant qu'il ne l'est
+    pas.
+
+    Sans fenêtre de départ, c'est le fixing du jour de strike. Avec une fenêtre
+    (`CONSTAT STRIKE_FIX AVG`), c'est la réduction des cours de SES relevés, dont
+    ce fixing n'est que le premier : mesurer le spot contre lui seul déplaçait
+    chaque barrière de l'écart entre ce cours et S₀. Une fenêtre incomplète ne
+    rend rien — la règle de l'agrégat officiel : une moyenne partielle présentée
+    comme S₀ est le chiffre faux qui ne se signale pas."""
+    strike = next((e for e in events
+                   if e.t_years == 0.0 and e.parent_event_id is None), None)
+    if strike is None:
+        return {}
+    depart = _fenetre_de_depart(schedule_json)
+    if not depart:
+        return json.loads(strike.spots_json or "{}")
+    attendus = [r["date"] for r in depart["releves"] if r.get("date")]
+    fournis = {}
+    for e in [strike] + [e for e in events if e.parent_event_id == strike.id]:
+        spots = {nom: v for nom, v in json.loads(e.spots_json or "{}").items()
+                 if float(v or 0) > 0}
+        if spots and e.event_date in attendus:
+            fournis[e.event_date] = {"spots": spots, "version": e.fixing_version or 0}
+    agregat = calculer_agregat(depart["reduction"], attendus, fournis)
+    return dict(agregat.niveaux) if agregat.calculable else {}
+
+
+_REDUCTION_LIBELLE = {"AVG": "moyenne", "MIN": "plus bas", "MAX": "plus haut"}
+
+
+def _evenements_pour_la_note(events: list, schedule_json: str) -> tuple[list[dict], str | None]:
+    """Les lignes « Constatation » de la note de valorisation client, et la
+    prochaine date d'observation qu'elle annonce.
+
+    Les relevés n'y figurent pas : un document client n'appelle pas
+    « constatation » une ligne de fixing qui ne décide rien, et ne présente pas
+    son premier relevé comme la prochaine observation. La fenêtre n'est pas tue
+    pour autant — elle qualifie la constatation qu'elle alimente, avec le nombre
+    de relevés que l'échéancier FIGÉ lui attribue."""
+    fenetres = _fenetres_par_date(schedule_json)
+    constatations = [e for e in events if e.parent_event_id is None]
+    lignes = []
+    for e in constatations:
+        label = e.label
+        fenetre = fenetres.get(round(e.t_years, 4))
+        if fenetre:
+            libelle = _REDUCTION_LIBELLE.get(fenetre["reduction"], fenetre["reduction"])
+            label = f"{label} — {libelle} de {len(fenetre['releves'])} relevés"
+        lignes.append({"date": e.event_date, "label": label, "status": e.status,
+                       "t_years": e.t_years})
+    prochaine = next((e.event_date
+                      for e in sorted(constatations, key=lambda x: x.t_years or 0.0)
+                      if e.status == "futur"), None)
+    return lignes, prochaine
+
+
 def _figer_echeancier(body) -> str:
     """L'échéancier contractuel du deal, en JSON, tel qu'il sera figé.
 
@@ -610,6 +682,12 @@ def _event_row(e: DealEvent) -> dict:
         "event_index": e.event_index,
         "event_date": e.event_date,
         "t_years": e.t_years,
+        # Un relevé de fenêtre pointe la constatation qu'il alimente. L'écran
+        # doit le distinguer : ce n'est pas une observation, il ne paie rien et
+        # ne compte pas dans la numérotation — mais il porte bien un fixing
+        # officiel, puisque c'est de lui que l'agrégat se calcule.
+        "parent_event_id": e.parent_event_id,
+        "reduction": e.reduction or None,
         "spots": json.loads(e.spots_json),
         "indicative_spots": json.loads(e.indicative_spots_json or "{}"),
         "source": e.source,
@@ -1740,7 +1818,7 @@ def _book_deal(
         session.add(source_rfq)
 
     # First event is always the strike date (t=0) — S₀ to be filled in Events tab
-    session.add(DealEvent(
+    strike_event = DealEvent(
         deal_id=deal.id,
         event_index=0,
         event_date=body.strike_date,
@@ -1751,14 +1829,44 @@ def _book_deal(
         fixing_status=FixingStatus.EXPECTED.value,
         data_category=DataCategory.UNKNOWN.value,
         label="Strike / Fixing S₀",
-    ))
+    )
+    session.add(strike_event)
+    _index = 0
+
+    # Une fenêtre de départ (`CONSTAT STRIKE_FIX AVG`) fixe S₀ sur ses relevés,
+    # dont le fixing du jour de strike n'est que le premier. Sans lignes pour
+    # les autres, le rejeu officiel reportait ce seul cours sur toute la
+    # fenêtre : S₀ valait le cours du strike et non la réduction, sans que rien
+    # ne le dise.
+    _depart = _fenetre_de_depart(deal.schedule_json)
+    if _depart:
+        strike_event.reduction = _depart["reduction"]
+        session.flush()
+        for j, releve in enumerate(_depart["releves"], start=1):
+            if releve["date"] == body.strike_date:
+                # Le jour de strike EST un relevé : une seule ligne, donc un
+                # seul fixing officiel pour les deux usages.
+                continue
+            _index += 1
+            session.add(DealEvent(
+                deal_id=deal.id,
+                event_index=_index,
+                event_date=releve["date"] or "",
+                t_years=round(releve["t"], 4),
+                spots_json="{}",
+                source="pending",
+                status="futur",
+                fixing_status=FixingStatus.EXPECTED.value,
+                data_category=DataCategory.UNKNOWN.value,
+                parent_event_id=strike_event.id,
+                label=f"Strike / Fixing S₀ · relevé {j}/{len(_depart['releves'])}",
+            ))
 
     # L'échéancier figé dit quelles constatations sont MOYENNÉES, et sur quels
     # relevés. Sans lui, on retombe sur des constatations ponctuelles — ce que
     # sont l'immense majorité des produits.
     _fenetres = _fenetres_par_date(deal.schedule_json)
 
-    _index = 0
     for idx, t in enumerate(times):
         ev_date = _date_plus_years(_obs_origin, t)
         is_maturity = (idx == len(times) - 1)
@@ -1989,14 +2097,20 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
     barrier gaps to raise crossing alerts."""
     today_str = today.isoformat()
     events = _get_events(deal.id, session)
-    future = [e for e in events if e.event_date > today_str]
+    # A window relevé feeds a constatation, it is not one: neither the next
+    # observation nor a PARAM() row. Read as one, the first relevé showed as
+    # "Prochaine obs." and the call alert counted its days to it.
+    constatations = [e for e in events if e.parent_event_id is None]
+    future = [e for e in constatations if e.event_date > today_str]
     next_ev = min(future, key=lambda e: e.event_date) if future else None
     days_to_next = (date.fromisoformat(next_ev.event_date) - today).days if next_ev else None
 
     underlyings = json.loads(deal.underlyings_json)
     tickers = [u["ticker"] for u in underlyings if u.get("ticker")]
-    strike_event = next((e for e in events if e.t_years == 0.0), None)
-    s0_map: dict = json.loads(strike_event.spots_json) if strike_event else {}
+    # S₀ as the contract defines it: the strike fixing, or the reduction of a
+    # start window's relevés — {} while that window is incomplete, so nothing
+    # is measured against a partial average.
+    s0_map: dict = _niveau_initial_constate(events, deal.schedule_json)
 
     # Current perfs + running extrema since strike. The running min is
     # what a continuously-monitored KI actually compares against; the
@@ -2053,10 +2167,15 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
                 wof, bof = min(perfs), max(perfs)
                 wof_min, bof_max = min(min_perfs), max(max_perfs)
 
-    # The next observation's 1-based index — a PARAM() barrier schedule
+    # The next observation's 1-based rank — a PARAM() barrier schedule
     # is read at THAT row (a degressive autocall must show the barrier
-    # the next fixing will actually use, not row 1).
-    next_obs_index = next_ev.event_index if next_ev else None
+    # the next fixing will actually use, not row 1). A rank among
+    # constatations, not event_index: a windowed constatation's index also
+    # counts the relevé rows booked before it, and read row 6 for row 2.
+    observations = sorted((e for e in constatations if e.t_years > 0),
+                          key=lambda e: (e.t_years, e.event_index))
+    next_obs_index = next((rank for rank, e in enumerate(observations, start=1)
+                           if e is next_ev), None)
 
     # Detected whatever the deal's stage: a barrier is a term of the contract,
     # not a consequence of having a spot. Before the strike there is simply no
@@ -2344,8 +2463,10 @@ def update_deal(
             if field == "market_snapshot":
                 return json.loads(deal.market_snapshot_json or "{}")
             if field == "observation_times":
+                # Relevé rows are not observation times: the booked
+                # observation_times never contained them.
                 return [event.t_years for event in _get_events(deal.id, session)
-                        if event.t_years > 0]
+                        if event.t_years > 0 and event.parent_event_id is None]
             if field == "selected_quote_id":
                 provenance = json.loads(deal.rfq_provenance_json or "{}")
                 return (provenance.get("retained") or {}).get("quote_id")
@@ -3563,8 +3684,12 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
         else:
             break
 
+    # Chaque date du contrat se lit à sa date, maturité comprise : l'horizon est
+    # celui de la date de maturité du deal, pas le tenor saisi au pricing.
+    horizon = horizon_contractuel(deal, compiled)
     res = eval_script_on_history(
-        compiled, dates_list, prices, start_idx, deal.T, user_params, tickers, r_frac
+        compiled, dates_list, prices, start_idx, horizon, user_params, tickers, r_frac,
+        origine=_origin,
     )
     if res is None:
         return None
@@ -3593,7 +3718,7 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
     # eval_script_on_history also returns that when the price history simply
     # doesn't extend far enough yet to know (see its mat_events branch).
     if today_str >= deal.maturity_date:
-        maturity_payout = sum(cf["cf"] for cf in res["cash_flows"] if abs(cf["t"] - deal.T) < 1e-6)
+        maturity_payout = sum(cf["cf"] for cf in res["cash_flows"] if abs(cf["t"] - horizon) < 1e-6)
         maturity_event = max(events, key=lambda e: e.t_years)
         # The label comes from explicit script state (KI/BREACHED variables),
         # never from the amount paid. A capital-protected or option payoff can
@@ -5683,10 +5808,10 @@ def reprice_inputs(
     underlyings = json.loads(deal.underlyings_json)
     tickers = [u["ticker"] for u in underlyings if u.get("ticker")]
 
-    # S₀ comes from the t=0 event (Strike / Fixing S₀), filled in by the user in Events tab
+    # S₀ comes from the t=0 event (Strike / Fixing S₀), filled in by the user in
+    # Events tab — or, with a start window, from the reduction of its relevés.
     events = _get_events(deal_id, session)
-    strike_event = next((e for e in events if e.t_years == 0.0), None)
-    s0_map: dict = json.loads(strike_event.spots_json) if strike_event else {}
+    s0_map: dict = _niveau_initial_constate(events, deal.schedule_json)
 
     normalized_spots: dict = {}
     current_spots: dict = {}
@@ -6029,8 +6154,7 @@ def _reinvest_proposal_data(deal: Deal, req: ReinvestProposalRequest) -> dict:
             # recalées sur SA base 100 (celle de tout l'historique récupéré,
             # pas celle de la fenêtre), flux positionnés à leur vraie date
             # dans cet historique.
-            days_T = round(T * 252)
-            max_start = len(dates) - days_T - 1
+            max_start = derniere_fenetre(compiled, dates, T)
             if max_start >= 0 and history:
                 replay = eval_script_on_history(compiled, dates, prices, max_start, T, up, [req.ticker], r_frac)
                 base_at_window_start = history["normalized"][max_start] if max_start < len(history["normalized"]) else None
@@ -6042,11 +6166,11 @@ def _reinvest_proposal_data(deal: Deal, req: ReinvestProposalRequest) -> dict:
                             continue
                         barriers.append({"name": b["name"], "direction": b.get("direction"),
                                           "level": round(lvl * base_at_window_start, 4)})
-                    cash_flows = []
-                    for cf in replay["cash_flows"]:
-                        idx = max_start + round(cf["t"] * 252)
-                        if 0 <= idx < len(dates):
-                            cash_flows.append({"date": dates[idx], "amount": cf["cf"]})
+                    # Chaque flux porte la date à laquelle le rejeu l'a lu : la
+                    # recalculer à 252 séances par an la décalait de quelques
+                    # jours par année de maturité.
+                    cash_flows = [{"date": cf["date"], "amount": cf["cf"]}
+                                  for cf in replay["cash_flows"]]
                     backtest["product"] = {
                         "window_start": dates[max_start],
                         "early_recall": replay["early_recall"],
@@ -6435,6 +6559,7 @@ def _mtm_core(
         "underlyings_json": underlyings_json,
         "norm_spots": norm_spots,
         "T_elapsed": T_elapsed,
+        "passe_jusqu_a": residuel.passe_jusqu_a,
         "T_remaining": T_remaining,
         "residual_payment_t": residual_payment_t,
         # Tout repricing dérivé (chocs, Greeks, explication de P&L) doit
@@ -6998,11 +7123,8 @@ def deal_mtm_report(
     if payload.get("resolved_pending") or ctx is None:
         raise HTTPException(422, payload.get("message", "Deal en attente de résolution"))
 
-    events = _get_events(deal_id, session)
-    ev_rows = [{"date": e.event_date, "label": e.label, "status": e.status,
-                "t_years": e.t_years} for e in events]
-    next_obs = next((e.event_date for e in sorted(events, key=lambda x: x.t_years or 0.0)
-                     if e.status == "futur"), None)
+    ev_rows, next_obs = _evenements_pour_la_note(
+        _get_events(deal_id, session), deal.schedule_json)
 
     start_idx = ctx["start_idx"]
     s0_map = ctx["s0_map"]

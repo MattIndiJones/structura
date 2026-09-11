@@ -65,6 +65,9 @@ def scenarios_endpoint(req: ScenarioRequest):
             constat_currency=req.settlement_ccy,
             residual_state=etat, state_spots=spots,
             residual_elapsed=ctx.T_elapsed if ctx is not None else None,
+            residual_passe=ctx.residuel.passe_jusqu_a if ctx is not None else None,
+            residual_releves=(ctx.residuel.state.get("releves_realises")
+                              if ctx is not None else None),
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

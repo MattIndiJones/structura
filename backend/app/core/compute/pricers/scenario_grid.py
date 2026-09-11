@@ -57,16 +57,20 @@ def price_scenario_grid_job(payload: dict) -> dict:
     # VaR — decaler les dates d'evenement et couper la fenetre de strike fix
     # deja consommee.
     _elapsed = payload.get("residual_elapsed")
+    # Là où le rejeu du passé s'est arrêté : la même coupe que le MtM.
+    _passe = payload.get("residual_passe")
     if _elapsed:
         compiled = CompiledScript(
-            events=_shift_events_for_mtf(compiled.events, _elapsed),
+            events=_shift_events_for_mtf(compiled.events, _elapsed, passe_jusqu_a=_passe),
             init_fn=compiled.init_fn, params=compiled.params,
             constats=compiled.constats, has_stop=compiled.has_stop,
             monitors=compiled.monitors,
             strike_fix_dates=[round(d - _elapsed, 6)
                               for d in (compiled.strike_fix_dates or [])
-                              if d > _elapsed + 1e-9] or None,
+                              if (d > _passe + 1e-6 if _passe is not None
+                                  else d > _elapsed + 1e-9)] or None,
             strike_fix_reduction=compiled.strike_fix_reduction,
+            releves_realises=payload.get("residual_releves") or None,
         )
 
     n = len(payload["underlyings"])

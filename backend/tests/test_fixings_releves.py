@@ -131,3 +131,97 @@ def test_le_modele_porte_le_lien_releve_constatation():
         assert len(releves) == 1
         assert releves[0].reduction == "", "un relevé ne porte pas de règle d'agrégation"
         assert parent.reduction == "AVG"
+
+
+def test_l_api_expose_le_lien_releve_constatation():
+    """L'écran Events doit pouvoir distinguer un relevé d'une constatation :
+    sans ces deux champs, il les afficherait au même niveau et annoncerait douze
+    observations là où le contrat en a trois."""
+    import inspect
+    from backend.app.api import deals as api
+
+    src = inspect.getsource(api)
+    # La sérialisation d'un événement de deal porte les deux champs.
+    i = src.index('"event_index": e.event_index,')
+    bloc = src[i:i + 900]
+    assert '"parent_event_id": e.parent_event_id,' in bloc
+    assert '"reduction": e.reduction or None,' in bloc
+
+
+def test_un_releve_ne_porte_pas_de_regle_d_agregation():
+    """La règle vit sur la constatation, jamais sur ses relevés : deux endroits
+    pour une même information, ce sont deux endroits qui peuvent diverger."""
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        parent = DealEvent(deal_id=1, event_index=1, event_date="2027-09-10",
+                           t_years=1.0, reduction="AVG", label="Obs. 1")
+        s.add(parent)
+        s.flush()
+        releve = DealEvent(deal_id=1, event_index=2, event_date="2026-12-10",
+                           t_years=0.25, parent_event_id=parent.id,
+                           label="Obs. 1 · relevé 1/4")
+        s.add(releve)
+        s.commit()
+        assert releve.reduction == ""
+        assert releve.parent_event_id == parent.id
+
+
+# ── La fenêtre de départ ───────────────────────────────────────────────
+
+SCRIPT_DEPART = """PARAM STRIKE = 100%
+CONSTAT STRIKE_FIX  AVG
+CONSTAT MATURITE
+
+AT MATURITE:
+  PAY MAX(WOF - STRIKE, 0) "call"
+"""
+
+
+def test_la_fenetre_de_depart_a_ses_releves_bookes_sous_le_strike():
+    """S0 d'un `STRIKE_FIX AVG 10D` se calcule sur dix cours. Le booking ne
+    créait que l'événement du strike : les autres relevés n'avaient ni ligne,
+    ni fixing, et le rejeu officiel reportait le cours du strike sur toute la
+    fenêtre — S0 valait ce premier cours, pas la moyenne.
+
+    Le fixing du jour de strike reste UNE ligne quand ce jour est un relevé :
+    il en est le premier, pas un de plus."""
+    import json
+    from types import SimpleNamespace
+    from backend.app.api import deals as deals_api
+
+    strike = date.today()
+    maturite = strike + timedelta(days=364)
+    while maturite.weekday() >= 5:
+        maturite -= timedelta(days=1)
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        deal = deals_api.book_deal(deals_api.DealCreate(
+            contrepartie="BNP Paribas", nominal=1_000_000.0, fair_value=97.9,
+            price_traded=98.0, trade_date=strike.isoformat(),
+            strike_date=strike.isoformat(),
+            value_date=(strike + timedelta(days=4)).isoformat(),
+            maturity_date=maturite.isoformat(),
+            payment_date=(maturite + timedelta(days=5)).isoformat(),
+            T=round((maturite - strike).days / 365.25, 4),
+            underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "s0_abs": 100.0}],
+            observation_times=[], script_snapshot=SCRIPT_DEPART,
+            market_snapshot={"constats": {
+                "STRIKE_FIX": {"date": strike.isoformat(), "window_length": "10D",
+                               "window_frequency": "1D"},
+                "MATURITE": maturite.isoformat()}},
+        ), SimpleNamespace(id=1, entity_id=1), s)
+
+        depart = json.loads(s.get(Deal, deal["id"]).schedule_json)["depart"]
+        attendues = [r["date"] for r in depart["releves"]]
+        assert depart["reduction"] == "AVG" and len(attendues) == 10
+
+        (strike_ev,) = [e for e in deal["events"] if e["t_years"] == 0.0]
+        assert strike_ev["reduction"] == "AVG"
+        releves = [e for e in deal["events"] if e["parent_event_id"] == strike_ev["id"]]
+        lignes = sorted([strike_ev["event_date"]] + [e["event_date"] for e in releves])
+        # Chaque date de la fenêtre a exactement une ligne, le strike compris.
+        assert lignes == sorted(set(attendues) | {strike.isoformat()})
+        assert len(lignes) == len(set(lignes))
+        assert all(e["reduction"] is None for e in releves)
