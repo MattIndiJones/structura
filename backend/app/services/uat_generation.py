@@ -25,8 +25,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, update
 from sqlmodel import Session, select
 
-from ..api import deals as deals_api
-from ..api import rfq as rfq_api
 from ..core.audit import record_audit_event
 from ..core.compute.executor import run_batch
 from ..core.workflow import DataCategory
@@ -36,6 +34,22 @@ from ..db.models import (
     RfqProvider, RfqQuote, RfqRequest, ShockRun, TradeAmendmentRequest,
     UatGenerationBatch, User,
 )
+
+
+deals_api = None
+rfq_api = None
+
+
+def configure_uat_workflows(deals_module, rfq_module) -> None:
+    """Inject application adapters from the API composition root."""
+    global deals_api, rfq_api
+    deals_api = deals_module
+    rfq_api = rfq_module
+
+
+def _require_workflows() -> None:
+    if deals_api is None or rfq_api is None:
+        raise RuntimeError("Workflows UAT non configurés.")
 
 
 PRODUCTS = {
@@ -736,8 +750,11 @@ def _create_rfq(spec: dict, body: UatGenerationRequest, target: User,
         scenario = spec["rfq_scenario"]
         quoted_at = now - (timedelta(hours=2) if scenario == "EXPIRED"
                            else timedelta(minutes=5 + offset))
-        valid_until = (now - timedelta(hours=1) if scenario == "EXPIRED"
-                       else now + timedelta(hours=1))
+        # An expired selected quote is an intentionally inconsistent UAT case.
+        # Production quite rightly refuses to select an already expired quote,
+        # so first exercise the real selection workflow with a valid deadline;
+        # the fixture is aged only after that workflow has accepted it.
+        valid_until = now + timedelta(hours=1)
         quote = rfq_api.update_quote(
             rfq.id,
             quote["id"],
@@ -762,6 +779,11 @@ def _create_rfq(spec: dict, body: UatGenerationRequest, target: User,
         rfq_api.update_rfq(
             rfq.id, rfq_api.RfqUpdate(selected_quote_id=winner["id"]), target, session)
         selected = session.get(RfqQuote, winner["id"])
+        if spec["rfq_scenario"] == "EXPIRED":
+            selected.valid_until = now - timedelta(hours=1)
+            session.add(selected)
+            session.commit()
+            session.refresh(selected)
     return session.get(RfqRequest, rfq.id), selected
 
 
@@ -1010,6 +1032,7 @@ def _age_generated_records(
 
 
 def generate_batch(body: UatGenerationRequest, admin: User, session: Session) -> dict:
+    _require_workflows()
     target, providers = _validate_request(body, session)
     specs = _build_specs(body)
     # Before any row is written: a batch that cannot be priced must fail whole

@@ -141,7 +141,8 @@
         </div>
         <pre class="code-editor !min-h-0 overflow-auto text-xs" style="max-height: 340px;"><code>{{ gen.script || '—' }}</code></pre>
         <div class="text-[11px] text-slate-500">
-          {{ gen.provider }} · {{ gen.model }} · {{ Math.round(gen.elapsed_ms / 100) / 10 }} s
+          {{ gen.provider }} · {{ gen.effective_model || gen.model }} ·
+          {{ Math.round(gen.elapsed_ms / 100) / 10 }} s
         </div>
       </div>
 
@@ -176,6 +177,17 @@
             <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
               Fiche de contrôle
             </div>
+            <div class="flex items-center gap-1.5 mb-2 flex-wrap">
+              <span class="badge" :class="gen.compiles ? 'badge-positive' : 'badge-negative'">
+                {{ gen.compiles ? 'Compilation réussie' : 'Compilation échouée' }}
+              </span>
+              <span class="badge" :class="statutClasse(gen.pricing_check)">
+                Contrôle financier · {{ statutLibelle(gen.pricing_check) }}
+              </span>
+              <span class="badge" :class="statutClasse(gen.checks_status)">
+                Revue · {{ statutLibelle(gen.checks_status) }}
+              </span>
+            </div>
             <div class="flex flex-col gap-1">
               <div v-for="(c, i) in gen.checks" :key="i"
                    class="flex items-start gap-2 text-[11px] leading-snug">
@@ -198,6 +210,17 @@
         </template>
       </div>
     </div>
+
+    <label v-if="gen?.adoption_requires_acknowledgement && !gen.parse_error"
+           class="flex items-start gap-2 rounded-lg px-3 py-2 text-xs cursor-pointer"
+           style="background: var(--gold-light); border: 1px solid var(--gold);">
+      <input v-model="warningsAcknowledged" type="checkbox" class="mt-0.5" />
+      <span>
+        J’ai lu les avertissements de la fiche de contrôle et je confirme que
+        le script correspond au payoff demandé. Cette confirmation sera conservée
+        dans sa provenance.
+      </span>
+    </label>
 
     <!-- Affinage -->
     <div v-if="gen && !gen.parse_error" class="flex flex-col gap-2 pt-1">
@@ -248,6 +271,7 @@ const descriptionEl = ref(null)
 const refinementEl = ref(null)
 const provider = ref('ollama')
 const model = ref('')
+const warningsAcknowledged = ref(false)
 
 const placeholder =
   'ex. : un autocall 3 ans sur le Nikkei, observation annuelle, rappel si '
@@ -263,7 +287,8 @@ const providers = computed(() => store.scriptProviders?.providers || [
 const currentProvider = computed(() => providers.value.find(p => p.key === provider.value))
 const currentModels = computed(() => currentProvider.value?.models || [])
 const privacyWarning = computed(() => provider.value !== 'ollama')
-const canAdopt = computed(() => !!gen.value?.script && !gen.value?.parse_error)
+const canAdopt = computed(() => !!gen.value?.script && !gen.value?.parse_error
+  && (!gen.value?.adoption_requires_acknowledgement || warningsAcknowledged.value))
 const recommendedMissing = computed(() => {
   const p = currentProvider.value
   return !!(p && p.key === 'ollama' && p.ready && p.recommended
@@ -303,6 +328,14 @@ const cls = l => ({
   attention: 'text-[var(--gold)]',
   info: 'text-slate-400',
 }[l] || '')
+const statutClasse = s => ({
+  passed: 'badge-positive', warning: 'badge-gold', failed: 'badge-negative',
+  not_run: 'badge-muted',
+}[s] || 'badge-muted')
+const statutLibelle = s => ({
+  passed: 'réussi', warning: 'à contrôler', failed: 'échoué',
+  not_run: 'non exécuté',
+}[s] || s)
 
 const probaTiles = computed(() => {
   const p = gen.value?.proba
@@ -331,6 +364,7 @@ watch(() => props.modelValue, async (open) => {
 // Changer de moteur remet le modèle sur celui par défaut : un nom de modèle
 // Ollama envoyé à OpenAI produirait une erreur incompréhensible.
 watch(provider, () => { model.value = currentProvider.value?.default_model || '' })
+watch(() => gen.value?.generation_id, () => { warningsAcknowledged.value = false })
 
 function run() {
   if (!description.value.trim() || loading.value) return
@@ -350,7 +384,7 @@ function runRefine() {
 }
 
 function adopt() {
-  store.adoptGeneratedScript()
+  store.adoptGeneratedScript({ warningsAcknowledged: warningsAcknowledged.value })
   emit('adopted')
   emit('update:modelValue', false)
 }

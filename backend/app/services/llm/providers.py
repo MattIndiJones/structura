@@ -36,6 +36,12 @@ class ProviderInfo:
     models: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class Completion:
+    text: str
+    effective_model: str
+
+
 PROVIDERS = {
     "ollama": ProviderInfo(
         key="ollama", label="Ollama (local)", needs_key=False,
@@ -227,17 +233,26 @@ def _modele_effectif(info: ProviderInfo, model: str | None) -> str:
     return info.default_model if info.default_model in installes else installes[0]
 
 
-def complete(provider: str, model: str | None, system: str, user: str, *,
-             temperature: float = 0.1, max_tokens: int = 2000) -> str:
-    """Une réponse texte. `temperature` bas par défaut : écrire un payoff dans
-    une grammaire imposée n'est pas un exercice de création."""
+def complete_with_metadata(provider: str, model: str | None, system: str,
+                           user: str, *, temperature: float = 0.1,
+                           max_tokens: int = 2000) -> Completion:
+    """Réponse et modèle réellement appelé, y compris après repli Ollama."""
     info = PROVIDERS.get(provider)
     if info is None:
         raise LlmError(
             f"Moteur inconnu : {provider!r} — valeurs admises : "
             f"{', '.join(PROVIDERS)}.")
-    out = _DISPATCH[provider](_modele_effectif(info, model), system, user,
+    effective_model = _modele_effectif(info, model)
+    out = _DISPATCH[provider](effective_model, system, user,
                               temperature, max_tokens)
     if not (out or "").strip():
         raise LlmError("Le modèle a renvoyé une réponse vide.")
-    return out
+    return Completion(text=out, effective_model=effective_model)
+
+
+def complete(provider: str, model: str | None, system: str, user: str, *,
+             temperature: float = 0.1, max_tokens: int = 2000) -> str:
+    """Compatibilité des autres assistants qui n'ont besoin que du texte."""
+    return complete_with_metadata(
+        provider, model, system, user,
+        temperature=temperature, max_tokens=max_tokens).text

@@ -100,6 +100,10 @@ export const PROVENANCES_DONNEES = [
   { value: 'native', label: 'Structura natif' },
 ]
 
+export const SOURCES_MARCHE = [
+  { value: 'YAHOO_FINANCE', label: 'Yahoo Finance' },
+]
+
 export const TYPES_MANDAT = [
   { value: 'mandate', label: 'Mandat' },
   { value: 'fund', label: 'Fonds / compartiment' },
@@ -595,6 +599,13 @@ export const useClientsStore = defineStore('clients', () => {
     interactions.value = interactions.value.filter(i => i.id !== id)
   }
 
+  async function cloturerRelance(id, statut = 'done', note = null) {
+    return _appel(`/api/interactions/follow-ups/${id}/close`, {
+      method: 'POST',
+      body: JSON.stringify({ status: statut, note }),
+    })
+  }
+
   // ── Client Intelligence ────────────────────────────────────────────
   // Lectures analytiques, en lecture seule. `asof` est exposé partout : rejouer
   // une analyse à une date passée est la seule façon de vérifier qu'un signal
@@ -657,7 +668,7 @@ export const useClientsStore = defineStore('clients', () => {
     supprimerPersonne,
     chargerOpportunites, chargerOpportunite, creerOpportunite,
     modifierOpportunite, changerStatut, supprimerOpportunite,
-    chargerInteractions, creerInteraction, supprimerInteraction,
+    chargerInteractions, creerInteraction, supprimerInteraction, cloturerRelance,
     signaux, seuils, lireIntelligenceClient, lireIntelligencePersonne,
     chargerSignaux, chargerAnalytics,
   }

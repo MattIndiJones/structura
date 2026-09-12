@@ -38,9 +38,16 @@ Payload shape (produced by var_engine.apply_scenario_to_deal_base):
 """
 from __future__ import annotations
 from datetime import date
+from ...valuation_context import run_valuation
 
 
 def price_var_scenario_job(payload: dict) -> dict:
+    if payload.get("settlement_claim"):
+        # A payoff already fixed and merely awaiting payment has no equity,
+        # volatility or correlation scenario left.  Keeping it in every book
+        # cell gives it a zero VaR contribution without excluding its exposure.
+        return {"price": float(payload["fixed_price"])}
+
     from ...payscript.parser import parse_script, resolve_constats, CompiledScript
     from ...payscript.engine import run_mc, _shift_events_for_mtf
 
@@ -80,22 +87,35 @@ def price_var_scenario_job(payload: dict) -> dict:
     state = payload["state"]
     corr = payload.get("corr_shocked") or payload["corr"]
 
-    result = run_mc(
-        residual_script, payload["engine_uls"], corr,
-        payload["r_frac"], payload["T_remaining"],
-        payload.get("n_paths", 3000), payload.get("model_used", "constant"),
-        seed=42, antithetic=payload.get("antithetic", True),
-        user_params=payload.get("user_params") or {},
-        spot_mult=effective_spots, spot_base=norm_spots,
-        vol_add=payload.get("vol_add"),
-        dr=payload.get("dr", 0.0),
-        yield_curve=payload.get("yc") or [], sigma_r=payload.get("sigma_r", 0.0),
-        a_r=payload.get("a_r", 0.0),
-        barrier_monitoring=payload.get("barrier_monitoring", "weekly"),
-        wof_min_init=state["wof_min"], bof_max_init=state["bof_max"],
-        index_offset=state["index"], memo_init=state["memo"], accum_init=state["accum"],
-        s_min_init=state["s_min"], s_max_init=state["s_max"], s_prev_init=state["s_prev"],
-        wof0_init=min(effective_spots),
-        realvol_state_init=state["realvol_state"], fix_state_init=state["fix_state"],
-    )
-    return {"price": result["price"]}
+    context = payload.get("valuation_context")
+    if context:
+        result = run_valuation(
+            residual_script, context, corr_matrix=corr,
+            spot_mult=effective_spots, spot_base=norm_spots,
+            vol_add=payload.get("vol_add"), dr=payload.get("dr", 0.0),
+            wof0_init=min(effective_spots),
+        )
+    else:
+        # Compatibility for queued batches created before context v1.
+        result = run_mc(
+            residual_script, payload["engine_uls"], corr,
+            payload["r_frac"], payload["T_remaining"],
+            payload.get("n_paths", 3000), payload.get("model_used", "constant"),
+            seed=payload.get("seed", 42), antithetic=payload.get("antithetic", True),
+            user_params=payload.get("user_params") or {},
+            spot_mult=effective_spots, spot_base=norm_spots,
+            vol_add=payload.get("vol_add"), dr=payload.get("dr", 0.0),
+            yield_curve=payload.get("yc") or [], sigma_r=payload.get("sigma_r", 0.0),
+            a_r=payload.get("a_r", 0.0),
+            funding_curve=payload.get("funding_curve") or [],
+            funding_spread=payload.get("funding_spread", 0.0),
+            maturity_payment_t=payload.get("residual_payment_t"),
+            strike_set_t=payload.get("strike_set_t"),
+            barrier_monitoring=payload.get("barrier_monitoring", "weekly"),
+            wof_min_init=state["wof_min"], bof_max_init=state["bof_max"],
+            index_offset=state["index"], memo_init=state["memo"], accum_init=state["accum"],
+            s_min_init=state["s_min"], s_max_init=state["s_max"], s_prev_init=state["s_prev"],
+            wof0_init=min(effective_spots),
+            realvol_state_init=state["realvol_state"], fix_state_init=state["fix_state"],
+        )
+    return {"price": result["price"] + float(payload.get("unsettled_pv", 0.0))}

@@ -133,6 +133,16 @@ def test_la_provenance_fictive_est_le_defaut_et_reste_explicitement_modifiable(a
     assert refusee.status_code == 422
 
 
+def test_la_source_de_marche_est_configuree_sur_le_compte_client(app_client):
+    fiche = _creer_client(app_client)
+    assert fiche["market_data_provider"] == "YAHOO_FINANCE"
+
+    refusee = app_client.patch(
+        f"/api/clients/{fiche['id']}",
+        json={"market_data_provider": "BLOOMBERG"})
+    assert refusee.status_code == 422
+
+
 # ── Doublons : on avertit, on ne bloque pas ──────────────────────────
 
 def test_un_doublon_probable_suspend_la_creation_avec_de_quoi_decider(app_client):
@@ -592,6 +602,55 @@ def test_une_interaction_se_supprime_et_laisse_une_trace(app_client):
         select(AuditEvent).where(
             AuditEvent.action == "INTERACTION_DELETED")).all()
     assert evenements and evenements[0].result == "SUCCESS"
+
+
+def test_une_relance_cloturee_disparait_des_signaux_et_peut_etre_rouverte(app_client):
+    fiche = _creer_client(app_client)
+    interaction = app_client.post("/api/interactions", json={
+        "client_id": fiche["id"], "interaction_date": "2026-08-01",
+        "interaction_type": "call", "summary": "Revue",
+        "next_action": "Renvoyer le pricing", "next_action_date": "2026-08-20",
+    }).json()
+    follow_up = interaction["follow_up"]
+    assert follow_up["status"] == "open"
+
+    before = app_client.get(
+        "/api/client-intelligence/signals", params={"asof": "2026-08-31"}).json()
+    assert any(s["follow_up_id"] == follow_up["id"] for s in before["signals"])
+
+    closed = app_client.post(
+        f"/api/interactions/follow-ups/{follow_up['id']}/close",
+        json={"status": "done", "note": "Indicatif envoyé"})
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["status"] == "done"
+    assert closed.json()["closed_by_user_id"] == 1
+
+    after = app_client.get(
+        "/api/client-intelligence/signals", params={"asof": "2026-08-31"}).json()
+    assert not any(s["follow_up_id"] == follow_up["id"] for s in after["signals"])
+
+    reopened = app_client.post(
+        f"/api/interactions/follow-ups/{follow_up['id']}/reopen")
+    assert reopened.status_code == 200
+    again = app_client.get(
+        "/api/client-intelligence/signals", params={"asof": "2026-08-31"}).json()
+    assert any(s["follow_up_id"] == follow_up["id"] for s in again["signals"])
+
+
+def test_modifier_une_prochaine_action_met_a_jour_la_relance_ouverte(app_client):
+    fiche = _creer_client(app_client)
+    interaction = app_client.post("/api/interactions", json={
+        "client_id": fiche["id"], "interaction_date": "2026-08-01",
+        "next_action": "Appeler", "next_action_date": "2026-08-20",
+    }).json()
+    updated = app_client.patch(
+        f"/api/interactions/{interaction['id']}",
+        json={"next_action": "Envoyer la term sheet",
+              "next_action_date": "2026-08-25"})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["follow_up"]["id"] == interaction["follow_up"]["id"]
+    assert updated.json()["follow_up"]["title"] == "Envoyer la term sheet"
+    assert updated.json()["follow_up"]["due_date"] == "2026-08-25"
 
 
 # ── Réattribution ────────────────────────────────────────────────────

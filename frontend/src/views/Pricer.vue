@@ -28,9 +28,15 @@
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
+        <span class="hidden md:inline-flex text-[10px] font-mono px-2 py-1 rounded border"
+          :class="estimateClass(store.pricingEstimate)"
+          :title="estimateTitle(store.pricingEstimate, 'Prix')">
+          Est. {{ formatWork(store.pricingEstimate.workUnits) }} · {{ formatMemory(store.pricingEstimate.estimatedPeakMb) }}
+        </span>
         <button v-if="store.result && store.selectedGreeks.length > 0"
           class="btn-secondary text-xs px-3 py-1.5"
           :disabled="store.loading"
+          :title="estimateTitle(store.greeksEstimate, 'Prix + Greeks')"
           @click="store.runGreeks()">
           ∂ Greeks
         </button>
@@ -120,6 +126,29 @@ const demo = useDemoModeStore()
 const route = useRoute()
 
 const eventsInitialDealId = ref(null)
+
+function formatWork(value) {
+  if (value >= 1e9) return `${(value / 1e9).toFixed(1)} Md u.`
+  if (value >= 1e6) return `${(value / 1e6).toFixed(1)} M u.`
+  if (value >= 1e3) return `${(value / 1e3).toFixed(0)} k u.`
+  return `${value} u.`
+}
+
+function formatMemory(value) {
+  return value >= 1024 ? `${(value / 1024).toFixed(1)} Go` : `${value.toFixed(0)} Mo`
+}
+
+function estimateClass(estimate) {
+  if (estimate.blocked) return 'border-red-300 bg-red-50 text-red-700'
+  if (estimate.warnings.length) return 'border-amber-300 bg-amber-50 text-amber-700'
+  return 'border-slate-300 bg-white/60 text-slate-500'
+}
+
+function estimateTitle(estimate, label) {
+  const details = [...estimate.reasons, ...estimate.warnings]
+  return `${label} : ${formatWork(estimate.workUnits)}, pic mémoire ${formatMemory(estimate.estimatedPeakMb)}`
+    + (details.length ? ` — ${details.join(' · ')}` : '')
+}
 
 function goToEvents(dealId) {
   eventsInitialDealId.value = dealId

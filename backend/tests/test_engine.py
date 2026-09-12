@@ -362,6 +362,25 @@ def test_flux_table_populated():
     assert len(res['flux_table']) >= 1
 
 
+def test_flux_table_agrege_exactement_les_deux_jambes_antithetiques():
+    script = parse_script('''
+AT 0.5
+  IF S[1] >= 1
+    PAY 0.1 "coupon conditionnel"
+
+AT MATURITY
+  PAY 1 "capital"
+''')
+    n = 3000
+    res = run_mc(script, CALL_PARAMS, CORR, r=0.0, T_max=1.0, N=n,
+                 model="constant", seed=42, antithetic=True, user_params={})
+    assert len(res["flux_table"]) == 2
+    for flow in res["flux_table"].values():
+        assert flow["pv"] == pytest.approx(flow["sum"], abs=1e-12)
+    assert sum(flow["pv"] for flow in res["flux_table"].values()) / n \
+        == pytest.approx(res["price"], abs=1e-6)
+
+
 # ── Mark-to-Future (nested Monte Carlo) ─────────────────────────────
 
 ZCB_SCRIPT = """

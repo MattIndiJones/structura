@@ -84,8 +84,8 @@
           <div v-else class="mt-3 pt-3 border-t border-slate-700">
             <p class="text-xs text-amber-500/80">
               {{ deal.fixing_policy === 'FOUR_EYES'
-                ? 'S₀ à renseigner — un Ops Maker doit soumettre le fixing Strike avec sa preuve officielle.'
-                : 'S₀ en attente — la clôture Yahoo sera officialisée automatiquement après publication et contrôle.' }}
+                ? 'S₀ à renseigner — un Ops Maker doit soumettre l’observation Strike avec sa pièce source.'
+                : 'S₀ en attente — la clôture Yahoo non ajustée sera appliquée automatiquement après publication et contrôle.' }}
             </p>
           </div>
         </template>
@@ -103,7 +103,7 @@
           </span>
           <HelpTip :text="deal.fixing_policy === 'FOUR_EYES'
             ? 'Le statut contractuel est en lecture seule. Un résultat terminal passe par validation humaine et application auditée.'
-            : 'Les clôtures Yahoo non ajustées sont officialisées et appliquées automatiquement si les contrôles passent. Toute anomalie bloque le traitement et crée une exception explicite.'" />
+            : 'Les clôtures Yahoo non ajustées sont appliquées automatiquement si les contrôles passent. Toute anomalie bloque le traitement et crée une exception explicite.'" />
           <button class="btn-secondary text-xs px-3 py-1.5" @click="reprice" :disabled="repricing">
             <span v-if="repricing"
               class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -144,7 +144,7 @@
           <div>
             <strong>{{ autoExceptionEvents.length }} constatation(s) bloquent le lifecycle.</strong>
             <div class="mt-0.5 text-red-200/70">
-              Sur ce produit classique, l’utilisateur du deal décide la valeur officielle et motive son contrôle.
+              Sur ce produit classique, l’utilisateur du deal décide la valeur retenue et motive son contrôle.
             </div>
           </div>
           <button class="btn-secondary text-[10px] px-2 py-1 shrink-0"
@@ -160,11 +160,11 @@
               <span class="font-semibold text-amber-300">Résolution proposée : {{ proposal.proposed_outcome }}</span>
               <span class="ml-2 text-slate-500">{{ proposal.status }} · source {{ proposal.data_source }}</span>
               <div class="text-[10px] text-slate-500 mt-0.5">
-                {{ proposal.result?.event_date || 'date inconnue' }} · l’autorisation Checker applique atomiquement le résultat officiel
+                {{ proposal.result?.event_date || 'date inconnue' }} · l’autorisation Checker applique atomiquement le résultat contractuel
               </div>
               <div v-if="proposal.comparison_status" class="text-[10px] mt-0.5"
                    :class="proposal.comparison_status === 'MATCH' ? 'text-emerald-400' : 'text-amber-400'">
-                Rejeu officiel : {{ proposal.comparison_status }}
+                Rejeu des observations validées : {{ proposal.comparison_status }}
                 <span v-if="proposal.official_result?.realized_payout != null">
                   · payout {{ (proposal.official_result.realized_payout * 100).toFixed(4) }}%
                 </span>
@@ -204,7 +204,7 @@
                 <th v-for="u in deal.underlyings" :key="u.name"
                   class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">
                   {{ u.ticker || u.name }}
-                  <span class="text-slate-600 font-normal ml-1">officiel / indicatif</span>
+                  <span class="text-slate-600 font-normal ml-1">retenu / indicatif</span>
                 </th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3">Fixing
                   <HelpTip :text="deal.fixing_policy === 'FOUR_EYES'
@@ -376,7 +376,7 @@
                      class="input" placeholder="Valeur strictement positive" />
             </div>
             <div class="flex flex-col gap-1">
-              <label class="label">Fournisseur officiel</label>
+              <label class="label">Source du compte client</label>
               <select v-model="fixingForm.provider" class="select">
                 <option v-for="provider in fixingProviders" :key="provider" :value="provider">
                   {{ provider }}
@@ -409,14 +409,14 @@
             </div>
             <div class="flex flex-col gap-1">
               <label class="label">Place / convention</label>
-              <input v-model="fixingForm.venue" class="input" placeholder="Official close" />
+              <input v-model="fixingForm.venue" class="input" placeholder="Clôture Yahoo" />
             </div>
             <div class="flex flex-col gap-1">
               <label class="label">Calendrier</label>
               <input v-model="fixingForm.calendar" class="input" placeholder="TARGET, SIX…" />
             </div>
             <div class="flex flex-col gap-1 sm:col-span-2">
-              <label class="label">Pièce source officielle (5 Mo maximum)</label>
+              <label class="label">Pièce source (5 Mo maximum)</label>
               <input type="file" class="input" @change="captureEvidence" />
               <div v-if="fixingForm.evidence_filename" class="text-[10px] text-slate-500">
                 {{ fixingForm.evidence_filename }} · {{ formatEvidenceSize(fixingForm.evidence_size_bytes) }}
@@ -443,7 +443,7 @@
         </div>
 
         <p v-if="allEventsFuture && deal.events?.length" class="mt-3 text-[11px] text-slate-600 italic">
-          Tous les événements sont futurs — le formulaire de fixing officiel sera disponible pour
+          Tous les événements sont futurs — le formulaire d’observation sera disponible pour
           l’Ops Maker après chaque date de constatation.
         </p>
       </div>
@@ -656,7 +656,7 @@
                   </span>
                   <span v-if="ev.evenement"
                         class="ml-1.5 text-[9px] rounded px-1 py-0.5 border border-amber-800/60 text-amber-500"
-                        title="Un bloc du script vise directement ce relevé : il porte les deux rôles, et n'aura qu'un seul fixing officiel.">
+                        title="Un bloc du script vise directement ce relevé : il porte les deux rôles, et n'aura qu'une seule observation retenue.">
                     événement
                   </span>
                 </td>
@@ -738,12 +738,9 @@ const commercialContacts = ref([])
 const fixingEventId = ref(null)
 const autoExceptionOpen = ref(false)
 const autoExceptionEvent = ref(null)
-const fixingProviders = [
-  'BLOOMBERG', 'REFINITIV', 'OFFICIAL_EXCHANGE',
-  'CALCULATION_AGENT', 'ISSUER_AGENT', 'CUSTODIAN',
-]
+const fixingProviders = ['YAHOO_FINANCE']
 const fixingForm = reactive({
-  spots: {}, provider: 'BLOOMBERG', source_type: 'MESSAGE', external_reference: '',
+  spots: {}, provider: 'YAHOO_FINANCE', source_type: 'MESSAGE', external_reference: '',
   observed_at: '', venue: '', calendar: '', timezone: 'UTC',
   evidence_sha256: '', evidence_filename: '',
   evidence_content_type: 'application/octet-stream', evidence_payload_b64: '',
@@ -914,7 +911,7 @@ function fixingStatusLabel(status, policy = '') {
   const labels = {
     EXPECTED: 'Attendu',
     RECEIVED: policy === 'AUTO_YAHOO' ? 'Reçu — décision utilisateur' : 'Reçu — Checker requis',
-    VALIDATED: 'Officiel',
+    VALIDATED: 'Validé',
     APPLIED: 'Appliqué',
     PARTIAL: 'Incomplet',
     MISSING: 'Manquant',
@@ -1042,7 +1039,7 @@ function openFixingForm(ev) {
   Object.assign(fixingForm, {
     spots: Object.fromEntries(deal.value.underlyings.map(
       underlying => [underlying.name, ev.spots?.[underlying.name] ?? ''])),
-    provider: ev.fixing_provider || 'BLOOMBERG',
+    provider: ev.fixing_provider || deal.value.market_data_provider || 'YAHOO_FINANCE',
     source_type: ev.fixing_source_type || 'MESSAGE',
     external_reference: '',
     observed_at: '',
@@ -1097,11 +1094,11 @@ async function submitFixing() {
 }
 
 async function validateEventFixing(ev) {
-  const reason = window.prompt('Motif de validation du fixing officiel :')
+  const reason = window.prompt('Motif de validation de cette observation :')
   if (!reason) return
   try {
     await dealsStore.validateFixing(deal.value.id, ev.id, reason)
-    showSaveMsg('✓ Fixing officiel validé')
+    showSaveMsg('✓ Observation validée')
   } catch (e) {
     showSaveMsg(`⚠ Validation refusée : ${e.message}`)
   }
@@ -1112,7 +1109,7 @@ async function rejectEventFixing(ev) {
   if (!reason) return
   try {
     await dealsStore.rejectFixing(deal.value.id, ev.id, reason)
-    showSaveMsg('✓ Version de fixing rejetée ; la version officielle précédente a été restaurée si nécessaire')
+    showSaveMsg('✓ Version rejetée ; la version validée précédente a été restaurée si nécessaire')
     await loadAudit()
   } catch (e) {
     showSaveMsg(`⚠ Rejet impossible : ${e.message}`)
@@ -1188,7 +1185,7 @@ function exportAudit() {
 
 async function validateProposal(proposal) {
   const confirmedOutcome = window.prompt(
-    'Confirmez indépendamment le résultat officiel en saisissant exactement : callé, ki ou final')
+    'Confirmez indépendamment le résultat contractuel en saisissant exactement : callé, ki ou final')
   if (!['callé', 'ki', 'final'].includes((confirmedOutcome || '').trim().toLowerCase())) {
     showSaveMsg('⚠ Confirmation explicite requise : saisissez callé, ki ou final')
     return

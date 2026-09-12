@@ -1,6 +1,7 @@
 import asyncio
 import mimetypes
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from fastapi import FastAPI
 
@@ -45,7 +46,12 @@ from .api.alerts import router as alerts_router
 from .api.compute import router as compute_router
 from .api.var import router as var_router
 from .db.database import init_db
-from .services.lifecycle_alerts import run_scheduled_refresh
+from .services.lifecycle_alerts import (
+    SCHEDULER_TIMEZONE, configure_lifecycle_handlers,
+    run_missed_refresh_if_needed, run_scheduled_refresh,
+)
+from .api.deals import refresh_deal_core, build_watchlist_row
+from zoneinfo import ZoneInfo
 
 app = FastAPI(
     title="Structura — PayScript Pricing Engine",
@@ -61,6 +67,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+configure_lifecycle_handlers(refresh_deal_core, build_watchlist_row)
+
 @app.on_event("startup")
 def on_startup():
     init_db()
@@ -73,14 +81,19 @@ def on_startup():
 # with reload disabled, and run_scheduled_refresh() never raises.
 @app.on_event("startup")
 async def start_lifecycle_scheduler():
+    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("STRUCTURA_DISABLE_SCHEDULER") == "1":
+        return
     async def _daily_loop():
+        await asyncio.to_thread(run_missed_refresh_if_needed)
+        tz = ZoneInfo(SCHEDULER_TIMEZONE)
         while True:
-            now = datetime.now()
+            now = datetime.now(tz)
             next_run = now.replace(hour=23, minute=0, second=0, microsecond=0)
             if next_run <= now:
                 next_run += timedelta(days=1)
             await asyncio.sleep((next_run - now).total_seconds())
-            await asyncio.to_thread(run_scheduled_refresh)
+            slot = next_run.astimezone(timezone.utc).replace(tzinfo=None)
+            await asyncio.to_thread(run_scheduled_refresh, slot, "SCHEDULED")
 
     asyncio.create_task(_daily_loop())
 

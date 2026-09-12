@@ -3,6 +3,12 @@ from fastapi import APIRouter, HTTPException
 from ..core.schemas import ScenarioRequest
 from ..core.payscript.parser import analysis_origin, parse_script, resolve_analysis_constats, effective_T_max
 from ..core.payscript.scenarios import compute_scenario_grid
+from ..core.compute_budget import (
+    count_compiled_dates,
+    ensure_budget,
+    estimate_mc_batch,
+    validate_compiled_dates,
+)
 
 router = APIRouter(prefix="/api", tags=["scenarios"])
 
@@ -45,6 +51,21 @@ def scenarios_endpoint(req: ScenarioRequest):
         T_eff = effective_T_max(compiled, req.T)
 
     try:
+        validate_compiled_dates(compiled)
+        calculation_budget = estimate_mc_batch(
+            operation="scenario_grid",
+            maturity_years=T_eff,
+            underlyings=n,
+            paths_per_run=req.N,
+            total_runs=1 + len(req.spot_shocks) * len(req.vol_shocks),
+            model=req.model,
+            antithetic=True,
+            continuous_monitoring=req.barrier_monitoring == "continuous",
+            stochastic_rates=req.sigma_r > 0,
+            concurrent_runs=4,
+            expanded_dates=count_compiled_dates(compiled),
+        )
+        ensure_budget(calculation_budget)
         # Le TEXTE, les PARAM et le calendrier QUI PRICENT — ceux de la variante
         # s'il y en a une. `compiled` ci-dessus les portait déjà, mais un
         # CompiledScript ne traverse pas une frontière de processus : le worker
@@ -76,4 +97,5 @@ def scenarios_endpoint(req: ScenarioRequest):
         if ctx is not None:
             res["valuation_date"] = ctx.valuation.isoformat()
             res["years_remaining"] = round(ctx.T_remaining, 4)
+        res["calculation_budget"] = calculation_budget.to_dict()
     return res

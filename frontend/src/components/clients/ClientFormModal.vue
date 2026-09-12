@@ -84,6 +84,17 @@
           </p>
         </div>
 
+        <div>
+          <label class="label">Source de données de marché</label>
+          <select v-model="formulaire.market_data_provider" class="select">
+            <option v-for="source in SOURCES_MARCHE" :key="source.value"
+                    :value="source.value">{{ source.label }}</option>
+          </select>
+          <p class="text-xs mt-1" style="color: var(--subtle)">
+            Cette source alimente les valorisations et observations de ce compte.
+          </p>
+        </div>
+
         <div class="sm:col-span-2">
           <label class="label">Notes</label>
           <textarea v-model="formulaire.notes" class="input" rows="3"
@@ -107,6 +118,7 @@
 import { ref, reactive } from 'vue'
 import {
   useClientsStore, TYPES_CLIENT, STATUTS_CLIENT, PROVENANCES_DONNEES,
+  SOURCES_MARCHE,
 } from '../../stores/clients.js'
 import BaseModal from '../ui/BaseModal.vue'
 import AlertMessage from '../ui/AlertMessage.vue'
@@ -129,6 +141,7 @@ const formulaire = reactive({
   country: props.client?.country || '',
   external_ref: props.client?.external_ref || '',
   data_origin: props.client?.data_origin || 'demo',
+  market_data_provider: props.client?.market_data_provider || 'YAHOO_FINANCE',
   notes: props.client?.notes || '',
 })
 

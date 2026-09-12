@@ -222,6 +222,7 @@ def test_claim_next_batch_requeues_stale_running():
     batch = enqueue_batch(s, user.id, "payscript_reprice", "abandoned", job_payloads=[_payload()])
     claimed = claim_next_batch(s, "worker-dead")
     claimed.claimed_at = datetime.utcnow() - timedelta(seconds=1000)
+    claimed.lease_expires_at = datetime.utcnow() - timedelta(seconds=1)
     s.add(claimed); s.commit()
 
     reclaimed = claim_next_batch(s, "worker-alive", stale_after_seconds=900)
@@ -294,13 +295,14 @@ def test_relaunch_batch_requeues_only_failed_jobs():
     jobs = pending_jobs(s, batch.id)
     record_job_result(s, jobs[0].id, True, {"price": 0.08}, None)
     record_job_result(s, jobs[1].id, False, None, "boom")
-    finalize_batch(s, batch.id)
+    finalize_batch(s, batch.id, result_summary={"publication_status": "incomplete"})
 
     relaunched = relaunch_batch(s, batch.id)
     assert relaunched.status == "queued"
     assert relaunched.failed_jobs == 0
     assert relaunched.claimed_at is None
     assert relaunched.worker_name is None
+    assert relaunched.result_summary_json == "{}"
 
     # the previously-failed job is retryable, the done one is left alone
     still_pending = pending_jobs(s, batch.id)
@@ -319,6 +321,22 @@ def test_relaunch_batch_refused_on_fully_completed_batch():
     jobs = pending_jobs(s, batch.id)
     record_job_result(s, jobs[0].id, True, {"price": 0.08}, None)
     finalize_batch(s, batch.id)
+
+    assert relaunch_batch(s, batch.id) is None
+
+
+def test_relaunch_batch_refuses_a_failed_batch_without_failed_job():
+    s = _make_session()
+    user = _make_user(s)
+    batch = enqueue_batch(s, user.id, "var_scenario", "preflight exclusions",
+                          job_payloads=[_payload()])
+    claim_next_batch(s, "worker-1")
+    job = pending_jobs(s, batch.id)[0]
+    record_job_result(s, job.id, True, {"price": 0.08}, None)
+    finalize_batch(s, batch.id)
+    batch.status = "failed"
+    s.add(batch)
+    s.commit()
 
     assert relaunch_batch(s, batch.id) is None
 

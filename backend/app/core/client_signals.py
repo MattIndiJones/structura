@@ -23,7 +23,7 @@ from sqlmodel import Session, select
 
 from ..db.models import (
     Affiliation, Client, ClientTradeHistory, Deal, DealEvent, Interaction,
-    Opportunity, Person,
+    InteractionFollowUp, Opportunity, Person,
 )
 from .client_cycle import (
     CONFIANCE_BASSE, compute_cycle, recommend_contact_window,
@@ -81,6 +81,8 @@ class Signal:
     mandate_id: Optional[int] = None
     origin: Optional[str] = None       # life_cycle | life_cycle_legacy | imported_history
     due_date: Optional[str] = None
+    interaction_id: Optional[int] = None
+    follow_up_id: Optional[int] = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -108,10 +110,43 @@ def build_signals(session: Session, *, entity_id: Optional[int],
     # ── Relances échues ──────────────────────────────────────────────
     # Le signal le plus simple, et celui qu'on rate le plus : une action notée
     # sur une interaction, dont la date est arrivée.
-    requete = select(Interaction).where(Interaction.entity_id == entity_id)
+    requete = select(InteractionFollowUp).where(
+        InteractionFollowUp.entity_id == entity_id,
+        InteractionFollowUp.status == "open")
     if user_id is not None:
-        requete = requete.where(Interaction.user_id == user_id)
-    for interaction in session.exec(requete).all():
+        requete = requete.where(InteractionFollowUp.owner_user_id == user_id)
+    followups = list(session.exec(requete).all())
+    all_followup_interactions = set(session.exec(
+        select(InteractionFollowUp.interaction_id).where(
+            InteractionFollowUp.entity_id == entity_id)).all())
+
+    for followup in followups:
+        echeance = _date_iso(followup.due_date)
+        if not followup.title or echeance is None or echeance > asof:
+            continue
+        retard = (asof - echeance).days
+        signaux.append(Signal(
+            kind=FOLLOW_UP_DUE,
+            severity="urgent" if retard > 7 else "warning",
+            title=followup.title,
+            reason=(f"Échue depuis {retard} jour(s)." if retard
+                    else "Échue aujourd'hui."),
+            client_id=followup.client_id,
+            client_name=(clients_par_id.get(followup.client_id).name
+                         if followup.client_id in clients_par_id else None),
+            opportunity_id=followup.opportunity_id,
+            due_date=echeance.isoformat(), interaction_id=followup.interaction_id,
+            follow_up_id=followup.id))
+
+    # Compatibilité des lignes créées avant le cycle de vie des relances. Dès
+    # qu'une relance dédiée existe (même close), l'ancien texte ne peut plus la
+    # ressusciter.
+    legacy_query = select(Interaction).where(Interaction.entity_id == entity_id)
+    if user_id is not None:
+        legacy_query = legacy_query.where(Interaction.user_id == user_id)
+    for interaction in session.exec(legacy_query).all():
+        if interaction.id in all_followup_interactions:
+            continue
         echeance = _date_iso(interaction.next_action_date)
         if not interaction.next_action or echeance is None or echeance > asof:
             continue
@@ -126,7 +161,7 @@ def build_signals(session: Session, *, entity_id: Optional[int],
             client_name=(clients_par_id.get(interaction.client_id).name
                          if interaction.client_id in clients_par_id else None),
             opportunity_id=interaction.opportunity_id,
-            due_date=echeance.isoformat()))
+            due_date=echeance.isoformat(), interaction_id=interaction.id))
 
     # ── Opportunités en sommeil ──────────────────────────────────────
     seuil_sommeil = stale_after_days()

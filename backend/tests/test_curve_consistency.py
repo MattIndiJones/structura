@@ -72,6 +72,29 @@ def test_forward_prepaye_vaut_exp_moins_qt_sous_courbe_pentue():
     assert prix == pytest.approx(math.exp(-0.02 * 2.0), abs=1e-3), f"{prix:.6f}"
 
 
+def test_forward_prepaye_sigma_nulle_sur_maturite_non_ronde_est_exact():
+    """The diffusion and discounting must end on the T actually requested.
+
+    With the former fixed 1/52 step, 1.013 years was simulated to 53/52 years
+    but discounted to 1.013: even a deterministic prepaid forward then failed
+    the no-arbitrage identity.
+    """
+    prix = _price(FORWARD, r=0.07, T=1.013, sigma=0.0, q=0.0)
+    assert prix == pytest.approx(1.0, abs=1e-12)
+
+
+def test_theta_zero_coupon_est_le_portage_quotidien_du_df():
+    T, r = 1.013, 0.03
+    g = compute_greeks(parse_script(ZERO_COUPON), _ul(sigma=0.0, q=0.0), CORR,
+                       r=r, T=T, N=1000, model="constant", seed=42,
+                       user_params={}, selected=["theta"])
+    attendu = r * math.exp(-r * T) / 365.25
+    # The engine ages one weekly monitoring step and reports it per calendar
+    # day; the O(dt²) convexity residue versus the instantaneous derivative is
+    # about 5.3e-8 here.
+    assert g["theta"] == pytest.approx(attendu, abs=1e-7)
+
+
 @pytest.mark.parametrize("model", ["localvol", "lsv"])
 def test_forward_prepaye_sous_modeles_a_vol_locale(model):
     """Les modèles à vol locale font entrer le taux une troisième fois, dans la

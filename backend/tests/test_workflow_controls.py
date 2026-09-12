@@ -220,7 +220,7 @@ def _fixing_submission(
         observed_at = datetime.fromisoformat(f"{event.event_date}T12:00:00+00:00")
     return deals_api.EventUpdate(
         spots=spots,
-        provider="BLOOMBERG",
+        provider="YAHOO_FINANCE",
         source_type="MESSAGE",
         external_reference=f"MSG-{event.id}-{supersedes_version or 1}",
         observed_at=observed_at.isoformat(),
@@ -344,7 +344,7 @@ def test_fixing_capture_requires_complete_actionable_provenance():
     assert not session.exec(select(OfficialFixingVersion)).first()
 
 
-def test_fixing_provider_must_belong_to_the_controlled_registry():
+def test_fixing_provider_must_match_the_client_account_source():
     session = _session(); deal = _deal(session); event = _events(session, deal)[0]
     submission = _fixing_submission(event, {"UL1": 100.0})
     submission.provider = "Source libre non homologuée"
@@ -353,7 +353,7 @@ def test_fixing_provider_must_belong_to_the_controlled_registry():
     failure = next(row for row in exc.value.detail["failures"]
                    if row["code"] == "FIXING_PROVIDER_NOT_AUTHORIZED")
     assert failure["field"] == "provider"
-    assert "référentiel" in failure["message"]
+    assert "compte client" in failure["message"]
 
 
 def test_fixing_timestamp_offset_must_match_the_market_timezone():
@@ -804,7 +804,7 @@ def test_auto_exception_owner_can_explicitly_adopt_yahoo(monkeypatch):
     assert version.validation_reason.startswith("Décision utilisateur")
 
 
-def test_user_confirmed_non_yahoo_exception_is_not_reopened(monkeypatch):
+def test_user_confirmed_exception_is_not_reopened_by_the_yahoo_feed(monkeypatch):
     session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
     strike, maturity = _events(session, deal)
     maturity.event_date = (date.today() + timedelta(days=30)).isoformat()

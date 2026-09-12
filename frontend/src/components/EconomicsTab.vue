@@ -168,8 +168,18 @@
         <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Sous-jacents
           <HelpTip text="Composition contractuelle du panier. Les volatilités, dividendes, smiles, corrélations et paramètres quanto restent dans Marché & Paramètres." />
         </h2>
-        <button class="btn-secondary text-xs" @click="onAddUnderlying">+ Ajouter</button>
+        <button class="btn-secondary text-xs"
+                :disabled="store.underlyings.length >= store.calculationLimits.maxUnderlyings"
+                :title="store.underlyings.length >= store.calculationLimits.maxUnderlyings
+                  ? `Maximum autorisé : ${store.calculationLimits.maxUnderlyings} sous-jacents` : ''"
+                @click="onAddUnderlying">+ Ajouter</button>
       </div>
+
+      <p v-if="store.underlyings.length > store.calculationLimits.underlyingWarningCount"
+         class="text-[10px] text-amber-500 mb-3">
+        Panier large : {{ store.underlyings.length }} sous-jacents. Le maximum autorisé est
+        {{ store.calculationLimits.maxUnderlyings }}.
+      </p>
 
       <div class="flex gap-1 mb-3 flex-wrap items-center">
         <button v-for="(underlying, index) in store.underlyings" :key="index"

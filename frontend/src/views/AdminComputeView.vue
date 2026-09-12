@@ -81,6 +81,7 @@ import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
 import { formatDateTime } from '../utils/format.js'
+import { confirmer } from '../composables/useConfirm.js'
 
 const batches = ref([])
 const loading = ref(true)

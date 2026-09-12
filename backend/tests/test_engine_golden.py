@@ -244,5 +244,7 @@ def test_greeks_pretrade_inchanges():
     assert g["delta_1"] == 0.5738
     assert g["gamma_1"] == 1.9378
     assert g["vega_1"] == 0.3898
-    assert g["theta"] == -0.0001
+    # Lot 5 preserves daily theta below one basis point instead of rounding the
+    # engine output to four decimals before portfolio nominal scaling.
+    assert g["theta"] == -0.00011518
     assert g["rho"] == 0.4852

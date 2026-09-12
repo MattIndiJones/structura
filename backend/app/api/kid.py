@@ -210,7 +210,8 @@ def _horizon_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
 # ── Cost-adjusted scenario row ────────────────────────────────────────
 
 def _scenario_row(sc: dict, T_h: float, cost_entry: float,
-                  cost_exit: float, cost_ongoing: float) -> dict:
+                  cost_exit: float, cost_ongoing: float,
+                  initial_price_pct: float = 100.0) -> dict:
     """Convert scenario outcomes to KID display (10 000€ invested).
 
     The annualised return is the IRR of the scenario's own dated flows — the
@@ -224,32 +225,56 @@ def _scenario_row(sc: dict, T_h: float, cost_entry: float,
     `life` is the scenario's real holding period. It belongs on screen: two
     cells of the same column can now legitimately carry different horizons,
     and a reader who is not told will think one of them is wrong."""
-    notional = 10_000.0
-    invested = notional * (1 - cost_entry / 100)
+    investment = 10_000.0
+    invested = investment * (1 - cost_entry / 100)
+    # PayScript flows are expressed per unit of contractual notional.  A note
+    # issued at par therefore keeps the historic 10k scaling.  For a product
+    # bought away from par (a call premium of 12, for example), the same 10k
+    # investment buys 10k / 12% units of contractual notional.
+    contract_notional = invested / (initial_price_pct / 100.0)
     scen = sc.get("scenarios") or {}
 
     def _fmt(key: str, payoff: float) -> dict:
         row = scen.get(key) or {}
         life = row.get("life") or T_h
-        gross = invested * payoff
-        net = gross * ((1 - cost_exit / 100) * (1 - cost_ongoing / 100) ** life)
-        net = round(net, 2)
-        # Same flows, each bearing the ongoing cost accrued to its OWN date,
-        # so the published rate is the one the client actually earns rather
-        # than a gross figure with a net amount printed beside it.
-        flows = row.get("flows")
-        if flows:
-            scaled = [{"t": f["t"],
-                       "cf": f["cf"] * invested * (1 - cost_exit / 100)
-                             * (1 - cost_ongoing / 100) ** f["t"]}
-                      for f in flows]
-            ann_irr = compute_irr([{"t": 0.0, "cf": -notional}] + scaled)
+        # One canonical dated stream drives BOTH published amount and return.
+        # Older cached scenario fixtures may not carry flows; representing the
+        # aggregate payoff as one flow at the scenario life is the only honest
+        # backwards-compatible reconstruction.
+        gross_flows = row.get("flows")
+        if gross_flows is None:
+            gross_flows = [{"t": life, "cf": payoff}]
+        final_t = max((float(f["t"]) for f in gross_flows), default=float(life))
+        net_flows = []
+        for flow in gross_flows:
+            t = float(flow["t"])
+            gross_cf = float(flow["cf"]) * contract_notional
+            ongoing_factor = (1 - cost_ongoing / 100) ** t
+            # Exit costs apply once, to the cash movements at the scenario's
+            # actual exit/redemption date.  Interim coupons are not exits.
+            exit_factor = (1 - cost_exit / 100) if abs(t - final_t) < 1e-10 else 1.0
+            net_flows.append({"t": t, "cf": gross_cf * ongoing_factor * exit_factor})
+
+        # KID amounts are published to cents.  Freeze that exact dated series
+        # before both summing it and solving its IRR, so the displayed amount
+        # cannot differ by rounding from the cash flows behind the return.
+        net_flows = [{"t": round(f["t"], 6), "cf": round(f["cf"], 2)}
+                     for f in net_flows]
+        net = round(sum(f["cf"] for f in net_flows), 2)
+        ann_irr = compute_irr([{"t": 0.0, "cf": -investment}] + net_flows)
+        if ann_irr is None:
+            ann = None
+            return_status = "not_computable"
         else:
-            ann_irr = None
-            if life > 0 and net > 0:
-                ann_irr = (net / notional) ** (1.0 / life) - 1.0
-        ann = -100.0 if ann_irr is None else ann_irr * 100.0
-        return {"amount": net, "ann_return": round(ann, 2), "life": round(life, 4)}
+            ann = round(ann_irr * 100.0, 2)
+            return_status = "total_loss" if ann_irr == -1.0 else "computed"
+        return {
+            "amount": net,
+            "ann_return": ann,
+            "return_status": return_status,
+            "life": round(life, 4),
+            "net_flows": net_flows,
+        }
 
     return {
         "T": round(T_h, 4),
@@ -264,6 +289,7 @@ def _scenario_row(sc: dict, T_h: float, cost_entry: float,
 
 class KidRequest(PricingRequest):
     crm: int = Field(default=3, ge=1, le=6)
+    initial_price_pct: float = Field(default=100.0, gt=0.0, le=1000.0)
     cost_entry: float = Field(default=0.0, ge=0, le=10)    # % one-shot
     cost_exit: float = Field(default=0.0, ge=0, le=10)     # % one-shot
     cost_ongoing: float = Field(default=0.0, ge=0, le=5)   # % per year
@@ -324,11 +350,12 @@ def kid_compute(
         raise HTTPException(422, str(e))
 
     # VEV from the 1st-percentile OUTCOME at the RHP (PRIIPs Annex II).
-    # p1 is the amount received per unit invested — unchanged in definition
-    # from before this module's rework, so MRM classification is untouched.
+    # PayScript outcomes are per unit of contractual notional.  Convert that
+    # outcome to a factor of the actual purchase price: at par this is a no-op;
+    # a call bought for 12 is measured against 0.12, not against 1.00.
     # (The VEV formula itself remains the module's own approximation rather
     # than the RTS expression; that non-conformity is tracked separately.)
-    p1 = sc_full["p1"]
+    p1 = sc_full["p1"] / (req.initial_price_pct / 100.0)
     if p1 > 0.0 and p1 < 1.0:
         vev = math.sqrt(-2.0 * math.log(p1) / T_full)
         mrm = _mrm_from_vev(vev)
@@ -347,7 +374,7 @@ def kid_compute(
     sri = _sri(mrm, req.crm)
 
     # Build horizons list (ascending T)
-    cost = (req.cost_entry, req.cost_exit, req.cost_ongoing)
+    cost = (req.cost_entry, req.cost_exit, req.cost_ongoing, req.initial_price_pct)
     horizons = []
     if sc_1y is not None:
         horizons.append(_scenario_row(sc_1y,   T_1y,   *cost))
@@ -365,12 +392,14 @@ def kid_compute(
         # The product's PRICE — a present value. `sc_full["price"]` is now the
         # mean amount held at the RHP, which is a different quantity.
         "full_price": round(sc_full["pv"], 4),
+        "initial_price_pct": req.initial_price_pct,
         # No reinvestment hypothesis anywhere: an amount is the sum of the
         # flows received, a return is the IRR of those flows at their dates.
         # Each cell carries the `life` of the scenario it describes, which is
         # what its return is annualised over.
         "annualisation": "tri_flux_dates",
         "costs": {
+            "initial_price": req.initial_price_pct,
             "entry":   req.cost_entry,
             "exit":    req.cost_exit,
             "ongoing": req.cost_ongoing,

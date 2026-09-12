@@ -31,6 +31,22 @@
             <div class="text-slate-500 mb-1">CRM (repris du KID)</div>
             <div class="font-mono font-bold text-slate-200">{{ store.kid.crm }} / 6</div>
           </div>
+          <div>
+            <label class="label">Protection contractuelle (%)
+              <HelpTip text="Niveau de capital protégé lu dans les termes du produit. Laissez vide si le contrat ne permet pas de l'établir. Le scénario de stress du KID ne sert jamais à qualifier une garantie." />
+            </label>
+            <input v-model.number="contract.capital_protection_level_pct" type="number" step="0.1" min="0" max="1000" placeholder="Non renseigné" class="input text-xs" />
+          </div>
+          <div>
+            <label class="label">Condition de protection
+              <HelpTip text="Une garantie n'est reconnue que si la protection atteint au moins 100 % et qu'aucune barrière ou condition ne peut la désactiver." />
+            </label>
+            <select v-model="contract.capital_protection_condition" class="select text-xs">
+              <option value="unknown">Non renseignée</option>
+              <option value="unconditional">Inconditionnelle</option>
+              <option value="conditional">Conditionnelle</option>
+            </select>
+          </div>
         </div>
         <div class="flex items-center gap-3 mt-3">
           <button class="btn-primary text-xs px-4 py-2" @click="compute" :disabled="loading">
@@ -65,7 +81,7 @@
 
             <div class="bg-slate-800/40 rounded-lg px-4 py-3">
               <div class="text-slate-500 mb-1">Capacité à supporter des pertes
-                <HelpTip text="Dérivé du scénario de stress (P1) du KID à l'échéance — pas recalculé indépendamment, pour garantir que KID et EMT racontent la même histoire de risque sur ce produit." />
+                <HelpTip text="Qualification fondée sur la protection contractuelle. Le scénario de stress mesure un risque économique mais ne peut pas créer une garantie juridique." />
               </div>
               <div class="font-semibold" :class="capitalColorClass">{{ emt.capital_protection.label }}</div>
             </div>
@@ -105,7 +121,7 @@
             SRI/CRM repris tels quels du KID déjà calculé — recalculez le KID si vous avez modifié
             les paramètres du produit, puis relancez l'EMT. Connaissance/expérience et capacité de
             perte sont des heuristiques basées sur la structure du script (rappel anticipé,
-            multi-actifs, effet de levier, barrières) et le scénario de stress du KID — à valider
+            worst-of, effet de levier, barrières) et la protection contractuelle renseignée — à valider
             par un compliance officer avant diffusion.
           </p>
         </div>
@@ -273,6 +289,11 @@ const loading = ref(false)
 const error   = ref('')
 const emt     = ref(null)
 
+const contract = ref({
+  capital_protection_level_pct: null,
+  capital_protection_condition: 'unknown',
+})
+
 const saving      = ref(false)
 const saveError   = ref('')
 const saveConfirm = ref(false)
@@ -391,6 +412,7 @@ async function copyBlockForExternalAI() {
 const capitalColorClass = computed(() => {
   const tier = emt.value?.capital_protection?.tier
   if (tier === 'garanti') return 'text-emerald-400'
+  if (tier === 'indetermine') return 'text-amber-400'
   if (tier === 'partiel') return 'text-amber-400'
   if (tier === 'risque') return 'text-orange-400'
   return 'text-red-400'
@@ -401,7 +423,8 @@ const featureTags = computed(() => {
   const f = emt.value.features
   return [
     { label: 'Rappel anticipé (autocall)', on: f.has_autocall },
-    { label: `Multi-actifs (${f.n_underlyings})`, on: f.has_worst_of },
+    { label: 'Worst-of', on: f.has_worst_of },
+    { label: `Multi-actifs (${f.n_underlyings})`, on: f.is_multi_asset },
     { label: 'Effet de levier', on: f.has_leverage },
     { label: 'Barrière', on: f.has_barrier },
   ]
@@ -416,7 +439,6 @@ async function compute() {
   emt.value = null
 
   try {
-    const lastHorizon = store.kid.horizons[store.kid.horizons.length - 1]
     const res = await apiFetch('/api/emt/compute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -425,7 +447,10 @@ async function compute() {
         sri: store.kid.sri,
         mrm: store.kid.mrm,
         crm: store.kid.crm,
-        stress_payoff_fraction: lastHorizon.stress.amount / 10000,
+        capital_protection_level_pct: Number.isFinite(contract.value.capital_protection_level_pct)
+          ? contract.value.capital_protection_level_pct
+          : null,
+        capital_protection_condition: contract.value.capital_protection_condition,
       }),
     })
     if (!res.ok) {

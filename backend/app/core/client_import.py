@@ -30,6 +30,7 @@ en silence — le pire résultat possible pour un outil censé consolider.
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field, asdict
@@ -177,6 +178,10 @@ class Rapport:
     anomalies: list[Anomalie] = field(default_factory=list)
     feuilles_lues: list[str] = field(default_factory=list)
     feuilles_inconnues: list[str] = field(default_factory=list)
+    file_fingerprint: Optional[str] = None
+    duplicate_of_batch_id: Optional[int] = None
+    duplicate_of_created_at: Optional[str] = None
+    collisions: list[dict] = field(default_factory=list)
 
     @property
     def bloquant(self) -> bool:
@@ -189,6 +194,10 @@ class Rapport:
             "issues": [a.as_dict() for a in self.anomalies],
             "sheets_read": self.feuilles_lues,
             "unknown_sheets": self.feuilles_inconnues,
+            "file_fingerprint": self.file_fingerprint,
+            "duplicate_of_batch_id": self.duplicate_of_batch_id,
+            "duplicate_of_created_at": self.duplicate_of_created_at,
+            "collisions": self.collisions,
             "blocking": self.bloquant,
             "total_created": sum(self.a_creer.values()),
             "total_updated": sum(self.a_mettre_a_jour.values()),
@@ -201,6 +210,56 @@ class ImportError_(Exception):
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
+
+
+def empreinte_fichier(contenu: bytes) -> str:
+    """Identité exacte du fichier reçu, indépendante de son nom."""
+    return hashlib.sha256(contenu).hexdigest()
+
+
+def _empreinte_transaction(payload: dict, occurrence: int) -> str:
+    """Clé naturelle stable d'une transaction sans identifiant externe.
+
+    L'occurrence distingue deux lignes strictement identiques du même fichier :
+    elles peuvent représenter deux souscriptions réelles. Au second import,
+    les mêmes occurrences retrouvent les mêmes clés et sont ignorées.
+    """
+    canonique = json.dumps(
+        {**payload, "occurrence": occurrence}, ensure_ascii=False,
+        sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonique.encode("utf-8")).hexdigest()
+
+
+def _transaction_identity(*, entity_id, client_id, affiliation_id, mandate_id,
+                          trade_date, maturity_date, product_type,
+                          transaction_format, instrument_family, payoff_family,
+                          payoff_description, documentation_reference,
+                          underlying, issuer, currency, notional, coupon_pct,
+                          barrier_pct, traded_with_us, price_pct,
+                          external_ref) -> dict:
+    if external_ref:
+        return {
+            "scope": "external_ref", "entity_id": entity_id,
+            "client_id": client_id,
+            "external_ref": str(external_ref).strip().casefold(),
+        }
+    return {
+        "scope": "natural", "entity_id": entity_id, "client_id": client_id,
+        "affiliation_id": affiliation_id, "mandate_id": mandate_id,
+        "trade_date": trade_date, "maturity_date": maturity_date,
+        "product_type": str(product_type or "").strip().casefold(),
+        "transaction_format": str(transaction_format or "").strip().casefold(),
+        "instrument_family": str(instrument_family or "").strip().casefold(),
+        "payoff_family": str(payoff_family or "").strip().casefold(),
+        "payoff_description": str(payoff_description or "").strip().casefold(),
+        "documentation_reference": str(documentation_reference or "").strip().casefold(),
+        "underlying": str(underlying or "").strip().casefold(),
+        "issuer": str(issuer or "").strip().casefold(),
+        "currency": str(currency or "EUR").strip().upper(),
+        "notional": notional, "coupon_pct": coupon_pct,
+        "barrier_pct": barrier_pct, "traded_with_us": traded_with_us,
+        "price_pct": price_pct,
+    }
 
 
 # ── Lecture des deux formats ──────────────────────────────────────────
@@ -425,7 +484,10 @@ class Resolveur:
 
 def _traiter(session: Session, donnees: dict[str, list[dict]],
              inconnues: list[str], *, entity_id: Optional[int], user_id: int,
-             batch_id: Optional[int] = None) -> Rapport:
+             batch_id: Optional[int] = None,
+             file_fingerprint: Optional[str] = None,
+             duplicate_of_batch_id: Optional[int] = None,
+             duplicate_of_created_at: Optional[str] = None) -> Rapport:
     """Le traitement, identique pour l'aperçu et le versement.
 
     Il ÉCRIT toujours dans la session, et c'est l'appelant qui décide : un
@@ -440,7 +502,10 @@ def _traiter(session: Session, donnees: dict[str, list[dict]],
     qu'un.
     """
     rapport = Rapport(feuilles_lues=[f for f in FEUILLES if f in donnees],
-                      feuilles_inconnues=inconnues)
+                      feuilles_inconnues=inconnues,
+                      file_fingerprint=file_fingerprint,
+                      duplicate_of_batch_id=duplicate_of_batch_id,
+                      duplicate_of_created_at=duplicate_of_created_at)
     resolveur = Resolveur(session, entity_id)
 
     def compter(dico: dict, feuille: str):
@@ -618,6 +683,43 @@ def _traiter(session: Session, donnees: dict[str, list[dict]],
         # passage qui couvre sa date. Sans identifiant, elle ne trouverait rien.
         session.flush()
 
+    # Clés déjà occupées. Les anciennes lignes sans ``natural_key`` sont
+    # projetées à la volée avec la même règle, ce qui rend aussi idempotent le
+    # premier réimport effectué après la migration.
+    existing_keys: dict[str, Optional[int]] = {}
+    legacy_occurrences: dict[str, int] = {}
+    histories = session.exec(
+        select(ClientTradeHistory).where(
+            ClientTradeHistory.entity_id == entity_id)).all()
+    for history in sorted(histories, key=lambda item: item.id or 0):
+        if history.natural_key:
+            existing_keys[history.natural_key] = history.id
+            continue
+        identity = _transaction_identity(
+            entity_id=history.entity_id, client_id=history.client_id,
+            affiliation_id=history.affiliation_id, mandate_id=history.mandate_id,
+            trade_date=history.trade_date, maturity_date=history.maturity_date,
+            product_type=history.product_type,
+            transaction_format=history.transaction_format,
+            instrument_family=history.instrument_family,
+            payoff_family=history.payoff_family,
+            payoff_description=history.payoff_description,
+            documentation_reference=history.documentation_reference,
+            underlying=history.underlying, issuer=history.issuer,
+            currency=history.currency, notional=history.notional,
+            coupon_pct=history.coupon_pct, barrier_pct=history.barrier_pct,
+            traded_with_us=history.traded_with_us, price_pct=history.price_pct,
+            external_ref=history.external_ref)
+        base = json.dumps(identity, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"), default=str)
+        occurrence = 1
+        if not history.external_ref:
+            occurrence = legacy_occurrences.get(base, 0) + 1
+            legacy_occurrences[base] = occurrence
+        existing_keys[_empreinte_transaction(identity, occurrence)] = history.id
+
+    incoming_occurrences: dict[str, int] = {}
+
     # ── transactions ─────────────────────────────────────────────────
     for ligne in donnees.get("transactions", []):
         numero = ligne.get("__ligne__", 0)
@@ -692,18 +794,43 @@ def _traiter(session: Session, donnees: dict[str, list[dict]],
                 affiliation_id = retenue.id
 
         reference = ligne.get("external_ref")
-        if reference and client.id is not None:
-            doublon = session.exec(
-                select(ClientTradeHistory).where(
-                    ClientTradeHistory.client_id == client.id,
-                    ClientTradeHistory.external_ref == str(reference))).first()
-            if doublon is not None:
-                compter(rapport.ignorees, "transactions")
-                continue
+        identity = _transaction_identity(
+            entity_id=entity_id, client_id=client.id,
+            affiliation_id=affiliation_id, mandate_id=mandate_id,
+            trade_date=jour, maturity_date=maturite,
+            product_type=ligne.get("product_type"),
+            transaction_format=ligne.get("transaction_format"),
+            instrument_family=ligne.get("instrument_family"),
+            payoff_family=ligne.get("payoff_family"),
+            payoff_description=ligne.get("payoff_description"),
+            documentation_reference=ligne.get("documentation_reference"),
+            underlying=ligne.get("underlying"), issuer=ligne.get("issuer"),
+            currency=ligne.get("currency") or "EUR", notional=nominal,
+            coupon_pct=coupon, barrier_pct=barriere,
+            traded_with_us=avec_nous, price_pct=prix,
+            external_ref=reference)
+        base = json.dumps(identity, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"), default=str)
+        occurrence = 1
+        if not reference:
+            occurrence = incoming_occurrences.get(base, 0) + 1
+            incoming_occurrences[base] = occurrence
+        natural_key = _empreinte_transaction(identity, occurrence)
+        if natural_key in existing_keys:
+            compter(rapport.ignorees, "transactions")
+            rapport.collisions.append({
+                "sheet": "transactions", "line": numero,
+                "existing_transaction_id": existing_keys[natural_key],
+                "natural_key": natural_key,
+                "reason": ("same_external_ref" if reference
+                           else "same_natural_key"),
+            })
+            continue
 
         compter(rapport.a_creer, "transactions")
         session.add(ClientTradeHistory(
                 entity_id=entity_id, import_batch_id=batch_id,
+                natural_key=natural_key,
                 client_id=client.id, affiliation_id=affiliation_id,
                 mandate_id=mandate_id,
                 trade_date=jour, maturity_date=maturite,
@@ -720,6 +847,9 @@ def _traiter(session: Session, donnees: dict[str, list[dict]],
             external_ref=str(reference) if reference else None,
             notes=ligne.get("notes")))
         session.flush()
+        existing_keys[natural_key] = getattr(
+            session.exec(select(ClientTradeHistory).where(
+                ClientTradeHistory.natural_key == natural_key)).first(), "id", None)
 
     # ── interactions ─────────────────────────────────────────────────
     for ligne in donnees.get("interactions", []):
@@ -783,8 +913,17 @@ def analyser(session: Session, contenu: bytes, *, format_: str,
             "Aucune section exploitable. Le fichier doit porter au moins une "
             f"des sections : {', '.join(FEUILLES)}. Téléchargez le modèle pour "
             f"le format attendu.")
-    rapport = _traiter(session, donnees, inconnues, entity_id=entity_id,
-                       user_id=user_id)
+    fingerprint = empreinte_fichier(contenu)
+    precedent = session.exec(select(ClientImportBatch).where(
+        ClientImportBatch.entity_id == entity_id,
+        ClientImportBatch.file_fingerprint == fingerprint,
+        ClientImportBatch.status == "applied")).first()
+    rapport = _traiter(
+        session, donnees, inconnues, entity_id=entity_id, user_id=user_id,
+        file_fingerprint=fingerprint,
+        duplicate_of_batch_id=precedent.id if precedent else None,
+        duplicate_of_created_at=(precedent.created_at.isoformat()
+                                 if precedent else None))
     # L'aperçu ne doit rien laisser derrière lui, pas même en session.
     session.rollback()
     return rapport
@@ -803,8 +942,18 @@ def appliquer(session: Session, contenu: bytes, *, format_: str, filename: str,
     donnees, inconnues = (lire_classeur(contenu) if format_ == "xlsx"
                           else lire_json(contenu))
 
-    controle = _traiter(session, donnees, inconnues, entity_id=entity_id,
-                        user_id=user_id)
+    fingerprint = empreinte_fichier(contenu)
+    precedent = session.exec(select(ClientImportBatch).where(
+        ClientImportBatch.entity_id == entity_id,
+        ClientImportBatch.file_fingerprint == fingerprint,
+        ClientImportBatch.status == "applied")).first()
+
+    controle = _traiter(
+        session, donnees, inconnues, entity_id=entity_id, user_id=user_id,
+        file_fingerprint=fingerprint,
+        duplicate_of_batch_id=precedent.id if precedent else None,
+        duplicate_of_created_at=(precedent.created_at.isoformat()
+                                 if precedent else None))
     session.rollback()
     if controle.bloquant and not ignorer_lignes_fautives:
         raise ImportError_(
@@ -814,12 +963,16 @@ def appliquer(session: Session, contenu: bytes, *, format_: str, filename: str,
 
     lot = ClientImportBatch(
         entity_id=entity_id, user_id=user_id, filename=filename,
-        source_format=format_, status="applied")
+        file_fingerprint=fingerprint, source_format=format_, status="applied")
     session.add(lot)
     session.flush()
 
-    rapport = _traiter(session, donnees, inconnues, entity_id=entity_id,
-                       user_id=user_id, batch_id=lot.id)
+    rapport = _traiter(
+        session, donnees, inconnues, entity_id=entity_id, user_id=user_id,
+        batch_id=lot.id, file_fingerprint=fingerprint,
+        duplicate_of_batch_id=precedent.id if precedent else None,
+        duplicate_of_created_at=(precedent.created_at.isoformat()
+                                 if precedent else None))
     lot.rows_created = sum(rapport.a_creer.values())
     lot.rows_updated = sum(rapport.a_mettre_a_jour.values())
     lot.rows_skipped = sum(rapport.ignorees.values())

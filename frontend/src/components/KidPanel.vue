@@ -11,7 +11,7 @@
       <!-- ── Paramètres KID ─────────────────────────────────── -->
       <div class="card">
         <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Paramètres KID</h3>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
           <div>
             <label class="label">CRM (risque crédit)
               <HelpTip text="Classe de risque de crédit de l'émetteur (notation), 1=AAA à 6=CCC et moins. Combiné au MRM (risque marché, calculé depuis la VEV) via la table PRIIPs pour donner le SRI final — un émetteur moins bien noté remonte le SRI même si le payoff est identique." />
@@ -24,6 +24,12 @@
               <option :value="5">5 — B</option>
               <option :value="6">6 — CCC et moins</option>
             </select>
+          </div>
+          <div>
+            <label class="label">Prix d'émission / prime
+              <HelpTip text="Prix payé en % du nominal. Une note émise au pair reste à 100. Pour un produit non pair, par exemple un call acheté 12, saisissez 12 : le TRI partira de la prime effectivement perdue ou récupérée." />
+            </label>
+            <input v-model.number="params.initial_price_pct" type="number" step="0.01" min="0.01" max="1000" class="input text-xs" />
           </div>
           <div>
             <label class="label">Frais d'entrée (%)
@@ -160,9 +166,12 @@
                     :class="h[sc.key].amount >= 10000 ? 'text-slate-200' : 'text-red-400'">
                     {{ fmtAmount(h[sc.key].amount) }} €
                   </div>
-                  <div class="font-mono text-[10px] mt-0.5"
+                  <div v-if="h[sc.key].ann_return != null" class="font-mono text-[10px] mt-0.5"
                     :class="h[sc.key].ann_return >= 0 ? 'text-emerald-400' : 'text-red-400'">
                     {{ h[sc.key].ann_return >= 0 ? '+' : '' }}{{ formatPercent(h[sc.key].ann_return, 2) }} / an
+                  </div>
+                  <div v-else class="text-[10px] mt-0.5 text-amber-400">
+                    Rendement non calculable
                   </div>
                   <!-- Durée sur laquelle CE scénario a été annualisé. Un produit
                        rappelé par anticipation a vécu moins longtemps que l'en-tête
@@ -251,6 +260,7 @@ const saveConfirm = ref(false)
 
 const params = ref({
   crm: 3,
+  initial_price_pct: 100,
   cost_entry: 0,
   cost_exit: 0,
   cost_ongoing: 0,
@@ -303,6 +313,7 @@ async function compute() {
       body: JSON.stringify({
         ...store.pricingBody(),
         crm: params.value.crm,
+        initial_price_pct: params.value.initial_price_pct,
         cost_entry: params.value.cost_entry,
         cost_exit: params.value.cost_exit,
         cost_ongoing: params.value.cost_ongoing,

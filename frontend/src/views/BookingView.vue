@@ -359,7 +359,7 @@
                     {{ d.fixing_policy === 'FOUR_EYES' ? 'Contrôle 4 yeux' : 'Yahoo auto' }}
                   </span>
                   <span :class="statusClass(d.status)" class="badge uppercase">
-                    {{ d.status }}
+                    {{ d.status === 'en_reglement' ? 'en règlement' : d.status }}
                   </span>
                 </div>
               </div>
@@ -384,9 +384,11 @@
                   <option value="booking">Params booking</option>
                   <option value="realized">Marché actuel</option>
                 </select>
-                <button v-if="d.status === 'actif'" class="btn-secondary text-xs px-3 py-1.5"
+                <button v-if="['actif', 'en_reglement'].includes(d.status)" class="btn-secondary text-xs px-3 py-1.5"
                   :disabled="mtmLoading[d.id]" @click.stop="runMtm(d.id)"
-                  title="MtM résiduel : valorise les cash-flows restants du produit vivant (calendrier résiduel, spots en % du strike, état KI/mémoire hérité)">
+                  :title="d.status === 'en_reglement'
+                    ? 'Valeur actualisée du remboursement connu jusqu’à sa date de paiement'
+                    : 'MtM résiduel : valorise les cash-flows restants du produit vivant (calendrier résiduel, spots en % du strike, état KI/mémoire hérité)'">
                   <span v-if="mtmLoading[d.id]"
                     class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
                   💰 MtM
@@ -483,8 +485,12 @@
                 <span v-if="mtmResults[d.id].wof_min_realized != null" class="text-slate-500">
                   WOF min réalisé <span class="font-mono text-slate-300">{{ (mtmResults[d.id].wof_min_realized * 100).toFixed(1) }}%</span>
                 </span>
-                <span v-if="mtmResults[d.id].realized_total" class="text-slate-500">
-                  flux déjà payés <span class="font-mono text-slate-300">{{ (mtmResults[d.id].realized_total * 100).toFixed(2) }}%</span>
+                <span v-if="mtmResults[d.id].settled_total" class="text-slate-500">
+                  flux déjà payés <span class="font-mono text-slate-300">{{ (mtmResults[d.id].settled_total * 100).toFixed(2) }}%</span>
+                </span>
+                <span v-if="mtmResults[d.id].unsettled_total" class="text-amber-400">
+                  à régler le {{ formatDate(mtmResults[d.id].payment_date || mtmResults[d.id].unsettled_cash_flows?.[0]?.payment_date) }}
+                  <span class="font-mono">{{ (mtmResults[d.id].unsettled_total * 100).toFixed(2) }}%</span>
                 </span>
                 <span v-if="mtmResults[d.id].best_case && mtmResults[d.id].best_case.capped" class="text-slate-500"
                   title="Meilleur dénouement possible du produit, en valeur actualisée (maximum de la distribution Monte Carlo)">
@@ -495,14 +501,14 @@
                   :title="`Le MtM capture ${(mtmResults[d.id].best_case.capture_ratio * 100).toFixed(1)}% du meilleur dénouement — potentiel résiduel ${mtmResults[d.id].best_case.upside_pts} pt (≈ ${mtmResults[d.id].best_case.upside_annualized_pct}%/an)`">
                   ⚡ sortie envisageable
                 </span>
-                <button class="btn-secondary text-[10px] px-2 py-1" :disabled="noteLoading[d.id]"
+                <button v-if="d.status === 'actif'" class="btn-secondary text-[10px] px-2 py-1" :disabled="noteLoading[d.id]"
                   @click.stop="downloadNote(d)"
                   title="Génère la note de valorisation PDF à envoyer au client — même chiffre que le MtM affiché (mode et seed identiques)">
                   <span v-if="noteLoading[d.id]"
                     class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
                   📄 Note de valo
                 </button>
-                <button class="btn-secondary text-[10px] px-2 py-1" :disabled="rollLoading[d.id]"
+                <button v-if="d.status === 'actif'" class="btn-secondary text-[10px] px-2 py-1" :disabled="rollLoading[d.id]"
                   @click.stop="runRoll(d)"
                   title="Reprice le même produit, même sous-jacent, départ forward (value date = aujourd'hui, tenor plein) — juste une simulation, rien n'est booké">
                   <span v-if="rollLoading[d.id]"
@@ -512,6 +518,10 @@
                 <span v-if="mtmResults[d.id].market_used" class="w-full font-mono text-[10px] pt-0.5"
                   :class="mtmResults[d.id].market_used.source === 'booking' ? 'text-slate-600' : 'text-sky-400'">
                   Marché utilisé : {{ marketUsedLabel(mtmResults[d.id].market_used) }}
+                </span>
+                <span v-if="mtmResults[d.id].market_used?.data?.contractual_history?.warnings?.length"
+                  class="w-full text-[10px] text-amber-400">
+                  ⚠ La dernière clôture disponible est ancienne pour au moins un sous-jacent.
                 </span>
               </div>
             </div>
@@ -784,7 +794,7 @@
                     class="mb-2 rounded-lg border border-red-800/50 bg-red-950/25 px-3 py-2 text-xs text-red-300 flex items-center justify-between gap-3">
                     <span>
                       <strong>{{ autoExceptionEvents(d.id).length }} constatation(s) bloquent le lifecycle.</strong>
-                      L’utilisateur du deal doit choisir la valeur officielle et motiver sa décision.
+                      L’utilisateur du deal doit choisir la valeur retenue et motiver sa décision.
                     </span>
                     <button class="btn-secondary text-[10px] px-2 py-1 shrink-0"
                       @click="openAutoException(d, autoExceptionEvents(d.id)[0])">
@@ -1154,7 +1164,7 @@ function fixingStatusLabel(status, policy = '') {
   const labels = {
     EXPECTED: 'Attendu',
     RECEIVED: policy === 'AUTO_YAHOO' ? 'Reçu — décision utilisateur' : 'Reçu — Checker requis',
-    VALIDATED: 'Officiel',
+    VALIDATED: 'Validé',
     APPLIED: 'Appliqué',
     PARTIAL: 'Incomplet',
     MISSING: 'Manquant',
@@ -1487,6 +1497,11 @@ async function runRoll(d) {
 // Effective market parameters of the MtM run — one compact line so a quoted
 // number is never separated from what priced it.
 function marketUsedLabel(mu) {
+  if (mu.source === 'known_settlement') {
+    const provider = mu.data?.provider === 'YAHOO_FINANCE'
+      ? 'Yahoo Finance' : (mu.data?.provider || '')
+    return `flux connu · r ${mu.r}% · funding ${mu.funding_spread || 0}% · ${provider}`
+  }
   const uls = Object.entries(mu.sigma || {})
     .map(([n, s]) => `${n} σ ${s}%` + (mu.q && mu.q[n] != null ? ` q ${mu.q[n]}%` : ''))
     .join(' · ')
@@ -1503,7 +1518,11 @@ function marketUsedLabel(mu) {
     ? `marché actuel${mu.window_returns ? ` (${mu.window_returns} rendements)` : ''}`
     : 'params booking'
   if (mu.source && mu.source.indexOf('+overrides') >= 0) src += ' + overrides'
-  return `${uls}${corr} · r ${mu.r}% · ${model} · ${src}`
+  const provider = mu.data?.provider === 'YAHOO_FINANCE'
+    ? 'Yahoo Finance' : mu.data?.provider
+  const effective = mu.data?.contractual_history?.asof_effective
+  const data = provider ? ` · ${provider}${effective ? ` au ${effective}` : ''}` : ''
+  return `${uls}${corr} · r ${mu.r}% · ${model} · ${src}${data}`
 }
 
 const watchlist = ref([])
@@ -1614,13 +1633,13 @@ async function openDealDetail(id) {
 // with Risk Management's Barrières tab so the color/label convention can't
 // diverge between the two.
 
-const statusOptions = ['actif', 'callé', 'échu', 'résilié']
+const statusOptions = ['actif', 'en_reglement', 'callé', 'échu', 'résilié']
 
 const sortBy  = ref('status')
 const sortDir = ref('asc')
 function toggleSortDir() { sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc' }
 
-const _STATUS_ORDER = { actif: 0, 'callé': 1, 'échu': 2 }
+const _STATUS_ORDER = { actif: 0, en_reglement: 1, 'callé': 2, 'échu': 3 }
 
 const filters = reactive({
   contrepartie: '',
@@ -1725,6 +1744,7 @@ function pct(n, total) {
 function statusClass(s) {
   const map = {
     actif: 'badge-positive',
+    en_reglement: 'badge-gold',
     'callé': 'badge-gold',
     'échu': 'badge-muted',
     'résilié': 'badge-negative',

@@ -4,6 +4,7 @@ compute module's var_scenario pricer. Offline: synthetic price series (no
 network), same in-memory-SQLite fixture style as test_portfolio_pnl.py for
 the deal-context extraction tests."""
 import json
+import importlib
 import math
 from datetime import date, timedelta
 from types import SimpleNamespace
@@ -12,10 +13,12 @@ import numpy as np
 import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
-from backend.app.api import deals as deals_api
-from backend.app.db.models import Deal, DealEvent
+from backend.app.db.models import ComputeBatch, ComputeJob, Deal, DealEvent
+from backend.app.core import deal_valuation
 from backend.app.core import var_engine as ve
 from backend.app.core.compute.pricers.var_scenario import price_var_scenario_job
+
+var_api = importlib.import_module("backend.app.api.var")
 
 USER = SimpleNamespace(id=1)
 
@@ -174,12 +177,172 @@ def test_aggregate_var_empty_input():
     assert res["n_scenarios"] == 0
 
 
+def _var_job(job_id, scenario, deal_id, status="done", price=99.0, error=None):
+    return SimpleNamespace(
+        id=job_id,
+        label=f"{scenario} / DEAL-{deal_id}",
+        status=status,
+        error=error,
+        payload_json=json.dumps({"_meta": {
+            "scenario_key": scenario,
+            "method": "historical",
+            "deal_id": deal_id,
+            "reference": f"DEAL-{deal_id}",
+            "mtm_before": 100.0,
+            "nominal": 1_000.0,
+            "fx_rate": 1.0,
+            "position_sign": 1.0,
+        }}),
+        result_json=json.dumps({"price": price}) if status == "done" else "{}",
+    )
+
+
+def _var_params():
+    deals = [
+        {"deal_id": 1, "reference": "DEAL-1", "nominal": 1_000.0, "currency": "EUR"},
+        {"deal_id": 2, "reference": "DEAL-2", "nominal": 1_000.0, "currency": "EUR"},
+    ]
+    return {
+        "confidence": 0.95,
+        "requested_deals": deals,
+        "included_deals": deals,
+        "preflight_exclusions": [],
+        "scenarios": [
+            {"key": "S1", "method": "historical"},
+            {"key": "S2", "method": "historical"},
+        ],
+    }
+
+
+def test_un_job_echoue_interdit_la_var_globale_et_produit_la_var_hors_deal():
+    jobs = [
+        _var_job(1, "S1", 1, price=99.0),
+        _var_job(2, "S1", 2, status="failed", error="pricing impossible"),
+        _var_job(3, "S2", 1, price=101.0),
+        _var_job(4, "S2", 2, price=102.0),
+    ]
+
+    result = var_api._aggregate_var_jobs(jobs, _var_params())
+
+    assert result["publication_status"] == "incomplete"
+    assert result["historical"] is None
+    assert result["parametric"] is None
+    assert result["worst_scenarios"] == []
+    assert result["excluded_deals"][0]["reference"] == "DEAL-2"
+    assert result["reduced_scope"]["included_deals"] == [
+        {"deal_id": 1, "reference": "DEAL-1", "nominal": 1_000.0, "currency": "EUR"}
+    ]
+    assert result["reduced_scope"]["historical"]["var_eur"] == 1_000.0
+
+
+def test_tous_les_jobs_en_echec_ne_publient_ni_zero_ni_var_reduite():
+    jobs = [
+        _var_job(1, "S1", 1, status="failed"),
+        _var_job(2, "S1", 2, status="failed"),
+        _var_job(3, "S2", 1, status="failed"),
+        _var_job(4, "S2", 2, status="failed"),
+    ]
+
+    result = var_api._aggregate_var_jobs(jobs, _var_params())
+
+    assert result["publication_status"] == "incomplete"
+    assert result["historical"] is None
+    assert result["reduced_scope"] is None
+    assert result["coverage"]["included_deals"] == 0
+
+
+def test_un_deal_ecarte_au_preflight_reste_visible_et_declenche_le_scope_reduit():
+    params = _var_params()
+    params["included_deals"] = [params["included_deals"][0]]
+    params["preflight_exclusions"] = [{
+        **params["requested_deals"][1],
+        "reason": "Snapshot de marché incomplet.",
+    }]
+    jobs = [
+        _var_job(1, "S1", 1, price=99.0),
+        _var_job(2, "S2", 1, price=101.0),
+    ]
+
+    result = var_api._aggregate_var_jobs(jobs, params)
+
+    assert result["historical"] is None
+    assert result["excluded_deals"][0]["phase"] == "preflight"
+    assert result["excluded_deals"][0]["reference"] == "DEAL-2"
+    assert result["reduced_scope"]["historical"]["var_eur"] == 1_000.0
+    assert result["coverage"] == {
+        "requested_deals": 2,
+        "included_deals": 1,
+        "excluded_deals": 1,
+        "deal_coverage_pct": 50.0,
+    }
+
+
+def test_univers_complet_publie_la_var_globale_sans_scope_reduit():
+    jobs = [
+        _var_job(1, "S1", 1, price=99.0),
+        _var_job(2, "S1", 2, price=99.5),
+        _var_job(3, "S2", 1, price=101.0),
+        _var_job(4, "S2", 2, price=102.0),
+    ]
+
+    result = var_api._aggregate_var_jobs(jobs, _var_params())
+
+    assert result["publication_status"] == "complete"
+    assert result["historical"]["var_eur"] == 1_500.0
+    assert result["reduced_scope"] is None
+
+
 # ── build_deal_scenario_base + var_scenario pricer round-trip ─────────
 
 def _make_session():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
     return Session(eng)
+
+
+def test_api_var_marque_le_global_incomplet_en_echec_et_publie_le_scope_reduit():
+    session = _make_session()
+    params = _var_params()
+    batch = ComputeBatch(
+        user_id=USER.id,
+        kind="var_scenario",
+        label="VaR test",
+        status="completed_with_failures",
+        total_jobs=4,
+        completed_jobs=3,
+        failed_jobs=1,
+        params_json=json.dumps(params),
+    )
+    session.add(batch)
+    session.commit()
+    session.refresh(batch)
+
+    source_jobs = [
+        _var_job(1, "S1", 1, price=99.0),
+        _var_job(2, "S1", 2, status="failed", error="pricing impossible"),
+        _var_job(3, "S2", 1, price=101.0),
+        _var_job(4, "S2", 2, price=102.0),
+    ]
+    for index, source in enumerate(source_jobs):
+        session.add(ComputeJob(
+            batch_id=batch.id,
+            job_index=index,
+            label=source.label,
+            payload_json=source.payload_json,
+            status=source.status,
+            result_json=source.result_json,
+            error=source.error,
+        ))
+    session.commit()
+
+    row = var_api.get_var_result(batch.id, USER, session)
+
+    assert row["status"] == "failed"
+    assert row["result"]["historical"] is None
+    assert row["result"]["reduced_scope"]["historical"]["var_eur"] == 1_000.0
+    persisted = session.get(ComputeBatch, batch.id)
+    assert persisted.status == "failed"
+    assert json.loads(persisted.result_summary_json)["publication_status"] == "incomplete"
 
 
 CALL_SCRIPT = "PARAM K = 1.0\n\nAT MATURITY\n  PAY MAX(0, S[1] - K)\n"
@@ -225,7 +388,7 @@ def test_build_deal_scenario_base_is_json_serializable_and_matches_mtm(monkeypat
     s = _make_session()
     deal = _add_active_deal(s, value_d, maturity)
 
-    monkeypatch.setattr(deals_api, "load_hist_prices",
+    monkeypatch.setattr(deal_valuation, "load_hist_prices",
                         lambda tickers, start, end=None: _flat_prices({"TK1": 100.0}, start, end))
 
     base = ve.build_deal_scenario_base(deal, s, n_paths=3000)
@@ -249,7 +412,7 @@ def test_build_deal_scenario_base_skips_matured_deal(monkeypatch):
     maturity = date.today() - timedelta(days=10)   # already past
     s = _make_session()
     deal = _add_active_deal(s, value_d, maturity)
-    monkeypatch.setattr(deals_api, "load_hist_prices",
+    monkeypatch.setattr(deal_valuation, "load_hist_prices",
                         lambda tickers, start, end=None: _flat_prices({"TK1": 100.0}, start, end))
 
     base = ve.build_deal_scenario_base(deal, s, n_paths=2000)
@@ -265,7 +428,7 @@ def test_var_scenario_pricer_reacts_to_spot_shock(monkeypatch):
     maturity = value_d + timedelta(days=365)
     s = _make_session()
     deal = _add_active_deal(s, value_d, maturity)
-    monkeypatch.setattr(deals_api, "load_hist_prices",
+    monkeypatch.setattr(deal_valuation, "load_hist_prices",
                         lambda tickers, start, end=None: _flat_prices({"TK1": 100.0}, start, end))
 
     base = ve.build_deal_scenario_base(deal, s, n_paths=3000)

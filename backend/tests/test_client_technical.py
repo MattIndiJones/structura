@@ -114,7 +114,11 @@ def test_un_script_herite_sans_moniteurs_passe_par_l_heuristique():
 
 def test_un_script_illisible_ne_fait_pas_tomber_la_fiche():
     niveaux = niveaux_du_script("ceci n'est pas du PayScript {{{")
-    assert niveaux == {"coupon_pct": None, "barriers": [], "protection_pct": None}
+    assert niveaux == {
+        "coupon_pct": None, "coupon_schedule_pct": None,
+        "barriers": [], "protection_pct": None,
+        "protection_schedule_pct": None,
+    }
 
 
 def test_un_script_absent_rend_des_niveaux_vides_et_non_zero():
@@ -127,6 +131,33 @@ def test_un_script_absent_rend_des_niveaux_vides_et_non_zero():
 def test_un_param_a_zero_n_est_pas_un_coupon():
     niveaux = niveaux_du_script("PARAM COUPON = 0%\nAT MATURITY:\n  PAY 1\n")
     assert niveaux["coupon_pct"] is None
+
+
+def test_les_parametres_bookes_remplacent_les_valeurs_par_defaut_du_script():
+    niveaux = niveaux_du_script(
+        SCRIPT_M,
+        user_params={"COUPON": 0.115, "M_AC_BAR": [1.05, 1.0, 0.95],
+                     "M_KI_BAR": 0.55},
+    )
+    assert niveaux["coupon_pct"] == 11.5
+    assert niveaux["protection_pct"] == 55.0
+    autocall = next(b for b in niveaux["barriers"] if b["kind"] == "autocall")
+    assert autocall["levels_pct"] == [105.0, 100.0, 95.0]
+
+
+def test_un_param_coupon_par_constatation_reste_un_echeancier():
+    script = """
+PARAM() COUPON = 5%
+PARAM M_KI_BAR = 60%
+AT 1, 2, 3:
+  PAY COUPON * INDEX
+AT MATURITY:
+  PAY INDIC(WOF >= M_KI_BAR)
+"""
+    niveaux = niveaux_du_script(
+        script, user_params={"COUPON": [0.04, 0.06, 0.08]})
+    assert niveaux["coupon_pct"] is None
+    assert niveaux["coupon_schedule_pct"] == [4.0, 6.0, 8.0]
 
 
 # ── Deal booké et ligne importée disent la même chose ────────────────
@@ -172,6 +203,33 @@ def test_un_deal_et_une_ligne_importee_rendent_les_memes_champs():
     assert set(booke) == set(importe)
     assert vue["coverage"]["with_coupon"] == 2
     assert vue["coverage"]["with_protection"] == 2
+
+
+def test_deux_deals_du_meme_script_gardent_leurs_economics_bookes_distincts():
+    session = _session()
+    client = Client(name="Test", entity_id=1)
+    session.add(client); session.commit(); session.refresh(client)
+
+    import json
+    for reference, coupon in (("D-6", 0.06), ("D-9", 0.09)):
+        session.add(Deal(
+            reference=reference, user_id=1, entity_id=1, client_id=client.id,
+            trade_date="2024-01-15", strike_date="2024-01-15",
+            maturity_date="2027-01-15", nominal=1e6, devise="EUR",
+            product_type="Autocall", status="actif", script_snapshot=SCRIPT_M,
+            market_snapshot_json=json.dumps({
+                "user_params": {"COUPON": coupon, "M_KI_BAR": 0.55,
+                                "M_AC_BAR": [1.05, 1.0, 0.95]}}),
+            underlyings_json='[{"ticker": "^STOXX50E"}]'))
+    session.commit()
+
+    rows = {row["reference"]: row for row in
+            technical_view(session, deals_of_client(session, client.id))["rows"]}
+    assert rows["D-6"]["coupon_pct"] == 6.0
+    assert rows["D-9"]["coupon_pct"] == 9.0
+    assert rows["D-6"]["protection_pct"] == 55.0
+    assert rows["D-6"]["terms_source"] == "booked_params"
+    assert rows["D-6"]["barriers"][0]["levels_pct"] == [105.0, 100.0, 95.0]
 
 
 # ── Familles de sous-jacents ─────────────────────────────────────────

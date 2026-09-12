@@ -5,7 +5,7 @@ own docstring) and never imports anything from this module.
 
 Three responsibilities:
   1. build_deal_scenario_base() — extracts the pure-data equivalent of
-     api/deals.py:_mtm_core's ctx for one active deal, ONCE, so every
+     core/deal_valuation.py:mtm_core's ctx for one active deal, ONCE, so every
      scenario job for that deal can share it (the replay itself is cheap —
      no Monte Carlo — recomputing it per scenario would be wasted work, and
      more importantly the compiled objects in _mtm_core's ctx can't cross a
@@ -43,25 +43,41 @@ from .calibration import realized_market
 # ── 1. Pure-data deal context (residual leg) ─────────────────────────
 
 def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dict:
-    """Wraps api/deals.py:_mtm_core to get the residual ctx once, then
+    """Wraps deal_valuation.mtm_core to get the residual ctx once, then
     strips it down to plain JSON-safe data — see pricers/var_scenario.py's
     docstring for exactly which fields and why.
 
     Returns {"skipped": True, "reason": ...} instead of raising whenever the
     deal can't be repriced right now (resolved_pending, maturity reached,
-    missing market data...) — same 'skip, don't abort the whole book'
-    contract as api/shocks.py's _run_shock_on_book, one level up (a VaR
-    study over 40 deals must not fail entirely because one of them needs its
-    lifecycle refreshed first)."""
-    from ..api.deals import _mtm_core, MtmRequest
+    missing market data...).  The API keeps that exclusion explicit: it does
+    not publish a VaR for the requested portfolio and automatically computes a
+    separately labelled VaR on the fixed calculable subset when one exists."""
+    from .deal_valuation import MtmRequest, mtm_core
     from fastapi import HTTPException
 
     try:
-        mtm_payload, ctx = _mtm_core(deal, session, n_paths, MtmRequest())
+        mtm_payload, ctx = mtm_core(deal, session, n_paths, MtmRequest())
     except HTTPException as e:
         return {"skipped": True, "reason": e.detail}
     if ctx is None:
         return {"skipped": True, "reason": mtm_payload.get("message", "résolution en attente")}
+
+    if ctx.get("settlement_claim"):
+        return {
+            "deal_id": deal.id,
+            "reference": deal.reference,
+            "devise": deal.devise,
+            "nominal": deal.nominal,
+            "mtm_before": mtm_payload["mtm"],
+            "tickers": [],
+            "data_provider": (mtm_payload.get("market_used", {})
+                              .get("data", {}).get("provider")),
+            "base": {
+                "fixed_price": mtm_payload["mtm"],
+                "settlement_claim": True,
+                "n_paths": 0,
+            },
+        }
 
     market = json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {}
 
@@ -72,6 +88,8 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
         "nominal": deal.nominal,
         "mtm_before": mtm_payload["mtm"],
         "tickers": ctx["tickers"],
+        "data_provider": (mtm_payload.get("market_used", {})
+                          .get("data", {}).get("provider")),
         "base": {
             "script_text": deal.script_snapshot,
             "constat_values": market.get("constats"),
@@ -99,6 +117,8 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
             "user_params": ctx["user_params"],
             "barrier_monitoring": market.get("barrierMonitoring", "weekly"),
             "n_paths": n_paths,
+            "valuation_context": ctx["valuation_context"],
+            "unsettled_pv": ctx.get("unsettled_pv", 0.0),
         },
     }
 
@@ -135,7 +155,9 @@ def apply_scenario_to_deal_base(deal_base: dict, scenario: MarketScenario) -> di
     tickers = deal_base["tickers"]
     spot_mult = [1.0 + scenario.spot_pct.get(tk, 0.0) / 100.0 for tk in tickers]
     vol_add = [scenario.vol_pts.get(tk, 0.0) / 100.0 for tk in tickers]
-    corr_shocked = _shock_corr_scalar(deal_base["base"]["corr"], scenario.corr_delta)
+    context = deal_base["base"].get("valuation_context") or {}
+    corr_shocked = _shock_corr_scalar(
+        context.get("corr_matrix", deal_base["base"]["corr"]), scenario.corr_delta)
 
     payload = dict(deal_base["base"])
     payload["spot_mult"] = spot_mult

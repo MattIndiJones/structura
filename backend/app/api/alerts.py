@@ -1,12 +1,13 @@
 """Lifecycle/barrier alerts raised by the daily refresh — list, mark read,
 and manual whole-book refresh (the UI's 'Rafraîchir le book' button)."""
 from __future__ import annotations
+import json
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import Alert, User
-from .auth import get_current_user
+from ..db.models import Alert, SchedulerRun, User
+from .auth import get_current_admin, get_current_user
 from ..services.lifecycle_alerts import refresh_book
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
@@ -31,6 +32,27 @@ def _alert_row(a: Alert) -> dict:
         "read": a.read,
         "created_at": a.created_at.isoformat(),
     }
+
+
+@router.get("/scheduler-runs")
+def list_scheduler_runs(
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+    limit: int = 30,
+):
+    rows = session.exec(
+        select(SchedulerRun).order_by(SchedulerRun.scheduled_for.desc())
+        .limit(max(1, min(limit, 100)))
+    ).all()
+    return [{
+        "id": row.id, "job_key": row.job_key,
+        "scheduled_for": row.scheduled_for.isoformat(),
+        "timezone": row.timezone, "status": row.status,
+        "trigger": row.trigger, "error": row.error,
+        "result": json.loads(row.result_json or "{}"),
+        "started_at": row.started_at.isoformat(),
+        "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+    } for row in rows]
 
 
 @router.get("")

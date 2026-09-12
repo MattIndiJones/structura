@@ -66,3 +66,16 @@ def test_les_fixings_contractuels_etaient_deja_sur_le_cours_nu():
     # l'autre, ce qui faisait diverger le replay de ses propres fixings.
     market_data.load_yahoo_reference_closes(["GLE.PA"], "2024-06-14", "2024-06-14")
     assert all(appel["auto_adjust"] is False for appel in _FakeHistory.appels)
+
+
+def test_la_borne_de_fin_est_inclusive_et_la_provenance_est_exposee():
+    res = market_data.load_hist_prices(
+        ["GLE.PA"], "2024-06-13", "2024-06-14")
+
+    assert _FakeHistory.appels[0]["end"] == "2024-06-15"
+    assert res["dates"] == ["2024-06-14"]
+    assert res["provider"] == "YAHOO_FINANCE"
+    assert res["price_type"] == "UNADJUSTED_CLOSE"
+    assert res["asof_effective"] == "2024-06-14"
+    assert res["effective_dates"] == {"GLE.PA": "2024-06-14"}
+    assert res["age_sessions"] == {"GLE.PA": 0}

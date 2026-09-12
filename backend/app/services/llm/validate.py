@@ -43,12 +43,23 @@ class Validation:
     price_pct: float | None = None
     price_error: str | None = None
     proba: dict | None = None
+    compiles: bool = False
+    checks_status: str = "not_run"
+    pricing_check: str = "not_run"
 
     def as_dict(self) -> dict:
         return {
             "script": self.script,
             "explanation": self.explanation,
             "ok": self.ok,
+            # ``ok`` est conservé pour compatibilité et signifie historiquement
+            # « compile ». Les nouveaux champs rendent les trois verdicts
+            # impossibles à confondre.
+            "compiles": self.compiles,
+            "checks_status": self.checks_status,
+            "pricing_check": self.pricing_check,
+            "has_warnings": self.checks_status == "warning",
+            "adoption_requires_acknowledgement": self.checks_status == "warning",
             "parse_error": self.parse_error,
             "checks": [c.__dict__ for c in self.checks],
             "params": self.params,
@@ -316,15 +327,18 @@ def validate(raw_response: str, *, description: str, underlyings, corr,
 
     if not script.strip():
         v.parse_error = "Le modèle n'a produit aucun script exploitable."
+        v.checks_status = "failed"
         return v
 
     try:
         compiled = parse_script(script)
     except ValueError as e:
         v.parse_error = str(e)
+        v.checks_status = "failed"
         return v
 
     v.ok = True
+    v.compiles = True
     v.n_events = len(compiled.events)
     v.has_stop = compiled.has_stop
     v.params = [{"name": p.name, "raw_default": p.raw_default,
@@ -338,6 +352,9 @@ def validate(raw_response: str, *, description: str, underlyings, corr,
             "Pricing de contrôle", INFO,
             "Non exécuté : le script référence un calendrier CONSTAT dont les "
             "dates se renseignent dans l'interface."))
+        v.checks_status = ("warning" if any(c.level == WARN for c in v.checks)
+                           else "passed")
+        v.pricing_check = "not_run"
         return v
 
     prix, err, proba = smoke_price(compiled, underlyings, corr, r, T, user_params)
@@ -345,4 +362,10 @@ def validate(raw_response: str, *, description: str, underlyings, corr,
     v.checks.append(price_check(
         prix, err, note_like=_looks_like_a_note(compiled, script, description),
         contexte=_contexte_marche(underlyings, corr)))
+    price_row = v.checks[-1]
+    v.pricing_check = (
+        "failed" if err else "warning" if price_row.level == WARN
+        else "passed" if price_row.level == OK else "not_run")
+    v.checks_status = ("warning" if any(c.level == WARN for c in v.checks)
+                       else "passed")
     return v

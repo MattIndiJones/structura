@@ -3,6 +3,7 @@ import { ref, reactive, computed } from 'vue'
 import { apiFetch } from '../utils/api.js'
 import { calculerDelta, contexteDepuisCorps } from '../composables/useVariantDelta.js'
 import { courbeDividende } from '../composables/useDividendCurve.js'
+import { CALCULATION_LIMITS, estimatePricingCalculation } from '../utils/calculationBudget.js'
 
 const DEFAULT_SCRIPT = `# Autocall Athena 3 ans
 PARAM COUPON = 8%
@@ -238,16 +239,16 @@ export const usePricingStore = defineStore('pricing', () => {
   const fundingCurve = reactive({
     enabled: false,
     mode: 'flat',          // 'flat' | 'pillars'
-    level: 1.50,           // en %, appliqué à tous les piliers
+    level: 0,              // en %, appliqué à tous les piliers
     pillars: [
-      { label: '3M',  T: 0.25, spread: 1.50 },
-      { label: '6M',  T: 0.5,  spread: 1.50 },
-      { label: '1Y',  T: 1.0,  spread: 1.50 },
-      { label: '2Y',  T: 2.0,  spread: 1.50 },
-      { label: '3Y',  T: 3.0,  spread: 1.50 },
-      { label: '5Y',  T: 5.0,  spread: 1.50 },
-      { label: '7Y',  T: 7.0,  spread: 1.50 },
-      { label: '10Y', T: 10.0, spread: 1.50 },
+      { label: '3M',  T: 0.25, spread: 0 },
+      { label: '6M',  T: 0.5,  spread: 0 },
+      { label: '1Y',  T: 1.0,  spread: 0 },
+      { label: '2Y',  T: 2.0,  spread: 0 },
+      { label: '3Y',  T: 3.0,  spread: 0 },
+      { label: '5Y',  T: 5.0,  spread: 0 },
+      { label: '7Y',  T: 7.0,  spread: 0 },
+      { label: '10Y', T: 10.0, spread: 0 },
     ],
   })
 
@@ -274,6 +275,20 @@ export const usePricingStore = defineStore('pricing', () => {
     credit: false,
   })
   const selectedGreeks = computed(() => Object.keys(greekSel).filter(k => greekSel[k]))
+  const _estimateInput = () => ({
+    script: script.value,
+    maturityYears: globalParams.T,
+    underlyings: underlyings.value.length,
+    paths: globalParams.N,
+    model: globalParams.model,
+    antithetic: globalParams.antithetic,
+    continuousMonitoring: globalParams.barrierMonitoring === 'continuous',
+    stochasticRates: globalParams.rateModel !== 'deterministic' && globalParams.sigma_r > 0,
+  })
+  const pricingEstimate = computed(() => estimatePricingCalculation(_estimateInput()))
+  const greeksEstimate = computed(() => estimatePricingCalculation({
+    ..._estimateInput(), selectedGreeks: selectedGreeks.value,
+  }))
 
   // ── Current script DB identity ────────────────────────────────────
   const currentScriptId   = ref(null)
@@ -370,6 +385,8 @@ export const usePricingStore = defineStore('pricing', () => {
   const scriptGenLoading = ref(false)
   const scriptGenError   = ref(null)
   const scriptProviders  = ref(null)
+  const scriptGenerationProvenance = ref(null)
+  const adoptedGeneratedScriptText = ref('')
   // Dictée : état du moteur local (installé ? poids téléchargés ?). Sondé une
   // seule fois, le paquet ne s'installe pas en cours de session.
   const transcribeEngines = ref(null)
@@ -387,6 +404,8 @@ export const usePricingStore = defineStore('pricing', () => {
   const progress  = ref(0)
 
   let _progressTimer = null
+  let _pricingRevision = 0
+  let _parseRevision = 0
 
   function _startProgress(estimatedMs) {
     progress.value = 0
@@ -639,8 +658,41 @@ export const usePricingStore = defineStore('pricing', () => {
     return { sigma_r: globalParams.sigma_r / 100, a_r: globalParams.a_r }   // hull_white
   }
 
+  function _canonical(value) {
+    if (Array.isArray(value)) return value.map(_canonical)
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.keys(value).sort()
+        .filter(k => value[k] !== undefined)
+        .map(k => [k, _canonical(value[k])]))
+    }
+    return value
+  }
+
+  function _requestKey(body) {
+    // La seed décrit le tirage de ce run, pas le produit. La changer ne rend
+    // donc pas économiquement caduc un prix déjà calculé.
+    const { compute_greeks, selected_greeks, seed, ...priced } = body
+    return JSON.stringify(_canonical(priced))
+  }
+
+  function _pricingBody() {
+    if (isInLife()) return _inLifeBody()
+    return {
+      ..._baseBody(), N: globalParams.N,
+      antithetic: globalParams.antithetic, ..._rateParams(),
+    }
+  }
+
+  const resultIsStale = computed(() => {
+    if (!result.value?._requestKey) return false
+    try { return result.value._requestKey !== _requestKey(_pricingBody()) }
+    catch { return true }
+  })
+
   // ── Parse ─────────────────────────────────────────────────────────
   async function parseScript() {
+    const revision = ++_parseRevision
+    const parsedScript = script.value
     if (!script.value.trim()) {
       scriptParams.value = []; scriptConstats.value = []; parseError.value = null
       _syncParamOverrides(); _syncConstatOverrides()
@@ -650,9 +702,10 @@ export const usePricingStore = defineStore('pricing', () => {
       const res = await fetch('/api/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script: script.value }),
+        body: JSON.stringify({ script: parsedScript }),
       })
       const data = await res.json()
+      if (revision !== _parseRevision || script.value !== parsedScript) return
       if (data.ok) {
         scriptParams.value = data.params; scriptConstats.value = data.constats || []
         scriptHasStop.value = data.has_stop ?? false
@@ -671,7 +724,9 @@ export const usePricingStore = defineStore('pricing', () => {
         return
       }
       _syncParamOverrides(); _syncConstatOverrides()
-    } catch (e) { parseError.value = e.message }
+    } catch (e) {
+      if (revision === _parseRevision && script.value === parsedScript) parseError.value = e.message
+    }
   }
 
   // Snapshot of the inputs that actually produced a pricing run, captured at
@@ -831,25 +886,43 @@ export const usePricingStore = defineStore('pricing', () => {
    *  la vie restante est simulée. Voir api/inlife.py pour pourquoi un simple
    *  « repartir du bon spot » ne suffirait pas sur un produit à mémoire. */
   async function runInLifePricing() {
+    const request = _inLifeBody()
+    request.seed = 42
+    const requestKey = _requestKey(request)
+    const inputs = _snapshotInputs()
+    inputs.seed = 42
+    const revision = ++_pricingRevision
     loading.value = true; error.value = null; result.value = null
     _startProgress((globalParams.N / 20000) * 350)
     try {
       const res = await apiFetch('/api/price/in-life', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(_inLifeBody()),
+        body: JSON.stringify(request),
       })
       const data = await res.json()
+      if (revision !== _pricingRevision || requestKey !== _requestKey(_pricingBody())) {
+        if (revision === _pricingRevision) error.value = 'Les paramètres ont changé pendant le calcul. Relancez le pricing.'
+        return
+      }
       if (!res.ok) { error.value = data.detail || 'Erreur serveur'; return }
       if (data.early_recall) { error.value = data.message; return }
-      result.value = { ...data, _inputs: _snapshotInputs() }
+      result.value = { ...data, _inputs: inputs, _requestKey: requestKey }
       rightTab.value = 'results'
     } catch (e) { error.value = e.message }
-    finally { loading.value = false; _stopProgress() }
+    finally {
+      if (revision === _pricingRevision) { loading.value = false; _stopProgress() }
+    }
   }
 
   async function runPricing() {
     if (isInLife()) return runInLifePricing()
+    const request = _pricingBody()
+    request.seed = 42
+    const requestKey = _requestKey(request)
+    const inputs = _snapshotInputs()
+    inputs.seed = 42
+    const revision = ++_pricingRevision
     loading.value = true; error.value = null; result.value = null
     _startProgress((globalParams.N / 20000) * 350)
     try {
@@ -857,18 +930,21 @@ export const usePricingStore = defineStore('pricing', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ..._baseBody(),
-          N: globalParams.N,
-          antithetic: globalParams.antithetic,
+          ...request,
           compute_greeks: false,
           selected_greeks: selectedGreeks.value,
-          ..._rateParams(),
         }),
       })
+      if (revision !== _pricingRevision || requestKey !== _requestKey(_pricingBody())) {
+        if (revision === _pricingRevision) error.value = 'Les paramètres ont changé pendant le calcul. Relancez le pricing.'
+        return
+      }
       if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
-      else { result.value = { ...(await res.json()), _inputs: _snapshotInputs() }; rightTab.value = 'results' }
+      else { result.value = { ...(await res.json()), _inputs: inputs, _requestKey: requestKey }; rightTab.value = 'results' }
     } catch (e) { error.value = e.message }
-    finally { loading.value = false; _stopProgress() }
+    finally {
+      if (revision === _pricingRevision) { loading.value = false; _stopProgress() }
+    }
   }
 
   // ── Spread émetteur implicite ─────────────────────────────────────
@@ -907,6 +983,21 @@ export const usePricingStore = defineStore('pricing', () => {
   // ── Greeks ────────────────────────────────────────────────────────
   async function runGreeks() {
     if (!result.value || !selectedGreeks.value.length) return
+    if (resultIsStale.value) {
+      error.value = 'Le prix est périmé : relancez le pricing avant de calculer les Greeks.'
+      return
+    }
+    const enCours = isInLife()
+    const request = {
+      ..._pricingBody(),
+      // Reprendre le tirage du prix affiché pour que les différences finies
+      // mesurent le bump, pas un nouveau bruit Monte Carlo.
+      seed: 42,
+      compute_greeks: true,
+      selected_greeks: selectedGreeks.value,
+    }
+    const requestKey = _requestKey(request)
+    const revision = ++_pricingRevision
     loading.value = true; error.value = null
     _startProgress(selectedGreeks.value.length * (globalParams.N / 20000) * 400)
     try {
@@ -914,19 +1005,16 @@ export const usePricingStore = defineStore('pricing', () => {
       // calculent sur la jambe résiduelle. Passer par /api/price bumpait le
       // produit NEUF depuis t=0 — des Greeks d'émission affichés à côté d'un
       // mark-to-market, sans rapport avec le chiffre au-dessus.
-      const enCours = isInLife()
       const res = await apiFetch(enCours ? '/api/price/in-life' : '/api/price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...(enCours ? _inLifeBody() : _baseBody()),
-          N: globalParams.N,
-          antithetic: globalParams.antithetic,
-          compute_greeks: true,
-          selected_greeks: selectedGreeks.value,
-          ..._rateParams(),
-        }),
+        body: JSON.stringify(request),
       })
+      if (revision !== _pricingRevision || result.value?._requestKey !== requestKey
+          || requestKey !== _requestKey(_pricingBody())) {
+        if (revision === _pricingRevision) error.value = 'Les paramètres ont changé pendant le calcul. Relancez le pricing.'
+        return
+      }
       if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
       else {
         const data = await res.json()
@@ -934,7 +1022,9 @@ export const usePricingStore = defineStore('pricing', () => {
         rightTab.value = 'greeks'
       }
     } catch (e) { error.value = e.message }
-    finally { loading.value = false; _stopProgress() }
+    finally {
+      if (revision === _pricingRevision) { loading.value = false; _stopProgress() }
+    }
   }
 
   // ── Payoff Profile ────────────────────────────────────────────────
@@ -1199,9 +1289,28 @@ export const usePricingStore = defineStore('pricing', () => {
   // Adoption explicite : le script ne descend dans l'éditeur que sur action de
   // l'utilisateur. Un script qui atterrirait tout seul, c'est un produit faux
   // qui part en cotation.
-  function adoptGeneratedScript() {
+  function adoptGeneratedScript({ warningsAcknowledged = false } = {}) {
     if (!scriptGen.value?.script) return
+    if (scriptGen.value.adoption_requires_acknowledgement && !warningsAcknowledged) return
     script.value = scriptGen.value.script
+    adoptedGeneratedScriptText.value = scriptGen.value.script
+    scriptGenerationProvenance.value = {
+      generation_id: scriptGen.value.generation_id,
+      generated_at: scriptGen.value.generated_at,
+      provider: scriptGen.value.provider,
+      requested_model: scriptGen.value.requested_model,
+      effective_model: scriptGen.value.effective_model || scriptGen.value.model,
+      prompt_version: scriptGen.value.prompt_version,
+      examples_version: scriptGen.value.examples_version,
+      examples: scriptGen.value.examples || [],
+      attempts: scriptGen.value.attempts || [],
+      script_sha256: scriptGen.value.script_sha256,
+      checks_status: scriptGen.value.checks_status,
+      pricing_check: scriptGen.value.pricing_check,
+      warnings_acknowledged: !!warningsAcknowledged,
+      adopted_script_text: scriptGen.value.script,
+      modified_after_adoption: false,
+    }
     parseScript()
   }
 
@@ -1504,6 +1613,9 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   function _clearResults() {
+    // Rend également toute réponse encore en vol inapplicable au nouveau
+    // produit chargé dans le store.
+    _pricingRevision += 1
     result.value = null; profile.value = null; paths.value = null
     proba.value = null; backtest.value = null; mtf.value = null
     solver.value = null; grid.value = null; scenarios.value = null
@@ -1521,13 +1633,18 @@ export const usePricingStore = defineStore('pricing', () => {
     rightTab.value = 'empty'
   }
 
-  function resetToDefaults() {
+  function _resetInputState() {
     relacherVariante()
-    currentScriptId.value   = null
+    currentScriptId.value = null
     currentScriptName.value = ''
+    scriptGenerationProvenance.value = null
+    adoptedGeneratedScriptText.value = ''
     script.value = DEFAULT_SCRIPT
     underlyings.value = [_defaultUnderlying(1)]
-    corrMatrix.value  = [[1.0]]
+    corrMatrix.value = [[1.0]]
+    activeUnderlyingIdx.value = 0
+    for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
+    for (const key of Object.keys(constatOverrides)) delete constatOverrides[key]
     const today = new Date().toISOString().split('T')[0]
     Object.assign(globalParams, {
       r: 3.0, T: 3.0, N: 20000, seed: 42, model: 'constant',
@@ -1537,7 +1654,27 @@ export const usePricingStore = defineStore('pricing', () => {
       trade_date: today, strike_date: today, value_date: today,
       payment_date: '', valuation_date: '',
     })
-    yieldCurve.enabled = false
+    Object.assign(yieldCurve, {
+      enabled: false, ancree: false, ecart: 120, tau: 4.0,
+      pillars: [
+        { label: '3M', T: 0.25, rate: 3.2 }, { label: '6M', T: 0.5, rate: 3.4 },
+        { label: '1Y', T: 1, rate: 3.6 }, { label: '2Y', T: 2, rate: 3.8 },
+        { label: '3Y', T: 3, rate: 3.9 }, { label: '5Y', T: 5, rate: 4.0 },
+        { label: '7Y', T: 7, rate: 4.1 }, { label: '10Y', T: 10, rate: 4.2 },
+        { label: '15Y', T: 15, rate: 4.25 }, { label: '20Y', T: 20, rate: 4.3 },
+        { label: '30Y', T: 30, rate: 4.35 },
+      ],
+    })
+    Object.assign(fundingCurve, {
+      enabled: false, mode: 'flat', level: 0,
+      pillars: [0.25, 0.5, 1, 2, 3, 5, 7, 10].map(T => ({
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: 0,
+      })),
+    })
+  }
+
+  function resetToDefaults() {
+    _resetInputState()
     _clearResults()
     parseScript()
   }
@@ -1546,18 +1683,27 @@ export const usePricingStore = defineStore('pricing', () => {
   // underlyings/corr, PARAM overrides — so Script/Marché & Paramètres/Deal/
   // Events all agree, instead of showing whatever was last being edited here.
   async function loadFromDeal(deal) {
-    relacherVariante()
+    _resetInputState()
+    _clearResults()
     const market = deal.market_snapshot || {}
+    scriptGenerationProvenance.value = market.ai_script_provenance || null
+    adoptedGeneratedScriptText.value = (
+      scriptGenerationProvenance.value?.adopted_script_text || '')
     currentScriptId.value   = deal.script_id || null
     currentScriptName.value = deal.reference
     script.value = deal.script_snapshot
 
-    if (market.underlyings?.length) {
+    const savedUnderlyings = market.underlyings?.length
+      ? market.underlyings : (deal.underlyings?.length ? deal.underlyings : null)
+    if (!savedUnderlyings) {
+      throw new Error('Le deal ne contient aucun sous-jacent exploitable dans son snapshot.')
+    }
+    if (savedUnderlyings.length) {
       // Merge over full defaults: old / API-booked deals have a partial
       // snapshot ({name, ticker, ccy, sigma, q}) — missing model fields
       // would flow as undefined → NaN → null → 422 at pricing time.
       // Explicit nulls in the snapshot are dropped for the same reason.
-      underlyings.value = market.underlyings.map((u, i) => ({
+      underlyings.value = savedUnderlyings.map((u, i) => ({
         ..._defaultUnderlying(i + 1),
         ...Object.fromEntries(Object.entries(u).filter(([, v]) => v != null)),
       }))
@@ -1568,6 +1714,8 @@ export const usePricingStore = defineStore('pricing', () => {
     Object.assign(globalParams, {
       r: market.r ?? globalParams.r,
       T: deal.T,
+      N: market.N ?? globalParams.N,
+      seed: 42,
       model: market.model ?? globalParams.model,
       antithetic: market.antithetic ?? globalParams.antithetic,
       deal_ccy: market.deal_ccy ?? deal.devise,
@@ -1575,6 +1723,7 @@ export const usePricingStore = defineStore('pricing', () => {
       rateModel: market.rateModel ?? globalParams.rateModel,
       sigma_r: market.sigma_r ?? globalParams.sigma_r,
       a_r: market.a_r ?? globalParams.a_r,
+      barrierMonitoring: market.barrierMonitoring ?? 'weekly',
       trade_date: deal.trade_date,
       strike_date: deal.strike_date,
       value_date: deal.value_date,
@@ -1586,7 +1735,30 @@ export const usePricingStore = defineStore('pricing', () => {
       yieldCurve.pillars = market.yieldCurve
     }
 
-    _clearResults()
+    const savedFunding = market.funding
+    const engineFundingCurve = market.funding_curve || []
+    if (savedFunding?.enabled && savedFunding.mode === 'pillars') {
+      fundingCurve.enabled = true
+      fundingCurve.mode = 'pillars'
+      fundingCurve.level = Number(savedFunding.level) || 0
+      fundingCurve.pillars = (savedFunding.pillars || []).map(p => ({ ...p }))
+    } else if (engineFundingCurve.length) {
+      fundingCurve.enabled = true
+      fundingCurve.mode = 'pillars'
+      fundingCurve.level = Number(engineFundingCurve[0]?.[1] || 0) * 100
+      fundingCurve.pillars = engineFundingCurve.map(([T, spread]) => ({
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: Number(spread) * 100,
+      }))
+    } else {
+      // Un deal sans funding est un cas valide. Le zéro reste visible et
+      // éditable ; il ne reprend jamais le spread du deal ouvert avant lui.
+      fundingCurve.enabled = true
+      fundingCurve.mode = 'flat'
+      fundingCurve.level = savedFunding?.enabled
+        ? (Number(savedFunding.level) || 0)
+        : Number(market.funding_spread || 0) * 100
+    }
+
     await parseScript()
 
     // Restore the CONSTAT calendars frozen at booking (after parseScript, so
@@ -1644,6 +1816,8 @@ export const usePricingStore = defineStore('pricing', () => {
   // same defensive merge-over-defaults as loadFromDeal handles that fine.
   async function loadFromRfq(rfqObj) {
     relacherVariante()
+    scriptGenerationProvenance.value = null
+    adoptedGeneratedScriptText.value = ''
     const p = rfqObj.params || {}
     currentScriptId.value   = rfqObj.script_id || null
     currentScriptName.value = rfqObj.reference
@@ -1813,6 +1987,14 @@ export const usePricingStore = defineStore('pricing', () => {
     currentScriptId.value   = data.id
     currentScriptName.value = data.name
     script.value = data.script_text
+    try {
+      scriptGenerationProvenance.value = JSON.parse(data.ai_provenance_json || '{}')
+      if (!Object.keys(scriptGenerationProvenance.value).length) {
+        scriptGenerationProvenance.value = null
+      }
+    } catch { scriptGenerationProvenance.value = null }
+    adoptedGeneratedScriptText.value = (
+      scriptGenerationProvenance.value?.adopted_script_text || '')
     await parseScript()
 
     if (data.params_json) {
@@ -1860,6 +2042,10 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   function _scriptBody() {
+    const provenance = scriptGenerationProvenance.value
+      ? { ...scriptGenerationProvenance.value,
+          modified_after_adoption: script.value !== adoptedGeneratedScriptText.value }
+      : null
     return {
       script_text: script.value,
       params_json: JSON.stringify({ ...paramOverrides }),
@@ -1892,6 +2078,11 @@ export const usePricingStore = defineStore('pricing', () => {
         yield_curve_enabled: yieldCurve.enabled,
         yield_curve_pillars: yieldCurve.pillars.map(x => ({ ...x })),
       }),
+      ai_provider: provenance?.provider || '',
+      ai_model: provenance?.effective_model || '',
+      ai_prompt: provenance?.attempts?.[0]?.prompt?.user || '',
+      ai_generated_at: provenance?.generated_at || null,
+      ai_provenance_json: JSON.stringify(provenance || {}),
     }
   }
 
@@ -2027,6 +2218,7 @@ export const usePricingStore = defineStore('pricing', () => {
 
   function addUnderlying() {
     const n = underlyings.value.length
+    if (n >= CALCULATION_LIMITS.maxUnderlyings) return
     underlyings.value.push({
       name: `Sous-jacent ${n+1}`, ticker: '', ccy: 'EUR',
       sigma: 20, q: 2.0, sigma_fx: 0, rho_sfx: 0, ccyh: 0,
@@ -2055,9 +2247,11 @@ export const usePricingStore = defineStore('pricing', () => {
     script, scriptParams, parseError, paramOverrides, scriptConstats, constatOverrides, scriptHasStop,
     underlyings, corrMatrix, activeUnderlyingIdx,
     globalParams, maturityDate, yieldCurve, greekSel, selectedGreeks,
-    result, profile, paths, proba, backtest, mtf, solver, grid, scenarios, kid,
+    pricingEstimate, greeksEstimate, calculationLimits: CALCULATION_LIMITS,
+    result, resultIsStale, profile, paths, proba, backtest, mtf, solver, grid, scenarios, kid,
     mtfDrill, mtfDrillLoading, mtfDrillError, runMtfDrilldown,
     scriptGen, scriptGenLoading, scriptGenError, scriptProviders,
+    scriptGenerationProvenance,
     loadScriptProviders, generateScript, adoptGeneratedScript, previewScriptPrompt,
     transcribeEngines, loadTranscribeEngines, transcribeAudio, prepareTranscribe,
     comparator, comparatorError, comparatorLoading, runBacktestCompare, adoptBasket,
@@ -2078,12 +2272,16 @@ export const usePricingStore = defineStore('pricing', () => {
     buildUserParams: _buildUserParams,
     buildConstats: _buildConstats,
     buildDividendCurve: _buildDividendCurve,
+    scriptProvenance: () => scriptGenerationProvenance.value
+      ? { ...scriptGenerationProvenance.value,
+          modified_after_adoption: script.value !== adoptedGeneratedScriptText.value }
+      : null,
     loadYfOne, loadYfAll, loadStrikeCloses,
     addUnderlying, removeUnderlying,
     resetToDefaults, loadFromDb, loadVariant, saveVariant, variantInfo,
     relacherVariante,
     variantDirty,
     loadFromDeal, loadFromRfq, saveScript, updateScript,
-    pricingBody: () => ({ ..._baseBody(), N: globalParams.N, antithetic: globalParams.antithetic, ..._rateParams() }),
+    pricingBody: _pricingBody,
   }
 })

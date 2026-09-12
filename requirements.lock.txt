@@ -1,0 +1,26 @@
+# Versions directes validées sur Windows avec Python 3.11 le 12/09/2026.
+# requirements.txt reste la source des plages compatibles.
+fastapi==0.115.14
+uvicorn[standard]==0.31.1
+numpy==1.26.4
+scipy==1.11.4
+statsmodels==0.14.6
+pydantic==2.13.4
+python-multipart==0.0.32
+httpx==0.27.2
+yfinance==0.2.66
+pandas==2.0.3
+pyarrow==24.0.0
+matplotlib==3.11.0
+reportlab==4.5.1
+openpyxl==3.1.5
+python-dateutil==2.9.0.post0
+holidays==0.103
+faster-whisper==1.2.1
+python-dotenv==1.2.2
+pytest==8.4.2
+pytest-asyncio==0.24.0
+sqlmodel==0.0.38
+SQLAlchemy==2.0.51
+python-jose[cryptography]==3.5.0
+bcrypt==4.3.0

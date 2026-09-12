@@ -21,7 +21,8 @@ import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
 from backend.app.core.client_controls import (
-    ClientRuleError, apply_constraints, rating_rank, read_constraints,
+    ClientRuleError, apply_constraints, apply_constraints_atomic,
+    rating_rank, read_constraints,
     require_constraints_version, validate_constraints, validate_rating,
     validate_scalar_constraints, RATING_SCALE,
 )
@@ -64,6 +65,30 @@ def test_deux_editions_concurrentes_la_seconde_est_refusee_pas_perdue():
 
     # Et le travail de A est intact.
     assert read_constraints(client)["currencies"] == ["EUR", "USD"]
+
+
+def test_le_compare_and_swap_en_base_refuse_deux_sessions_sur_la_meme_version():
+    """Le WHERE version=N ferme la fenêtre entre lecture et écriture."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as creation:
+        client = _client(creation)
+        client_id = client.id
+
+    with Session(engine) as session_a, Session(engine) as session_b:
+        client_a = session_a.get(Client, client_id)
+        client_b = session_b.get(Client, client_id)
+        assert client_a.constraints_version == client_b.constraints_version == 1
+
+        apply_constraints_atomic(
+            session_a, client_a, {"currencies": ["EUR"]}, 1)
+        session_a.commit()
+
+        with pytest.raises(ClientRuleError) as capture:
+            apply_constraints_atomic(
+                session_b, client_b, {"currencies": ["USD"]}, 1)
+        assert capture.value.code == "CONSTRAINTS_VERSION_STALE"
+        assert read_constraints(client_b) == {"currencies": ["EUR"]}
 
 
 def test_une_ecriture_sur_la_version_a_jour_passe():

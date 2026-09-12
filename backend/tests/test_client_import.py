@@ -248,6 +248,71 @@ def test_verser_deux_fois_le_meme_fichier_ne_double_rien(app_client):
     assert second["updated"]["clients"] == 2
     assert second["skipped"]["affiliations"] == 2
     assert second["skipped"]["transactions"] == 4
+    assert second["duplicate_of_batch_id"] is not None
+
+
+def test_une_transaction_sans_reference_externe_est_idempotente(app_client):
+    charge = {
+        "clients": [{"name": "Bank A"}],
+        "transactions": [{
+            "client_name": "Bank A", "trade_date": "2026-01-15",
+            "product_type": "Autocall", "underlying": "SX5E",
+            "issuer": "BNP Paribas", "currency": "EUR", "notional": 1_000_000,
+            "coupon_pct": 8.0, "barrier_pct": 60.0,
+        }],
+    }
+    first = _envoyer(app_client, charge, route="apply")
+    second = _envoyer(app_client, charge, route="apply")
+    assert first.status_code == second.status_code == 200
+    assert len(app_client.session.exec(select(ClientTradeHistory)).all()) == 1
+    assert second.json()["skipped"]["transactions"] == 1
+    assert second.json()["duplicate_of_batch_id"] == first.json()["batch_id"]
+    assert second.json()["collisions"][0]["reason"] == "same_natural_key"
+
+
+def test_deux_lignes_identiques_du_fichier_restent_deux_souscriptions():
+    """L'ordinal empêche la déduplication de détruire un vrai doublon métier."""
+    from backend.app.core.client_import import appliquer
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        charge = {
+            "clients": [{"name": "Bank A"}],
+            "transactions": [
+                {"client_name": "Bank A", "trade_date": "2026-01-15",
+                 "product_type": "Autocall", "notional": 1_000_000},
+                {"client_name": "Bank A", "trade_date": "2026-01-15",
+                 "product_type": "Autocall", "notional": 1_000_000},
+            ],
+        }
+        contenu = json.dumps(charge).encode()
+        appliquer(session, contenu, format_="json", filename="a.json",
+                  entity_id=None, user_id=1)
+        session.commit()
+        assert len(session.exec(select(ClientTradeHistory)).all()) == 2
+
+        _, report = appliquer(session, contenu, format_="json", filename="a.json",
+                              entity_id=None, user_id=1)
+        session.commit()
+        assert len(session.exec(select(ClientTradeHistory)).all()) == 2
+        assert report.ignorees["transactions"] == 2
+
+
+def test_deux_transactions_proches_mais_distinctes_ne_sont_pas_fusionnees(app_client):
+    charge = {
+        "clients": [{"name": "Bank A"}],
+        "transactions": [
+            {"client_name": "Bank A", "trade_date": "2026-01-15",
+             "product_type": "Autocall", "issuer": "BNP Paribas",
+             "notional": 1_000_000},
+            {"client_name": "Bank A", "trade_date": "2026-01-15",
+             "product_type": "Autocall", "issuer": "UBS",
+             "notional": 1_000_000},
+        ],
+    }
+    response = _envoyer(app_client, charge, route="apply")
+    assert response.status_code == 200, response.text
+    assert len(app_client.session.exec(select(ClientTradeHistory)).all()) == 2
 
 
 def test_un_import_complete_les_champs_vides_sans_ecraser_la_saisie(app_client):

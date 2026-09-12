@@ -669,3 +669,25 @@ def test_une_origine_garde_le_droit_d_ecrire_son_contexte(client):
     pid = _origine(client)
     res = client.put(f"/api/db/scripts/{pid}", json={"script_text": "AT 1:\n  PAY 1\n"})
     assert res.status_code == 200
+
+
+def test_un_script_sauvegarde_conserve_la_provenance_ia_complete(client):
+    provenance = {
+        "generation_id": "gen-1", "provider": "ollama",
+        "requested_model": "qwen:14b", "effective_model": "qwen:7b",
+        "warnings_acknowledged": True,
+        "attempts": [{"prompt": {"system": "S", "user": "U"},
+                      "raw_response": "AT MATURITY:\n  PAY 1"}],
+    }
+    response = client.post("/api/db/scripts", json={
+        "name": "Généré", "script_text": "AT MATURITY:\n  PAY 1\n",
+        "ai_provider": "ollama", "ai_model": "qwen:7b",
+        "ai_prompt": "U", "ai_generated_at": "2026-09-12T10:00:00Z",
+        "ai_provenance_json": json.dumps(provenance),
+    })
+    assert response.status_code == 201, response.text
+    row = client.get(f"/api/db/scripts/{response.json()['id']}").json()
+    assert row["ai_provider"] == "ollama"
+    assert row["ai_model"] == "qwen:7b"
+    assert json.loads(row["ai_provenance_json"])["attempts"][0]["raw_response"].startswith(
+        "AT MATURITY")

@@ -263,7 +263,14 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
         body: JSON.stringify(form),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || 'Erreur au lancement de l\'étude VaR')
+      if (!res.ok) {
+        const detail = data.detail
+        const err = new Error(
+          typeof detail === 'object' ? detail.message :
+            (detail || 'Erreur au lancement de l\'étude VaR'))
+        if (typeof detail === 'object') err.computeDetail = detail
+        throw err
+      }
       varPolling.value = true
       pollVarBatch(data.batch_id)
       return data

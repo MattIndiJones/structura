@@ -25,8 +25,8 @@ from ..core.client_controls import (
 )
 from ..db.database import get_session
 from ..db.models import (
-    Affiliation, Client, Interaction, InteractionParticipant, Opportunity,
-    Person, User,
+    Affiliation, Client, Interaction, InteractionFollowUp,
+    InteractionParticipant, Opportunity, Person, User,
 )
 from .auth import get_current_user
 
@@ -61,6 +61,16 @@ class InteractionUpdate(BaseModel):
     participants: Optional[list[ParticipantIn]] = None
 
 
+class FollowUpClose(BaseModel):
+    status: str = "done"
+    note: Optional[str] = None
+
+
+class FollowUpReschedule(BaseModel):
+    title: Optional[str] = None
+    due_date: Optional[str] = None
+
+
 def _scoped(session: Session, interaction_id: int, current: User) -> Interaction:
     interaction = session.get(Interaction, interaction_id)
     if interaction is None or interaction.entity_id != current.entity_id:
@@ -73,6 +83,14 @@ def _scoped_client(session: Session, client_id: int, current: User) -> Client:
     if client is None or client.entity_id != current.entity_id:
         raise HTTPException(404, "Client introuvable")
     return client
+
+
+def _scoped_follow_up(session: Session, follow_up_id: int,
+                      current: User) -> InteractionFollowUp:
+    row = session.get(InteractionFollowUp, follow_up_id)
+    if row is None or row.entity_id != current.entity_id:
+        raise HTTPException(404, "Relance introuvable")
+    return row
 
 
 def _participants_rendus(session: Session, interaction_id: int) -> list[dict]:
@@ -97,6 +115,9 @@ def _rendu(session: Session, interaction: Interaction) -> dict:
     client = session.get(Client, interaction.client_id)
     opportunite = (session.get(Opportunity, interaction.opportunity_id)
                    if interaction.opportunity_id else None)
+    followups = session.exec(select(InteractionFollowUp).where(
+        InteractionFollowUp.interaction_id == interaction.id)).all()
+    latest_followup = sorted(followups, key=lambda row: row.id or 0)[-1] if followups else None
     return {
         "id": interaction.id,
         "client_id": interaction.client_id,
@@ -110,10 +131,56 @@ def _rendu(session: Session, interaction: Interaction) -> dict:
         "notes": interaction.notes,
         "next_action": interaction.next_action,
         "next_action_date": interaction.next_action_date,
+        "follow_up": _follow_up_row(latest_followup) if latest_followup else None,
         "participants": _participants_rendus(session, interaction.id),
         "created_at": interaction.created_at.isoformat(),
         "updated_at": interaction.updated_at.isoformat(),
     }
+
+
+def _follow_up_row(row: InteractionFollowUp) -> dict:
+    return {
+        "id": row.id, "interaction_id": row.interaction_id,
+        "client_id": row.client_id, "opportunity_id": row.opportunity_id,
+        "owner_user_id": row.owner_user_id, "title": row.title,
+        "due_date": row.due_date, "status": row.status,
+        "closure_note": row.closure_note,
+        "closed_by_user_id": row.closed_by_user_id,
+        "created_at": row.created_at.isoformat(),
+        "updated_at": row.updated_at.isoformat(),
+        "closed_at": row.closed_at.isoformat() if row.closed_at else None,
+    }
+
+
+def _sync_follow_up(session: Session, interaction: Interaction, actor_id: int) -> None:
+    open_row = session.exec(select(InteractionFollowUp).where(
+        InteractionFollowUp.interaction_id == interaction.id,
+        InteractionFollowUp.status == "open")).first()
+    title = str(interaction.next_action or "").strip()
+    if not title:
+        if open_row:
+            now = datetime.utcnow()
+            open_row.status = "abandoned"
+            open_row.closure_note = "Action retirée de l'interaction."
+            open_row.closed_by_user_id = actor_id
+            open_row.closed_at = now
+            open_row.updated_at = now
+            session.add(open_row)
+        return
+    if open_row is None:
+        open_row = InteractionFollowUp(
+            entity_id=interaction.entity_id, interaction_id=interaction.id,
+            client_id=interaction.client_id,
+            opportunity_id=interaction.opportunity_id,
+            owner_user_id=interaction.user_id, title=title,
+            due_date=interaction.next_action_date,
+            created_by_user_id=actor_id)
+    else:
+        open_row.title = title
+        open_row.due_date = interaction.next_action_date
+        open_row.opportunity_id = interaction.opportunity_id
+        open_row.updated_at = datetime.utcnow()
+    session.add(open_row)
 
 
 def _set_participants(session: Session, interaction: Interaction,
@@ -231,6 +298,7 @@ def create_interaction(
         next_action_date=body.next_action_date)
     session.add(interaction)
     session.flush()
+    _sync_follow_up(session, interaction, current.id)
 
     try:
         _set_participants(session, interaction, body.participants)
@@ -270,11 +338,20 @@ def update_interaction(
         except ClientRuleError as erreur:
             raise HTTPException(422, erreur.message)
         interaction.interaction_type = body.interaction_type
+    if body.interaction_date is not None:
+        try:
+            parse_iso_date(body.interaction_date, "Date de l'interaction")
+        except ClientRuleError as erreur:
+            raise HTTPException(422, erreur.message)
+    if body.next_action_date is not None:
+        try:
+            parse_iso_date(body.next_action_date, "Date de la prochaine action")
+        except ClientRuleError as erreur:
+            raise HTTPException(422, erreur.message)
     for champ in ("interaction_date", "summary", "notes", "next_action",
                   "next_action_date"):
-        valeur = getattr(body, champ)
-        if valeur is not None:
-            setattr(interaction, champ, valeur)
+        if champ in body.model_fields_set:
+            setattr(interaction, champ, getattr(body, champ))
 
     if "opportunity_id" in body.model_fields_set:
         if body.opportunity_id is None:
@@ -298,9 +375,103 @@ def update_interaction(
 
     interaction.updated_at = datetime.utcnow()
     session.add(interaction)
+    session.flush()
+    _sync_follow_up(session, interaction, current.id)
     session.commit()
     session.refresh(interaction)
     return _rendu(session, interaction)
+
+
+@router.post("/follow-ups/{follow_up_id}/close")
+def close_follow_up(
+    follow_up_id: int,
+    body: FollowUpClose,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    row = _scoped_follow_up(session, follow_up_id, current)
+    if body.status not in {"done", "abandoned"}:
+        raise HTTPException(422, detail={
+            "code": "FOLLOW_UP_STATUS_INVALID",
+            "message": "Une relance se clôture comme réalisée ou abandonnée."})
+    if row.status != "open":
+        raise HTTPException(409, detail={
+            "code": "FOLLOW_UP_ALREADY_CLOSED",
+            "message": "Cette relance est déjà clôturée."})
+    before = _follow_up_row(row)
+    now = datetime.utcnow()
+    row.status = body.status
+    row.closure_note = str(body.note or "").strip() or None
+    row.closed_by_user_id = current.id
+    row.closed_at = now
+    row.updated_at = now
+    session.add(row)
+    record_audit_event(
+        session, action="INTERACTION_FOLLOW_UP_CLOSED",
+        object_type="interaction_follow_up", object_id=row.id,
+        actor_user_id=current.id, result="SUCCESS", before=before,
+        after={"status": row.status, "closure_note": row.closure_note})
+    session.commit()
+    session.refresh(row)
+    return _follow_up_row(row)
+
+
+@router.patch("/follow-ups/{follow_up_id}")
+def reschedule_follow_up(
+    follow_up_id: int,
+    body: FollowUpReschedule,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    row = _scoped_follow_up(session, follow_up_id, current)
+    if row.status != "open":
+        raise HTTPException(409, detail={
+            "code": "FOLLOW_UP_CLOSED",
+            "message": "Une relance clôturée ne peut pas être replanifiée."})
+    if body.due_date is not None:
+        try:
+            parse_iso_date(body.due_date, "Date de relance")
+        except ClientRuleError as erreur:
+            raise HTTPException(422, erreur.message)
+        row.due_date = body.due_date
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(422, "Le titre de la relance est requis.")
+        row.title = title
+    row.updated_at = datetime.utcnow()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _follow_up_row(row)
+
+
+@router.post("/follow-ups/{follow_up_id}/reopen")
+def reopen_follow_up(
+    follow_up_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    row = _scoped_follow_up(session, follow_up_id, current)
+    if row.status == "open":
+        return _follow_up_row(row)
+    another_open = session.exec(select(InteractionFollowUp).where(
+        InteractionFollowUp.interaction_id == row.interaction_id,
+        InteractionFollowUp.status == "open",
+        InteractionFollowUp.id != row.id)).first()
+    if another_open:
+        raise HTTPException(409, detail={
+            "code": "FOLLOW_UP_OPEN_EXISTS",
+            "message": "Une autre relance est déjà ouverte pour cette interaction."})
+    row.status = "open"
+    row.closed_by_user_id = None
+    row.closed_at = None
+    row.closure_note = None
+    row.updated_at = datetime.utcnow()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _follow_up_row(row)
 
 
 @router.delete("/{interaction_id}", status_code=204)
@@ -320,6 +491,9 @@ def delete_interaction(
             select(InteractionParticipant).where(
                 InteractionParticipant.interaction_id == interaction.id)).all():
         session.delete(lien)
+    for follow_up in session.exec(select(InteractionFollowUp).where(
+            InteractionFollowUp.interaction_id == interaction.id)).all():
+        session.delete(follow_up)
     record_audit_event(
         session, action="INTERACTION_DELETED", object_type="interaction",
         object_id=interaction.id, actor_user_id=current.id, result="SUCCESS",

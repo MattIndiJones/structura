@@ -1,36 +1,98 @@
 import math
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import date
 
+from .compute_budget import (
+    MAX_MATURITY_YEARS,
+    MAX_SCRIPT_CHARS,
+    MAX_UNDERLYINGS,
+)
+from .payscript.models import MODELS
+
+
+MIN_RATE = -0.25
+MAX_RATE = 1.0
+
+
+def validate_term_curve(curve: List[List[float]], label: str) -> List[List[float]]:
+    previous_maturity = -math.inf
+    normalized: List[List[float]] = []
+    for node in curve:
+        if len(node) != 2:
+            raise ValueError(f"Chaque nœud de {label} doit contenir [maturité, taux].")
+        maturity, rate = float(node[0]), float(node[1])
+        if not (math.isfinite(maturity) and math.isfinite(rate)):
+            raise ValueError(f"La {label} contient une valeur non finie.")
+        if maturity <= 0:
+            raise ValueError(f"Les maturités de la {label} doivent être strictement positives.")
+        if maturity <= previous_maturity:
+            raise ValueError(f"Les maturités de la {label} doivent être strictement croissantes.")
+        if not MIN_RATE <= rate <= MAX_RATE:
+            raise ValueError(
+                f"Les taux de la {label} doivent être compris entre "
+                f"{MIN_RATE:.0%} et {MAX_RATE:.0%}."
+            )
+        normalized.append([maturity, rate])
+        previous_maturity = maturity
+    return normalized
+
+
+def validate_correlation_matrix(matrix: List[List[float]], n: int) -> List[List[float]]:
+    """Validate the matrix contract without hiding a legitimate PSD repair.
+
+    Symmetry, unit diagonal and coefficient bounds are input invariants. Positive
+    semidefiniteness is deliberately left to the pricing engine: a small
+    near-PSD projection is an accepted numerical operation and is disclosed in
+    the pricing response; a material repair is rejected there.
+    """
+    if len(matrix) != n or any(len(row) != n for row in matrix):
+        raise ValueError(
+            f"La matrice de corrélation doit être carrée de dimension {n}×{n}."
+        )
+    normalized = [[float(value) for value in row] for row in matrix]
+    for i, row in enumerate(normalized):
+        for j, value in enumerate(row):
+            if not math.isfinite(value):
+                raise ValueError("La matrice de corrélation contient une valeur non finie.")
+            if not -1.0 <= value <= 1.0:
+                raise ValueError("Les corrélations doivent être comprises entre -1 et 1.")
+            if i == j and abs(value - 1.0) > 1e-10:
+                raise ValueError("La diagonale de la matrice de corrélation doit être égale à 1.")
+            if j < i and abs(value - normalized[j][i]) > 1e-10:
+                raise ValueError("La matrice de corrélation doit être symétrique.")
+    return normalized
+
 
 class UnderlyingParams(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     name: str = "Underlying"
     ticker: str = ""
     ccy: str = "EUR"
-    sigma: float = 0.20
-    q: float = 0.02
+    sigma: float = Field(default=0.20, ge=0.0, le=10.0)
+    q: float = Field(default=0.02, ge=0.0, le=2.0)
     # Optional piecewise-constant annual dividend-yield curve. Each node is
     # [bucket_end_years, annual_yield] in engine units (0.02 = 2%). The scalar
     # q remains the first-year / legacy flat assumption; an empty curve keeps
     # the historical pricing path exactly unchanged.
     dividend_curve: List[List[float]] = Field(default_factory=list)
     dividend_decay: float = Field(default=0.0, ge=0.0, le=1.0)
-    sigma_fx: float = 0.0
-    rho_sfx: float = 0.0
+    sigma_fx: float = Field(default=0.0, ge=0.0, le=10.0)
+    rho_sfx: float = Field(default=0.0, ge=-1.0, le=1.0)
     ccyh: float = 0.0
     # Heston
     v0: float = 0.04
     kappa: float = 2.0
     theta: float = 0.04
     xi: float = 0.35
-    rho_h: float = -0.70
-    rho_rS: float = 0.0
+    rho_h: float = Field(default=-0.70, ge=-1.0, le=1.0)
+    rho_rS: float = Field(default=0.0, ge=-1.0, le=1.0)
     # SABR
     alpha: float = 0.20
-    beta: float = 0.50
-    rho: float = -0.30
+    beta: float = Field(default=0.50, ge=0.0, le=1.0)
+    rho: float = Field(default=-0.30, ge=-1.0, le=1.0)
     nu: float = 0.40
     # Dupire local vol
     skew: float = 0.0
@@ -54,6 +116,8 @@ class UnderlyingParams(BaseModel):
                 )
             if rate < 0.0:
                 raise ValueError("Un rendement de dividende ne peut pas être négatif.")
+            if rate > 2.0:
+                raise ValueError("Un rendement de dividende ne peut pas dépasser 200 %.")
             if rate > previous_q + 1e-12:
                 raise ValueError("La courbe de dividende dégressive doit être non croissante.")
             normalized.append([maturity, rate])
@@ -62,14 +126,16 @@ class UnderlyingParams(BaseModel):
 
 
 class PricingRequest(BaseModel):
-    script: str
-    underlyings: List[UnderlyingParams]
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    script: str = Field(max_length=MAX_SCRIPT_CHARS)
+    underlyings: List[UnderlyingParams] = Field(min_length=1, max_length=MAX_UNDERLYINGS)
     corr_matrix: List[List[float]]
-    r: float = 0.03
-    T: float = 3.0
+    r: float = Field(default=0.03, ge=MIN_RATE, le=MAX_RATE)
+    T: float = Field(default=3.0, gt=0.0, le=MAX_MATURITY_YEARS)
     N: int = Field(default=20000, ge=1000, le=200000)
     seed: int = 42
-    model: str = "constant"
+    model: str = Field(default="constant", pattern=f"^({'|'.join(MODELS)})$")
     antithetic: bool = True
     user_params: Dict[str, Any] = {}
     compute_greeks: bool = False
@@ -89,6 +155,12 @@ class PricingRequest(BaseModel):
     # CONSTAT values, keyed by name — see core/payscript/parser.resolve_constats.
     # Empty dict is a no-op (the common/simple-mode case: no AT<ConstatName>:).
     constats: Dict[str, Any] = {}
+
+    @field_validator("seed", mode="before")
+    @classmethod
+    def fixed_monte_carlo_seed(cls, _value) -> int:
+        """Desk convention: every pricing run uses the global seed 42."""
+        return 42
     # Date the calendar's year-fractions are measured from — the product's own
     # t=0, i.e. its value date. None keeps the historic default (today), which
     # is only right for a same-day settlement. Callers that know the value date
@@ -110,6 +182,21 @@ class PricingRequest(BaseModel):
     # When the cash is exchanged between counterparties. The quoted price is the
     # amount that moves on that date, so it is the date the PV is expressed at.
     value_date: Optional[date] = None
+
+    @field_validator("yield_curve")
+    @classmethod
+    def validate_yield_curve(cls, curve: List[List[float]]) -> List[List[float]]:
+        return validate_term_curve(curve, "courbe de taux")
+
+    @field_validator("funding_curve")
+    @classmethod
+    def validate_funding_curve(cls, curve: List[List[float]]) -> List[List[float]]:
+        return validate_term_curve(curve, "courbe de funding")
+
+    @model_validator(mode="after")
+    def validate_correlation(self):
+        self.corr_matrix = validate_correlation_matrix(self.corr_matrix, len(self.underlyings))
+        return self
 
 
 class PricingResponse(BaseModel):
@@ -141,6 +228,14 @@ class PricingResponse(BaseModel):
     # montrent donc le même objet, ce qui est le seul moyen que l'écran ne
     # raconte pas deux histoires selon qu'on a cliqué « Booker » ou non.
     schedule: Optional[Dict[str, Any]] = None
+    calculation_budget: Optional[Dict[str, Any]] = None
+    # Validated server-side inputs and their canonical fingerprint.  The
+    # booking endpoint rebuilds its market snapshot from this receipt instead
+    # of trusting a second, manually assembled Vue representation.
+    pricing_receipt: Optional[Dict[str, Any]] = None
+    corr_repair: Optional[Dict[str, Any]] = None
+    barrier_monitoring: str = "weekly"
+    barrier_monitoring_note: Optional[str] = None
 
 
 class ParseRequest(BaseModel):
@@ -177,13 +272,15 @@ class VariantOverrides(BaseModel):
 
 class AnalysisBase(BaseModel):
     """Shared fields for profile / paths / proba / backtest / mtf requests."""
-    script: str
-    underlyings: List[UnderlyingParams]
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    script: str = Field(max_length=MAX_SCRIPT_CHARS)
+    underlyings: List[UnderlyingParams] = Field(min_length=1, max_length=MAX_UNDERLYINGS)
     corr_matrix: List[List[float]]
-    r: float = 0.03
-    T: float = 3.0
+    r: float = Field(default=0.03, ge=MIN_RATE, le=MAX_RATE)
+    T: float = Field(default=3.0, gt=0.0, le=MAX_MATURITY_YEARS)
     seed: int = 42
-    model: str = "constant"
+    model: str = Field(default="constant", pattern=f"^({'|'.join(MODELS)})$")
     user_params: Dict[str, Any] = {}
     yield_curve: List[List[float]] = []
     sigma_r: float = Field(default=0.0, ge=0.0, le=0.10)
@@ -219,6 +316,21 @@ class AnalysisBase(BaseModel):
     funding_curve: List[List[float]] = []
     funding_spread: float = Field(default=0.0, ge=-0.05, le=0.50)
 
+    @field_validator("yield_curve")
+    @classmethod
+    def validate_yield_curve(cls, curve: List[List[float]]) -> List[List[float]]:
+        return validate_term_curve(curve, "courbe de taux")
+
+    @field_validator("funding_curve")
+    @classmethod
+    def validate_funding_curve(cls, curve: List[List[float]]) -> List[List[float]]:
+        return validate_term_curve(curve, "courbe de funding")
+
+    @model_validator(mode="after")
+    def validate_correlation(self):
+        self.corr_matrix = validate_correlation_matrix(self.corr_matrix, len(self.underlyings))
+        return self
+
 
 class ProfileRequest(AnalysisBase):
     pass
@@ -247,11 +359,13 @@ class BacktestCompareRequest(BaseModel):
     combinations drawn from the best `shortlist_n` single performers only —
     testing every C(N, basket_size) combination is combinatorially
     infeasible for any non-trivial candidate pool."""
-    script: str
-    candidates: List[UnderlyingParams]
-    r: float = 0.03
-    T: float = 3.0
-    model: str = "constant"
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    script: str = Field(max_length=MAX_SCRIPT_CHARS)
+    candidates: List[UnderlyingParams] = Field(min_length=1, max_length=MAX_UNDERLYINGS)
+    r: float = Field(default=0.03, ge=MIN_RATE, le=MAX_RATE)
+    T: float = Field(default=3.0, gt=0.0, le=MAX_MATURITY_YEARS)
+    model: str = Field(default="constant", pattern=f"^({'|'.join(MODELS)})$")
     user_params: Dict[str, Any] = {}
     constats: Dict[str, Any] = {}
     anchor: Optional[date] = None   # see PricingRequest.anchor
@@ -283,13 +397,15 @@ class ScriptGenerateRequest(BaseModel):
     description: str = Field(min_length=3, max_length=4000)
     provider: str = "ollama"
     model: Optional[str] = None
-    underlyings: List[UnderlyingParams] = []
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    underlyings: List[UnderlyingParams] = Field(default_factory=list, max_length=MAX_UNDERLYINGS)
     corr_matrix: List[List[float]] = []
     r: float = 0.03
-    T: float = 3.0
+    T: float = Field(default=3.0, gt=0.0, le=MAX_MATURITY_YEARS)
     user_params: Dict[str, Any] = {}
     # Affinage : repart du script courant au lieu de tout réécrire.
-    current_script: str = ""
+    current_script: str = Field(default="", max_length=MAX_SCRIPT_CHARS)
     refine: bool = False
 
 
@@ -353,13 +469,13 @@ class ReinvestScanRequest(BaseModel):
     hi: float
     filters: List[ReinvestMetricFilter] = []
     N: int = Field(default=6000, ge=1000, le=20000)
-    model: str = "constant"
+    model: str = Field(default="constant", pattern=f"^({'|'.join(MODELS)})$")
     vol_period: str = "1y"
     # Maturité du scan — None = tenor d'origine du deal (deal.T). Bissection
     # tenue sur param_name uniquement ; param_overrides (mode avancé) fixe
     # tout autre PARAM à une valeur choisie plutôt qu'à celle du booking,
     # en unités stockées (même convention que lo/hi/target_price).
-    T: Optional[float] = None
+    T: Optional[float] = Field(default=None, gt=0.0, le=MAX_MATURITY_YEARS)
     param_overrides: Dict[str, Any] = {}
 
 
@@ -374,10 +490,10 @@ class ReinvestProposalRequest(BaseModel):
     target_price: float
     lo: float
     hi: float
-    T: Optional[float] = None
+    T: Optional[float] = Field(default=None, gt=0.0, le=MAX_MATURITY_YEARS)
     param_overrides: Dict[str, Any] = {}
     N: int = Field(default=8000, ge=1000, le=20000)
-    model: str = "constant"
+    model: str = Field(default="constant", pattern=f"^({'|'.join(MODELS)})$")
     vol_period: str = "1y"
     backtest_start: str = "2015-01-01"
     backtest_freq: int = Field(default=21, ge=1, le=252)

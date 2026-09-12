@@ -18,9 +18,12 @@ from ..db.database import get_session
 from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent,
                           Entity, User, Counterparty, Portfolio, LifecycleProposal,
                           OfficialFixingVersion, Opportunity, RfqQuote, RfqRequest, Script,
-                          TradeAmendmentRequest)
+                          TradeAmendmentRequest, ValuationRun)
 from .auth import get_current_user
-from ..services.market_data import load_hist_prices, load_yahoo_reference_closes
+from ..services.market_data import (
+    DEFAULT_MARKET_DATA_PROVIDER, dividend_profile, load_hist_prices,
+    load_yahoo_reference_closes, market_data_provider_for_deal,
+)
 from ..core.payscript.parser import parse_script, resolve_constats, CompiledScript, effective_T_max
 from ..core.payscript.engine import derniere_fenetre, eval_script_on_history
 from ..core.inlife_valuation import (
@@ -38,6 +41,7 @@ from ..core.lifecycle_controls import (
     semantic_maturity_outcome,
 )
 from ..core.market_snapshot import snapshot_rate, snapshot_rate_is_default
+from ..core.payoff_terms import classify_param_barrier
 from ..core.agregats_officiels import calculer as calculer_agregat
 from ..core.rfq_controls import (
     booking_gate_failures, failures_payload, product_terms, product_terms_hash,
@@ -47,6 +51,14 @@ from ..core.workflow import (
     QuoteFirmness, amendment_four_eyes_enabled,
 )
 from ..core.schemas import ReinvestScanRequest, ReinvestProposalRequest
+from ..core.valuation_context import (
+    ValuationContext, funding_from_market_snapshot, run_valuation,
+    verify_pricing_receipt,
+)
+from ..core.deal_valuation import (
+    DealGreeksRequest, MtmRequest, mtm_core as _deal_mtm_core,
+)
+from ..core.valuation_runs import stage_valuation_run, replay_valuation_run
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
 
@@ -73,6 +85,10 @@ class DealCreate(BaseModel):
     script_snapshot: str
     script_id: Optional[int] = None
     market_snapshot: dict = {}
+    # Returned by /api/price. Optional for legacy/manual bookings and RFQ
+    # imports; when present it is authoritative for the pricing assumptions
+    # and fair value stored on the deal.
+    pricing_receipt: Optional[dict] = None
     # Pre-trade opportunity this deal converts from, if any — see
     # db/models.py:Deal.indicative_id.
     indicative_id: Optional[int] = None
@@ -602,7 +618,7 @@ def _gen_ref(entity_name: str | None, session: Session) -> str:
     return next_reference(session, Deal, f"{prefix}-{date.today().strftime('%Y%m%d')}-")
 
 
-def _deal_row(d: Deal, events: list | None = None) -> dict:
+def _deal_row(d: Deal, events: list | None = None, session: Session | None = None) -> dict:
     row = {
         "id": d.id,
         "reference": d.reference,
@@ -616,6 +632,10 @@ def _deal_row(d: Deal, events: list | None = None) -> dict:
         # Rattachement commercial — à qui le produit a été vendu. None sur un
         # deal booké hors parcours client, ce qui reste valide.
         "client_id": d.client_id,
+        "market_data_provider": (
+            market_data_provider_for_deal(d, session)
+            if session is not None else DEFAULT_MARKET_DATA_PROVIDER
+        ),
         "opportunity_id": d.opportunity_id,
         "primary_affiliation_id": d.primary_affiliation_id,
         "mandate_id": d.mandate_id,
@@ -658,11 +678,13 @@ def _deal_row(d: Deal, events: list | None = None) -> dict:
         "payment_date": d.payment_date,
         "T": d.T,
         "realized_payout": d.realized_payout,
+        "settlement_amount": d.settlement_amount,
         "resolution_outcome": d.resolution_outcome,
         "underlyings": json.loads(d.underlyings_json),
         "market_snapshot": json.loads(d.market_snapshot_json),
         "greeks": json.loads(d.greeks_json) if d.greeks_json else {},
         "greeks_computed_at": d.greeks_computed_at.isoformat() if d.greeks_computed_at else None,
+        "latest_valuation_run_id": d.latest_valuation_run_id,
         "status": d.status,
         "contract_version": d.contract_version,
         "script_id": d.script_id,
@@ -1095,14 +1117,6 @@ def _ops_deal(
 _FIXING_SOURCE_TYPES = {
     "API", "MESSAGE", "FILE", "PLATFORM", "CALCULATION_AGENT", "OTHER",
 }
-_FIXING_PROVIDERS = {
-    "BLOOMBERG",
-    "REFINITIV",
-    "OFFICIAL_EXCHANGE",
-    "CALCULATION_AGENT",
-    "ISSUER_AGENT",
-    "CUSTODIAN",
-}
 _MAX_FIXING_EVIDENCE_BYTES = 5 * 1024 * 1024
 
 
@@ -1115,7 +1129,7 @@ def _decode_fixing_evidence(body: EventUpdate) -> tuple[bytes | None, list[dict]
             "evidence_filename",
             "Le nom de la pièce source est absent ou invalide.",
             expected="Un nom de fichier simple de 1 à 255 caractères.",
-            action="Sélectionnez à nouveau la pièce source officielle.",
+            action="Sélectionnez à nouveau la pièce source.",
             received=filename or None,
         ))
     content_type = str(body.evidence_content_type or "").strip()
@@ -1127,7 +1141,7 @@ def _decode_fixing_evidence(body: EventUpdate) -> tuple[bytes | None, list[dict]
             "evidence_content_type",
             "Le type de contenu de la pièce source est absent ou invalide.",
             expected="Un type MIME, par exemple application/pdf ou text/csv.",
-            action="Sélectionnez à nouveau la pièce source officielle.",
+            action="Sélectionnez à nouveau la pièce source.",
             received=content_type or None,
         ))
     try:
@@ -1149,7 +1163,7 @@ def _decode_fixing_evidence(body: EventUpdate) -> tuple[bytes | None, list[dict]
                 "evidence_payload_b64",
                 "La pièce source archivée est vide.",
                 expected="Une pièce non vide.",
-                action="Sélectionnez le message, fichier ou export officiel reçu.",
+                action="Sélectionnez le message, fichier ou export reçu de la source.",
             ))
         elif len(payload) > _MAX_FIXING_EVIDENCE_BYTES:
             failures.append(_workflow_failure(
@@ -1184,7 +1198,7 @@ def _parse_official_observed_at(raw: str, timezone_name: str) -> tuple[datetime 
             "observed_at",
             "La date/heure d’observation est absente ou invalide.",
             expected="Date-heure ISO avec timezone, par exemple 2026-07-31T17:30:00+02:00.",
-            action="Renseignez le timestamp publié par la source officielle.",
+            action="Renseignez le timestamp publié par la source de données.",
             received=raw or None,
         )]
     if observed.utcoffset() is None:
@@ -1227,6 +1241,7 @@ def _fixing_submission_failures(
     deal: Deal,
     event: DealEvent,
     body: EventUpdate,
+    expected_provider: str,
 ) -> tuple[list[dict], datetime | None]:
     # A partial candidate may be captured and remains explicitly PARTIAL, but
     # it can never pass Checker validation.  Provenance, however, is mandatory
@@ -1247,13 +1262,13 @@ def _fixing_submission_failures(
                 action=action,
             ))
     provider = str(body.provider or "").strip().upper()
-    if provider not in _FIXING_PROVIDERS:
+    if provider != expected_provider:
         failures.append(_workflow_failure(
             "FIXING_PROVIDER_NOT_AUTHORIZED",
             "provider",
-            "Le fournisseur n’appartient pas au référentiel de sources officielles autorisées.",
-            expected=", ".join(sorted(_FIXING_PROVIDERS)),
-            action="Sélectionnez un fournisseur autorisé ou faites mettre à jour le référentiel.",
+            "Le fournisseur ne correspond pas à la source de données du compte client.",
+            expected=expected_provider,
+            action="Utilisez la source configurée sur le compte client.",
             received=body.provider or None,
         ))
     source_type = str(body.source_type or "").strip().upper()
@@ -1261,7 +1276,7 @@ def _fixing_submission_failures(
         failures.append(_workflow_failure(
             "FIXING_SOURCE_TYPE_INVALID",
             "source_type",
-            "Le type de source officielle est absent ou non autorisé.",
+            "Le type de source est absent ou non autorisé.",
             expected=", ".join(sorted(_FIXING_SOURCE_TYPES)),
             action="Sélectionnez le type correspondant à la preuve reçue.",
             received=body.source_type or None,
@@ -1320,7 +1335,7 @@ def _fixing_submission_failures(
             "event_date",
             "L’événement contractuel est encore futur.",
             expected="Une date d’événement atteinte.",
-            action="Attendez la date de constatation officielle.",
+            action="Attendez la date contractuelle de constatation.",
             received=event.event_date,
         ))
     return failures, observed
@@ -1430,6 +1445,8 @@ def _booking_request_summary(body: DealCreate) -> dict:
         "payment_date": body.payment_date,
         "T": body.T,
         "fixing_policy": body.fixing_policy,
+        "pricing_input_fingerprint": (
+            (body.pricing_receipt or {}).get("input_fingerprint")),
         "client_id": body.client_id,
         "mandate_id": body.mandate_id,
         "opportunity_id": body.opportunity_id,
@@ -1438,6 +1455,123 @@ def _booking_request_summary(body: DealCreate) -> dict:
         "instrument_family": body.instrument_family,
         "payoff_family": body.payoff_family,
     }
+
+
+def _ai_script_provenance(body: DealCreate) -> Optional[dict]:
+    provenance = (body.market_snapshot or {}).get("ai_script_provenance")
+    if provenance is None:
+        return None
+    if not isinstance(provenance, dict):
+        raise HTTPException(422, {
+            "code": "AI_PROVENANCE_INVALID",
+            "message": "La provenance IA du script doit être un objet."})
+    adopted = provenance.get("adopted_script_text")
+    if not isinstance(adopted, str) or not adopted.strip():
+        raise HTTPException(422, {
+            "code": "AI_PROVENANCE_INVALID",
+            "message": "La provenance IA ne contient pas le script adopté."})
+    expected_hash = hashlib.sha256(adopted.encode("utf-8")).hexdigest()
+    if provenance.get("script_sha256") != expected_hash:
+        raise HTTPException(422, {
+            "code": "AI_PROVENANCE_INVALID",
+            "message": "L'empreinte du script généré ne correspond pas à sa provenance."})
+    if (provenance.get("checks_status") == "warning"
+            and provenance.get("warnings_acknowledged") is not True):
+        raise HTTPException(422, {
+            "code": "AI_WARNINGS_NOT_ACKNOWLEDGED",
+            "message": "Les avertissements de l'assistant IA doivent être acquittés avant le booking."})
+    return {
+        **provenance,
+        "modified_after_adoption": body.script_snapshot != adopted,
+    }
+
+
+def _apply_pricing_receipt(body: DealCreate,
+                           ai_provenance: Optional[dict] = None) -> None:
+    """Validate a pricing result and make its server snapshot authoritative.
+
+    Manual and RFQ bookings may legitimately have no receipt.  Once a receipt
+    is supplied, however, every field that identifies the priced product must
+    still match: accepting only part of it would recreate the stale-price bug
+    at the API boundary.
+    """
+    if not body.pricing_receipt:
+        return
+    try:
+        verified = verify_pricing_receipt(body.pricing_receipt)
+    except ValueError as exc:
+        raise HTTPException(422, {
+            "code": "PRICING_RECEIPT_INVALID",
+            "message": str(exc),
+        })
+
+    priced = verified["pricing_input"]
+    variant = priced.get("variant") or {}
+    priced_script = variant.get("script") or priced.get("script") or ""
+    if body.script_snapshot != priced_script:
+        raise HTTPException(409, {
+            "code": "PRICING_RESULT_STALE",
+            "message": "Le script a changé depuis le pricing. Relancez le calcul avant de booker.",
+        })
+
+    expected_price = float(verified.get("price_pct"))
+    if abs(float(body.fair_value) - expected_price) > 0.0001:
+        raise HTTPException(409, {
+            "code": "PRICING_RESULT_STALE",
+            "message": "La fair value ne correspond plus au résultat de pricing identifié.",
+            "expected": expected_price,
+            "received": body.fair_value,
+        })
+
+    comparisons = {
+        "strike_date": body.strike_date,
+        "value_date": body.value_date,
+        "maturity_date": body.maturity_date,
+        "payment_date": body.payment_date or None,
+        "settlement_ccy": body.devise,
+    }
+    for field, received in comparisons.items():
+        expected = priced.get(field)
+        if expected is not None and str(received or "") != str(expected or ""):
+            raise HTTPException(409, {
+                "code": "PRICING_RESULT_STALE",
+                "message": f"{field} a changé depuis le pricing. Relancez le calcul avant de booker.",
+                "expected": expected,
+                "received": received,
+            })
+
+    priced_t = priced.get("T")
+    if priced_t is not None and abs(float(body.T) - float(priced_t)) > 1e-10:
+        raise HTTPException(409, {
+            "code": "PRICING_RESULT_STALE",
+            "message": "La maturité en années a changé depuis le pricing. Relancez le calcul avant de booker.",
+            "expected": priced_t,
+            "received": body.T,
+        })
+
+    expected_uls = [
+        (str(u.get("name") or ""), str(u.get("ticker") or ""), str(u.get("ccy") or ""))
+        for u in (priced.get("underlyings") or [])
+    ]
+    received_uls = [
+        (str(u.get("name") or ""), str(u.get("ticker") or ""), str(u.get("ccy") or ""))
+        for u in body.underlyings
+    ]
+    if expected_uls != received_uls:
+        raise HTTPException(409, {
+            "code": "PRICING_RESULT_STALE",
+            "message": "Les sous-jacents ont changé depuis le pricing. Relancez le calcul avant de booker.",
+        })
+
+    snapshot = verified["market_snapshot"]
+    # Keep the exact validated engine-unit request with the display snapshot.
+    # The fingerprint alone proves identity but cannot reproduce or explain the
+    # original price without these inputs.
+    snapshot["pricing_input"] = verified["pricing_input"]
+    snapshot["pricing_price_pct"] = verified["price_pct"]
+    if ai_provenance:
+        snapshot["ai_script_provenance"] = ai_provenance
+    body.market_snapshot = snapshot
 
 
 def _reject_booking(session: Session, current: User, body: DealCreate,
@@ -1481,6 +1615,10 @@ def _book_deal(
 
     try:
         _validate_economics(body)
+        ai_provenance = _ai_script_provenance(body)
+        _apply_pricing_receipt(body, ai_provenance)
+        if ai_provenance and not body.pricing_receipt:
+            body.market_snapshot["ai_script_provenance"] = ai_provenance
     except HTTPException as exc:
         _reject_booking(session, current, body, exc.status_code, exc.detail)
 
@@ -1947,7 +2085,7 @@ def _book_deal(
             session, current, body, 409,
             "Conflit d'unicité pendant le booking. Rechargez les données et réessayez.")
     session.refresh(deal)
-    return _deal_row(deal, _get_events(deal.id, session))
+    return _deal_row(deal, _get_events(deal.id, session), session)
 
 
 @router.post("", status_code=201)
@@ -1997,24 +2135,7 @@ def list_deals(
     deals = session.exec(statement).all()
     if current_role in {"ops_maker", "checker"}:
         deals = [deal for deal in deals if _can_access_deal(deal, current, session)]
-    return [_deal_row(d) for d in deals]
-
-
-def _classify_param_barrier(name: str, val: float) -> str | None:
-    """Heuristic barrier detection on PARAM names. PayScript has no formal
-    'this is a barrier' concept — AC_BAR/KI_BAR are naming conventions from
-    our templates, nothing more. Name matching + a plausibility range on the
-    stored value (fraction of S₀) is the honest best effort: it covers the
-    standard templates, an unusually-named script slips through silently.
-    KI is checked first so 'KI_BAR' lands on ki, not autocall."""
-    if not (0.2 <= val <= 3.0):
-        return None
-    n = name.upper()
-    if "KI" in n or "KNOCK" in n:
-        return "ki"
-    if "AC" in n or "CALL" in n or "BAR" in n:
-        return "autocall"
-    return None
+    return [_deal_row(d, session=session) for d in deals]
 
 
 # Eligible counterparties for the booking form — any authenticated user (the
@@ -2241,7 +2362,7 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
         else:
             # Legacy scripts with no M_ params — name heuristic vs WOF.
             for p in compiled.params:
-                kind = _classify_param_barrier(p.name, p.stored_val)
+                kind = classify_param_barrier(p.name, p.stored_val)
                 if kind:
                     barriers.append({
                         "name": p.name,
@@ -2318,7 +2439,7 @@ def _script_flags(deal: Deal) -> dict:
     except ValueError:
         return {"has_stop": False, "has_ki_param": False, "has_autocall_param": False}
     scalar_params = [p for p in compiled.params if p.kind == "scalar"]
-    kinds = {_classify_param_barrier(p.name, p.stored_val) for p in scalar_params}
+    kinds = {classify_param_barrier(p.name, p.stored_val) for p in scalar_params}
     return {
         "has_stop": compiled.has_stop,
         "has_ki_param": "ki" in kinds,
@@ -2363,7 +2484,7 @@ def get_deal(
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
-    row = _deal_row(deal, _get_events(deal_id, session))
+    row = _deal_row(deal, _get_events(deal_id, session), session)
     versions = session.exec(
         select(OfficialFixingVersion)
         .where(OfficialFixingVersion.deal_id == deal_id)
@@ -2861,7 +2982,7 @@ def update_event(
             object_type="DEAL",
             object_id=deal.id,
             current=current,
-            message="Le propriétaire économique du deal ne peut pas saisir ses fixings officiels.",
+            message="Le propriétaire économique du deal ne peut pas saisir ses observations contractuelles.",
             failures=[_workflow_failure(
                 "DEAL_OWNER_CANNOT_CAPTURE_FIXING",
                 "entered_by",
@@ -2941,7 +3062,8 @@ def update_event(
             received=body.supersedes_version,
         ))
 
-    submission_failures, observed = _fixing_submission_failures(deal, ev, body)
+    submission_failures, observed = _fixing_submission_failures(
+        deal, ev, body, market_data_provider_for_deal(deal, session))
     failures = version_failures + submission_failures
     if failures:
         if version_failures and current_version:
@@ -3139,7 +3261,7 @@ def validate_fixing(
             "current_fixing_version_id",
             "Aucune preuve versionnée n’est liée au fixing candidat.",
             expected="Une soumission par un Ops Maker avec provenance complète.",
-            action="Demandez à un Ops Maker de saisir le fixing et sa preuve officielle.",
+            action="Demandez à un Ops Maker de saisir l’observation et sa pièce source.",
         ))
     elif version.entered_by == current.id:
         failures.append(_workflow_failure(
@@ -3175,7 +3297,7 @@ def validate_fixing(
             "event_date",
             "La date contractuelle du fixing est encore future.",
             expected="Une date d’événement atteinte.",
-            action="Attendez la date officielle de constatation.",
+            action="Attendez la date contractuelle de constatation.",
             received=ev.event_date,
         ))
     if ev.data_category != DataCategory.FIXING_CANDIDATE:
@@ -3548,7 +3670,7 @@ def reject_fixing(
                 object_type="DEAL_EVENT",
                 object_id=ev.id,
                 current=current,
-                message="Rejet non appliqué — la version officielle précédente ne peut pas être restaurée sûrement.",
+                message="Rejet non appliqué — la version validée précédente ne peut pas être restaurée sûrement.",
                 failures=[_workflow_failure(
                     "PREVIOUS_FIXING_VERSION_NOT_RESTORABLE",
                     "supersedes_id",
@@ -4202,7 +4324,7 @@ def _user_exception_lifecycle_evaluation(
         return None, [_workflow_failure(
             "AUTO_USER_EXCEPTION_STILL_PENDING",
             "events",
-            "Toutes les constatations déjà atteintes ne sont pas encore officielles.",
+            "Toutes les constatations déjà atteintes ne sont pas encore validées.",
             expected="Une décision utilisateur sur chaque exception atteinte.",
             action="Traitez les autres lignes signalées en exception.",
             received=[event.id for event in pending],
@@ -4392,7 +4514,7 @@ def resolve_auto_fixing_exception(
                     "Reprendre la clôture Yahoo malgré un contrôle en échec "
                     "doit être motivé.",
                     expected="Un motif de 10 caractères minimum.",
-                    action="Décrivez le contrôle effectué avant d'officialiser.",
+                    action="Décrivez le contrôle effectué avant de retenir la donnée.",
                     received=body.reason or None,
                 )],
                 before=before,
@@ -4605,19 +4727,19 @@ def resolve_auto_fixing_exception(
     actor_label = getattr(current, "username", None) or f"utilisateur #{current.id}"
     if proposal and proposal.status == LifecycleStatus.APPLIED.value:
         message = (
-            f"Fixing v{version.version} officialisé par {actor_label}; "
+            f"Observation v{version.version} validée par {actor_label}; "
             f"résolution {proposal.proposed_outcome} appliquée automatiquement.")
     elif remaining:
         message = (
-            f"Fixing v{version.version} officialisé par {actor_label}; "
+            f"Observation v{version.version} validée par {actor_label}; "
             f"{len(remaining)} exception(s) reste(nt) à traiter.")
     elif replay_failures:
         message = (
-            f"Fixing v{version.version} officialisé; le lifecycle reste bloqué : "
+            f"Observation v{version.version} validée; le lifecycle reste bloqué : "
             f"{replay_failures[0].get('message', replay_failures[0].get('code'))}")
     else:
         message = (
-            f"Fixing v{version.version} officialisé par {actor_label}; "
+            f"Observation v{version.version} validée par {actor_label}; "
             "le produit reste en vie.")
     return {
         "event": _event_row(session.get(DealEvent, event.id)),
@@ -4710,12 +4832,12 @@ def _auto_validate_yahoo_event(
             }):
         session.add(event)
         return False, None
-    # A user-confirmed non-Yahoo exception is now the official fact for this
-    # event.  Keep displaying the latest Yahoo value as indicative, but do
-    # not reopen the same exception at every scheduled refresh.
+    # A user-confirmed exception is now the validated contractual fact for this
+    # event. The provider may still be Yahoo: provenance and human decision are
+    # separate dimensions. Keep displaying the latest feed value as indicative,
+    # but do not reopen the same exception at every scheduled refresh.
     if (current_version and
             current_version.capture_actor_type == "USER" and
-            current_version.provider != "YAHOO_FINANCE" and
             event.fixing_status in {
                 FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value,
             }):
@@ -4790,7 +4912,7 @@ def _auto_validate_yahoo_event(
         session.add(event)
         failure = _workflow_failure(
             "YAHOO_OFFICIAL_REVISION_DETECTED", "spots",
-            "Yahoo publie une valeur différente du fixing déjà officialisé.",
+            "Yahoo publie une valeur différente de l’observation déjà validée.",
             expected=current_spots,
             action="Comparez les deux versions et décidez explicitement si le lifecycle doit être rejoué.",
             received=spots,
@@ -4998,7 +5120,7 @@ def _auto_apply_lifecycle(
             if difference > tolerance:
                 failures.append(_workflow_failure(
                     "AUTO_REPLAY_PAYOUT_MISMATCH", "evaluation.realized_payout",
-                    "Le payout Yahoo diverge du replay officiel au-delà de la tolérance monétaire.",
+                    "Le payout Yahoo diverge du rejeu des observations validées au-delà de la tolérance monétaire.",
                     expected=f"Écart ≤ {tolerance:.12g} ({monetary_tolerance:.6g} {deal.devise}).",
                     action="Contrôlez le script et les fixings avant application.",
                     received={
@@ -5044,7 +5166,8 @@ def _auto_apply_lifecycle(
     session.flush()
     before_deal = _deal_row(deal)
     trigger.status = outcome
-    deal.status = "callé" if outcome == "callé" else "échu"
+    deal.status, deal.settlement_amount = _terminal_deal_state(
+        deal, outcome, official_result, date.today())
     deal.realized_payout = official_result.get("realized_payout")
     deal.resolution_outcome = outcome
     deal.updated_at = now
@@ -5110,7 +5233,7 @@ def _auto_apply_lifecycle(
         result="SUCCESS",
         before={"deal": before_deal},
         after={"deal": _deal_row(deal), "proposal": _proposal_row(proposal)},
-        reason="Résolution appliquée automatiquement depuis les fixings Yahoo officiels.",
+        reason="Résolution appliquée automatiquement depuis les observations Yahoo validées.",
         data_source=DataCategory.FIXING_OFFICIAL,
         correlation_id=proposal.correlation_id,
         metadata={"policy": deal.fixing_policy, "official_result": official_result},
@@ -5204,17 +5327,17 @@ def _refresh_auto_yahoo_deal_core(
         ).strip()
     elif proposal and proposal.status == LifecycleStatus.APPLIED.value:
         message = (
-            f"✓ {officialized} constatation(s) Yahoo officialisée(s) ; "
+            f"✓ {officialized} constatation(s) Yahoo validée(s) ; "
             f"résolution {proposal.proposed_outcome} appliquée automatiquement."
         )
     elif proposal and proposal.status == LifecycleStatus.MANUAL_REVIEW_REQUIRED.value:
         message = (
-            f"⚠ {officialized} constatation(s) Yahoo officialisée(s), "
+            f"⚠ {officialized} constatation(s) Yahoo validée(s), "
             "mais la résolution requiert un contrôle manuel."
         )
     else:
         message = (
-            f"✓ {officialized} constatation(s) Yahoo officialisée(s) ; "
+            f"✓ {officialized} constatation(s) Yahoo validée(s) ; "
             "le produit reste en vie."
         )
     return {
@@ -5254,7 +5377,7 @@ def _proposal_fixing_failures(
             "LIFECYCLE_TRIGGER_EVENT_MISSING",
             "proposal.event_id",
             "La proposition ne référence aucun événement contractuel exact.",
-            expected="L’identifiant de l’événement où le replay officiel s’arrête.",
+            expected="L’identifiant de l’événement où le rejeu des observations validées s’arrête.",
             action="Recalculez la proposition depuis le calendrier contractuel gelé.",
             received=proposal.event_id,
         ))
@@ -5264,7 +5387,7 @@ def _proposal_fixing_failures(
             _workflow_failure(
                 spot_failure["code"],
                 f"spots.{spot_failure.get('underlying', '')}".rstrip("."),
-                "Le fixing officiel est incomplet ou contient une valeur invalide.",
+                "L’observation validée est incomplète ou contient une valeur invalide.",
                 expected="Une valeur numérique strictement positive par sous-jacent contractuel.",
                 action="Soumettez une nouvelle version complète puis faites-la valider.",
                 received=(
@@ -5288,9 +5411,9 @@ def _proposal_fixing_failures(
             event_failures.append(_workflow_failure(
                 "FIXING_NOT_OFFICIAL",
                 "data_category",
-                "La donnée requise est indicative ou candidate, pas officielle.",
+                "La donnée requise est encore indicative ou candidate, et n’a pas été validée.",
                 expected=DataCategory.FIXING_OFFICIAL.value,
-                action="Soumettez une preuve officielle puis faites valider le fixing.",
+                action="Soumettez une pièce source puis faites valider l’observation.",
                 received=event.data_category,
             ))
         version = (
@@ -5300,7 +5423,7 @@ def _proposal_fixing_failures(
         if not version:
             event_failures.append(_workflow_failure(
                 "FIXING_PROVENANCE_MISSING", "current_fixing_version_id",
-                "Le fixing ne possède pas de preuve officielle versionnée.",
+                "L’observation ne possède pas de pièce source versionnée.",
                 expected="Une version avec pièce archivée et hash vérifié.",
                 action="Demandez une soumission Ops Maker puis une validation Checker.",
             ))
@@ -5342,6 +5465,19 @@ def _payout_reconciliation_tolerance(deal: Deal) -> tuple[float, float]:
     if not deal.nominal or deal.nominal <= 0:
         return 0.0, monetary_tolerance
     return monetary_tolerance / float(deal.nominal), monetary_tolerance
+
+
+def _terminal_deal_state(
+    deal: Deal, outcome: str, result: dict, asof: date,
+) -> tuple[str, Optional[float]]:
+    """Status and outstanding amount after a terminal observation."""
+    if outcome == "callé":
+        return "callé", None
+    payment = date.fromisoformat(deal.payment_date or deal.maturity_date)
+    outstanding = result.get("maturity_payout")
+    if payment > asof and outstanding is not None:
+        return "en_reglement", float(outstanding)
+    return "échu", None
 
 
 def _owned_proposal(
@@ -5477,9 +5613,9 @@ def validate_lifecycle_proposal(
                 failures.append(_workflow_failure(
                     "OFFICIAL_INDICATIVE_OUTCOME_MISMATCH",
                     "proposal.proposed_outcome",
-                    "Le résultat officiel diverge de la proposition indicative.",
+                    "Le résultat validé diverge de la proposition indicative.",
                     expected=official_result.get("outcome"),
-                    action="Rejetez la proposition indicative et générez une proposition réconciliée depuis le replay officiel.",
+                    action="Rejetez la proposition indicative et générez une proposition réconciliée depuis les observations validées.",
                     received=proposal.proposed_outcome,
                 ))
             else:
@@ -5496,11 +5632,11 @@ def validate_lifecycle_proposal(
                         failures.append(_workflow_failure(
                             "OFFICIAL_INDICATIVE_PAYOUT_MISMATCH",
                             "proposal.result.realized_payout",
-                            "Le payout indicatif diverge du payout officiel au-delà de la tolérance monétaire.",
+                            "Le payout indicatif diverge du payout validé au-delà de la tolérance monétaire.",
                             expected=(
                                 f"Écart ≤ {normalized_tolerance:.12g} du nominal "
                                 f"(soit {monetary_tolerance:.6g} {deal.devise})."),
-                            action="Rejetez la proposition indicative et générez une proposition réconciliée depuis le replay officiel.",
+                            action="Rejetez la proposition indicative et générez une proposition réconciliée depuis les observations validées.",
                             received={
                                 "indicative": indicative_payout,
                                 "official": official_payout,
@@ -5619,8 +5755,8 @@ def apply_lifecycle_proposal(
     if not proposal.official_result_json or not proposal.official_input_hash:
         failures.append(_workflow_failure(
             "OFFICIAL_REPLAY_MISSING", "official_result_json",
-            "Aucun replay officiel gelé n’est attaché à l’autorisation.",
-            expected="Un résultat officiel et son hash d’inputs.",
+            "Aucun rejeu validé gelé n’est attaché à l’autorisation.",
+            expected="Un résultat validé et son hash d’inputs.",
             action="Reprenez l’autorisation Checker depuis une proposition PROPOSED.",
         ))
     elif not fixing_failures:
@@ -5628,9 +5764,9 @@ def apply_lifecycle_proposal(
         if current_official_hash != proposal.official_input_hash:
             failures.append(_workflow_failure(
                 "OFFICIAL_REPLAY_STALE", "official_input_hash",
-                "Les inputs officiels ont changé depuis l’autorisation.",
+                "Les observations validées ont changé depuis l’autorisation.",
                 expected="Le hash d’inputs gelé lors de l’autorisation.",
-                action="Marquez cette proposition STALE et produisez un nouveau replay officiel.",
+                action="Marquez cette proposition STALE et produisez un nouveau rejeu validé.",
                 received="Un hash courant différent du hash autorisé.",
             ))
     if failures:
@@ -5680,21 +5816,23 @@ def apply_lifecycle_proposal(
             "Le résultat autorisé n’est pas terminal.",
             [_workflow_failure(
                 "UNSUPPORTED_OUTCOME", "official_result.outcome",
-                "Le replay officiel ne produit pas un événement économique terminal supporté.",
+                "Le rejeu validé ne produit pas un événement économique terminal supporté.",
                 expected="callé, ki ou final",
-                action="Corrigez le script ou attendez un événement officiel terminal.",
+                action="Corrigez le script ou attendez un événement contractuel terminal.",
                 received=outcome,
             )], 422)
     trigger = next(event for event in required_events if event.id == proposal.event_id)
     all_events = _get_events(deal.id, session)
     trigger.status = outcome
-    target_deal_status = "callé" if outcome == "callé" else "échu"
+    target_deal_status, settlement_amount = _terminal_deal_state(
+        deal, outcome, result, date.today())
     deal_cas = session.exec(
         update(Deal)
         .where(Deal.id == deal.id, Deal.status == "actif")
         .values(
             status=target_deal_status,
             realized_payout=result.get("realized_payout"),
+            settlement_amount=settlement_amount,
             resolution_outcome=outcome,
             updated_at=applied_at,
         )
@@ -5764,7 +5902,7 @@ def apply_lifecycle_proposal(
     session.commit()
     session.refresh(deal)
     session.refresh(proposal)
-    return {"deal": _deal_row(deal, _get_events(deal.id, session)),
+    return {"deal": _deal_row(deal, _get_events(deal.id, session), session),
             "proposal": _proposal_row(proposal)}
 
 
@@ -5779,7 +5917,7 @@ def reprice_inputs(
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
 
-    if deal.status in ("callé", "échu"):
+    if deal.status in ("callé", "échu", "en_reglement"):
         # Already resolved (see _evaluate_lifecycle) — there is no more
         # optionality to run a Monte Carlo on. Re-simulating from today with
         # a fresh script would price it as if it restarted now, which is
@@ -5792,6 +5930,8 @@ def reprice_inputs(
             "resolved": True,
             "status": deal.status,
             "realized_payout": deal.realized_payout,
+            "settlement_amount": deal.settlement_amount,
+            "payment_date": deal.payment_date,
             "resolution_date": resolved_event.event_date if resolved_event else None,
         }
 
@@ -5942,6 +6082,7 @@ def reinvest_roll_endpoint(
     sigma_r = (market.get("sigma_r", 0.0) or 0.0) / 100.0 if rate_model != "deterministic" else 0.0
     a_r = (market.get("a_r", 0.0) or 0.0) if rate_model == "hull_white" else 0.0
     yc = [[p["T"], p["rate"] / 100.0] for p in market.get("yieldCurve") or []]
+    funding_curve, funding_spread = funding_from_market_snapshot(market)
 
     T_new = deal.T
     value_date_new = date.today()
@@ -5953,7 +6094,8 @@ def reinvest_roll_endpoint(
             N=20000, model=market.get("model", "constant"), seed=42,
             antithetic=bool(market.get("antithetic", True)),
             user_params=user_params,
-            yield_curve=yc, sigma_r=sigma_r, a_r=a_r,
+            yield_curve=yc, funding_curve=funding_curve,
+            funding_spread=funding_spread, sigma_r=sigma_r, a_r=a_r,
             barrier_monitoring=market.get("barrierMonitoring", "weekly"),
         )
     except ValueError as e:
@@ -6236,354 +6378,21 @@ def reinvest_proposal_pdf_endpoint(
     )
 
 
-# Early-exit signal threshold: MtM capturing this share of the best possible
-# discounted outcome on a capped payoff → "consider exiting" flag on the note.
-_EXIT_CAPTURE = 0.97
+# Residual MtM schemas and implementation live in core/deal_valuation.py.
+def _mtm_core(deal: Deal, session: Session, n_paths: int = 20000,
+              body: Optional[MtmRequest] = None,
+              asof: Optional[date] = None):
+    """Compatibility boundary for routes and existing callers.
 
-
-class MtmOverrideUL(BaseModel):
-    """Manual per-underlying market override for the residual MtM — display
-    units, same as the booking snapshot (sigma=20 → 20%)."""
-    sigma: Optional[float] = None
-    q: Optional[float] = None
-
-
-class MtmRequest(BaseModel):
-    """Optional body of POST /{deal_id}/mtm. Absent body (current frontend,
-    bare curl) → recalibrate="none" → booking snapshot, bit-identical to the
-    historical behavior. Priority: manual overrides > realized > booking."""
-    recalibrate: Literal["none", "realized"] = "none"
-    overrides: Optional[dict[str, MtmOverrideUL]] = None   # key = underlying name
-    r: Optional[float] = None        # flat rate override, in % (curve dropped)
-    window_days: int = 252
-
-
-class DealGreeksRequest(MtmRequest):
-    """Body of POST /{deal_id}/greeks — same market-assumption knobs as the
-    MtM (recalibrate/overrides/r), plus which sensitivities to compute. corr
-    (cross-gamma) is supported by compute_greeks but left out of the default
-    selection — not something a future portfolio aggregation can simply sum
-    across deals with different baskets."""
-    selected: List[str] = ["delta", "gamma", "vega", "theta", "rho"]
-
-
-def _mtm_core(
-    deal: Deal,
-    session: Session,
-    n_paths: int = 20000,
-    body: Optional[MtmRequest] = None,
-    asof: Optional[date] = None,
-) -> tuple[dict, Optional[dict]]:
-    """Residual mark-to-market of an ACTIVE deal: replay the frozen script on
-    realized history (state: memory coupons, observation index, running
-    extrema), then Monte Carlo the REMAINING life only — observation dates at
-    their true residual times, paths seeded at today's spot/strike levels,
-    replayed state injected. This is the desk MtM, as opposed to '→ Ouvrir'
-    re-pricing which restarts the product as new. Design:
-    MTM_RESIDUEL_DESIGN.md.
-
-    Returns (payload, ctx): payload is the /mtm response; ctx carries the
-    intermediates the valuation note (PDF) and the P&L explain need — price
-    history, replayed state, compiled script (monitors), effective underlyings,
-    residual script — or None on the resolved_pending short-circuit. Ownership
-    is the caller's concern.
-
-    asof (default today) values the deal AS OF a past date: the price history
-    is truncated there, so the replayed state, the seeding spots, the residual
-    calendar and the realized-vol window all follow — this is what the P&L
-    explain uses to build its two photos (EXPLICATION_VALO_DESIGN.md)."""
-    from ..core.payscript.engine import run_mc, _shift_events_for_mtf
-
-    deal_id = deal.id
-    if deal.status != "actif":
-        raise HTTPException(422, f"Deal {deal.status} — plus d'optionnalité à valoriser "
-                                 f"(remboursement réalisé: {deal.realized_payout})")
-
-    today = asof or date.today()
-    maturity = date.fromisoformat(deal.maturity_date)
-    value_d = date.fromisoformat(deal.value_date)
-    if today >= maturity:
-        raise HTTPException(422, "Échéance atteinte — lancer le refresh du cycle de vie "
-                                 "pour résoudre le deal plutôt que le valoriser")
-    # Meme origine que les temps d observation : la date de strike. Compter le
-    # temps ecoule depuis la value date decalerait tout le residuel.
-    _elapsed_origin = (date.fromisoformat(deal.strike_date) if deal.strike_date else value_d)
-    # Avant la constatation initiale, `T_elapsed` devient NÉGATIF : rien ne
-    # s'est écoulé, et l'écart au strike décale les constatations vers l'avenir
-    # (_shift_events_for_mtf soustrait T_elapsed). L'axe commence dans les deux
-    # cas à la date de valorisation ; ce qui change est qu'avant le strike il
-    # commence AVANT le produit, et que le fixing est alors simulé comme le
-    # reste — `strike_set_t` dit au moteur à quel pas il tombe.
-    pre_strike = today < _elapsed_origin
-    T_elapsed = (today - _elapsed_origin).days / 365.25
-    T_remaining = max(1 / 52, (maturity - today).days / 365.25)
-    residual_payment_t = (
-        (date.fromisoformat(deal.payment_date) - today).days / 365.25
-        if deal.payment_date else None)
-    strike_set_t = -T_elapsed if pre_strike else None
-
-    # Le rejeu du passé et la construction du résiduel vivent dans le cœur
-    # (core/inlife_valuation) : le Pricer doit pouvoir les appeler sans qu'un
-    # deal existe. Ici on ne fait que traduire un deal en paramètres.
-    strike_event = next((e for e in _get_events(deal_id, session) if e.t_years == 0.0), None)
-    produit = InLifeProduct(
-        script_snapshot=deal.script_snapshot,
-        underlyings=json.loads(deal.underlyings_json),
-        strike_levels=json.loads(strike_event.spots_json) if strike_event else {},
-        strike_date=(date.fromisoformat(deal.strike_date) if deal.strike_date else value_d),
-        value_date=value_d,
-        tenor=deal.T,
-        currency=(deal.devise or "").strip().upper(),
-        payment_date=(date.fromisoformat(deal.payment_date) if deal.payment_date else None),
-        market=json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {},
+    Dependencies are passed explicitly so the core remains usable by workers
+    and deterministic tests without importing this API module.
+    """
+    return _deal_mtm_core(
+        deal, session, n_paths, body, asof,
+        load_prices=load_hist_prices,
+        dividend_loader=dividend_profile,
+        realized_loader=realized_market,
     )
-    # Historique réalisé depuis le strike (même fenêtre J-7 que le refresh du
-    # cycle de vie : un strike un week-end ou un férié a besoin de la clôture
-    # qui précède). Le chargement reste ici, le cœur ne fait pas d'I/O.
-    tickers = [u["ticker"] for u in produit.underlyings if u.get("ticker")]
-    if not tickers:
-        raise HTTPException(422, "Aucun ticker défini sur ce deal")
-    # Avant le strike, la fenêtre partirait d'une date postérieure à sa propre
-    # fin : Yahoo refuse l'intervalle et le MtM s'arrêtait là. On borne au jour
-    # de valorisation — l'historique ne sert alors qu'à la recalibration
-    # réalisée et à l'affichage, le rejeu n'ayant rien à rejouer.
-    fetch_start = (min(produit.strike_date, today) - timedelta(days=7)).isoformat()
-    px_data = load_hist_prices(tickers, fetch_start, today.isoformat())
-    if "error" in px_data:
-        raise HTTPException(422, px_data["error"])
-    try:
-        residuel = build_residual(produit, px_data.get("prices", {}),
-                                  px_data.get("dates", []), T_elapsed, today)
-    except ValuationError as exc:
-        raise HTTPException(422, str(exc))
-
-    if residuel.early_recall:
-        # The old wording pointed at "refresh the lifecycle", which stopped
-        # being actionable when fixings became governed: a refresh only updates
-        # INDICATIVE monitoring data and raises a proposal — resolving the deal
-        # now requires an official fixing validated by an independent Checker.
-        return {
-            "resolved_pending": True,
-            "message": "Le replay indicatif détecte un rappel anticipé : ce deal ne "
-                       "devrait plus être actif. La résolution passe par un fixing "
-                       "officiel validé — soumettez la version candidate puis faites-la "
-                       "traiter dans la file Checker. Un refresh ne met à jour que les "
-                       "données indicatives et ne résoudra pas le deal.",
-            "T_actual": residuel.T_actual,
-        }, None
-
-    # Noms locaux conservés : toute la suite de la fonction les utilise tels
-    # quels, ce qui garde le déplacement mécanique et vérifiable.
-    market = produit.market
-    underlyings_json = produit.underlyings
-    compiled = residuel.compiled
-    residual_script = residuel.residual_script
-    state = residuel.state
-    realized_cfs = residuel.realized_flows
-    norm_spots = residuel.norm_spots
-    engine_uls = residuel.engine_uls
-    r_frac = residuel.r_frac
-    prices = residuel.prices
-    dates_list = residuel.dates_list
-    user_params = residuel.user_params
-    replay = residuel.replay
-    start_idx = residuel.start_idx
-    s0_map = residuel.s0_map
-    n_u = len(engine_uls)
-    corr = market.get("corrMatrix") or [
-        [1.0 if i == j else 0.0 for j in range(n_u)] for i in range(n_u)
-    ]
-
-    rate_model = market.get("rateModel", "deterministic")
-    sigma_r = (market.get("sigma_r", 0.0) or 0.0) / 100.0 if rate_model != "deterministic" else 0.0
-    a_r = (market.get("a_r", 0.0) or 0.0) if rate_model == "hull_white" else 0.0
-    yc = [[p["T"], p["rate"] / 100.0] for p in market.get("yieldCurve") or []]
-
-    # ── Market recalibration (opt-in) — only the FUTURE MC leg is affected,
-    # the historical replay and the inherited state never depend on σ/corr.
-    body = body or MtmRequest()
-    model_used = market.get("model", "constant")
-    source = "booking"
-    n_returns = None
-    if body.recalibrate == "realized":
-        try:
-            rm = realized_market(prices, tickers, body.window_days)
-        except ValueError as e:
-            raise HTTPException(422, f"Recalibration réalisée impossible : {e}")
-        for u, tk in zip(engine_uls, tickers):
-            u["sigma"] = rm["sigma"][tk]
-        corr = rm["corr"]
-        n_returns = rm["n_returns"]
-        # Realized vol is a GBM-like number: keeping Heston/SABR/LV with only σ
-        # swapped would be either a no-op or an incoherent mix (fresh level,
-        # stale smile). Forced model is surfaced in market_used.
-        model_used = "constant"
-        source = "realized"
-    if body.overrides:
-        by_name = {u["name"]: u for u in engine_uls}
-        for name, ov in body.overrides.items():
-            u = by_name.get(name)
-            if u is None:
-                raise HTTPException(422, f"Override sur sous-jacent inconnu : {name}")
-            if ov.sigma is not None:
-                u["sigma"] = ov.sigma / 100.0
-                model_used = "constant"   # same reasoning as the realized mode
-            if ov.q is not None:
-                u["q"] = ov.q / 100.0
-                # A flat manual override replaces the complete booked curve;
-                # keeping the nodes would make the visible override a no-op.
-                u["dividend_curve"] = []
-        source += "+overrides"
-    if body.r is not None:
-        # A fresh flat rate with the stale booking curve would be incoherent —
-        # the override replaces the whole discounting/drift term.
-        r_frac = body.r / 100.0
-        yc = []
-
-    try:
-        result = run_mc(
-            residual_script, engine_uls, corr, r_frac, T_remaining,
-            maturity_payment_t=residual_payment_t,
-            strike_set_t=strike_set_t,
-            N=max(1000, min(100000, n_paths)),
-            model=model_used, seed=42,
-            antithetic=bool(market.get("antithetic", True)),
-            user_params=user_params, spot_mult=norm_spots, spot_base=norm_spots,
-            yield_curve=yc, sigma_r=sigma_r, a_r=a_r,
-            barrier_monitoring=market.get("barrierMonitoring", "weekly"),
-            wof_min_init=state["wof_min"], bof_max_init=state["bof_max"],
-            index_offset=state["index"], memo_init=state["memo"],
-            accum_init=state["accum"],
-            s_min_init=state["s_min"], s_max_init=state["s_max"],
-            s_prev_init=state["s_prev"],
-            # WOF at t=0 of the residual tensor = the actual path seed level,
-            # not state["wof_last"] — s0 (strike event) and ref (first replay
-            # close) are normally identical, but the seed is what the simulated
-            # WOF series actually continues from.
-            wof0_init=min(norm_spots),
-            realvol_state_init=state["realvol_state"],
-            fix_state_init=state["fix_state"],
-        )
-    except ValueError as e:
-        raise HTTPException(422, f"MC résiduel impossible : {e}")
-
-    # Residual upside vs the best possible outcome (present value). A payoff is
-    # "capped" when the top of the discounted distribution is flat (best case =
-    # 95th percentile within 0.5%) — autocalls, reverse convertibles… For those,
-    # a MtM already capturing >= _EXIT_CAPTURE of the best case means the client
-    # keeps market+credit risk for near-zero remaining upside: early-exit signal.
-    # Uncapped payoffs (open upside participation): pv_max is a meaningless tail
-    # quantile — expose pv_p95 as "favourable scenario", never the exit signal.
-    pv_max, pv_p95 = result.get("pv_max"), result.get("pv_p95")
-    best_case = None
-    if pv_max is not None and pv_max > 0:
-        # bool()/float() coercions: these come out of numpy reductions, and a
-        # numpy.bool_ (unlike numpy.float64, a float subclass) crashes FastAPI's
-        # JSON encoder.
-        pv_max, pv_p95 = float(pv_max), float(pv_p95 or 0.0)
-        capped = bool((pv_max - pv_p95) / pv_max < 0.005)
-        horizon = max(result.get("fugit") or T_remaining, 1 / 52)
-        upside = pv_max - result["price"]
-        capture = result["price"] / pv_max
-        best_case = {
-            "pv_max": pv_max,
-            "pv_p95": pv_p95,
-            "capped": capped,
-            "capture_ratio": round(capture, 4),
-            "upside_pts": round(upside * 100, 2),
-            "upside_annualized_pct": round(upside / horizon * 100, 2),
-            "horizon_years": round(horizon, 2),
-            "exit_signal": bool(capped and capture >= _EXIT_CAPTURE),
-        }
-
-    payload = {
-        "deal_id": deal_id,
-        "reference": deal.reference,
-        "mtm": result["price"],
-        "ic95": result["ic95"],
-        "prob_gt100": result["prob_gt100"],
-        "fugit": result["fugit"],
-        "T_elapsed": round(T_elapsed, 4),
-        "T_remaining": round(T_remaining, 4),
-        # Avant le strike il n'y a pas de constatation passée : les champs
-        # « réalisé » sont vides plutôt que nuls — 0 se lirait comme un
-        # plus-bas à zéro, ce qui est l'inverse de ce qu'ils décrivent.
-        "pre_strike": pre_strike,
-        "strike_date": deal.strike_date,
-        "obs_passees": state["index"],
-        "wof_min_realized": (None if state["wof_min"] is None
-                             else round(state["wof_min"], 4)),
-        "s_min_realized": (None if state["s_min"] is None else
-                           {u["name"]: round(v, 4)
-                            for u, v in zip(underlyings_json, state["s_min"])}),
-        "norm_spots": {u["name"]: round(s, 4) for u, s in zip(underlyings_json, norm_spots)},
-        "realized_cash_flows": realized_cfs,
-        "realized_total": round(sum(cf["cf"] for cf in realized_cfs), 4),
-        "best_case": best_case,
-        "n_paths": result["n_paths"],
-        "elapsed_ms": result["elapsed_ms"],
-        # Effective market parameters of the future MC leg — always present so
-        # a MtM number can never be quoted without knowing what priced it.
-        # q is never recalibrated (no dividend source); overrides only.
-        "market_used": {
-            "source": source,
-            "model": model_used,
-            "r": round(r_frac * 100.0, 4),
-            # True only for a legacy snapshot carrying no rate at all: the
-            # figure above is then our fallback, not this deal's own term.
-            # A zero or negative booked rate is honoured and reads False.
-            "r_is_default": snapshot_rate_is_default(market) and body.r is None,
-            "flat_curve": not yc,
-            "window_returns": n_returns,
-            "sigma": {u["name"]: round(eu["sigma"] * 100.0, 2)
-                      for u, eu in zip(underlyings_json, engine_uls)},
-            "q": {u["name"]: round(eu["q"] * 100.0, 2)
-                  for u, eu in zip(underlyings_json, engine_uls)},
-            "dividend_curve": {
-                u["name"]: [[round(t, 6), round(q * 100.0, 6)] for t, q in
-                            (eu.get("dividend_curve") or [])]
-                for u, eu in zip(underlyings_json, engine_uls)
-            },
-            "corr": [[round(v, 4) for v in row] for row in corr],
-        },
-    }
-    ctx = {
-        "compiled": compiled,
-        "state": state,
-        "user_params": user_params,
-        "dates": dates_list,
-        "prices": prices,
-        "start_idx": start_idx,
-        "s0_map": s0_map,
-        "tickers": tickers,
-        "underlyings_json": underlyings_json,
-        "norm_spots": norm_spots,
-        "T_elapsed": T_elapsed,
-        "passe_jusqu_a": residuel.passe_jusqu_a,
-        "T_remaining": T_remaining,
-        "residual_payment_t": residual_payment_t,
-        # Tout repricing dérivé (chocs, Greeks, explication de P&L) doit
-        # simuler le MÊME produit que le MtM auquel il se compare : sans ce
-        # report, la jambe choquée pricerait un produit déjà striké contre un
-        # forward-start, et l'écart mesurerait surtout cette différence-là.
-        "strike_set_t": strike_set_t,
-        "pre_strike": pre_strike,
-        "n_mc": result["n_paths"],
-        # Everything needed to re-run this photo's MC (or a mix of two photos)
-        # for the P&L explain waterfall:
-        "residual_script": residual_script,
-        "engine_uls": engine_uls,
-        "corr": corr,
-        "model_used": model_used,
-        "r_frac": r_frac,
-        "yc": yc,
-        "sigma_r": sigma_r,
-        "a_r": a_r,
-        "antithetic": bool(market.get("antithetic", True)),
-        "barrier_monitoring": market.get("barrierMonitoring", "weekly"),
-        "N_used": max(1000, min(100000, n_paths)),
-    }
-    return payload, ctx
 
 
 @router.post("/{deal_id}/mtm")
@@ -6598,7 +6407,14 @@ def deal_mtm(
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
-    payload, _ctx = _mtm_core(deal, session, n_paths, body)
+    payload, ctx = _mtm_core(deal, session, n_paths, body)
+    if ctx is None:
+        return payload
+    _run, payload = stage_valuation_run(
+        session, deal, current.id, "MTM", ctx, payload,
+        diagnostics={"request": (body.model_dump(mode="json") if body else {})},
+    )
+    session.commit()
     return payload
 
 
@@ -6626,6 +6442,12 @@ def deal_greeks(
     mtm_payload, ctx = _mtm_core(deal, session, n_paths, body)
     if ctx is None:
         return mtm_payload   # resolved_pending short-circuit — nothing to bump
+    if ctx.get("settlement_claim"):
+        raise HTTPException(
+            422,
+            "Le remboursement est déjà déterminé : les Greeks optionnels ne "
+            "s’appliquent plus. Consultez le MtM du flux à régler.",
+        )
 
     names = [u["name"] for u in ctx["underlyings_json"]]
     # Cross-gamma (correlation sensitivity) is meaningless for a single
@@ -6641,8 +6463,10 @@ def deal_greeks(
     raw = compute_greeks(
         ctx["residual_script"], ctx["engine_uls"], ctx["corr"],
         ctx["r_frac"], ctx["T_remaining"], ctx["N_used"], ctx["model_used"],
-        seed=42, user_params=ctx["user_params"], selected=selected,
+        seed=ctx.get("seed", 42), user_params=ctx["user_params"], selected=selected,
         sigma_r=ctx["sigma_r"], a_r=ctx["a_r"], yield_curve=ctx["yc"],
+        funding_curve=ctx.get("funding_curve", []),
+        funding_spread=ctx.get("funding_spread", 0.0),
         barrier_monitoring=ctx["barrier_monitoring"],
         # A live deal's sensitivities are those of what it has BECOME — spot
         # where it stands today, knock-in already touched or not, coupons
@@ -6650,6 +6474,7 @@ def deal_greeks(
         # omitting this does, answers a question nobody asked.
         antithetic=ctx["antithetic"], state=_greeks_state(ctx),
         strike_set_t=ctx.get("strike_set_t"),
+        maturity_payment_t=ctx.get("residual_payment_t"),
     )
 
     per_underlying: dict[str, dict] = {}
@@ -6694,6 +6519,10 @@ def deal_greeks(
         payload["pre_strike"] = _avertissement_greeks_pre_strike(
             deal.strike_date, ctx["model_used"])
 
+    _run, payload = stage_valuation_run(
+        session, deal, current.id, "GREEKS", ctx, payload,
+        diagnostics={"selected": selected},
+    )
     deal.greeks_json = json.dumps(payload)
     deal.greeks_computed_at = datetime.utcnow()
     session.add(deal)
@@ -6768,24 +6597,30 @@ def _run_explain_step(cal: dict, spot: dict, uls: list, corr, model: str,
     + path-dependent replayed state), vol bundle (σ via uls + model), corr.
     Mirrors _mtm_core's run_mc call exactly so the chain's endpoints coincide
     with the two /mtm figures. Same seed everywhere (CRN)."""
-    from ..core.payscript.engine import run_mc
     st = spot["state"]
-    return run_mc(
-        cal["residual_script"], uls, corr, common["r_frac"], cal["T_remaining"],
+    context = ValuationContext(
+        underlyings=uls, corr_matrix=corr, r=common["r_frac"],
+        T=cal["T_remaining"], N=common["N"], model=model,
+        seed=common.get("seed", 42), antithetic=common["antithetic"],
+        user_params=common["user_params"], yield_curve=common["yc"],
+        funding_curve=common.get("funding_curve", []),
+        funding_spread=common.get("funding_spread", 0.0),
+        sigma_r=common["sigma_r"], a_r=common["a_r"],
+        barrier_monitoring=common["bm"],
         maturity_payment_t=cal.get("residual_payment_t"),
         strike_set_t=cal.get("strike_set_t"),
-        N=common["N"], model=model, seed=42, antithetic=common["antithetic"],
-        user_params=common["user_params"], spot_mult=spot["norm_spots"],
-        spot_base=spot["norm_spots"],
-        yield_curve=common["yc"], sigma_r=common["sigma_r"], a_r=common["a_r"],
-        barrier_monitoring=common["bm"],
-        wof_min_init=st["wof_min"], bof_max_init=st["bof_max"],
-        index_offset=cal["index_offset"], memo_init=st["memo"],
-        accum_init=st["accum"],
-        s_min_init=st["s_min"], s_max_init=st["s_max"], s_prev_init=st["s_prev"],
-        wof0_init=min(spot["norm_spots"]),
-        realvol_state_init=st["realvol_state"], fix_state_init=st["fix_state"],
-    )["price"]
+        state={
+            "spot_mult": spot["norm_spots"], "spot_base": spot["norm_spots"],
+            "wof_min_init": st["wof_min"], "bof_max_init": st["bof_max"],
+            "index_offset": cal["index_offset"], "memo_init": st["memo"],
+            "accum_init": st["accum"], "s_min_init": st["s_min"],
+            "s_max_init": st["s_max"], "s_prev_init": st["s_prev"],
+            "wof0_init": min(spot["norm_spots"]),
+            "realvol_state_init": st["realvol_state"],
+            "fix_state_init": st["fix_state"],
+        },
+    )
+    return run_valuation(cal["residual_script"], context)["price"]
 
 
 def _greeks_state(ctx: dict) -> dict:
@@ -6819,12 +6654,15 @@ def _residual_greeks(ctx: dict, n_paths: int) -> list[dict]:
     raw = compute_greeks(
         ctx["residual_script"], ctx["engine_uls"], ctx["corr"],
         ctx["r_frac"], ctx["T_remaining"], ctx["N_used"], ctx["model_used"],
-        seed=42, user_params=ctx["user_params"],
+        seed=ctx.get("seed", 42), user_params=ctx["user_params"],
         selected=["delta", "gamma", "vega"],
         sigma_r=ctx["sigma_r"], a_r=ctx["a_r"], yield_curve=ctx["yc"],
+        funding_curve=ctx.get("funding_curve", []),
+        funding_spread=ctx.get("funding_spread", 0.0),
         barrier_monitoring=ctx["barrier_monitoring"],
         antithetic=ctx["antithetic"], state=_greeks_state(ctx),
         strike_set_t=ctx.get("strike_set_t"),
+        maturity_payment_t=ctx.get("residual_payment_t"),
     )
     out = []
     for i, u in enumerate(ctx["underlyings_json"]):
@@ -6894,17 +6732,21 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
     common = {"r_frac": c1["r_frac"], "yc": c1["yc"], "sigma_r": c1["sigma_r"],
               "a_r": c1["a_r"], "antithetic": c1["antithetic"],
               "user_params": c1["user_params"], "bm": c1["barrier_monitoring"],
-              "N": c1["N_used"]}
+              "funding_curve": c1.get("funding_curve", []),
+              "funding_spread": c1.get("funding_spread", 0.0),
+              "seed": c1.get("seed", 42), "N": c1["N_used"]}
     # strike_set_t : None en cours de vie, donc sans effet sur une cascade
     # existante. Avant le strike, l'omettre ferait pricer chaque étage comme un
     # produit déjà striké pendant que les deux /mtm encadrants pricent un
     # forward-start — la cascade ne télescoperait plus vers ΔMtM.
     cal1 = {"residual_script": c1["residual_script"], "T_remaining": c1["T_remaining"],
             "index_offset": c1["state"]["index"],
-            "strike_set_t": c1.get("strike_set_t")}
+            "strike_set_t": c1.get("strike_set_t"),
+            "residual_payment_t": c1.get("residual_payment_t")}
     cal2 = {"residual_script": c2["residual_script"], "T_remaining": c2["T_remaining"],
             "index_offset": c2["state"]["index"],
-            "strike_set_t": c2.get("strike_set_t")}
+            "strike_set_t": c2.get("strike_set_t"),
+            "residual_payment_t": c2.get("residual_payment_t")}
     spot1 = {"norm_spots": c1["norm_spots"], "state": c1["state"]}
     spot2 = {"norm_spots": c2["norm_spots"], "state": c2["state"]}
 
@@ -7092,7 +6934,7 @@ def _monitor_levels(compiled, user_params: dict, next_row: int) -> list[dict]:
         lvl = resolve(p.name)
         if lvl is None:
             continue
-        kind = _classify_param_barrier(p.name, lvl)
+        kind = classify_param_barrier(p.name, lvl)
         if kind:
             out.append({"name": p.name, "observable": None,
                         "direction": "down" if kind == "ki" else "up",
@@ -7122,6 +6964,12 @@ def deal_mtm_report(
     payload, ctx = _mtm_core(deal, session, n_paths, body)
     if payload.get("resolved_pending") or ctx is None:
         raise HTTPException(422, payload.get("message", "Deal en attente de résolution"))
+    if ctx.get("settlement_claim"):
+        raise HTTPException(
+            422,
+            "Le remboursement est déjà déterminé : la note de valorisation "
+            "optionnelle n’est plus applicable. Consultez le MtM du flux à régler.",
+        )
 
     ev_rows, next_obs = _evenements_pour_la_note(
         _get_events(deal_id, session), deal.schedule_json)
@@ -7156,13 +7004,87 @@ def deal_mtm_report(
         "history": {"dates": ctx["dates"][start_idx:], "series": series},
         "greeks": _residual_greeks(ctx, n_paths),
     }
+    run, run_result = stage_valuation_run(
+        session, deal, current.id, "REPORT", ctx,
+        {"mtm": payload, "greeks": data["greeks"]},
+        diagnostics={"document": "valuation_note"},
+    )
+    data["valuation_run_id"] = run.id
     try:
         pdf_bytes = generate_valuation_pdf(data)
     except Exception as e:
+        session.rollback()
         raise HTTPException(500, f"Erreur génération de la note de valorisation : {e}")
+    session.commit()
     filename = f"Note_valo_{deal.reference}_{date.today().isoformat()}.pdf"
     return StreamingResponse(
         _io.BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Valuation-Run-Id": str(run.id),
+        },
     )
+
+
+def _valuation_run_row(run: ValuationRun, include_payload: bool = False) -> dict:
+    row = {
+        "id": run.id, "deal_id": run.deal_id, "run_type": run.run_type,
+        "contract_version": run.contract_version,
+        "context_hash": run.context_hash, "engine_version": run.engine_version,
+        "engine_fingerprint": run.engine_fingerprint, "n_paths": run.n_paths,
+        "created_at": run.created_at.isoformat(),
+    }
+    if include_payload:
+        row.update({
+            "result": json.loads(run.result_json or "{}"),
+            "market_data": json.loads(run.market_data_json or "{}"),
+            "data_versions": json.loads(run.data_versions_json or "{}"),
+            "diagnostics": json.loads(run.diagnostics_json or "{}"),
+        })
+    return row
+
+
+@router.get("/{deal_id}/valuation-runs")
+def list_valuation_runs(
+    deal_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    deal = session.get(Deal, deal_id)
+    if not deal or not _can_access_deal(deal, current, session):
+        raise HTTPException(404, "Deal introuvable")
+    runs = session.exec(
+        select(ValuationRun).where(ValuationRun.deal_id == deal_id)
+        .order_by(ValuationRun.created_at.desc(), ValuationRun.id.desc())
+    ).all()
+    return [_valuation_run_row(run) for run in runs]
+
+
+@router.get("/valuation-runs/{run_id}")
+def get_valuation_run(
+    run_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    run = session.get(ValuationRun, run_id)
+    deal = session.get(Deal, run.deal_id) if run else None
+    if not run or not deal or not _can_access_deal(deal, current, session):
+        raise HTTPException(404, "Run de valorisation introuvable")
+    return _valuation_run_row(run, include_payload=True)
+
+
+@router.post("/valuation-runs/{run_id}/replay")
+def replay_saved_valuation_run(
+    run_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    run = session.get(ValuationRun, run_id)
+    deal = session.get(Deal, run.deal_id) if run else None
+    if not run or not deal or not _can_access_deal(deal, current, session):
+        raise HTTPException(404, "Run de valorisation introuvable")
+    try:
+        return replay_valuation_run(run)
+    except Exception as exc:
+        raise HTTPException(422, f"Rejeu du run impossible : {exc}") from exc

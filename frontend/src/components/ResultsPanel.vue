@@ -90,6 +90,17 @@
       </div>
     </div>
 
+    <div v-if="store.result.corr_repair"
+         class="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-400">
+      ⚠ La matrice de corrélation a été ajustée pour permettre sa factorisation
+      (écart maximal {{ formatNumber(store.result.corr_repair.max_shift * 100, 4) }} point de corrélation).
+      Le prix utilise la matrice ajustée publiée dans le résultat.
+    </div>
+    <div v-if="store.result.barrier_monitoring_note"
+         class="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-400">
+      ⚠ {{ store.result.barrier_monitoring_note }}
+    </div>
+
     <!-- Tuiles stats -->
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
       <div class="stat-box">
@@ -889,9 +900,10 @@ const vegaScopeNote = computed(() => {
 const thetaEventNote = computed(() => {
   const event = thetaEvent.value
   if (!event) return ''
-  const reasons = {
-    observation_transition_required: 'Theta non publié : la fenêtre de calcul franchit une observation contractuelle nécessitant une transition d’état.',
-    fenetre_strike_fix: 'Theta non publié : la fenêtre de calcul franchit une date de fixing initial.',
+    const reasons = {
+      observation_transition_required: 'Theta non publié : la fenêtre de calcul franchit une observation contractuelle nécessitant une transition d’état.',
+      constatation_window_transition_required: 'Theta non publié : la fenêtre de calcul franchit un relevé appartenant à une constatation sur période.',
+      fenetre_strike_fix: 'Theta non publié : la fenêtre de calcul franchit une date de fixing initial.',
     realvol: 'Theta non publié : le vieillissement nécessiterait d’inventer une observation de volatilité réalisée.',
   }
   return reasons[event.reason] || 'Theta non publié : une transition contractuelle empêche un simple vieillissement du produit.'

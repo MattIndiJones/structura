@@ -17,10 +17,21 @@ from ..core.payscript.engine import (
     run_mc, compute_greeks,
     run_payoff_profile, run_mc_paths, run_mc_proba,
     eval_script_on_history, compute_irr, derniere_fenetre, seances_jusqu_a,
-    run_mark_to_future, run_mtf_drilldown,
+    run_mark_to_future, run_mtf_drilldown, MTF_MAX_BATCH,
 )
 from ..services.market_data import load_hist_prices
 from ..core.calendars import UnsupportedCurrency
+from ..core.compute_budget import (
+    count_compiled_dates,
+    ensure_budget,
+    estimate_mc_batch,
+    estimate_pricing_request,
+    validate_compiled_dates,
+    validate_problem_dimensions,
+)
+from ..core.valuation_context import (
+    ValuationContext, build_pricing_receipt, run_valuation,
+)
 
 router = APIRouter(prefix="/api", tags=["pricing"])
 
@@ -112,12 +123,25 @@ def price_endpoint(req: PricingRequest):
     T_eff = effective_T_max(compiled, req.T)
 
     try:
-        result = run_mc(
-            script=compiled,
+        validate_compiled_dates(compiled)
+        calculation_budget = estimate_pricing_request(
+            maturity_years=T_eff,
+            underlyings=n,
+            paths=req.N,
+            model=req.model,
+            antithetic=req.antithetic,
+            continuous_monitoring=req.barrier_monitoring == "continuous",
+            stochastic_rates=req.sigma_r > 0,
+            selected_greeks=(req.selected_greeks
+                             if req.compute_greeks else None),
+            expanded_dates=count_compiled_dates(compiled),
+        )
+        ensure_budget(calculation_budget)
+        valuation_context = ValuationContext(
             underlyings=uls,
             corr_matrix=corr,
             r=req.r,
-            T_max=T_eff,
+            T=T_eff,
             N=req.N,
             model=req.model,
             seed=req.seed,
@@ -131,7 +155,10 @@ def price_endpoint(req: PricingRequest):
             barrier_monitoring=req.barrier_monitoring,
             maturity_payment_t=maturity_payment_t,
             value_date_t=value_date_t,
+            script_text=req.script,
+            constats=req.constats,
         )
+        result = run_valuation(compiled, valuation_context)
 
         greeks: dict = {}
         if req.compute_greeks and req.selected_greeks:
@@ -143,6 +170,8 @@ def price_endpoint(req: PricingRequest):
                 funding_curve=req.funding_curve or [],
                 funding_spread=req.funding_spread,
                 barrier_monitoring=req.barrier_monitoring,
+                maturity_payment_t=maturity_payment_t,
+                value_date_t=value_date_t,
             )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -164,6 +193,11 @@ def price_endpoint(req: PricingRequest):
         constatation_windows=result.get("constatation_windows"),
         schedule=(compiled.echeancier.to_dict()
                   if getattr(compiled, "echeancier", None) else None),
+        calculation_budget=calculation_budget.to_dict(),
+        pricing_receipt=build_pricing_receipt(req, result["price"]),
+        corr_repair=result.get("corr_repair"),
+        barrier_monitoring=result.get("barrier_monitoring", req.barrier_monitoring),
+        barrier_monitoring_note=result.get("barrier_monitoring_note"),
     )
 
 
@@ -200,6 +234,8 @@ def profile_endpoint(req: ProfileRequest):
         raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
 
     try:
+        validate_compiled_dates(compiled)
+        validate_problem_dimensions(T_eff, n)
         res = run_payoff_profile(compiled, uls, corr, r_eff, T_eff,
                                   analysis_user_params(req, ctx), state=etat)
     except ValueError as e:
@@ -263,6 +299,19 @@ def paths_endpoint(req: PathsRequest):
     if len(corr) != n or any(len(row) != n for row in corr):
         raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
     try:
+        validate_compiled_dates(compiled)
+        calculation_budget = estimate_mc_batch(
+            operation="path_visualisation",
+            maturity_years=T_eff,
+            underlyings=n,
+            paths_per_run=req.N_stat,
+            total_runs=1,
+            model=req.model,
+            antithetic=False,
+            continuous_monitoring=req.barrier_monitoring == "continuous",
+            expanded_dates=count_compiled_dates(compiled),
+        )
+        ensure_budget(calculation_budget)
         res = run_mc_paths(
             compiled, uls, corr, r_eff, T_eff,
             N_display=req.N_display,
@@ -279,6 +328,7 @@ def paths_endpoint(req: PathsRequest):
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
         res["years_remaining"] = round(ctx.T_remaining, 4)
+    res["calculation_budget"] = calculation_budget.to_dict()
     return res
 
 
@@ -304,6 +354,20 @@ def proba_endpoint(req: ProbaRequest):
     if len(corr) != n or any(len(row) != n for row in corr):
         raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
     try:
+        validate_compiled_dates(compiled)
+        paths_used = min(10_000, max(2_000, req.N))
+        calculation_budget = estimate_mc_batch(
+            operation="probability_analysis",
+            maturity_years=T_eff,
+            underlyings=n,
+            paths_per_run=paths_used,
+            total_runs=1,
+            model=req.model,
+            antithetic=False,
+            continuous_monitoring=req.barrier_monitoring == "continuous",
+            expanded_dates=count_compiled_dates(compiled),
+        )
+        ensure_budget(calculation_budget)
         res = run_mc_proba(
             compiled, uls, corr, r_eff, T_eff,
             N=req.N,
@@ -320,6 +384,7 @@ def proba_endpoint(req: ProbaRequest):
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
         res["years_remaining"] = round(ctx.T_remaining, 4)
+    res["calculation_budget"] = calculation_budget.to_dict()
     return res
 
 
@@ -354,6 +419,20 @@ def mtf_endpoint(req: MtfRequest):
     if T_eff is None:
         T_eff = effective_T_max(compiled, req.T)
     try:
+        validate_compiled_dates(compiled)
+        peak_paths = max(req.n_outer, min(MTF_MAX_BATCH, req.n_outer * req.n_inner))
+        total_paths = req.n_outer + req.n_outer * req.n_inner * req.n_dates
+        calculation_budget = estimate_mc_batch(
+            operation="mark_to_future",
+            maturity_years=T_eff,
+            underlyings=n,
+            paths_per_run=peak_paths,
+            total_runs=total_paths / peak_paths,
+            model=req.model,
+            antithetic=False,
+            expanded_dates=count_compiled_dates(compiled),
+        )
+        ensure_budget(calculation_budget)
         res = run_mark_to_future(
             compiled, uls, corr, r_eff, T_eff,
             main_price=req.main_price,
@@ -378,6 +457,7 @@ def mtf_endpoint(req: MtfRequest):
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
         res["years_remaining"] = round(ctx.T_remaining, 4)
+    res["calculation_budget"] = calculation_budget.to_dict()
     return res
 
 
@@ -601,7 +681,31 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
 
     T_eff = effective_T_max(compiled, req.T)
     try:
-        return run_mtf_drilldown(
+        validate_compiled_dates(compiled)
+        outer_per_chunk = max(1, MTF_MAX_BATCH // req.n_inner)
+        chunk_starts = {
+            (int(i) // outer_per_chunk) * outer_per_chunk
+            for i in req.scenario_ids
+            if 0 <= int(i) < req.n_outer
+        }
+        chunk_paths = [
+            (min(req.n_outer, start + outer_per_chunk) - start) * req.n_inner
+            for start in chunk_starts
+        ]
+        peak_paths = max([req.n_outer, *chunk_paths])
+        total_paths = req.n_outer + sum(chunk_paths)
+        calculation_budget = estimate_mc_batch(
+            operation="mark_to_future_drilldown",
+            maturity_years=T_eff,
+            underlyings=n,
+            paths_per_run=peak_paths,
+            total_runs=total_paths / peak_paths,
+            model=req.model,
+            antithetic=False,
+            expanded_dates=count_compiled_dates(compiled),
+        )
+        ensure_budget(calculation_budget)
+        result = run_mtf_drilldown(
             compiled, uls, corr, req.r, T_eff,
             main_price=req.main_price,
             t0=req.t,
@@ -621,6 +725,8 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
             yield_curve=req.yield_curve,
             sigma_r=req.sigma_r,
         )
+        result["calculation_budget"] = calculation_budget.to_dict()
+        return result
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -638,6 +744,13 @@ def backtest_endpoint(req: BacktestRequest):
     if not tickers:
         raise HTTPException(status_code=422, detail="Aucun ticker défini dans les sous-jacents.")
 
+    T_eff = effective_T_max(compiled, req.T)
+    try:
+        validate_compiled_dates(compiled)
+        validate_problem_dimensions(T_eff, len(req.underlyings))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     # Load historical prices
     px_data = load_hist_prices(tickers, req.start_date, req.end_date)
     if "error" in px_data:
@@ -649,7 +762,6 @@ def backtest_endpoint(req: BacktestRequest):
     if missing:
         raise HTTPException(status_code=422, detail=f"Tickers manquants dans l'historique: {missing}")
 
-    T_eff = effective_T_max(compiled, req.T)
     # Chaque fenêtre lit ses dates à leur date, calendrier du contrat translaté
     # sur son jour de départ. Trois ans couvrent donc ~765 séances et non 756 :
     # compter l'horizon à 252 par an laisserait les dernières fenêtres finir
@@ -843,6 +955,13 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
         raise HTTPException(status_code=422,
             detail=f"Il faut au moins {req.basket_size} sous-jacent(s) distinct(s) pour un panier de taille {req.basket_size}.")
 
+    T_eff = effective_T_max(compiled, req.T)
+    try:
+        validate_compiled_dates(compiled)
+        validate_problem_dimensions(T_eff, req.basket_size)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     px_data = load_hist_prices(tickers, req.start_date, req.end_date)
     if "error" in px_data:
         raise HTTPException(status_code=422, detail=px_data["error"])
@@ -851,8 +970,6 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
     tickers = [tk for tk in tickers if tk in prices]
     if not tickers:
         raise HTTPException(status_code=422, detail="Aucun historique trouvé pour ces tickers.")
-
-    T_eff = effective_T_max(compiled, req.T)
 
     # Stage 1 — every candidate alone, cheap (O(N) backtests)
     stage1 = []

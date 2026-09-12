@@ -203,3 +203,35 @@ def test_legacy_snapshot_without_rate_is_flagged(session_with_flat_history):
     assert payload["market_used"]["r"] == pytest.approx(DEFAULT_RATE_PCT)
     # Le repli reste possible, mais il se voit.
     assert payload["market_used"]["r_is_default"] is True
+
+
+def test_marche_actuel_rafraichit_le_niveau_de_dividende_et_garde_le_decay(
+        session_with_flat_history, monkeypatch):
+    session = session_with_flat_history
+    deal = _zero_coupon_deal(session, 3.0)
+    market = json.loads(deal.market_snapshot_json)
+    market["underlyings"][0].update({
+        "sigma": 20.0, "q": 2.0, "dividendCurveEnabled": True,
+        "dividendDecay": 10.0,
+        "dividendCurve": [{"T": 1.0, "rate": 2.0}],
+    })
+    deal.market_snapshot_json = json.dumps(market)
+    session.add(deal)
+    session.commit()
+    session.refresh(deal)
+    monkeypatch.setattr(deals_api, "realized_market", lambda *_args, **_kwargs: {
+        "sigma": {"AAA": 0.2}, "corr": [[1.0]], "n_returns": 252,
+    })
+    monkeypatch.setattr(deals_api, "dividend_profile", lambda *_args, **_kwargs: {
+        "ok": True, "yield_declared": 0.035,
+    })
+
+    payload, ctx = deals_api._mtm_core(
+        deal, session, n_paths=2000,
+        body=deals_api.MtmRequest(recalibrate="realized"),
+    )
+
+    assert ctx["engine_uls"][0]["q"] == pytest.approx(0.035)
+    assert ctx["engine_uls"][0]["dividend_decay"] == pytest.approx(0.10)
+    assert ctx["engine_uls"][0]["dividend_curve"][0][1] == pytest.approx(0.035)
+    assert payload["market_used"]["dividend_source"]["AAA"] == "current"

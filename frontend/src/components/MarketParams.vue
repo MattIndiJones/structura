@@ -63,7 +63,17 @@
               {{ formatNumber(store.result.t_max_effective, 2) }} Y
             </span>
           </div>
-          <input v-else v-model.number="store.globalParams.T" type="number" step="0.25" class="input" />
+          <input v-else v-model.number="store.globalParams.T" type="number" step="0.25"
+                 min="0.01" :max="store.calculationLimits.maxMaturityYears" class="input" />
+          <div v-if="store.globalParams.T > store.calculationLimits.maturityWarningYears
+                     && store.globalParams.T <= store.calculationLimits.maxMaturityYears"
+               class="text-[10px] text-amber-500 mt-0.5">
+            Maturité longue — coût et sensibilité modèle accrus.
+          </div>
+          <div v-if="store.globalParams.T > store.calculationLimits.maxMaturityYears"
+               class="text-[10px] text-red-500 mt-0.5">
+            Maximum autorisé : {{ store.calculationLimits.maxMaturityYears }} ans.
+          </div>
         </div>
 
         <!-- Modèle -->
@@ -129,10 +139,10 @@
         </div>
         <div class="mc-param-field">
           <label class="label">Seed
-            <HelpTip text="Graine du générateur aléatoire — fixe le tirage des trajectoires. Deux runs avec le même seed et les mêmes paramètres donnent exactement le même prix (reproductible pour du débogage ou une comparaison A/B), un seed différent donne un résultat légèrement différent (bruit Monte Carlo)." />
+            <HelpTip text="Convention globale du moteur : seed 42 pour tous les pricings. Elle sert à la reproductibilité numérique et ne constitue pas un paramètre économique du deal." />
           </label>
           <SensitiveValue mode="input">
-            <input v-model.number="store.globalParams.seed" type="number" step="1" class="input" />
+            <input :value="42" type="number" class="input opacity-70" disabled />
           </SensitiveValue>
         </div>
         <div class="mc-param-field">
@@ -177,6 +187,10 @@
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Sous-jacents — calibration
         <HelpTip text="La composition du panier (choix des sous-jacents, tickers) se définit dans l'onglet Deal. Ici, seuls les paramètres de marché (volatilité, dividende, smile, quanto) sont calibrés pour chaque sous-jacent déjà ajouté." />
       </h2>
+      <p v-if="store.underlyings.length > store.calculationLimits.underlyingWarningCount"
+         class="text-[10px] text-amber-500 -mt-2 mb-3">
+        Panier large ({{ store.underlyings.length }} actifs) — contrôlez corrélations, coût et stabilité des Greeks.
+      </p>
 
       <!-- Liste des sous-jacents (toujours visible) -->
       <div class="flex gap-1 mb-3 flex-wrap items-center">

@@ -356,7 +356,8 @@ def test_le_prompt_est_consultable_sans_appeler_de_modele():
     from backend.app.services.llm import preview_prompt
     p = preview_prompt("un autocall 3 ans barrière PDI -40%", n_underlyings=1,
                        maturity=3.0)
-    assert set(p) == {"system", "user", "examples", "chars", "approx_tokens"}
+    assert set(p) == {"system", "user", "examples", "examples_version",
+                      "chars", "approx_tokens"}
     assert p["chars"] == len(p["system"]) + len(p["user"])
     assert p["approx_tokens"] > 500
     assert p["examples"] and all(isinstance(e, str) for e in p["examples"])
@@ -370,3 +371,48 @@ def test_le_prompt_change_avec_la_description():
     b = preview_prompt("un shark note capital garanti")
     assert a["examples"] != b["examples"]
     assert a["system"] != b["system"]
+
+
+def test_compile_pricing_et_avertissements_sont_trois_verdicts_distincts():
+    raw = (f"{SCRIPT_MARK}\nAT 1:\n  PAY 1\n{EXPLAIN_MARK}\n"
+           "Produit sans maturité.")
+    v = _validate(raw, "une note")
+    result = v.as_dict()
+    assert result["ok"] is True          # alias historique
+    assert result["compiles"] is True
+    assert result["checks_status"] == "warning"
+    assert result["adoption_requires_acknowledgement"] is True
+    assert result["pricing_check"] in {"passed", "warning"}
+
+
+def test_la_provenance_capture_chaque_prompt_reponse_et_modele_effectif(monkeypatch):
+    import backend.app.services.llm as llm
+    from backend.app.services.llm.providers import Completion
+
+    invalid = "ceci ne compile pas"
+    valid = (f"{SCRIPT_MARK}\nAT MATURITY:\n  PAY 1\n"
+             f"{EXPLAIN_MARK}\nRemboursement du nominal.")
+    completions = iter([
+        Completion(invalid, "modele-installe:7b"),
+        Completion(valid, "modele-installe:7b"),
+    ])
+    monkeypatch.setattr(
+        llm, "complete_with_metadata", lambda *args, **kwargs: next(completions))
+
+    result = llm.generate(
+        "une note qui rembourse le nominal", provider="ollama",
+        model="modele-demande:14b", underlyings=UL, corr=C1,
+        r=0.03, T=1.0)
+
+    assert result["repairs"] == 1
+    assert result["requested_model"] == "modele-demande:14b"
+    assert result["effective_model"] == "modele-installe:7b"
+    assert result["model"] == "modele-installe:7b"
+    assert result["prompt"] == result["attempts"][-1]["prompt"]
+    assert result["attempts"][0]["raw_response"] == invalid
+    assert result["attempts"][1]["raw_response"] == valid
+    assert result["attempts"][1]["kind"] == "repair"
+    assert result["attempts"][0]["prompt"] != result["attempts"][1]["prompt"]
+    assert len(result["script_sha256"]) == 64
+    assert result["generation_id"]
+    assert len(result["examples_version"]) == 64

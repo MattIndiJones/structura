@@ -33,11 +33,13 @@ from sqlmodel import Session
 from backend.app.db.database import engine, init_db
 from backend.app.core.compute.queue_store import (
     claim_next_batch, pending_jobs, record_job_result, finalize_batch,
+    lease_is_active, renew_lease,
 )
 from backend.app.core.compute.executor import run_batch
 
 
-def process_next_batch(worker_name: str, max_workers: int, use_processes: bool) -> bool:
+def process_next_batch(worker_name: str, max_workers: int, use_processes: bool,
+                       job_timeout_seconds: float = 300.0) -> bool:
     """Claims and fully drains one batch (blocking until every job is
     dispatched). Returns False if nothing was queued/claimable, so the
     caller's poll loop knows whether to sleep."""
@@ -45,21 +47,58 @@ def process_next_batch(worker_name: str, max_workers: int, use_processes: bool) 
         batch = claim_next_batch(session, worker_name)
         if not batch:
             return False
-        batch_id, kind, label = batch.id, batch.kind, batch.label
-        jobs = pending_jobs(session, batch_id)
-        job_payloads = [(j.id, json.loads(j.payload_json)) for j in jobs]
+        batch_id, kind, label, lease_token = (
+            batch.id, batch.kind, batch.label, batch.lease_token)
+        params = json.loads(batch.params_json or "{}")
 
-    print(f"[{worker_name}] batch #{batch_id} ({kind!r}, {label!r}) — {len(job_payloads)} job(s)")
+    effective_workers = max(1, min(max_workers, int(params.get("max_workers", max_workers))))
+    window_size = max(effective_workers, effective_workers * 2)
+    timeout = float(params.get("job_timeout_seconds", job_timeout_seconds))
+
+    print(f"[{worker_name}] batch #{batch_id} ({kind!r}, {label!r}) — "
+          f"fenêtres de {window_size} job(s)")
 
     def _on_result(job_id, jr):
         with Session(engine) as s:
-            record_job_result(s, job_id, jr.ok, jr.result, jr.error)
+            record_job_result(s, job_id, jr.ok, jr.result, jr.error,
+                              lease_token=lease_token)
 
-    run_batch(kind, job_payloads, max_workers=max_workers, use_processes=use_processes,
-              on_result=_on_result)
+    last_heartbeat = 0.0
+
+    def _tick():
+        nonlocal last_heartbeat
+        now = time.monotonic()
+        if now - last_heartbeat >= 10.0:
+            with Session(engine) as s:
+                renew_lease(s, batch_id, lease_token)
+            last_heartbeat = now
+
+    def _cancelled_or_lease_lost():
+        with Session(engine) as s:
+            return not lease_is_active(s, batch_id, lease_token)
+
+    while True:
+        with Session(engine) as session:
+            if not renew_lease(session, batch_id, lease_token):
+                return True
+            jobs = pending_jobs(session, batch_id, limit=window_size,
+                                lease_token=lease_token)
+            job_payloads = [(j.id, json.loads(j.payload_json)) for j in jobs]
+        if not job_payloads:
+            break
+        run_batch(
+            kind, job_payloads, max_workers=effective_workers,
+            use_processes=use_processes, on_result=_on_result,
+            should_cancel=_cancelled_or_lease_lost, on_tick=_tick,
+            job_timeout_seconds=timeout, window_size=window_size,
+        )
+        if _cancelled_or_lease_lost():
+            return True
 
     with Session(engine) as session:
-        final = finalize_batch(session, batch_id)
+        final = finalize_batch(session, batch_id, lease_token=lease_token)
+    if final is None:
+        return True
     print(f"[{worker_name}] batch #{batch_id} -> {final.status} "
           f"({final.completed_jobs} ok / {final.failed_jobs} failed)")
     return True
@@ -77,6 +116,8 @@ def main():
     p.add_argument("--threads", action="store_true",
                    help="Utilise des threads au lieu de processus — déconseillé pour du repricing "
                         "PayScript (voir core/compute/executor.py), réservé à un pricer externe I/O-bound")
+    p.add_argument("--job-timeout-seconds", type=float, default=300.0,
+                   help="Durée maximale d'un job avant arrêt de sa fenêtre (défaut: 300s)")
     args = p.parse_args()
 
     init_db()
@@ -86,7 +127,9 @@ def main():
           f"— Ctrl+C pour arrêter.")
 
     while True:
-        did_work = process_next_batch(worker_name, args.max_workers, use_processes=not args.threads)
+        did_work = process_next_batch(
+            worker_name, args.max_workers, use_processes=not args.threads,
+            job_timeout_seconds=args.job_timeout_seconds)
         if args.once:
             break
         if not did_work:

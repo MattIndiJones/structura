@@ -12,18 +12,29 @@ from __future__ import annotations
 import bisect
 import math
 import time
+from dataclasses import replace
 from datetime import date, timedelta
 from typing import NamedTuple
 import numpy as np
 from numpy.random import default_rng
 from scipy.special import erfc
 from .parser import CompiledScript, CompiledEvent
+from .models import MODELS
+from ..compute_budget import (
+    ABSOLUTE_WORK_LIMIT,
+    WORKER_MEMORY_LIMIT_BYTES,
+    ensure_budget,
+    count_compiled_dates,
+    estimate_mc,
+    estimate_mc_batch,
+    validate_compiled_dates,
+    validate_problem_dimensions,
+)
 
 SY = 52       # weekly steps per year
 # Largest coefficient move a nearest-PSD repair may make before the matrix is
 # rejected outright rather than silently used (see cholesky).
 CORR_REPAIR_TOL = 0.02
-MODELS = ("constant", "heston", "sabr", "localvol", "lsv")
 PSI_C = 1.5   # Heston QE switching threshold
 MTF_MAX_BATCH = 20_000   # cap simulated paths per inner Mark-to-Future chunk (memory bound)
 # Below this many surviving contracts a Mark-to-Future date is flagged `thin`:
@@ -1118,26 +1129,27 @@ def _rate_coupled_factor(corr: list[list[float]], rho_vec, n: int) -> np.ndarray
 
 # ── PayScript evaluation ────────────────────────────────────────────
 
-def _strike_fix_steps(script: CompiledScript, ts_n: int) -> list[int]:
+def _strike_fix_steps(script: CompiledScript, ts_n: int,
+                      dt: float = 1.0 / SY) -> list[int]:
     """Steps of the starting window — the dates that fix S0.
     run_payoff_profile needs the LAST of them to know where to stop sweeping the
     neutral level, and _apply_delayed_bump needs it to know where a Greeks bump
     may start biting; both must quantise exactly like the reduction itself, or a
     short window desyncs them and the sweep-cancels-fixing bug comes back."""
-    return _window_steps(script.strike_fix_dates, ts_n)
+    return _window_steps(script.strike_fix_dates, ts_n, dt)
 
 
-def _window_steps(dates, ts: int) -> list[int]:
+def _window_steps(dates, ts: int, dt: float = 1.0 / SY) -> list[int]:
     """Year-fractions of a constatation window -> distinct grid steps.
 
-    Same weekly quantisation as every other date (round(d*SY)), clamped into
+    Same quantisation as every other date (round(d/dt)), clamped into
     [1, ts]. Distinct is the operative word: a window declared daily collapses
     onto the weekly grid, so 30 business days become 6 steps and each counts
     ONCE. Silently averaging the same step five times would weight one week as
     heavily as the other five put together."""
     if not dates:
         return []
-    return sorted({min(max(round(d * SY), 1), ts) for d in dates})
+    return sorted({min(max(round(d / dt), 1), ts) for d in dates})
 
 
 def _reduce_window(S: np.ndarray, steps: list[int], reduction: str) -> np.ndarray:
@@ -1234,7 +1246,8 @@ def _fusionner_realise(a: dict | None, b: dict | None) -> dict | None:
 
 
 def _niveau_initial(script: CompiledScript, S: np.ndarray, ts: int, n: int,
-                     N: int, fix_state_init: dict | None) -> np.ndarray | None:
+                     N: int, fix_state_init: dict | None,
+                     dt: float = 1.0 / SY) -> np.ndarray | None:
     """S0_i — the initial level each underlying is measured against, (n, N).
 
     None when the product has no starting window: S0 is then the strike-date
@@ -1242,7 +1255,7 @@ def _niveau_initial(script: CompiledScript, S: np.ndarray, ts: int, n: int,
     """
     if not script.strike_fix_reduction:
         return None
-    steps = _window_steps(script.strike_fix_dates, ts)
+    steps = _window_steps(script.strike_fix_dates, ts, dt)
     window = _reduce_window(S, steps, script.strike_fix_reduction) if steps else None
     if window is None and fix_state_init is None:
         return None
@@ -1280,7 +1293,8 @@ def _rebaser_sur_le_niveau_initial(S: np.ndarray, ref: np.ndarray, end_step: int
 
 def _constater(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 bridge_min, bridge_max, fix_state_init: dict | None,
-                step_map: dict, releves_realises: dict | None = None) -> tuple:
+                step_map: dict, releves_realises: dict | None = None,
+                dt: float = 1.0 / SY) -> tuple:
     """Toute la chaîne de constatation d'un jeu de trajectoires.
 
     1. réduire la fenêtre de départ en S0_i, par sous-jacent ;
@@ -1293,16 +1307,16 @@ def _constater(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
     appliquer exactement la même suite, dans le même ordre. C'est la divergence
     entre deux chemins d'évaluation qui avait déjà fait analyser un produit
     neuf alors qu'il était en cours de vie."""
-    ref = _niveau_initial(script, S, ts, n, N, fix_state_init)
+    ref = _niveau_initial(script, S, ts, n, N, fix_state_init, dt)
     if ref is not None:
-        steps = _strike_fix_steps(script, ts)
+        steps = _strike_fix_steps(script, ts, dt)
         S, bridge_min, bridge_max = _rebaser_sur_le_niveau_initial(
             S, ref, max(steps) if steps else 0, bridge_min, bridge_max)
-    return S, bridge_min, bridge_max, _niveaux_constates(script, S, ts, step_map,
-                                                         releves_realises)
+    return S, bridge_min, bridge_max, _niveaux_constates(
+        script, S, ts, step_map, releves_realises, dt)
 
 
-def _rangs_observation(step_map: dict) -> dict:
+def _rangs_observation(step_map: dict, dt: float = 1.0 / SY) -> dict:
     """Rang que chaque événement lit sous le nom `INDEX`, aligné index par index
     sur `step_map` — même patron que `pay_map` et les niveaux constatés.
 
@@ -1319,7 +1333,7 @@ def _rangs_observation(step_map: dict) -> dict:
         rangs = []
         for ev in evs:
             k = next((j for j, d in enumerate(ev.dates)
-                      if max(1, round(d * SY)) == step), None)
+                      if max(1, round(d / dt)) == step), None)
             rangs.append(ev.ranks[k] if ev.ranks and k is not None
                          and k < len(ev.ranks) else None)
         out[step] = rangs
@@ -1327,7 +1341,8 @@ def _rangs_observation(step_map: dict) -> dict:
 
 
 def _niveaux_constates(script: CompiledScript, S: np.ndarray, ts: int,
-                        step_map: dict, releves_realises: dict | None = None) -> dict:
+                        step_map: dict, releves_realises: dict | None = None,
+                        dt: float = 1.0 / SY) -> dict:
     """Niveau constaté de chaque ÉVÉNEMENT, aligné index par index sur
     `step_map` — exactement comme `pay_map` l'est déjà.
 
@@ -1363,10 +1378,10 @@ def _niveaux_constates(script: CompiledScript, S: np.ndarray, ts: int,
             # `AT Nom:` porte toutes les dates du calendrier, chacune avec sa
             # fenêtre — il faut retrouver la bonne.
             k = next((j for j, d in enumerate(ev.dates)
-                      if max(1, round(d * SY)) == step), None)
+                      if max(1, round(d / dt)) == step), None)
             if k is None or k >= len(ev.window_dates):
                 continue
-            w = tuple(_window_steps(ev.window_dates[k], ts))
+            w = tuple(_window_steps(ev.window_dates[k], ts, dt))
             passes = (ev.releves_passes[k] if ev.releves_passes
                       and k < len(ev.releves_passes) else 0)
             cle = None
@@ -1656,7 +1671,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             # rendements sont nuls par aplatissement, mais le temps, lui,
             # continuerait de courir : la vol realisee sortirait diluee.
             _vecu = max(1, step - state_start_step)
-            ctx["realvol"] = (math.sqrt(SY * cum_sq_ret[step - 1, path] / _vecu)
+            ctx["realvol"] = (math.sqrt(cum_sq_ret[step - 1, path] / (_vecu * dt))
                               if realvol_state_init is None else
                               math.sqrt((_rv_s0 + cum_sq_ret[step - 1, path])
                                         / (_rv_t + _vecu * dt)))
@@ -2007,6 +2022,30 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
 
 # ── Main Monte Carlo entry point ────────────────────────────────────
 
+def _average_antithetic_flux_maps(base: dict, anti: dict) -> dict:
+    """Average each dated flow across the two legs of every antithetic pair.
+
+    The price estimator averages paired paths, so its decomposition must do the
+    same entry by entry. A posteriori rescaling of the base leg can force the PV
+    total to match while assigning the wrong amount to individual dates or flow
+    labels whenever the two legs trigger different contractual branches.
+    """
+    averaged: dict = {}
+    for key in base.keys() | anti.keys():
+        left, right = base.get(key), anti.get(key)
+        template = left or right
+        averaged[key] = {
+            field: template[field]
+            for field in template
+            if field not in {"n", "sum", "pv"}
+        }
+        for field in ("n", "sum", "pv"):
+            averaged[key][field] = 0.5 * (
+                (left.get(field, 0.0) if left else 0.0)
+                + (right.get(field, 0.0) if right else 0.0)
+            )
+    return averaged
+
 def run_mc(script: CompiledScript,
            underlyings,
            corr_matrix,
@@ -2072,9 +2111,31 @@ def run_mc(script: CompiledScript,
     user_params = user_params or {}
     n = len(underlyings)
     T = T_max + dt_add
+    validate_compiled_dates(script)
+    ensure_budget(
+        estimate_mc(
+            operation="monte_carlo",
+            maturity_years=T,
+            underlyings=n,
+            paths=N,
+            model=model,
+            antithetic=antithetic,
+            continuous_monitoring=use_bridge,
+            stochastic_rates=sigma_r > 0,
+            expanded_dates=count_compiled_dates(script),
+        ),
+        memory_limit_bytes=WORKER_MEMORY_LIMIT_BYTES,
+        work_limit=ABSOLUTE_WORK_LIMIT,
+    )
     r_eff = r + dr
     ts = max(1, round(T * SY))
-    dt = 1.0 / SY
+    # Keep roughly weekly monitoring and the same random tensor dimensions, but
+    # make the terminal node exactly equal to the requested horizon. The former
+    # fixed 1/52 step ended at round(T*52)/52 and therefore priced a nearby
+    # maturity while reporting T. Contractual event dates remain quantised to
+    # this monitoring grid; inserting them as extra monitoring nodes would
+    # silently change the definition of a weekly barrier.
+    dt = T / ts
     sq_dt = math.sqrt(dt)
 
     step_map: dict[int, list] = {}
@@ -2090,7 +2151,7 @@ def run_mc(script: CompiledScript,
             for i, d in enumerate(ev.dates):
                 # Clamp to step >= 1: a date rounding to step 0 would make the
                 # evaluators index S_min[-1]/WOF_min[-1] — the END of the path.
-                step = max(1, round(d * SY))
+                step = max(1, round(d / dt))
                 step_map.setdefault(step, []).append(ev)
                 pays = ev.payment_dates
                 pay_map.setdefault(step, []).append(
@@ -2216,7 +2277,7 @@ def run_mc(script: CompiledScript,
     def _apply_delayed_bump(S: np.ndarray) -> np.ndarray:
         if not _bump_needs_delay:
             return S
-        fix_steps = _strike_fix_steps(script, ts)
+        fix_steps = _strike_fix_steps(script, ts, dt)
         fix_end_step = max(fix_steps) if fix_steps else 0
         S = S.copy()
         for i, (m, b) in enumerate(zip(spot_mult, _base_vec)):
@@ -2230,7 +2291,7 @@ def run_mc(script: CompiledScript,
     # hebdomadaire que les dates d'observation : les deux doivent s'accorder,
     # sans quoi une constatation pourrait précéder le strike qui la référence.
     strike_step = (0 if not strike_set_t
-                   else min(max(round(strike_set_t * SY), 1), ts))
+                   else min(max(round(strike_set_t / dt), 1), ts))
 
     if use_heston:
         S_base = _simulate_heston(ts, n, N_pairs, dt, sq_dt, underlyings,
@@ -2268,7 +2329,7 @@ def run_mc(script: CompiledScript,
     # niveaux constates aux dates qui portent une fenetre.
     S_base, br_min_b, br_max_b, lvl_b = _constater(
         script, S_base, ts, n, N_pairs, br_min_b, br_max_b,
-        fix_state_init, step_map)
+        fix_state_init, step_map, dt=dt)
 
     stop_times_base: list[float] | None = [] if script.has_stop else None
     flows_base: list | None = [] if per_path_flows else None
@@ -2309,11 +2370,12 @@ def run_mc(script: CompiledScript,
                                           s_prev_init=s_prev_init, wof0_init=wof0_init,
                                           realvol_state_init=realvol_state_init,
                                           lvl_map=lvl_b,
-                                          rank_map=_rangs_observation(step_map),
+                                          rank_map=_rangs_observation(step_map, dt),
                                           state_start_step=strike_step)
 
     payoffs_anti: list[float] = []
     raw_anti:     list[float] = []
+    flux_map_anti: dict = {}
     if antithetic:
         # The antithetic leg is the same draw with the sign flipped: it needs no
         # new randomness, and it should need no new memory either. Two
@@ -2362,12 +2424,12 @@ def run_mc(script: CompiledScript,
             S_anti, strike_step, br_min_a, br_max_a)
         S_anti, br_min_a, br_max_a, lvl_a = _constater(
             script, S_anti, ts, n, N_pairs, br_min_a, br_max_a,
-            fix_state_init, step_map)
+            fix_state_init, step_map, dt=dt)
         stop_times_anti: list[float] | None = [] if script.has_stop else None
         flows_anti = [] if per_path_flows else None
         payoffs_anti, raw_anti = _eval_paths(script, S_anti, ts, n, N_pairs, dt, r_eff,
-                                              user_params, step_map, mat_events, {},
-                                              record=False, df_arr=df_anti,
+                                              user_params, step_map, mat_events, flux_map_anti,
+                                              record=True, df_arr=df_anti,
                                               pay_map=pay_map,
                                               pay_df={t: _df_at_time(df_anti, t, dt, ts, r_eff)
                                                       for t in pay_times},
@@ -2384,7 +2446,7 @@ def run_mc(script: CompiledScript,
                                               s_prev_init=s_prev_init, wof0_init=wof0_init,
                                               realvol_state_init=realvol_state_init,
                                               lvl_map=lvl_a,
-                                              rank_map=_rangs_observation(step_map),
+                                              rank_map=_rangs_observation(step_map, dt),
                                               state_start_step=strike_step)
 
     # Price: antithetic average of paired paths (lower variance).
@@ -2407,12 +2469,8 @@ def run_mc(script: CompiledScript,
     var5   = pv_all[int(N_hist * 0.05)]
     prob_gt100 = sum(1 for p in raw_all if p > 1.0) / N_hist
 
-    # Scale flux PV contributions (base paths) to match antithetically-averaged price.
-    base_price = sum(payoffs_base) / N_pairs
-    if antithetic and base_price != 0:
-        scale = price / base_price
-        for d in flux_map.values():
-            d["pv"] *= scale
+    if antithetic:
+        flux_map = _average_antithetic_flux_maps(flux_map, flux_map_anti)
 
     # Fugit = E[τ] — probability-weighted expected life of the product.
     # Averaged over base + antithetic legs for more stable estimate.
@@ -2467,9 +2525,10 @@ def run_mc(script: CompiledScript,
         # overvalued. Flagged rather than silently trusted.
         "barrier_monitoring": barrier_monitoring,
         "barrier_monitoring_note": (
-            "Monitoring continu approché par pont brownien — biais mesuré "
-            "d'environ -14% sur une barrière proche de la monnaie (référence : "
-            "formule de Merton). Le mode hebdomadaire, lui, est exact."
+            "Monitoring continu approché par pont brownien — biais de prix "
+            "d'environ -14% mesuré sur un benchmark down-and-out proche de la "
+            "monnaie face à la formule de Merton. Le mode hebdomadaire évalue "
+            "exactement le contrat échantillonné sur ses points hebdomadaires."
         ) if use_bridge else None,
         # Ce qu'une fenêtre de constatation a RÉELLEMENT pesé. Publié pour
         # toutes les fenêtres, pas seulement les courtes : « attention, fenêtre
@@ -2477,11 +2536,12 @@ def run_mc(script: CompiledScript,
         # hebdomadaire, 30 jours ouvrés valent 6 points et l'écart au quotidien
         # se mesure en quelques points de base ; en dessous d'une semaine il ne
         # reste qu'un point et le moyennage n'a tout simplement pas eu lieu.
-        "constatation_windows": _window_report(script, ts) or None,
+        "constatation_windows": _window_report(script, ts, dt) or None,
     }
 
 
-def _window_report(script: CompiledScript, ts: int) -> list[dict]:
+def _window_report(script: CompiledScript, ts: int,
+                   dt: float = 1.0 / SY) -> list[dict]:
     """Points de grille effectivement retenus par chaque fenêtre, vs demandés."""
     out: list[dict] = []
 
@@ -2489,7 +2549,7 @@ def _window_report(script: CompiledScript, ts: int) -> list[dict]:
 
     def _add(label: str, reduction: str, dates, t: float | None):
         asked = len(dates or [])
-        kept = len(_window_steps(dates, ts))
+        kept = len(_window_steps(dates, ts, dt))
         if not asked:
             return
         # Deux événements qui constatent la même fenêtre au même jour — un
@@ -2525,7 +2585,9 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
                    yield_curve=None, barrier_monitoring: str = "weekly",
                    antithetic: bool = True, state: dict | None = None,
                    funding_curve=None, funding_spread: float = 0.0,
-                   strike_set_t: float | None = None):
+                   strike_set_t: float | None = None,
+                   maturity_payment_t: float | None = None,
+                   value_date_t: float = 0.0):
     """CRN bump-and-reprice greeks.
 
     Every term of every finite difference — including the CENTER of gamma/
@@ -2583,6 +2645,8 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
             yield_curve=yield_curve or [], barrier_monitoring=barrier_monitoring,
             funding_curve=funding_curve or [], funding_spread=funding_spread,
             strike_set_t=strike_set_t,
+            maturity_payment_t=maturity_payment_t,
+            value_date_t=value_date_t,
             spot_mult=sv, spot_base=base_spots,
             wof_min_init=st.get("wof_min"), bof_max_init=st.get("bof_max"),
             index_offset=st.get("index", 0) if index_ is None else index_,
@@ -2663,6 +2727,50 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
     return greeks
 
 
+def _age_compiled_script(script: CompiledScript, shift: float) -> CompiledScript:
+    """Move the unresolved contractual timeline while preserving its metadata."""
+    eps = 1e-9
+    aged_events = []
+    for ev in script.events:
+        if ev.type != "AT":
+            aged_events.append(ev)
+            continue
+
+        kept = [index for index, event_t in enumerate(ev.dates)
+                if event_t > shift + eps]
+        if not kept:
+            continue
+
+        def _aligned(values, transform):
+            if values is None:
+                return None
+            return [transform(values[index]) for index in kept]
+
+        aged_events.append(replace(
+            ev,
+            dates=[round(ev.dates[index] - shift, 6) for index in kept],
+            payment_dates=_aligned(
+                ev.payment_dates,
+                lambda value: None if value is None else round(value - shift, 6),
+            ),
+            window_dates=_aligned(
+                ev.window_dates,
+                lambda dates: [round(value - shift, 6) for value in dates
+                               if value > shift + eps],
+            ),
+            ranks=_aligned(ev.ranks, lambda value: value),
+            releves_passes=_aligned(ev.releves_passes, lambda value: value),
+        ))
+
+    strike_fix_dates = None
+    if script.strike_fix_dates is not None:
+        strike_fix_dates = [round(value - shift, 6)
+                            for value in script.strike_fix_dates
+                            if value > shift + eps]
+
+    return replace(script, events=aged_events, strike_fix_dates=strike_fix_dates)
+
+
 def _theta_and_event(script: CompiledScript, T: float, st: dict,
                      base_g: float | None, base_res: dict | None,
                      reprice) -> tuple[float | None, dict | None]:
@@ -2695,6 +2803,19 @@ def _theta_and_event(script: CompiledScript, T: float, st: dict,
     if st.get("realvol_state"):
         return None, {"reason": "realvol"}
 
+    crossed_window_points = sorted({
+        round(value, 6)
+        for ev in script.events
+        for dates in (ev.window_dates or [])
+        for value in dates
+        if 0 < value <= dt_step + eps
+    })
+    if crossed_window_points:
+        return None, {
+            "reason": "constatation_window_transition_required",
+            "t_years": crossed_window_points[-1],
+        }
+
     crossed = sorted({round(d, 6) for ev in script.events if ev.type == "AT"
                       for d in ev.dates if 0 < d <= dt_step + eps})
 
@@ -2711,27 +2832,8 @@ def _theta_and_event(script: CompiledScript, T: float, st: dict,
             "terminates": bool(script.has_stop),
         }
 
-    aged_sfd = ([round(d - dt_step, 6) for d in script.strike_fix_dates
-                 if d > dt_step + eps] or None) if script.strike_fix_dates else None
-
-    def _respan(events, shift: float):
-        out = []
-        for ev in events:
-            if ev.type != "AT":
-                out.append(ev)
-                continue
-            keep = [round(d - shift, 6) for d in ev.dates if d > dt_step + eps]
-            if keep:
-                out.append(CompiledEvent(type=ev.type, dates=keep, fn=ev.fn))
-        return out
-
-    def _variant(shift: float):
-        return CompiledScript(events=_respan(script.events, shift),
-                              init_fn=script.init_fn, params=script.params,
-                              constats=script.constats, has_stop=script.has_stop,
-                              strike_fix_dates=aged_sfd)
-
-    aged = reprice(script_=_variant(dt_step), T_=T - dt_step)["price"]
+    aged = reprice(script_=_age_compiled_script(script, dt_step),
+                   T_=T - dt_step)["price"]
     # Per calendar day: the product was aged by dt_step YEARS, which is
     # 365.25*dt_step days on the engine's own day-count — 7.02 on the weekly
     # grid, not 7. Hard-coding 7 was right only by coincidence of SY=52, and
@@ -2739,7 +2841,10 @@ def _theta_and_event(script: CompiledScript, T: float, st: dict,
     # changed: at 252 steps the product ages 1.45 days while the result would
     # still be divided by 7, understating decay almost fivefold.
     per_day = 365.25 * dt_step
-    return round((aged - base_g) / per_day, 4), None
+    # Daily theta on a unit-notional product is commonly below 1bp. Four
+    # decimals rounded a 3% zero-coupon from 0.0000797 to 0.0001, a 25% display
+    # error that then propagated into nominal-weighted portfolio risk.
+    return round((aged - base_g) / per_day, 8), None
 
 
 # ── Analytics: Payoff Profile ───────────────────────────────────────
@@ -2775,6 +2880,8 @@ def run_payoff_profile(script: CompiledScript, underlyings, corr_matrix,
     symbolically, and it generalizes to every PayScript, not just gear puts."""
     user_params = user_params or {}
     n = len(underlyings)
+    validate_problem_dimensions(T_max, n)
+    validate_compiled_dates(script)
     levels = [0.0 + i * 1.50 / (n_pts - 1) for i in range(n_pts)]
 
     ts = max(1, round(T_max * SY))
@@ -2859,6 +2966,24 @@ def run_mc_paths(script: CompiledScript, underlyings, corr_matrix,
     _fix_state = state.pop("fix_state_init", None)
     user_params = user_params or {}
     n = len(underlyings)
+    if barrier_monitoring not in ("weekly", "continuous"):
+        raise ValueError(f"barrier_monitoring invalide: {barrier_monitoring!r}.")
+    validate_model(model, underlyings)
+    validate_compiled_dates(script)
+    ensure_budget(
+        estimate_mc(
+            operation="path_visualisation",
+            maturity_years=T_max,
+            underlyings=n,
+            paths=N_stat,
+            model=model,
+            antithetic=False,
+            continuous_monitoring=barrier_monitoring == "continuous",
+            expanded_dates=count_compiled_dates(script),
+        ),
+        memory_limit_bytes=WORKER_MEMORY_LIMIT_BYTES,
+        work_limit=ABSOLUTE_WORK_LIMIT,
+    )
     ts = max(1, round(T_max * SY))
     dt = 1.0 / SY
     sq_dt = math.sqrt(dt)
@@ -2987,6 +3112,24 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
     user_params = user_params or {}
     n = len(underlyings)
     N_p = min(10000, max(2000, N))
+    if barrier_monitoring not in ("weekly", "continuous"):
+        raise ValueError(f"barrier_monitoring invalide: {barrier_monitoring!r}.")
+    validate_model(model, underlyings)
+    validate_compiled_dates(script)
+    ensure_budget(
+        estimate_mc(
+            operation="probability_analysis",
+            maturity_years=T_max,
+            underlyings=n,
+            paths=N_p,
+            model=model,
+            antithetic=False,
+            continuous_monitoring=barrier_monitoring == "continuous",
+            expanded_dates=count_compiled_dates(script),
+        ),
+        memory_limit_bytes=WORKER_MEMORY_LIMIT_BYTES,
+        work_limit=ABSOLUTE_WORK_LIMIT,
+    )
     ts = max(1, round(T_max * SY))
     dt = 1.0 / SY
     sq_dt = math.sqrt(dt)
@@ -3552,6 +3695,22 @@ def run_mark_to_future(script: CompiledScript,
     # this function already computes correctly for a recallable product.
     mtm_dates = ([round(float(d), 6) for d in mtm_dates]
                  if mtm_dates else build_mtf_dates(T_max, n_dates))
+    _peak_paths = max(n_outer, min(MTF_MAX_BATCH, n_outer * n_inner))
+    _total_paths = n_outer + n_outer * n_inner * len(mtm_dates)
+    ensure_budget(
+        estimate_mc_batch(
+            operation="mark_to_future",
+            maturity_years=T_max,
+            underlyings=n,
+            paths_per_run=_peak_paths,
+            total_runs=_total_paths / _peak_paths,
+            model=model,
+            antithetic=False,
+            expanded_dates=count_compiled_dates(script),
+        ),
+        memory_limit_bytes=WORKER_MEMORY_LIMIT_BYTES,
+        work_limit=ABSOLUTE_WORK_LIMIT,
+    )
     # A mark date inside the first half-step snaps to step 0: the replay would
     # then index an empty path tensor and die on `WOF_min[-1]` with an IndexError
     # about axis 0 having size 0 — a stack trace no caller can act on.
@@ -3949,6 +4108,28 @@ def run_mtf_drilldown(script: CompiledScript,
         raise ValueError(
             f"{len(ids)} scénarios demandés, {max_scenarios} au maximum — chacun "
             f"rejoue {n_inner} chemins internes et renvoie sa trajectoire complète.")
+    _outer_per_chunk = max(1, MTF_MAX_BATCH // n_inner)
+    _chunk_starts = {(i // _outer_per_chunk) * _outer_per_chunk for i in ids}
+    _chunk_paths = [
+        (min(n_outer, start + _outer_per_chunk) - start) * n_inner
+        for start in _chunk_starts
+    ]
+    _peak_paths = max([n_outer, *_chunk_paths])
+    _total_paths = n_outer + sum(_chunk_paths)
+    ensure_budget(
+        estimate_mc_batch(
+            operation="mark_to_future_drilldown",
+            maturity_years=T_max,
+            underlyings=n,
+            paths_per_run=_peak_paths,
+            total_runs=_total_paths / _peak_paths,
+            model=model,
+            antithetic=False,
+            expanded_dates=count_compiled_dates(script),
+        ),
+        memory_limit_bytes=WORKER_MEMORY_LIMIT_BYTES,
+        work_limit=ABSOLUTE_WORK_LIMIT,
+    )
     lab = {i: (labels[j] if labels and j < len(labels) else None)
            for j, i in enumerate(ids)}
 
@@ -4335,7 +4516,8 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                             prices_by_ticker: dict, start_idx: int,
                             T_max: float, user_params: dict,
                             tickers: list[str], r: float = 0.03,
-                            origine: date | str | None = None) -> dict | None:
+                            origine: date | str | None = None,
+                            reference_levels: dict[str, float] | None = None) -> dict | None:
     """Replay PayScript using actual historical close prices.
 
     Chaque date de l'échéancier se lit à sa DATE — voir `_LectureParDate`.
@@ -4357,6 +4539,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     # peuvent constater differemment.
     win_map: dict = {}
     rank_map: dict = {}
+    payment_map: dict = {}
     mat_events = []
     for ev in compiled.events:
         if ev.type == "AT_MATURITY":
@@ -4377,6 +4560,9 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                 # rejouait. Voir test_backtest_oracle.py.
                 rank_map.setdefault(cle, []).append(
                     ev.ranks[i] if ev.ranks and i < len(ev.ranks) else None)
+                pays = ev.payment_dates
+                payment_map.setdefault(cle, []).append(
+                    pays[i] if pays and i < len(pays) else None)
 
     reportes: set = set()
 
@@ -4429,6 +4615,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     _fix_all_past = bool(_fix_red and _fix_dates
                           and lecture.indice(max(_fix_dates)) is not None)
     ref: dict = {}
+    reference_levels = reference_levels or {}
     for tk in tickers:
         px = prices_by_ticker.get(tk, [])
         if not (px and start_idx < len(px) and px[start_idx] > 0):
@@ -4437,7 +4624,8 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             closes = _closes_on(tk, _fix_dates)
             ref[tk] = _reduce(closes, _fix_red) if closes else px[start_idx]
         else:
-            ref[tk] = px[start_idx]
+            explicit = float(reference_levels.get(tk, 0.0) or 0.0)
+            ref[tk] = explicit if explicit > 0 else px[start_idx]
     if not ref:
         return None
 
@@ -4615,7 +4803,15 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             for fl in st["flows"]:
                 # La séance lue voyage avec le flux : un écran qui la
                 # recalculerait depuis `t` referait la transposition.
-                cfs.append({"t": t_y, "cf": fl["v"], "date": dates[hi]})
+                _payments = payment_map.get(t_obs, [])
+                payment_t = (_payments[ev_i]
+                             if ev_i < len(_payments) and _payments[ev_i] is not None
+                             else t_y)
+                cfs.append({
+                    "t": t_y, "cf": fl["v"], "date": dates[hi],
+                    "payment_t": payment_t,
+                    "payment_date": lecture.jour(payment_t).isoformat(),
+                })
             if st["done"]:
                 done = True
                 ctx["done"] = True
@@ -4651,7 +4847,11 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                         f"Erreur d'exécution du script (événement {ev.type}, t={ctx['t']:.4f}) : {e}"
                     ) from e
                 for fl in st["flows"]:
-                    cfs.append({"t": T_max, "cf": fl["v"], "date": dates[mhi]})
+                    cfs.append({
+                        "t": T_max, "cf": fl["v"], "date": dates[mhi],
+                        "payment_t": T_max,
+                        "payment_date": lecture.jour(T_max).isoformat(),
+                    })
                 if st["done"]:
                     done = True
 

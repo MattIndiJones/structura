@@ -23,7 +23,7 @@ from ..core.rfq_controls import (
     rfq_readiness_failures,
 )
 from ..core.payscript.parser import parse_script
-from ..core.workflow import RfqBusinessStatus, rfq_business_status
+from ..core.workflow import RfqBusinessStatus, derive_rfq_status, rfq_business_status
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api/rfq", tags=["rfq"])
@@ -361,15 +361,7 @@ def _derive_status(rfq: RfqRequest, quotes: list) -> str:
 
     Note the app has no explicit "send the tender" action: adding a provider
     IS the act of soliciting it, so that's what "envoyée" keys off."""
-    if rfq.status in _TERMINAL_STATUSES:
-        return rfq.status
-    if rfq.selected_quote_id is not None:
-        return "retenue"
-    if any(q.price is not None for q in quotes):
-        return "quote"
-    if quotes:
-        return "envoye"
-    return "draft"
+    return derive_rfq_status(rfq.status, rfq.selected_quote_id, quotes)
 
 
 def _sync_status(rfq: RfqRequest, session: Session) -> None:

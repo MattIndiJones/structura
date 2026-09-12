@@ -26,6 +26,11 @@ class ScriptCreate(BaseModel):
     category: str = ""
     tags: str = ""
     is_shared: bool = False
+    ai_provider: str = ""
+    ai_model: str = ""
+    ai_prompt: str = ""
+    ai_generated_at: datetime | None = None
+    ai_provenance_json: str = "{}"
 
 
 class ScriptUpdate(BaseModel):
@@ -39,12 +44,19 @@ class ScriptUpdate(BaseModel):
     category: str | None = None
     tags: str | None = None
     is_shared: bool | None = None
+    ai_provider: str | None = None
+    ai_model: str | None = None
+    ai_prompt: str | None = None
+    ai_generated_at: datetime | None = None
+    ai_provenance_json: str | None = None
 
 
 # Ce qui décrit le PRODUIT, par opposition à ce qui décrit la fiche (nom,
 # dossier, partage, tags). Une déclinaison hérite le premier de son origine.
 _CHAMPS_DE_CONTEXTE = {
     "script_text", "params_json", "constats_json", "global_params_json",
+    "ai_provider", "ai_model", "ai_prompt", "ai_generated_at",
+    "ai_provenance_json",
 }
 
 
@@ -63,6 +75,12 @@ def _row(s: Script, owner_name: str, variant_count: int = 0) -> dict:
         "category": s.category,
         "tags": s.tags,
         "is_shared": s.is_shared,
+        "ai_provider": s.ai_provider,
+        "ai_model": s.ai_model,
+        "ai_prompt": s.ai_prompt,
+        "ai_generated_at": (s.ai_generated_at.isoformat()
+                            if s.ai_generated_at else None),
+        "ai_provenance_json": s.ai_provenance_json,
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
         "parent_id": s.parent_id,
@@ -147,6 +165,11 @@ def create_script(
         category=body.category,
         tags=body.tags,
         is_shared=body.is_shared,
+        ai_provider=body.ai_provider,
+        ai_model=body.ai_model,
+        ai_prompt=body.ai_prompt,
+        ai_generated_at=body.ai_generated_at,
+        ai_provenance_json=body.ai_provenance_json,
     )
     session.add(s)
     session.commit()

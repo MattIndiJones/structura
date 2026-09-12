@@ -18,6 +18,7 @@ KidRecord/EmtRecord) since a scenario's parameters can change on the next
 run and past ones should stay reconstructable."""
 from __future__ import annotations
 import json
+import math
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -27,6 +28,7 @@ from ..db.models import Deal, Portfolio, ShockRun, User, position_sign
 from .auth import get_current_user
 from .deals import _can_access_deal, _mtm_core, MtmRequest
 from ..core.amc_prices import fx_rate_to
+from ..core.valuation_context import run_valuation
 
 router = APIRouter(tags=["shocks"])
 
@@ -106,12 +108,33 @@ def _run_shock_on_deal(deal: Deal, session: Session, n_paths: int, shock: ShockR
     """Full reprice under the shocked scenario. Never raises for a
     resolved-pending deal (returns a skip marker instead), so a
     portfolio-wide shock can keep going over the rest of the book."""
-    from ..core.payscript.engine import run_mc
-
     mtm_payload, ctx = _mtm_core(deal, session, n_paths, shock)
     if ctx is None:
         return {"deal_id": deal.id, "reference": deal.reference, "skipped": True,
                 "reason": mtm_payload.get("message", "résolution en attente")}
+
+    # Between contractual maturity and payment the claim is known. Spot, vol
+    # and correlation shocks have no effect; a parallel rate shock still moves
+    # its present value under the same continuous-compounding convention.
+    if ctx.get("settlement_claim"):
+        price_before = float(ctx["fixed_price"])
+        dr = shock.rate_shock_bp / 10000.0
+        price_after = price_before * math.exp(
+            -dr * float(ctx.get("time_to_payment", 0.0)))
+        fx_rate = fx_rate_to(deal.devise, "EUR")
+        if fx_rate is None:
+            raise HTTPException(
+                422, f"Taux de change {deal.devise}/EUR indisponible — l'impact en "
+                     f"euros de ce choc ne peut pas être calculé pour {deal.reference}.")
+        delta_pts = price_after - price_before
+        return {
+            "deal_id": deal.id, "reference": deal.reference, "skipped": False,
+            "mtm_before": price_before, "mtm_after": price_after,
+            "delta_pts": round(delta_pts, 4),
+            "delta_eur": round(
+                delta_pts * position_sign(deal) * deal.nominal * fx_rate, 2),
+            "n_paths": 0, "spot_shock_scope": "flux_connu",
+        }
 
     spot_mult, vol_add = _build_shock_arrays(ctx["underlyings_json"], shock,
                                              ctx["norm_spots"])
@@ -123,23 +146,16 @@ def _run_shock_on_deal(deal: Deal, session: Session, n_paths: int, shock: ShockR
     # coupons, same observation counter. Repricing without it produced a
     # `delta_pts` that mostly measured the difference between a live deal and a
     # brand new one, not the effect of the shock.
-    st = ctx["state"]
-    result = run_mc(
-        ctx["residual_script"], ctx["engine_uls"], corr_shocked,
-        ctx["r_frac"], ctx["T_remaining"], ctx["N_used"], ctx["model_used"],
-        seed=42, antithetic=ctx["antithetic"], user_params=ctx["user_params"],
-        # La jambe choquée doit simuler le MÊME produit que le MtM auquel
-        # elle se compare : forward-start si le strike n'est pas constaté.
-        strike_set_t=ctx.get("strike_set_t"),
+    result = run_valuation(
+        ctx["residual_script"], ctx["valuation_context"],
+        corr_matrix=corr_shocked,
         spot_mult=spot_mult, spot_base=ctx["norm_spots"], vol_add=vol_add, dr=dr,
-        yield_curve=ctx["yc"], sigma_r=ctx["sigma_r"], a_r=ctx["a_r"],
-        barrier_monitoring=ctx["barrier_monitoring"],
-        wof_min_init=st["wof_min"], bof_max_init=st["bof_max"],
-        index_offset=st["index"], memo_init=st["memo"], accum_init=st["accum"],
-        s_min_init=st["s_min"], s_max_init=st["s_max"], s_prev_init=st["s_prev"],
         wof0_init=min(spot_mult),
-        realvol_state_init=st["realvol_state"], fix_state_init=st["fix_state"],
     )
+    # Observed but not yet paid coupons are already part of the baseline MtM.
+    # They carry no spot/vol/correlation optionality and must remain in the
+    # shocked value; otherwise even a zero shock creates a fictitious loss.
+    result["price"] += float(ctx.get("unsettled_pv", 0.0))
 
     fx_rate = fx_rate_to(deal.devise, "EUR")
     if fx_rate is None:
@@ -264,7 +280,10 @@ def shock_portfolio(
     if not p or p.user_id != current.id:
         raise HTTPException(404, "Portefeuille introuvable")
     deals = session.exec(
-        select(Deal).where(Deal.portfolio_id == portfolio_id, Deal.status == "actif")
+        select(Deal).where(
+            Deal.portfolio_id == portfolio_id,
+            Deal.status.in_(["actif", "en_reglement"]),
+        )
     ).all()
     result = _run_shock_on_book(list(deals), session, n_paths, body)
     run = _persist_shock(session, current.id, "portfolio", body, result, portfolio_id=portfolio_id)
@@ -279,7 +298,10 @@ def shock_global(
     n_paths: int = 20000,
 ):
     deals = session.exec(
-        select(Deal).where(Deal.user_id == current.id, Deal.status == "actif")
+        select(Deal).where(
+            Deal.user_id == current.id,
+            Deal.status.in_(["actif", "en_reglement"]),
+        )
     ).all()
     result = _run_shock_on_book(list(deals), session, n_paths, body)
     run = _persist_shock(session, current.id, "global", body, result)

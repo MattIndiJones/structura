@@ -7,6 +7,11 @@
         ⚠ Lancez d'abord un pricing (▶ Pricer) pour pré-remplir le fair value et les temps d'observation.
       </p>
     </div>
+    <div v-if="store.resultIsStale" class="card border-red-800/60 bg-red-950/20">
+      <p class="text-red-300 text-sm">
+        ⚠ Le script ou les paramètres ont changé depuis ce pricing. Relancez ▶ Pricer avant de booker.
+      </p>
+    </div>
 
     <div v-if="store.currentRfqId"
          :class="['text-[10px] border rounded-lg px-3 py-1.5 w-fit',
@@ -203,7 +208,6 @@
         </div>
       </div>
     </div>
-
     <!-- ── Conditions de transaction ───────────────────────── -->
     <div class="card">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Conditions de transaction</h2>
@@ -297,7 +301,7 @@
         </button>
       </template>
       <button v-else class="btn-primary w-full py-3 text-sm font-bold"
-        :disabled="dealsStore.loading"
+        :disabled="dealsStore.loading || store.resultIsStale"
         @click="book">
         <span v-if="dealsStore.loading"
           class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-2"></span>
@@ -534,6 +538,9 @@ function validate() {
   // priced in this session (the RFQ→booking path arrives with the results
   // cleared). Booking it would set the deal's whole P&L baseline to 0.
   if (!form.fair_value) errors.fair_value = 'Fair value requise — lancez ▶ Pricer, ou saisissez-la'
+  if (store.resultIsStale) {
+    errors.fair_value = 'Le pricing est périmé — relancez ▶ Pricer avant le booking'
+  }
   if (form.client_id && !form.mandate_id) {
     errors.commercial = 'Sélectionnez le mandat ou périmètre du Client.'
   } else if (form.client_id && !form.opportunity_id
@@ -555,7 +562,7 @@ async function book() {
     ccy: u.ccy,
   }))
 
-  const marketSnapshot = {
+  const fallbackMarketSnapshot = {
     r: store.globalParams.r,
     T: store.globalParams.T,
     model: store.globalParams.model,
@@ -570,8 +577,8 @@ async function book() {
     // pricing.js:loadFromDeal and reprice_inputs' "still alive" branch.
     underlyings: store.underlyings.map(u => ({
       ...u,
-      // Freeze both the generating assumptions and the exact annual nodes.
-      // Lifecycle replay consumes the nodes; q/decay explain how they arose.
+      // Les nœuds expliquent le pricing initial. En repricing, q reprend son
+      // niveau du jour et la courbe est régénérée avec la convention de decay.
       dividendCurve: store.buildDividendCurve(u),
     })),
     corrMatrix: store.corrMatrix,
@@ -606,7 +613,12 @@ async function book() {
       observation_times: observationTimes.value,
       script_snapshot: store.script,
       script_id: store.currentScriptId || null,
-      market_snapshot: marketSnapshot,
+      market_snapshot: {
+        ...(store.result?.pricing_receipt?.market_snapshot || fallbackMarketSnapshot),
+        ...(store.scriptProvenance()
+          ? { ai_script_provenance: store.scriptProvenance() } : {}),
+      },
+      pricing_receipt: store.result?.pricing_receipt || null,
       indicative_id: store.currentIndicativeId || null,
       rfq_id: store.currentRfqId || null,
       client_id: form.client_id,

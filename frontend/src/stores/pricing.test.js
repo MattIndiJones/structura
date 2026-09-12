@@ -230,7 +230,10 @@ describe('la déclinaison ne survit pas au produit qu’elle décrit', () => {
 
   it.each([
     ['resetToDefaults', (s) => s.resetToDefaults()],
-    ['loadFromDeal', (s) => s.loadFromDeal({ id: 1, script_snapshot: VALIDE })],
+    ['loadFromDeal', (s) => s.loadFromDeal({
+      id: 1, script_snapshot: VALIDE, T: 3, devise: 'EUR',
+      underlyings: [{ name: 'A', ticker: 'A', ccy: 'EUR' }],
+    })],
     ['loadFromRfq', (s) => s.loadFromRfq({ id: 1, script_snapshot: VALIDE })],
   ])('%s relâche la déclinaison en chargeant un autre produit', async (_nom, charger) => {
     const store = await storeSurVarianteModifiee()
@@ -311,7 +314,10 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
       id: 7,
       reference: 'DEAL-7',
       script_snapshot: VALIDE,
-      market_snapshot: { deal_ccy: 'USD', user_params: { COUPON: 0.0175 }, constats: {} },
+      market_snapshot: {
+        deal_ccy: 'USD', user_params: { COUPON: 0.0175 }, constats: {},
+        underlyings: [{ name: 'A', ticker: 'A', ccy: 'USD', sigma: 20, q: 2 }],
+      },
       T: 3,
       devise: 'USD',
       nominal: 2_500_000,
@@ -333,5 +339,67 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
     expect(store.globalParams.value_date).toBe('2026-09-07')
     expect(store.globalParams.payment_date).toBe('2029-09-06')
     expect(store.paramOverrides.COUPON).toBeCloseTo(1.75, 10)
+  })
+
+  it('remet à zéro courbes, funding et réglages absents du deal suivant', async () => {
+    const store = await storeRenseigne()
+    const base = {
+      script_snapshot: VALIDE, T: 3, devise: 'EUR', nominal: 1_000_000,
+      underlyings: [{ name: 'A', ticker: 'A', ccy: 'EUR' }],
+    }
+    await store.loadFromDeal({
+      ...base, id: 1, reference: 'A',
+      market_snapshot: {
+        underlyings: [{ name: 'A', ticker: 'A', ccy: 'EUR' }],
+        yieldCurve: [{ label: '1Y', T: 1, rate: 4 }], N: 50000,
+        barrierMonitoring: 'continuous',
+        funding: { enabled: true, mode: 'flat', level: 1.5, pillars: [] },
+      },
+    })
+    await store.loadFromDeal({ ...base, id: 2, reference: 'B', market_snapshot: {} })
+
+    expect(store.yieldCurve.enabled).toBe(false)
+    expect(store.fundingCurve.enabled).toBe(true)
+    expect(store.fundingCurve.level).toBe(0)
+    expect(store.globalParams.N).toBe(20000)
+    expect(store.globalParams.seed).toBe(42)
+    expect(store.globalParams.barrierMonitoring).toBe('weekly')
+  })
+})
+
+describe('un résultat de pricing reste lié à ses entrées', () => {
+  it('devient périmé dès qu’un PARAM change', async () => {
+    const store = await storeRenseigne()
+    const parseFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async (url, opts) => {
+      if (String(url).includes('/api/parse')) return parseFetch(url, opts)
+      return {
+        ok: true,
+        json: async () => ({ price: 1, pricing_receipt: { pricing_input: { seed: 42 } } }),
+      }
+    })
+
+    await store.runPricing()
+    expect(store.resultIsStale).toBe(false)
+    store.paramOverrides.COUPON = 3
+    expect(store.resultIsStale).toBe(true)
+  })
+
+  it('ignore une réponse arrivée après une modification', async () => {
+    const store = await storeRenseigne()
+    let release
+    const pending = new Promise(resolve => { release = resolve })
+    globalThis.fetch = vi.fn(async url => {
+      if (String(url).includes('/api/price')) await pending
+      return { ok: true, json: async () => ({ price: 1 }) }
+    })
+
+    const run = store.runPricing()
+    store.paramOverrides.COUPON = 4
+    release()
+    await run
+
+    expect(store.result).toBeNull()
+    expect(store.error).toContain('paramètres ont changé')
   })
 })

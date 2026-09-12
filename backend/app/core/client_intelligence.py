@@ -78,7 +78,9 @@ class Transaction:
     __slots__ = ("trade_date", "maturity_date", "reference_date", "product_type",
                  "currency", "issuer", "notional", "underlyings", "imported",
                  "opportunity_id", "client_id", "mandate_id", "affiliation_id",
-                 "coupon_pct", "protection_pct", "price_pct", "traded_with_us",
+                 "coupon_pct", "coupon_schedule_pct", "protection_pct",
+                 "protection_schedule_pct", "terms_source", "price_pct",
+                 "traded_with_us",
                  "reference", "barriers", "source_type", "source_id",
                  "data_origin", "transaction_format", "instrument_family",
                  "payoff_family", "payoff_description",
@@ -87,7 +89,9 @@ class Transaction:
     def __init__(self, *, trade_date, maturity_date, reference_date, product_type,
                  currency, issuer, notional, underlyings, imported,
                  opportunity_id=None, client_id=None, coupon_pct=None,
-                 protection_pct=None, price_pct=None, traded_with_us=None,
+                 coupon_schedule_pct=None, protection_pct=None,
+                 protection_schedule_pct=None, terms_source=None,
+                 price_pct=None, traded_with_us=None,
                  reference=None, barriers=None, mandate_id=None,
                  affiliation_id=None, source_type="deal", source_id=None,
                  data_origin="native", transaction_format=None,
@@ -99,7 +103,10 @@ class Transaction:
         # quoi l'écran technique n'afficherait des niveaux que pour les
         # transactions dont nous sommes le moins sûrs.
         self.coupon_pct = coupon_pct
+        self.coupon_schedule_pct = coupon_schedule_pct
         self.protection_pct = protection_pct
+        self.protection_schedule_pct = protection_schedule_pct
+        self.terms_source = terms_source
         self.price_pct = price_pct
         self.traded_with_us = traded_with_us
         self.reference = reference
@@ -135,26 +142,35 @@ class Transaction:
         return self.data_origin in {"native", "imported"}
 
 
-def _niveaux_du_deal(deal: Deal) -> dict:
-    """Coupon, protection et barrières d'un deal, lus dans son script figé.
+def _niveaux_du_deal(deal: Deal, cache: Optional[dict] = None) -> dict:
+    """Coupon, protection et barrières d'un deal, lus dans son contrat figé.
 
-    Le script est mis en cache par son texte : une fiche client reparse sinon
-    le même modèle autant de fois qu'il y a de deals qui en sont issus, et un
-    parse PayScript n'est pas gratuit.
+    Le texte PayScript donne la forme du payoff, mais les niveaux réellement
+    bookés vivent dans ``market_snapshot_json.user_params``. Le cache est local
+    à l'assemblage d'une fiche et sa clé inclut donc les paramètres contractuels.
     """
     from .client_technical import niveaux_du_script
     script = deal.script_snapshot or ""
-    if script not in _CACHE_NIVEAUX:
-        _CACHE_NIVEAUX[script] = niveaux_du_script(script)
-    niveaux = _CACHE_NIVEAUX[script]
+    market = _json_object(deal.market_snapshot_json) or {}
+    user_params = market.get("user_params") or {}
+    if not isinstance(user_params, dict):
+        user_params = {}
+    key = (
+        script,
+        json.dumps(user_params, sort_keys=True, separators=(",", ":"), default=str),
+        getattr(deal, "contract_version", None),
+    )
+    cache = cache if cache is not None else {}
+    if key not in cache:
+        cache[key] = niveaux_du_script(script, user_params=user_params)
+    niveaux = cache[key]
     return {"coupon_pct": niveaux["coupon_pct"],
+            "coupon_schedule_pct": niveaux["coupon_schedule_pct"],
             "protection_pct": niveaux["protection_pct"],
-            "barriers": niveaux["barriers"]}
-
-
-# Cache de lecture, vidé à chaque assemblage de fiche : on ne veut pas qu'il
-# grossisse indéfiniment dans un processus qui tourne des semaines.
-_CACHE_NIVEAUX: dict[str, dict] = {}
+            "protection_schedule_pct": niveaux["protection_schedule_pct"],
+            "barriers": niveaux["barriers"],
+            "terms_source": ("booked_params" if user_params
+                             else "script_defaults")}
 
 
 def _json_object(raw: Optional[str]) -> Optional[dict]:
@@ -170,6 +186,7 @@ def _json_object(raw: Optional[str]) -> Optional[dict]:
 def _depuis_deal(
     deal: Deal, *, client_origin: str = "native",
     mandate_origin: Optional[str] = None,
+    levels_cache: Optional[dict] = None,
 ) -> Transaction:
     sous_jacents = []
     try:
@@ -204,7 +221,7 @@ def _depuis_deal(
         payoff_description=deal.payoff_description,
         documentation_reference=deal.documentation_reference,
         rfq_provenance=_json_object(deal.rfq_provenance_json),
-        **_niveaux_du_deal(deal))
+        **_niveaux_du_deal(deal, levels_cache))
 
 
 def _depuis_historique(
@@ -221,6 +238,8 @@ def _depuis_historique(
         imported=True, client_id=ligne.client_id,
         mandate_id=ligne.mandate_id, affiliation_id=ligne.affiliation_id,
         coupon_pct=ligne.coupon_pct, protection_pct=ligne.barrier_pct,
+        coupon_schedule_pct=None, protection_schedule_pct=None,
+        terms_source="imported_columns",
         price_pct=ligne.price_pct, traded_with_us=ligne.traded_with_us,
         reference=ligne.external_ref, source_type="imported_trade",
         source_id=ligne.id,
@@ -256,10 +275,12 @@ def _normalise_transactions(
         [row.client_id for row in deals] + [row.client_id for row in histories],
         [row.mandate_id for row in deals] + [row.mandate_id for row in histories],
     )
+    levels_cache: dict = {}
     return [
         _depuis_deal(
             row, client_origin=client_origins.get(row.client_id, "native"),
-            mandate_origin=mandate_origins.get(row.mandate_id))
+            mandate_origin=mandate_origins.get(row.mandate_id),
+            levels_cache=levels_cache)
         for row in deals
     ] + [
         _depuis_historique(
@@ -1372,7 +1393,10 @@ def technical_view(session: Session,
             "notional": transaction.notional,
             "underlyings": transaction.underlyings,
             "coupon_pct": transaction.coupon_pct,
+            "coupon_schedule_pct": transaction.coupon_schedule_pct,
             "protection_pct": transaction.protection_pct,
+            "protection_schedule_pct": transaction.protection_schedule_pct,
+            "terms_source": transaction.terms_source,
             "barriers": transaction.barriers,
             "price_pct": transaction.price_pct,
             "traded_with_us": transaction.traded_with_us,
@@ -1386,7 +1410,8 @@ def technical_view(session: Session,
 
     # Ce que l'écran ne pourra pas montrer, et pourquoi — plutôt que des
     # colonnes vides que personne ne sait interpréter.
-    sans_coupon = [l for l in lignes if l["coupon_pct"] is None]
+    sans_coupon = [l for l in lignes if l["coupon_pct"] is None
+                   and not l["coupon_schedule_pct"]]
     return {
         "rows": lignes,
         "by_family": moyennes_par_famille(lignes),
@@ -1395,7 +1420,8 @@ def technical_view(session: Session,
             "n": len(lignes),
             "with_coupon": len(lignes) - len(sans_coupon),
             "with_protection": len([l for l in lignes
-                                    if l["protection_pct"] is not None]),
+                                    if l["protection_pct"] is not None
+                                    or l["protection_schedule_pct"]]),
             "unclassified_underlying": len([l for l in lignes
                                             if l["nature"] is None]),
         },

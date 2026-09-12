@@ -45,9 +45,14 @@ def _batch_row(b: ComputeBatch) -> dict:
         "id": b.id, "kind": b.kind, "label": b.label, "status": b.status,
         "total_jobs": b.total_jobs, "completed_jobs": b.completed_jobs, "failed_jobs": b.failed_jobs,
         "params": json.loads(b.params_json) if b.params_json else {},
+        "cost_estimate": json.loads(b.cost_estimate_json) if b.cost_estimate_json else {},
         "result_summary": json.loads(b.result_summary_json) if b.result_summary_json else {},
         "worker_name": b.worker_name,
         "claimed_at": b.claimed_at.isoformat() if b.claimed_at else None,
+        "heartbeat_at": b.heartbeat_at.isoformat() if b.heartbeat_at else None,
+        "lease_expires_at": b.lease_expires_at.isoformat() if b.lease_expires_at else None,
+        "cancel_requested_at": (b.cancel_requested_at.isoformat()
+                                if b.cancel_requested_at else None),
         "started_at": b.started_at.isoformat() if b.started_at else None,
         "finished_at": b.finished_at.isoformat() if b.finished_at else None,
         "created_at": b.created_at.isoformat(),
@@ -58,7 +63,7 @@ def _job_row(j: ComputeJob) -> dict:
     return {
         "id": j.id, "job_index": j.job_index, "label": j.label, "status": j.status,
         "result": json.loads(j.result_json) if j.result_json else {},
-        "error": j.error,
+        "error": j.error, "attempt": j.attempt,
         "started_at": j.started_at.isoformat() if j.started_at else None,
         "finished_at": j.finished_at.isoformat() if j.finished_at else None,
     }

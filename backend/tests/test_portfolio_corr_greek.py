@@ -23,7 +23,8 @@ def _make_session():
 
 
 def _add_deal(s: Session, reference: str, names_tickers: list[tuple[str, str]],
-              corr_pairs: dict, nominal: float = 1_000_000.0, portfolio_id=None) -> Deal:
+              corr_pairs: dict, nominal: float = 1_000_000.0, portfolio_id=None,
+              per_underlying: dict | None = None, vega_scope: dict | None = None) -> Deal:
     deal = Deal(
         reference=reference, user_id=1, script_snapshot="AT MATURITY:\n  PAY 1.0",
         underlyings_json=json.dumps([{"name": n, "ticker": t, "s0_abs": 100.0}
@@ -33,7 +34,8 @@ def _add_deal(s: Session, reference: str, names_tickers: list[tuple[str, str]],
         maturity_date="2030-01-01", T=3.0, devise="EUR",
         nominal=nominal, price_traded=98.0, status="actif",
         portfolio_id=portfolio_id,
-        greeks_json=json.dumps({"per_underlying": {}, "scalar": {}, "corr_pairs": corr_pairs}),
+        greeks_json=json.dumps({"per_underlying": per_underlying or {}, "scalar": {},
+                                "corr_pairs": corr_pairs, "vega_scope": vega_scope}),
         greeks_computed_at=datetime.utcnow(),
     )
     s.add(deal)
@@ -110,5 +112,33 @@ def test_deal_with_no_basket_has_no_corr_contribution(monkeypatch):
         res = portfolios_api.portfolio_risk(p.id, USER, s)
         assert len(res["deals_included"]) == 2
         assert len(res["corr_pairs"]) == 1
+    finally:
+        s.close()
+
+
+def test_vegas_de_perimetres_differents_ne_sont_pas_additionnes(monkeypatch):
+    monkeypatch.setattr(portfolios_api, "_TICKER_TO_KEY", {})
+    monkeypatch.setattr(portfolios_api, "_TICKER_TO_LABEL", {})
+    s = _make_session()
+    p = Portfolio(name="Book vega", user_id=1)
+    s.add(p); s.commit(); s.refresh(p)
+    try:
+        _add_deal(
+            s, "GBM", [("Action", "ACT")], {}, nominal=1_000_000.0,
+            portfolio_id=p.id, per_underlying={"Action": {"vega": 0.20}},
+            vega_scope={"type": "total"},
+        )
+        _add_deal(
+            s, "HESTON", [("Action", "ACT")], {}, nominal=2_000_000.0,
+            portfolio_id=p.id, per_underlying={"Action": {"vega": 0.10}},
+            vega_scope={"type": "leg_independante", "coverage": {"Action": 0.5}},
+        )
+        bucket = portfolios_api.portfolio_risk(p.id, USER, s)["per_underlying"]["ACT"]
+        assert bucket["vega_by_scope_eur"]["total"] == pytest.approx(200_000.0)
+        assert bucket["vega_by_scope_eur"]["leg_independante"] == pytest.approx(200_000.0)
+        assert bucket["vega_eur"] is None
+        assert bucket["vega_scope_mixed"] is True
+        assert {c["vega_scope"] for c in bucket["contributions"]} \
+            == {"total", "leg_independante"}
     finally:
         s.close()

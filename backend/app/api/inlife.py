@@ -23,14 +23,25 @@ from datetime import date, timedelta
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..core.inlife_valuation import (
     InLifeProduct, ValuationError, VariantTerms, build_residual,
 )
 from ..core.lifecycle_controls import path_dependency_reasons
-from ..core.payscript.engine import compute_greeks, run_mc
-from ..core.schemas import UnderlyingParams, VariantOverrides
+from ..core.payscript.engine import compute_greeks
+from ..core.compute_budget import (
+    MAX_SCRIPT_CHARS,
+    MAX_UNDERLYINGS,
+    ensure_budget,
+    estimate_pricing_request,
+    validate_compiled_dates,
+    count_compiled_dates,
+)
+from ..core.schemas import UnderlyingParams, VariantOverrides, validate_term_curve
+from ..core.valuation_context import (
+    ValuationContext, build_pricing_receipt, run_valuation,
+)
 from ..db.models import User
 from ..services.market_data import load_hist_prices
 from .auth import get_current_user
@@ -41,8 +52,11 @@ router = APIRouter(prefix="/api", tags=["pricing"])
 
 class InLifePricingRequest(BaseModel):
     """Un produit et la date à laquelle on veut le valoriser."""
-    script: str
-    underlyings: list[UnderlyingParams]
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    script: str = Field(max_length=MAX_SCRIPT_CHARS)
+    underlyings: list[UnderlyingParams] = Field(
+        min_length=1, max_length=MAX_UNDERLYINGS)
     corr_matrix: list[list[float]]
     r: float = 0.03
     N: int = Field(default=20000, ge=1000, le=200000)
@@ -85,6 +99,21 @@ class InLifePricingRequest(BaseModel):
     # Avenant : les termes de la variante, qui ne valent que pour la vie
     # restante. Absent, on valorise le produit tel qu'il a été émis.
     variant: Optional[VariantOverrides] = None
+
+    @field_validator("yield_curve")
+    @classmethod
+    def validate_yield_curve(cls, curve: list[list[float]]) -> list[list[float]]:
+        return validate_term_curve(curve, "courbe de taux")
+
+    @field_validator("funding_curve")
+    @classmethod
+    def validate_funding_curve(cls, curve: list[list[float]]) -> list[list[float]]:
+        return validate_term_curve(curve, "courbe de funding")
+
+    @field_validator("seed", mode="before")
+    @classmethod
+    def fixed_monte_carlo_seed(cls, _value) -> int:
+        return 42
 
 
 def _snapshot_underlying(u: UnderlyingParams) -> dict:
@@ -211,8 +240,13 @@ class ResidualContext:
 
     def sur_axe_residuel(self, courbe):
         """Décale les piliers d'une courbe sur l'axe du MC résiduel."""
-        return [[max(0.0, t - self.T_elapsed), niveau]
-                for t, niveau in (courbe or []) if t > self.T_elapsed]
+        courbe = list(courbe or [])
+        residuelle = [[max(0.0, t - self.T_elapsed), niveau]
+                      for t, niveau in courbe if t > self.T_elapsed]
+        if residuelle or not courbe:
+            return residuelle
+        # Convention d'extrapolation du moteur : le dernier pilier reste plat.
+        return [[self.T_remaining, courbe[-1][1]]]
 
 
 def variant_terms_or_none(req) -> VariantTerms | None:
@@ -376,26 +410,33 @@ def price_in_life(
     courbe_residuelle = ctx.sur_axe_residuel(req.yield_curve)
     funding_residuel = ctx.sur_axe_residuel(req.funding_curve)
     try:
-        res = run_mc(
-            residuel.residual_script, residuel.engine_uls, req.corr_matrix,
-            residuel.r_frac, T_remaining,
-            maturity_payment_t=paiement_residuel,
-            N=req.N, model=req.model, seed=req.seed, antithetic=req.antithetic,
-            user_params=ctx.user_params,
-            yield_curve=courbe_residuelle,
-            funding_curve=funding_residuel, funding_spread=req.funding_spread,
-            sigma_r=req.sigma_r, a_r=req.a_r,
-            barrier_monitoring=req.barrier_monitoring,
-            spot_mult=residuel.norm_spots, spot_base=residuel.norm_spots,
-            wof_min_init=etat["wof_min"], bof_max_init=etat["bof_max"],
-            index_offset=etat["index"], memo_init=etat["memo"],
-            accum_init=etat["accum"],
-            s_min_init=etat["s_min"], s_max_init=etat["s_max"],
-            s_prev_init=etat["s_prev"],
-            wof0_init=min(residuel.norm_spots),
-            realvol_state_init=etat["realvol_state"],
-            fix_state_init=etat["fix_state"],
+        validate_compiled_dates(residuel.residual_script)
+        calculation_budget = estimate_pricing_request(
+            maturity_years=T_remaining,
+            underlyings=len(residuel.engine_uls),
+            paths=req.N,
+            model=req.model,
+            antithetic=req.antithetic,
+            continuous_monitoring=req.barrier_monitoring == "continuous",
+            stochastic_rates=req.sigma_r > 0,
+            selected_greeks=(req.selected_greeks
+                             if req.compute_greeks else None),
+            expanded_dates=count_compiled_dates(residuel.residual_script),
         )
+        ensure_budget(calculation_budget)
+        valuation_context = ValuationContext(
+            underlyings=residuel.engine_uls, corr_matrix=req.corr_matrix,
+            r=residuel.r_frac, T=T_remaining, N=req.N, model=req.model,
+            seed=42, antithetic=req.antithetic, user_params=ctx.user_params,
+            yield_curve=courbe_residuelle, funding_curve=funding_residuel,
+            funding_spread=req.funding_spread, sigma_r=req.sigma_r, a_r=req.a_r,
+            barrier_monitoring=req.barrier_monitoring,
+            maturity_payment_t=paiement_residuel,
+            strike_set_t=residuel.strike_set_t,
+            script_text=ctx.script_text, constats=ctx.constats,
+            state=ctx.mc_kwargs,
+        )
+        res = run_valuation(residuel.residual_script, valuation_context)
     except ValueError as exc:
         raise HTTPException(422, f"Monte Carlo résiduel impossible : {exc}")
 
@@ -417,6 +458,8 @@ def price_in_life(
                 funding_curve=funding_residuel, funding_spread=req.funding_spread,
                 barrier_monitoring=req.barrier_monitoring,
                 antithetic=req.antithetic,
+                maturity_payment_t=paiement_residuel,
+                strike_set_t=residuel.strike_set_t,
                 state={
                     "spot_base": residuel.norm_spots,
                     "wof_min": etat["wof_min"], "bof_max": etat["bof_max"],
@@ -453,6 +496,7 @@ def price_in_life(
         "var5": res["var5"],
         "prob_gt100": res["prob_gt100"],
         "payoffs": res["payoffs"],
+        "calculation_budget": calculation_budget.to_dict(),
         "elapsed_ms": res["elapsed_ms"],
         "greeks": greeks,
         "n_paths": res["n_paths"],
@@ -473,6 +517,7 @@ def price_in_life(
         # mémoire fait disparaître ce que le client a accumulé, et ce fait doit
         # se lire plutôt que se deviner.
         "variant_state_check": ctx.variant_state_check,
+        "pricing_receipt": build_pricing_receipt(req, res["price"]),
         # De quoi écrire le bandeau d'état sans le recalculer côté écran.
         "past": {
             "years_elapsed": round(T_elapsed, 4),

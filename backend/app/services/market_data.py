@@ -99,6 +99,9 @@ def load_hist_vol(tickers: list[str], period: str = "1y") -> dict:
             "period": period,
             "n_obs": int(len(log_ret)),
             "missing": missing,
+            "provider": "YAHOO_FINANCE",
+            "price_type": "ADJUSTED_CLOSE",
+            "adjusted": True,
         }
     except Exception as e:
         logger.exception("load_hist_vol")
@@ -120,6 +123,62 @@ def load_hist_vol(tickers: list[str], period: str = "1y") -> dict:
 _TTL_PRIX = 120.0
 _cache_prix: dict[tuple, tuple[float, dict]] = {}
 
+DEFAULT_MARKET_DATA_PROVIDER = "YAHOO_FINANCE"
+SUPPORTED_MARKET_DATA_PROVIDERS = {DEFAULT_MARKET_DATA_PROVIDER}
+
+
+def normalize_market_data_provider(provider: Optional[str]) -> str:
+    """Return the configured provider code, rejecting unavailable adapters.
+
+    The account-level field is deliberately a provider code rather than a
+    Yahoo boolean.  Yahoo is the only adapter today; Bloomberg or Reuters can
+    later implement the same contract without changing pricing callers.
+    """
+    normalized = str(provider or DEFAULT_MARKET_DATA_PROVIDER).strip().upper()
+    if normalized not in SUPPORTED_MARKET_DATA_PROVIDERS:
+        raise ValueError(
+            f"Source de données non disponible : {normalized}. "
+            f"Sources actives : {', '.join(sorted(SUPPORTED_MARKET_DATA_PROVIDERS))}."
+        )
+    return normalized
+
+
+def market_data_provider_for_deal(deal, session) -> str:
+    """Resolve the current data source attached to the deal's client account.
+
+    Product-only and legacy deals have no client account and therefore use the
+    platform default.  The function intentionally uses the SQLModel mapper
+    dynamically, keeping this service independent from the database models.
+    """
+    client_id = getattr(deal, "client_id", None)
+    if not client_id:
+        return DEFAULT_MARKET_DATA_PROVIDER
+    try:
+        from ..db.models import Client
+        client = session.get(Client, client_id)
+    except Exception:
+        client = None
+    return normalize_market_data_provider(
+        getattr(client, "market_data_provider", None) if client else None)
+
+
+def _business_sessions_between(last_date: date, requested_end: date) -> int:
+    """Weekday sessions expected after ``last_date`` through ``requested_end``.
+
+    Yahoo does not expose a dependable exchange calendar for every instrument.
+    This is therefore an age indicator, not a contractual calendar decision;
+    weekend days never make a Friday close look stale.
+    """
+    if last_date >= requested_end:
+        return 0
+    cursor = last_date + timedelta(days=1)
+    count = 0
+    while cursor <= requested_end:
+        if cursor.weekday() < 5:
+            count += 1
+        cursor += timedelta(days=1)
+    return count
+
 
 def vider_cache_prix() -> None:
     """Force le prochain appel à repartir de la source. Pour les tests, et pour
@@ -128,7 +187,8 @@ def vider_cache_prix() -> None:
 
 
 def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
-                      adjusted: bool = False) -> dict:
+                     adjusted: bool = False,
+                     provider: str = DEFAULT_MARKET_DATA_PROVIDER) -> dict:
     """Daily close prices for backtest replay.
 
     `adjusted` decides WHICH price, and the two answer different questions.
@@ -146,30 +206,49 @@ def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
     True returns the dividend-adjusted close, for statistical estimates where
     total return is the honest input: realized volatility, correlations,
     calibration. Never for anything a payoff reads."""
+    try:
+        provider = normalize_market_data_provider(provider)
+    except ValueError as exc:
+        return {"error": str(exc)}
     if not _HAS_YF:
         return {"error": "yfinance non installé"}
 
     # La clé porte les tickers TRIÉS : deux appels au même panier dans un ordre
     # différent décrivent le même historique.
-    cle = (tuple(sorted(tickers)), start, end, adjusted)
+    cle = (provider, tuple(sorted(tickers)), start, end, adjusted)
     fige = _cache_prix.get(cle)
     if fige is not None and (time.monotonic() - fige[0]) < _TTL_PRIX:
         # Copie superficielle : l'appelant ne doit pas pouvoir muter le cache.
         return {**fige[1]}
 
     try:
-        end = end or datetime.today().strftime("%Y-%m-%d")
+        requested_end = date.fromisoformat(
+            end or datetime.today().strftime("%Y-%m-%d"))
+        # yfinance treats ``end`` as exclusive.  Every Structura caller treats
+        # it as an as-of date, so request the next calendar day and then filter
+        # defensively.  A post-close valuation can now consume today's close.
+        end_exclusive = (requested_end + timedelta(days=1)).isoformat()
         price_series: dict = {}
+        effective_dates: dict[str, str] = {}
+        age_sessions: dict[str, int] = {}
         for tk in tickers:
             try:
-                hist = yf.Ticker(tk).history(start=start, end=end, auto_adjust=adjusted)
+                hist = yf.Ticker(tk).history(
+                    start=start, end=end_exclusive, auto_adjust=adjusted)
                 if not hist.empty and "Close" in hist.columns:
                     # Same cross-timezone alignment fix as load_hist_vol above —
                     # without it, a multi-ticker basket backtest silently
                     # compares near-random staggered rows instead of the same
                     # calendar day across exchanges.
                     hist.index = hist.index.tz_localize(None)
-                    price_series[tk] = hist["Close"].dropna()
+                    series = hist["Close"].dropna()
+                    series = series[series.index.date <= requested_end]
+                    if not series.empty:
+                        price_series[tk] = series
+                        effective = series.index[-1].date()
+                        effective_dates[tk] = effective.isoformat()
+                        age_sessions[tk] = _business_sessions_between(
+                            effective, requested_end)
             except Exception as e:
                 logger.debug("YF prices error %s: %s", tk, e)
 
@@ -206,7 +285,23 @@ def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
                 if tk in prices.columns
             },
             "n_obs": len(dates),
+            "provider": provider,
+            "price_type": ("ADJUSTED_CLOSE" if adjusted
+                           else "UNADJUSTED_CLOSE"),
+            "adjusted": bool(adjusted),
+            "requested_start": start,
+            "requested_end": requested_end.isoformat(),
+            "asof_effective": dates[-1] if dates else None,
+            "effective_dates": effective_dates,
+            "age_sessions": age_sessions,
+            "fetched_at": datetime.utcnow().isoformat(),
         }
+        stale = {ticker: age for ticker, age in age_sessions.items() if age > 1}
+        payload["warnings"] = ([{
+            "code": "MARKET_DATA_STALE",
+            "message": "Dernière clôture éloignée de la date de valorisation.",
+            "age_sessions": stale,
+        }] if stale else [])
         # Say when the window had to be shortened, rather than returning a
         # shorter history that looks like the one that was asked for.
         if not prices.empty and requested_start is not None:

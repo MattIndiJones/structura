@@ -454,6 +454,10 @@ def generate_valuation_pdf(data: dict) -> bytes:
     today = datetime.date.today().isoformat()
     _header(story, "Note de valorisation",
             f"{deal.get('reference', '')} — valorisation indicative au {today}")
+    if data.get("valuation_run_id"):
+        story.append(Paragraph(
+            f"Référence de calcul immuable : VR-{data['valuation_run_id']}", S_SMALL))
+        story.append(Spacer(1, 4))
 
     # Identification + headline number
     story.append(_id_table(deal, data.get("underlyings") or []))

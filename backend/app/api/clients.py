@@ -27,7 +27,7 @@ from ..core.client_constraints_ref import (
 )
 from ..core.client_intelligence import declared_preferences, preference_history
 from ..core.client_controls import (
-    ClientRuleError, apply_constraints, client_history_counts,
+    ClientRuleError, apply_constraints_atomic, client_history_counts,
     find_client_duplicates, read_constraints, require_client_deletable,
     validate_client_status, validate_client_type, validate_coverage_role,
     validate_data_origin,
@@ -39,6 +39,7 @@ from ..db.models import (
     Affiliation, Client, ClientCoverage, ClientMandate,
     ClientPreferenceStatement, Deal, Interaction, Opportunity, Person, User,
 )
+from ..services.market_data import normalize_market_data_provider
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
@@ -55,6 +56,7 @@ class ClientCreate(BaseModel):
     external_ref: Optional[str] = None
     notes: Optional[str] = None
     data_origin: str = "demo"
+    market_data_provider: str = "YAHOO_FINANCE"
     # Confirmation explicite après un avertissement de doublon. Sans elle, un
     # doublon probable est signalé et l'écriture suspendue — §21 : on avertit,
     # on ne bloque pas, mais on ne crée pas non plus dans le dos de personne.
@@ -70,6 +72,7 @@ class ClientUpdate(BaseModel):
     external_ref: Optional[str] = None
     notes: Optional[str] = None
     data_origin: Optional[str] = None
+    market_data_provider: Optional[str] = None
 
 
 class PreferenceEvidence(BaseModel):
@@ -316,6 +319,7 @@ def _rendu(session: Session, client: Client, *, detail: bool = False) -> dict:
         "external_ref": client.external_ref,
         "notes": client.notes,
         "data_origin": client.data_origin,
+        "market_data_provider": client.market_data_provider,
         "ticket_min": client.ticket_min,
         "ticket_max": client.ticket_max,
         "ticket_currency": client.ticket_currency,
@@ -580,8 +584,10 @@ def create_client(
         validate_client_type(body.client_type)
         validate_client_status(body.status)
         data_origin = validate_data_origin(body.data_origin)
-    except ClientRuleError as erreur:
-        raise HTTPException(422, erreur.message)
+        market_data_provider = normalize_market_data_provider(
+            body.market_data_provider)
+    except (ClientRuleError, ValueError) as erreur:
+        raise HTTPException(422, getattr(erreur, "message", str(erreur)))
 
     doublons = find_client_duplicates(
         session, name=nom, legal_name=body.legal_name,
@@ -600,7 +606,7 @@ def create_client(
         entity_id=current.entity_id, name=nom, legal_name=body.legal_name,
         client_type=body.client_type, country=body.country, status=body.status,
         external_ref=body.external_ref, notes=body.notes,
-        data_origin=data_origin,
+        data_origin=data_origin, market_data_provider=market_data_provider,
         created_by_user_id=current.id)
     session.add(client)
     session.flush()
@@ -613,7 +619,8 @@ def create_client(
         session, action="CLIENT_CREATED", object_type="client",
         object_id=client.id, actor_user_id=current.id, result="SUCCESS",
         after={"name": client.name, "client_type": client.client_type,
-               "status": client.status, "data_origin": client.data_origin})
+               "status": client.status, "data_origin": client.data_origin,
+               "market_data_provider": client.market_data_provider})
     session.commit()
     session.refresh(client)
     return _rendu(session, client, detail=True)
@@ -630,7 +637,8 @@ def update_client(
     avant = {"name": client.name, "status": client.status,
              "client_type": client.client_type, "legal_name": client.legal_name,
              "country": client.country, "external_ref": client.external_ref,
-             "notes": client.notes, "data_origin": client.data_origin}
+             "notes": client.notes, "data_origin": client.data_origin,
+             "market_data_provider": client.market_data_provider}
 
     if body.client_type is not None:
         try:
@@ -649,6 +657,12 @@ def update_client(
             client.data_origin = validate_data_origin(body.data_origin)
         except ClientRuleError as erreur:
             raise HTTPException(422, erreur.message)
+    if body.market_data_provider is not None:
+        try:
+            client.market_data_provider = normalize_market_data_provider(
+                body.market_data_provider)
+        except ValueError as erreur:
+            raise HTTPException(422, str(erreur))
     if body.name is not None:
         nom = body.name.strip()
         if not nom:
@@ -664,7 +678,8 @@ def update_client(
     apres = {"name": client.name, "status": client.status,
              "client_type": client.client_type, "legal_name": client.legal_name,
              "country": client.country, "external_ref": client.external_ref,
-             "notes": client.notes, "data_origin": client.data_origin}
+             "notes": client.notes, "data_origin": client.data_origin,
+             "market_data_provider": client.market_data_provider}
     if avant != apres:
         record_audit_event(
             session, action="CLIENT_UPDATED", object_type="client",
@@ -935,8 +950,9 @@ def replace_constraints(
         definitions = definitions_for(session, entity_id=client.entity_id,
                                       client_id=client.id,
                                       include_archived=True)
-        apply_constraints(client, body.constraints, body.constraints_version,
-                          definitions)
+        apply_constraints_atomic(
+            session, client, body.constraints, body.constraints_version,
+            definitions)
     except ClientRuleError as erreur:
         if erreur.code == "CONSTRAINTS_VERSION_STALE":
             # Un conflit d'écriture est un fait à tracer : c'est la preuve que

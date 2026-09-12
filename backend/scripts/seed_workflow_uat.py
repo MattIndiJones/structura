@@ -44,8 +44,11 @@ from backend.app.db.models import (
     RfqQuote, RfqRequest, TradeAmendmentRequest, User,
 )
 from backend.app.services.uat_generation import (
-    LIFECYCLE_PROFILE_KEYS, UatGenerationRequest, generate_batch,
+    LIFECYCLE_PROFILE_KEYS, UatGenerationRequest, configure_uat_workflows,
+    generate_batch,
 )
+
+configure_uat_workflows(deals_api, rfq_api)
 
 
 EXPERT_SCRIPT = """PARAM COUPON = 8%

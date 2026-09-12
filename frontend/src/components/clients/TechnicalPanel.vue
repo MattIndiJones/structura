@@ -177,13 +177,14 @@
                 {{ l.notional ? montant(l.notional) : '—' }}
               </td>
               <td class="py-2 pr-3 text-right tabular-nums"
-                  :class="{ absent: l.coupon_pct === null }">
-                {{ l.coupon_pct !== null ? pct(l.coupon_pct) : '—' }}
+                  :class="{ absent: l.coupon_pct === null && !l.coupon_schedule_pct?.length }"
+                  :title="sourceNiveaux(l)">
+                {{ niveauOuEcheancier(l.coupon_pct, l.coupon_schedule_pct) }}
               </td>
               <td class="py-2 pr-3 text-right tabular-nums"
-                  :class="{ absent: l.protection_pct === null }"
+                  :class="{ absent: l.protection_pct === null && !l.protection_schedule_pct?.length }"
                   :title="detailBarrieres(l)">
-                {{ l.protection_pct !== null ? pct(l.protection_pct) : '—' }}
+                {{ niveauOuEcheancier(l.protection_pct, l.protection_schedule_pct) }}
               </td>
               <td class="py-2 pr-3 text-right tabular-nums"
                   :class="{ absent: l.price_pct === null }">
@@ -202,9 +203,10 @@
       <p class="card-hint" style="margin: 0">
         {{ couverture.with_coupon }} transaction(s) sur {{ couverture.n }} portent
         un coupon lisible, {{ couverture.with_protection }} une protection. Sur un
-        deal booké ici, ces niveaux sont lus dans son script figé ; sur une ligne
-        importée, ils viennent du fichier. Un tiret veut dire « non renseigné »,
-        jamais zéro.
+        deal booké ici, ces niveaux viennent des paramètres contractuels figés
+        lors du booking (ou des valeurs par défaut du script pour les anciens
+        deals qui n'en portent pas) ; sur une ligne importée, ils viennent du
+        fichier. Un tiret veut dire « non renseigné », jamais zéro.
       </p>
     </div>
   </div>
@@ -254,8 +256,26 @@ const jour = formatDate
 function detailBarrieres(ligne) {
   if (!ligne.barriers?.length) return ''
   return ligne.barriers
-    .map(b => `${b.name} · ${b.kind} · ${b.level_pct} %`)
+    .map(b => {
+      const niveau = b.levels_pct?.length
+        ? b.levels_pct.map(pct).join(' → ')
+        : (b.level_pct !== null ? pct(b.level_pct) : '—')
+      return `${b.name} · ${b.kind} · ${niveau}`
+    })
     .join('\n')
+}
+
+function niveauOuEcheancier(niveau, echeancier) {
+  if (echeancier?.length) return echeancier.map(pct).join(' → ')
+  return niveau !== null ? pct(niveau) : '—'
+}
+
+function sourceNiveaux(ligne) {
+  return {
+    booked_params: 'Paramètres contractuels figés au booking',
+    script_defaults: 'Valeurs par défaut du script (ancien deal sans paramètres bookés)',
+    imported_columns: 'Valeurs déclarées dans le fichier importé',
+  }[ligne.terms_source] || ''
 }
 
 function libelleExec(valeur) {

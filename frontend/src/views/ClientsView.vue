@@ -73,6 +73,14 @@
                 <span class="badge" :class="item.enRetard ? 'badge-negative' : 'badge-gold'">
                   {{ item.enRetard ? 'En retard' : "Aujourd'hui" }}
                 </span>
+                <div v-if="item.follow_up_id" class="flex items-center gap-1">
+                  <button class="btn-ghost btn-sm" @click="cloturerRelance(item, 'done')">
+                    Réalisée
+                  </button>
+                  <button class="btn-ghost btn-sm" @click="cloturerRelance(item, 'abandoned')">
+                    Abandonner
+                  </button>
+                </div>
               </li>
             </ul>
           </div>
@@ -365,6 +373,10 @@
                               class="btn-ghost btn-sm">Life Cycle →</RouterLink>
                   <button v-if="signal.client_id" class="btn-ghost btn-sm"
                           @click="ouvrirClient(signal.client_id)">Client →</button>
+                  <button v-if="signal.follow_up_id" class="btn-ghost btn-sm"
+                          @click="cloturerRelance(signal, 'done')">Réalisée</button>
+                  <button v-if="signal.follow_up_id" class="btn-ghost btn-sm"
+                          @click="cloturerRelance(signal, 'abandoned')">Abandonner</button>
                 </div>
               </li>
             </ul>
@@ -681,11 +693,19 @@ const tuiles = computed(() => [
 // Date() ni de fuseau, donc pas de décalage d'un jour selon l'heure locale.
 const aujourdhui = new Date().toISOString().slice(0, 10)
 const relancesDues = computed(() =>
-  store.interactions
-    .filter(i => i.next_action && i.next_action_date
-                 && i.next_action_date <= aujourdhui)
-    .map(i => ({ ...i, enRetard: i.next_action_date < aujourdhui }))
+  store.signaux
+    .filter(s => s.kind === 'follow_up_due' && s.due_date <= aujourdhui)
+    .map(s => ({ ...s, id: s.follow_up_id || `legacy-${s.interaction_id}`,
+      next_action: s.title, next_action_date: s.due_date,
+      enRetard: s.due_date < aujourdhui }))
     .sort((a, b) => a.next_action_date.localeCompare(b.next_action_date)))
+
+async function cloturerRelance(item, statut) {
+  if (!item.follow_up_id) return
+  await store.cloturerRelance(item.follow_up_id, statut)
+  await store.chargerSignaux({ mineOnly: mesDossiers.value })
+  if (section.value === 'apercu') await store.chargerInteractions({ limit: 50 })
+}
 
 const dormants = computed(
   () => store.clients.filter(c => c.status === 'dormant' || c.status === 'inactive'))

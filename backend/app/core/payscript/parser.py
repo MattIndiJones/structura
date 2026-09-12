@@ -35,6 +35,11 @@ import math
 from dataclasses import dataclass
 from typing import Callable
 
+from ..compute_budget import (
+    MAX_EXPANDED_DATES,
+    validate_script_source,
+)
+
 
 # ── Safe math namespace exposed to PayScript ──────────────────────
 _SAFE_MATH = {
@@ -541,14 +546,32 @@ def _parse_dates(s: str, line_no: int) -> list[float]:
     dates = []
     for part in s.split(','):
         part = part.strip()
-        m = re.match(r'^([\d.]+)\.\.([\d.]+)(?::([\d.]+))?$', part)
+        m = re.match(r'^([+-]?[\d.]+)\.\.([+-]?[\d.]+)(?::([+-]?[\d.]+))?$', part)
         if m:
             start, end = float(m.group(1)), float(m.group(2))
             step = float(m.group(3)) if m.group(3) else 1.0
+            if not all(math.isfinite(v) for v in (start, end, step)):
+                raise ValueError(f'Ligne {line_no}: plage de dates non finie: "{part}"')
+            if step <= 0:
+                raise ValueError(
+                    f'Ligne {line_no}: le pas de la plage doit être strictement positif: "{part}"')
+            if end < start:
+                raise ValueError(
+                    f'Ligne {line_no}: la fin de plage précède son début: "{part}"')
+            estimated = math.floor((end - start + 1e-9) / step) + 1
+            if len(dates) + estimated > MAX_EXPANDED_DATES:
+                raise ValueError(
+                    f'Ligne {line_no}: calendrier trop volumineux — plus de '
+                    f'{MAX_EXPANDED_DATES:,} dates développées.')
             t = start
             while t <= end + 1e-9:
                 dates.append(round(t, 10))
-                t = round(t + step, 10)
+                next_t = round(t + step, 10)
+                if next_t <= t:
+                    raise ValueError(
+                        f'Ligne {line_no}: le pas {step:g} est trop petit pour faire '
+                        'progresser la plage après arrondi.')
+                t = next_t
         else:
             v = part.rstrip('Yy')
             try:
@@ -562,10 +585,16 @@ def _parse_dates(s: str, line_no: int) -> list[float]:
     if bad:
         raise ValueError(f'Ligne {line_no}: date d\'observation invalide ({bad[0]:g}) — '
                          f'les dates AT doivent être strictement positives.')
-    return sorted(set(dates))
+    unique = sorted(set(dates))
+    if len(unique) > MAX_EXPANDED_DATES:
+        raise ValueError(
+            f'Ligne {line_no}: calendrier trop volumineux — plus de '
+            f'{MAX_EXPANDED_DATES:,} dates développées.')
+    return unique
 
 
 def parse_script(code: str) -> CompiledScript:
+    validate_script_source(code)
     raw_lines = code.split('\n')
     lines = []
     for i, raw in enumerate(raw_lines):

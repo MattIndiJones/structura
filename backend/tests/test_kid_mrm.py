@@ -18,7 +18,7 @@ risque-neutre). Ces tests ne portent que sur la cohérence interne du classement
 import pytest
 from sqlalchemy import create_engine, text
 
-from backend.app.api.kid import KidSaveRequest, _mrm_from_vev, _sri
+from backend.app.api.kid import KidSaveRequest, _mrm_from_vev, _scenario_row, _sri
 from backend.app.db.database import _make_kid_vev_nullable
 
 
@@ -80,3 +80,77 @@ def test_migration_rend_vev_nullable_sur_une_base_existante():
         conn.execute(text("""INSERT INTO kid_records VALUES
             (1,NULL,NULL,1,'perte totale',7,7,3,NULL,3,'[]','{}','2026-01-01')"""))
         conn.commit()
+
+
+def _scenario_with_flows(flows):
+    amount = sum(flow["cf"] for flow in flows)
+    cell = {"amount": amount, "life": max((f["t"] for f in flows), default=1.0),
+            "flows": flows}
+    return {
+        "p1": amount, "p10": amount, "p50": amount, "p90": amount,
+        "scenarios": {key: dict(cell) for key in ("p1", "p10", "p50", "p90")},
+    }
+
+
+def test_call_achete_12_double_a_un_tri_de_100_pourcent_sur_un_an():
+    scenario = _scenario_with_flows([{"t": 1.0, "cf": 0.24}])
+
+    row = _scenario_row(scenario, 1.0, 0.0, 0.0, 0.0, initial_price_pct=12.0)
+
+    assert row["modere"]["amount"] == pytest.approx(20_000.0)
+    assert row["modere"]["ann_return"] == pytest.approx(100.0)
+    assert row["modere"]["return_status"] == "computed"
+
+
+def test_perte_integrale_de_la_prime_est_moins_cent_pourcent():
+    scenario = _scenario_with_flows([{"t": 1.0, "cf": 0.0}])
+
+    row = _scenario_row(scenario, 1.0, 0.0, 0.0, 0.0, initial_price_pct=12.0)
+
+    assert row["stress"]["amount"] == 0.0
+    assert row["stress"]["ann_return"] == -100.0
+    assert row["stress"]["return_status"] == "total_loss"
+
+
+def test_montant_et_tri_utilisent_exactement_les_memes_flux_nets():
+    scenario = _scenario_with_flows([
+        {"t": 1.0, "cf": 0.08},
+        {"t": 2.0, "cf": 1.08},
+    ])
+
+    cell = _scenario_row(
+        scenario, 2.0, cost_entry=0.0, cost_exit=1.0,
+        cost_ongoing=2.0, initial_price_pct=100.0,
+    )["modere"]
+
+    assert cell["amount"] == sum(f["cf"] for f in cell["net_flows"])
+    # Le frais de sortie ne frappe que les flux de la date de sortie.
+    assert cell["net_flows"][0]["cf"] == pytest.approx(800.0 * 0.98, abs=0.01)
+    assert cell["net_flows"][1]["cf"] == pytest.approx(
+        10_800.0 * 0.98**2 * 0.99, abs=0.01)
+
+
+@pytest.mark.parametrize("annee_rappel", [1, 2, 3])
+def test_coupon_annuel_huit_pourcent_garde_un_tri_de_huit_pourcent(annee_rappel):
+    flows = [{"t": float(year), "cf": 0.08} for year in range(1, annee_rappel)]
+    flows.append({"t": float(annee_rappel), "cf": 1.08})
+    scenario = _scenario_with_flows(flows)
+
+    cell = _scenario_row(
+        scenario, float(annee_rappel), 0.0, 0.0, 0.0,
+        initial_price_pct=100.0,
+    )["modere"]
+
+    assert cell["ann_return"] == pytest.approx(8.0, abs=1e-6)
+
+
+def test_tri_ambigu_reste_non_calculable_et_ne_devient_pas_une_perte_totale():
+    scenario = _scenario_with_flows([
+        {"t": 1.0, "cf": 2.5},
+        {"t": 2.0, "cf": -1.55},
+    ])
+
+    cell = _scenario_row(scenario, 2.0, 0.0, 0.0, 0.0)["modere"]
+
+    assert cell["ann_return"] is None
+    assert cell["return_status"] == "not_computable"

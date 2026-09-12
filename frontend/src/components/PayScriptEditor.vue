@@ -96,6 +96,7 @@
         <textarea
           v-model="store.script"
           class="code-editor w-full"
+          :maxlength="store.calculationLimits.maxScriptChars"
           spellcheck="false"
           placeholder="# Écrivez votre PayScript ici…"
           @input="onInput"
@@ -103,6 +104,12 @@
           style="min-height:340px"
         />
       </SensitiveValue>
+      <div class="px-3 py-1.5 border-t border-slate-800 text-[10px] font-mono text-right"
+           :class="store.script.length > store.calculationLimits.maxScriptChars * 0.9
+             ? 'text-amber-500' : 'text-slate-600'">
+        {{ store.script.length.toLocaleString() }} / {{ store.calculationLimits.maxScriptChars.toLocaleString() }} caractères ·
+        {{ store.script.split('\n').length.toLocaleString() }} / {{ store.calculationLimits.maxScriptLines.toLocaleString() }} lignes
+      </div>
     </div>
 
     <!-- Parse error -->

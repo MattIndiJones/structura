@@ -139,6 +139,7 @@ class Script(SQLModel, table=True):
     ai_model: str = Field(default="")
     ai_prompt: str = Field(default="")            # la description en français
     ai_generated_at: Optional[datetime] = Field(default=None)
+    ai_provenance_json: str = Field(default="{}", sa_column=Column(Text))
     # ── Filiation ───────────────────────────────────────────────────
     # Une variante d'un deal existant : elle ne stocke QUE ses écarts, dans
     # variant_delta_json, et hérite tout le reste de son parent à la lecture.
@@ -282,6 +283,11 @@ class Deal(SQLModel, table=True):
     # the deal resolves (callé/échu) — see api/deals.py:_evaluate_lifecycle.
     # None while still actif.
     realized_payout: Optional[float] = Field(default=None)
+    # Cash flow still owed after its contractual observation.  At maturity it
+    # is the terminal redemption only (earlier coupons may already be in
+    # realized_payout). It remains exposed until payment_date; the value is
+    # retained afterwards as audit history while the terminal status excludes it.
+    settlement_amount: Optional[float] = Field(default=None)
     # Mirrors the terminal event's status ("callé" | "ki" | "final") once
     # resolved — lets the Booking view compute a hit-ratio straight from the
     # deal list, no per-deal events fetch needed. None while still actif.
@@ -311,8 +317,13 @@ class Deal(SQLModel, table=True):
     # overwritten at each recompute, no history kept. None while never computed.
     greeks_json: str = Field(default="{}", sa_column=Column(Text))
     greeks_computed_at: Optional[datetime] = Field(default=None)
+    # Latest explicit valuation selected for the deal screens.  The complete
+    # append-only history lives in valuation_runs; this pointer is only a
+    # convenient cache and never makes an old run mutable.
+    latest_valuation_run_id: Optional[int] = Field(
+        default=None, foreign_key="valuation_runs.id", index=True)
 
-    status: str = Field(default="actif")  # actif | callé | échu | résilié
+    status: str = Field(default="actif")  # actif | en_reglement | callé | échu | résilié
     # Monotonic version of the operational contract row. Every governed
     # amendment snapshots both the previous and resulting version in
     # DealContractVersion; a concurrent/stale request can therefore never
@@ -679,10 +690,10 @@ class RfqProvider(SQLModel, table=True):
 class Alert(SQLModel, table=True):
     """Lifecycle/barrier alert raised by the daily refresh (or the manual
     'Rafraîchir le book' action) — see services/lifecycle_alerts.py.
-    dedup_key guarantees at most one alert per logical fact (one per deal
-    resolution, one per barrier crossing) no matter how many runs re-detect
-    it; deal_reference is denormalized so the alert stays readable even if
-    the deal is later deleted."""
+    dedup_key guarantees at most one alert per logical fact: one per deal
+    resolution, one permanent knock-in crossing, and one autocall warning per
+    contractual observation date. deal_reference is denormalized so the alert
+    stays readable even if the deal is later deleted."""
     __tablename__ = "alerts"
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
@@ -894,7 +905,7 @@ class ComputeBatch(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.id", index=True)
     kind: str = Field(default="")   # selects the pricer in core/compute/pricers/PRICERS
     label: str = Field(default="")
-    status: str = Field(default="queued")  # queued | running | completed | completed_with_failures | failed
+    status: str = Field(default="queued")  # queued | running | completed | completed_with_failures | failed | cancelled
     total_jobs: int = Field(default=0)
     completed_jobs: int = Field(default=0)
     failed_jobs: int = Field(default=0)
@@ -902,6 +913,11 @@ class ComputeBatch(SQLModel, table=True):
     result_summary_json: str = Field(default="{}", sa_column=Column(Text))    # kind-specific aggregation, filled by the caller once every job is in a terminal state
     worker_name: Optional[str] = Field(default=None)   # host-pid of whichever worker last claimed this batch
     claimed_at: Optional[datetime] = Field(default=None)
+    lease_token: Optional[str] = Field(default=None, index=True)
+    lease_expires_at: Optional[datetime] = Field(default=None, index=True)
+    heartbeat_at: Optional[datetime] = Field(default=None)
+    cancel_requested_at: Optional[datetime] = Field(default=None)
+    cost_estimate_json: str = Field(default="{}", sa_column=Column(Text))
     started_at: Optional[datetime] = Field(default=None)
     finished_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -921,10 +937,54 @@ class ComputeJob(SQLModel, table=True):
     job_index: int = Field(default=0)      # order within the batch, stable regardless of completion order
     label: str = Field(default="")         # human-readable (e.g. a historical scenario's date, a deal reference)
     payload_json: str = Field(default="{}", sa_column=Column(Text))
-    status: str = Field(default="queued")  # queued | done | failed
+    status: str = Field(default="queued")  # queued | running | done | failed | cancelled
+    lease_token: Optional[str] = Field(default=None, index=True)
+    attempt: int = Field(default=0)
     result_json: str = Field(default="{}", sa_column=Column(Text))
     error: Optional[str] = Field(default=None)
     started_at: Optional[datetime] = Field(default=None)
+    finished_at: Optional[datetime] = Field(default=None)
+
+
+class ValuationRun(SQLModel, table=True):
+    """Immutable evidence for one explicit deal valuation action.
+
+    Internal bump legs belong to the result of the same run.  Replaying a run
+    consumes only context_json and never refreshes external market data.
+    """
+    __tablename__ = "valuation_runs"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    run_type: str = Field(default="MTM", index=True)  # MTM | GREEKS | REPORT
+    contract_version: int = Field(default=1)
+    context_json: str = Field(default="{}", sa_column=Column(Text))
+    context_hash: str = Field(index=True)
+    market_data_json: str = Field(default="{}", sa_column=Column(Text))
+    data_versions_json: str = Field(default="{}", sa_column=Column(Text))
+    engine_version: str = Field(default="unknown")
+    engine_fingerprint: str = Field(default="")
+    n_paths: int = Field(default=0)
+    result_json: str = Field(default="{}", sa_column=Column(Text))
+    diagnostics_json: str = Field(default="{}", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class SchedulerRun(SQLModel, table=True):
+    """Durable, idempotent journal for one scheduled lifecycle slot."""
+    __tablename__ = "scheduler_runs"
+    __table_args__ = (
+        UniqueConstraint("job_key", "scheduled_for", name="uq_scheduler_job_slot"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    job_key: str = Field(index=True)
+    scheduled_for: datetime = Field(index=True)
+    timezone: str = Field(default="Europe/Paris")
+    status: str = Field(default="RUNNING", index=True)
+    trigger: str = Field(default="SCHEDULED")  # SCHEDULED | CATCH_UP | MANUAL
+    result_json: str = Field(default="{}", sa_column=Column(Text))
+    error: Optional[str] = Field(default=None, sa_column=Column(Text))
+    started_at: datetime = Field(default_factory=datetime.utcnow)
     finished_at: Optional[datetime] = Field(default=None)
 
 
@@ -977,6 +1037,11 @@ class Client(SQLModel, table=True):
     # fictive, `demo` est volontairement le défaut de migration. Le passage
     # à une donnée réelle est un geste explicite, jamais une déduction.
     data_origin: str = Field(default="demo", index=True)
+    # Market-data adapter selected for this client account.  Yahoo Finance is
+    # the only active adapter today; the code is stored explicitly so a future
+    # Bloomberg or Reuters connection is an account configuration change, not
+    # a rewrite of every valuation path.
+    market_data_provider: str = Field(default="YAHOO_FINANCE", index=True)
 
     # ── Contraintes institutionnelles ─────────────────────────────────
     # Scalaires en colonnes, listes en JSON. La coupure n'est pas
@@ -1208,6 +1273,27 @@ class Interaction(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class InteractionFollowUp(SQLModel, table=True):
+    """Action commerciale issue d'une interaction, avec une vraie clôture."""
+    __tablename__ = "interaction_follow_ups"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
+    interaction_id: int = Field(foreign_key="interactions.id", index=True)
+    client_id: int = Field(foreign_key="clients.id", index=True)
+    opportunity_id: Optional[int] = Field(
+        default=None, foreign_key="opportunities.id", index=True)
+    owner_user_id: int = Field(foreign_key="users.id", index=True)
+    title: str = Field(default="")
+    due_date: Optional[str] = Field(default=None, index=True)
+    status: str = Field(default="open", index=True)  # open | done | abandoned
+    created_by_user_id: int = Field(foreign_key="users.id")
+    closed_by_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    closure_note: Optional[str] = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    closed_at: Optional[datetime] = Field(default=None)
+
+
 class InteractionParticipant(SQLModel, table=True):
     """Les personnes présentes, désignées par leur affiliation du moment."""
     __tablename__ = "interaction_participants"
@@ -1329,6 +1415,7 @@ class ClientImportBatch(SQLModel, table=True):
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
     user_id: int = Field(foreign_key="users.id", index=True)
     filename: str = Field(default="")
+    file_fingerprint: str = Field(default="", index=True)
     source_format: str = Field(default="xlsx")     # xlsx | json
     status: str = Field(default="applied", index=True)  # applied | reverted
     rows_created: int = Field(default=0)
@@ -1359,10 +1446,15 @@ class ClientTradeHistory(SQLModel, table=True):
     aujourd'hui.
     """
     __tablename__ = "client_trade_history"
+    __table_args__ = (
+        UniqueConstraint("entity_id", "natural_key",
+                         name="uq_client_trade_history_natural_key"),
+    )
     id: Optional[int] = Field(default=None, primary_key=True)
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
     import_batch_id: Optional[int] = Field(
         default=None, foreign_key="client_import_batches.id", index=True)
+    natural_key: Optional[str] = Field(default=None, index=True)
     client_id: int = Field(foreign_key="clients.id", index=True)
     affiliation_id: Optional[int] = Field(
         default=None, foreign_key="affiliations.id", index=True)

@@ -193,6 +193,9 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
         w = position_sign(d) * d.nominal * fx_rate
 
         greeks = json.loads(d.greeks_json)
+        vega_scope = (greeks.get("vega_scope") or {}).get("type") or "non_documente"
+        if vega_scope not in {"total", "leg_independante"}:
+            vega_scope = "non_documente"
         name_to_ticker = {u.get("name"): u.get("ticker", "")
                           for u in json.loads(d.underlyings_json)}
 
@@ -201,17 +204,31 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
             key = _TICKER_TO_KEY.get(ticker, ticker or name)
             label = _TICKER_TO_LABEL.get(ticker, name)
             bucket = per_underlying.setdefault(key, {"label": label, "delta_eur": 0.0,
-                                                       "gamma_eur": 0.0, "vega_eur": 0.0,
+                                                       "gamma_eur": 0.0,
+                                                       "vega_by_scope_eur": {
+                                                           "total": 0.0,
+                                                           "leg_independante": 0.0,
+                                                           "non_documente": 0.0,
+                                                       },
+                                                       "_vega_scopes": [],
                                                        "contributions": []})
             contrib = {"deal_id": d.id, "reference": d.reference,
-                       "delta_eur": None, "gamma_eur": None, "vega_eur": None}
-            for greek_name, out_key in (("delta", "delta_eur"), ("gamma", "gamma_eur"),
-                                         ("vega", "vega_eur")):
+                       "delta_eur": None, "gamma_eur": None, "vega_eur": None,
+                       "vega_scope": None}
+            for greek_name, out_key in (("delta", "delta_eur"), ("gamma", "gamma_eur")):
                 v = g.get(greek_name)
                 if v is not None:
                     amt = v * w
                     bucket[out_key] += amt
                     contrib[out_key] = amt
+            vega = g.get("vega")
+            if vega is not None:
+                amt = vega * w
+                bucket["vega_by_scope_eur"][vega_scope] += amt
+                if vega_scope not in bucket["_vega_scopes"]:
+                    bucket["_vega_scopes"].append(vega_scope)
+                contrib["vega_eur"] = amt
+                contrib["vega_scope"] = vega_scope
             bucket["contributions"].append(contrib)
 
         # Correlation Greek (compute_greeks' corr_i_j, cross-gamma to a rise
@@ -265,6 +282,17 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
         if (now - d.greeks_computed_at) > timedelta(days=_STALE_DAYS):
             deals_stale.append({"id": d.id, "reference": d.reference,
                                  "greeks_computed_at": d.greeks_computed_at.isoformat()})
+
+    for bucket in per_underlying.values():
+        scopes = bucket.pop("_vega_scopes")
+        bucket["vega_scopes"] = scopes
+        bucket["vega_scope_mixed"] = len(scopes) > 1
+        # Compatibility for consumers that can display only one vega number:
+        # publish it only when it has one unambiguous scope. A mixed number is
+        # economically undefined, so None is safer than a plausible-looking sum.
+        bucket["vega_eur"] = (
+            bucket["vega_by_scope_eur"][scopes[0]] if len(scopes) == 1 else None
+        )
 
     return {
         "deals_included": deals_included,
@@ -486,13 +514,22 @@ def _aggregate_exposure_by_counterparty(deals: list[Deal], session: Session) -> 
             # this screen exists to prevent, so the position is named instead.
             deals_missing_fx.append(_fx_missing_row(d))
             continue
-        nom_eur = d.nominal * fx_rate
+        exposure_fraction = (
+            float(d.settlement_amount or 0.0)
+            if d.status == "en_reglement" else 1.0
+        )
+        nom_eur = d.nominal * exposure_fraction * fx_rate
         nominal_total_eur += nom_eur
 
         key = d.contrepartie or "(non renseignée)"
         bucket = by_cpty.setdefault(key, {"nominal_eur": 0.0, "deals": []})
         bucket["nominal_eur"] += nom_eur
-        bucket["deals"].append({"id": d.id, "reference": d.reference, "nominal_eur": round(nom_eur, 2)})
+        bucket["deals"].append({
+            "id": d.id, "reference": d.reference,
+            "nominal_eur": round(nom_eur, 2), "status": d.status,
+            "exposure_basis": ("settlement_amount"
+                               if d.status == "en_reglement" else "nominal"),
+        })
 
     limits = {c.name: c.limit_eur for c in session.exec(select(Counterparty)).all()}
 
@@ -654,7 +691,10 @@ def exposure_by_counterparty_global(
     across all of their portfolios — same 'always the true total' contract
     as /risk-global."""
     deals = session.exec(
-        select(Deal).where(Deal.user_id == current.id, Deal.status == "actif")
+        select(Deal).where(
+            Deal.user_id == current.id,
+            Deal.status.in_(["actif", "en_reglement"]),
+        )
     ).all()
     payload = _aggregate_exposure_by_counterparty(list(deals), session)
     payload["scope"] = "global"
@@ -671,7 +711,10 @@ def exposure_by_counterparty_portfolio(
     if not p or p.user_id != current.id:
         raise HTTPException(404, "Portefeuille introuvable")
     deals = session.exec(
-        select(Deal).where(Deal.portfolio_id == portfolio_id, Deal.status == "actif")
+        select(Deal).where(
+            Deal.portfolio_id == portfolio_id,
+            Deal.status.in_(["actif", "en_reglement"]),
+        )
     ).all()
     payload = _aggregate_exposure_by_counterparty(list(deals), session)
     payload["scope"] = "portfolio"

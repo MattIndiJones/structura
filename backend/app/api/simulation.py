@@ -8,6 +8,12 @@ from fastapi import APIRouter, HTTPException
 from ..core.schemas import SolverRequest, GridRequest
 from ..core.payscript.parser import parse_script, resolve_analysis_constats, resolve_constats, effective_T_max
 from ..core.payscript.simulation import solve_for_param, compute_price_grid
+from ..core.compute_budget import (
+    count_compiled_dates,
+    ensure_budget,
+    estimate_mc_batch,
+    validate_compiled_dates,
+)
 
 router = APIRouter(prefix="/api", tags=["simulation"])
 
@@ -45,6 +51,10 @@ def _parse_and_validate(req) -> tuple:
 
     if T_eff is None:
         T_eff = effective_T_max(compiled, req.T)
+    try:
+        validate_compiled_dates(compiled)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return compiled, uls, corr, T_eff, r_eff, etat, yc, ctx
 
 
@@ -62,6 +72,19 @@ def solve_endpoint(req: SolverRequest):
     _check_param_exists(compiled, req.param_name)
 
     try:
+        calculation_budget = estimate_mc_batch(
+            operation="solver",
+            maturity_years=T_eff,
+            underlyings=len(uls),
+            paths_per_run=req.N,
+            total_runs=req.max_iter + 2,
+            model=req.model,
+            antithetic=True,
+            continuous_monitoring=req.barrier_monitoring == "continuous",
+            stochastic_rates=req.sigma_r > 0,
+            expanded_dates=count_compiled_dates(compiled),
+        )
+        ensure_budget(calculation_budget)
         res = solve_for_param(
             compiled, uls, corr, r_eff, T_eff, req.model, req.seed,
             # Les PARAM de la vie restante. `compiled` porte ceux de la
@@ -81,6 +104,7 @@ def solve_endpoint(req: SolverRequest):
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
         res["years_remaining"] = round(ctx.T_remaining, 4)
+    res["calculation_budget"] = calculation_budget.to_dict()
     return res
 
 
@@ -96,6 +120,19 @@ def grid_endpoint(req: GridRequest):
                              detail="Les deux axes doivent porter sur des paramètres différents.")
 
     try:
+        calculation_budget = estimate_mc_batch(
+            operation="parameter_grid",
+            maturity_years=T_eff,
+            underlyings=len(uls),
+            paths_per_run=req.N,
+            total_runs=req.x_steps * req.y_steps,
+            model=req.model,
+            antithetic=True,
+            continuous_monitoring=req.barrier_monitoring == "continuous",
+            stochastic_rates=req.sigma_r > 0,
+            expanded_dates=count_compiled_dates(compiled),
+        )
+        ensure_budget(calculation_budget)
         res = compute_price_grid(
             compiled, uls, corr, r_eff, T_eff, req.model, req.seed,
             # Les PARAM de la vie restante. `compiled` porte ceux de la
@@ -116,4 +153,5 @@ def grid_endpoint(req: GridRequest):
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
         res["years_remaining"] = round(ctx.T_remaining, 4)
+    res["calculation_budget"] = calculation_budget.to_dict()
     return res

@@ -28,6 +28,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from typing import Optional
 
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from ..db.models import (
@@ -299,6 +300,46 @@ def apply_constraints(client: Client, constraints: dict,
     client.constraints_json = json.dumps(propre, ensure_ascii=False)
     client.constraints_version = client.constraints_version + 1
     client.updated_at = datetime.utcnow()
+    return client
+
+
+def apply_constraints_atomic(session: Session, client: Client, constraints: dict,
+                             version_envoyee: Optional[int],
+                             definitions=None) -> Client:
+    """Remplace les contraintes par un compare-and-swap exécuté en base.
+
+    Le contrôle Python de :func:`apply_constraints` reste utile aux appels
+    unitaires, mais il laisse une fenêtre entre le SELECT et l'UPDATE. Ici la
+    version attendue fait partie du WHERE : une seule écriture concurrente peut
+    faire passer ``version`` de N à N+1.
+    """
+    if version_envoyee is None:
+        require_constraints_version(client, version_envoyee)
+    propre = validate_constraints(constraints, definitions)
+    maintenant = datetime.utcnow()
+    statement = (
+        update(Client)
+        .where(Client.id == client.id,
+               Client.constraints_version == version_envoyee)
+        .values(
+            constraints_json=json.dumps(propre, ensure_ascii=False),
+            constraints_version=version_envoyee + 1,
+            updated_at=maintenant,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    result = session.exec(statement)
+    if result.rowcount != 1:
+        session.expire(client)
+        session.refresh(client)
+        raise ClientRuleError(
+            code="CONSTRAINTS_VERSION_STALE",
+            message=("Ces préférences ont été modifiées entre-temps par quelqu'un "
+                     "d'autre. Rechargez la fiche pour repartir de la version à "
+                     "jour, vos modifications n'ont pas été enregistrées."),
+        )
+    session.expire(client)
+    session.refresh(client)
     return client
 
 

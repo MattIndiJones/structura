@@ -133,6 +133,32 @@
           {{ rapport.unknown_sheets.join(', ') }}.
         </AlertMessage>
 
+        <AlertMessage v-if="rapport.duplicate_of_batch_id" kind="info">
+          Ce fichier exact a déjà été importé dans le lot
+          #{{ rapport.duplicate_of_batch_id }}<template v-if="rapport.duplicate_of_created_at">
+            le {{ formaterDate(rapport.duplicate_of_created_at) }}</template>.
+          Les lignes déjà présentes sont
+          signalées ci-dessous et ne seront pas recréées.
+        </AlertMessage>
+
+        <div v-if="rapport.collisions?.length" class="flex flex-col gap-2">
+          <div class="text-sm font-semibold">
+            {{ rapport.collisions.length }} transaction(s) déjà présente(s)
+          </div>
+          <ul class="flex flex-col gap-1 max-h-48 overflow-y-auto rounded-[10px] p-3"
+              style="background: var(--surface2); border: 1px solid var(--border)">
+            <li v-for="collision in rapport.collisions" :key="collision.natural_key"
+                class="text-xs">
+              <span class="font-mono font-semibold">
+                transactions · ligne {{ collision.line }}</span>
+              — correspond à la transaction
+              {{ collision.existing_transaction_id
+                 ? `#${collision.existing_transaction_id}` : 'du même fichier' }} ;
+              elle sera ignorée.
+            </li>
+          </ul>
+        </div>
+
         <div v-if="rapport.issues.length" class="flex flex-col gap-2">
           <div class="text-sm font-semibold" style="color: var(--negative)">
             {{ rapport.issues.length }} ligne(s) à corriger

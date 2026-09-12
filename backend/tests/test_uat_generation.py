@@ -9,14 +9,19 @@ from fastapi import HTTPException
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.core.rfq_controls import booking_gate_failures
+from backend.app.api import deals as deals_api, rfq as rfq_api
 from backend.app.db.models import (
     Alert, AuditEvent, Counterparty, Deal, DealEvent, Entity, LifecycleProposal,
     OfficialFixingVersion, RfqProvider, RfqQuote, RfqRequest,
     UatGenerationBatch, User,
 )
 from backend.app.services.uat_generation import (
-    UatGenerationRequest, delete_batch, generate_batch, preview_generation,
+    UatGenerationRequest, configure_uat_workflows, delete_batch,
+    generate_batch, preview_generation,
 )
+
+
+configure_uat_workflows(deals_api, rfq_api)
 
 
 def _session_and_users() -> tuple[Session, User, User]:

@@ -13,9 +13,9 @@ import math
 
 import pytest
 
-from backend.app.core.payscript.parser import parse_script, CompiledScript
+from backend.app.core.payscript.parser import parse_script, CompiledEvent, CompiledScript
 from backend.app.core.payscript.engine import (
-    run_mc, compute_greeks, _shift_events_for_mtf, SY,
+    run_mc, compute_greeks, _age_compiled_script, _shift_events_for_mtf, SY,
 )
 from backend.app.api.deals import _residual_greeks, _greeks_state
 
@@ -226,6 +226,53 @@ def test_theta_absent_plutot_que_faux_sur_un_etat_non_roulable():
     g2 = _greeks(REALVOL, selected=("theta",), sigma=0.05,
                  state=_state(1.0, realvol_state={"sumsq": 0.02, "t": 0.5}))
     assert g2["theta"] is None and g2["theta_event"]["reason"] == "realvol"
+
+
+def test_vieillissement_preserve_tous_les_champs_du_script_compile():
+    fn = lambda _ctx, _state: None
+    event = CompiledEvent(
+        type="AT", dates=[0.05, 0.50], fn=fn, constat_ref="OBS",
+        constat_qualifier=[("last",)], payment_dates=[0.06, 0.52],
+        window_dates=[[0.01, 0.04], [0.40, 0.50]], reduction="AVG",
+        ranks=[1, 2], releves_passes=[3, 4],
+    )
+    maturity = CompiledEvent(type="AT_MATURITY", dates=[], fn=fn)
+    schedule = object()
+    script = CompiledScript(
+        events=[event, maturity], init_fn=fn, params=[], constats=[], has_stop=True,
+        monitors=[{"name": "M", "observable": "WOF", "direction": "up"}],
+        strike_fix_dates=[0.30], strike_fix_reduction="AVG",
+        echeancier=schedule, origine="2026-09-12",
+        releves_realises={"OBS#2": {"n": 4}},
+    )
+
+    aged = _age_compiled_script(script, 0.10)
+    kept = aged.events[0]
+    assert kept.dates == [0.4]
+    assert kept.payment_dates == [0.42]
+    assert kept.window_dates == [[0.3, 0.4]]
+    assert kept.ranks == [2] and kept.releves_passes == [4]
+    assert kept.constat_ref == event.constat_ref
+    assert kept.constat_qualifier == event.constat_qualifier
+    assert kept.reduction == event.reduction and kept.fn is fn
+    assert aged.events[1] is maturity
+    assert aged.monitors == script.monitors
+    assert aged.strike_fix_dates == [0.2]
+    assert aged.strike_fix_reduction == "AVG"
+    assert aged.echeancier is schedule
+    assert aged.origine == script.origine
+    assert aged.releves_realises == script.releves_realises
+
+
+def test_theta_refuse_de_franchir_un_releve_de_fenetre():
+    cs = parse_script('AT MATURITY\n  PAY 1 "capital"')
+    cs.events.insert(0, CompiledEvent(
+        type="AT", dates=[0.5], fn=lambda _ctx, _state: None,
+        window_dates=[[0.01, 0.5]], reduction="AVG",
+    ))
+    g = _greeks(None, compiled=cs, selected=("theta",), state=_state(1.0))
+    assert g["theta"] is None
+    assert g["theta_event"]["reason"] == "constatation_window_transition_required"
 
 
 # ── Unités consommées par les notes PDF ───────────────────────────────────

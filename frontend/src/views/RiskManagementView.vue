@@ -116,6 +116,10 @@
                     ⏱ {{ pf.risk.deals_stale.length }} deal(s) avec des Greeks vieux de plus de 7 jours
                     ({{ pf.risk.deals_stale.map(d => d.reference).join(', ') }})
                   </div>
+                  <div v-if="hasMixedVegaScopes"
+                    class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
+                    ⚠ Certains sous-jacents portent plusieurs périmètres de vega. Les montants sont présentés séparément et ne sont pas additionnés.
+                  </div>
 
                   <div v-if="!pf.risk.deals_included.length" class="text-xs text-slate-500">
                     Aucun deal avec des Greeks calculés dans cette sélection.
@@ -132,8 +136,8 @@
                               <HelpTip align="right" text="Exposition nette en EUR pour un mouvement de 100% du sous-jacent : Σ(delta% du deal × nominal × taux de change), sommée sur tous les deals qui le contiennent. Vert = exposition longue, rouge = short." /></th>
                             <th class="text-right py-1.5 pr-3 font-semibold">Gamma (EUR)
                               <HelpTip align="right" text="Variation du delta net (EUR) pour un mouvement de 100% du sous-jacent. Peut être très élevé et bruité près d'une barrière autocall/KI (payoff quasi-digital) — vérifiez le détail par deal si un chiffre paraît disproportionné." /></th>
-                            <th class="text-right py-1.5 font-semibold">Vega (EUR)
-                              <HelpTip align="right" text="Sensibilité nette en EUR à une hausse de 100 points de volatilité implicite du sous-jacent, sommée sur tous les deals concernés." /></th>
+                            <th class="text-right py-1.5 font-semibold">Vega par périmètre (EUR)
+                              <HelpTip align="right" width="w-80" text="Les vegas de volatilité totale, de jambe indépendante de variance et les anciens vegas sans périmètre documenté restent séparés. Les additionner donnerait une exposition sans définition commune." /></th>
                           </tr>
                         </thead>
                         <tbody>
@@ -146,7 +150,13 @@
                               <td class="py-1.5 pr-3 text-right font-mono"
                                 :class="g.delta_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">{{ formatNominal(g.delta_eur) }}</td>
                               <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ formatNominal(g.gamma_eur) }}</td>
-                              <td class="py-1.5 text-right font-mono text-slate-400">{{ formatNominal(g.vega_eur) }}</td>
+                              <td class="py-1.5 text-right font-mono text-slate-400">
+                                <div v-for="row in vegaRows(g)" :key="row.scope">
+                                  <span class="text-[10px] text-slate-600">{{ vegaScopeLabel(row.scope) }}</span>
+                                  {{ formatNominal(row.value) }}
+                                </div>
+                                <span v-if="!vegaRows(g).length" class="text-slate-600">—</span>
+                              </td>
                             </tr>
                             <tr v-if="expandedUnderlying === key" class="bg-slate-900/60">
                               <td colspan="4" class="py-2 pl-6 pr-3">
@@ -157,7 +167,7 @@
                                       <th class="text-right py-1 pr-3 font-medium">Delta (EUR / %)
                                         <HelpTip align="right" text="% = part de ce deal dans le delta net de la ligne — peut dépasser 100% ou être négatif si des deals se compensent entre eux." /></th>
                                       <th class="text-right py-1 pr-3 font-medium">Gamma (EUR / %)</th>
-                                      <th class="text-right py-1 font-medium">Vega (EUR / %)</th>
+                                      <th class="text-right py-1 font-medium">Vega (EUR / périmètre / %)</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -171,7 +181,11 @@
                                         {{ formatNominal(c.gamma_eur) }} <span class="text-slate-600">({{ sharePct(c.gamma_eur, g.gamma_eur) }})</span>
                                       </td>
                                       <td class="py-1 text-right font-mono text-slate-400">
-                                        {{ formatNominal(c.vega_eur) }} <span class="text-slate-600">({{ sharePct(c.vega_eur, g.vega_eur) }})</span>
+                                        <template v-if="c.vega_eur != null">
+                                          {{ formatNominal(c.vega_eur) }}
+                                          <span class="text-slate-600">{{ vegaScopeLabel(c.vega_scope) }} · ({{ sharePct(c.vega_eur, vegaScopeTotal(g, c.vega_scope)) }})</span>
+                                        </template>
+                                        <span v-else class="text-slate-600">—</span>
                                       </td>
                                     </tr>
                                   </tbody>
@@ -275,22 +289,22 @@
             <!-- ══ Onglet Contreparties : concentration & limites ═ -->
             <template v-else-if="activeTab === 'contreparties'">
                 <div class="text-[10px] text-slate-500 -mt-1">
-                  Nominal (converti en EUR) par contrepartie sur les deals actifs de cette sélection — pas de recalcul Monte Carlo, lecture directe.
-                  <HelpTip text="Base nominal, pas MtM courant : une note structurée est une créance non sécurisée sur l'émetteur pour le remboursement promis — c'est le nominal qui est en jeu en cas de défaut, pas la valeur de marché du jour." />
+                  Exposition par contrepartie sur les deals actifs et les remboursements en attente — pas de recalcul Monte Carlo.
+                  <HelpTip text="Avant maturité, la base est le nominal. Entre maturité et paiement, la base devient le remboursement contractuel connu encore dû par l'émetteur." />
                 </div>
 
                 <div v-if="pf.exposureLoading" class="text-xs text-slate-500">Chargement…</div>
 
                 <template v-else-if="pf.exposure">
                   <div v-if="!pf.exposure.by_counterparty.length" class="text-xs text-slate-500">
-                    Aucun deal actif dans cette sélection.
+                    Aucun deal actif ou en attente de règlement dans cette sélection.
                   </div>
 
                   <template v-else>
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <div class="stat-box">
-                        <div class="text-xs text-slate-500 mb-1">Nominal total
-                          <HelpTip text="Somme des nominaux de tous les deals actifs de cette sélection, convertis en EUR." /></div>
+                        <div class="text-xs text-slate-500 mb-1">Exposition totale
+                          <HelpTip text="Somme des nominaux actifs et des remboursements connus non réglés, convertis en EUR." /></div>
                         <div class="text-lg font-bold font-mono text-slate-200">{{ formatNominal(pf.exposure.nominal_total_eur) }}</div>
                         <div class="text-[10px] text-slate-600">EUR</div>
                       </div>
@@ -560,7 +574,7 @@
                     class="flex flex-col gap-1.5">
                     <div class="text-xs text-slate-400">
                       {{ pf.varStudy.status === 'queued' ? 'En file d\'attente…' : 'En cours…' }}
-                      {{ pf.varStudy.completed_jobs + pf.varStudy.failed_jobs }} / {{ pf.varStudy.total_jobs }} scénario(s)
+                      {{ pf.varStudy.completed_jobs + pf.varStudy.failed_jobs }} / {{ pf.varStudy.total_jobs }} valorisation(s)
                     </div>
                     <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                       <div class="h-full bg-blue-500 transition-all"
@@ -569,37 +583,59 @@
                   </div>
 
                   <template v-else>
-                    <div v-if="pf.varStudy.failed_jobs" class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
-                      ⚠ {{ pf.varStudy.failed_jobs }} / {{ pf.varStudy.total_jobs }} scénario(s) en erreur — chiffres calculés sur les autres.
+                    <div v-if="pf.varStudy.result?.global_status === 'incomplete'"
+                      class="text-xs text-red-300 bg-red-950/30 border border-red-900/50 rounded-lg px-3 py-2">
+                      <div class="font-semibold">VaR du portefeuille demandé indisponible.</div>
+                      <div class="mt-1 text-red-300/80">
+                        Couverture {{ pf.varStudy.result.coverage?.included_deals ?? 0 }}/{{ pf.varStudy.result.coverage?.requested_deals ?? 0 }} deal(s).
+                        Aucune VaR ni aucun ES global n'est publié.
+                      </div>
+                    </div>
+
+                    <div v-if="varPublishedScope" class="text-xs text-slate-400">
+                      <span class="font-semibold text-slate-200">{{ varPublishedScopeLabel }}</span>
+                      <span v-if="pf.varStudy.result?.global_status === 'incomplete'">
+                        — univers fixe après exclusion de {{ varExcludedDeals.length }} deal(s) dans tous les scénarios.
+                      </span>
+                    </div>
+
+                    <div v-if="pf.varStudy.params?.market_data"
+                      class="text-[10px] text-slate-500 font-mono">
+                      Source : {{ pf.varStudy.params.market_data.provider === 'YAHOO_FINANCE'
+                        ? 'Yahoo Finance' : pf.varStudy.params.market_data.provider }} ·
+                      clôtures ajustées · date effective
+                      {{ pf.varStudy.params.market_data.asof_effective || 'indisponible' }}
+                      <span v-if="pf.varStudy.params.market_data.warnings?.length"
+                        class="text-amber-400"> · ⚠ données anciennes</span>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div v-for="m in ['historical', 'parametric']" :key="m" v-show="pf.varStudy.result?.[m]"
+                      <div v-for="m in ['historical', 'parametric']" :key="m" v-show="varPublishedScope?.[m]"
                         class="card flex flex-col gap-2">
                         <div class="text-xs font-bold text-slate-300 uppercase tracking-wider">
                           {{ m === 'historical' ? 'Historique' : 'Paramétrique' }}
-                          <span class="text-slate-600 font-normal normal-case">— {{ pf.varStudy.result?.[m]?.n_scenarios }} scénario(s)</span>
+                          <span class="text-slate-600 font-normal normal-case">— {{ varPublishedScope?.[m]?.n_scenarios }} scénario(s)</span>
                         </div>
                         <div class="grid grid-cols-2 gap-2">
                           <div class="stat-box">
                             <div class="text-xs text-slate-500 mb-1">VaR {{ Math.round((pf.varStudy.params.confidence ?? 0.95) * 100) }}%</div>
-                            <div class="text-lg font-bold font-mono text-red-400">{{ formatNominal(pf.varStudy.result?.[m]?.var_eur) }}</div>
+                            <div class="text-lg font-bold font-mono text-red-400">{{ formatNominal(varPublishedScope?.[m]?.var_eur) }}</div>
                             <div class="text-[10px] text-slate-600">EUR</div>
                           </div>
                           <div class="stat-box">
                             <div class="text-xs text-slate-500 mb-1">Expected Shortfall
                               <HelpTip text="Perte moyenne au-delà du seuil VaR — la queue au-delà du pire (confiance)%, pas juste le point de coupure." /></div>
-                            <div class="text-lg font-bold font-mono text-red-400">{{ formatNominal(pf.varStudy.result?.[m]?.es_eur) }}</div>
+                            <div class="text-lg font-bold font-mono text-red-400">{{ formatNominal(varPublishedScope?.[m]?.es_eur) }}</div>
                             <div class="text-[10px] text-slate-600">EUR</div>
                           </div>
                         </div>
                         <div class="text-[10px] text-slate-500 font-mono flex flex-wrap gap-x-3">
-                          <span v-for="(v, p) in pf.varStudy.result?.[m]?.distribution_summary" :key="p">{{ p }}: {{ formatNominal(v) }}</span>
+                          <span v-for="(v, p) in varPublishedScope?.[m]?.distribution_summary" :key="p">{{ p }}: {{ formatNominal(v) }}</span>
                         </div>
                       </div>
                     </div>
 
-                    <div v-if="pf.varStudy.result?.worst_scenarios?.length" class="overflow-x-auto table-shell" tabindex="0" role="region">
+                    <div v-if="varPublishedScope?.worst_scenarios?.length" class="overflow-x-auto table-shell" tabindex="0" role="region">
                       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 mt-1">Pires scénarios</div>
                       <table class="w-full text-xs border-collapse">
                         <thead>
@@ -610,7 +646,7 @@
                           </tr>
                         </thead>
                         <tbody>
-                          <tr v-for="w in pf.varStudy.result.worst_scenarios" :key="w.scenario_key"
+                          <tr v-for="w in varPublishedScope.worst_scenarios" :key="w.scenario_key"
                             class="border-b border-slate-800/50">
                             <td class="py-1 pr-3 font-mono text-slate-300">{{ w.scenario_key }}</td>
                             <td class="py-1 pr-3 text-slate-500">{{ w.method === 'historical' ? 'Historique' : 'Paramétrique' }}</td>
@@ -620,8 +656,12 @@
                       </table>
                     </div>
 
-                    <div v-if="varDealsSkipped.length" class="text-xs text-slate-500">
-                      Deals ignorés au lancement : {{ varDealsSkipped.map(d => d.reference).join(', ') }}
+                    <div v-if="varExcludedDeals.length" class="text-xs text-slate-500 flex flex-col gap-1">
+                      <div class="font-semibold text-slate-400">Deals exclus du périmètre calculable</div>
+                      <div v-for="deal in varExcludedDeals" :key="`${deal.phase}-${deal.deal_id}`">
+                        <span class="font-mono text-slate-300">{{ deal.reference }}</span>
+                        — {{ deal.reason }}
+                      </div>
                     </div>
                   </template>
                 </template>
@@ -986,6 +1026,7 @@ import { apiFetch } from '../utils/api.js'
 import { formatInt, formatDateTime, formatPercent } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
 import HelpTip from '../components/HelpTip.vue'
+import { confirmer } from '../composables/useConfirm.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -1012,6 +1053,31 @@ const expandedCounterparty = ref(null)
 const newPortfolioName = ref('')
 
 const formatNominal = formatInt
+
+const hasMixedVegaScopes = computed(() =>
+  Object.values(pf.risk?.per_underlying || {}).some(bucket => bucket.vega_scope_mixed)
+)
+
+const VEGA_SCOPE_LABELS = {
+  total: 'vol totale',
+  leg_independante: 'jambe indépendante',
+  non_documente: 'périmètre non documenté',
+}
+
+function vegaScopeLabel(scope) {
+  return VEGA_SCOPE_LABELS[scope] || scope || 'périmètre non documenté'
+}
+
+function vegaScopeTotal(bucket, scope) {
+  return bucket?.vega_by_scope_eur?.[scope] ?? null
+}
+
+function vegaRows(bucket) {
+  return (bucket?.vega_scopes || []).map(scope => ({
+    scope,
+    value: vegaScopeTotal(bucket, scope),
+  }))
+}
 
 function sharePct(contribution, bucketTotal) {
   if (contribution == null || !bucketTotal) return '—'
@@ -1113,6 +1179,26 @@ const varAdvancedOpen = ref(false)
 const varDealsSkipped = ref([])
 const varLaunchError = ref('')
 
+const varExcludedDeals = computed(() => {
+  const resultDeals = pf.varStudy?.result?.excluded_deals
+  if (resultDeals?.length) return resultDeals
+  const persisted = pf.varStudy?.params?.preflight_exclusions
+  if (persisted?.length) return persisted
+  return varDealsSkipped.value
+})
+
+const varPublishedScope = computed(() => {
+  const result = pf.varStudy?.result
+  if (!result) return null
+  if (result.global_status === 'complete') return result
+  if (result.global_status === 'incomplete') return result.reduced_scope || null
+  // Historical batches created before the publication gate.
+  return result.historical || result.parametric ? result : null
+})
+
+const varPublishedScopeLabel = computed(() =>
+  varPublishedScope.value?.label || 'VaR du portefeuille demandé')
+
 async function launchVarStudy() {
   varDealsSkipped.value = []
   varLaunchError.value = ''
@@ -1120,6 +1206,30 @@ async function launchVarStudy() {
     const launched = await pf.launchVar(varForm)
     varDealsSkipped.value = launched.deals_skipped || []
   } catch (e) {
+    const detail = e.computeDetail
+    if (detail?.code === 'COMPUTE_CONFIRMATION_REQUIRED') {
+      const x = detail.estimate || {}
+      const accepted = await confirmer({
+        titre: 'Confirmer cette VaR lourde ?',
+        message: `${Number(x.cells || 0).toLocaleString('fr-FR')} valorisations, ` +
+          `${Number(x.paths_per_scenario || 0).toLocaleString('fr-FR')} trajectoires chacune, ` +
+          `mémoire de pointe estimée ${x.estimated_peak_mb || 0} Mo.`,
+        confirmer: 'Lancer la VaR',
+      })
+      if (accepted) {
+        try {
+          const launched = await pf.launchVar({
+            ...varForm, confirmation_token: detail.confirmation_token,
+          })
+          varDealsSkipped.value = launched.deals_skipped || []
+          return
+        } catch (retryError) {
+          varLaunchError.value = retryError.message
+          return
+        }
+      }
+      return
+    }
     varLaunchError.value = e.message
   }
 }

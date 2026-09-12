@@ -32,6 +32,7 @@ from typing import Optional, Sequence
 from sqlmodel import Session, select
 
 from ..db.models import Underlying
+from .payoff_terms import classify_param_barrier
 
 
 # ── Niveaux d'un deal booké ───────────────────────────────────────────
@@ -46,7 +47,7 @@ def _plausible_coupon(valeur: float) -> bool:
     return 0.0 < valeur <= 0.60
 
 
-def niveaux_du_script(script: Optional[str]) -> dict:
+def niveaux_du_script(script: Optional[str], user_params: Optional[dict] = None) -> dict:
     """Coupon et protections lus dans un script PayScript.
 
     Rend `{"coupon_pct": float|None, "barriers": [{name, kind, level_pct}],
@@ -54,7 +55,9 @@ def niveaux_du_script(script: Optional[str]) -> dict:
     barrière de capital — la plus basse des barrières « ki », celle qui décide
     de la perte en capital.
     """
-    vide = {"coupon_pct": None, "barriers": [], "protection_pct": None}
+    vide = {"coupon_pct": None, "coupon_schedule_pct": None,
+            "barriers": [], "protection_pct": None,
+            "protection_schedule_pct": None}
     if not script:
         return vide
     try:
@@ -66,12 +69,28 @@ def niveaux_du_script(script: Optional[str]) -> dict:
         return vide
 
     params = list(getattr(compile_, "params", []) or [])
-    valeurs = {p.name: p.stored_val for p in params
-               if isinstance(getattr(p, "stored_val", None), (int, float))}
+    overrides = user_params or {}
+    valeurs = {p.name: overrides.get(p.name, p.stored_val) for p in params}
+
+    def _schedule(param, value) -> list[float] | None:
+        if param.kind != "array" and not isinstance(value, (list, tuple)):
+            return None
+        raw = list(value) if isinstance(value, (list, tuple)) else [value]
+        return [float(item) for item in raw if isinstance(item, (int, float))]
 
     coupon = None
-    for nom, valeur in valeurs.items():
-        if "COUPON" in nom.upper() and _plausible_coupon(float(valeur)):
+    coupon_schedule = None
+    for param in params:
+        valeur = valeurs.get(param.name)
+        if "COUPON" not in param.name.upper():
+            continue
+        schedule = _schedule(param, valeur)
+        if schedule:
+            plausible = [v for v in schedule if _plausible_coupon(v)]
+            if len(plausible) == len(schedule):
+                coupon_schedule = [round(v * 100, 4) for v in schedule]
+                break
+        elif isinstance(valeur, (int, float)) and _plausible_coupon(float(valeur)):
             coupon = round(float(valeur) * 100, 4)
             break
 
@@ -81,29 +100,47 @@ def niveaux_du_script(script: Optional[str]) -> dict:
         # Contrat M_ explicite : la direction vient de l'usage réel du
         # paramètre dans le script, pas d'une devinette sur son nom.
         for moniteur in moniteurs:
+            param = next((p for p in params if p.name == moniteur["name"]), None)
             niveau = valeurs.get(moniteur["name"])
-            if niveau is None:
+            if niveau is None or param is None:
                 continue
             genre = {"up": "autocall", "down": "ki"}.get(
                 moniteur.get("direction"), "neutre")
-            barrieres.append({"name": moniteur["name"], "kind": genre,
-                              "level_pct": round(float(niveau) * 100, 2)})
+            schedule = _schedule(param, niveau)
+            if schedule:
+                barrieres.append({"name": moniteur["name"], "kind": genre,
+                                  "level_pct": None,
+                                  "levels_pct": [round(v * 100, 2) for v in schedule]})
+            elif isinstance(niveau, (int, float)):
+                barrieres.append({"name": moniteur["name"], "kind": genre,
+                                  "level_pct": round(float(niveau) * 100, 2),
+                                  "levels_pct": None})
     else:
         # Scripts hérités, sans M_ : même heuristique que la watchlist, pour
         # que les deux écrans ne se contredisent jamais sur un même deal.
-        from ..api.deals import _classify_param_barrier
         for param in params:
-            valeur = getattr(param, "stored_val", None)
-            if not isinstance(valeur, (int, float)):
+            valeur = valeurs.get(param.name)
+            schedule = _schedule(param, valeur)
+            representative = schedule[0] if schedule else valeur
+            if not isinstance(representative, (int, float)):
                 continue
-            genre = _classify_param_barrier(param.name, float(valeur))
+            genre = classify_param_barrier(param.name, float(representative))
             if genre:
-                barrieres.append({"name": param.name, "kind": genre,
-                                  "level_pct": round(float(valeur) * 100, 2)})
+                barrieres.append({
+                    "name": param.name, "kind": genre,
+                    "level_pct": (None if schedule else round(float(valeur) * 100, 2)),
+                    "levels_pct": ([round(v * 100, 2) for v in schedule]
+                                   if schedule else None),
+                })
 
     protections = [b["level_pct"] for b in barrieres if b["kind"] == "ki"]
-    return {"coupon_pct": coupon, "barriers": barrieres,
-            "protection_pct": min(protections) if protections else None}
+    schedules = [b["levels_pct"] for b in barrieres
+                 if b["kind"] == "ki" and b.get("levels_pct")]
+    return {"coupon_pct": coupon, "coupon_schedule_pct": coupon_schedule,
+            "barriers": barrieres,
+            "protection_pct": min(p for p in protections if p is not None)
+            if any(p is not None for p in protections) else None,
+            "protection_schedule_pct": schedules[0] if schedules else None}
 
 
 # ── Découpage d'un panier importé ───────────────────────────────

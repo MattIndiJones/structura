@@ -125,3 +125,17 @@ def rfq_business_status(legacy_status: str, *, ready: bool = False) -> str:
         return RfqBusinessStatus.READY.value
     return _LEGACY_RFQ_STATUS_MAP.get(
         legacy_status, RfqBusinessStatus.DRAFT).value
+
+
+def derive_rfq_status(current_status: str, selected_quote_id: int | None,
+                      quotes: list) -> str:
+    """Derive the legacy RFQ stage from persisted facts."""
+    if current_status in {"clos", "sans_suite"}:
+        return current_status
+    if selected_quote_id is not None:
+        return "retenue"
+    if any(getattr(quote, "price", None) is not None for quote in quotes):
+        return "quote"
+    if quotes:
+        return "envoye"
+    return "draft"

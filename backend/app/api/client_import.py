@@ -14,6 +14,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..core.audit import record_audit_event
@@ -132,9 +133,19 @@ async def verser(
         session, action="CLIENT_IMPORT_APPLIED", object_type="client_import_batch",
         object_id=lot.id, actor_user_id=current.id, result="SUCCESS",
         after={"filename": lot.filename, "created": lot.rows_created,
-               "updated": lot.rows_updated, "skipped": lot.rows_skipped},
+               "updated": lot.rows_updated, "skipped": lot.rows_skipped,
+               "file_fingerprint": lot.file_fingerprint,
+               "duplicate_of_batch_id": rapport.duplicate_of_batch_id},
         data_source=format_)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(409, detail={
+            "code": "IMPORT_CONCURRENT_DUPLICATE",
+            "message": ("Une transaction identique a été importée en parallèle. "
+                        "Relancez l'aperçu : aucune ligne de ce lot n'a été enregistrée."),
+        })
     session.refresh(lot)
     return {"batch_id": lot.id, "filename": lot.filename, "format": format_,
             **rapport.as_dict()}
@@ -150,6 +161,7 @@ def lots(
             ClientImportBatch.entity_id == current.entity_id)).all()
     return [{
         "id": lot.id, "filename": lot.filename, "format": lot.source_format,
+        "file_fingerprint": lot.file_fingerprint,
         "status": lot.status, "rows_created": lot.rows_created,
         "rows_updated": lot.rows_updated, "rows_skipped": lot.rows_skipped,
         "created_at": lot.created_at.isoformat(),

@@ -8,6 +8,7 @@ from .models import (
     Counterparty, Alert, Portfolio, ShockRun, ComputeBatch, ComputeJob,
     AuditEvent, LifecycleProposal, TradeAmendmentRequest, DealContractVersion,
     OfficialFixingVersion, UatGenerationBatch, Underlying,
+    ValuationRun, SchedulerRun,
 )
 
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
@@ -45,6 +46,13 @@ def _migrate():
     tables, it never ALTERs an existing one. No Alembic in this project;
     keep patches here small and check-before-add."""
     with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                key TEXT PRIMARY KEY,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.commit()
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deals)"))}
         if "indicative_id" not in cols:
             conn.execute(text("ALTER TABLE deals ADD COLUMN indicative_id INTEGER"))
@@ -75,6 +83,10 @@ def _migrate():
 
         if "realized_payout" not in cols:
             conn.execute(text("ALTER TABLE deals ADD COLUMN realized_payout REAL"))
+            conn.commit()
+
+        if "settlement_amount" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN settlement_amount REAL"))
             conn.commit()
 
         if "resolution_outcome" not in cols:
@@ -108,6 +120,14 @@ def _migrate():
             conn.execute(text("ALTER TABLE deals ADD COLUMN greeks_computed_at DATETIME"))
             conn.commit()
 
+        if "latest_valuation_run_id" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN latest_valuation_run_id INTEGER"))
+            conn.commit()
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_deals_latest_valuation_run_id "
+            "ON deals (latest_valuation_run_id)"))
+        conn.commit()
+
         if "portfolio_id" not in cols:
             conn.execute(text("ALTER TABLE deals ADD COLUMN portfolio_id INTEGER"))
             conn.commit()
@@ -120,6 +140,7 @@ def _migrate():
                              ("ai_model", "TEXT DEFAULT ''"),
                              ("ai_prompt", "TEXT DEFAULT ''"),
                              ("ai_generated_at", "DATETIME"),
+                             ("ai_provenance_json", "TEXT DEFAULT '{}'"),
                              ("parent_id", "INTEGER"),
                              ("variant_title", "TEXT DEFAULT ''"),
                              ("variant_mode", "TEXT DEFAULT ''"),
@@ -410,10 +431,50 @@ def _migrate():
             # Lot 0 sont fictives. Une donnée réelle sera requalifiée
             # explicitement, jamais supposée telle par la migration.
             ("data_origin", "TEXT DEFAULT 'demo'"),
+            ("market_data_provider", "TEXT DEFAULT 'YAHOO_FINANCE'"),
         ):
             if client_cols and name not in client_cols:
                 conn.execute(text(f"ALTER TABLE clients ADD COLUMN {name} {ddl}"))
                 conn.commit()
+        if client_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_clients_market_data_provider "
+                "ON clients (market_data_provider)"))
+            conn.commit()
+
+        batch_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(compute_batches)"))}
+        if batch_cols:
+            for name, ddl in (
+                ("lease_token", "TEXT"),
+                ("lease_expires_at", "DATETIME"),
+                ("heartbeat_at", "DATETIME"),
+                ("cancel_requested_at", "DATETIME"),
+                ("cost_estimate_json", "TEXT DEFAULT '{}'"),
+            ):
+                if name not in batch_cols:
+                    conn.execute(text(
+                        f"ALTER TABLE compute_batches ADD COLUMN {name} {ddl}"))
+                    conn.commit()
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_compute_batches_lease_token "
+                "ON compute_batches (lease_token)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_compute_batches_lease_expires_at "
+                "ON compute_batches (lease_expires_at)"))
+            conn.commit()
+
+        job_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(compute_jobs)"))}
+        if job_cols:
+            if "lease_token" not in job_cols:
+                conn.execute(text("ALTER TABLE compute_jobs ADD COLUMN lease_token TEXT"))
+            if "attempt" not in job_cols:
+                conn.execute(text("ALTER TABLE compute_jobs ADD COLUMN attempt INTEGER DEFAULT 0"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_compute_jobs_lease_token "
+                "ON compute_jobs (lease_token)"))
+            conn.commit()
 
         # La première version de ClientMandate appelait le texte libre
         # `notes`. Le Lot 1 l'expose sous le nom métier `comment`. Une base
@@ -445,6 +506,7 @@ def _migrate():
             ("payoff_family", "TEXT"),
             ("payoff_description", "TEXT"),
             ("documentation_reference", "TEXT"),
+            ("natural_key", "TEXT"),
         ):
             if histo_cols and name not in histo_cols:
                 conn.execute(text(
@@ -469,6 +531,48 @@ def _migrate():
             conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_client_trade_history_payoff_family "
                 "ON client_trade_history (payoff_family)"))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "uq_client_trade_history_natural_key "
+                "ON client_trade_history (entity_id, natural_key) "
+                "WHERE natural_key IS NOT NULL"))
+            conn.commit()
+
+        import_batch_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(client_import_batches)"))}
+        if import_batch_cols and "file_fingerprint" not in import_batch_cols:
+            conn.execute(text(
+                "ALTER TABLE client_import_batches "
+                "ADD COLUMN file_fingerprint TEXT DEFAULT ''"))
+            conn.commit()
+        if import_batch_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_import_batches_fingerprint "
+                "ON client_import_batches (entity_id, file_fingerprint)"))
+            conn.commit()
+
+        # Les prochaines actions historiques deviennent des relances ouvertes.
+        # NOT EXISTS rend cette reprise idempotente et empêche une relance
+        # clôturée de ressusciter à chaque démarrage.
+        followup_table = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='interaction_follow_ups'"),).first()
+        if followup_table:
+            conn.execute(text("""
+                INSERT INTO interaction_follow_ups (
+                    entity_id, interaction_id, client_id, opportunity_id,
+                    owner_user_id, title, due_date, status,
+                    created_by_user_id, created_at, updated_at
+                )
+                SELECT i.entity_id, i.id, i.client_id, i.opportunity_id,
+                       i.user_id, i.next_action, i.next_action_date, 'open',
+                       i.user_id, i.created_at, i.updated_at
+                FROM interactions i
+                WHERE TRIM(COALESCE(i.next_action, '')) <> ''
+                  AND NOT EXISTS (
+                    SELECT 1 FROM interaction_follow_ups f
+                    WHERE f.interaction_id = i.id)
+            """))
             conn.commit()
 
         indic_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(indicatives)"))}
@@ -486,6 +590,10 @@ def _migrate():
         _ensure_one_deal_per_rfq(conn)
         _ensure_rfq_integrity_triggers(conn)
         _make_kid_vev_nullable(conn)
+        conn.execute(text(
+            "INSERT OR IGNORE INTO app_migrations(key) VALUES (:key)"),
+            {"key": "lot7_operational_columns_v1"})
+        conn.commit()
 
 
 def _ensure_unique_reference(conn, table: str) -> None:
@@ -642,7 +750,7 @@ def _backfill_rfq_statuses():
     _derive_status is imported lazily: api\\rfq.py imports this module for
     get_session, so a module-level import here would be circular."""
     from sqlmodel import select
-    from ..api.rfq import _derive_status
+    from ..core.workflow import derive_rfq_status
     with Session(engine) as s:
         s.execute(text("""
             CREATE TABLE IF NOT EXISTS app_migrations (
@@ -660,7 +768,8 @@ def _backfill_rfq_statuses():
         for q in s.exec(select(RfqQuote)).all():
             quotes_by_rfq.setdefault(q.rfq_id, []).append(q)
         for r in rfqs:
-            derived = _derive_status(r, quotes_by_rfq.get(r.id, []))
+            derived = derive_rfq_status(
+                r.status, r.selected_quote_id, quotes_by_rfq.get(r.id, []))
             if derived != r.status:
                 r.status = derived
                 s.add(r)

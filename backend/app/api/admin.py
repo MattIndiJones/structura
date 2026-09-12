@@ -18,7 +18,11 @@ from ..services.uat_generation import (
     UatGenerationRequest, delete_batch as delete_uat_batch,
     generate_batch as generate_uat_batch, generator_config,
     list_batches as list_uat_batches, preview_generation,
+    configure_uat_workflows,
 )
+from . import deals as deals_api, rfq as rfq_api
+
+configure_uat_workflows(deals_api, rfq_api)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 

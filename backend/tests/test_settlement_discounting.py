@@ -8,6 +8,7 @@ nominal, systématiquement dans le même sens.
 import math
 from datetime import date
 
+from backend.app.core.payscript import engine
 from backend.app.core.payscript.engine import run_mc
 from backend.app.core.payscript.parser import parse_script, resolve_constats
 
@@ -110,3 +111,21 @@ def test_sans_calendrier_de_reglement_rien_ne_change():
     res = _price(compiled, 1.0)
     for ligne in res["flux_table"].values():
         assert ligne["t_pay"] == ligne["t"]
+
+
+def test_les_greeks_reutilisent_les_dates_completes(monkeypatch):
+    calls = []
+
+    def fake_run_mc(*args, **kwargs):
+        calls.append(kwargs)
+        return {"price": 1.0}
+
+    monkeypatch.setattr(engine, "run_mc", fake_run_mc)
+    engine.compute_greeks(
+        parse_script(ZERO_COUPON), UL, CORR, R, 1.0, 4000, "constant", 42,
+        {}, selected=["delta"], maturity_payment_t=1.02, value_date_t=0.01,
+    )
+
+    assert calls
+    assert all(c["maturity_payment_t"] == 1.02 for c in calls)
+    assert all(c["value_date_t"] == 0.01 for c in calls)

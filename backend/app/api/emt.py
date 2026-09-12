@@ -4,14 +4,13 @@ Derives an indicative European MiFID Template (EMT) profile for the priced
 product: knowledge & experience required, capacity to bear losses, risk
 tolerance and recommended holding period.
 
-SRI/MRM/CRM and the stress-scenario payoff are NOT recomputed here — they
-are passed in from the already-computed /api/kid result, so the KID and the
-EMT always show the same risk indicator for the same product instead of two
-independent Monte Carlo runs that could drift apart (different CRM entry,
-different seed noise). The frontend (EmtPanel.vue) refuses to call this
-endpoint until a KID has been computed. Only the script-complexity read
-(autocall / worst-of / leverage / barrier) is done here, from a plain parse
-— no simulation.
+SRI/MRM/CRM are NOT recomputed here — they are passed in from the already
+computed /api/kid result, so the KID and EMT keep one risk indicator instead
+of two Monte Carlo runs that could drift apart.  Capital protection is a
+separate contractual input: the KID stress scenario can measure a loss but
+never establish a guarantee.  The frontend (EmtPanel.vue) refuses to call
+this endpoint until a KID has been computed. Only the script-complexity read
+(autocall / worst-of / leverage / barrier) is done here, from a plain parse.
 
 This is a desk aid to speed up drafting, not a FinDatEx-compliant export —
 client type, negative target market and distribution strategy are business
@@ -24,7 +23,8 @@ except ImportError:
     from typing_extensions import Annotated
 
 import json
-from typing import Optional
+import re
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -45,13 +45,26 @@ class EmtRequest(PricingRequest):
     sri: int = Field(..., ge=1, le=7)
     mrm: int = Field(..., ge=1, le=7)
     crm: int = Field(..., ge=1, le=6)
-    # Net stress-scenario (P1) payoff at maturity, as a fraction of notional,
-    # after costs — from the last entry of the KID's `horizons` list
-    # (horizons[-1].stress.amount / 10000).
-    stress_payoff_fraction: float = Field(..., ge=0)
+    # Contractual truth entered from the term sheet.  A market scenario can
+    # measure a loss but can never establish a legal capital guarantee.
+    capital_protection_level_pct: Optional[float] = Field(default=None, ge=0, le=1000)
+    capital_protection_condition: Literal[
+        "unknown", "unconditional", "conditional"
+    ] = "unknown"
 
 
-def _detect_features(compiled, n_underlyings: int) -> dict:
+def _script_without_comments(script_text: str) -> str:
+    lines = []
+    for line in script_text.splitlines():
+        code = line.split("#", 1)[0]
+        # PAY labels describe a flow for humans and are not observables used by
+        # the payoff.  "coupon worst-of" must not turn a basket into a WOF.
+        lines.append(re.sub(r'"[^"]*"', '""', code))
+    return "\n".join(lines)
+
+
+def _detect_features(compiled, n_underlyings: int, script_text: str = "") -> dict:
+    source = _script_without_comments(script_text).upper()
     has_leverage = any(
         p.name in _LEVERAGE_NAMES and p.is_pct and p.stored_val > 1.0
         for p in compiled.params
@@ -60,28 +73,50 @@ def _detect_features(compiled, n_underlyings: int) -> dict:
         ('BAR' in p.name or p.name.startswith('KI') or p.name.startswith('KO'))
         for p in compiled.params
     )
-    has_worst_of = n_underlyings > 1
+    # A multi-asset average and a worst-of are different risks.  Read the
+    # observable actually used by the payoff rather than guessing from the
+    # number of underlyings.
+    has_worst_of = bool(re.search(r"\bWOF(?:_MIN)?\b", source))
+    is_multi_asset = n_underlyings > 1
     has_autocall = compiled.has_stop
 
     return {
         "has_leverage": has_leverage,
         "has_barrier": has_barrier,
         "has_worst_of": has_worst_of,
+        "is_multi_asset": is_multi_asset,
         "has_autocall": has_autocall,
         "n_underlyings": n_underlyings,
         "complexity_score": sum([has_leverage, has_barrier, has_worst_of, has_autocall]),
     }
 
 
-def _capital_tier(stress_payoff: float) -> dict:
-    """Bucket the KID's net stress-scenario payoff into a capital-loss tier."""
-    if stress_payoff >= 0.97:
-        return {"tier": "garanti", "label": "Capital garanti à l'échéance"}
-    if stress_payoff >= 0.75:
-        return {"tier": "partiel", "label": "Perte en capital possible mais limitée"}
-    if stress_payoff > 0.0:
-        return {"tier": "risque", "label": "Perte en capital significative possible"}
-    return {"tier": "total", "label": "Perte en capital totale possible"}
+def _capital_tier(level_pct: float | None, condition: str) -> dict:
+    """Classify only an explicit, unconditional contractual protection."""
+    details = {
+        "level_pct": level_pct,
+        "condition": condition,
+        "source": "contract",
+    }
+    if level_pct is not None and level_pct >= 100.0 and condition == "unconditional":
+        return {
+            **details,
+            "tier": "garanti",
+            "label": f"Capital garanti contractuellement à {level_pct:g} % à l'échéance",
+        }
+    if level_pct is None:
+        reason = "niveau contractuel non renseigné"
+    elif condition == "conditional":
+        reason = f"protection contractuelle de {level_pct:g} % conditionnelle"
+    elif condition == "unknown":
+        reason = f"condition de la protection de {level_pct:g} % non renseignée"
+    else:
+        reason = f"protection contractuelle limitée à {level_pct:g} %"
+    return {
+        **details,
+        "tier": "indetermine",
+        "label": f"Protection du capital indéterminée — {reason}",
+    }
 
 
 def _knowledge_tier(complexity_score: int, capital_tier: str) -> dict:
@@ -121,8 +156,19 @@ def emt_compute(
     if len(req.corr_matrix) != n or any(len(row) != n for row in req.corr_matrix):
         raise HTTPException(422, "Matrice de corrélation invalide.")
 
-    features = _detect_features(compiled, n)
-    cap = _capital_tier(req.stress_payoff_fraction)
+    features = _detect_features(compiled, n, req.script)
+    cap = _capital_tier(
+        req.capital_protection_level_pct,
+        req.capital_protection_condition,
+    )
+    # `features` is already persisted by /api/emt/save.  Keeping the explicit
+    # contract input there makes a saved EMT reconstructable without a schema
+    # migration and avoids reducing the audit trail to a human-readable label.
+    features["capital_protection_contract"] = {
+        "level_pct": req.capital_protection_level_pct,
+        "condition": req.capital_protection_condition,
+        "source": "contract",
+    }
     knowledge = _knowledge_tier(features["complexity_score"], cap["tier"])
 
     return {
