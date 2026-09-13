@@ -4,17 +4,20 @@
     <!-- ── Yahoo Finance loader ──────────────────────────────────── -->
     <div class="card">
       <div class="flex items-center gap-3 mb-3 flex-wrap">
-        <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mr-auto">Données Yahoo Finance</h2>
-        <button class="btn-secondary text-xs px-3" :disabled="store.loading" @click="store.loadYfAll()">
-          📡 Charger vols &amp; corr.
+        <div class="mr-auto">
+          <h2 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Données de marché</h2>
+          <p class="text-[11px] text-slate-400 mt-1">Source du compte : Yahoo Finance · clôtures ajustées pour σ et corrélation</p>
+        </div>
+        <button class="btn-secondary text-xs px-3" :disabled="store.marketDataLoading" @click="store.loadYfAll()">
+          {{ store.marketDataLoading ? 'Chargement…' : '↻ Recharger le marché' }}
         </button>
       </div>
       <div v-if="store.yfStatus" class="text-xs mt-1 leading-relaxed"
            :class="store.yfStatus.startsWith('⚠') ? 'text-amber-400' : 'text-green-400'">
         <SensitiveValue placeholder="Données chargées">{{ store.yfStatus }}</SensitiveValue>
       </div>
-      <div v-else class="text-xs text-slate-600 italic">
-        Renseignez les tickers puis cliquez "Charger" pour auto-remplir σ, q et la corrélation.
+      <div v-else class="text-xs text-slate-400 italic">
+        Le changement de date recharge automatiquement σ, q et la corrélation. Les valeurs restent éditables.
       </div>
     </div>
 
@@ -46,25 +49,23 @@
           <label class="label">Date de valorisation
             <HelpTip text="Date à laquelle on veut la valeur du produit. Laissée vide, ou égale à la constatation initiale, on price à l'émission. Postérieure, le passé est rejoué sur les cours réellement constatés — coupons déjà versés, mémoire accumulée, barrières franchies — et seule la vie restante est simulée. C'est ce qui distingue un mark-to-market d'un prix d'émission." />
           </label>
-          <input v-model="store.globalParams.valuation_date" type="date" class="input" />
+          <input v-model="store.globalParams.valuation_date" type="date" class="input"
+                 @change="store.onValuationDateChange()" />
           <div v-if="store.isInLife()" class="text-[10px] text-amber-500 mt-0.5">
             Valorisation en cours de vie
           </div>
+          <div v-else-if="store.isPreStrike()" class="text-[10px] text-blue-400 mt-0.5">
+            Avant strike — le niveau de strike futur sera simulé
+          </div>
         </div>
         <div class="mc-param-field">
-          <label class="label">Maturité (Y)
-            <HelpTip v-if="store.scriptConstats.length > 0" text="Le script utilise CONSTAT — la maturité réelle est dictée par le calendrier (la date la plus tardive parmi les événements résolus, éditable dans l'onglet Deal), pas par ce champ." />
-            <HelpTip v-else text="Horizon de simulation en années. Si le script a des dates AT qui dépassent cette valeur, le pricer étend automatiquement l'horizon effectif (voir t_max_effective dans les résultats) — ce champ est un minimum, pas un plafond strict." />
+          <label class="label">Horizon contractuel (Y)
+            <HelpTip text="Calculé entre la date de strike et la maturité saisie dans Economics. La date contractuelle pilote le calcul ; cet horizon est sa traduction pour le moteur." />
           </label>
-          <div v-if="store.scriptConstats.length > 0"
-               class="input bg-slate-800/40 text-slate-500 cursor-not-allowed flex items-center justify-between gap-2">
-            <span class="truncate">Calendrier deal</span>
-            <span v-if="store.result?.t_max_effective" class="font-mono text-slate-400 shrink-0">
-              {{ formatNumber(store.result.t_max_effective, 2) }} Y
-            </span>
+          <div class="input bg-slate-800/40 text-slate-400 cursor-not-allowed flex items-center justify-between gap-2">
+            <span class="font-mono">{{ formatNumber(store.globalParams.T, 4) }} Y</span>
+            <span class="text-[10px] text-slate-500">depuis Economics</span>
           </div>
-          <input v-else v-model.number="store.globalParams.T" type="number" step="0.25"
-                 min="0.01" :max="store.calculationLimits.maxMaturityYears" class="input" />
           <div v-if="store.globalParams.T > store.calculationLimits.maturityWarningYears
                      && store.globalParams.T <= store.calculationLimits.maxMaturityYears"
                class="text-[10px] text-amber-500 mt-0.5">

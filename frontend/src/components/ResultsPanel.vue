@@ -451,6 +451,7 @@
     <FluxDecomposition :result="store.result"
                        :origin-date="store.result?.in_life
                          ? store.result.valuation_date : inputs?.strike_date"
+                       :contract-origin-date="inputs?.strike_date"
                        :value-date="inputs?.value_date" />
   </div>
 
@@ -618,7 +619,23 @@ const maturityDateStr = computed(() => {
 
 const observationRows = computed(() => {
   const res = store.result
-  if (!res?.flux_table || !inputs.value) return []
+  if (!res || !inputs.value) return []
+  const origineContrat = inputs.value.strike_date || inputs.value.value_date
+  const schedule = res.schedule?.constatations
+  if (Array.isArray(schedule) && schedule.length) {
+    const cutoff = res.in_life ? res.valuation_date : origineContrat
+    return schedule.map((c, idx) => {
+      const date = c.date || (origineContrat ? addDaysStr(origineContrat, c.t * 365.25) : null)
+      const calendrier = c.calendrier ? `${c.calendrier} ` : 'Obs. '
+      return {
+        label: `${calendrier}${c.rang ?? idx + 1}`,
+        date,
+        t: c.t,
+        isFuture: !cutoff || !date || date > cutoff,
+      }
+    })
+  }
+  if (!res.flux_table) return []
   // L'axe des temps du moteur part du STRIKE — et, en cours de vie, de la
   // date de valorisation, puisque seule la vie restante est simulée. L'ancrer
   // sur la value date décalait toutes les échéances ; l'ancrer sur le strike
@@ -628,7 +645,7 @@ const observationRows = computed(() => {
                           : (inputs.value.strike_date || inputs.value.value_date)
   if (!origine) return []
   const times = [...new Set(Object.values(res.flux_table).map(e => e.t))].sort((a, b) => a - b)
-  const now = todayStr()
+  const cutoff = enCours ? res.valuation_date : origine
   const maturityT = res.t_max_effective ?? inputs.value.T
   // En cours de vie, la numérotation reprend là où le passé s'est arrêté :
   // repartir de 1 ferait croire que le produit vient d'être émis.
@@ -639,7 +656,7 @@ const observationRows = computed(() => {
                                 : Math.abs(t - maturityT) < 0.01
     return {
       label: estMaturite ? 'Maturité' : `Obs. ${deja + idx + 1}`,
-      date, t, isFuture: date > now,
+      date, t, isFuture: date > cutoff,
     }
   })
 })

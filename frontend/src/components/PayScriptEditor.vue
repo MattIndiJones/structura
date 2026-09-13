@@ -1,6 +1,14 @@
 ﻿<template>
   <div class="flex flex-col gap-4">
 
+    <div v-if="store.contractTermsLocked"
+         class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
+      <p class="text-sm font-bold">🔒 PayScript figé au booking</p>
+      <p class="text-xs mt-0.5">
+        Le script reste consultable. Pour changer le payoff, créez un nouveau produit ou une déclinaison explicite.
+      </p>
+    </div>
+
     <!-- Toolbar -->
     <div class="flex items-center gap-2 flex-wrap">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mr-auto">PayScript</h2>
@@ -18,7 +26,8 @@
       </div>
       <HelpTip width="w-72" text="Normal : dates AT écrites en dur (AT 1, 2, 3). Expert : calendrier CONSTAT() généré (start/end/roll/fréquence/stub), pratique pour des échéanciers réguliers longs sans lister chaque date à la main, et pour rejouer un calendrier réel avec jours fériés/roll gérés proprement. Change seulement les templates chargés — ne convertit pas le script actuellement en cours d'édition." />
 
-      <select class="select text-xs w-auto" @change="loadExample($event.target.value); $event.target.value=''">
+      <select class="select text-xs w-auto" :disabled="store.contractTermsLocked"
+              @change="loadExample($event.target.value); $event.target.value=''">
         <option value="">{{ expertMode ? 'Exemples (expert)…' : 'Exemples…' }}</option>
         <option value="__blank__">— Script libre (vide) —</option>
         <optgroup v-for="(items, group) in groupedTemplates" :key="group" :label="group">
@@ -26,7 +35,8 @@
         </optgroup>
       </select>
 
-      <button class="btn-secondary text-xs px-3 py-1.5 shrink-0" @click="assistantOpen = true">
+      <button class="btn-secondary text-xs px-3 py-1.5 shrink-0"
+              :disabled="store.contractTermsLocked" @click="assistantOpen = true">
         ✨ Assistant IA
       </button>
       <HelpTip width="w-72" text="Décrivez le produit en français, un modèle propose un script PayScript. Rien n'est appliqué automatiquement : le script arrive accompagné d'une reformulation en français et d'une fiche de contrôle, et c'est vous qui l'adoptez. Ollama tourne en local — la description ne quitte pas la machine." />
@@ -41,13 +51,14 @@
       <!-- Save / Update button -->
       <button v-if="store.currentScriptId"
               class="btn-primary text-xs px-3 py-1.5 flex items-center gap-1.5 shrink-0"
-              :disabled="saving"
+              :disabled="saving || store.contractTermsLocked"
               @click="quickSave">
         <span v-if="saving" class="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin"></span>
         {{ saving ? '…' : 'Enregistrer' }}
       </button>
       <button v-else
               class="btn-primary text-xs px-3 py-1.5 shrink-0"
+              :disabled="store.contractTermsLocked"
               @click="openSaveModal">
         Sauvegarder
       </button>
@@ -96,11 +107,12 @@
         <textarea
           v-model="store.script"
           class="code-editor w-full"
+          :readonly="store.contractTermsLocked"
           :maxlength="store.calculationLimits.maxScriptChars"
           spellcheck="false"
           placeholder="# Écrivez votre PayScript ici…"
           @input="onInput"
-          @keydown.tab.prevent="insertTab"
+          @keydown.tab="onEditorTab"
           style="min-height:340px"
         />
       </SensitiveValue>
@@ -198,6 +210,7 @@ const saveNameInput = ref(null)
 const saveModal = reactive({ open: false, name: '', description: '', tags: '', isShared: false, error: '' })
 
 function openSaveModal() {
+  if (store.contractTermsLocked) return
   saveModal.name        = store.currentScriptName || ''
   saveModal.description = ''
   saveModal.tags        = ''
@@ -209,6 +222,7 @@ function openSaveModal() {
 }
 
 async function quickSave() {
+  if (store.contractTermsLocked) return
   saving.value = true
   notice.value = ''
   try {
@@ -223,6 +237,7 @@ async function quickSave() {
 }
 
 async function doSave() {
+  if (store.contractTermsLocked) return
   const name = saveModal.name.trim()
   if (!name) { saveModal.error = 'Le nom est requis'; return }
   saving.value = true
@@ -356,7 +371,7 @@ AT MATURITY:
 `
 
 async function loadExample(key) {
-  if (!key) return
+  if (!key || store.contractTermsLocked) return
   Object.keys(store.paramOverrides).forEach(k => delete store.paramOverrides[k])
 
   // Point de départ vierge : un squelette qui parse (donc qui price) plutôt
@@ -412,8 +427,15 @@ function _applyTenor(ov, key, tenor) {
 
 // ── Misc ───────────────────────────────────────────────────────────
 function onInput() {
+  if (store.contractTermsLocked) return
   clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => store.parseScript(), 500)
+}
+
+function onEditorTab(event) {
+  if (store.contractTermsLocked) return
+  event.preventDefault()
+  insertTab(event)
 }
 
 function insertTab(e) {

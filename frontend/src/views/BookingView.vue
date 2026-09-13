@@ -136,7 +136,7 @@
           <div v-if="watchlist.length || watchlistError" class="card">
             <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
               Watchlist — proximité barrières
-              <HelpTip width="w-72" text="Deals actifs triés par urgence : écart du worst-of actuel à chaque barrière détectée dans le script (en points de S₀), et prochaine date d'observation. Détection par convention de nommage des PARAM (AC_BAR, KI_BAR…) — un script aux noms inhabituels peut passer à travers. Les niveaux sont ceux réellement figés au booking ; le défaut du script n'est utilisé qu'en l'absence de surcharge." />
+              <HelpTip width="w-72" text="Deals actifs triés par urgence : écart du worst-of actuel à chaque barrière détectée dans le script (en points du strike), et prochaine date d'observation. Détection par convention de nommage des PARAM (AC_BAR, KI_BAR…) — un script aux noms inhabituels peut passer à travers. Les niveaux sont ceux réellement figés au booking ; le défaut du script n'est utilisé qu'en l'absence de surcharge." />
             </h2>
 
             <div v-if="watchlistError" class="text-xs text-amber-400">⚠ {{ watchlistError }}</div>
@@ -174,10 +174,10 @@
                       <HelpTip text="Date de la prochaine observation du script (rappel, coupon ou constat de barrière) et nombre de jours restants. Trié par défaut de la plus proche à la plus lointaine." />
                     </th>
                     <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">WOF
-                      <HelpTip text="Performance actuelle du pire sous-jacent vs son S₀ (spot le plus récent). Entre parenthèses : le minimum touché depuis le strike — c'est lui qu'une barrière KI en continu compare." />
+                      <HelpTip text="Performance actuelle du pire sous-jacent par rapport à son strike (cours le plus récent). Entre parenthèses : le minimum touché depuis le strike — c'est lui qu'une barrière KI en continu compare." />
                     </th>
                     <th class="text-left text-slate-500 font-medium pb-2">Barrières
-                      <HelpTip width="w-72" text="Barrières PARAM détectées dans le script (convention M_), avec l'écart actuel en points de S₀ et le sens de lecture : vert = zone favorable (rappel proche / KI éloigné), rouge = barrière franchie ou zone de danger." />
+                      <HelpTip width="w-72" text="Barrières PARAM détectées dans le script (convention M_), avec l'écart actuel en points du strike et le sens de lecture : vert = zone favorable (rappel proche / KI éloigné), rouge = barrière franchie ou zone de danger." />
                     </th>
                   </tr>
                 </thead>
@@ -238,10 +238,10 @@
                         </span>
                       </template>
                       <span v-else-if="w.next_event && w.strike_pending" class="text-slate-600"
-                            title="Le strike n'a pas encore eu lieu — pas de S₀ fixé, donc pas de performance à mesurer">
+                            title="Le strike n'a pas encore eu lieu — aucun niveau de strike n'est fixé, donc aucune performance ne peut être mesurée">
                         avant strike
                       </span>
-                      <span v-else class="text-slate-600" title="S₀ manquant — lancez un Refresh sur ce deal">n/d</span>
+                      <span v-else class="text-slate-600" title="Niveau de strike manquant — lancez un Refresh sur ce deal">n/d</span>
                     </td>
                     <td class="py-2">
                       <div class="flex gap-1.5 flex-wrap">
@@ -377,22 +377,6 @@
                   title="Portefeuille du propriétaire du deal — modification réservée au propriétaire">
                   {{ d.portfolio_id ? `PF #${d.portfolio_id}` : 'Sans PF' }}
                 </span>
-                <select v-if="d.status === 'actif'" class="select text-xs py-1"
-                  :value="mtmMode[d.id] || 'booking'" @click.stop
-                  @change="mtmMode[d.id] = $event.target.value"
-                  title="Paramètres de marché du MtM : σ/corrélations figées au booking, ou recalibrées sur la vol réalisée 1 an (modèle GBM)">
-                  <option value="booking">Params booking</option>
-                  <option value="realized">Marché actuel</option>
-                </select>
-                <button v-if="['actif', 'en_reglement'].includes(d.status)" class="btn-secondary text-xs px-3 py-1.5"
-                  :disabled="mtmLoading[d.id]" @click.stop="runMtm(d.id)"
-                  :title="d.status === 'en_reglement'
-                    ? 'Valeur actualisée du remboursement connu jusqu’à sa date de paiement'
-                    : 'MtM résiduel : valorise les cash-flows restants du produit vivant (calendrier résiduel, spots en % du strike, état KI/mémoire hérité)'">
-                  <span v-if="mtmLoading[d.id]"
-                    class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
-                  💰 MtM
-                </button>
                 <button v-if="d.status === 'actif'" class="btn-secondary text-xs px-3 py-1.5"
                   :disabled="greeksLoading[d.id]" @click.stop="runGreeks(d.id)"
                   title="Greeks du deal (bump-and-reprice CRN) : delta/gamma/vega par sous-jacent, theta, rho — mêmes hypothèses de marché que le mode MtM sélectionné">
@@ -417,113 +401,287 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <div>
-                <div class="text-slate-500 mb-0.5">Nominal</div>
-                <div class="font-mono text-slate-200">{{ formatNominal(d.nominal) }} {{ d.devise }}</div>
-              </div>
-              <div>
-                <div class="text-slate-500 mb-0.5">Prix / FV / Marge</div>
-                <div class="font-mono">
-                  <span class="text-slate-200">{{ d.price_traded.toFixed(2) }}%</span>
-                  <span class="text-slate-600 mx-1">/</span>
-                  <span class="text-slate-400">{{ d.fair_value.toFixed(2) }}%</span>
-                  <span class="mx-1" :class="d.margin >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                    {{ d.margin >= 0 ? '+' : '' }}{{ d.margin.toFixed(2) }}%
-                  </span>
+            <!-- Vue synthétique : contrat, marché, repricing et résultat restent
+                 séparés pour qu'un niveau contractuel ne soit jamais lu comme
+                 une hypothèse du dernier calcul. Chaque panneau a sa teinte, pour
+                 que deux voisins ne se confondent pas ; les chiffres, eux, sont
+                 posés sur blanc et gardent toute leur lisibilité. -->
+            <div class="deal-overview-grid">
+              <section class="deal-panel deal-panel--contract">
+                <header class="deal-panel__head">
+                  <span class="deal-panel__dot" aria-hidden="true"></span>
+                  <h3 class="deal-panel__title">Deal & economics</h3>
+                </header>
+                <div class="deal-well deal-figures">
+                  <div>
+                    <span class="deal-label">Nominal</span>
+                    <strong class="deal-value">{{ formatNominal(d.nominal) }} {{ d.devise }}</strong>
+                  </div>
+                  <div>
+                    <span class="deal-label">Prix traité</span>
+                    <strong class="deal-value">{{ d.price_traded.toFixed(2) }}%</strong>
+                  </div>
+                  <div>
+                    <span class="deal-label">Fair value</span>
+                    <strong class="deal-value is-secondary">{{ d.fair_value.toFixed(2) }}%</strong>
+                  </div>
+                  <div>
+                    <span class="deal-label">Marge</span>
+                    <strong class="deal-value" :class="signToneClass(d.margin)">
+                      {{ d.margin >= 0 ? '+' : '' }}{{ d.margin.toFixed(2) }}%
+                    </strong>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div class="text-slate-500 mb-0.5">Strike / Value</div>
-                <div class="font-mono text-slate-300">{{ formatDate(d.strike_date) }} → {{ formatDate(d.value_date) }}</div>
-              </div>
-              <div>
-                <div class="text-slate-500 mb-0.5">Maturité</div>
-                <div class="font-mono text-slate-300">{{ formatDate(d.maturity_date) }}</div>
-              </div>
-            </div>
+                <dl class="deal-dates">
+                  <div><dt>Trade</dt><dd>{{ formatDate(d.trade_date) }}</dd></div>
+                  <div><dt>Strike</dt><dd>{{ formatDate(d.strike_date) }}</dd></div>
+                  <div><dt>Value</dt><dd>{{ formatDate(d.value_date) }}</dd></div>
+                  <div><dt>Maturité</dt><dd>{{ formatDate(d.maturity_date) }}</dd></div>
+                  <div><dt>Paiement</dt><dd>{{ formatDate(d.payment_date) }}</dd></div>
+                </dl>
+                <div v-if="details[d.id]?.terms?.length" class="deal-term-list">
+                  <div v-for="t in primaryTerms(details[d.id].terms)" :key="t.name"
+                    class="deal-term" :title="`${t.name}${t.desc ? ` — ${t.desc}` : ''}`">
+                    <span>{{ termBusinessLabel(t.name) }}</span>
+                    <strong>{{ formatTerm(t) }}</strong>
+                  </div>
+                  <details v-if="details[d.id].terms.length > primaryTerms(details[d.id].terms).length"
+                    class="deal-technical-details">
+                    <summary>Voir les {{ details[d.id].terms.length }} termes contractuels</summary>
+                    <div class="deal-term-list mt-2">
+                      <div v-for="t in details[d.id].terms" :key="t.name" class="deal-term" :title="t.desc || t.name">
+                        <span>{{ termBusinessLabel(t.name) }}</span>
+                        <strong>{{ formatTerm(t) }}</strong>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+                <div v-if="d.realized_payout != null" class="deal-realized">
+                  Remboursement réalisé :
+                  <strong>{{ (d.realized_payout * 100).toFixed(2) }}%</strong>
+                  <span v-if="d.resolution_outcome"> ({{ d.resolution_outcome }})</span>
+                </div>
+              </section>
 
-            <div v-if="d.realized_payout != null" class="text-xs text-slate-400">
-              Remboursement réalisé : <span class="font-mono text-slate-200">{{ (d.realized_payout * 100).toFixed(2) }}%</span>
-              <span v-if="d.resolution_outcome" class="text-slate-600"> ({{ d.resolution_outcome }})</span>
+              <section class="deal-panel deal-panel--market">
+                <header class="deal-panel__head">
+                  <span class="deal-panel__dot" aria-hidden="true"></span>
+                  <h3 class="deal-panel__title">Sous-jacents & niveaux</h3>
+                </header>
+                <div class="deal-well deal-underlyings">
+                  <div v-for="u in d.underlyings" :key="u.name" class="deal-underlying">
+                    <div class="deal-underlying__top">
+                      <span class="deal-underlying__name" :title="u.name">{{ u.ticker || u.name }}</span>
+                      <span v-if="wlUnderlying(d.id, u.name)?.perf != null"
+                        class="deal-perf" :class="signToneClass(wlUnderlying(d.id, u.name).perf - 1)"
+                        title="Performance depuis le strike">
+                        {{ signedPercent((wlUnderlying(d.id, u.name).perf - 1) * 100, 1) }}
+                      </span>
+                    </div>
+                    <div class="deal-underlying__levels">
+                      <span>Strike <strong>{{ formatSpot(strikeFor(d.id, u.name)) }}</strong></span>
+                      <span class="deal-underlying__arrow" aria-hidden="true">→</span>
+                      <span>Cours actuel <strong>{{ formatSpot(wlUnderlying(d.id, u.name)?.spot) }}</strong></span>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="wlRow(d.id)?.barriers?.length" class="deal-well deal-barriers">
+                  <!-- Règle : position de l'observable entre protection et rappel,
+                       relue des écarts ci-dessous (utils/barriers.js). -->
+                  <div v-for="g in barrierGauges(wlRow(d.id).barriers)" :key="g.observable" class="barrier-gauge">
+                    <div class="barrier-gauge__caption">
+                      <span>{{ gaugeObservableLabel(d, g.observable) }}</span>
+                      <span>en % du strike</span>
+                    </div>
+                    <div class="barrier-gauge__track" role="img" :aria-label="gaugeAriaLabel(d, g)">
+                      <div v-if="g.lossZonePct != null" class="barrier-gauge__zone barrier-gauge__zone--loss"
+                        :style="{ width: `${g.lossZonePct}%` }"></div>
+                      <div v-if="g.gainZonePct != null" class="barrier-gauge__zone barrier-gauge__zone--gain"
+                        :style="{ width: `${g.gainZonePct}%` }"></div>
+                      <div v-for="m in g.marks" :key="m.name"
+                        class="barrier-gauge__mark" :class="`barrier-gauge__mark--${m.kind}`"
+                        :style="{ left: `${m.pct}%` }"
+                        :title="`${barrierBusinessLabel(m)} — ${formatGaugeLevel(m.level)}`">
+                        <span v-if="m.labelled">{{ formatGaugeLevel(m.level) }}</span>
+                      </div>
+                      <div class="barrier-gauge__cursor" :style="{ left: `${g.currentPct}%` }">
+                        <span>{{ formatGaugeLevel(g.current) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-for="b in wlRow(d.id).barriers" :key="b.name" class="deal-barrier-row">
+                    <span class="deal-barrier-row__tick" :class="`deal-barrier-row__tick--${b.kind}`"
+                      aria-hidden="true"></span>
+                    <div class="min-w-0">
+                      <span class="deal-barrier-name">{{ barrierBusinessLabel(b) }}</span>
+                      <span class="deal-barrier-code">{{ b.name }}</span>
+                    </div>
+                    <strong>{{ (b.level * 100).toFixed(0) }}%</strong>
+                    <span :class="barrierChipClass(b)"
+                      class="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap">
+                      {{ barrierGapLabel(b) }}
+                    </span>
+                  </div>
+                </div>
+                <div v-else class="deal-empty-state">
+                  {{ d.status === 'actif' ? 'Aucune barrière détectée dans le script.' : 'Niveaux de marché non suivis sur ce deal.' }}
+                </div>
+              </section>
+
+              <section class="deal-panel deal-panel--model">
+                <header class="deal-panel__head">
+                  <span class="deal-panel__dot" aria-hidden="true"></span>
+                  <h3 class="deal-panel__title">Paramètres de repricing</h3>
+                </header>
+                <label v-if="d.status === 'actif'" class="deal-basis">
+                  <span class="deal-label">Base du calcul</span>
+                  <select class="select deal-panel__select w-full text-xs py-1.5"
+                    :value="mtmModeFor(d.id)" @click.stop
+                    @change="setMtmMode(d.id, $event.target.value)"
+                    title="Choix des hypothèses utilisées pour le prochain calcul">
+                    <option value="realized">Marché actuel</option>
+                    <option value="booking">Paramètres du booking</option>
+                  </select>
+                </label>
+                <div v-else class="deal-basis">
+                  <span class="deal-label">Base du calcul</span>
+                  <strong class="deal-value">{{ mtmModeFor(d.id) === 'realized' ? 'Marché actuel' : 'Paramètres du booking' }}</strong>
+                </div>
+                <p class="deal-basis-note">
+                  {{ mtmModeFor(d.id) === 'realized'
+                    ? 'Données Yahoo actualisées. Le taux et le funding restent ceux du booking.'
+                    : 'Paramètres de modèle, volatilités et corrélations du booking, avec les cours disponibles à la date du calcul.' }}
+                </p>
+                <div class="deal-well deal-figures">
+                  <div>
+                    <span class="deal-label">Modèle</span>
+                    <strong class="deal-value">{{ repricingModelLabel(d) }}</strong>
+                  </div>
+                  <div>
+                    <span class="deal-label">Taux</span>
+                    <strong class="deal-value">{{ effectiveRateLabel(d) }}</strong>
+                  </div>
+                  <div>
+                    <span class="deal-label">Funding</span>
+                    <strong class="deal-value">{{ effectiveFundingLabel(d) }}</strong>
+                  </div>
+                  <div>
+                    <span class="deal-label">Source</span>
+                    <strong class="deal-value">{{ effectiveProviderLabel(d) }}</strong>
+                  </div>
+                </div>
+                <details v-if="mtmResults[d.id]?.market_used" class="deal-technical-details">
+                  <summary>Voir le détail du dernier calcul</summary>
+                  <p>{{ marketUsedLabel(mtmResults[d.id].market_used) }}</p>
+                </details>
+                <div v-if="mtmResults[d.id]?.market_used?.data?.contractual_history?.warnings?.length"
+                  class="deal-alert" role="note">
+                  <span aria-hidden="true">⚠</span>
+                  <span>La dernière clôture disponible est ancienne pour au moins un sous-jacent.</span>
+                </div>
+              </section>
+
+              <section class="deal-panel deal-panel--result">
+                <header class="deal-panel__head">
+                  <span class="deal-panel__dot" aria-hidden="true"></span>
+                  <h3 class="deal-panel__title">Résultat</h3>
+                </header>
+                <!-- Rien de calculé (ou calcul en cours) : l'action est au centre du
+                     panneau plutôt qu'en bas d'un grand vide. -->
+                <div v-if="!mtmResults[d.id]" class="deal-result-empty">
+                  <template v-if="['actif', 'en_reglement'].includes(d.status)">
+                    <strong>{{ mtmLoading[d.id] ? 'Calcul du MTM en cours…' : 'Aucun MTM calculé' }}</strong>
+                    <span>
+                      {{ mtmLoading[d.id] ? 'Avec' : 'Le premier calcul utilisera' }}
+                      {{ mtmModeFor(d.id) === 'realized' ? 'le marché actuel' : 'les paramètres du booking' }}.
+                    </span>
+                    <button class="btn-primary text-xs px-3 py-1.5 mt-1"
+                      :disabled="mtmLoading[d.id]" @click.stop="runMtm(d.id)"
+                      :title="mtmButtonTitle(d)">
+                      <span v-if="mtmLoading[d.id]"
+                        class="w-3 h-3 border-2 border-slate-200 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
+                      Calculer le MTM
+                    </button>
+                  </template>
+                  <template v-else>
+                    <strong>Pas de MTM à calculer</strong>
+                    <span>Le produit n’est plus en vie.</span>
+                  </template>
+                </div>
+                <template v-else>
+                  <div v-if="mtmResults[d.id].error" class="deal-alert" role="alert">
+                    <span aria-hidden="true">⚠</span><span>{{ mtmResults[d.id].error }}</span>
+                  </div>
+                  <div v-else-if="mtmResults[d.id].resolved_pending" class="deal-alert" role="note">
+                    <span aria-hidden="true">⚠</span><span>{{ mtmResults[d.id].message }}</span>
+                  </div>
+                  <template v-else>
+                    <div>
+                      <span class="deal-label">MtM</span>
+                      <div class="deal-mtm__value">{{ (mtmResults[d.id].mtm * 100).toFixed(2) }}%</div>
+                      <div class="deal-mtm__ci">
+                        IC 95% · {{ (mtmResults[d.id].ic95[0] * 100).toFixed(2) }}% à {{ (mtmResults[d.id].ic95[1] * 100).toFixed(2) }}%
+                      </div>
+                    </div>
+                    <div class="deal-result-grid">
+                      <div>
+                        <span class="deal-label">Écart vs traité</span>
+                        <strong class="deal-value" :class="signToneClass(mtmResults[d.id].mtm * 100 - d.price_traded)">
+                          {{ signedNumber(mtmResults[d.id].mtm * 100 - d.price_traded, 2) }} pts
+                        </strong>
+                      </div>
+                      <div>
+                        <span class="deal-label">Vie restante</span>
+                        <strong class="deal-value">{{ mtmResults[d.id].T_remaining.toFixed(2) }} an(s)</strong>
+                      </div>
+                      <div v-if="mtmResults[d.id].pre_strike">
+                        <span class="deal-label">État</span>
+                        <strong class="deal-value tone-info">Avant strike</strong>
+                      </div>
+                      <div v-else>
+                        <span class="deal-label">Observations passées</span>
+                        <strong class="deal-value">{{ mtmResults[d.id].obs_passees }}</strong>
+                      </div>
+                      <div v-if="mtmResults[d.id].wof_min_realized != null">
+                        <span class="deal-label">Worst-of min réalisé</span>
+                        <strong class="deal-value">{{ (mtmResults[d.id].wof_min_realized * 100).toFixed(1) }}%</strong>
+                      </div>
+                      <div v-if="mtmResults[d.id].unsettled_total">
+                        <span class="deal-label">À régler</span>
+                        <strong class="deal-value tone-warn">{{ (mtmResults[d.id].unsettled_total * 100).toFixed(2) }}%</strong>
+                      </div>
+                    </div>
+                    <div v-if="mtmResults[d.id].best_case?.capped" class="deal-best-case">
+                      Meilleur scénario : <strong>{{ (mtmResults[d.id].best_case.pv_max * 100).toFixed(2) }}%</strong>
+                      <span v-if="mtmResults[d.id].best_case.exit_signal"> · sortie envisageable</span>
+                    </div>
+                  </template>
+                  <div class="deal-result-actions">
+                    <button v-if="['actif', 'en_reglement'].includes(d.status)" class="btn-primary text-xs px-3 py-1.5"
+                      :disabled="mtmLoading[d.id]" @click.stop="runMtm(d.id)"
+                      :title="mtmButtonTitle(d)">
+                      <span v-if="mtmLoading[d.id]"
+                        class="w-3 h-3 border-2 border-slate-200 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
+                      Calculer le MTM
+                    </button>
+                    <button v-if="d.status === 'actif' && mtmResults[d.id]?.mtm != null"
+                      class="btn-secondary text-[10px] px-2 py-1" :disabled="noteLoading[d.id]"
+                      @click.stop="downloadNote(d)" title="Génère la note de valorisation avec les mêmes hypothèses que le mode sélectionné">
+                      📄 Note de valo
+                    </button>
+                    <button v-if="d.status === 'actif' && mtmResults[d.id]?.mtm != null"
+                      class="btn-secondary text-[10px] px-2 py-1" :disabled="rollLoading[d.id]"
+                      @click.stop="runRoll(d)" title="Reprice le même produit avec un nouveau départ forward">
+                      🔄 Relancer un prix
+                    </button>
+                  </div>
+                </template>
+              </section>
             </div>
 
             <div v-if="refreshResults[d.id]" class="text-xs pt-2 border-t border-slate-800"
               :class="refreshResults[d.id].startsWith('⚠') ? 'text-amber-400' : 'text-slate-400'">
               {{ refreshResults[d.id] }}
-            </div>
-
-            <!-- ── MtM résiduel ────────────────────────────────── -->
-            <div v-if="mtmResults[d.id]" class="text-xs pt-2 border-t border-slate-800">
-              <div v-if="mtmResults[d.id].error" class="text-amber-400">⚠ {{ mtmResults[d.id].error }}</div>
-              <div v-else-if="mtmResults[d.id].resolved_pending" class="text-amber-400">
-                ⚠ {{ mtmResults[d.id].message }}
-              </div>
-              <div v-else class="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span>
-                  MtM résiduel :
-                  <span class="font-mono font-bold text-sm text-brand-gradient">{{ (mtmResults[d.id].mtm * 100).toFixed(2) }}%</span>
-                  <span class="text-slate-600 font-mono text-[10px]">
-                    [{{ (mtmResults[d.id].ic95[0] * 100).toFixed(2) }} – {{ (mtmResults[d.id].ic95[1] * 100).toFixed(2) }}]
-                  </span>
-                </span>
-                <span class="text-slate-500">
-                  vs traité <span class="font-mono" :class="(mtmResults[d.id].mtm * 100 - d.price_traded) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                    {{ (mtmResults[d.id].mtm * 100 - d.price_traded) >= 0 ? '+' : '' }}{{ (mtmResults[d.id].mtm * 100 - d.price_traded).toFixed(2) }} pts
-                  </span>
-                </span>
-                <span class="text-slate-500">
-                  vie restante <span class="font-mono text-slate-300">{{ mtmResults[d.id].T_remaining.toFixed(2) }} an(s)</span>
-                </span>
-                <span v-if="mtmResults[d.id].pre_strike" class="text-sky-400">
-                  avant strike
-                  <HelpTip :text="`Le niveau initial sera constaté le ${mtmResults[d.id].strike_date}. Il est simulé comme le reste : chaque trajectoire diffuse jusqu'à cette date et y fixe son propre strike, auquel le payoff se réfère ensuite. Rien n'est encore réalisé : ni observation, ni coupon, ni barrière.`" />
-                </span>
-                <span v-if="!mtmResults[d.id].pre_strike" class="text-slate-500">
-                  obs passées <span class="font-mono text-slate-300">{{ mtmResults[d.id].obs_passees }}</span>
-                </span>
-                <span v-if="mtmResults[d.id].wof_min_realized != null" class="text-slate-500">
-                  WOF min réalisé <span class="font-mono text-slate-300">{{ (mtmResults[d.id].wof_min_realized * 100).toFixed(1) }}%</span>
-                </span>
-                <span v-if="mtmResults[d.id].settled_total" class="text-slate-500">
-                  flux déjà payés <span class="font-mono text-slate-300">{{ (mtmResults[d.id].settled_total * 100).toFixed(2) }}%</span>
-                </span>
-                <span v-if="mtmResults[d.id].unsettled_total" class="text-amber-400">
-                  à régler le {{ formatDate(mtmResults[d.id].payment_date || mtmResults[d.id].unsettled_cash_flows?.[0]?.payment_date) }}
-                  <span class="font-mono">{{ (mtmResults[d.id].unsettled_total * 100).toFixed(2) }}%</span>
-                </span>
-                <span v-if="mtmResults[d.id].best_case && mtmResults[d.id].best_case.capped" class="text-slate-500"
-                  title="Meilleur dénouement possible du produit, en valeur actualisée (maximum de la distribution Monte Carlo)">
-                  meilleur scénario <span class="font-mono text-slate-300">{{ (mtmResults[d.id].best_case.pv_max * 100).toFixed(2) }}%</span>
-                </span>
-                <span v-if="mtmResults[d.id].best_case && mtmResults[d.id].best_case.exit_signal"
-                  class="text-amber-400 border border-amber-700 rounded px-1.5 py-0.5 text-[10px]"
-                  :title="`Le MtM capture ${(mtmResults[d.id].best_case.capture_ratio * 100).toFixed(1)}% du meilleur dénouement — potentiel résiduel ${mtmResults[d.id].best_case.upside_pts} pt (≈ ${mtmResults[d.id].best_case.upside_annualized_pct}%/an)`">
-                  ⚡ sortie envisageable
-                </span>
-                <button v-if="d.status === 'actif'" class="btn-secondary text-[10px] px-2 py-1" :disabled="noteLoading[d.id]"
-                  @click.stop="downloadNote(d)"
-                  title="Génère la note de valorisation PDF à envoyer au client — même chiffre que le MtM affiché (mode et seed identiques)">
-                  <span v-if="noteLoading[d.id]"
-                    class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
-                  📄 Note de valo
-                </button>
-                <button v-if="d.status === 'actif'" class="btn-secondary text-[10px] px-2 py-1" :disabled="rollLoading[d.id]"
-                  @click.stop="runRoll(d)"
-                  title="Reprice le même produit, même sous-jacent, départ forward (value date = aujourd'hui, tenor plein) — juste une simulation, rien n'est booké">
-                  <span v-if="rollLoading[d.id]"
-                    class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
-                  🔄 Relancer un prix
-                </button>
-                <span v-if="mtmResults[d.id].market_used" class="w-full font-mono text-[10px] pt-0.5"
-                  :class="mtmResults[d.id].market_used.source === 'booking' ? 'text-slate-600' : 'text-sky-400'">
-                  Marché utilisé : {{ marketUsedLabel(mtmResults[d.id].market_used) }}
-                </span>
-                <span v-if="mtmResults[d.id].market_used?.data?.contractual_history?.warnings?.length"
-                  class="w-full text-[10px] text-amber-400">
-                  ⚠ La dernière clôture disponible est ancienne pour au moins un sous-jacent.
-                </span>
-              </div>
             </div>
 
             <!-- ── Greeks (bump-and-reprice CRN) ─────────────────── -->
@@ -704,11 +862,12 @@
                       class="absolute -top-1 -bottom-1 w-0.5 bg-amber-400"
                       :style="{ left: lifePct(d) + '%' }" title="Aujourd'hui"></div>
                     <!-- Constatations -->
+                    <!-- Liseré blanc : un point bleu reste lisible sur le remplissage bleu. -->
                     <div v-for="ev in obsEvents(d.id)" :key="ev.id"
-                      class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full border"
+                      class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full border ring-2 ring-white"
                       :class="eventDotClass(ev)"
                       :style="{ left: eventPct(d, ev) + '%' }"
-                      :title="`${ev.label} — ${ev.event_date} (${ev.status})`"></div>
+                      :title="`${displayEventLabel(ev.label)} — ${ev.event_date} (${ev.status})`"></div>
                   </div>
                   <div class="flex gap-3 mt-1.5 text-[10px] text-slate-600 flex-wrap">
                     <span><span class="inline-block w-2 h-2 rounded-full bg-blue-500 border border-blue-400 mr-1"></span>observé</span>
@@ -717,63 +876,6 @@
                     <span><span class="inline-block w-2 h-2 rounded-full bg-red-500 border border-red-400 mr-1"></span>KI</span>
                     <span><span class="inline-block w-2 h-2 rounded-full bg-slate-900 border border-slate-600 mr-1"></span>futur</span>
                     <span><span class="inline-block w-2 h-2 rounded-full bg-slate-700 border border-slate-600 mr-1 opacity-50"></span>annulé</span>
-                  </div>
-                </div>
-
-                <!-- Dates complètes -->
-                <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
-                  <div><div class="text-slate-500 mb-0.5">Trade</div><div class="font-mono text-slate-300">{{ formatDate(d.trade_date) }}</div></div>
-                  <div><div class="text-slate-500 mb-0.5">Strike</div><div class="font-mono text-slate-300">{{ formatDate(d.strike_date) }}</div></div>
-                  <div><div class="text-slate-500 mb-0.5">Value</div><div class="font-mono text-slate-300">{{ formatDate(d.value_date) }}</div></div>
-                  <div><div class="text-slate-500 mb-0.5">Maturité</div><div class="font-mono text-slate-300">{{ formatDate(d.maturity_date) }}</div></div>
-                  <div><div class="text-slate-500 mb-0.5">Payment</div><div class="font-mono text-slate-300">{{ formatDate(d.payment_date) }}</div></div>
-                </div>
-
-                <!-- Termes économiques (PARAM figés au booking) -->
-                <div v-if="details[d.id].terms?.length">
-                  <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                    Termes économiques
-                    <HelpTip text="Les PARAM du script figé au booking, avec les valeurs réellement bookées (surcharges UI si figées, défauts du script sinon). Un PARAM() par observation affiche toutes ses lignes dans l'ordre des dates AT." />
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <div v-for="t in details[d.id].terms" :key="t.name"
-                      class="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-xs"
-                      :title="t.desc || t.name">
-                      <span class="font-mono text-slate-400">{{ t.name }}</span>
-                      <span class="font-mono font-semibold text-slate-200">{{ formatTerm(t) }}</span>
-                      <span v-if="t.kind === 'array'" class="text-[10px] text-slate-600">par obs</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Sous-jacents : S₀ figé + spot actuel (watchlist) -->
-                <div>
-                  <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Sous-jacents</div>
-                  <div class="flex flex-wrap gap-2">
-                    <div v-for="u in details[d.id].underlyings" :key="u.name"
-                      class="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-1.5 text-xs">
-                      <span class="font-mono font-semibold text-slate-200">{{ u.ticker || u.name }}</span>
-                      <span class="text-slate-500">S₀ <span class="font-mono text-slate-300">{{ formatSpot(s0For(d.id, u.name)) }}</span></span>
-                      <template v-if="wlUnderlying(d.id, u.name)">
-                        <span class="text-slate-500">spot <span class="font-mono text-slate-300">{{ formatSpot(wlUnderlying(d.id, u.name).spot) }}</span></span>
-                        <span class="font-mono font-semibold"
-                          :class="wlUnderlying(d.id, u.name).perf >= 1 ? 'text-emerald-400' : 'text-red-400'">
-                          {{ ((wlUnderlying(d.id, u.name).perf - 1) * 100).toFixed(1) >= 0 ? '+' : '' }}{{ ((wlUnderlying(d.id, u.name).perf - 1) * 100).toFixed(1) }}%
-                        </span>
-                      </template>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Barrières (watchlist, deals actifs seulement) -->
-                <div v-if="wlRow(d.id)?.barriers?.length">
-                  <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Barrières</div>
-                  <div class="flex gap-1.5 flex-wrap">
-                    <span v-for="b in wlRow(d.id).barriers" :key="b.name"
-                      :class="barrierChipClass(b)"
-                      class="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap">
-                      {{ b.name }} {{ (b.level * 100).toFixed(0) }}%<template v-if="b.observable && b.observable !== 'WOF'"> vs {{ b.observable }}</template> · {{ barrierGapLabel(b) }}
-                    </span>
                   </div>
                 </div>
 
@@ -824,7 +926,7 @@
                           <td class="py-1.5 pr-3 text-slate-500">{{ rangConstatation(details[d.id].events, ev) ?? '' }}</td>
                           <td class="py-1.5 pr-3 whitespace-nowrap"
                             :class="estReleve(ev) ? 'text-slate-500 pl-6 text-[11px]' : 'text-slate-300'">
-                            <span v-if="estReleve(ev)" class="text-slate-700 mr-1">↳</span>{{ ev.label }}
+                            <span v-if="estReleve(ev)" class="text-slate-700 mr-1">↳</span>{{ displayEventLabel(ev.label) }}
                             <span v-if="ev.reduction"
                               class="ml-1.5 text-[9px] rounded px-1 py-0.5 border border-blue-800/60 text-blue-400"
                               :title="`Niveau constaté : ${libelleReduction(ev.reduction)} des cours de ses relevés, sous-jacent par sous-jacent.`">{{ ev.reduction }}</span>
@@ -980,7 +1082,7 @@ import DataFilterBar from '../components/ui/DataFilterBar.vue'
 import AutoFixingExceptionModal from '../components/AutoFixingExceptionModal.vue'
 import { useDataFilter } from '../composables/useDataFilter.js'
 import { formatInt, formatPercent, formatDate } from '../utils/format.js'
-import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
+import { barrierChipClass, barrierGapLabel, barrierGauges } from '../utils/barriers.js'
 import {
   compterConstatations, compterReleves, estReleve, libelleReduction, ordonnerEvenements,
   rangConstatation,
@@ -1221,6 +1323,103 @@ function formatTerm(t) {
   return Array.isArray(t.value) ? t.value.map(one).join(' / ') : one(t.value)
 }
 
+function termBusinessLabel(name = '') {
+  const normalized = String(name).toUpperCase()
+  // Before the coupon itself: M_CPN_BAR 70 % and COUPON 2 % both read
+  // "Coupon" otherwise, side by side on a Phoenix.
+  if (/(COUP|CPN).*BAR/.test(normalized)) return 'Barrière de coupon'
+  if (/COUP|CPN/.test(normalized)) return 'Coupon'
+  if (/AC.*BAR|AUTOCALL/.test(normalized)) return 'Barrière de rappel'
+  if (/KI.*BAR|PROTECT/.test(normalized)) return 'Barrière de protection'
+  if (/PARTIC/.test(normalized)) return 'Participation'
+  if (/CAP/.test(normalized)) return 'Plafond'
+  if (/FLOOR/.test(normalized)) return 'Plancher'
+  if (/STRIKE/.test(normalized)) return 'Strike'
+  return String(name).replace(/^M_/, '').replaceAll('_', ' ').toLowerCase()
+    .replace(/^./, char => char.toUpperCase())
+}
+
+function primaryTerms(terms = []) {
+  const important = /COUP|CPN|AC.*BAR|AUTOCALL|KI.*BAR|PROTECT|PARTIC|CAP|FLOOR|STRIKE/i
+  const ranked = [...terms].sort((a, b) => Number(important.test(b.name)) - Number(important.test(a.name)))
+  return ranked.slice(0, 4)
+}
+
+function barrierBusinessLabel(barrier) {
+  // The name first for a coupon barrier: WOF >= M_CPN_BAR is an upward
+  // monitor, the same kind as the recall — read by kind alone, a Phoenix
+  // showed two "Barrière de rappel".
+  if (/COUP|CPN/i.test(barrier?.name || '')) return 'Barrière de coupon'
+  if (barrier?.kind === 'autocall') return 'Barrière de rappel'
+  if (barrier?.kind === 'ki') return 'Barrière de protection'
+  return termBusinessLabel(barrier?.name || 'Barrière')
+}
+
+// Colour of a signed figure. A class the panel stylesheet owns: a Tailwind
+// text-red-400 lost to the scoped `color` of its own element, and a negative
+// margin was printed in black.
+function signToneClass(value) {
+  return Number(value) >= 0 ? 'tone-pos' : 'tone-neg'
+}
+
+function formatGaugeLevel(value) {
+  return `${+Number(value).toFixed(1)}%`
+}
+
+// Which level the ruler reads — see build_watchlist_row:_observable_value.
+function gaugeObservableLabel(deal, observable) {
+  const rows = wlRow(deal.id)?.underlyings || []
+  const tickerOf = (u) => u?.ticker || u?.name || ''
+  const single = rows.length === 1 ? tickerOf(rows[0]) : ''
+  const priced = rows.filter(u => u.perf != null)
+  const extreme = (pick) => priced.length
+    ? tickerOf(priced.reduce((a, b) => (pick(b.perf, a.perf) ? b : a)))
+    : ''
+
+  if (observable === 'WOF') {
+    const worst = extreme((x, y) => x < y)
+    return single || (worst ? `Worst-of · ${worst}` : 'Worst-of')
+  }
+  if (observable === 'BOF') {
+    const best = extreme((x, y) => x > y)
+    return single || (best ? `Best-of · ${best}` : 'Best-of')
+  }
+  if (observable === 'WOF_MIN') return `${single || 'Worst-of'} · plus bas depuis le strike`
+  if (observable === 'BOF_MAX') return `${single || 'Best-of'} · plus haut depuis le strike`
+  if (observable === 'BASKET') return 'Panier'
+  const indexed = /^S(?:_MIN|_MAX)?\[(\d+)\]$/.exec(observable || '')
+  if (indexed) return tickerOf(rows[Number(indexed[1]) - 1]) || observable
+  return observable
+}
+
+function gaugeAriaLabel(deal, gauge) {
+  const marks = gauge.marks.map(m => `${barrierBusinessLabel(m)} ${formatGaugeLevel(m.level)}`)
+  return `${gaugeObservableLabel(deal, gauge.observable)} à ${formatGaugeLevel(gauge.current)} du strike — ${marks.join(', ')}`
+}
+
+function mtmButtonTitle(deal) {
+  return deal.status === 'en_reglement'
+    ? 'Valeur actualisée du remboursement connu jusqu’à sa date de paiement'
+    : 'Valorise les flux restants du produit vivant à la date du calcul'
+}
+
+function displayEventLabel(label = '') {
+  return String(label)
+    .replace(/Strike\s*\/\s*Fixing\s*S[₀0]/gi, 'Fixing du strike')
+    .replace(/\bS[₀0]\b/g, 'Strike')
+}
+
+function signedNumber(value, decimals = 2) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '–'
+  return `${number >= 0 ? '+' : ''}${number.toFixed(decimals)}`
+}
+
+function signedPercent(value, decimals = 1) {
+  const formatted = signedNumber(value, decimals)
+  return formatted === '–' ? formatted : `${formatted}%`
+}
+
 // Watchlist join — live spot/perf and barrier gaps for active deals
 function wlRow(id) {
   return watchlist.value.find(w => w.deal_id === id) || null
@@ -1228,6 +1427,10 @@ function wlRow(id) {
 
 function wlUnderlying(id, name) {
   return wlRow(id)?.underlyings?.find(u => u.name === name) || null
+}
+
+function strikeFor(id, name) {
+  return s0For(id, name) ?? wlUnderlying(id, name)?.s0 ?? null
 }
 
 // ── Alertes cycle de vie / barrières ────────────────────────────────
@@ -1287,13 +1490,68 @@ async function refreshBook() {
 // ── MtM résiduel ────────────────────────────────────────────────────
 const mtmLoading = reactive({})
 const mtmResults = reactive({})
-const mtmMode = reactive({})   // deal id -> 'booking' (défaut) | 'realized'
+const mtmMode = reactive({})   // deal id -> 'realized' (défaut) | 'booking'
+
+function mtmModeFor(id) {
+  return mtmMode[id] || 'realized'
+}
+
+function setMtmMode(id, mode) {
+  if (mtmModeFor(id) === mode) return
+  mtmMode[id] = mode
+  // A result must never remain visible under a newly selected parameter set.
+  mtmResults[id] = null
+}
+
+function modelBusinessLabel(model) {
+  const labels = {
+    constant: 'GBM',
+    gbm: 'GBM',
+    heston: 'Heston',
+    sabr: 'SABR',
+    local_vol: 'Vol locale',
+    lsv: 'LSV',
+  }
+  return labels[String(model || '').toLowerCase()] || model || 'Non renseigné'
+}
+
+function repricingModelLabel(deal) {
+  if (mtmModeFor(deal.id) === 'realized') return 'GBM'
+  return modelBusinessLabel(mtmResults[deal.id]?.market_used?.model || deal.market_snapshot?.model)
+}
+
+function effectiveRateLabel(deal) {
+  const used = mtmResults[deal.id]?.market_used
+  const rate = used?.r ?? deal.market_snapshot?.r
+  if (rate == null) return 'Non renseigné'
+  return `${Number(rate).toFixed(2)}%${used?.r_is_default ? ' (défaut)' : ''}`
+}
+
+function effectiveFundingLabel(deal) {
+  const used = mtmResults[deal.id]?.market_used
+  if (used?.funding_curve?.length) return `Courbe · ${used.funding_curve.length} piliers`
+  if (used?.funding_spread != null) return `${Number(used.funding_spread).toFixed(2)}%`
+
+  const market = deal.market_snapshot || {}
+  if (market.funding_curve?.length) return `Courbe · ${market.funding_curve.length} piliers`
+  if (market.funding?.mode === 'pillars' && market.funding.pillars?.length) {
+    return `Courbe · ${market.funding.pillars.length} piliers`
+  }
+  if (market.funding?.level != null) return `${Number(market.funding.level).toFixed(2)}%`
+  return `${(Number(market.funding_spread || 0) * 100).toFixed(2)}%`
+}
+
+function effectiveProviderLabel(deal) {
+  const provider = mtmResults[deal.id]?.market_used?.data?.provider || deal.market_data_provider
+  if (provider === 'YAHOO_FINANCE' || provider === 'YAHOO') return 'Yahoo Finance'
+  return provider || 'Yahoo Finance'
+}
 
 async function runMtm(id) {
   mtmLoading[id] = true
   mtmResults[id] = null
   try {
-    const mode = mtmMode[id] || 'booking'
+    const mode = mtmModeFor(id)
     const res = await apiFetch(`/api/deals/${id}/mtm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1326,7 +1584,7 @@ async function runGreeks(id) {
   greeksLoading[id] = true
   greeksResults[id] = null
   try {
-    const mode = mtmMode[id] || 'booking'
+    const mode = mtmModeFor(id)
     const res = await apiFetch(`/api/deals/${id}/greeks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1448,7 +1706,7 @@ const noteLoading = reactive({})
 async function downloadNote(d) {
   noteLoading[d.id] = true
   try {
-    const mode = mtmMode[d.id] || 'booking'
+    const mode = mtmModeFor(d.id)
     const res = await apiFetch(`/api/deals/${d.id}/mtm/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1852,9 +2110,568 @@ onMounted(async () => {
   text-align: center;
 }
 
+/* ── Synthèse du deal : quatre panneaux, une identité chacun ──────────────
+   La teinte dit de quoi parle le panneau (contrat, marché, hypothèses,
+   résultat) et deux voisins n'ont jamais la même, en 4, 2 ou 1 colonne. Les
+   chiffres sont posés sur des cuvettes blanches et le texte reste encre :
+   aucune écriture de couleur sur un fond de la même couleur (le badge bleu
+   sur panneau bleu était illisible). */
+.deal-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.deal-panel {
+  --panel-tint: var(--surface);
+  --panel-edge: var(--border);
+  --panel-accent: var(--muted);
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--panel-edge);
+  border-top: 3px solid var(--panel-accent);
+  border-radius: 12px;
+  background: var(--panel-tint);
+  padding: 0.8rem 0.9rem 0.9rem;
+  box-shadow: 0 1px 2px rgba(26, 24, 20, 0.05);
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.deal-panel--contract { --panel-tint: #f4f6f9; --panel-edge: #d6dce5; --panel-accent: #52627a; }
+.deal-panel--market { --panel-tint: #edf7f4; --panel-edge: #c3e1d8; --panel-accent: #14806f; }
+.deal-panel--model { --panel-tint: #f5f1fc; --panel-edge: #d9cfef; --panel-accent: #6e51bd; }
+.deal-panel--result { --panel-tint: var(--surface); --panel-edge: #b7cfeb; --panel-accent: var(--accent); }
+
+.deal-panel:focus-within {
+  border-color: var(--panel-accent);
+}
+
+/* Survol : le panneau passe devant ses voisins et grossit. Pointeur
+   seulement (au doigt, le survol resterait collé), et sans mouvement pour qui
+   l'a désactivé dans son système. */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .deal-panel:hover {
+    z-index: 2;
+    transform: scale(1.04);
+    box-shadow: 0 18px 38px -14px rgba(26, 24, 20, 0.32), 0 3px 8px rgba(26, 24, 20, 0.06);
+  }
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) and (max-width: 1350px) {
+  .deal-panel:hover {
+    transform: scale(1.025);
+  }
+}
+
+@media (hover: hover) and (prefers-reduced-motion: reduce) {
+  .deal-panel:hover {
+    box-shadow: 0 0 0 2px var(--panel-accent);
+  }
+}
+
+.deal-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.deal-panel__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: var(--panel-accent);
+}
+
+.deal-panel__title {
+  color: #2f2b25;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.deal-well {
+  border: 1px solid var(--panel-edge);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.deal-label {
+  display: block;
+  color: #635d53;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.deal-value {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.deal-value.is-secondary {
+  color: #57524a;
+  font-weight: 500;
+}
+
+.deal-figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.deal-figures > div {
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+}
+
+.deal-figures > div:nth-child(odd) {
+  border-right: 1px solid var(--border);
+}
+
+.deal-figures > div:nth-child(n + 3) {
+  border-top: 1px solid var(--border);
+}
+
+/* ── Contrat ── */
+.deal-dates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem 0.75rem;
+  padding: 0 0.15rem;
+}
+
+.deal-dates dt {
+  color: #635d53;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+}
+
+.deal-dates dd {
+  margin-top: 0.15rem;
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.deal-term-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.deal-term {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  border: 1px solid var(--panel-edge);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 0.2rem 0.55rem;
+  color: #57524a;
+  font-size: 0.6875rem;
+}
+
+.deal-term strong {
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-weight: 700;
+}
+
+.deal-realized {
+  color: #57524a;
+  font-size: 0.75rem;
+}
+
+.deal-realized strong {
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+.deal-technical-details {
+  color: #57524a;
+  font-size: 0.6875rem;
+}
+
+.deal-technical-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #3d382f;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--panel-edge);
+  text-underline-offset: 3px;
+}
+
+.deal-technical-details p {
+  margin-top: 0.4rem;
+  color: #57524a;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  line-height: 1.45;
+}
+
+/* ── Marché ── */
+.deal-underlying {
+  padding: 0.5rem 0.65rem;
+}
+
+.deal-underlying + .deal-underlying {
+  border-top: 1px solid var(--border);
+}
+
+.deal-underlying__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.deal-underlying__name {
+  overflow: hidden;
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deal-perf {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--surface2);
+  padding: 0.1rem 0.5rem;
+  color: #57524a;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.deal-perf.tone-pos { background: var(--positive-light); }
+.deal-perf.tone-neg { background: var(--negative-light); }
+
+.deal-underlying__levels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.4rem;
+  margin-top: 0.25rem;
+  color: #635d53;
+  font-size: 0.6875rem;
+}
+
+.deal-underlying__levels strong {
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.deal-underlying__arrow {
+  color: var(--subtle);
+}
+
+.deal-barriers > * + * {
+  border-top: 1px solid var(--border);
+}
+
+/* Règle des barrières : zones, repères et curseur sont placés en % de la
+   largeur par barrierGauges (utils/barriers.js). */
+.barrier-gauge {
+  padding: 0.55rem 0.65rem 0.45rem;
+}
+
+.barrier-gauge__caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+}
+
+.barrier-gauge__caption span:first-child {
+  overflow: hidden;
+  color: #3d382f;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.barrier-gauge__caption span:last-child {
+  flex: 0 0 auto;
+  color: var(--subtle);
+  font-size: 0.625rem;
+}
+
+.barrier-gauge__track {
+  position: relative;
+  height: 0.5rem;
+  margin: 1.35rem 0.4rem 1.3rem;
+  border-radius: 999px;
+  background: #e9e6df;
+}
+
+.barrier-gauge__zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.barrier-gauge__zone--loss {
+  left: 0;
+  border-radius: 999px 0 0 999px;
+  background: #f3c4bd;
+}
+
+.barrier-gauge__zone--gain {
+  right: 0;
+  border-radius: 0 999px 999px 0;
+  background: #b9e0c9;
+}
+
+.barrier-gauge__mark {
+  position: absolute;
+  top: -0.3rem;
+  bottom: -0.3rem;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--muted);
+}
+
+.barrier-gauge__mark--ki { background: var(--negative); }
+.barrier-gauge__mark--autocall { background: var(--positive); }
+
+.barrier-gauge__mark span,
+.barrier-gauge__cursor span {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.barrier-gauge__mark span { bottom: calc(100% + 0.2rem); }
+.barrier-gauge__mark--ki span { color: var(--negative); }
+.barrier-gauge__mark--autocall span { color: var(--positive); }
+
+.barrier-gauge__cursor {
+  position: absolute;
+  top: 50%;
+  width: 0.85rem;
+  height: 0.85rem;
+  margin: -0.425rem 0 0 -0.425rem;
+  border: 2px solid var(--surface);
+  border-radius: 999px;
+  background: var(--text);
+  box-shadow: 0 1px 3px rgba(26, 24, 20, 0.35);
+}
+
+.barrier-gauge__cursor span {
+  top: calc(100% + 0.25rem);
+  color: var(--text);
+}
+
+.deal-barrier-row {
+  display: grid;
+  grid-template-columns: 0.2rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem 0.45rem 0.5rem;
+}
+
+.deal-barrier-row__tick {
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--border2);
+}
+
+.deal-barrier-row__tick--ki { background: var(--negative); }
+.deal-barrier-row__tick--autocall { background: var(--positive); }
+
+.deal-barrier-name {
+  display: block;
+  color: #3d382f;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.deal-barrier-code {
+  display: block;
+  color: var(--subtle);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.625rem;
+}
+
+.deal-barrier-row > strong {
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.deal-empty-state {
+  color: #57524a;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+/* ── Hypothèses ── */
+.deal-basis {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.deal-panel__select.select {
+  border-color: var(--panel-edge);
+  background-color: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.deal-panel__select.select:hover,
+.deal-panel__select.select:focus {
+  border-color: var(--panel-accent);
+}
+
+.deal-basis-note {
+  color: #4f4a42;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.deal-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  border: 1px solid rgba(184, 134, 11, 0.35);
+  border-radius: 8px;
+  background: var(--gold-light);
+  padding: 0.45rem 0.6rem;
+  color: #6f5207;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+}
+
+/* ── Résultat ── */
+.deal-mtm__value {
+  margin-top: 0.15rem;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 1.9rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.deal-mtm__ci {
+  margin-top: 0.25rem;
+  color: #635d53;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.6875rem;
+}
+
+.deal-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem 0.8rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.7rem;
+}
+
+.deal-best-case {
+  border-radius: 8px;
+  background: var(--surface2);
+  padding: 0.45rem 0.6rem;
+  color: #4f4a42;
+  font-size: 0.6875rem;
+}
+
+.deal-best-case strong {
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+.deal-best-case span {
+  color: #8a6508;
+  font-weight: 600;
+}
+
+.deal-result-empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 8rem;
+  border: 1px dashed var(--panel-edge);
+  border-radius: 9px;
+  padding: 1rem;
+  text-align: center;
+}
+
+.deal-result-empty > strong {
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.deal-result-empty > span {
+  color: #57524a;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.deal-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: auto;
+}
+
+/* Couleurs de signe en dernier, sous le panneau : elles doivent l'emporter
+   sur toutes les couleurs de base ci-dessus. */
+.deal-panel .tone-pos { color: var(--positive); }
+.deal-panel .tone-neg { color: var(--negative); }
+.deal-panel .tone-warn { color: #8a6508; }
+.deal-panel .tone-info { color: #0369a1; }
+
+@media (max-width: 1350px) {
+  .deal-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
   .deal-card__header {
     grid-template-columns: minmax(10rem, 1fr) minmax(0, 2fr);
+  }
+
+  .deal-overview-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

@@ -25,6 +25,9 @@
         </div>
         <!-- Error display -->
         <div v-if="store.error" class="text-xs truncate" style="color: var(--negative);">⚠ {{ store.error }}</div>
+        <div v-else-if="store.marketDataLoading" class="text-xs truncate" style="color: var(--accent);">
+          ↻ Mise à jour du marché à la date de valorisation…
+        </div>
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
@@ -42,10 +45,10 @@
         </button>
         <button
           class="btn-primary flex items-center gap-2 text-sm"
-          :disabled="store.loading || !!store.parseError"
+          :disabled="store.loading || store.marketDataLoading || !!store.parseError"
           @click="store.runPricing()">
           <span v-if="store.loading" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-          {{ store.loading ? 'Calcul…' : '▶ Pricer' }}
+          {{ store.marketDataLoading ? 'Marché…' : store.loading ? 'Calcul…' : '▶ Pricer' }}
         </button>
       </div>
     </div>
@@ -53,6 +56,17 @@
     <!-- Les déclinaisons du deal, juste sous la barre d'outils : ce qu'on
          regarde doit se lire avant ce qu'on lit. -->
     <VariantBar />
+
+    <div v-if="store.contractTermsLocked"
+         class="mx-5 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-amber-950 shrink-0">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span class="text-sm font-bold">🔒 Deal booké</span>
+        <span class="font-mono text-xs font-semibold">{{ store.openedDeal.reference }}</span>
+        <span class="text-xs">
+          Termes contractuels figés · seules les hypothèses de valorisation sont modifiables.
+        </span>
+      </div>
+    </div>
 
     <!-- ── Main 2-col ──────────────────────────────────────────── -->
     <main class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-0 items-stretch">

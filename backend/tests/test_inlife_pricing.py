@@ -216,6 +216,11 @@ def test_la_reponse_porte_les_memes_statistiques_que_le_pricing_normal(marche):
         assert cle in res, f"{cle} absent de la réponse"
     assert res["payoffs"], "distribution des payoffs vide"
     assert res["t_max_effective"] == pytest.approx(res["past"]["years_remaining"], abs=1e-6)
+    # La décomposition MC peut s'arrêter au premier STOP ; le calendrier du
+    # contrat, lui, doit rester complet afin que l'onglet Flux ne donne jamais
+    # l'impression que les échéances suivantes n'existent pas.
+    assert len(res["schedule"]["constatations"]) == 12
+    assert all(c["date"] for c in res["schedule"]["constatations"])
 
 
 def test_la_courbe_de_dividende_atteint_le_moteur(marche):

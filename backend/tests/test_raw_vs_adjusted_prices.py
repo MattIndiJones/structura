@@ -11,6 +11,7 @@ pas la réponse qu'il renvoie.
 """
 import pandas as pd
 import pytest
+import math
 
 from backend.app.services import market_data
 
@@ -59,6 +60,35 @@ def test_l_estimation_de_volatilite_garde_le_rendement_total():
     # mesure sur le rendement total, dividendes réinvestis.
     market_data.load_hist_vol(["GLE.PA"], period="1y")
     assert _FakeHistory.appels[0]["auto_adjust"] is True
+
+
+def test_la_calibration_datee_utilise_la_meme_fenetre_que_le_mtm(monkeypatch):
+    calls = []
+    prices = [100.0 * math.exp(0.01 * i) for i in range(300)]
+
+    def history_loader(tickers, start, end=None, adjusted=False, provider="YAHOO_FINANCE"):
+        calls.append({"tickers": tickers, "start": start, "end": end,
+                      "adjusted": adjusted, "provider": provider})
+        return {
+            "dates": [f"2025-01-{(i % 28) + 1:02d}" for i in range(300)],
+            "prices": {ticker: prices for ticker in tickers},
+            "provider": "YAHOO_FINANCE", "price_type": "ADJUSTED_CLOSE",
+            "asof_effective": "2026-09-11",
+            "effective_dates": {ticker: "2026-09-11" for ticker in tickers},
+            "age_sessions": {ticker: 0 for ticker in tickers},
+            "warnings": [], "fetched_at": "2026-09-13T10:00:00",
+        }
+
+    monkeypatch.setattr(market_data, "load_hist_prices", history_loader)
+    res = market_data.load_hist_vol(
+        ["GLE.PA"], asof="2026-09-13", window_days=252)
+
+    assert calls[0]["end"] == "2026-09-13"
+    assert calls[0]["adjusted"] is True
+    assert res["requested_asof"] == "2026-09-13"
+    assert res["asof_effective"] == "2026-09-11"
+    assert res["n_obs"] == 252
+    assert res["vols"]["GLE.PA"] == pytest.approx(math.sqrt(252) * 0.01)
 
 
 def test_les_fixings_contractuels_etaient_deja_sur_le_cours_nu():

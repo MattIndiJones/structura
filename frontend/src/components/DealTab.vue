@@ -2,12 +2,12 @@
   <div class="flex flex-col gap-5">
 
     <!-- No pricing result warning -->
-    <div v-if="!store.result" class="card border-amber-800/50 bg-amber-950/20">
+    <div v-if="!store.result && !store.contractTermsLocked" class="card border-amber-800/50 bg-amber-950/20">
       <p class="text-amber-400 text-sm">
         ⚠ Lancez d'abord un pricing (▶ Pricer) pour pré-remplir le fair value et les temps d'observation.
       </p>
     </div>
-    <div v-if="store.resultIsStale" class="card border-red-800/60 bg-red-950/20">
+    <div v-if="store.resultIsStale && !store.contractTermsLocked" class="card border-red-800/60 bg-red-950/20">
       <p class="text-red-300 text-sm">
         ⚠ Le script ou les paramètres ont changé depuis ce pricing. Relancez ▶ Pricer avant de booker.
       </p>
@@ -40,8 +40,16 @@
       </template>
     </div>
 
+    <div v-if="store.contractTermsLocked"
+         class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
+      <p class="text-sm font-bold">🔒 Deal booké — données contractuelles figées</p>
+      <p class="text-xs mt-0.5">
+        Ces informations décrivent le deal existant. Utilisez « Booker un autre deal » pour repartir explicitement de ce produit.
+      </p>
+    </div>
+
     <!-- ── Identité du deal ─────────────────────────────────── -->
-    <div class="card">
+    <fieldset class="card" :disabled="store.contractTermsLocked">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Identité</h2>
       <div class="grid grid-cols-2 gap-3">
         <div class="col-span-2">
@@ -207,9 +215,9 @@
             class="input bg-slate-800/40 text-slate-500 cursor-not-allowed" readonly />
         </div>
       </div>
-    </div>
+    </fieldset>
     <!-- ── Conditions de transaction ───────────────────────── -->
-    <div class="card">
+    <fieldset class="card" :disabled="store.contractTermsLocked">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Conditions de transaction</h2>
       <div class="grid grid-cols-2 gap-3">
         <div class="col-span-2">
@@ -253,7 +261,7 @@
           </div>
         </div>
       </div>
-    </div>
+    </fieldset>
 
     <!-- ── Booking ─────────────────────────────────────────── -->
     <div class="card">
@@ -419,7 +427,7 @@ function onDirectDealOpportunityChange() {
 }
 
 watch(() => store.result, (r) => {
-  if (r) {
+  if (r && !store.contractTermsLocked) {
     form.fair_value = parseFloat((r.price * 100).toFixed(4))
     if (!form.price_traded) form.price_traded = form.fair_value
   }
@@ -521,6 +529,7 @@ const existingDeal = computed(() => bookedDeal.value || store.openedDeal)
 function rearmBooking() {
   bookedDeal.value = null
   store.openedDeal = null
+  if (store.result) form.fair_value = parseFloat((store.result.price * 100).toFixed(4))
 }
 
 function validate() {

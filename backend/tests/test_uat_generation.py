@@ -13,7 +13,7 @@ from backend.app.api import deals as deals_api, rfq as rfq_api
 from backend.app.db.models import (
     Alert, AuditEvent, Counterparty, Deal, DealEvent, Entity, LifecycleProposal,
     OfficialFixingVersion, RfqProvider, RfqQuote, RfqRequest,
-    UatGenerationBatch, User,
+    UatGenerationBatch, User, ValuationRun,
 )
 from backend.app.services.uat_generation import (
     UatGenerationRequest, configure_uat_workflows, delete_batch,
@@ -162,6 +162,42 @@ def test_invalid_ranges_are_rejected_before_batch_creation():
     assert not session.exec(select(UatGenerationBatch)).first()
 
 
+def test_booked_uat_uses_the_same_pricing_snapshot_boundary_as_the_pricer():
+    """A UAT deal must reopen with display units and its exact pricing input.
+
+    The generator used to persist engine fractions directly in the display
+    snapshot. A 26% volatility therefore reopened as 0.26%, which made an
+    autocall almost deterministic at its first observation. The receipt now
+    drives booking through the ordinary Pricer boundary.
+    """
+    session, admin, target = _session_and_users()
+    batch = generate_batch(_request(
+        target,
+        mode="BOOKED_ONLY",
+        count=1,
+        seed=29,
+        product_types=["ATHENA"],
+        underlying_tickers=["^STOXX50E"],
+        max_underlyings=1,
+        lifecycle_profile="FORWARD_START",
+    ), admin, session)
+
+    deal = session.exec(select(Deal).where(
+        Deal.uat_batch_id == batch["id"])).one()
+    snapshot = json.loads(deal.market_snapshot_json)
+    priced = snapshot["pricing_input"]
+
+    assert snapshot["snapshot_version"] == 1
+    assert snapshot["seed"] == priced["seed"] == 42
+    assert snapshot["r"] == pytest.approx(priced["r"] * 100)
+    assert snapshot["underlyings"][0]["sigma"] == pytest.approx(
+        priced["underlyings"][0]["sigma"] * 100)
+    assert snapshot["underlyings"][0]["q"] == pytest.approx(
+        priced["underlyings"][0]["q"] * 100)
+    assert snapshot["pricing_price_pct"] == pytest.approx(deal.fair_value)
+    assert json.loads(deal.schedule_json)["constatations"]
+
+
 @pytest.mark.parametrize("family", [
     "ATHENA", "PHOENIX", "REVERSE_CONVERTIBLE", "CAPITAL_GUARANTEED",
 ])
@@ -307,10 +343,16 @@ def test_complete_mix_covers_all_eight_profiles_and_cleans_terminal_dependencies
     assert all(rfq.status == "clos" for rfq in rfqs)
     assert any(date.fromisoformat(rfq.ao_date) < date.today() for rfq in rfqs)
 
+    deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).first()
+    session.add(ValuationRun(
+        deal_id=deal.id, user_id=target.id, context_hash="uat-cleanup-regression"))
+    session.commit()
+
     delete_batch(batch["id"], admin, session)
     assert not session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).first()
     assert not session.exec(select(OfficialFixingVersion)).first()
     assert not session.exec(select(LifecycleProposal)).first()
+    assert not session.exec(select(ValuationRun)).first()
     assert not session.exec(select(RfqRequest).where(
         RfqRequest.uat_batch_id == batch["id"])).first()
 

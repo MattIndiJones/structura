@@ -27,12 +27,13 @@ from sqlmodel import Session, select
 
 from ..core.audit import record_audit_event
 from ..core.compute.executor import run_batch
+from ..core.valuation_context import build_pricing_receipt
 from ..core.workflow import DataCategory
 from ..db.models import (
     Alert, Counterparty, Deal, DealContractVersion, DealEvent,
     Document, EmtRecord, KidRecord, LifecycleProposal, OfficialFixingVersion,
     RfqProvider, RfqQuote, RfqRequest, ShockRun, TradeAmendmentRequest,
-    UatGenerationBatch, User,
+    UatGenerationBatch, User, ValuationRun,
 )
 
 
@@ -594,7 +595,7 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
     return specs
 
 
-def _price_specs(specs: list[dict], *, seed: int) -> None:
+def _price_specs(specs: list[dict]) -> None:
     """Price every spec with the production engine, in place.
 
     Replaces a `rng.uniform(97, 100)` draw that ignored the coupon, the
@@ -621,24 +622,52 @@ def _price_specs(specs: list[dict], *, seed: int) -> None:
     jobs = []
     for spec in specs:
         params = spec["params"]
-        jobs.append((spec["index"], {
-            "script_text": spec["script"],
+        pricing_input = {
+            "script": spec["script"],
             "underlyings": params["underlyings"],
-            "corr": params["corr_matrix"],
+            "corr_matrix": params["corr_matrix"],
             "r": params["r"],
             "T": params["T"],
-            "n_paths": UAT_PRICING_PATHS,
+            "N": UAT_PRICING_PATHS,
             "model": params["model"],
-            # Derived from the batch seed so a given seed keeps producing a
-            # given set of prices — the generator's reproducibility contract.
-            "seed": (seed * 100_003 + spec["index"]) % (2 ** 31 - 1),
+            # Convention desk globale : le tirage Monte-Carlo est toujours 42.
+            # Le seed du lot ne sert qu'à reproduire les produits générés.
+            "seed": 42,
             "antithetic": True,
             "user_params": params["user_params"],
-            "constat_values": params["constats"],
+            "constats": params["constats"],
             "strike_date": params["strike_date"],
             "value_date": params["value_date"],
+            "maturity_date": spec["maturity_date"],
             "payment_date": params["payment_date"],
             "settlement_ccy": params["currency"],
+            "yield_curve": [],
+            "funding_curve": [],
+            "funding_spread": 0.0,
+            "sigma_r": 0.0,
+            "a_r": 0.0,
+            "barrier_monitoring": "weekly",
+        }
+        spec["pricing_input"] = pricing_input
+        jobs.append((spec["index"], {
+            # Derive the worker payload from the receipt input so the recorded
+            # proof and the actual run cannot drift through duplicated values.
+            "script_text": pricing_input["script"],
+            "underlyings": pricing_input["underlyings"],
+            "corr": pricing_input["corr_matrix"],
+            "r": pricing_input["r"],
+            "T": pricing_input["T"],
+            "n_paths": pricing_input["N"],
+            "model": pricing_input["model"],
+            "seed": pricing_input["seed"],
+            "antithetic": pricing_input["antithetic"],
+            "user_params": pricing_input["user_params"],
+            "constat_values": pricing_input["constats"],
+            "strike_date": pricing_input["strike_date"],
+            "value_date": pricing_input["value_date"],
+            "payment_date": pricing_input["payment_date"],
+            "settlement_ccy": pricing_input["settlement_ccy"],
+            "barrier_monitoring": pricing_input["barrier_monitoring"],
         }))
 
     results = run_batch(
@@ -653,9 +682,14 @@ def _price_specs(specs: list[dict], *, seed: int) -> None:
             failures.append(
                 f"{spec['name']}: {result.error if result else 'aucun résultat'}")
             continue
-        # The engine returns a fraction of notional; the whole booking chain
-        # (fair_value, quote prices, price_traded) speaks in percent.
-        spec["model_price"] = round(float(result.result["price"]) * 100, 2)
+        # The receipt is built from the exact inputs sent to the worker.  Its
+        # market snapshot is therefore converted by the same central unit
+        # boundary as an ordinary Pricer booking (sigma 0.26 -> display 26),
+        # instead of persisting engine fractions in a display snapshot.
+        priced_fraction = float(result.result["price"])
+        receipt = build_pricing_receipt(spec["pricing_input"], priced_fraction)
+        spec["pricing_receipt"] = receipt
+        spec["model_price"] = receipt["price_pct"]
     if failures:
         raise RuntimeError(
             "Pricing UAT impossible pour "
@@ -822,18 +856,7 @@ def _book(spec: dict, target: User, batch: UatGenerationBatch,
           session: Session, *, rfq: RfqRequest | None = None,
           selected: RfqQuote | None = None, counterparty: str) -> Deal:
     params = spec["params"]
-    market = {
-        "underlyings": params["underlyings"],
-        "user_params": params["user_params"],
-        "constats": params["constats"],
-        "r": params["r"],
-        "model": params["model"],
-        "corrMatrix": params["corr_matrix"],
-        "uat_scenario": {
-            "batch_key": batch.batch_key,
-            "lifecycle_profile": spec["lifecycle_profile"],
-        },
-    }
+    receipt = spec["pricing_receipt"]
     deal_data = deals_api._book_deal(
         deals_api.DealCreate(
             sens="vente",
@@ -853,7 +876,8 @@ def _book(spec: dict, target: User, batch: UatGenerationBatch,
             underlyings=params["underlyings"],
             observation_times=[],
             script_snapshot=spec["script"],
-            market_snapshot=market,
+            market_snapshot=receipt["market_snapshot"],
+            pricing_receipt=receipt,
             rfq_id=rfq.id if rfq else None,
         ),
         target,
@@ -1037,7 +1061,7 @@ def generate_batch(body: UatGenerationRequest, admin: User, session: Session) ->
     specs = _build_specs(body)
     # Before any row is written: a batch that cannot be priced must fail whole
     # rather than book deals carrying an invented fair value.
-    _price_specs(specs, seed=body.seed)
+    _price_specs(specs)
     batch_key = datetime.utcnow().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6].upper()
     batch = UatGenerationBatch(
         batch_key=batch_key,
@@ -1196,7 +1220,7 @@ def delete_batch(batch_id: int, admin: User, session: Session) -> dict:
             OfficialFixingVersion.deal_id.in_(deal_ids)).values(supersedes_id=None))
         for model in (LifecycleProposal, OfficialFixingVersion, DealContractVersion,
                       TradeAmendmentRequest, Document, KidRecord, EmtRecord,
-                      Alert, ShockRun, DealEvent):
+                      Alert, ShockRun, ValuationRun, DealEvent):
             session.exec(delete(model).where(model.deal_id.in_(deal_ids)))
         session.exec(delete(Deal).where(Deal.id.in_(deal_ids)))
 

@@ -11,12 +11,17 @@ router = APIRouter(prefix="/api/finance", tags=["market-data"])
 
 
 @router.get("/hist_vol")
-async def hist_vol_endpoint(tickers: str, period: str = "1y"):
-    """Load realized vol, dividend yield, and correlation matrix for the given tickers."""
+async def hist_vol_endpoint(
+    tickers: str,
+    period: str = "1y",
+    asof: Optional[str] = None,
+    window_days: int = 252,
+):
+    """Load realized vol/correlation for a current or historical as-of date."""
     tks = [t.strip().upper() for t in tickers.split(",") if t.strip()]
     if not tks:
         return {"error": "Aucun ticker fourni"}
-    return load_hist_vol(tks, period)
+    return load_hist_vol(tks, period, asof=asof, window_days=window_days)
 
 
 @router.get("/hist_prices")

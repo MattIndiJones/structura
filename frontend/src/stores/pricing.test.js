@@ -338,6 +338,13 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
     expect(store.globalParams.strike_date).toBe('2026-09-03')
     expect(store.globalParams.value_date).toBe('2026-09-07')
     expect(store.globalParams.payment_date).toBe('2029-09-06')
+    // Ouvrir le deal restitue le pricing initial. Le MTM ne démarre que
+    // lorsque l'utilisateur avance explicitement la Pricing date.
+    expect(store.globalParams.valuation_date).toBe('2026-09-03')
+    expect(store.isInLife()).toBe(false)
+    store.globalParams.valuation_date = '2026-09-12'
+    expect(store.isInLife()).toBe(true)
+    expect(store.pricingBody().valuation_date).toBe('2026-09-12')
     expect(store.paramOverrides.COUPON).toBeCloseTo(1.75, 10)
   })
 
@@ -364,6 +371,114 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
     expect(store.globalParams.N).toBe(20000)
     expect(store.globalParams.seed).toBe(42)
     expect(store.globalParams.barrierMonitoring).toBe('weekly')
+  })
+
+  it('fige le panier et la maturité tant que le deal booké reste ouvert', async () => {
+    const store = await storeRenseigne()
+    await store.loadFromDeal({
+      id: 9, reference: 'DEAL-LOCKED', script_snapshot: VALIDE,
+      market_snapshot: {
+        underlyings: [{ name: 'SX5E', ticker: '^STOXX50E', ccy: 'EUR' }],
+      },
+      T: 3, devise: 'EUR', nominal: 1_000_000,
+      strike_date: '2026-09-13', maturity_date: '2029-09-13',
+    })
+
+    expect(store.contractTermsLocked).toBe(true)
+    store.addUnderlying()
+    store.removeUnderlying(0)
+    store.setMaturityDate('2030-09-13')
+
+    expect(store.underlyings).toHaveLength(1)
+    expect(store.underlyings[0]).toMatchObject({ name: 'SX5E', ticker: '^STOXX50E' })
+    expect(store.maturityDate).toBe('2029-09-13')
+    await expect(store.adoptBasket(
+      ['^GDAXI'], ['DAX'], [[1]])).rejects.toThrow('panier est figé')
+
+    store.resetToDefaults()
+    expect(store.contractTermsLocked).toBe(false)
+  })
+
+  it('actualise le marché sans réécrire l’identité contractuelle', async () => {
+    const store = await storeRenseigne()
+    await store.loadFromDeal({
+      id: 10, reference: 'DEAL-MARKET', script_snapshot: VALIDE,
+      market_snapshot: {
+        underlyings: [{ name: 'Sous-jacent 1', ticker: 'mc.pa', ccy: 'EUR', sigma: 20, q: 2 }],
+      },
+      T: 3, devise: 'EUR', nominal: 1_000_000,
+      strike_date: '2026-09-13', maturity_date: '2029-09-13',
+    })
+    globalThis.fetch = vi.fn(async url => {
+      if (String(url).includes('/api/finance/hist_vol')) {
+        return { ok: true, json: async () => ({
+          tickers: ['MC.PA'], vols: { 'MC.PA': 0.25 },
+          corr: { 'MC.PA': { 'MC.PA': 1 } }, missing: [], n_obs: 252,
+          requested_asof: '2026-09-13', asof_effective: '2026-09-11',
+        }) }
+      }
+      if (String(url).includes('/api/finance/dividends')) {
+        return { ok: true, json: async () => ({
+          ok: true, yield_declared: 0.03, dividends: [],
+          pays_dividends: true, suspect: false,
+        }) }
+      }
+      return { ok: false, json: async () => ({}) }
+    })
+
+    await store.loadYfAll({ asof: '2026-09-13' })
+
+    expect(store.underlyings[0].name).toBe('Sous-jacent 1')
+    expect(store.underlyings[0].ticker).toBe('mc.pa')
+    expect(store.underlyings[0].sigma).toBe(25)
+    expect(store.underlyings[0].q).toBe(3)
+  })
+
+  it('construit toujours le pricing avec le contrat figé', async () => {
+    const store = await storeRenseigne()
+    await store.loadFromDeal({
+      id: 11, reference: 'DEAL-FROZEN-PAYLOAD', script_snapshot: VALIDE,
+      market_snapshot: {
+        underlyings: [{ name: 'SX5E', ticker: '^STOXX50E', ccy: 'EUR', sigma: 20, q: 2 }],
+        user_params: { COUPON: 0.0175 },
+      },
+      T: 3, devise: 'EUR', nominal: 1_000_000,
+      strike_date: '2026-09-13', value_date: '2026-09-15',
+      maturity_date: '2029-09-13', payment_date: '2029-09-18',
+    })
+
+    // Simule un futur composant mal protégé : les hypothèses de marché sont
+    // autorisées, l'identité et le payoff ne doivent jamais partir au moteur.
+    store.script = 'AT MATURITY:\n  PAY 0\n'
+    store.paramOverrides.COUPON = 99
+    store.underlyings[0].name = 'AUTRE'
+    store.underlyings[0].ticker = 'OTHER'
+    store.underlyings[0].sigma = 31
+    store.globalParams.maturity_date = '2035-01-01'
+
+    const body = store.pricingBody()
+    expect(body.script).toBe(VALIDE)
+    expect(body.user_params.COUPON).toBeCloseTo(0.0175, 10)
+    expect(body.underlyings[0]).toMatchObject({
+      name: 'SX5E', ticker: '^STOXX50E', ccy: 'EUR', sigma: 0.31,
+    })
+    expect(body.maturity_date).toBe('2029-09-13')
+    expect(body.payment_date).toBe('2029-09-18')
+  })
+
+  it('refuse un panier dont la taille diverge malgré le verrou', async () => {
+    const store = await storeRenseigne()
+    await store.loadFromDeal({
+      id: 12, reference: 'DEAL-BASKET-GUARD', script_snapshot: VALIDE,
+      market_snapshot: {
+        underlyings: [{ name: 'SX5E', ticker: '^STOXX50E', ccy: 'EUR' }],
+      },
+      T: 3, devise: 'EUR', strike_date: '2026-09-13', maturity_date: '2029-09-13',
+    })
+
+    store.underlyings.push({ ...store.underlyings[0], name: 'DAX', ticker: '^GDAXI' })
+
+    expect(() => store.pricingBody()).toThrow('panier contractuel de 1 sous-jacent')
   })
 })
 
@@ -401,5 +516,106 @@ describe('un résultat de pricing reste lié à ses entrées', () => {
 
     expect(store.result).toBeNull()
     expect(store.error).toContain('paramètres ont changé')
+  })
+})
+
+describe('la maturité est une date contractuelle éditable', () => {
+  it('fait de AT MATURITY une date et en déduit T', async () => {
+    setActivePinia(createPinia())
+    globalThis.fetch = serveurDeParse({ declare: {
+      params: DECLARATIONS.params, constats: [],
+    } })
+    const store = usePricingStore()
+    store.script = 'PARAM COUPON = 2%\nAT MATURITY:\n  PAY 1\n'
+    await store.parseScript()
+    store.globalParams.strike_date = '2026-09-13'
+
+    store.setMaturityDate('2028-09-13')
+
+    expect(store.maturityDate).toBe('2028-09-13')
+    expect(store.globalParams.T).toBeCloseTo(2.00137, 4)
+    expect(store.pricingBody().maturity_date).toBe('2028-09-13')
+  })
+
+  it('restaure la date objet d’un CONSTAT MATURITE unique', async () => {
+    setActivePinia(createPinia())
+    globalThis.fetch = serveurDeParse({ declare: {
+      params: [], constats: [{ name: 'MATURITE', kind: 'single' }],
+    } })
+    const store = usePricingStore()
+    await store.loadFromDeal({
+      id: 17, reference: 'SINGLE-DATE',
+      script_snapshot: 'CONSTAT MATURITE\nAT MATURITE:\n  PAY 1\n',
+      market_snapshot: {
+        underlyings: [{ name: 'SX5E', ticker: '^STOXX50E', ccy: 'EUR' }],
+        constats: {
+          MATURITE: { date: '2027-12-10', convention: 'following', settlement_lag: 3 },
+        },
+      },
+      T: 1.25, devise: 'EUR', strike_date: '2026-09-13',
+      maturity_date: '2027-12-10',
+    })
+
+    expect(store.maturityDate).toBe('2027-12-10')
+    expect(store.constatOverrides.MATURITE).toBe('2027-12-10')
+    expect(store.buildConstats()).toEqual({ MATURITE: '2027-12-10' })
+  })
+})
+
+describe('la date de valorisation pilote le marché et le moteur', () => {
+  it('route une date avant strike vers le pricer forward-start', async () => {
+    const store = await storeRenseigne()
+    store.globalParams.strike_date = '2026-12-11'
+    store.globalParams.value_date = '2026-12-15'
+    store.globalParams.valuation_date = '2026-09-13'
+    store.globalParams.maturity_date = '2028-06-09'
+    let pricedUrl = ''
+    globalThis.fetch = vi.fn(async url => {
+      if (String(url).includes('/api/price')) pricedUrl = String(url)
+      return { ok: true, json: async () => ({ price: 0.99 }) }
+    })
+
+    await store.runPricing()
+
+    expect(store.isPreStrike()).toBe(true)
+    expect(pricedUrl).toContain('/api/price/in-life')
+    expect(store.result.price).toBe(0.99)
+  })
+
+  it('recharge σ, q et corrélation à la date choisie sans renommer le deal', async () => {
+    const store = await storeRenseigne()
+    store.underlyings = [{
+      ...store.underlyings[0], name: 'LVMH', ticker: 'MC.PA', sigma: 26, q: 2,
+    }]
+    store.globalParams.valuation_date = '2026-09-13'
+    store.result = { price: 0.88 }
+    const urls = []
+    globalThis.fetch = vi.fn(async url => {
+      urls.push(String(url))
+      if (String(url).includes('/api/finance/hist_vol')) {
+        return { ok: true, json: async () => ({
+          tickers: ['MC.PA'], vols: { 'MC.PA': 0.30334158 },
+          corr: { 'MC.PA': { 'MC.PA': 1 } }, missing: [], n_obs: 252,
+          requested_asof: '2026-09-13', asof_effective: '2026-09-11',
+        }) }
+      }
+      if (String(url).includes('/api/finance/dividends')) {
+        return { ok: true, json: async () => ({
+          ok: true, yield_declared: 0.031303, dividends: [1, 2],
+          pays_dividends: true, suspect: false,
+        }) }
+      }
+      return { ok: false, json: async () => ({}) }
+    })
+
+    await store.onValuationDateChange()
+
+    expect(urls.find(url => url.includes('/hist_vol'))).toContain('asof=2026-09-13')
+    expect(urls.find(url => url.includes('/dividends'))).toContain('asof=2026-09-13')
+    expect(store.underlyings[0].name).toBe('LVMH')
+    expect(store.underlyings[0].sigma).toBe(30.334158)
+    expect(store.underlyings[0].q).toBe(3.1303)
+    expect(store.marketDataEffectiveDate).toBe('2026-09-11')
+    expect(store.result).toBeNull()
   })
 })

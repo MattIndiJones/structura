@@ -7,13 +7,49 @@
   et l'AO le racontent différemment.
 
   Piloté par props (pas par le store du Pricer) : `result` est la réponse
-  brute de /api/price, `originDate` la date de strike — origine de l'axe des
-  temps du moteur, donc seule ancre valide pour reconvertir un t en date.
+  brute de /api/price, `originDate` l'origine de l'axe du calcul courant :
+  strike à l'émission, date de valorisation pour une vie résiduelle.
   `valueDate` ne sert plus que de repli pour les appelants qui n'ont pas de
   date de strike ; sans l'une ni l'autre les échéances restent en T+n ans.
 -->
 <template>
   <div class="flex flex-col gap-4">
+    <!-- Le calendrier du contrat et les PAY exécutés par le moteur répondent
+         à deux questions différentes. Le premier doit rester complet même si
+         STOP rappelle toutes les trajectoires à la première observation ; la
+         seconde table explique uniquement le prix effectivement simulé. -->
+    <div v-if="scheduleRows.length" class="card overflow-x-auto table-shell" tabindex="0" role="region">
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
+        Échéancier contractuel complet
+      </div>
+      <div class="text-[11px] text-slate-600 mb-3">
+        Toutes les constatations prévues au contrat restent affichées, y compris après une date de rappel simulée.
+      </div>
+      <table class="w-full min-w-[500px] text-xs border-collapse">
+        <thead>
+          <tr class="bg-slate-800/60 border-b-2 border-slate-700">
+            <th class="text-left py-1.5 px-2">Événement</th>
+            <th class="text-left py-1.5 px-2">Constatation</th>
+            <th class="text-left py-1.5 px-2">Règlement</th>
+            <th class="text-left py-1.5 px-2">Méthode</th>
+            <th class="text-right py-1.5 px-2">Statut à la pricing date</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in scheduleRows" :key="row.key" class="border-b border-slate-800/60">
+            <td class="py-1.5 px-2 font-semibold text-slate-300">{{ row.label }}</td>
+            <td class="py-1.5 px-2 font-mono text-slate-300"><SensitiveValue>{{ row.dateLabel }}</SensitiveValue></td>
+            <td class="py-1.5 px-2 font-mono text-slate-400"><SensitiveValue>{{ row.payDateLabel }}</SensitiveValue></td>
+            <td class="py-1.5 px-2 text-slate-500">{{ row.reduction }}</td>
+            <td class="py-1.5 px-2 text-right text-[10px]"
+                :class="row.isFuture ? 'text-slate-500' : 'text-amber-400'">
+              {{ row.isFuture ? 'à venir' : 'passée' }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <div v-if="groups.length === 0"
          class="flex flex-col items-center justify-center py-12 gap-2 text-slate-600">
       <div class="text-3xl">💰</div>
@@ -135,6 +171,10 @@ const props = defineProps({
   // Origine de l'axe des temps du moteur, ISO — la date de STRIKE, puisque
   // c'est là que le niveau initial se constate et que la diffusion démarre.
   originDate: { type: String, default: null },
+  // Origine contractuelle, toujours la date de strike. En cours de vie,
+  // originDate devient la date de valorisation pour les flux résiduels, mais
+  // l'échéancier complet conserve ses temps depuis le strike.
+  contractOriginDate: { type: String, default: null },
   // Repli pour les appelants sans date de strike. Ancrer sur elle décale
   // toutes les échéances de (value − strike) : c'est faux dès que les deux
   // dates diffèrent, ce qui est le cas normal d'un produit réel.
@@ -142,6 +182,7 @@ const props = defineProps({
 })
 
 const anchor = computed(() => props.originDate || props.valueDate)
+const contractAnchor = computed(() => props.contractOriginDate || props.originDate || props.valueDate)
 
 const f2 = v => (v != null ? formatNumber(v * 100, 2) : '—')
 const formatSignedPercent = (value, decimals) =>
@@ -157,6 +198,34 @@ function tToCalDate(t) {
   if (!anchor.value) return t < 0.005 ? 'T₀' : 'T + ' + formatNumber(t, 2) + ' ans'
   return formatDate(addDaysStr(anchor.value, t * 365.25))
 }
+
+function contractualDate(isoDate, t) {
+  if (isoDate) return isoDate
+  if (!contractAnchor.value || typeof t !== 'number') return null
+  return addDaysStr(contractAnchor.value, t * 365.25)
+}
+
+const scheduleRows = computed(() => {
+  const constats = props.result?.schedule?.constatations
+  if (!Array.isArray(constats) || constats.length === 0) return []
+  const cutoff = props.result?.in_life
+    ? props.result.valuation_date
+    : contractAnchor.value
+
+  return constats.map((c, idx) => {
+    const date = contractualDate(c.date, c.t)
+    const payDate = contractualDate(c.date_paiement, c.t_paiement ?? c.t)
+    const calendar = c.calendrier ? `${c.calendrier} ` : 'Obs. '
+    return {
+      key: `${c.calendrier || 'literal'}-${c.rang ?? idx}-${c.t}`,
+      label: `${calendar}${c.rang ?? idx + 1}`,
+      dateLabel: date ? formatDate(date) : tToCalDate(c.t),
+      payDateLabel: payDate ? formatDate(payDate) : '—',
+      reduction: c.reduction || 'ponctuelle',
+      isFuture: !cutoff || !date || date > cutoff,
+    }
+  })
+})
 
 const groups = computed(() => {
   const ft = props.result?.flux_table

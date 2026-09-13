@@ -18,10 +18,70 @@ except ImportError:
     logger.warning("yfinance not installed — pip install yfinance")
 
 
-def load_hist_vol(tickers: list[str], period: str = "1y") -> dict:
-    """Realized annualized vol + dividend yield + correlation matrix from Yahoo Finance."""
+def load_hist_vol(tickers: list[str], period: str = "1y",
+                  asof: Optional[str] = None, window_days: int = 252) -> dict:
+    """Realized annualized vol and correlation matrix from Yahoo Finance.
+
+    With ``asof`` the calculation uses the same adjusted, rounded and aligned
+    history as the residual MtM.  This is the path used by the Pricer when its
+    valuation date changes: a historical valuation must not receive today's
+    trailing window.  The legacy ``period`` path remains available for callers
+    that do not ask for a dated market context.
+    """
     if not _HAS_YF:
         return {"error": "yfinance non installé — pip install yfinance"}
+    if asof:
+        try:
+            requested_end = date.fromisoformat(asof)
+            if not 20 <= int(window_days) <= 2520:
+                return {"error": "window_days doit être compris entre 20 et 2520"}
+            # Calendar-day cushion large enough to retain ``window_days``
+            # common trading returns through holidays and exchange closures.
+            start = (requested_end - timedelta(days=max(365, int(window_days) * 2))).isoformat()
+            history = load_hist_prices(
+                tickers, start, requested_end.isoformat(), adjusted=True)
+            if history.get("error"):
+                return history
+
+            # Local import avoids making the generic price loader depend on a
+            # calibration module during import.  This is exactly the estimator
+            # used by deal_valuation.mtm_core.
+            from ..core.calibration import realized_market
+            calibrated = realized_market(
+                history.get("prices", {}), tickers, int(window_days))
+            corr_matrix = calibrated["corr"]
+            corr = {
+                t1: {t2: round(float(corr_matrix[i][j]), 4)
+                     for j, t2 in enumerate(tickers)}
+                for i, t1 in enumerate(tickers)
+            }
+            return {
+                "tickers": list(tickers),
+                "vols": {tk: round(float(calibrated["sigma"][tk]), 8)
+                         for tk in tickers},
+                # Kept for response compatibility. Dated dividend assumptions
+                # come from dividend_profile(), never from today's Yahoo info.
+                "div_yields": {},
+                "corr": corr,
+                "period": period,
+                "window_days": int(window_days),
+                "n_obs": int(calibrated["n_returns"]),
+                "missing": [],
+                "provider": history.get("provider", DEFAULT_MARKET_DATA_PROVIDER),
+                "price_type": history.get("price_type", "ADJUSTED_CLOSE"),
+                "adjusted": True,
+                "requested_asof": requested_end.isoformat(),
+                "asof_effective": history.get("asof_effective"),
+                "effective_dates": history.get("effective_dates", {}),
+                "age_sessions": history.get("age_sessions", {}),
+                "warnings": history.get("warnings", []),
+                "fetched_at": history.get("fetched_at"),
+            }
+        except ValueError as exc:
+            return {"error": f"Calibration réalisée impossible : {exc}"}
+        except Exception as exc:
+            logger.exception("load_hist_vol asof")
+            return {"error": str(exc)}
     try:
         price_series: dict = {}
         for tk in tickers:

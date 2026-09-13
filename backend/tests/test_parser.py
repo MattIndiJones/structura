@@ -5,6 +5,8 @@ from datetime import date, timedelta
 from backend.app.core.payscript.parser import (
     parse_script, resolve_constats, effective_T_max, CompiledScript,
 )
+from backend.app.api.pricing import parse_endpoint
+from backend.app.core.schemas import ParseRequest
 
 
 SIMPLE_VANILLA = """
@@ -55,6 +57,12 @@ def test_parse_vanilla():
     assert cs.params[0].stored_val == pytest.approx(1.0)
     assert len(cs.events) == 1
     assert cs.events[0].type == 'AT_MATURITY'
+
+
+def test_parse_api_exposes_reserved_maturity_event():
+    response = parse_endpoint(ParseRequest(script=SIMPLE_VANILLA))
+    assert response.ok is True
+    assert response.has_maturity_event is True
 
 
 def test_parse_autocall():

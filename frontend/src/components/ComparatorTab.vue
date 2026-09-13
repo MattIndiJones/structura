@@ -120,7 +120,9 @@
                   <span v-else>💰 Prix indicatif</span>
                 </button>
                 <button class="text-[10px] px-2 py-1 bg-blue-700 hover:bg-blue-600 text-white rounded"
-                        :disabled="rowState(row).adopting" @click="adopt(row)">
+                        :disabled="rowState(row).adopting || store.contractTermsLocked"
+                        :title="store.contractTermsLocked ? 'Panier figé au booking' : ''"
+                        @click="adopt(row)">
                   {{ rowState(row).adopted ? '✓ Adopté' : '✓ Adopter ce panier' }}
                 </button>
                 <div v-if="rowState(row).error" class="text-[10px] text-red-400 mt-0.5">{{ rowState(row).error }}</div>

@@ -16,8 +16,22 @@
       </div>
     </div>
 
+    <div v-if="contractTermsLocked"
+         class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
+      <div class="flex items-start gap-2">
+        <span aria-hidden="true">🔒</span>
+        <div>
+          <p class="text-sm font-bold">Termes contractuels figés</p>
+          <p class="text-xs mt-0.5">
+            Ce deal est booké. Le payoff, le panier, les dates et les economics restent ceux du contrat.
+            La date de valorisation, le marché et le modèle se modifient dans Marché &amp; Paramètres.
+          </p>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Termes principaux ─────────────────────────────────── -->
-    <div class="card">
+    <fieldset class="card" :disabled="contractTermsLocked">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Termes principaux</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
@@ -37,10 +51,10 @@
           </select>
         </div>
       </div>
-    </div>
+    </fieldset>
 
     <!-- ── Dates économiques ─────────────────────────────────── -->
-    <div class="card">
+    <fieldset class="card" :disabled="contractTermsLocked">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Dates économiques</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
@@ -48,10 +62,10 @@
             <HelpTip text="Première constatation et origine de l'axe des temps du moteur. Les performances du produit sont mesurées relativement aux niveaux S₀ constatés à cette date." />
           </label>
           <input v-model="store.globalParams.strike_date" type="date" class="input"
-                 :readonly="datesFigees"
-                 :class="[datesFigees ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : '', marque.classe(cheminGlobal('strike_date'))]" />
-          <p v-if="datesFigees" class="text-[10px] text-slate-500 mt-0.5">
-            Figée sur un avenant — le passé a été rejoué dessus.
+                 :readonly="datesLocked"
+                 :class="[datesLocked ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : '', marque.classe(cheminGlobal('strike_date'))]" />
+          <p v-if="datesLocked" class="text-[10px] text-slate-500 mt-0.5">
+            {{ contractTermsLocked ? 'Figée au booking.' : 'Figée sur un avenant — le passé a été rejoué dessus.' }}
           </p>
         </div>
         <div>
@@ -59,18 +73,23 @@
             <HelpTip text="Date d'échange initial du cash et date à laquelle le prix est exprimé. Elle reste distincte de la strike date, qui ancre l'axe du moteur." />
           </label>
           <input v-model="store.globalParams.value_date" type="date" class="input"
-                 :readonly="datesFigees"
-                 :class="[datesFigees ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : '', marque.classe(cheminGlobal('value_date'))]" />
-          <p v-if="datesFigees" class="text-[10px] text-slate-500 mt-0.5">
-            Figée sur un avenant — le passé a été rejoué dessus.
+                 :readonly="datesLocked"
+                 :class="[datesLocked ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : '', marque.classe(cheminGlobal('value_date'))]" />
+          <p v-if="datesLocked" class="text-[10px] text-slate-500 mt-0.5">
+            {{ contractTermsLocked ? 'Figée au booking.' : 'Figée sur un avenant — le passé a été rejoué dessus.' }}
           </p>
         </div>
         <div>
           <label class="label">Maturité
-            <HelpTip text="Dernière constatation contractuelle. Elle est dérivée du calendrier CONSTAT lorsqu'il existe, sinon de la maturité T ancrée sur la strike date." />
+            <HelpTip text="Dernière constatation contractuelle. AT MATURITY utilise directement cette date. Lorsqu'un échéancier porte plusieurs constatations, sa dernière date reste la source de vérité." />
           </label>
-          <input :value="store.maturityDate" type="date"
-            class="input bg-slate-800/40 text-slate-500 cursor-not-allowed" readonly />
+          <input :value="store.maturityDate" type="date" class="input"
+            :readonly="contractTermsLocked || !store.maturityDateEditable"
+            :class="contractTermsLocked || !store.maturityDateEditable ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : ''"
+            @input="store.setMaturityDate($event.target.value)" />
+          <p v-if="contractTermsLocked || !store.maturityDateEditable" class="text-[10px] text-slate-500 mt-0.5">
+            {{ contractTermsLocked ? 'Figée au booking.' : 'Pilotée par la dernière date de l’échéancier ci-dessous.' }}
+          </p>
         </div>
         <div>
           <label class="label">Payment date <span class="text-slate-600 font-normal">(règlement final)</span>
@@ -80,7 +99,7 @@
             @input="paymentDateDirty = true" />
         </div>
       </div>
-    </div>
+    </fieldset>
 
     <!-- ── Paramètres PayScript ──────────────────────────────── -->
     <div class="card">
@@ -98,7 +117,8 @@
         Aucun PARAM déclaré dans le script courant.
       </div>
 
-      <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+      <fieldset v-else :disabled="contractTermsLocked"
+                class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
         <div v-for="p in store.scriptParams" :key="p.name"
              class="rounded-lg border border-slate-700 bg-slate-800/40 p-3 flex flex-col gap-2"
              :class="p.kind === 'array' ? 'sm:col-span-2 xl:col-span-3' : ''">
@@ -159,7 +179,7 @@
             </div>
           </SensitiveValue>
         </div>
-      </div>
+      </fieldset>
     </div>
 
     <!-- ── Sous-jacents ──────────────────────────────────────── -->
@@ -169,9 +189,11 @@
           <HelpTip text="Composition contractuelle du panier. Les volatilités, dividendes, smiles, corrélations et paramètres quanto restent dans Marché & Paramètres." />
         </h2>
         <button class="btn-secondary text-xs"
-                :disabled="store.underlyings.length >= store.calculationLimits.maxUnderlyings"
-                :title="store.underlyings.length >= store.calculationLimits.maxUnderlyings
-                  ? `Maximum autorisé : ${store.calculationLimits.maxUnderlyings} sous-jacents` : ''"
+                :disabled="contractTermsLocked || store.underlyings.length >= store.calculationLimits.maxUnderlyings"
+                :title="contractTermsLocked
+                  ? 'Panier figé au booking'
+                  : store.underlyings.length >= store.calculationLimits.maxUnderlyings
+                    ? `Maximum autorisé : ${store.calculationLimits.maxUnderlyings} sous-jacents` : ''"
                 @click="onAddUnderlying">+ Ajouter</button>
       </div>
 
@@ -197,14 +219,15 @@
         </button>
       </div>
 
-      <div v-if="activeU" class="bg-slate-800/60 border border-slate-700 rounded-lg p-4">
+      <fieldset v-if="activeU" :disabled="contractTermsLocked"
+                class="bg-slate-800/60 border border-slate-700 rounded-lg p-4">
         <div class="flex items-center justify-between mb-3">
           <span v-if="demo.enabled" class="text-sm font-semibold text-slate-300 border-b border-slate-600 pb-1">
             {{ demo.underlyingLabel(activeU.name, activeUIdx) }}
           </span>
           <input v-else v-model="activeU.name"
             class="input w-auto text-sm font-semibold bg-transparent border-0 border-b border-slate-600 rounded-none px-0 pb-1 focus:border-blue-500" />
-          <button v-if="store.underlyings.length > 1"
+          <button v-if="store.underlyings.length > 1 && !contractTermsLocked"
             class="text-slate-600 hover:text-red-400 text-xs ml-2"
             @click="onRemoveUnderlying">✕</button>
         </div>
@@ -220,19 +243,12 @@
                   <option v-for="item in group.items" :key="item.ticker" :value="item.ticker">{{ item.label }}</option>
                 </optgroup>
               </select>
-              <button class="btn-secondary text-lg px-3 flex-shrink-0" title="Charger σ, q depuis Yahoo Finance"
-                :disabled="store.loading || !activeU.ticker" @click="store.loadYfOne(activeUIdx)">📡</button>
             </div>
             <input v-model="activeU.ticker" class="input font-mono mt-1 text-xs"
               placeholder="ou saisir manuellement ex: ^STOXX50E"
-              @focus="onTickerFocus" @blur="onTickerBlur" />
+              @blur="onTickerBlur" />
           </SensitiveValue>
         </div>
-        <div v-if="store.yfStatus" class="text-xs mb-2 leading-relaxed"
-             :class="store.yfStatus.startsWith('⚠') ? 'text-amber-400' : 'text-green-400'">
-          <SensitiveValue placeholder="Données chargées">{{ store.yfStatus }}</SensitiveValue>
-        </div>
-
         <div class="w-32">
           <label class="label">Devise du sous-jacent</label>
           <select v-model="activeU.ccy" class="select">
@@ -240,16 +256,17 @@
             <option>JPY</option><option>CHF</option><option>SGD</option>
           </select>
         </div>
-      </div>
+      </fieldset>
     </div>
 
     <!-- ── Calendriers du script ─────────────────────────────── -->
-    <div v-if="store.scriptConstats.length" class="card">
+    <div v-if="calendarControls.length" class="card">
       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Échéanciers du script (CONSTAT)
         <HelpTip width="w-72" text="Chaque CONSTAT déclaré dans le script reçoit ici ses dates, fréquences, conventions de jour ouvré et délais de règlement. Ces valeurs sont utilisées par le moteur puis figées au booking." />
       </div>
       <div class="flex flex-col gap-3">
-        <div v-for="calendar in store.scriptConstats" :key="calendar.name"
+        <fieldset v-for="calendar in calendarControls" :key="calendar.name"
+             :disabled="contractTermsLocked"
              class="bg-slate-800/60 border border-slate-700 rounded-lg p-3">
           <div class="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-2">
             {{ calendar.name }}
@@ -356,7 +373,7 @@
             <ObservationSchedule class="mt-1" :request="scheduleRequest(calendar)"
                                  :window-frequency="samplingFrequency(calendar)" />
           </div>
-        </div>
+        </fieldset>
       </div>
     </div>
 
@@ -436,8 +453,10 @@ const marque = useVariantMark(store)
 
 onMounted(ensureUnderlyings)
 
+const contractTermsLocked = computed(() => store.contractTermsLocked)
 const datesFigees = computed(() =>
   store.variantInfo && (store.variantInfo.mode || 'avenant') === 'avenant')
+const datesLocked = computed(() => contractTermsLocked.value || datesFigees.value)
 
 function parseNominal(value) {
   return parseFloat(String(value ?? '').replace(/\s/g, '').replace(',', '.')) || 0
@@ -485,7 +504,7 @@ watch(() => store.globalParams.payment_date, (value) => {
 }, { immediate: true })
 
 async function proposePaymentDate(maturity) {
-  if (!usableDate(maturity) || paymentDateDirty.value) return
+  if (contractTermsLocked.value || !usableDate(maturity) || paymentDateDirty.value) return
   try {
     const response = await fetch('/api/calendar/resolve', {
       method: 'POST',
@@ -508,6 +527,8 @@ function setProposedPaymentDate(date) {
 }
 
 watch(() => store.maturityDate, proposePaymentDate, { immediate: true })
+watch(() => [store.maturityDate, store.globalParams.strike_date],
+  () => store.syncTenorFromMaturity(), { immediate: true })
 
 function formatParamDefault(param) {
   const value = param.display_default
@@ -517,19 +538,23 @@ function formatParamDefault(param) {
 
 const activeUIdx = computed(() => store.activeUnderlyingIdx)
 const activeU = computed(() => store.underlyings[activeUIdx.value] ?? store.underlyings[0])
+const calendarControls = computed(() =>
+  store.scriptConstats.filter(calendar => !store.isMaturityConstat(calendar.name)))
 
-function onAddUnderlying() { store.addUnderlying() }
-function onRemoveUnderlying() { store.removeUnderlying(activeUIdx.value) }
+function onAddUnderlying() {
+  if (!contractTermsLocked.value) store.addUnderlying()
+}
+function onRemoveUnderlying() {
+  if (!contractTermsLocked.value) store.removeUnderlying(activeUIdx.value)
+}
 function onTickerSelect(ticker) {
+  if (contractTermsLocked.value) return
   activeU.value.ticker = ticker
-  if (ticker) store.loadYfOne(activeUIdx.value)
 }
 
-let tickerBeforeEdit = ''
-function onTickerFocus() { tickerBeforeEdit = activeU.value.ticker }
 function onTickerBlur() {
+  if (contractTermsLocked.value) return
   activeU.value.ticker = activeU.value.ticker.trim().toUpperCase()
-  if (activeU.value.ticker && activeU.value.ticker !== tickerBeforeEdit) store.loadYfOne(activeUIdx.value)
 }
 
 const tenor = value => (value?.value ? `${value.value}${value.unit}` : null)

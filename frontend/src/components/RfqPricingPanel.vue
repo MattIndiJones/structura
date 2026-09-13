@@ -114,6 +114,7 @@
       </div>
 
       <FluxDecomposition :result="result" :origin-date="pricing.strikeDate"
+                         :contract-origin-date="pricing.strikeDate"
                          :value-date="pricing.valueDate" />
     </template>
   </aside>

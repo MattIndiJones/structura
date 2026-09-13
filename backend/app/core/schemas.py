@@ -248,6 +248,7 @@ class ParseResponse(BaseModel):
     constats: List[Dict[str, Any]] = []
     events_count: int
     has_stop: bool = False
+    has_maturity_event: bool = False
     # M_-prefixed PARAMs and how the script compares them — see
     # payscript/parser._analyze_monitors. [{name, observable, direction}].
     monitors: List[Dict[str, Any]] = []

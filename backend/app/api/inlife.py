@@ -485,6 +485,8 @@ def price_in_life(
     # après la constatation initiale sont un état.
     noms_params = {p.name for p in (residuel.compiled.params if residuel.compiled else [])}
     etat_repris = {k: v for k, v in etat["memo"].items() if k not in noms_params}
+    schedule = (residuel.compiled.echeancier.to_dict()
+                if residuel.compiled and residuel.compiled.echeancier else None)
     return {
         "price": res["price"],
         "ic95": res["ic95"],
@@ -508,6 +510,10 @@ def price_in_life(
         # — on ne peut plus expliquer le prix ligne à ligne, ce qui est
         # précisément ce qu'on attend d'une valorisation en cours de vie.
         "flux_table": _clean_flux(res["flux_table"]),
+        # L'échéancier contractuel complet reste visible même lorsque toutes
+        # les trajectoires ont été rappelées avant une date future. La table
+        # de flux seule ne contient que les PAY effectivement exécutés.
+        "schedule": schedule,
         "n_eff": res["n_eff"],
         "fugit": res.get("fugit"),
         "valuation_date": valuation.isoformat(),

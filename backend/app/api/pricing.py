@@ -78,10 +78,14 @@ def parse_endpoint(req: ParseRequest):
                        "window_scope": c.window_scope} for c in compiled.constats],
             events_count=len(compiled.events),
             has_stop=compiled.has_stop,
+            has_maturity_event=any(
+                event.type == "AT_MATURITY" for event in compiled.events),
             monitors=compiled.monitors or [],
         )
     except ValueError as e:
-        return ParseResponse(ok=False, params=[], constats=[], events_count=0, has_stop=False, errors=str(e))
+        return ParseResponse(ok=False, params=[], constats=[], events_count=0,
+                             has_stop=False, has_maturity_event=False,
+                             errors=str(e))
 
 
 @router.post("/price", response_model=PricingResponse)
