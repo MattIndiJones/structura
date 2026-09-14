@@ -13,7 +13,7 @@ from ..core.product.inputs import describe_product, pricing_input, terms_from_in
 from ..core.product.models import CommercialContext, Product, TradeIntent
 from ..core.schemas import PricingRequest
 from ..core.valuation_context import (
-    canonical_fingerprint, pricing_input_payload, verify_pricing_receipt,
+    json_transport_fingerprint, pricing_input_payload, verify_pricing_receipt,
 )
 from ..db.database import get_session
 from ..db.models import ProductCalculationRun, ProductRecord, User
@@ -138,7 +138,8 @@ def create_product(
             receipt = verify_server_receipt(
                 body.pricing_receipt, secret=receipt_signing_secret())
             receipt = verify_pricing_receipt(receipt)
-            if receipt["input_fingerprint"] != canonical_fingerprint(validated):
+            if json_transport_fingerprint(
+                    receipt["pricing_input"]) != json_transport_fingerprint(validated):
                 raise ProductError(
                     "PRODUCT_RECEIPT_MISMATCH",
                     "Le prix conservé ne correspond pas aux entrées du produit.", 422)
@@ -329,7 +330,8 @@ def retain_product_calculation(
             body.pricing_receipt, secret=receipt_signing_secret())
         receipt = verify_pricing_receipt(receipt)
         validated = _validated_pricing_input(receipt["pricing_input"])
-        if receipt["input_fingerprint"] != canonical_fingerprint(validated):
+        if json_transport_fingerprint(
+                receipt["pricing_input"]) != json_transport_fingerprint(validated):
             raise ProductError(
                 "PRODUCT_RECEIPT_MISMATCH",
                 "Le reçu de calcul ne correspond pas à ses entrées.", 422)

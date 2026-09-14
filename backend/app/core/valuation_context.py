@@ -35,6 +35,33 @@ def canonical_fingerprint(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def _json_transport_value(value: Any) -> Any:
+    """Return the value shape preserved by a browser JSON round-trip.
+
+    JavaScript serializes ``0.0`` as ``0`` (and does the same for every
+    integral float).  Python's JSON encoder preserves the decimal suffix, so a
+    fingerprint taken before the response left the API could otherwise differ
+    from the fingerprint of the exact same numeric inputs posted back by Vue.
+    """
+    if isinstance(value, dict):
+        return {key: _json_transport_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_transport_value(item) for item in value]
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def json_transport_json(value: Any) -> str:
+    """Canonical JSON without distinguishing ``1`` from ``1.0``."""
+    return canonical_json(_json_transport_value(value))
+
+
+def json_transport_fingerprint(value: Any) -> str:
+    """Fingerprint JSON data after browser-stable number normalization."""
+    return hashlib.sha256(json_transport_json(value).encode("utf-8")).hexdigest()
+
+
 @dataclass
 class ValuationContext:
     underlyings: list[dict]
@@ -235,7 +262,7 @@ def market_snapshot_from_pricing_input(payload: dict) -> dict:
 
 def build_pricing_receipt(request, price: float) -> dict:
     pricing_input = pricing_input_payload(request)
-    fingerprint = canonical_fingerprint(pricing_input)
+    fingerprint = json_transport_fingerprint(pricing_input)
     market_snapshot = market_snapshot_from_pricing_input(pricing_input)
     market_snapshot["pricing_input_fingerprint"] = fingerprint
     return {
@@ -253,11 +280,24 @@ def verify_pricing_receipt(receipt: dict) -> dict:
     pricing_input = receipt.get("pricing_input")
     if not isinstance(pricing_input, dict):
         raise ValueError("La preuve de pricing ne contient pas ses entrées.")
-    expected = canonical_fingerprint(pricing_input)
-    if receipt.get("input_fingerprint") != expected:
+    expected = json_transport_fingerprint(pricing_input)
+    supplied = receipt.get("input_fingerprint")
+    accepted = {expected, canonical_fingerprint(pricing_input)}
+    if supplied not in accepted:
+        # Receipts issued before transport-stable fingerprints were introduced
+        # hashed Pydantic's typed floats (0.0/1.0).  Rebuild that typed request
+        # so a calculation already visible in the browser remains retainable.
+        try:
+            from .schemas import PricingRequest
+            legacy_input = pricing_input_payload(
+                PricingRequest.model_validate(pricing_input))
+            accepted.add(canonical_fingerprint(legacy_input))
+        except (TypeError, ValueError):
+            pass
+    if supplied not in accepted:
         raise ValueError("L'empreinte de la preuve de pricing est invalide.")
     rebuilt = market_snapshot_from_pricing_input(pricing_input)
-    rebuilt["pricing_input_fingerprint"] = expected
+    rebuilt["pricing_input_fingerprint"] = supplied
     return {**receipt, "market_snapshot": rebuilt}
 
 

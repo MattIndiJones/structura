@@ -12,7 +12,9 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from backend.app.api.auth import get_current_user, receipt_signing_secret
 from backend.app.core.product.models import FrozenObject
 from backend.app.core.schemas import PricingRequest
-from backend.app.core.valuation_context import build_pricing_receipt
+from backend.app.core.valuation_context import (
+    build_pricing_receipt, canonical_fingerprint, pricing_input_payload,
+)
 from backend.app.db.database import get_session
 from backend.app.db.models import (
     Counterparty, Deal, ProductCalculationRun, ProductRecord,
@@ -82,6 +84,17 @@ def _create(client, *, key="create-product-001", receipt=None, pricing_input=Non
     return response.json()
 
 
+def _browser_json_roundtrip(value):
+    """Model JSON.stringify: integral JavaScript numbers are posted as ints."""
+    if isinstance(value, dict):
+        return {key: _browser_json_roundtrip(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_browser_json_roundtrip(item) for item in value]
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
 def test_conservation_sans_prix_ne_stocke_que_les_termes(product_client):
     product = _create(product_client)
     assert product["revision"] == 1
@@ -125,6 +138,47 @@ def test_recu_du_pricing_http_peut_etre_conserve_tel_quel(product_client):
         product_client, key="product-from-http-receipt",
         receipt=receipt, pricing_input=receipt["pricing_input"])
     assert product["calculations"][0]["price"] == pytest.approx(priced.json()["price"] * 100)
+
+
+def test_recu_pricing_supporte_un_roundtrip_json_navigateur(product_client):
+    pricing_input = _pricing_input(N=1000)
+    priced = product_client.post("/api/price", json=pricing_input)
+    assert priced.status_code == 200, priced.text
+
+    receipt = _browser_json_roundtrip(priced.json()["pricing_receipt"])
+    product = _create(
+        product_client, key="product-from-browser-receipt",
+        receipt=receipt, pricing_input=receipt["pricing_input"])
+    assert product["calculations"][0]["price"] == pytest.approx(priced.json()["price"] * 100)
+
+
+def test_preuve_ancienne_reste_valide_apres_roundtrip_navigateur(product_client):
+    request = PricingRequest.model_validate(_pricing_input(N=1000))
+    legacy_input = pricing_input_payload(request)
+    legacy_receipt = build_pricing_receipt(request, 0.9825)
+    legacy_receipt["input_fingerprint"] = canonical_fingerprint(legacy_input)
+    legacy_receipt["market_snapshot"]["pricing_input_fingerprint"] = legacy_receipt["input_fingerprint"]
+    receipt = signed_receipt(
+        legacy_receipt, secret=receipt_signing_secret(), result={"price": 0.9825})
+    receipt = _browser_json_roundtrip(receipt)
+
+    product = _create(
+        product_client, key="product-from-legacy-browser-receipt",
+        receipt=receipt, pricing_input=receipt["pricing_input"])
+    assert product["calculations"][0]["price"] == pytest.approx(98.25)
+
+
+def test_prix_entier_reste_signe_apres_roundtrip_navigateur(product_client):
+    request = PricingRequest.model_validate(_pricing_input(N=1000))
+    receipt = signed_receipt(
+        build_pricing_receipt(request, 1.0),
+        secret=receipt_signing_secret(), result={"price": 1.0})
+    receipt = _browser_json_roundtrip(receipt)
+
+    product = _create(
+        product_client, key="product-from-integral-price",
+        receipt=receipt, pricing_input=receipt["pricing_input"])
+    assert product["calculations"][0]["price"] == pytest.approx(100.0)
 
 
 def test_recu_modifie_est_refuse_et_transaction_annulee(product_client):
