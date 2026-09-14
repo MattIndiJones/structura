@@ -139,6 +139,21 @@
               <p class="text-xs text-slate-600">Gérez, organisez et partagez vos scripts de pricing dans des dossiers.</p>
             </RouterLink>
 
+            <!-- Produits volontairement conservés -->
+            <RouterLink to="/products"
+              class="card flex flex-col gap-3
+                     hover:border-amber-700 hover:bg-amber-950/20 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-amber-900/50 flex items-center justify-center text-xl">◫</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-amber-300 transition-colors">Mes Produits</div>
+                  <div class="text-xs text-slate-500">Dossiers suivis de bout en bout</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Reprenez un produit conservé, ses termes figés et ses calculs datés.</p>
+            </RouterLink>
+
             <!-- Nouveau script -->
             <RouterLink to="/pricer"
               class="card flex flex-col gap-3
@@ -147,11 +162,11 @@
               <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-lg bg-green-900/50 flex items-center justify-center text-xl">✏️</div>
                 <div>
-                  <div class="font-bold text-slate-100 group-hover:text-green-300 transition-colors">Nouveau Script</div>
-                  <div class="text-xs text-slate-500">Pricer — éditeur vide</div>
+                  <div class="font-bold text-slate-100 group-hover:text-green-300 transition-colors">Nouveau Pricing</div>
+                  <div class="text-xs text-slate-500">Session éphémère</div>
                 </div>
               </div>
-              <p class="text-xs text-slate-600">Ouvrez le pricer avec un éditeur vide et commencez à structurer.</p>
+              <p class="text-xs text-slate-600">Testez et calculez librement ; rien n'est conservé sans action explicite.</p>
             </RouterLink>
 
             <!-- Documentation -->

@@ -101,6 +101,10 @@
           </div>
 
           <AlertMessage v-if="createError" kind="error">{{ createError }}</AlertMessage>
+          <AlertMessage v-if="sourceProduct" kind="info">
+            Cette RFQ utilise le Product <span class="font-mono font-semibold">{{ sourceProduct.reference }}</span>
+            en termes v{{ sourceProduct.terms_version }}. Le serveur reprend ses termes et son calendrier comme source faisant autorité.
+          </AlertMessage>
 
           <!-- Deux colonnes dès qu'il y a la place : à gauche ce qu'on
                demande et à qui, à droite le produit qu'on fait pricer. -->
@@ -966,6 +970,7 @@ import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useRfqStore } from '../stores/rfq.js'
+import { useProductsStore } from '../stores/products.js'
 import { useMarketAssumptions } from '../composables/useMarketAssumptions.js'
 import YieldCurveCard from '../components/YieldCurveCard.vue'
 import FundingCurveCard from '../components/FundingCurveCard.vue'
@@ -1059,8 +1064,11 @@ function restoreConstatOverrides(constats, overridesObj, saved) {
 }
 
 const rfq = useRfqStore()
+const products = useProductsStore()
 const router = useRouter()
 const route = useRoute()
+const sourceProduct = ref(null)
+const sourceProductPricingInput = ref(null)
 
 // Contexte commercial, quand on arrive depuis une fiche d'opportunité
 // (`/rfq?opportunity=12`). Purement additif : sans ce paramètre, l'écran se
@@ -1280,10 +1288,14 @@ async function refreshParsedParams(overrideValues = null, overrideConstats = nul
 function onSourceToggle(src) {
   form.source = src
   duplicateSourceScript.value = null
+  sourceProduct.value = null
+  sourceProductPricingInput.value = null
   refreshParsedParams()
 }
 function onTemplateChange() {
   duplicateSourceScript.value = null
+  sourceProduct.value = null
+  sourceProductPricingInput.value = null
   refreshParsedParams()
 }
 // The picker offers two kinds of options in one <select>: rows from the
@@ -1347,6 +1359,8 @@ onMounted(async () => {
       selectedId.value = null
       rfq.current = null
     }
+    const productId = Number(route.query.product)
+    if (productId) await prefillFromProduct(productId)
   } finally {
     loadingList.value = false
   }
@@ -1369,6 +1383,8 @@ function openCreateForm() {
   createError.value = ''
   notice.value = ''
   duplicateSourceScript.value = null
+  sourceProduct.value = null
+  sourceProductPricingInput.value = null
   commercialLinkEnabled.value = false
   Object.assign(form, {
     name: '', ao_date: todayIso(), kind: 'indicatif', sens: 'achat', source: 'template', template_type: '',
@@ -1395,6 +1411,43 @@ function openCreateForm() {
   Object.assign(advanced, { sigma: 20, q: 2, r: 3, N: 20000, model: 'constant' })
   nominalRaw.value = '1 000 000'
   parsedParams.value = []
+}
+
+async function prefillFromProduct(productId) {
+  const loaded = await products.fetchOne(productId)
+  if (!loaded) {
+    listError.value = products.error || 'Produit introuvable.'
+    return
+  }
+  openCreateForm()
+  sourceProduct.value = loaded.product
+  sourceProductPricingInput.value = loaded.calculationInput
+  const terms = loaded.product.terms
+  duplicateSourceScript.value = terms.script
+  form.source = 'script'
+  form.name = loaded.product.name
+  form.T = terms.T
+  form.currency = terms.settlement_ccy || 'EUR'
+  form.strike_date = terms.strike_date || ''
+  form.value_date = terms.value_date || ''
+  form.payment_date = terms.payment_date || ''
+  form.underlying_name = terms.underlyings[0]?.name || 'Sous-jacent'
+  form.underlying_ticker = terms.underlyings[0]?.ticker || ''
+  nominalRaw.value = String(loaded.product.intent?.nominal || 1_000_000)
+  formatNominal()
+  const firstMarket = loaded.calculationInput?.underlyings?.[0] || {}
+  advanced.sigma = Number(firstMarket.sigma ?? 0.20) * 100
+  advanced.q = Number(firstMarket.q ?? 0.02) * 100
+  advanced.r = Number(loaded.calculationInput?.r ?? 0.03) * 100
+  advanced.N = loaded.calculationInput?.N ?? 20000
+  advanced.model = loaded.calculationInput?.model || 'constant'
+  await refreshParsedParams()
+  for (const parameter of terms.parameters || []) {
+    paramOverrides[parameter.name] = Array.isArray(parameter.value)
+      ? parameter.value.map(value => parameter.is_pct ? value * 100 : value)
+      : (parameter.is_pct ? parameter.value * 100 : parameter.value)
+  }
+  restoreConstatOverrides(scriptConstats.value, constatOverrides, terms.constats || {})
 }
 
 async function toggleDirectCommercial() {
@@ -1932,7 +1985,16 @@ async function submitCreate() {
 
   creating.value = true
   try {
+    const productMarket = sourceProductPricingInput.value || {}
+    const productUnderlyings = sourceProduct.value
+      ? sourceProduct.value.terms.underlyings.map((identity, index) => ({
+          ...(productMarket.underlyings?.[index] || { sigma: 0.20, q: 0.02 }),
+          ...identity,
+        }))
+      : null
     const rfqObj = await rfq.create({
+      product_id: sourceProduct.value?.product_id || null,
+      product_terms_version: sourceProduct.value?.terms_version || null,
       name: form.name,
       ao_date: form.ao_date,
       kind: form.kind,
@@ -1952,32 +2014,44 @@ async function submitCreate() {
       script_id: form.source === 'script' ? form.script_id : null,
       script_snapshot,
       params: {
-        underlyings: [{
+        underlyings: productUnderlyings || [{
           name: form.underlying_name, ticker: form.underlying_ticker,
           ccy: form.currency, sigma: advanced.sigma / 100, q: advanced.q / 100,
           ...ao.dividendeDuSousJacent(0, createMaturityDate.value
             ? yearsBetween(form.strike_date, createMaturityDate.value) : form.T),
         }],
-        corr_matrix: [[1]],
+        corr_matrix: sourceProduct.value
+          ? (productMarket.corr_matrix || sourceProduct.value.terms.underlyings.map((_, i) =>
+              sourceProduct.value.terms.underlyings.map((__, j) => i === j ? 1 : 0)))
+          : [[1]],
         // T dérivé du calendrier CONSTAT quand il y en a un, et non du ténor
         // tapé : c'est la fin de calendrier que l'écran affiche comme maturité.
         // Laisser les deux diverger obligeait à « corriger » T à chaque calcul
         // de prix modèle — donc à toucher un terme contractuel après
         // sollicitation. T est fixé une fois, à la création, où il est encore
         // librement modifiable.
-        r: advanced.r / 100,
+        r: sourceProduct.value ? (productMarket.r ?? advanced.r / 100) : advanced.r / 100,
         // T est l'horizon de DIFFUSION : il se compte depuis le strike, pas
         // depuis le règlement. Deux jours ouvrés d'écart avec l'ancienne
         // définition, mais surtout deux définitions différentes du symbole.
         T: (createMaturityDate.value
             ? yearsBetween(form.strike_date, createMaturityDate.value)
             : form.T),
-        N: advanced.N, model: advanced.model,
+        N: sourceProduct.value ? (productMarket.N ?? advanced.N) : advanced.N,
+        model: sourceProduct.value ? (productMarket.model || advanced.model) : advanced.model,
         // Les trois hypothèses de marché saisies au-dessus. Sans elles dans le
         // payload, les cartes seraient éditables sans le moindre effet sur le
         // prix — le projet a déjà connu ça avec la courbe de dividende, qui vaut
         // pourtant −491,6 bps.
         ...ao.hypothesesDeMarche(),
+        ...(sourceProduct.value ? {
+          yield_curve: productMarket.yield_curve || [],
+          funding_curve: productMarket.funding_curve || [],
+          funding_spread: productMarket.funding_spread || 0,
+          sigma_r: productMarket.sigma_r || 0,
+          a_r: productMarket.a_r || 0,
+          barrier_monitoring: productMarket.barrier_monitoring || 'weekly',
+        } : {}),
         user_params,
         constats: buildConstatsPayload(scriptConstats.value, constatOverrides),
         notional: nominalValue.value, currency: form.currency,

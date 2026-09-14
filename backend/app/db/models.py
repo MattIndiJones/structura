@@ -5,6 +5,80 @@ from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Column, Text
 
 
+class ProductRecord(SQLModel, table=True):
+    """Identity and optimistic revision pointer; never holds market data."""
+    __tablename__ = "products"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    reference: str = Field(unique=True, index=True)
+    name: str
+    user_id: int = Field(foreign_key="users.id", index=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
+    origin_product_id: Optional[int] = Field(default=None, foreign_key="products.id")
+    data_origin: str = Field(default="native")
+    revision: int = Field(default=0)
+    terms_version: int = Field(default=0)
+    archived: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProductTermsVersion(SQLModel, table=True):
+    __tablename__ = "product_terms_versions"
+    __table_args__ = (UniqueConstraint("product_id", "version"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: int = Field(foreign_key="products.id", index=True)
+    version: int
+    parent_version: Optional[int] = None
+    fingerprint: str = Field(index=True)
+    terms_json: str = Field(sa_column=Column(Text, nullable=False))
+    reason: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProductRevision(SQLModel, table=True):
+    __tablename__ = "product_revisions"
+    __table_args__ = (UniqueConstraint("product_id", "revision"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: int = Field(foreign_key="products.id", index=True)
+    revision: int
+    terms_version: int
+    snapshot_json: str = Field(sa_column=Column(Text, nullable=False))
+    actor_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    action: str
+    reason: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProductCalculationRun(SQLModel, table=True):
+    __tablename__ = "product_calculation_runs"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: int = Field(foreign_key="products.id", index=True)
+    terms_version: int
+    input_revision: int
+    kind: str = "PRICING"
+    user_id: int = Field(foreign_key="users.id")
+    calculated_at: datetime
+    valuation_date: Optional[str] = None
+    source: str = "SERVER"
+    input_hash: str
+    input_json: str = Field(default="{}", sa_column=Column(Text))
+    result_json: str = Field(default="{}", sa_column=Column(Text))
+    valuation_run_id: Optional[int] = Field(default=None, foreign_key="valuation_runs.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProductCommand(SQLModel, table=True):
+    __tablename__ = "product_commands"
+    __table_args__ = (UniqueConstraint("user_id", "command_key"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id")
+    command_key: str
+    input_hash: str
+    product_id: int = Field(foreign_key="products.id", index=True)
+    result_revision: int
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class Entity(SQLModel, table=True):
     __tablename__ = "entities"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -162,6 +236,9 @@ class Script(SQLModel, table=True):
 class Deal(SQLModel, table=True):
     __tablename__ = "deals"
     id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="products.id", unique=True)
+    product_terms_version: Optional[int] = Field(default=None)
+    counterparty_id: Optional[int] = Field(default=None, foreign_key="counterparties.id")
     # Unique: the reference is the trade's business identity (valuation notes,
     # KID, client correspondence). Handed out by core/references.py, which
     # numbers off the highest suffix rather than the row count so deleting one
@@ -374,6 +451,8 @@ class DealContractVersion(SQLModel, table=True):
 class Document(SQLModel, table=True):
     __tablename__ = "documents"
     id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="products.id", index=True)
+    product_terms_version: Optional[int] = Field(default=None)
     deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
     user_id: int = Field(foreign_key="users.id")
     doc_type: str = Field(default="")   # kid | termsheet_indicatif | termsheet_final | confirmation | autre
@@ -410,6 +489,7 @@ class Indicative(SQLModel, table=True):
     """
     __tablename__ = "indicatives"
     id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="products.id", index=True)
     reference: str = Field(index=True, unique=True)   # see Deal.reference
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     user_id: int = Field(foreign_key="users.id")
@@ -445,6 +525,8 @@ class KidRecord(SQLModel, table=True):
     generation time."""
     __tablename__ = "kid_records"
     id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="products.id", index=True)
+    product_terms_version: Optional[int] = Field(default=None)
     indicative_id: Optional[int] = Field(default=None, foreign_key="indicatives.id")
     deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
     user_id: int = Field(foreign_key="users.id")
@@ -469,6 +551,8 @@ class EmtRecord(SQLModel, table=True):
     generated from (see emt.py), never recomputed independently."""
     __tablename__ = "emt_records"
     id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="products.id", index=True)
+    product_terms_version: Optional[int] = Field(default=None)
     indicative_id: Optional[int] = Field(default=None, foreign_key="indicatives.id")
     deal_id: Optional[int] = Field(default=None, foreign_key="deals.id")
     user_id: int = Field(foreign_key="users.id")
@@ -502,6 +586,8 @@ class RfqRequest(SQLModel, table=True):
     re-keyed. Individual bank responses live in RfqQuote."""
     __tablename__ = "rfq_requests"
     id: Optional[int] = Field(default=None, primary_key=True)
+    product_id: Optional[int] = Field(default=None, foreign_key="products.id", index=True)
+    product_terms_version: Optional[int] = Field(default=None)
     reference: str = Field(index=True, unique=True)   # see Deal.reference
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     user_id: int = Field(foreign_key="users.id")

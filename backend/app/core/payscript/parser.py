@@ -967,6 +967,9 @@ def resolve_analysis_constats(compiled, req):
     L'origine suit la meme regle qu'ailleurs : la date de STRIKE, ou `anchor`
     en repli pour les appelants qui n'en declarent pas.
     """
+    if getattr(req, "frozen_schedule", None) is not None:
+        from ..product.calendar import restore_calendar
+        return restore_calendar(compiled, req.frozen_schedule)
     return resolve_constats(compiled, req.constats, anchor=analysis_origin(req),
                             currency=getattr(req, "settlement_ccy", None))
 

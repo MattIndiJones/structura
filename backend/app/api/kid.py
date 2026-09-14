@@ -27,6 +27,9 @@ from ..core.payscript.engine import run_mc, run_mark_to_future, compute_irr
 from .auth import get_current_user
 from ..db.database import get_session
 from ..db.models import User, KidRecord, Indicative, Deal
+from ..core.product.models import FrozenObject
+from ..core.product.inputs import calculation_context, pricing_input
+from ..services.product_repository import ProductError, load_product, owned_record, stage_revision
 
 router = APIRouter(prefix="/api/kid", tags=["kid"])
 
@@ -288,6 +291,8 @@ def _scenario_row(sc: dict, T_h: float, cost_entry: float,
 # ── Request schema ────────────────────────────────────────────────────
 
 class KidRequest(PricingRequest):
+    product_id: Optional[int] = None
+    product_terms_version: Optional[int] = None
     crm: int = Field(default=3, ge=1, le=6)
     initial_price_pct: float = Field(default=100.0, gt=0.0, le=1000.0)
     cost_entry: float = Field(default=0.0, ge=0, le=10)    # % one-shot
@@ -301,8 +306,25 @@ class KidRequest(PricingRequest):
 def kid_compute(
     req: KidRequest,
     current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
 ):
     """Compute PRIIPs KID scenarios and SRI."""
+    if req.product_id is not None:
+        try:
+            owned_record(session, req.product_id, current)
+            product = load_product(session, req.product_id)
+            if (req.product_terms_version is not None
+                    and req.product_terms_version != product.terms_version):
+                raise ProductError(
+                    "PRODUCT_TERMS_STALE",
+                    "La version des termes du Product a changé.")
+            req = KidRequest.model_validate(pricing_input(
+                product, calculation_context(req.model_dump(mode="json"))))
+        except ProductError as exc:
+            raise HTTPException(
+                exc.status, detail={"code": exc.code, "message": str(exc)})
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
     try:
         compiled = parse_script(req.script)
         compiled = resolve_analysis_constats(compiled, req)
@@ -410,6 +432,8 @@ def kid_compute(
 # ── Persistence — append-only, one row per generation ──────────────────
 
 class KidSaveRequest(BaseModel):
+    product_id: Optional[int] = None
+    product_terms_version: Optional[int] = None
     indicative_id: Optional[int] = None
     deal_id: Optional[int] = None
     product_title: str = "Produit structuré"
@@ -420,8 +444,8 @@ class KidSaveRequest(BaseModel):
     # returns null with MRM 7 and persistence must preserve that fact.
     vev: Optional[float] = None
     T_rhp: float
-    horizons: list = []
-    costs: dict = {}
+    horizons: list = Field(default_factory=list)
+    costs: dict = Field(default_factory=dict)
 
 
 def _kid_record_row(k: KidRecord) -> dict:
@@ -429,6 +453,8 @@ def _kid_record_row(k: KidRecord) -> dict:
         "id": k.id,
         "indicative_id": k.indicative_id,
         "deal_id": k.deal_id,
+        "product_id": k.product_id,
+        "product_terms_version": k.product_terms_version,
         "product_title": k.product_title,
         "sri": k.sri, "mrm": k.mrm, "crm": k.crm, "vev": k.vev, "T_rhp": k.t_rhp,
         "horizons": json.loads(k.horizons_json),
@@ -443,24 +469,50 @@ def save_kid(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    if not req.indicative_id and not req.deal_id:
-        raise HTTPException(422, "indicative_id ou deal_id requis.")
+    if not req.indicative_id and not req.deal_id and not req.product_id:
+        raise HTTPException(422, "product_id, indicative_id ou deal_id requis.")
+    linked_product_id = req.product_id
     if req.indicative_id:
         ind = session.get(Indicative, req.indicative_id)
         if not ind or ind.user_id != current.id:
             raise HTTPException(404, "Indicatif introuvable")
+        linked_product_id = linked_product_id or ind.product_id
     if req.deal_id:
         deal = session.get(Deal, req.deal_id)
         if not deal or deal.user_id != current.id:
             raise HTTPException(404, "Deal introuvable")
+        if linked_product_id is not None and deal.product_id not in {None, linked_product_id}:
+            raise HTTPException(422, "Le deal ne correspond pas au Product demandé.")
+        linked_product_id = linked_product_id or deal.product_id
+
+    product = None
+    if linked_product_id is not None:
+        try:
+            owned_record(session, linked_product_id, current)
+            product = load_product(session, linked_product_id)
+        except ProductError as exc:
+            raise HTTPException(exc.status, detail={"code": exc.code, "message": str(exc)})
+        if req.product_terms_version is not None and req.product_terms_version != product.terms_version:
+            raise HTTPException(409, "La version des termes du Product a changé.")
 
     rec = KidRecord(
+        product_id=linked_product_id,
+        product_terms_version=product.terms_version if product else None,
         indicative_id=req.indicative_id, deal_id=req.deal_id, user_id=current.id,
         product_title=req.product_title,
         sri=req.sri, mrm=req.mrm, crm=req.crm, vev=req.vev, t_rhp=req.T_rhp,
         horizons_json=json.dumps(req.horizons), costs_json=json.dumps(req.costs),
     )
     session.add(rec)
+    session.flush()
+    if product is not None:
+        document = FrozenObject({"kind": "KID", "record_id": rec.id,
+                                 "terms_version": product.terms_version,
+                                 "created_at": rec.created_at.isoformat()})
+        product = product.model_copy(update={"documents": (*product.documents, document)})
+        stage_revision(session, product, expected_revision=product.revision,
+                       actor_id=current.id, action="PRODUCT_KID_RETAINED",
+                       reason="Conservation d’un KID sur le Product.")
     session.commit()
     session.refresh(rec)
     return _kid_record_row(rec)
@@ -472,13 +524,16 @@ def list_kid_records(
     session: Annotated[Session, Depends(get_session)],
     indicative_id: Optional[int] = None,
     deal_id: Optional[int] = None,
+    product_id: Optional[int] = None,
 ):
-    if not indicative_id and not deal_id:
-        raise HTTPException(422, "indicative_id ou deal_id requis.")
+    if not indicative_id and not deal_id and not product_id:
+        raise HTTPException(422, "product_id, indicative_id ou deal_id requis.")
     q = select(KidRecord).where(KidRecord.user_id == current.id)
     if indicative_id:
         q = q.where(KidRecord.indicative_id == indicative_id)
     if deal_id:
         q = q.where(KidRecord.deal_id == deal_id)
+    if product_id:
+        q = q.where(KidRecord.product_id == product_id)
     rows = session.exec(q.order_by(KidRecord.created_at.desc())).all()
     return [_kid_record_row(r) for r in rows]

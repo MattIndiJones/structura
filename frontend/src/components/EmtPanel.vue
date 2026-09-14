@@ -444,6 +444,8 @@ async function compute() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...store.pricingBody(),
+        product_id: store.currentProduct?.product_id || null,
+        product_terms_version: store.currentProduct?.terms_version || null,
         sri: store.kid.sri,
         mrm: store.kid.mrm,
         crm: store.kid.crm,
@@ -473,12 +475,15 @@ async function saveEmt() {
   saving.value = true
   saveError.value = ''
   try {
-    const indicativeId = await store.ensureIndicative()
+    const productId = store.currentProduct?.product_id || null
+    const indicativeId = productId ? null : await store.ensureIndicative()
     const res = await apiFetch('/api/emt/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         indicative_id: indicativeId,
+        product_id: productId,
+        product_terms_version: store.currentProduct?.terms_version || null,
         product_title: productTitle.value,
         sri: emt.value.sri, mrm: emt.value.mrm, crm: emt.value.crm, T_rhp: emt.value.T_rhp,
         capital_tier: emt.value.capital_protection.tier,

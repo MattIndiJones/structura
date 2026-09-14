@@ -157,6 +157,7 @@ export const useRfqStore = defineStore('rfq', () => {
         funding_spread: p.funding_spread ?? 0,
         user_params: p.user_params || {},
         constats: p.constats || {},
+        frozen_schedule: p.frozen_schedule || null,
         // Trois dates, trois rôles distincts : la diffusion démarre au
         // strike (c'est là que le niveau initial se constate), le prix
         // s'exprime à la value date (c'est le montant échangé au règlement),

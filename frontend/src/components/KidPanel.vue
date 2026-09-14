@@ -312,6 +312,8 @@ async function compute() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...store.pricingBody(),
+        product_id: store.currentProduct?.product_id || null,
+        product_terms_version: store.currentProduct?.terms_version || null,
         crm: params.value.crm,
         initial_price_pct: params.value.initial_price_pct,
         cost_entry: params.value.cost_entry,
@@ -344,12 +346,15 @@ async function saveKid() {
   saving.value = true
   saveError.value = ''
   try {
-    const indicativeId = await store.ensureIndicative()
+    const productId = store.currentProduct?.product_id || null
+    const indicativeId = productId ? null : await store.ensureIndicative()
     const res = await apiFetch('/api/kid/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         indicative_id: indicativeId,
+        product_id: productId,
+        product_terms_version: store.currentProduct?.terms_version || null,
         product_title: store.productTitle,
         sri: kid.value.sri, mrm: kid.value.mrm, crm: kid.value.crm,
         vev: kid.value.vev, T_rhp: kid.value.T_rhp,

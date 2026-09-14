@@ -46,6 +46,9 @@ def _migrate():
     tables, it never ALTERs an existing one. No Alembic in this project;
     keep patches here small and check-before-add."""
     with engine.connect() as conn:
+        from .product_migrations import migrate_product_links
+        migrate_product_links(conn)
+        conn.commit()
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS app_migrations (
                 key TEXT PRIMARY KEY,

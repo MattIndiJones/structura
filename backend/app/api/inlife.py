@@ -45,6 +45,8 @@ from ..core.valuation_context import (
 from ..db.models import User
 from ..services.market_data import load_hist_prices
 from .auth import get_current_user
+from .auth import receipt_signing_secret
+from ..services.product_receipts import signed_receipt
 from .pricing import _clean_flux
 
 router = APIRouter(prefix="/api", tags=["pricing"])
@@ -63,6 +65,7 @@ class InLifePricingRequest(BaseModel):
     model: str = "constant"
     user_params: dict = Field(default_factory=dict)
     constats: dict = Field(default_factory=dict)
+    frozen_schedule: Optional[dict] = None
     seed: int = 42
     antithetic: bool = True
     # Mêmes leviers de marché que /api/price. Ils manquaient ici : une courbe
@@ -356,6 +359,7 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
         currency=(req.settlement_ccy or "").strip().upper(),
         payment_date=req.payment_date,
         market=market,
+        frozen_schedule=req.frozen_schedule,
     )
 
     T_elapsed = max(0.0, (valuation - req.strike_date).days / 365.25)
@@ -523,7 +527,14 @@ def price_in_life(
         # mémoire fait disparaître ce que le client a accumulé, et ce fait doit
         # se lire plutôt que se deviner.
         "variant_state_check": ctx.variant_state_check,
-        "pricing_receipt": build_pricing_receipt(req, res["price"]),
+        "pricing_receipt": signed_receipt(
+            build_pricing_receipt(req, res["price"]),
+            secret=receipt_signing_secret(),
+            result={
+                "price": res["price"], "ic95": res["ic95"],
+                "median": res["median"], "var5": res["var5"],
+                "prob_gt100": res["prob_gt100"],
+            }),
         # De quoi écrire le bandeau d'état sans le recalculer côté écran.
         "past": {
             "years_elapsed": round(T_elapsed, 4),

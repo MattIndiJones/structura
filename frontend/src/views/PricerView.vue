@@ -13,16 +13,20 @@ import { useRoute } from 'vue-router'
 import Pricer from './Pricer.vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useAuthStore } from '../stores/auth.js'
+import { useProductsStore } from '../stores/products.js'
 import { apiFetch } from '../utils/api.js'
 
 const route  = useRoute()
 const store  = usePricingStore()
 const auth   = useAuthStore()
+const products = useProductsStore()
 const ready  = ref(false)
 
 async function charger() {
-  const { id, variantId } = route.params
-  if (variantId) {
+  const { id, variantId, productId } = route.params
+  if (productId) {
+    await loadProductFromDb(parseInt(productId))
+  } else if (variantId) {
     await loadVariantFromDb(parseInt(variantId))
   } else if (id) {
     await loadScriptFromDb(parseInt(id))
@@ -39,10 +43,16 @@ onMounted(charger)
 // ce watch, cliquer « Origine » ou une autre déclinaison changeait l'URL et
 // laissait l'écran sur le produit précédent — et créer une variante n'ouvrait
 // jamais la variante créée.
-watch(() => [route.params.id, route.params.variantId], async () => {
+watch(() => [route.params.id, route.params.variantId, route.params.productId], async () => {
   ready.value = false
   await charger()
 })
+
+async function loadProductFromDb(id) {
+  const loaded = await products.fetchOne(id)
+  if (!loaded) { store.resetToDefaults(); return }
+  await store.loadFromProduct(loaded.product, loaded.calculationInput)
+}
 
 async function loadVariantFromDb(id) {
   // Le contexte arrive déjà résolu — parent + delta, et pour une note neuve,

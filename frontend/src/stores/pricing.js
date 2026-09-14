@@ -328,6 +328,9 @@ export const usePricingStore = defineStore('pricing', () => {
   // created lazily on first KID/EMT save, reused for every save after that
   // until reset. See db/models.py:Indicative for the full rationale. ──────
   const currentIndicativeId = ref(null)
+  // Dossier Product conservé actuellement ouvert. Null signifie que la
+  // session reste un brouillon de pricing entièrement éphémère.
+  const currentProduct = ref(null)
 
   // RFQ this pricing session was pre-filled from (see loadFromRfq below) —
   // sent as Deal.rfq_id at booking time so the winning quote's RFQ can be
@@ -348,7 +351,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // A deal loaded through loadFromDeal is a persisted contract. The Pricer may
   // change its valuation assumptions, but it must not turn that contract into
   // another payoff while continuing to display the booked reference.
-  const contractTermsLocked = computed(() => !!openedDeal.value)
+  const contractTermsLocked = computed(() => !!openedDeal.value || !!currentProduct.value)
 
   function _activeBookedContract() {
     return contractTermsLocked.value ? bookedContractTerms.value : null
@@ -674,6 +677,7 @@ export const usePricingStore = defineStore('pricing', () => {
       // elle décrit le produit à l'émission — comportement historique.
       valuation_date: globalParams.valuation_date || null,
       maturity_date: frozen?.maturity_date ?? _maturityDate(),
+      frozen_schedule: currentProduct.value?.terms?.resolved_events || null,
       // Le calendrier CONSTAT porte des dates absolues ; le moteur veut des
       // fractions d'année depuis l'origine de son axe, qui est la date de
       // STRIKE — là où le niveau initial se constate. Repli sur la value date
@@ -716,6 +720,37 @@ export const usePricingStore = defineStore('pricing', () => {
       ..._baseBody(), N: globalParams.N,
       antithetic: globalParams.antithetic, ..._rateParams(),
     }
+  }
+
+  const PRODUCT_TERM_FIELDS = new Set([
+    'script', 'user_params', 'constats', 'T', 'strike_date', 'value_date',
+    'maturity_date', 'payment_date', 'anchor', 'settlement_ccy', 'frozen_schedule',
+  ])
+
+  async function _authoritativeProductRequest(request) {
+    const product = currentProduct.value
+    if (!product) return request
+    const context = Object.fromEntries(
+      Object.entries(request).filter(([key]) => !PRODUCT_TERM_FIELDS.has(key)))
+    context.underlyings = (request.underlyings || []).map(underlying => {
+      const { name, ticker, ccy, ...market } = underlying
+      return market
+    })
+    const res = await apiFetch(`/api/products/${product.product_id}/pricing-input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expected_terms_version: product.terms_version,
+        context,
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const detail = typeof data?.detail === 'string'
+        ? data.detail : data?.detail?.message
+      throw new Error(detail || 'Les termes du Product n’ont pas pu être chargés.')
+    }
+    return data
   }
 
   const resultIsStale = computed(() => {
@@ -977,7 +1012,7 @@ export const usePricingStore = defineStore('pricing', () => {
    *  la vie restante est simulée. Voir api/inlife.py pour pourquoi un simple
    *  « repartir du bon spot » ne suffirait pas sur un produit à mémoire. */
   async function runInLifePricing() {
-    const request = _inLifeBody()
+    let request = _inLifeBody()
     request.seed = 42
     const requestKey = _requestKey(request)
     const inputs = _snapshotInputs()
@@ -986,6 +1021,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null; result.value = null
     _startProgress((globalParams.N / 20000) * 350)
     try {
+      request = await _authoritativeProductRequest(request)
       const res = await apiFetch('/api/price/in-life', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1008,7 +1044,7 @@ export const usePricingStore = defineStore('pricing', () => {
 
   async function runPricing() {
     if (usesDatedPricing()) return runInLifePricing()
-    const request = _pricingBody()
+    let request = _pricingBody()
     request.seed = 42
     const requestKey = _requestKey(request)
     const inputs = _snapshotInputs()
@@ -1017,6 +1053,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null; result.value = null
     _startProgress((globalParams.N / 20000) * 350)
     try {
+      request = await _authoritativeProductRequest(request)
       const res = await fetch('/api/price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1796,6 +1833,7 @@ export const usePricingStore = defineStore('pricing', () => {
     kid.value = null
     comparator.value = null
     currentIndicativeId.value = null
+    currentProduct.value = null
     currentRfqId.value = null
     openedDeal.value = null
     bookedContractTerms.value = null
@@ -1859,6 +1897,96 @@ export const usePricingStore = defineStore('pricing', () => {
     _resetInputState()
     _clearResults()
     parseScript()
+  }
+
+  function _productUnderlying(identity, market, index) {
+    const out = { ..._defaultUnderlying(index + 1), ...identity }
+    const pctFields = [
+      'sigma', 'q', 'sigma_fx', 'rho_sfx', 'v0', 'theta', 'xi', 'rho_h',
+      'rho_rS', 'alpha', 'beta', 'rho', 'nu', 'skew', 'curvature',
+    ]
+    for (const field of pctFields) {
+      if (market?.[field] != null) out[field] = Number(market[field]) * 100
+    }
+    if (market?.ccyh != null) out.ccyh = Number(market.ccyh) * 10000
+    if (market?.kappa != null) out.kappa = Number(market.kappa)
+    const curve = market?.dividend_curve || []
+    if (curve.length) {
+      out.dividendCurveEnabled = true
+      out.q = Number(curve[0][1]) * 100
+      out.dividendDecay = curve.length > 1 && Number(curve[0][1]) > 0
+        ? Math.max(0, Math.min(100,
+          (1 - Number(curve[1][1]) / Number(curve[0][1])) * 100))
+        : Number(market?.dividend_decay || 0) * 100
+    }
+    return out
+  }
+
+  /** Ouvre le Product comme source contractuelle et remet, si elle existe,
+   *  la dernière hypothèse de marché dans les champs du pricer. */
+  async function loadFromProduct(product, calculationInput = null) {
+    _resetInputState()
+    _clearResults()
+    const terms = product.terms
+    const market = calculationInput || {}
+    script.value = terms.script
+    currentScriptName.value = product.reference || product.name
+
+    const assumptions = market.underlyings || []
+    underlyings.value = terms.underlyings.map((identity, index) =>
+      _productUnderlying(identity, assumptions[index] || {}, index))
+    corrMatrix.value = Array.isArray(market.corr_matrix)
+      && market.corr_matrix.length === terms.underlyings.length
+      ? market.corr_matrix.map(row => [...row])
+      : terms.underlyings.map((_, i) => terms.underlyings.map((__, j) => i === j ? 1 : 0))
+    activeUnderlyingIdx.value = 0
+
+    Object.assign(globalParams, {
+      r: market.r != null ? Number(market.r) * 100 : globalParams.r,
+      T: terms.T,
+      N: market.N ?? globalParams.N,
+      model: market.model || globalParams.model,
+      antithetic: market.antithetic ?? globalParams.antithetic,
+      deal_ccy: terms.settlement_ccy || globalParams.deal_ccy,
+      nominal: product.intent?.nominal ?? globalParams.nominal,
+      strike_date: terms.strike_date || '',
+      value_date: terms.value_date || '',
+      maturity_date: terms.maturity_date || '',
+      payment_date: terms.payment_date || '',
+      valuation_date: '',
+      barrierMonitoring: market.barrier_monitoring || 'weekly',
+      rateModel: Number(market.sigma_r || 0) === 0
+        ? 'deterministic' : (Number(market.a_r || 0) === 0 ? 'abm' : 'hull_white'),
+      sigma_r: Number(market.sigma_r || 0) * 100,
+      a_r: Number(market.a_r || 0),
+    })
+    if (Array.isArray(market.yield_curve) && market.yield_curve.length) {
+      yieldCurve.enabled = true
+      yieldCurve.pillars = market.yield_curve.map(([T, rate]) => ({
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, rate: Number(rate) * 100,
+      }))
+    }
+    if (Array.isArray(market.funding_curve) && market.funding_curve.length) {
+      fundingCurve.enabled = true
+      fundingCurve.mode = 'pillars'
+      fundingCurve.pillars = market.funding_curve.map(([T, spread]) => ({
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: Number(spread) * 100,
+      }))
+    } else if (market.funding_spread != null) {
+      fundingCurve.enabled = Number(market.funding_spread) !== 0
+      fundingCurve.mode = 'flat'
+      fundingCurve.level = Number(market.funding_spread) * 100
+    }
+
+    await parseScript()
+    for (const parameter of terms.parameters || []) {
+      if (!(parameter.name in paramOverrides)) continue
+      paramOverrides[parameter.name] = Array.isArray(parameter.value)
+        ? parameter.value.map(value => fromStoredUnits(parameter.name, value))
+        : fromStoredUnits(parameter.name, parameter.value)
+    }
+    _restoreConstats(terms.constats || {})
+    currentProduct.value = product
   }
 
   // Reopen a booked deal's exact frozen state — script, market params, full
@@ -2478,7 +2606,7 @@ export const usePricingStore = defineStore('pricing', () => {
     // deux voies de construction finiraient par classer des produits
     // que l'écran ne price pas.
     inLifeBody: _inLifeBody,
-    currentIndicativeId, productTitle, ensureIndicative,
+    currentIndicativeId, currentProduct, productTitle, ensureIndicative,
     currentRfqId, pendingDealPrefill, openedDeal, contractTermsLocked,
     parseScript, runPricing, runGreeks,
     runProfile, runPaths, runProba, runBacktest, runMtf,
@@ -2498,7 +2626,7 @@ export const usePricingStore = defineStore('pricing', () => {
     resetToDefaults, loadFromDb, loadVariant, saveVariant, variantInfo,
     relacherVariante,
     variantDirty,
-    loadFromDeal, loadFromRfq, saveScript, updateScript,
+    loadFromDeal, loadFromRfq, loadFromProduct, saveScript, updateScript,
     pricingBody: _pricingBody,
   }
 })

@@ -19,7 +19,7 @@ from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent
                           Entity, User, Counterparty, Portfolio, LifecycleProposal,
                           OfficialFixingVersion, Opportunity, RfqQuote, RfqRequest, Script,
                           TradeAmendmentRequest, ValuationRun)
-from .auth import get_current_user
+from .auth import get_current_user, receipt_signing_secret
 from ..services.market_data import (
     DEFAULT_MARKET_DATA_PROVIDER, dividend_profile, load_hist_prices,
     load_yahoo_reference_closes, market_data_provider_for_deal,
@@ -59,6 +59,13 @@ from ..core.deal_valuation import (
     DealGreeksRequest, MtmRequest, mtm_core as _deal_mtm_core,
 )
 from ..core.valuation_runs import stage_valuation_run, replay_valuation_run
+from ..core.product.inputs import terms_from_input
+from ..core.product.models import CommercialContext, FrozenObject, TradeIntent
+from ..services.product_repository import (
+    ProductError, load_product, owned_record, stage_revision,
+)
+from ..services.product_lifecycle import lifecycle_snapshot, stage_product_lifecycle
+from ..services.product_receipts import verify_server_receipt
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
 
@@ -66,6 +73,8 @@ router = APIRouter(prefix="/api/deals", tags=["deals"])
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
 class DealCreate(BaseModel):
+    product_id: Optional[int] = None
+    product_terms_version: Optional[int] = None
     sens: Literal["achat", "vente"] = "vente"
     contrepartie: str
     devise: str = "EUR"
@@ -621,6 +630,8 @@ def _gen_ref(entity_name: str | None, session: Session) -> str:
 def _deal_row(d: Deal, events: list | None = None, session: Session | None = None) -> dict:
     row = {
         "id": d.id,
+        "product_id": d.product_id,
+        "product_terms_version": d.product_terms_version,
         "reference": d.reference,
         "entity_id": d.entity_id,
         "user_id": d.user_id,
@@ -1768,6 +1779,58 @@ def _book_deal(
             fermete_avant=fermete_avant,
             firmness_affirmee_au_booking=qualifiee_au_booking)
 
+    source_product = None
+    source_product_id = source_rfq.product_id if source_rfq is not None else body.product_id
+    if source_rfq is not None and body.product_id is not None \
+            and body.product_id != source_rfq.product_id:
+        _reject_booking(session, current, body, 422, {
+            "code": "RFQ_PRODUCT_MISMATCH",
+            "message": "Le Product demandé ne correspond pas à celui de la RFQ.",
+        })
+    if source_product_id is not None:
+        try:
+            owned_record(session, source_product_id, current)
+            source_product = load_product(session, source_product_id)
+        except ProductError as exc:
+            _reject_booking(session, current, body, exc.status, {
+                "code": exc.code, "message": str(exc),
+            })
+        expected_terms = (source_rfq.product_terms_version
+                          if source_rfq is not None else body.product_terms_version)
+        if expected_terms is not None and expected_terms != source_product.terms_version:
+            _reject_booking(session, current, body, 409, {
+                "code": "PRODUCT_TERMS_STALE",
+                "message": "La version du Product a changé depuis l’ouverture du dossier.",
+            })
+        if source_product.execution is not None:
+            _reject_booking(session, current, body, 409, {
+                "code": "PRODUCT_ALREADY_BOOKED",
+                "message": "Ce Product est déjà rattaché à une exécution.",
+            })
+        if source_rfq is None:
+            if not body.pricing_receipt:
+                _reject_booking(session, current, body, 422, {
+                    "code": "PRODUCT_REPRICE_REQUIRED",
+                    "message": "Repricez le Product avant un booking direct.",
+                })
+            try:
+                verified_product_receipt = verify_server_receipt(
+                    body.pricing_receipt, secret=receipt_signing_secret())
+                priced_terms = terms_from_input(
+                    verified_product_receipt["pricing_input"], allow_unresolved=False)
+            except (KeyError, TypeError, ValueError) as exc:
+                _reject_booking(session, current, body, 422, {
+                    "code": "PRODUCT_PRICING_RECEIPT_INVALID",
+                    "message": f"Le reçu serveur du pricing est invalide : {exc}",
+                })
+            if priced_terms.fingerprint != source_product.terms_fingerprint:
+                _reject_booking(session, current, body, 422, {
+                    "code": "PRODUCT_TERMS_MISMATCH",
+                    "message": "Le pricing courant ne porte plus les termes du Product ouvert.",
+                })
+        body.product_id = source_product_id
+        body.product_terms_version = source_product.terms_version
+
     # A new deal's script and frozen CONSTAT values are the contract.  Client
     # Monte-Carlo grid points are never a safe booking fallback.
     try:
@@ -1853,6 +1916,8 @@ def _book_deal(
         user_id=current.id,
         uat_batch_id=uat_batch_id,
         portfolio_id=default_portfolio.id,
+        product_id=body.product_id,
+        product_terms_version=body.product_terms_version,
         indicative_id=body.indicative_id,
         rfq_id=body.rfq_id,
         rfq_provenance_json=rfq_provenance,
@@ -1874,6 +1939,8 @@ def _book_deal(
         script_id=body.script_id,
         sens=body.sens,
         contrepartie=body.contrepartie,
+        counterparty_id=(session.exec(select(Counterparty.id).where(
+            Counterparty.name == body.contrepartie)).first()),
         devise=body.devise,
         product_type=body.product_type,
         fixing_policy=body.fixing_policy,
@@ -2051,6 +2118,51 @@ def _book_deal(
                 parent_event_id=constatation.id,
                 label=f"{label} · relevé {j}/{len(fenetre['releves'])}",
             ))
+
+    if source_product is not None:
+        product_rfqs = source_product.rfqs
+        if source_rfq is not None:
+            from .rfq import (_booked_deals_by_rfq, _counterparty_by_provider,
+                              _get_quotes, _rfq_row)
+            current_rfq = FrozenObject(_rfq_row(
+                source_rfq, _get_quotes(source_rfq.id, session),
+                _counterparty_by_provider(session),
+                _booked_deals_by_rfq(session, current.id)))
+            product_rfqs = tuple(
+                item for item in product_rfqs
+                if item.to_dict().get("id") != source_rfq.id
+            ) + (current_rfq,)
+        intent = TradeIntent(
+            **{
+                **source_product.intent.model_dump(mode="json"),
+                "nominal": deal.nominal,
+                "side": "BUY" if deal.sens == "vente" else "SELL",
+                "counterparty_id": deal.counterparty_id,
+                "counterparty_name": deal.contrepartie,
+                "product_type": deal.product_type,
+                "transaction_format": deal.transaction_format or "",
+                "instrument_family": deal.instrument_family or "",
+                "payoff_family": deal.payoff_family or "",
+                "payoff_description": deal.payoff_description or "",
+                "documentation_reference": deal.documentation_reference or "",
+            }
+        )
+        commercial = CommercialContext(
+            client_id=deal.client_id, mandate_id=deal.mandate_id,
+            opportunity_id=deal.opportunity_id,
+            primary_affiliation_id=deal.primary_affiliation_id,
+        )
+        source_product = source_product.model_copy(update={
+            "intent": intent,
+            "commercial": commercial,
+            "rfqs": product_rfqs,
+            "execution": FrozenObject(_contract_snapshot(deal)),
+            "lifecycle": lifecycle_snapshot(session, deal),
+        })
+        stage_revision(
+            session, source_product, expected_revision=source_product.revision,
+            actor_id=current.id, action="PRODUCT_BOOKED",
+            reason=f"Booking du Product dans le deal {deal.reference}.")
 
     try:
         record_audit_event(
@@ -3202,6 +3314,11 @@ def update_event(
             "external_reference": version.external_reference,
         },
     )
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_FIXING_RECEIVED",
+        reason=version.capture_reason,
+    )
     session.commit()
     session.refresh(ev)
     return _event_row(ev)
@@ -3476,6 +3593,11 @@ def validate_fixing(
             "record_sha256": version.record_sha256,
         },
     )
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_FIXING_VALIDATED",
+        reason=body.reason,
+    )
     session.commit()
     session.refresh(ev)
     return _event_row(ev)
@@ -3734,6 +3856,11 @@ def reject_fixing(
             "maker_user_id": version.entered_by,
             "checker_user_id": current.id,
         },
+    )
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_FIXING_REJECTED",
+        reason=body.reason,
     )
     session.commit()
     session.refresh(ev)
@@ -4083,6 +4210,10 @@ def _refresh_deal_core(
 
     deal.updated_at = datetime.utcnow()
     session.add(deal)
+    stage_product_lifecycle(
+        session, deal, actor_user_id=actor_user_id,
+        action="PRODUCT_LIFECYCLE_REFRESHED",
+        reason="Synchronisation après le monitoring lifecycle.")
     session.commit()
     return {
         "updated": updated,
@@ -4714,6 +4845,11 @@ def resolve_auto_fixing_exception(
     )
     deal.updated_at = decided_at
     session.add(deal)
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_FIXING_EXCEPTION_DECIDED",
+        reason=body.reason,
+    )
     session.commit()
     session.refresh(event)
 
@@ -4722,6 +4858,13 @@ def resolve_auto_fixing_exception(
     if evaluation and evaluation.get("outcome") != "en_cours":
         proposal = _auto_apply_lifecycle(
             deal, evaluation, session, actor_user_id=current.id)
+        stage_product_lifecycle(
+            session, deal, actor_user_id=current.id,
+            action=("PRODUCT_LIFECYCLE_RESOLUTION_APPLIED"
+                    if proposal and proposal.status == LifecycleStatus.APPLIED.value
+                    else "PRODUCT_LIFECYCLE_REFRESHED"),
+            reason="Synchronisation après rejeu des fixings validés.",
+        )
         session.commit()
     remaining = _pending_auto_fixing_exceptions(deal, session)
     actor_label = getattr(current, "username", None) or f"utilisateur #{current.id}"
@@ -5317,6 +5460,12 @@ def _refresh_auto_yahoo_deal_core(
     proposal = _auto_apply_lifecycle(deal, evaluation, session, actor_user_id)
     deal.updated_at = datetime.utcnow()
     session.add(deal)
+    stage_product_lifecycle(
+        session, deal, actor_user_id=actor_user_id,
+        action=("PRODUCT_LIFECYCLE_RESOLUTION_APPLIED"
+                if proposal and proposal.status == LifecycleStatus.APPLIED.value
+                else "PRODUCT_LIFECYCLE_REFRESHED"),
+        reason="Synchronisation après traitement lifecycle automatique.")
     session.commit()
     if exceptions:
         first_failure = exceptions[0]["failures"][0]
@@ -5898,6 +6047,11 @@ def apply_lifecycle_proposal(
         after={"proposal": _proposal_row(proposal), "deal": _deal_row(deal)},
         reason=body.reason,
         data_source=DataCategory.FIXING_OFFICIAL,
+    )
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_LIFECYCLE_RESOLUTION_APPLIED",
+        reason=body.reason,
     )
     session.commit()
     session.refresh(deal)

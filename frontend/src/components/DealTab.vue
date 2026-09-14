@@ -604,6 +604,8 @@ async function book() {
 
   try {
     const deal = await dealsStore.bookDeal({
+      product_id: store.currentProduct?.product_id || null,
+      product_terms_version: store.currentProduct?.terms_version || null,
       sens: form.sens,
       contrepartie: form.contrepartie.trim(),
       devise: store.globalParams.deal_ccy,

@@ -53,6 +53,8 @@
       </div>
     </div>
 
+    <ProductContextBar />
+
     <!-- Les déclinaisons du deal, juste sous la barre d'outils : ce qu'on
          regarde doit se lire avant ce qu'on lit. -->
     <VariantBar />
@@ -60,10 +62,12 @@
     <div v-if="store.contractTermsLocked"
          class="mx-5 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-amber-950 shrink-0">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span class="text-sm font-bold">🔒 Deal booké</span>
-        <span class="font-mono text-xs font-semibold">{{ store.openedDeal.reference }}</span>
+        <span class="text-sm font-bold">🔒 {{ store.openedDeal ? 'Deal booké' : 'Product conservé' }}</span>
+        <span class="font-mono text-xs font-semibold">
+          {{ store.openedDeal?.reference || store.currentProduct?.reference }}
+        </span>
         <span class="text-xs">
-          Termes contractuels figés · seules les hypothèses de valorisation sont modifiables.
+          Termes figés · seules les hypothèses de valorisation sont modifiables.
         </span>
       </div>
     </div>
@@ -126,16 +130,19 @@ import ResultsPanel    from '../components/ResultsPanel.vue'
 import KidPanel        from '../components/KidPanel.vue'
 import EmtPanel        from '../components/EmtPanel.vue'
 import SensitiveValue  from '../components/SensitiveValue.vue'
+import ProductContextBar from '../components/ProductContextBar.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDealsStore } from '../stores/deals.js'
 import { useRfqStore } from '../stores/rfq.js'
+import { useProductsStore } from '../stores/products.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 
 const store = usePricingStore()
 const dealsStore = useDealsStore()
 const rfqStore = useRfqStore()
+const productsStore = useProductsStore()
 const demo = useDemoModeStore()
 const route = useRoute()
 
@@ -188,7 +195,13 @@ onMounted(async () => {
   const fromRfq = route.query.fromRfq
   if (fromRfq) {
     const rfqObj = await rfqStore.fetchOne(Number(fromRfq))
-    if (rfqObj) await store.loadFromRfq(rfqObj)
+    if (rfqObj) {
+      await store.loadFromRfq(rfqObj)
+      if (rfqObj.product_id) {
+        const loaded = await productsStore.fetchOne(rfqObj.product_id)
+        if (loaded) store.currentProduct = loaded.product
+      }
+    }
     store.leftTab = 'deal'
   }
 })

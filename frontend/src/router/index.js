@@ -36,6 +36,16 @@ const routes = [
     meta: { title: 'Pricer' },
   },
   {
+    path: '/products/:productId/pricer',
+    component: () => import('../views/PricerView.vue'),
+    meta: { title: 'Produit — Pricer' },
+  },
+  {
+    path: '/products',
+    component: () => import('../views/ProductsView.vue'),
+    meta: { title: 'Mes Produits' },
+  },
+  {
     path: '/documentation',
     component: () => import('../views/DocumentationView.vue'),
     meta: { title: 'Documentation' },

@@ -53,7 +53,15 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
     not publish a VaR for the requested portfolio and automatically computes a
     separately labelled VaR on the fixed calculable subset when one exists."""
     from .deal_valuation import MtmRequest, mtm_core
+    from ..services.product_repository import ProductError, load_product
     from fastapi import HTTPException
+
+    product = None
+    if getattr(deal, "product_id", None) is not None:
+        try:
+            product = load_product(session, deal.product_id)
+        except ProductError as exc:
+            return {"skipped": True, "reason": {"code": exc.code, "message": str(exc)}}
 
     try:
         mtm_payload, ctx = mtm_core(deal, session, n_paths, MtmRequest())
@@ -80,6 +88,7 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
         }
 
     market = json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {}
+    terms = product.terms if product is not None else None
 
     return {
         "deal_id": deal.id,
@@ -91,13 +100,16 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
         "data_provider": (mtm_payload.get("market_used", {})
                           .get("data", {}).get("provider")),
         "base": {
-            "script_text": deal.script_snapshot,
-            "constat_values": market.get("constats"),
-            "value_date": deal.value_date,
+            "script_text": terms.script if terms is not None else deal.script_snapshot,
+            "constat_values": (terms.constats.to_dict()
+                               if terms is not None else market.get("constats")),
+            "value_date": (terms.value_date.isoformat()
+                           if terms and terms.value_date else deal.value_date),
             # Sans ces deux-la le worker ne peut pas resoudre un calendrier
             # portant une convention ou un decalage de reglement.
-            "strike_date": deal.strike_date,
-            "settlement_ccy": (deal.devise or "").strip().upper() or None,
+            "strike_date": (terms.strike_date.isoformat()
+                            if terms and terms.strike_date else deal.strike_date),
+            "settlement_ccy": ((terms.settlement_ccy if terms else deal.devise) or "").strip().upper() or None,
             "T_elapsed": ctx["T_elapsed"],
             # La coupe passé / vie restante du MtM : le worker doit couper le
             # calendrier au même endroit, sinon la jambe choquée reprice un
@@ -114,7 +126,7 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
             "sigma_r": ctx["sigma_r"],
             "a_r": ctx["a_r"],
             "antithetic": ctx["antithetic"],
-            "user_params": ctx["user_params"],
+            "user_params": terms.user_params() if terms is not None else ctx["user_params"],
             "barrier_monitoring": market.get("barrierMonitoring", "weekly"),
             "n_paths": n_paths,
             "valuation_context": ctx["valuation_context"],
