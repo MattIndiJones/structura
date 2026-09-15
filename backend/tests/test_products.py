@@ -331,6 +331,41 @@ def test_rfq_consomme_les_termes_du_product_et_l_enrichit(product_client):
     assert refreshed["rfqs"][0]["reference"] == rfq["reference"]
 
 
+def test_rfq_depuis_pricer_conserve_tout_le_panier_du_product(product_client):
+    underlyings = [
+        {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR",
+         "s0": 1.0, "sigma": 0.21, "q": 0.018},
+        {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR",
+         "s0": 1.0, "sigma": 0.27, "q": 0.031},
+    ]
+    correlation = [[1.0, 0.45], [0.45, 1.0]]
+    product = _create(
+        product_client, key="multi-product-for-rfq",
+        pricing_input=_pricing_input(
+            underlyings=underlyings, corr_matrix=correlation))
+
+    response = product_client.post("/api/rfq", json={
+        "product_id": product["product_id"],
+        "product_terms_version": product["terms_version"],
+        "name": "AO worst-of depuis Pricer", "kind": "indicatif", "sens": "achat",
+        "script_snapshot": "AT MATURITY\n  PAY 0",
+        "params": {
+            "underlyings": [
+                {"s0": 1.0, "sigma": 0.21, "q": 0.018},
+                {"s0": 1.0, "sigma": 0.27, "q": 0.031},
+            ],
+            "corr_matrix": correlation, "r": 0.03, "N": 2000,
+            "model": "constant",
+        },
+    })
+
+    assert response.status_code == 201, response.text
+    rfq = response.json()
+    assert [u["ticker"] for u in rfq["params"]["underlyings"]] == ["MC.PA", "^GDAXI"]
+    assert [u["sigma"] for u in rfq["params"]["underlyings"]] == [0.21, 0.27]
+    assert rfq["params"]["corr_matrix"] == correlation
+
+
 def test_booking_direct_rattache_l_execution_au_product(product_client):
     pricing_input = _pricing_input()
     request = PricingRequest.model_validate(pricing_input)

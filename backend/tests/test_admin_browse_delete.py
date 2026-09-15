@@ -17,7 +17,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from backend.app.core import admin_registry
 from backend.app.db.models import (
     Alert, Deal, DealEvent, Entity, LifecycleProposal, OfficialFixingVersion,
-    RfqQuote, RfqRequest, TradeAmendmentRequest, User,
+    RfqQuote, RfqRequest, TradeAmendmentRequest, User, ValuationRun,
 )
 
 
@@ -114,6 +114,34 @@ def test_deleting_a_deal_carrying_its_whole_lifecycle():
     for model in (Deal, DealEvent, OfficialFixingVersion, Alert,
                   LifecycleProposal, TradeAmendmentRequest):
         assert s.exec(select(model)).all() == [], model.__name__
+    assert s.execute(text("PRAGMA foreign_key_check")).fetchall() == []
+
+
+def test_deleting_a_deal_removes_its_valuation_history_and_latest_pointer():
+    """The latest valuation forms a second FK cycle: deal -> latest run ->
+    deal.  Admin deletion must cut the pointer and remove every run before the
+    parent deal, including deals that have been repriced several times."""
+    s = _session()
+    deal = _deal(s, "TEST-DEL-VALUATIONS")
+    runs = []
+    for index in range(3):
+        run = ValuationRun(
+            deal_id=deal.id,
+            user_id=1,
+            run_type="MTM",
+            context_hash=f"hash-{index}",
+        )
+        s.add(run)
+        s.flush()
+        runs.append(run)
+    deal.latest_valuation_run_id = runs[-1].id
+    s.add(deal)
+    s.commit()
+
+    admin_registry.delete_row("deals", deal.id, s)
+
+    assert s.exec(select(Deal)).all() == []
+    assert s.exec(select(ValuationRun)).all() == []
     assert s.execute(text("PRAGMA foreign_key_check")).fetchall() == []
 
 

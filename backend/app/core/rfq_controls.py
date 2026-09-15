@@ -13,6 +13,7 @@ from typing import Any
 
 from ..db.models import RfqQuote, RfqRequest
 from .payscript.parser import parse_script, resolve_constats
+from .schemas import validate_correlation_matrix
 
 
 MODEL_PRICE_MAX_AGE_MINUTES = max(
@@ -196,6 +197,19 @@ def rfq_readiness_failures(rfq: RfqRequest) -> list[ControlFailure]:
                 failures.append(ControlFailure(
                     "UNDERLYING_INCOMPLETE",
                     f"Sous-jacent {idx} incomplet : {', '.join(missing)}."))
+
+    correlation = params.get("corr_matrix")
+    # A one-name RFQ has no pairwise correlation to specify.  From two names
+    # onward the matrix is a material pricing and Risk input, so an API caller
+    # must provide the complete basket matrix instead of relying on a hidden
+    # identity fallback in a later module.
+    if len(underlyings) > 1 or correlation:
+        try:
+            validate_correlation_matrix(correlation or [], len(underlyings))
+        except (TypeError, ValueError) as exc:
+            failures.append(ControlFailure(
+                "CORRELATION_MATRIX_INVALID",
+                f"Matrice de corrélation RFQ invalide : {exc}"))
 
     notional = params.get("notional")
     if not isinstance(notional, (int, float)) or isinstance(notional, bool) or notional <= 0:

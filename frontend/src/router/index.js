@@ -63,6 +63,11 @@ const routes = [
     meta: { title: 'Booking — produits bookés' },
   },
   {
+    path: '/booking/:dealId/valuations',
+    component: () => import('../views/DealValuationsView.vue'),
+    meta: { title: 'Historique des MtM' },
+  },
+  {
     path: '/risk',
     component: () => import('../views/RiskManagementView.vue'),
     meta: { title: 'Risk Management' },

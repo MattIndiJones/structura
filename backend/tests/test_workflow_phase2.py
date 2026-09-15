@@ -744,3 +744,25 @@ def test_deal_audit_timeline_is_owner_scoped_and_filterable():
     assert timeline["items"][0]["action"] == "AMENDMENT_REQUESTED"
     with pytest.raises(HTTPException):
         deals_api.get_deal_audit(deal.id, OTHER_CHECKER, session)
+
+
+def test_deal_audit_timeline_excludes_rows_from_a_recycled_legacy_id():
+    session = _session()
+    deal = _deal(session)
+    event = _events(session, deal)[0]
+    old_time = deal.created_at - timedelta(hours=1)
+    new_time = deal.created_at + timedelta(seconds=1)
+    session.add(AuditEvent(
+        action="OLD_BOOKING", object_type="DEAL", object_id=deal.id,
+        result="SUCCESS", created_at=old_time))
+    session.add(AuditEvent(
+        action="OLD_FIXING", object_type="DEAL_EVENT", object_id=event.id,
+        result="SUCCESS", created_at=old_time))
+    session.add(AuditEvent(
+        action="CURRENT_BOOKING", object_type="DEAL", object_id=deal.id,
+        result="SUCCESS", created_at=new_time))
+    session.commit()
+
+    timeline = deals_api.get_deal_audit(deal.id, MAKER, session)
+
+    assert [row["action"] for row in timeline["items"]] == ["CURRENT_BOOKING"]

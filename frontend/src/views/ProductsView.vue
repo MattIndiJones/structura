@@ -306,70 +306,17 @@
       </template>
     </BaseModal>
 
-    <BaseModal v-model="comparisonDialog.open" title="Comparer les calculs conservés" max-width="1180px">
+    <BaseModal v-model="comparisonDialog.open" title="Comparateur de prix" max-width="1280px">
       <LoadingSpinner v-if="comparisonDialog.loading" class="py-8" />
       <AlertMessage v-else-if="comparisonDialog.error" kind="error">
         {{ comparisonDialog.error }}
       </AlertMessage>
-      <div v-else-if="comparisonDialog.items.length" class="space-y-3">
-        <div class="rounded-lg border px-3 py-2.5 text-xs"
-             style="border-color: var(--border); background: var(--surface2);">
-          <div class="font-semibold">{{ comparisonDialog.productReference }}</div>
-          <div class="mt-1" style="color: var(--muted);">
-            {{ comparisonDialog.items.length }} calculs comparés dans l’ordre chronologique.
-            Chaque mouvement est mesuré contre la colonne immédiatement précédente.
-          </div>
-        </div>
-
-        <AlertMessage v-if="comparisonHasDifferentTerms" kind="warning">
-          La sélection contient plusieurs versions de termes. Les paramètres de marché restent comparables,
-          mais l’écart de prix ne représente pas un mouvement de marché pur.
-        </AlertMessage>
-
-        <div v-if="comparisonRows().length" class="comparison-table-wrap rounded-lg border"
-             style="border-color: var(--border);">
-          <table class="comparison-table text-[11px]">
-            <thead>
-              <tr style="background: var(--surface2); color: var(--muted);">
-                <th class="text-left px-3 py-2 comparison-table__group">Bloc</th>
-                <th class="text-left px-3 py-2 comparison-table__parameter">Paramètre</th>
-                <th v-for="item in comparisonDialog.items" :key="item.detail.id"
-                    class="text-right px-3 py-2 comparison-table__value">
-                  <div class="font-semibold" style="color: var(--text);">
-                    {{ formatDateTime(item.detail.calculated_at) }}
-                  </div>
-                  <div class="text-[9px] mt-0.5">
-                    Valo. {{ formatDate(item.detail.valuation_date) }} · termes v{{ item.detail.terms_version }}
-                  </div>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in comparisonRows()" :key="row.key" class="border-t"
-                  style="border-color: var(--border);">
-                <td class="px-3 py-2" style="color: var(--muted);">{{ row.group }}</td>
-                <td class="px-3 py-2 font-medium">{{ row.label }}</td>
-                <td v-for="(value, index) in row.values" :key="index"
-                    class="px-3 py-2 text-right font-mono"
-                    :class="{ 'comparison-cell--changed': seriesCellChanged(row, index) }">
-                  <div>{{ formatMarketValue(row, value) }}</div>
-                  <div v-if="index > 0" class="text-[9px] mt-0.5"
-                       :class="seriesCellChanged(row, index) ? 'market-delta' : 'comparison-cell__flat'">
-                    {{ formatSeriesDelta(row, index) }}
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div v-else class="rounded-lg border px-3 py-5 text-xs text-center"
-             style="border-color: var(--border); color: var(--muted);">
-          Aucun paramètre de marché n’a bougé entre les calculs sélectionnés.
-        </div>
-      </div>
-      <template #footer>
-        <button class="btn-secondary text-xs" @click="comparisonDialog.open = false">Fermer</button>
-      </template>
+      <PriceComparisonPanel v-else-if="comparisonDialog.items.length"
+        :items="productComparisonItems" :groups="productComparisonGroups"
+        :collapsible="false"
+        version-warning="Les calculs portent sur plusieurs versions de termes : l’écart de prix ne représente pas un mouvement de marché pur."
+        :title="`Évolution du prix de ${comparisonDialog.productReference}`"
+        price-label="prix conservés" />
     </BaseModal>
   </div>
 </template>
@@ -383,6 +330,7 @@ import BaseModal from '../components/ui/BaseModal.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SensitiveValue from '../components/SensitiveValue.vue'
+import PriceComparisonPanel from '../components/PriceComparisonPanel.vue'
 import { useProductsStore } from '../stores/products.js'
 import { formatBps, formatDate, formatDateTime, formatInt, formatNumber, formatPercent } from '../utils/format.js'
 import { compareMarketSnapshots, compareMarketSnapshotSeries } from '../utils/productCalculations.js'
@@ -414,8 +362,36 @@ const comparisonDialog = reactive({
   productReference: '',
   items: [],
 })
-const comparisonHasDifferentTerms = computed(() =>
-  new Set(comparisonDialog.items.map(item => item.detail.terms_version)).size > 1)
+const productComparisonItems = computed(() => comparisonDialog.items.map(item => ({
+  id: item.detail.id,
+  calculatedAt: item.detail.calculated_at,
+  valuationDate: item.detail.valuation_date,
+  price: item.summary?.price ?? null,
+  basis: `Termes v${item.detail.terms_version}`,
+  version: item.detail.terms_version,
+})))
+
+const productComparisonGroups = computed(() => {
+  if (!comparisonDialog.items.length) return []
+  const priceRow = {
+    key: 'result:price', label: 'Prix équitable', unit: 'percent', decimals: 2,
+    values: comparisonDialog.items.map(item => item.summary?.price ?? null),
+  }
+  const marketRows = compareMarketSnapshotSeries(
+    comparisonDialog.items.map(item => item.detail.market_snapshot))
+  const groups = new Map([['Résultat', [priceRow]]])
+  for (const row of marketRows) {
+    if (!groups.has(row.group)) groups.set(row.group, [])
+    groups.get(row.group).push({
+      key: row.key,
+      label: row.label,
+      unit: row.unit,
+      decimals: row.unit === 'bps' ? 1 : 2,
+      values: row.values,
+    })
+  }
+  return [...groups].map(([label, rows]) => ({ label, rows }))
+})
 
 onMounted(() => products.fetchAll())
 
@@ -527,21 +503,6 @@ async function showComparison(product) {
   }
 }
 
-function comparisonRows() {
-  if (!comparisonDialog.items.length) return []
-  const market = compareMarketSnapshotSeries(
-    comparisonDialog.items.map(item => item.detail.market_snapshot))
-    .filter(row => row.changed)
-  const prices = comparisonDialog.items.map(item => item.summary?.price ?? null)
-  const priceDeltas = prices.map((price, index) =>
-    index && price != null && prices[index - 1] != null ? price - prices[index - 1] : null)
-  const priceChanged = priceDeltas.some(delta => delta != null && Math.abs(delta) > 1e-10)
-  return [{
-    key: 'result:price', group: 'Résultat', label: 'Prix équitable', unit: 'percent',
-    values: prices, deltas: priceDeltas, changed: priceChanged,
-  }, ...market]
-}
-
 function previousCalculation(productId, calculation) {
   const sameTerms = (detailsByProduct[productId]?.calculations || [])
     .filter(item => item.terms_version === calculation.terms_version)
@@ -580,26 +541,6 @@ function formatMarketDelta(row) {
   if (row.unit === 'correlation') return `${sign}${formatNumber(row.delta, 2)}`
   if (row.unit === 'number') return `${sign}${formatNumber(row.delta, 2)}`
   return `${sign}${formatNumber(row.delta, 2)} pt`
-}
-
-function seriesCellChanged(row, index) {
-  if (index === 0) return false
-  const current = row.values[index]
-  const previous = row.values[index - 1]
-  return current === null || previous === null
-    ? current !== previous
-    : Math.abs(current - previous) > 1e-10
-}
-
-function formatSeriesDelta(row, index) {
-  if (!seriesCellChanged(row, index)) return 'stable'
-  const delta = row.deltas[index]
-  if (delta == null) return 'structure modifiée'
-  const sign = delta > 0 ? '+' : ''
-  if (row.unit === 'bps') return `${sign}${formatNumber(delta, 1)} bps`
-  if (row.unit === 'correlation') return `${sign}${formatNumber(delta, 2)}`
-  if (row.unit === 'number') return `${sign}${formatNumber(delta, 2)}`
-  return `${sign}${formatNumber(delta, 2)} pt`
 }
 
 async function setArchive(product) {
@@ -663,14 +604,6 @@ function modelLabel(model) {
 .market-row--changed { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
 .market-delta { color: var(--accent); font-weight: 700; }
 .calculation-checkbox { width: 14px; height: 14px; accent-color: var(--accent); }
-.comparison-table-wrap { max-height: min(58vh, 620px); overflow: auto; }
-.comparison-table { min-width: 760px; width: max-content; }
-.comparison-table__group { min-width: 115px; }
-.comparison-table__parameter { min-width: 170px; }
-.comparison-table__value { min-width: 175px; }
-.comparison-table thead { position: sticky; top: 0; z-index: 1; }
-.comparison-cell--changed { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
-.comparison-cell__flat { color: var(--subtle); }
 .result-stat {
   display: flex;
   min-height: 76px;

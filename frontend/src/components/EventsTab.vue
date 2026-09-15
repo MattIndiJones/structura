@@ -673,7 +673,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useDealsStore } from '../stores/deals.js'
 import { usePricingStore } from '../stores/pricing.js'
 import { useAuthStore } from '../stores/auth.js'
@@ -795,6 +795,15 @@ onMounted(async () => {
         ? dealsStore.deals.find(d => d.script_id === store.currentScriptId)?.id ?? null
         : null)
   if (id) await selectDeal(id)
+})
+
+// EventsTab remains mounted while the Pricer opens another booked deal.  The
+// prop changes, but onMounted does not run again; explicitly reload the scoped
+// status and audit data for the new trade.
+watch(() => props.initialDealId, async (id, previousId) => {
+  if (!id || id === previousId) return
+  dealsStore.auditEvents = []
+  await selectDeal(id)
 })
 
 async function selectDeal(id) {

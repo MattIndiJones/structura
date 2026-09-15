@@ -5,6 +5,7 @@ import { calculerDelta, contexteDepuisCorps } from '../composables/useVariantDel
 import { courbeDividende } from '../composables/useDividendCurve.js'
 import { CALCULATION_LIMITS, estimatePricingCalculation } from '../utils/calculationBudget.js'
 import { buildModelCalendars } from '../utils/productModels.js'
+import { normaliseCorrelation } from '../utils/rfqBasket.js'
 
 const DEFAULT_SCRIPT = `# Autocall Athena 3 ans
 PARAM COUPON = 8%
@@ -1132,6 +1133,13 @@ export const usePricingStore = defineStore('pricing', () => {
   keys => { for (const key of keys ? keys.split(',') : []) _resolveEffectiveDate(key) })
 
   function syncTenorFromMaturity() {
+    // Une RFQ porte le tenor effectivement cote. Son echeancier peut finir un
+    // week-end puis etre ajuste au jour ouvre suivant pour le pricing :
+    // recalculer T depuis cette date effective transforme alors, a tort, le
+    // meme contrat en un tenor different et le booking est refuse. Depuis une
+    // RFQ, les termes restent ceux de l'AO ; tout autre produit doit passer par
+    // une nouvelle RFQ.
+    if (currentRfqId.value) return
     const maturity = _maturityDate()
     if (!maturity || !globalParams.strike_date) return
     const start = new Date(`${globalParams.strike_date}T00:00:00Z`)
@@ -2401,21 +2409,10 @@ export const usePricingStore = defineStore('pricing', () => {
     _markSessionBaseline()
   }
 
-  /**
-   * The date a reopened deal is first valued at: its initial pricing.
-   *
-   * For a struck deal that is the strike date. A deal whose strike is still to
-   * come (forward start) cannot be valued at that future date — it used to
-   * be, which priced a product at a date no market exists for. Its initial
-   * pricing is the trade date, never later than today, with the strike
-   * simulated path by path.
-   */
-  function _initialValuationDate(deal) {
-    const today = new Date().toISOString().split('T')[0]
-    const strike = deal.strike_date || ''
-    if (!strike || strike <= today) return strike
-    const trade = deal.trade_date || ''
-    return trade && trade < strike && trade < today ? trade : today
+  function _localTodayIso() {
+    const now = new Date()
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+      .toISOString().slice(0, 10)
   }
 
   // Reopen a booked deal's exact frozen state — script, market params, full
@@ -2468,10 +2465,10 @@ export const usePricingStore = defineStore('pricing', () => {
       value_date: deal.value_date,
       maturity_date: deal.maturity_date || '',
       payment_date: deal.payment_date || '',
-      // Un deal rouvert montre d'abord son pricing initial. Le passage en MtM
-      // reste un choix explicite : l'utilisateur change cette Pricing date,
-      // ce qui fait basculer _pricingBody vers /api/price/in-life.
-      valuation_date: _initialValuationDate(deal),
+      // La date de calcul est un choix de repricing, pas un terme contractuel.
+      // Un deal rouvert part donc toujours de la date locale du jour ; strike,
+      // value date et maturité restent, eux, ceux du contrat figé.
+      valuation_date: _localTodayIso(),
     })
 
     if (market.yieldCurve?.length) {
@@ -2606,7 +2603,7 @@ export const usePricingStore = defineStore('pricing', () => {
           dividendDecay: dividend_decay != null ? dividend_decay * 100 : inferredDecay,
         }
       })
-      corrMatrix.value = p.corr_matrix?.length ? p.corr_matrix : [[1.0]]
+      corrMatrix.value = normaliseCorrelation(p.corr_matrix, underlyings.value.length)
       activeUnderlyingIdx.value = 0
     }
 

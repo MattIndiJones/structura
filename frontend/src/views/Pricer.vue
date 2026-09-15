@@ -181,14 +181,15 @@ function goToEvents(dealId) {
 }
 
 // Deep link from the Booking view (/pricer?dealId=…) — reload that deal's
-// exact frozen state (script + params + underlyings) into every tab, not
-// just Events, then jump straight there instead of landing on Script.
+// exact frozen state (script + params + underlyings) into every tab. Callers
+// can name the landing tab; legacy links still open the lifecycle events.
 onMounted(async () => {
   const dealId = route.query.dealId
   if (dealId) {
     const deal = await dealsStore.selectDeal(Number(dealId))
     if (deal) await store.loadFromDeal(deal)
-    goToEvents(Number(dealId))
+    if (route.query.tab === 'script') store.leftTab = 'script'
+    else goToEvents(Number(dealId))
     return
   }
 

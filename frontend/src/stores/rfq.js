@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch } from '../utils/api.js'
+import { normaliseCorrelation } from '../utils/rfqBasket.js'
 
 async function _json(res, fallbackMsg) {
   if (!res.ok) {
@@ -180,7 +181,7 @@ export const useRfqStore = defineStore('rfq', () => {
     const payload = {
       script: rfq.script_snapshot,
       underlyings: p.underlyings || [],
-      corr_matrix: p.corr_matrix || [],
+      corr_matrix: normaliseCorrelation(p.corr_matrix, (p.underlyings || []).length),
       r: p.r ?? 0.03,
       T: p.T ?? 3.0,
       N: p.N ?? 20000,
@@ -227,8 +228,11 @@ export const useRfqStore = defineStore('rfq', () => {
         model: p.model || 'constant',
         r: p.r ?? null,
         N: p.N ?? null,
-        sigma: p.underlyings?.[0]?.sigma ?? null,
-        q: p.underlyings?.[0]?.q ?? null,
+        underlyings: (p.underlyings || []).map(underlying => ({
+          name: underlying.name, ticker: underlying.ticker,
+          sigma: underlying.sigma ?? null, q: underlying.q ?? null,
+        })),
+        corr_matrix: normaliseCorrelation(p.corr_matrix, (p.underlyings || []).length),
       },
       at: new Date().toISOString(),
     }

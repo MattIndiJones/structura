@@ -14,23 +14,42 @@
 
     <div class="px-6 pb-8 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_22rem] gap-6 items-start">
       <!-- Catalogue: one sheet per payoff, with no duration nor asset count. -->
-      <div class="flex flex-col gap-6">
-        <section v-for="family in families" :key="family.key" :aria-label="family.label">
-          <h2 class="micro-label mb-2">{{ family.label }}</h2>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <button v-for="model in family.models" :key="model.key" type="button"
-                    :id="`modele-${model.key}`"
-                    class="model-option" :class="{ active: selectedKey === model.key }"
-                    :aria-pressed="selectedKey === model.key"
-                    @click="select(model)">
-              <span class="text-sm font-semibold" style="color: var(--text);">{{ model.label }}</span>
-              <span class="text-xs leading-relaxed" style="color: var(--muted);">{{ model.description }}</span>
-              <span class="flex flex-wrap gap-1 mt-1">
-                <span class="badge badge-muted">{{ underlyingsLabel(model) }}</span>
-                <span class="badge badge-muted">{{ tenorsLabel(model) }}</span>
+      <div class="family-list">
+        <section v-for="family in families" :key="family.key" class="family-section"
+                 :class="{ 'family-section--open': isFamilyOpen(family.key) }">
+          <button type="button" class="family-toggle"
+                  :aria-expanded="isFamilyOpen(family.key)"
+                  :aria-controls="`famille-${family.key}`"
+                  @click="toggleFamily(family.key)">
+            <span class="family-toggle__identity">
+              <span class="family-toggle__title">{{ family.label }}</span>
+              <span class="family-toggle__count">
+                {{ family.models.length }} modèle{{ family.models.length > 1 ? 's' : '' }}
               </span>
-            </button>
-          </div>
+            </span>
+            <span class="family-toggle__action">
+              {{ isFamilyOpen(family.key) ? 'Réduire' : 'Afficher' }}
+              <span class="family-chevron" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <Transition name="family-content">
+            <div v-if="isFamilyOpen(family.key)" :id="`famille-${family.key}`" class="family-content">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <button v-for="model in family.models" :key="model.key" type="button"
+                        :id="`modele-${model.key}`"
+                        class="model-option" :class="{ active: selectedKey === model.key }"
+                        :aria-pressed="selectedKey === model.key"
+                        @click="select(model)">
+                  <span class="text-sm font-semibold" style="color: var(--text);">{{ model.label }}</span>
+                  <span class="text-xs leading-relaxed" style="color: var(--muted);">{{ model.description }}</span>
+                  <span class="flex flex-wrap gap-1 mt-1">
+                    <span class="badge badge-muted">{{ underlyingsLabel(model) }}</span>
+                    <span class="badge badge-muted">{{ tenorsLabel(model) }}</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </Transition>
         </section>
       </div>
 
@@ -123,10 +142,22 @@ const families = PRODUCT_MODEL_FAMILIES
 const selectedKey = ref('')
 const count = ref(1)
 const tenor = ref(null)
+const openFamilies = ref(new Set())
 
 const selected = computed(() => productModels.find(m => m.key === selectedKey.value) || null)
 const counts = computed(() => underlyingCountsFor(selected.value, CALCULATION_LIMITS.maxUnderlyings))
 const tenors = computed(() => tenorsFor(selected.value))
+
+function isFamilyOpen(familyKey) {
+  return openFamilies.value.has(familyKey)
+}
+
+function toggleFamily(familyKey) {
+  const next = new Set(openFamilies.value)
+  if (next.has(familyKey)) next.delete(familyKey)
+  else next.add(familyKey)
+  openFamilies.value = next
+}
 
 // The strike date of a fresh Pricer session: today (M8).
 const strikeDate = new Date().toISOString().slice(0, 10)
@@ -202,6 +233,41 @@ async function open() {
 </script>
 
 <style scoped>
+.family-list { display: flex; flex-direction: column; gap: .65rem; }
+.family-section {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(26, 24, 20, .035);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.family-section--open {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  box-shadow: 0 8px 22px -18px rgba(26, 77, 132, .55);
+}
+.family-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 3.6rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .8rem 1rem;
+  background: var(--surface);
+  text-align: left;
+}
+.family-toggle:hover { background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+.family-toggle__identity { display: flex; min-width: 0; align-items: baseline; gap: .65rem; }
+.family-toggle__title { color: var(--text); font-size: .78rem; font-weight: 750; letter-spacing: .035em; text-transform: uppercase; }
+.family-toggle__count { color: var(--muted); font-size: .66rem; white-space: nowrap; }
+.family-toggle__action { display: flex; flex: 0 0 auto; align-items: center; gap: .45rem; color: var(--muted); font-size: .66rem; font-weight: 650; }
+.family-chevron { display: inline-block; color: var(--accent); font-family: sans-serif; font-size: 1.25rem; line-height: 1; transition: transform .15s ease; }
+.family-section--open .family-chevron { transform: rotate(90deg); }
+.family-content { padding: .15rem .75rem .75rem; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface2) 42%, var(--surface)); }
+.family-content > .grid { padding-top: .65rem; }
+.family-content-enter-active, .family-content-leave-active { transition: opacity .14s ease, transform .14s ease; }
+.family-content-enter-from, .family-content-leave-to { opacity: 0; transform: translateY(-4px); }
 .model-option {
   display: flex;
   flex-direction: column;
@@ -220,6 +286,7 @@ async function open() {
   background: var(--accent-light);
 }
 @media (prefers-reduced-motion: reduce) {
-  .model-option { transition: none; }
+  .family-section, .family-chevron, .family-content-enter-active,
+  .family-content-leave-active, .model-option { transition: none; }
 }
 </style>

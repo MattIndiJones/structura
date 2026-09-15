@@ -24,7 +24,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from backend.app.api import deals as deals_api
 from backend.app.api import rfq as rfq_api
 from backend.app.db.models import (
-    Client, ClientMandate, Counterparty, Deal, Opportunity,
+    AuditEvent, Client, ClientMandate, Counterparty, Deal, Opportunity,
     RfqProvider, RfqQuote, RfqRequest,
 )
 from backend.app.core.references import next_reference
@@ -90,6 +90,61 @@ def test_to_trade_calendar_is_rejected_before_the_rfq_is_created():
     assert exc.value.status_code == 422
     assert exc.value.detail["code"] == "CONTRACT_CALENDAR_INVALID"
     assert s.exec(select(RfqRequest)).all() == []
+
+
+def test_multi_underlying_rfq_requires_a_complete_correlation_matrix():
+    s = _make_session()
+    strike = date.today()
+    end = strike + timedelta(days=365)
+    params = {
+        "underlyings": [
+            {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR"},
+            {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR"},
+        ],
+        "notional": 1_000_000, "currency": "EUR", "T": 1.0,
+        "strike_date": strike.isoformat(),
+        "value_date": strike.isoformat(),
+        "payment_date": (end + timedelta(days=3)).isoformat(),
+        "constats": {"OBS": {
+            "start_date": strike.isoformat(), "end_date": end.isoformat(),
+            "roll_date": (strike + timedelta(days=90)).isoformat(),
+            "frequency": "3M",
+        }},
+    }
+    with pytest.raises(HTTPException) as exc:
+        rfq_api.create_rfq(rfq_api.RfqCreate(
+            name="Worst-of incomplet", kind="to_trade",
+            script_snapshot="CONSTAT() OBS\nAT OBS:\n  PAY WOF",
+            params=params,
+        ), USER, s)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "CORRELATION_MATRIX_INVALID"
+    assert s.exec(select(RfqRequest)).all() == []
+
+
+def test_multi_underlying_repricing_cannot_replace_the_matrix_with_an_incomplete_one():
+    s = _make_session()
+    params = {
+        "underlyings": [
+            {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR"},
+            {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR"},
+        ],
+        "corr_matrix": [[1.0, 0.45], [0.45, 1.0]],
+    }
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+        name="Worst-of", script_snapshot="AT MATURITY\n  PAY WOF", params=params,
+    ), USER, s)
+
+    with pytest.raises(HTTPException) as exc:
+        rfq_api.update_rfq(
+            rfq["id"], rfq_api.RfqUpdate(pricing_params={"corr_matrix": [[1.0]]}),
+            USER, s)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "CORRELATION_MATRIX_INVALID"
+    stored = json.loads(s.get(RfqRequest, rfq["id"]).params_json)
+    assert stored["corr_matrix"] == [[1.0, 0.45], [0.45, 1.0]]
 
 
 # ── 1. Timezone round-trip + sort order ────────────────────────────────
@@ -341,6 +396,82 @@ def test_booking_from_an_rfq_links_deal_and_closes_the_rfq():
     assert deal["rfq_id"] == rfq["id"]
     closed_rfq = s.get(RfqRequest, rfq["id"])
     assert closed_rfq.status == "clos"
+
+
+def test_multi_underlying_rfq_reaches_the_deal_without_losing_market_inputs():
+    s = _make_session()
+    strike = date.today()
+    maturity = strike + timedelta(days=365)
+    payment = maturity + timedelta(days=3)
+    script = "CONSTAT() OBS\nAT OBS:\n  PAY WOF"
+    rfq_underlyings = [
+        {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR", "sigma": 0.21, "q": 0.018},
+        {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR", "sigma": 0.27, "q": 0.031},
+    ]
+    correlation = [[1.0, 0.45], [0.45, 1.0]]
+    constats = {"OBS": {
+        "start_date": strike.isoformat(), "end_date": maturity.isoformat(),
+        "roll_date": (strike + timedelta(days=90)).isoformat(),
+        "frequency": "3M",
+    }}
+    params = {
+        "underlyings": rfq_underlyings, "corr_matrix": correlation,
+        "notional": 1_000_000, "currency": "EUR", "T": 1.0,
+        "strike_date": strike.isoformat(), "value_date": strike.isoformat(),
+        "maturity_date": maturity.isoformat(), "payment_date": payment.isoformat(),
+        "constats": constats, "user_params": {}, "r": 0.03, "model": "constant",
+    }
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+        name="Worst-of LVMH DAX", kind="to_trade",
+        script_snapshot=script, params=params,
+    ), USER, s)
+    quote = _add_quote(s, rfq["id"], "BNP Paribas")
+    rfq_api.update_quote(
+        rfq["id"], quote["id"], rfq_api.QuoteUpdate(price=98.2), USER, s)
+    rfq_api.update_rfq(
+        rfq["id"], rfq_api.RfqUpdate(selected_quote_id=quote["id"]), USER, s)
+
+    booked_underlyings = [
+        {**underlying, "s0_abs": 100.0} for underlying in rfq_underlyings
+    ]
+    market_underlyings = [
+        {**rfq_underlyings[0], "sigma": 21.0, "q": 1.8},
+        {**rfq_underlyings[1], "sigma": 27.0, "q": 3.1},
+    ]
+    deal = _book_deal(_booking_body(
+        rfq_id=rfq["id"], script_snapshot=script,
+        nominal=1_000_000, devise="EUR", T=1.0,
+        strike_date=strike.isoformat(), value_date=strike.isoformat(),
+        maturity_date=maturity.isoformat(), payment_date=payment.isoformat(),
+        underlyings=booked_underlyings,
+        market_snapshot={
+            "underlyings": market_underlyings, "corrMatrix": correlation,
+            "constats": constats, "user_params": {}, "r": 3.0,
+            "model": "constant", "antithetic": True,
+        },
+        fair_value=97.9, price_traded=98.2,
+    ), USER, s)
+
+    assert [u["ticker"] for u in deal["underlyings"]] == ["MC.PA", "^GDAXI"]
+    assert deal["market_snapshot"]["underlyings"] == market_underlyings
+    assert deal["market_snapshot"]["corrMatrix"] == correlation
+    assert deal["rfq_provenance"]["product_terms"]["underlyings"] == [
+        {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR"},
+        {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR"},
+    ]
+    assert s.get(RfqRequest, rfq["id"]).status == "clos"
+
+
+def test_booking_never_reuses_a_deal_id_retained_by_the_audit_trail():
+    s = _make_session()
+    s.add(AuditEvent(
+        action="OLD_BOOKING", object_type="DEAL", object_id=80,
+        result="SUCCESS"))
+    s.commit()
+
+    deal = _book_deal(_booking_body(), USER, s)
+
+    assert deal["id"] > 80
 
 
 def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority():

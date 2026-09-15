@@ -31,7 +31,7 @@ from ..core.inlife_valuation import (
     _engine_underlyings, _shift_dividend_curve,
 )
 from ..core.calibration import realized_market
-from ..core.references import next_reference
+from ..core.references import next_audited_id, next_reference
 from ..core.audit import commit_rejection, record_audit_event
 from ..core.client_controls import (
     ClientRuleError, client_provenance_snapshot, require_deal_attribution_coherent,
@@ -1907,6 +1907,10 @@ def _book_deal(
     default_portfolio = get_or_create_default_portfolio(session, current.id)
 
     deal = Deal(
+        # AuditEvent keeps numeric object identities forever.  Letting SQLite
+        # recycle a deleted Deal id would splice the previous trade's history
+        # into the new one.
+        id=next_audited_id(session, Deal, "DEAL"),
         reference=reference,
         entity_id=current.entity_id,
         user_id=current.id,
@@ -2638,8 +2642,16 @@ def get_deal_audit(
     proposals = _get_lifecycle_proposals(deal_id, session)
     amendments = session.exec(select(TradeAmendmentRequest).where(
         TradeAmendmentRequest.deal_id == deal_id)).all()
+    # Legacy SQLite databases may already have recycled Deal, DealEvent or
+    # proposal ids after an administrative deletion.  The current trade cannot
+    # own any audit row written before it existed.  Keep this lower bound even
+    # though new Deal ids are now allocated durably: it repairs the timeline of
+    # databases that predate that allocator.
+    since_booking = AuditEvent.created_at >= deal.created_at
     clauses = [
-        (AuditEvent.object_type == "DEAL") & (AuditEvent.object_id == deal_id),
+        (AuditEvent.object_type == "DEAL")
+        & (AuditEvent.object_id == deal_id)
+        & since_booking,
     ]
     if deal.rfq_id:
         linked_rfq = session.get(RfqRequest, deal.rfq_id)
@@ -2656,15 +2668,18 @@ def get_deal_audit(
     if events:
         clauses.append(
             (AuditEvent.object_type == "DEAL_EVENT") &
-            (AuditEvent.object_id.in_([row.id for row in events])))
+            (AuditEvent.object_id.in_([row.id for row in events])) &
+            since_booking)
     if proposals:
         clauses.append(
             (AuditEvent.object_type == "LIFECYCLE_PROPOSAL") &
-            (AuditEvent.object_id.in_([row.id for row in proposals])))
+            (AuditEvent.object_id.in_([row.id for row in proposals])) &
+            since_booking)
     if amendments:
         clauses.append(
             (AuditEvent.object_type == "TRADE_AMENDMENT_REQUEST") &
-            (AuditEvent.object_id.in_([row.id for row in amendments])))
+            (AuditEvent.object_id.in_([row.id for row in amendments])) &
+            since_booking)
     statement = select(AuditEvent).where(or_(*clauses))
     if action:
         statement = statement.where(AuditEvent.action == action)
@@ -7117,20 +7132,70 @@ def _valuation_run_row(run: ValuationRun, include_payload: bool = False) -> dict
     return row
 
 
+@router.get("/valuation-runs/latest-mtm")
+def latest_mtm_runs(
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    deal_ids: str = "",
+):
+    """Latest persisted MtM for each requested accessible deal.
+
+    Booking shows several deals at once. Returning the immutable run payloads
+    in one call avoids two HTTP requests per row when the user comes back to
+    the page. The complete history remains available through the existing
+    per-deal endpoint.
+    """
+    try:
+        requested_ids = {
+            int(raw) for raw in deal_ids.split(",") if raw.strip()
+        }
+    except ValueError as exc:
+        raise HTTPException(422, "deal_ids doit contenir des identifiants entiers") from exc
+    if not requested_ids:
+        return []
+    if len(requested_ids) > 200:
+        raise HTTPException(422, "200 deals maximum par requête")
+
+    runs = session.exec(
+        select(ValuationRun)
+        .where(ValuationRun.run_type == "MTM")
+        .where(ValuationRun.deal_id.in_(requested_ids))
+        .order_by(ValuationRun.created_at.desc(), ValuationRun.id.desc())
+    ).all()
+    latest = []
+    seen = set()
+    for run in runs:
+        if run.deal_id in seen:
+            continue
+        deal = session.get(Deal, run.deal_id)
+        if not deal or not _can_access_deal(deal, current, session):
+            continue
+        seen.add(run.deal_id)
+        latest.append(_valuation_run_row(run, include_payload=True))
+    return latest
+
+
 @router.get("/{deal_id}/valuation-runs")
 def list_valuation_runs(
     deal_id: int,
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    run_type: Optional[str] = None,
+    include_payload: bool = False,
 ):
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
+    statement = select(ValuationRun).where(ValuationRun.deal_id == deal_id)
+    if run_type:
+        normalized_type = run_type.strip().upper()
+        if normalized_type not in {"MTM", "GREEKS", "REPORT"}:
+            raise HTTPException(422, "Type de run de valorisation inconnu")
+        statement = statement.where(ValuationRun.run_type == normalized_type)
     runs = session.exec(
-        select(ValuationRun).where(ValuationRun.deal_id == deal_id)
-        .order_by(ValuationRun.created_at.desc(), ValuationRun.id.desc())
+        statement.order_by(ValuationRun.created_at.desc(), ValuationRun.id.desc())
     ).all()
-    return [_valuation_run_row(run) for run in runs]
+    return [_valuation_run_row(run, include_payload=include_payload) for run in runs]
 
 
 @router.get("/valuation-runs/{run_id}")

@@ -44,6 +44,7 @@ class MtmRequest(BaseModel):
     overrides: Optional[dict[str, MtmOverrideUL]] = None
     r: Optional[float] = None
     window_days: int = 252
+    valuation_date: Optional[date] = None
 
 
 class DealGreeksRequest(MtmRequest):
@@ -90,10 +91,23 @@ def mtm_core(
     load_prices = load_prices or load_hist_prices
     dividend_loader = dividend_loader or dividend_profile
     realized_loader = realized_loader or realized_market
-    deal_id = deal.id
-    today = asof or date.today()
-    market_provider = market_data_provider_for_deal(deal, session)
     body = body or MtmRequest()
+    deal_id = deal.id
+    calendar_today = date.today()
+    today = asof or body.valuation_date or calendar_today
+    if today > calendar_today:
+        raise HTTPException(422, "La date de valorisation ne peut pas être future")
+    if deal.trade_date:
+        try:
+            trade_date = date.fromisoformat(deal.trade_date)
+        except ValueError:
+            raise HTTPException(422, "La date de trade du deal est invalide")
+        if today < trade_date:
+            raise HTTPException(
+                422,
+                "La date de valorisation ne peut pas précéder la date de trade",
+            )
+    market_provider = market_data_provider_for_deal(deal, session)
     product = None
     if getattr(deal, "product_id", None) is not None:
         try:
@@ -136,6 +150,7 @@ def mtm_core(
             funding_curve=funding_curve, funding_spread=funding_spread)
         payload = {
             "deal_id": deal_id, "reference": deal.reference,
+            "valuation_date": today.isoformat(),
             "status": "en_reglement", "settlement_pending": True,
             "mtm": mtm, "ic95": [mtm, mtm], "prob_gt100": float(mtm > 1.0),
             "fugit": remaining, "T_elapsed": round(elapsed, 4),
@@ -509,6 +524,7 @@ def mtm_core(
     payload = {
         "deal_id": deal_id,
         "reference": deal.reference,
+        "valuation_date": today.isoformat(),
         "mtm": result["price"],
         "ic95": result["ic95"],
         "prob_gt100": result["prob_gt100"],

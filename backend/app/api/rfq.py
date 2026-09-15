@@ -22,6 +22,7 @@ from ..core.rfq_controls import (
     contract_calendar_failures, maturity_iso, pricing_input_hash, product_terms, product_terms_hash,
     rfq_readiness_failures,
 )
+from ..core.schemas import validate_correlation_matrix
 from ..core.payscript.parser import parse_script
 from ..core.product.models import FrozenObject
 from ..core.workflow import RfqBusinessStatus, derive_rfq_status, rfq_business_status
@@ -660,6 +661,27 @@ def _clean_optional(value) -> str | None:
     return cleaned or None
 
 
+def _validate_rfq_correlation(params: dict) -> None:
+    """Reject an incomplete basket before it can become an RFQ record.
+
+    Correlation is a material input for both pricing and Risk.  Persisting a
+    two-name basket without it would force a later module to invent an
+    identity matrix, so every RFQ mutation that can carry pricing inputs uses
+    the same explicit contract.
+    """
+    underlyings = params.get("underlyings") or []
+    matrix = params.get("corr_matrix")
+    if len(underlyings) <= 1 and not matrix:
+        return
+    try:
+        validate_correlation_matrix(matrix or [], len(underlyings))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, detail={
+            "code": "CORRELATION_MATRIX_INVALID",
+            "message": f"Matrice de corrélation RFQ invalide : {exc}",
+        }) from exc
+
+
 def _create_rfq(
     body: RfqCreate,
     current: User,
@@ -710,6 +732,7 @@ def _create_rfq(
             "params": params,
             "product_terms_version": product.terms_version,
         })
+    _validate_rfq_correlation(body.params or {})
     if body.kind == "to_trade" and not _is_expert_script(body.script_snapshot):
         raise HTTPException(
             422, "Une RFQ 'to trade' doit utiliser un script en mode Expert (calendrier "
@@ -944,6 +967,7 @@ def update_rfq(
     if "pricing_params" in data:
         _refuse_if_booked(rfq, session, "les hypothèses de pricing")
         merged = _merge_pricing_params(rfq, data.pop("pricing_params") or {})
+        _validate_rfq_correlation(merged)
         new_hash = pricing_input_hash(rfq.script_snapshot, merged)
         if rfq.model_price is not None and rfq.model_input_hash != new_hash:
             rfq.model_price = None
@@ -954,6 +978,7 @@ def update_rfq(
         _refuse_if_booked(rfq, session, "les termes et paramètres de l'AO")
         new_params = data.pop("params") or {}
         _refuser_reglement_avant_maturite(new_params)
+        _validate_rfq_correlation(new_params)
         existing_terms = product_terms(rfq.script_snapshot, json.loads(rfq.params_json))
         new_terms = product_terms(rfq.script_snapshot, new_params)
         if _get_quotes(rfq_id, session) and new_terms != existing_terms:

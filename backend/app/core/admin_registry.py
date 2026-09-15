@@ -25,6 +25,7 @@ from ..db.models import (
     KidRecord, EmtRecord, RfqRequest, RfqQuote, User, AdminAuditLog,
     Alert, ShockRun, LifecycleProposal, TradeAmendmentRequest,
     DealContractVersion, OfficialFixingVersion,
+    ValuationRun,
 )
 from .audit import commit_rejection
 
@@ -38,8 +39,8 @@ def _cleanup_document_file(row: Document) -> None:
         path.unlink()
 
 
-def _break_deal_fixing_cycle(row: Deal, session: Session) -> None:
-    """Cut `deal_events.current_fixing_version_id` before anything is deleted.
+def _prepare_deal_delete(row: Deal, session: Session) -> None:
+    """Cut the two reverse pointers before deleting a deal's children.
 
     `deal_events` points at `official_fixing_versions`, which points back at
     `deal_events`. A cycle cannot be topologically sorted, so SQLAlchemy stops
@@ -48,11 +49,15 @@ def _break_deal_fixing_cycle(row: Deal, session: Session) -> None:
     children. That is why deleting ANY deal returned "Erreur suppression",
     even one with nothing but three lifecycle events attached.
 
-    Nulling the forward pointer removes the cycle; the versions themselves are
-    then deleted as children, before the events they belong to."""
+    A deal also points at its latest immutable `valuation_run`, while every
+    valuation run points back at the deal.  Nulling both forward pointers
+    removes the cycles; their targets are then deleted as children."""
     session.execute(
         text("UPDATE deal_events SET current_fixing_version_id = NULL "
              "WHERE deal_id = :did"),
+        {"did": row.id})
+    session.execute(
+        text("UPDATE deals SET latest_valuation_run_id = NULL WHERE id = :did"),
         {"did": row.id})
     session.flush()
 
@@ -84,7 +89,7 @@ REGISTRY: dict[str, dict] = {
     "deals": {
         "model": Deal, "label": "Deals",
         "columns": ["id", "reference", "contrepartie", "devise", "nominal", "status", "user_id", "created_at"],
-        "prepare": _break_deal_fixing_cycle,
+        "prepare": _prepare_deal_delete,
         # ORDER MATTERS and is enforced by a flush between each entry, because
         # SQLAlchemy's own ordering cannot be trusted here (see the cycle in
         # _break_deal_fixing_cycle). Everything that points at deal_events must
@@ -95,6 +100,7 @@ REGISTRY: dict[str, dict] = {
         # not be deleted at all — and the failure surfaced as a bare
         # "Erreur suppression" with no indication of what was holding it.
         "children": [
+            (ValuationRun, "deal_id"),
             (OfficialFixingVersion, "deal_id"),
             (LifecycleProposal, "deal_id"),
             (TradeAmendmentRequest, "deal_id"),

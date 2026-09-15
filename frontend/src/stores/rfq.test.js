@@ -107,4 +107,38 @@ describe('le pricing daté d’une RFQ', () => {
     })).rejects.toThrow('Produit rappelé')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it('price séparément chaque sous-jacent et conserve la matrice du panier', async () => {
+    const calls = []
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) })
+      if (url === '/api/price') return response({ price: 0.965, flux_table: {} })
+      return response({ id: 9, model_price: 96.5, params: {}, quotes: [] })
+    }))
+    const store = useRfqStore()
+    const basket = [
+      { name: 'LVMH', ticker: 'MC.PA', ccy: 'EUR', sigma: 0.21, q: 0.018 },
+      { name: 'DAX', ticker: '^GDAXI', ccy: 'EUR', sigma: 0.27, q: 0.031 },
+    ]
+
+    await store.computeModelPrice({
+      id: 9,
+      ao_date: '2026-09-15',
+      script_snapshot: 'AT MATURITY:\n  PAY WOF',
+      params: {
+        strike_date: '2026-09-15', value_date: '2026-09-17',
+        maturity_date: '2029-09-15', payment_date: '2029-09-18', T: 3,
+        underlyings: basket, corr_matrix: [[1, 0.45], [0.45, 1]],
+      },
+    })
+
+    expect(calls[0].url).toBe('/api/price')
+    expect(calls[0].body.underlyings).toEqual(basket)
+    expect(calls[0].body.corr_matrix).toEqual([[1, 0.45], [0.45, 1]])
+    expect(store.lastPricing.hypotheses.underlyings).toEqual([
+      { name: 'LVMH', ticker: 'MC.PA', sigma: 0.21, q: 0.018 },
+      { name: 'DAX', ticker: '^GDAXI', sigma: 0.27, q: 0.031 },
+    ])
+    expect(store.lastPricing.hypotheses.corr_matrix).toEqual([[1, 0.45], [0.45, 1]])
+  })
 })

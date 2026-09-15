@@ -44,7 +44,7 @@ onMounted(charger)
 // laissait l'écran sur le produit précédent — et créer une variante n'ouvrait
 // jamais la variante créée.
 watch(() => [route.params.id, route.params.variantId, route.params.productId,
-             route.query.calculation], async () => {
+             route.query.calculation, route.query.dealId, route.query.fromRfq], async () => {
   ready.value = false
   await charger()
 })

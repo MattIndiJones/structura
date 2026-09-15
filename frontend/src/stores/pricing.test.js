@@ -306,6 +306,59 @@ describe('le préremplissage depuis un AO garde ses dates', () => {
 
     expect(store.pricingBody().payment_date).toBe('2029-09-05')
   })
+
+  it('garde le tenor cote quand la maturite effective de la RFQ est ajustee', async () => {
+    const store = await storeRenseigne()
+    const rfq = {
+      ...AO,
+      params: {
+        ...AO.params,
+        strike_date: '2026-09-29',
+        maturity_date: '2029-09-29',
+        payment_date: '2029-10-03',
+        T: 3.0007,
+        constats: {
+          OBSERVATIONS: {
+            start_date: '2026-09-29', end_date: '2029-09-29',
+            roll_date: '2026-12-29', frequency: '3M',
+            convention: 'following', settlement_lag: 0,
+          },
+        },
+      },
+    }
+
+    await store.loadFromRfq(rfq)
+    store.syncTenorFromMaturity()
+
+    expect(store.currentRfqId).toBe(rfq.id)
+    expect(store.globalParams.T).toBe(3.0007)
+  })
+
+  it('reprend tout le panier et sa corrélation jusque dans le prochain pricing', async () => {
+    const store = await storeRenseigne()
+    await store.loadFromRfq({
+      ...AO,
+      params: {
+        ...AO.params,
+        underlyings: [
+          { name: 'LVMH', ticker: 'MC.PA', ccy: 'EUR', sigma: 0.21, q: 0.018 },
+          { name: 'DAX', ticker: '^GDAXI', ccy: 'EUR', sigma: 0.27, q: 0.031 },
+        ],
+        corr_matrix: [[1, 0.45], [0.45, 1]],
+      },
+    })
+
+    expect(store.underlyings.map(u => [u.ticker, u.sigma, u.q])).toEqual([
+      ['MC.PA', 21, 1.7999999999999998],
+      ['^GDAXI', 27, 3.1],
+    ])
+    const body = store.pricingBody()
+    expect(body.underlyings.map(u => [u.ticker, u.sigma, u.q])).toEqual([
+      ['MC.PA', 0.21, 0.018],
+      ['^GDAXI', 0.27, 0.031],
+    ])
+    expect(body.corr_matrix).toEqual([[1, 0.45], [0.45, 1]])
+  })
 })
 
 describe('les economics d’un deal rouvert restent autoritatifs', () => {
@@ -339,10 +392,12 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
     expect(store.globalParams.strike_date).toBe('2026-09-03')
     expect(store.globalParams.value_date).toBe('2026-09-07')
     expect(store.globalParams.payment_date).toBe('2029-09-06')
-    // Ouvrir le deal restitue le pricing initial. Le MTM ne démarre que
-    // lorsque l'utilisateur avance explicitement la Pricing date.
-    expect(store.globalParams.valuation_date).toBe('2026-09-03')
-    expect(store.isInLife()).toBe(false)
+    const maintenant = new Date()
+    const aujourdHuiLocal = new Date(
+      maintenant.getTime() - maintenant.getTimezoneOffset() * 60_000,
+    ).toISOString().slice(0, 10)
+    expect(store.globalParams.valuation_date).toBe(aujourdHuiLocal)
+    expect(store.isInLife()).toBe(aujourdHuiLocal > '2026-09-03')
     store.globalParams.valuation_date = '2026-09-12'
     expect(store.isInLife()).toBe(true)
     expect(store.pricingBody().valuation_date).toBe('2026-09-12')
@@ -374,9 +429,7 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
     expect(store.globalParams.barrierMonitoring).toBe('weekly')
   })
 
-  it('un forward start rouvert se valorise à sa date de trade, jamais à un strike futur', async () => {
-    // Écran du 14/09 : strike au 11/12/2026, la date de valorisation proposée
-    // valait ce strike — un prix à une date où aucun marché n'existe encore.
+  it('un deal rouvert se valorise aujourd’hui, avant ou après son strike', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-09-14T09:00:00Z'))
     try {
@@ -390,17 +443,16 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
       }
 
       await store.loadFromDeal(forward)
-      expect(store.globalParams.valuation_date).toBe('2026-09-11')
+      expect(store.globalParams.valuation_date).toBe('2026-09-14')
       expect(store.isPreStrike()).toBe(true)
 
-      // Un trade daté après aujourd'hui ne vaut pas mieux : aujourd'hui.
       await store.loadFromDeal({ ...forward, id: 31, trade_date: '2026-10-01' })
       expect(store.globalParams.valuation_date).toBe('2026-09-14')
 
-      // Un deal déjà striké garde son pricing initial à la date de strike.
       await store.loadFromDeal({ ...forward, id: 32, trade_date: '2026-09-01',
                                  strike_date: '2026-09-03' })
-      expect(store.globalParams.valuation_date).toBe('2026-09-03')
+      expect(store.globalParams.valuation_date).toBe('2026-09-14')
+      expect(store.isInLife()).toBe(true)
     } finally {
       vi.useRealTimers()
     }

@@ -226,12 +226,34 @@ def test_avant_le_strike_le_pricer_et_booking_donnent_le_meme_prix(monkeypatch):
     def charger(tickers, debut, fin=None, adjusted=False):
         return _historique(date.fromisoformat(debut), date.fromisoformat(fin), 40.0)
 
-    booking, _ = mtm_core(deal, session, 2000, MtmRequest(recalibrate="none"),
-                          asof=valorisation, load_prices=charger,
+    booking, _ = mtm_core(
+        deal, session, 2000,
+        MtmRequest(recalibrate="none", valuation_date=valorisation),
+        load_prices=charger,
                           dividend_loader=lambda *_: {"ok": False})
 
     assert booking["pre_strike"] is True
+    assert booking["valuation_date"] == valorisation.isoformat()
     assert pricer["price"] == pytest.approx(booking["mtm"], abs=1e-9)
+
+
+def test_la_date_mtm_est_bornee_par_le_trade_et_aujourdhui():
+    from backend.app.core.deal_valuation import MtmRequest, mtm_core
+
+    deal = SimpleNamespace(
+        id=1,
+        trade_date=(date.today() - timedelta(days=5)).isoformat(),
+    )
+    with pytest.raises(HTTPException, match="future"):
+        mtm_core(
+            deal, None,
+            body=MtmRequest(valuation_date=date.today() + timedelta(days=1)),
+        )
+    with pytest.raises(HTTPException, match="précéder la date de trade"):
+        mtm_core(
+            deal, None,
+            body=MtmRequest(valuation_date=date.today() - timedelta(days=6)),
+        )
 
 
 def test_le_prix_avant_le_strike_bouge_avec_la_volatilite(monkeypatch):
