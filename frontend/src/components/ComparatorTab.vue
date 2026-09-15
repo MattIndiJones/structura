@@ -204,6 +204,10 @@ function rowState(row) {
 
 async function quotePrice(row) {
   const st = rowState(row)
+  if (!(await store.ensureScriptValidated())) {
+    st.error = 'Le script ne valide pas : corrigez-le dans l’onglet Script.'
+    return
+  }
   st.pricing = true; st.error = ''
   try {
     const res = await apiFetch(`/api/finance/hist_vol?tickers=${encodeURIComponent(row.tickers.join(','))}&period=1y`)

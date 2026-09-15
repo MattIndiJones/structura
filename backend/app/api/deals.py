@@ -44,7 +44,8 @@ from ..core.market_snapshot import snapshot_rate, snapshot_rate_is_default
 from ..core.payoff_terms import classify_param_barrier
 from ..core.agregats_officiels import calculer as calculer_agregat
 from ..core.rfq_controls import (
-    booking_gate_failures, failures_payload, product_terms, product_terms_hash,
+    booking_gate_failures, booking_terms_differences, failures_payload,
+    product_terms, product_terms_hash,
 )
 from ..core.workflow import (
     AmendmentStatus, DataCategory, FixingPolicy, FixingStatus, LifecycleStatus,
@@ -79,7 +80,7 @@ class DealCreate(BaseModel):
     contrepartie: str
     devise: str = "EUR"
     product_type: str = ""
-    fixing_policy: Literal["AUTO_YAHOO", "FOUR_EYES"] = "AUTO_YAHOO"
+    fixing_policy: Literal["AUTO_YAHOO"] = "AUTO_YAHOO"
     nominal: float
     fair_value: float
     price_traded: float
@@ -293,9 +294,6 @@ def _validate_economics(body) -> None:
         except (TypeError, ValueError):
             errors.append(f"la date de {label} est invalide ({raw!r})")
 
-    if body.strike_date and body.value_date and body.value_date < body.strike_date:
-        errors.append(f"la date de valeur ({body.value_date}) précède la date de strike "
-                      f"({body.strike_date})")
     if body.maturity_date and body.value_date and body.maturity_date <= body.value_date:
         errors.append(f"la maturité ({body.maturity_date}) n'est pas postérieure à la date "
                       f"de valeur ({body.value_date})")
@@ -355,10 +353,8 @@ def _validate_rfq_booking_identity(rfq: RfqRequest, body: DealCreate,
                  f"fournisseur retenu ({selected.provider} → {expected_counterparty}).")
 
     expected = product_terms(rfq.script_snapshot, json.loads(rfq.params_json or "{}"))
-    actual_all = _deal_product_terms(body)
-    actual = {key: actual_all.get(key) for key in expected}
-    if actual != expected:
-        changed = sorted(key for key in expected if actual.get(key) != expected.get(key))
+    changed = booking_terms_differences(expected, _deal_product_terms(body))
+    if changed:
         raise HTTPException(
             422, "Le deal ne correspond pas aux termes contractuels figés de la RFQ : "
                  + ", ".join(changed) + ". Rechargez le booking depuis la RFQ ; "
@@ -1943,7 +1939,7 @@ def _book_deal(
             Counterparty.name == body.contrepartie)).first()),
         devise=body.devise,
         product_type=body.product_type,
-        fixing_policy=body.fixing_policy,
+        fixing_policy=FixingPolicy.AUTO_YAHOO.value,
         nominal=body.nominal,
         fair_value=body.fair_value,
         price_traded=body.price_traded,
@@ -2646,8 +2642,17 @@ def get_deal_audit(
         (AuditEvent.object_type == "DEAL") & (AuditEvent.object_id == deal_id),
     ]
     if deal.rfq_id:
-        clauses.append(
-            (AuditEvent.object_type == "RFQ") & (AuditEvent.object_id == deal.rfq_id))
+        linked_rfq = session.get(RfqRequest, deal.rfq_id)
+        rfq_clause = (
+            (AuditEvent.object_type == "RFQ") &
+            (AuditEvent.object_id == deal.rfq_id)
+        )
+        # Legacy SQLite databases may have reused an RFQ primary key after a
+        # physical deletion.  Events older than the linked RFQ cannot belong
+        # to it and must not contaminate the deal timeline.
+        if linked_rfq is not None:
+            rfq_clause &= AuditEvent.created_at >= linked_rfq.created_at
+        clauses.append(rfq_clause)
     if events:
         clauses.append(
             (AuditEvent.object_type == "DEAL_EVENT") &
@@ -4106,121 +4111,25 @@ def _refresh_deal_core(
     if not tickers:
         raise ValueError("Aucun sous-jacent défini sur ce deal")
 
-    if deal.fixing_policy == FixingPolicy.AUTO_YAHOO.value:
-        return _refresh_auto_yahoo_deal_core(
-            deal, session, actor_user_id, underlyings, tickers)
-
-    today = date.today().isoformat()
-    events = _get_events(deal.id, session)
-    past_events = [e for e in events if e.event_date <= today]
-    if not past_events:
-        return {"updated": 0, "message": "Aucun événement passé", "evaluation": None}
-
-    # Fetch from a week BEFORE the strike: a strike date falling on a
-    # weekend/holiday has no close of its own, and _closest_price's
-    # "last close <= date" convention needs the preceding trading day to
-    # exist in the window — otherwise S₀ silently stays empty.
-    fetch_start = (date.fromisoformat(deal.strike_date) - timedelta(days=7)).isoformat()
-    px_data = load_hist_prices(tickers, fetch_start, today)
-    if "error" in px_data:
-        raise ValueError(px_data["error"])
-
-    dates_list = px_data.get("dates", [])
-    prices = px_data.get("prices", {})
-    if not dates_list:
-        raise ValueError("Données historiques vides")
-
-    # Build a {date: idx} map for fast lookup
-    date_idx = {d: i for i, d in enumerate(dates_list)}
-
-    def _closest_price(ticker: str, target_date: str) -> tuple[float | None, str | None]:
-        if ticker not in prices:
-            return None, None
-        available = [d for d in dates_list if d <= target_date]
-        if not available:
-            return None, None
-        used_date = available[-1]
-        idx = date_idx[used_date]
-        val = prices[ticker][idx]
-        return (round(float(val), 4), used_date) if val is not None else (None, used_date)
-
-    updated = 0
-    for ev in past_events:
-        spots = {}
-        used_dates = {}
-        for u in underlyings:
-            tk = u.get("ticker", "")
-            name = u["name"]
-            spot, used_date = _closest_price(tk, ev.event_date)
-            if spot is not None:
-                spots[name] = spot
-                used_dates[name] = used_date
-        if len(spots) != len(underlyings):
-            missing = [u["name"] for u in underlyings if u["name"] not in spots]
-            raise ValueError(
-                f"Données indicatives partielles au {ev.event_date}; manquantes: {', '.join(missing)}")
-        if spots:
-            before = json.loads(ev.indicative_spots_json or "{}")
-            if before == spots:
-                continue
-            ev.indicative_spots_json = json.dumps(spots, sort_keys=True)
-            session.add(ev)
-            updated += 1
-            fallbacks = {
-                name: used for name, used in used_dates.items() if used != ev.event_date}
-            record_audit_event(
-                session,
-                action="INDICATIVE_DATA_USED",
-                object_type="DEAL_EVENT",
-                object_id=ev.id,
-                actor_user_id=actor_user_id,
-                actor_type="USER" if actor_user_id else "PROCESS",
-                result="SUCCESS",
-                before={"indicative_spots": before},
-                after={"indicative_spots": spots},
-                reason="Mise à jour de données de monitoring non opposables.",
-                data_source=DataCategory.INDICATIVE,
-                metadata={"provider": "Yahoo Finance", "price_dates": used_dates,
-                          "fallback_dates": fallbacks},
-            )
-            if fallbacks:
-                _ensure_alert(
-                    session,
-                    deal,
-                    "data_fallback",
-                    f"Fallback de date de marché au {ev.event_date}: {fallbacks}",
-                    f"data-fallback:{deal.id}:{ev.id}:{json.dumps(fallbacks, sort_keys=True)}",
-                )
-                record_audit_event(
-                    session,
-                    action="DATA_FALLBACK_USED",
-                    object_type="DEAL_EVENT",
-                    object_id=ev.id,
-                    actor_user_id=actor_user_id,
-                    actor_type="USER" if actor_user_id else "PROCESS",
-                    result="SUCCESS",
-                    reason="Dernière clôture disponible antérieure à la date contractuelle.",
-                    data_source=DataCategory.INDICATIVE,
-                    metadata={"fallback_dates": fallbacks},
-                )
-
-    evaluation = _evaluate_lifecycle(deal, events, dates_list, prices, tickers)
-    proposal = _create_lifecycle_proposal(
-        deal, evaluation, session, actor_user_id)
-
-    deal.updated_at = datetime.utcnow()
-    session.add(deal)
-    stage_product_lifecycle(
-        session, deal, actor_user_id=actor_user_id,
-        action="PRODUCT_LIFECYCLE_REFRESHED",
-        reason="Synchronisation après le monitoring lifecycle.")
-    session.commit()
-    return {
-        "updated": updated,
-        "message": f"{updated} événement(s) indicatif(s) mis à jour",
-        "evaluation": evaluation,
-        "proposal": _proposal_row(proposal) if proposal else None,
-    }
+    if deal.fixing_policy != FixingPolicy.AUTO_YAHOO.value:
+        previous_policy = deal.fixing_policy
+        deal.fixing_policy = FixingPolicy.AUTO_YAHOO.value
+        session.add(deal)
+        record_audit_event(
+            session,
+            action="FIXING_POLICY_AUTOMATED",
+            object_type="DEAL",
+            object_id=deal.id,
+            actor_user_id=actor_user_id,
+            actor_type="USER" if actor_user_id else "PROCESS",
+            result="SUCCESS",
+            before={"fixing_policy": previous_policy},
+            after={"fixing_policy": FixingPolicy.AUTO_YAHOO.value},
+            reason="Retrait du workflow Maker/Checker ; les clôtures fournisseur contrôlées deviennent officielles automatiquement.",
+            data_source=DataCategory.FIXING_OFFICIAL,
+        )
+    return _refresh_auto_yahoo_deal_core(
+        deal, session, actor_user_id, underlyings, tickers)
 
 
 _AUTO_YAHOO_MAX_FALLBACK_DAYS = 4
@@ -4521,7 +4430,7 @@ def resolve_auto_fixing_exception(
             "AUTO_EXCEPTION_POLICY_REQUIRED", "fixing_policy",
             "La validation mono-utilisateur est réservée aux produits Yahoo automatiques.",
             expected=FixingPolicy.AUTO_YAHOO.value,
-            action="Utilisez le workflow Maker/Checker du produit contrôlé.",
+            action="Actualisez le deal pour appliquer la politique automatique.",
             received=deal.fixing_policy,
         ))
     if event.event_date > date.today().isoformat():
@@ -5428,12 +5337,29 @@ def _refresh_auto_yahoo_deal_core(
         raise ValueError(reference_data["error"])
     officialized = 0
     exceptions: list[dict] = []
-    for event in past_events:
+    official_prefix: list[DealEvent] = []
+    official_evaluation = None
+    replay_failures: list[dict] = []
+    # Contractual observations are consumed in order.  As soon as their
+    # authoritative prefix proves an autocall/maturity, later rows no longer
+    # belong to the life of the product and must neither be validated nor
+    # generate fallback alerts.
+    for event in sorted(past_events, key=lambda row: (row.t_years, row.event_index)):
         changed, exception = _auto_validate_yahoo_event(
             deal, event, underlyings, reference_data, session, actor_user_id)
         officialized += int(changed)
         if exception:
             exceptions.append(exception)
+            break
+        if (event.fixing_status != FixingStatus.VALIDATED.value or
+                event.data_category != DataCategory.FIXING_OFFICIAL.value):
+            break
+        official_prefix.append(event)
+        official_evaluation, replay_failures = replay_official_fixings(
+            deal, official_prefix)
+        if (official_evaluation and
+                official_evaluation.get("outcome") != "en_cours"):
+            break
     dates, prices = _reference_history_arrays(reference_data, tickers)
     if not dates:
         raise ValueError("Les clôtures Yahoo ne permettent pas de construire un historique commun")
@@ -5443,15 +5369,7 @@ def _refresh_auto_yahoo_deal_core(
     # data and a governed fallback for scripts whose path dependence cannot be
     # established from event fixings alone, but it must not decide an otherwise
     # replayable terminal outcome on dates that differ from the booked calendar.
-    official_prefix: list[DealEvent] = []
-    for event in sorted(past_events, key=lambda row: (row.t_years, row.event_index)):
-        if (event.fixing_status != FixingStatus.VALIDATED.value or
-                event.data_category != DataCategory.FIXING_OFFICIAL.value):
-            break
-        official_prefix.append(event)
-    official_evaluation = None
-    replay_failures: list[dict] = []
-    if official_prefix:
+    if official_prefix and official_evaluation is None:
         official_evaluation, replay_failures = replay_official_fixings(
             deal, official_prefix)
     evaluation = official_evaluation

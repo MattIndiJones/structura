@@ -65,6 +65,18 @@ def test_parse_api_exposes_reserved_maturity_event():
     assert response.has_maturity_event is True
 
 
+def test_parse_api_exposes_literal_observation_dates():
+    """Le Pricer date les années `AT` depuis le strike pour refuser une maturité
+    antérieure à la dernière observation écrite. Les dates d'un CONSTAT ne sont
+    pas connues au parsing et n'y figurent pas."""
+    response = parse_endpoint(ParseRequest(script=AUTOCALL + "\nAT 1.5:\n  PAY 0\n"))
+    assert response.ok is True
+    assert response.at_dates == [1.0, 1.5, 2.0, 3.0]
+    expert = parse_endpoint(ParseRequest(
+        script="CONSTAT() OBS\nAT OBS:\n  PAY 0\nAT MATURITY:\n  PAY 1\n"))
+    assert expert.ok is True and expert.at_dates == []
+
+
 def test_parse_autocall():
     cs = parse_script(AUTOCALL)
     assert len(cs.params) == 2
@@ -493,10 +505,20 @@ def test_param_array_declaration():
     assert seed.is_pct is True
 
 
-def test_param_array_no_seed_defaults():
-    cs = parse_script("PARAM() M_BAR\nAT 1:\n  PAY INDIC(WOF >= M_BAR)")
+def test_param_array_requires_a_value():
+    """D4 (11/09/2026) : `PARAM()` exige une valeur, comme `PARAM`. Sans elle,
+    la déclaration passait à 0 % en silence ; les deux formes nomment désormais
+    ce qui manque au lieu de parler d'instruction inconnue."""
+    with pytest.raises(ValueError, match=r"PARAM\(\) M_BAR attend une valeur initiale"):
+        parse_script("PARAM() M_BAR\nAT 1:\n  PAY INDIC(WOF >= M_BAR)")
+    with pytest.raises(ValueError, match=r"PARAM\(\) M_BAR attend une valeur initiale"):
+        parse_script('PARAM() M_BAR "barrière"\nAT 1:\n  PAY INDIC(WOF >= M_BAR)')
+    with pytest.raises(ValueError, match="PARAM COUPON attend une valeur initiale"):
+        parse_script("PARAM COUPON\nAT MATURITY:\n  PAY COUPON")
+    # L'unité reste celle qui est écrite : sans %, la valeur est un nombre brut.
+    cs = parse_script("PARAM() M_BAR = 0.95\nAT 1:\n  PAY INDIC(WOF >= M_BAR)")
     p = cs.params[0]
-    assert p.kind == "array" and p.raw_default == 0.0 and p.is_pct is True
+    assert p.kind == "array" and p.raw_default == pytest.approx(0.95) and p.is_pct is False
 
 
 def test_param_array_per_observation_resolution():

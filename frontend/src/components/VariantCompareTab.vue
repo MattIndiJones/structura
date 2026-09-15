@@ -176,6 +176,10 @@ const meilleure = computed(() =>
 const aUnRoll = computed(() => classees.value.some(l => l.mode === 'roll'))
 
 async function comparer() {
+  if (!(await store.ensureScriptValidated())) {
+    erreur.value = 'Le script ne valide pas : corrigez-le dans l’onglet Script.'
+    return
+  }
   occupe.value = true; erreur.value = ''
   try {
     const res = await apiFetch('/api/variants/compare', {

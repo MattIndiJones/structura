@@ -23,10 +23,11 @@
  * D'où ces tests, qui vérifient l'état APRÈS le cycle complet — et pas
  * seulement que rien n'a planté.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import { usePricingStore } from './pricing.js'
+import { findProductModel } from '../utils/productModels.js'
 
 const VALIDE = `PARAM COUPON = 2%
 CONSTAT() OBS
@@ -373,6 +374,38 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
     expect(store.globalParams.barrierMonitoring).toBe('weekly')
   })
 
+  it('un forward start rouvert se valorise à sa date de trade, jamais à un strike futur', async () => {
+    // Écran du 14/09 : strike au 11/12/2026, la date de valorisation proposée
+    // valait ce strike — un prix à une date où aucun marché n'existe encore.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-14T09:00:00Z'))
+    try {
+      const store = await storeRenseigne()
+      const forward = {
+        id: 30, reference: 'FWD-START', script_snapshot: VALIDE,
+        market_snapshot: { underlyings: [{ name: 'SPX', ticker: '^GSPC', ccy: 'EUR' }] },
+        T: 1.5, devise: 'EUR', nominal: 1_680_000,
+        trade_date: '2026-09-11', strike_date: '2026-12-11', value_date: '2026-12-15',
+        maturity_date: '2028-06-09', payment_date: '2028-06-14',
+      }
+
+      await store.loadFromDeal(forward)
+      expect(store.globalParams.valuation_date).toBe('2026-09-11')
+      expect(store.isPreStrike()).toBe(true)
+
+      // Un trade daté après aujourd'hui ne vaut pas mieux : aujourd'hui.
+      await store.loadFromDeal({ ...forward, id: 31, trade_date: '2026-10-01' })
+      expect(store.globalParams.valuation_date).toBe('2026-09-14')
+
+      // Un deal déjà striké garde son pricing initial à la date de strike.
+      await store.loadFromDeal({ ...forward, id: 32, trade_date: '2026-09-01',
+                                 strike_date: '2026-09-03' })
+      expect(store.globalParams.valuation_date).toBe('2026-09-03')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('fige le panier et la maturité tant que le deal booké reste ouvert', async () => {
     const store = await storeRenseigne()
     await store.loadFromDeal({
@@ -559,6 +592,477 @@ describe('la maturité est une date contractuelle éditable', () => {
     expect(store.maturityDate).toBe('2027-12-10')
     expect(store.constatOverrides.MATURITE).toBe('2027-12-10')
     expect(store.buildConstats()).toEqual({ MATURITE: '2027-12-10' })
+  })
+})
+
+/**
+ * Un serveur de parse qui lit vraiment les déclarations du texte : PARAM,
+ * PARAM(), CONSTAT et années `AT`. `retiens` peut suspendre une réponse pour
+ * rejouer l'ordre d'arrivée de deux validations.
+ */
+function serveurQuiLit({ retiens = null, autres = null } = {}) {
+  return vi.fn(async (url, opts) => {
+    if (!String(url).includes('/api/parse')) {
+      return autres ? autres(url, opts) : { ok: false, json: async () => ({}) }
+    }
+    const texte = JSON.parse(opts.body).script
+    if (retiens) await retiens(texte)
+    if (texte.includes('INDIC(WOF\n')) {
+      return { ok: true, json: async () => ({ ok: false, errors: 'Ligne 6 : expression incomplète' }) }
+    }
+    const params = [...texte.matchAll(/^PARAM(\(\))?\s+(\w+)\s*=\s*([\d.]+)(%?)/gm)].map(m => ({
+      name: m[2], kind: m[1] ? 'array' : 'scalar',
+      raw_default: Number(m[3]), display_default: Number(m[3]), is_pct: m[4] === '%',
+    }))
+    const constats = [...texte.matchAll(
+      /^CONSTAT(\(\)(?:\(\))?)?\s+(\w+)(?:[ \t]+(MIN|MAX|AVG))?(?:[ \t]+(PERIOD))?/gm)].map(m => ({
+      name: m[2], kind: !m[1] ? 'single' : (m[1] === '()()' ? 'nested_schedule' : 'schedule'),
+      reduction: m[3] || null, window_scope: m[4] ? 'period' : 'length',
+    }))
+    const at_dates = [...texte.matchAll(/^AT\s+([\d.,\s]+):/gm)]
+      .flatMap(m => m[1].split(',').map(Number)).sort((a, b) => a - b)
+    return { ok: true, json: async () => ({
+      ok: true, params, constats, at_dates,
+      has_stop: /\bSTOP\b/.test(texte), has_maturity_event: /^AT MATURITY/m.test(texte),
+    }) }
+  })
+}
+
+const ATHENA_NORMAL = `# Autocall Athena
+PARAM COUPON = 8%
+PARAM M_AC_BAR = 100%
+PARAM M_KI_BAR = 60%
+
+AT 1, 2, 3:
+  SET CALL = INDIC(WOF >= M_AC_BAR)
+  PAY CALL * COUPON * INDEX
+  PAY CALL * 1
+  IF CALL = 1:
+    STOP
+
+AT MATURITY:
+  SET KI = INDIC(WOF < M_KI_BAR)
+  PAY (1 - KI) * 1
+  PAY KI * WOF
+`
+
+const appelsParse = () => globalThis.fetch.mock.calls
+  .filter(([url]) => String(url).includes('/api/parse')).length
+
+async function storeQuiLit(texte = VALIDE) {
+  setActivePinia(createPinia())
+  globalThis.fetch = serveurQuiLit()
+  const store = usePricingStore()
+  store.script = texte
+  await store.parseScript()
+  return store
+}
+
+describe('la validation est un geste, pas un effet de la frappe', () => {
+  it('ne relit rien pendant la frappe et signale le script non validé', async () => {
+    const store = await storeQuiLit()
+    store.paramOverrides.COUPON = 1.334167
+    const avant = appelsParse()
+
+    store.script = VALIDE.replace('PARAM COUPON = 2%', 'PARAM COUPON = 6')
+
+    expect(store.scriptDirty).toBe(true)
+    expect(appelsParse()).toBe(avant)
+    expect(store.scriptParams[0]).toMatchObject({ display_default: 2, is_pct: true })
+    expect(store.paramOverrides.COUPON).toBe(1.334167)
+  })
+
+  it('une valeur initiale changée remplace la saisie, et le dit', async () => {
+    const store = await storeQuiLit()
+    store.paramOverrides.COUPON = 1.334167
+    store.script = VALIDE.replace('PARAM COUPON = 2%', 'PARAM COUPON = 3%')
+
+    expect(await store.validateScript()).toBe(true)
+
+    expect(store.scriptDirty).toBe(false)
+    expect(store.paramOverrides.COUPON).toBe(3)
+    expect(store.validationReport.replaced).toEqual([{
+      name: 'COUPON', before: 1.334167, beforePct: true, after: 3, afterPct: true,
+    }])
+  })
+
+  it('une déclaration inchangée ne touche pas la saisie', async () => {
+    const store = await storeQuiLit()
+    store.paramOverrides.COUPON = 1.334167
+    store.script = `${VALIDE}# une ligne de commentaire\n`
+
+    await store.validateScript()
+
+    expect(store.paramOverrides.COUPON).toBe(1.334167)
+    expect(store.validationReport).toEqual({ replaced: [], keptRows: [] })
+  })
+
+  it('une valeur jamais saisie suit le script sans être signalée', async () => {
+    const store = await storeQuiLit()
+    store.script = VALIDE.replace('PARAM COUPON = 2%', 'PARAM COUPON = 2.5%')
+
+    await store.validateScript()
+
+    expect(store.paramOverrides.COUPON).toBe(2.5)
+    expect(store.validationReport.replaced).toEqual([])
+  })
+
+  it('D6 : 8, Ctrl+S, ajout du %, Ctrl+S donne 8 %', async () => {
+    const store = await storeQuiLit(VALIDE.replace('PARAM COUPON = 2%', 'PARAM COUPON = 8'))
+    expect(store.buildUserParams().COUPON).toBe(8)
+
+    store.script = VALIDE.replace('PARAM COUPON = 2%', 'PARAM COUPON = 8%')
+    await store.validateScript()
+
+    expect(store.paramOverrides.COUPON).toBe(8)
+    expect(store.buildUserParams().COUPON).toBeCloseTo(0.08, 12)
+  })
+
+  it('PARAM() : seules les lignes restées à l’ancienne valeur suivent le script (M11)', async () => {
+    const DEGRESSIF = 'PARAM() M_AC_BAR = 100%\nCONSTAT() OBS\n\nAT OBS:\n  PAY 1\n'
+    const store = await storeQuiLit(DEGRESSIF)
+    store.paramOverrides.M_AC_BAR = [100, 95, 100]
+
+    store.script = DEGRESSIF.replace('= 100%', '= 105%')
+    await store.validateScript()
+
+    expect(store.paramOverrides.M_AC_BAR).toEqual([105, 95, 105])
+    expect(store.validationReport.keptRows).toEqual([
+      { name: 'M_AC_BAR', count: 1, unitChanged: false },
+    ])
+  })
+
+  it('un chargement devient la référence et ne reporte rien', async () => {
+    const store = await storeQuiLit()
+    store.paramOverrides.COUPON = 1.334167
+    const AO = {
+      id: 5, script_snapshot: VALIDE.replace('PARAM COUPON = 2%', 'PARAM COUPON = 5%'),
+      params: { user_params: { COUPON: 0.04 } }, quotes: [],
+    }
+
+    await store.loadFromRfq(AO)
+    expect(store.paramOverrides.COUPON).toBeCloseTo(4, 10)
+    expect(store.validationReport).toBeNull()
+
+    // Revalider le texte chargé ne change rien : la référence est le chargement.
+    store.script = `${AO.script_snapshot}# relu\n`
+    await store.validateScript()
+    expect(store.paramOverrides.COUPON).toBeCloseTo(4, 10)
+  })
+
+  it('ignore une réponse de validation arrivée après une plus récente', async () => {
+    setActivePinia(createPinia())
+    let libere
+    const retenue = new Promise(resolve => { libere = resolve })
+    globalThis.fetch = serveurQuiLit({
+      retiens: texte => (texte.includes('COUPON = 7%') ? retenue : null),
+    })
+    const store = usePricingStore()
+    store.script = VALIDE
+    await store.parseScript()
+
+    store.script = VALIDE.replace('PARAM COUPON = 2%', 'PARAM COUPON = 7%')
+    const ancienne = store.validateScript()
+    store.script = VALIDE.replace('PARAM COUPON = 2%', 'PARAM COUPON = 9%')
+    expect(await store.validateScript()).toBe(true)
+    libere()
+
+    expect(await ancienne).toBe(false)
+    expect(store.paramOverrides.COUPON).toBe(9)
+    expect(store.scriptDirty).toBe(false)
+  })
+
+  it('un calcul valide d’abord et s’arrête sur une erreur de script', async () => {
+    const store = await storeQuiLit()
+    store.script = CASSE
+
+    await store.runPricing()
+
+    const urls = globalThis.fetch.mock.calls.map(([url]) => String(url))
+    expect(urls.some(url => url.includes('/api/price'))).toBe(false)
+    expect(store.parseError).toBeTruthy()
+    expect(store.error).toContain('Script non valide')
+  })
+
+  it('un calcul price le script validé, avec ses nouvelles valeurs', async () => {
+    setActivePinia(createPinia())
+    let corps = null
+    globalThis.fetch = serveurQuiLit({
+      autres: async (url, opts) => {
+        if (String(url).includes('/api/price')) corps = JSON.parse(opts.body)
+        return { ok: true, json: async () => ({ price: 1 }) }
+      },
+    })
+    const store = usePricingStore()
+    store.script = VALIDE
+    await store.parseScript()
+    store.script = `${VALIDE.replace('PARAM COUPON = 2%', 'PARAM COUPON = 4%')}PARAM FLOOR_LVL = 90%\n`
+
+    await store.runPricing()
+
+    expect(corps.script).toContain('COUPON = 4%')
+    expect(corps.user_params).toEqual({ COUPON: 0.04, FLOOR_LVL: 0.9 })
+  })
+
+  it('revenir au texte validé après un essai raté efface l’erreur', async () => {
+    const store = await storeQuiLit()
+    store.script = CASSE
+    await store.validateScript()
+    expect(store.parseError).toBeTruthy()
+
+    store.script = VALIDE
+    expect(await store.ensureScriptValidated()).toBe(true)
+    expect(store.parseError).toBeNull()
+  })
+})
+
+/**
+ * M4 (14/09/2026) : la maturité est toujours éditable et vaut la dernière date
+ * de constatation du produit, quels que soient les échéanciers.
+ *
+ * La règle du 13/09 retenait la fin des échéanciers et verrouillait le champ :
+ * deux ans de coupons sur une note à trois ans affichaient une maturité à deux
+ * ans, un T de deux ans, un paiement proposé à deux ans — et un booking refusé.
+ */
+describe('la maturité est la dernière constatation du produit', () => {
+  const NOTE = `PARAM COUPON = 5%
+CONSTAT() COUPONS
+CONSTAT MATURITE
+
+AT COUPONS:
+  PAY COUPON
+
+AT MATURITE:
+  PAY 1
+`
+  const COUPONS_2A = {
+    start_date: '2026-09-14', end_date: '2028-09-14', roll_date: '2026-09-14',
+    frequency: { value: 1, unit: 'Y' },
+  }
+
+  async function note({ autres } = {}) {
+    setActivePinia(createPinia())
+    globalThis.fetch = serveurQuiLit({ autres })
+    const store = usePricingStore()
+    store.script = NOTE
+    await store.parseScript()
+    store.globalParams.strike_date = '2026-09-14'
+    Object.assign(store.constatOverrides.COUPONS, COUPONS_2A)
+    store.constatOverrides.MATURITE = '2029-09-14'
+    return store
+  }
+
+  it('deux ans de coupons et une maturité à trois ans : trois ans', async () => {
+    const store = await note()
+    store.syncTenorFromMaturity()
+
+    expect(store.maturityDateEditable).toBe(true)
+    expect(store.maturityDate).toBe('2029-09-14')
+    expect(store.globalParams.T).toBeCloseTo(1096 / 365.25, 5)
+    expect(store.pricingBody().maturity_date).toBe('2029-09-14')
+  })
+
+  it('déplace les constatations terminales et laisse les coupons en place', async () => {
+    const store = await note()
+
+    expect(store.setMaturityDate('2030-03-14')).toBe(true)
+
+    expect(store.constatOverrides.MATURITE).toBe('2030-03-14')
+    expect(store.constatOverrides.COUPONS).toMatchObject(COUPONS_2A)
+    expect(store.maturityDate).toBe('2030-03-14')
+  })
+
+  it('refuse une maturité avancée avant la fin d’un échéancier non terminal (M12)', async () => {
+    const store = await note()
+
+    expect(store.setMaturityDate('2028-06-14')).toBe(false)
+
+    expect(store.maturityError).toContain('COUPONS')
+    expect(store.maturityError).toContain('14/09/2028')
+    expect(store.constatOverrides.MATURITE).toBe('2029-09-14')
+    expect(store.maturityDate).toBe('2029-09-14')
+  })
+
+  it('échéancier et date unique le même jour bougent ensemble, roll aligné compris', async () => {
+    const store = await note()
+    Object.assign(store.constatOverrides.COUPONS, {
+      end_date: '2029-09-14', roll_date: '2029-09-14',
+    })
+
+    expect(store.setMaturityDate('2030-09-16')).toBe(true)
+
+    expect(store.constatOverrides.COUPONS.end_date).toBe('2030-09-16')
+    expect(store.constatOverrides.COUPONS.roll_date).toBe('2030-09-16')
+    expect(store.constatOverrides.MATURITE).toBe('2030-09-16')
+  })
+
+  it('un calendrier trimestriel garde son ancrage quand sa fin bouge', async () => {
+    const TRIMESTRIEL = 'CONSTAT() OBS\n\nAT OBS:\n  PAY 0.01\n\nAT OBS.last:\n  PAY 1\n'
+    const store = await storeQuiLit(TRIMESTRIEL)
+    store.globalParams.strike_date = '2026-09-14'
+    Object.assign(store.constatOverrides.OBS, {
+      start_date: '2026-09-14', end_date: '2029-09-14', roll_date: '2026-12-14',
+      frequency: { value: 3, unit: 'M' },
+    })
+
+    expect(store.setMaturityDate('2029-12-14')).toBe(true)
+
+    expect(store.constatOverrides.OBS).toMatchObject({
+      start_date: '2026-09-14', end_date: '2029-12-14', roll_date: '2026-12-14',
+    })
+    expect(store.maturityDate).toBe('2029-12-14')
+  })
+
+  it('reconnaît la constatation terminale par sa date, plus par son nom', async () => {
+    const store = await storeQuiLit('CONSTAT ECHEANCE\n\nAT ECHEANCE:\n  PAY 1\n')
+    store.constatOverrides.ECHEANCE = '2027-09-14'
+
+    expect(store.maturityDate).toBe('2027-09-14')
+    expect(store.setMaturityDate('2028-03-14')).toBe(true)
+    expect(store.constatOverrides.ECHEANCE).toBe('2028-03-14')
+  })
+
+  it('affiche la date ajustée d’une constatation tombant un jour fermé', async () => {
+    const appels = []
+    const store = await note({
+      autres: async (url, opts) => {
+        if (String(url).includes('/api/calendar/resolve')) {
+          const demande = JSON.parse(opts.body)
+          appels.push(demande)
+          const moved = demande.date === '2029-09-15' && demande.convention === 'following'
+          return { ok: true, json: async () => ({
+            date: moved ? '2029-09-17' : demande.date, source: demande.date, moved,
+          }) }
+        }
+        return { ok: false, json: async () => ({}) }
+      },
+    })
+    // La dernière constatation est la fin des coupons, un samedi, en jour
+    // ouvré suivant.
+    store.constatOverrides.MATURITE = ''
+    Object.assign(store.constatOverrides.COUPONS, {
+      end_date: '2029-09-15', convention: 'following',
+    })
+
+    expect(store.maturityDate).toBe('2029-09-15')
+    await vi.waitFor(() => expect(store.maturityDate).toBe('2029-09-17'))
+    expect(appels).toEqual([{ date: '2029-09-15', currency: 'EUR', convention: 'following' }])
+    expect(store.pricingBody().maturity_date).toBe('2029-09-17')
+  })
+
+  it('mode Normal : refuse une maturité antérieure à la dernière année AT', async () => {
+    const store = await storeQuiLit(ATHENA_NORMAL)
+    store.globalParams.strike_date = '2026-09-14'
+    store.globalParams.maturity_date = ''
+
+    // 1 096 jours après le strike : la même arithmétique que le booking.
+    expect(store.maturityDate).toBe('2029-09-14')
+    expect(store.setMaturityDate('2028-09-14')).toBe(false)
+    expect(store.maturityError).toContain('AT 3')
+    expect(store.setMaturityDate('2030-09-14')).toBe(true)
+    expect(store.maturityDate).toBe('2030-09-14')
+  })
+})
+
+/**
+ * « Modèles de produits » (M6–M9, M13) : une fiche, un nombre de sous-jacents
+ * et un ténor ouvrent le Pricer complété, sans écran de saisie en plus.
+ */
+describe('un modèle de produit ouvre le Pricer complété', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-14T09:00:00Z'))
+  })
+  afterEach(() => { vi.useRealTimers() })
+
+  async function ouvrir(key, options) {
+    setActivePinia(createPinia())
+    globalThis.fetch = serveurQuiLit()
+    const store = usePricingStore()
+    await store.loadFromProductModel(findProductModel(key), options)
+    return store
+  }
+
+  it('génère panier, calendrier et maturité depuis la date de strike du Pricer', async () => {
+    const store = await ouvrir('autocall_athena', { underlyingCount: 2, tenorCode: '3Y' })
+
+    expect(store.script).toBe(findProductModel('autocall_athena').script)
+    expect(store.scriptDirty).toBe(false)
+    expect(store.underlyings.map(u => [u.name, u.ticker])).toEqual([
+      ['Sous-jacent 1', ''], ['Sous-jacent 2', ''],
+    ])
+    expect(store.corrMatrix).toEqual([[1, 0], [0, 1]])
+    expect(store.globalParams.strike_date).toBe('2026-09-14')
+    expect(store.constatOverrides.OBSERVATIONS).toMatchObject({
+      start_date: '2026-09-14', end_date: '2029-09-14', roll_date: '2026-09-14',
+      frequency: { value: 1, unit: 'Y' }, convention: 'none', settlement_lag: 0,
+    })
+    expect(store.maturityDate).toBe('2029-09-14')
+    expect(store.globalParams.T).toBeCloseTo(1096 / 365.25, 5)
+    expect(store.paramOverrides).toMatchObject({ COUPON: 8, M_AC_BAR: 100, M_KI_BAR: 60 })
+    expect(store.hasUnsavedSession()).toBe(false)
+  })
+
+  it('le calendrier ne suit pas un changement de strike (M13)', async () => {
+    const store = await ouvrir('autocall_athena', { underlyingCount: 1, tenorCode: '2Y' })
+
+    store.globalParams.strike_date = '2026-10-01'
+
+    expect(store.constatOverrides.OBSERVATIONS).toMatchObject({
+      start_date: '2026-09-14', end_date: '2028-09-14',
+    })
+    expect(store.maturityDate).toBe('2028-09-14')
+  })
+
+  it('pose les fenêtres de la fiche et borne le panier à son minimum', async () => {
+    const store = await ouvrir('call_panier_moyenne', { underlyingCount: 1, tenorCode: '1Y' })
+
+    expect(store.underlyings).toHaveLength(2)
+    expect(store.constatOverrides.STRIKE_FIX).toMatchObject({
+      date: '2026-09-14', window_length: { value: 10, unit: 'D' },
+    })
+    expect(store.constatOverrides.MATURITE).toMatchObject({
+      date: '2027-09-14', window_length: { value: 30, unit: 'D' },
+    })
+    // La fenêtre de départ ne date pas la maturité : la constatation finale, si.
+    expect(store.maturityDate).toBe('2027-09-14')
+  })
+
+  it('sans ténor : le script générique et aucune date inventée', async () => {
+    const store = await ouvrir('phoenix', { underlyingCount: 3 })
+
+    expect(store.underlyings).toHaveLength(3)
+    expect(store.globalParams.strike_date).toBe('')
+    expect(store.globalParams.value_date).toBe('')
+    expect(store.constatOverrides.OBSERVATIONS).toMatchObject({ start_date: '', end_date: '' })
+    expect(store.maturityDate).toBe('')
+  })
+
+  it('remplacer une session à échéancier ne laisse aucune déclaration sans valeur', async () => {
+    // Le banc visuel l'a montré : la remise à zéro effaçait les valeurs des
+    // CONSTAT mais gardait un instant leurs déclarations, et Economics
+    // plantait au rendu sur `constatOverrides.OBS.frequency`.
+    const store = await storeRenseigne()
+    globalThis.fetch = serveurQuiLit()
+    const declaresSansValeur = () => store.scriptConstats
+      .filter(c => !(c.name in store.constatOverrides)).map(c => c.name)
+
+    store.resetToDefaults()
+    expect(declaresSansValeur()).toEqual([])
+
+    const chargement = store.loadFromProductModel(findProductModel('phoenix'), { tenorCode: '2Y' })
+    expect(declaresSansValeur()).toEqual([])
+    await chargement
+    expect(declaresSansValeur()).toEqual([])
+    expect(store.constatOverrides.OBSERVATIONS.end_date).toBe('2028-09-14')
+  })
+
+  it('signale une session modifiée avant qu’un modèle la remplace', async () => {
+    const store = await ouvrir('call', { tenorCode: '6M' })
+    expect(store.hasUnsavedSession()).toBe(false)
+
+    store.paramOverrides.STRIKE = 95
+    expect(store.hasUnsavedSession()).toBe(true)
   })
 })
 

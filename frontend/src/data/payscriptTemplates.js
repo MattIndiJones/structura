@@ -27,6 +27,12 @@ export const templateMeta = [
   { key: 'zcb',                        label: 'ZCB (test actualisation)',                group: 'Validation' },
 ]
 
+export function productTypeLabel(value) {
+  const raw = String(value || '').trim()
+  const normalized = raw.toLocaleLowerCase('fr-FR')
+  return templateMeta.find(template => template.key.toLocaleLowerCase('fr-FR') === normalized)?.label || raw
+}
+
 // ── Normal mode (dates AT écrites en dur) ──────────────────────────
 export const examples = {
   autocall_athena: `# Autocall Athena 3 ans

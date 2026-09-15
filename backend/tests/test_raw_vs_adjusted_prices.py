@@ -84,6 +84,11 @@ def test_la_calibration_datee_utilise_la_meme_fenetre_que_le_mtm(monkeypatch):
         ["GLE.PA"], asof="2026-09-13", window_days=252)
 
     assert calls[0]["end"] == "2026-09-13"
+    # La fenêtre est celle du MtM résiduel au sens propre : le même calcul de
+    # début, désormais partagé (il ne l'était pas avant le 14/09/2026).
+    from backend.app.core.calibration import calibration_history_start
+    from datetime import date
+    assert calls[0]["start"] == calibration_history_start(date(2026, 9, 13), 252).isoformat()
     assert calls[0]["adjusted"] is True
     assert res["requested_asof"] == "2026-09-13"
     assert res["asof_effective"] == "2026-09-11"

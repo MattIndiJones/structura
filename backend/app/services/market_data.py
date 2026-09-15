@@ -35,18 +35,18 @@ def load_hist_vol(tickers: list[str], period: str = "1y",
             requested_end = date.fromisoformat(asof)
             if not 20 <= int(window_days) <= 2520:
                 return {"error": "window_days doit être compris entre 20 et 2520"}
+            # Local import avoids making the generic price loader depend on a
+            # calibration module during import.  This is exactly the estimator,
+            # and the window, used by deal_valuation.mtm_core.
+            from ..core.calibration import calibration_history_start, realized_market
+
             # Calendar-day cushion large enough to retain ``window_days``
             # common trading returns through holidays and exchange closures.
-            start = (requested_end - timedelta(days=max(365, int(window_days) * 2))).isoformat()
+            start = calibration_history_start(requested_end, int(window_days)).isoformat()
             history = load_hist_prices(
                 tickers, start, requested_end.isoformat(), adjusted=True)
             if history.get("error"):
                 return history
-
-            # Local import avoids making the generic price loader depend on a
-            # calibration module during import.  This is exactly the estimator
-            # used by deal_valuation.mtm_core.
-            from ..core.calibration import realized_market
             calibrated = realized_market(
                 history.get("prices", {}), tickers, int(window_days))
             corr_matrix = calibrated["corr"]

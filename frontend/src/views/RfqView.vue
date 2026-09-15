@@ -1864,12 +1864,16 @@ const detailCalendarEnd = computed(() => {
 })
 
 // Same derivation rule as createMaturityDate/DealTab.vue: latest CONSTAT
-// schedule end date when the script has one, else value_date + T years.
+// schedule end date when the script has one, else strike + T years. The
+// engine's time axis starts at the strike — counting from the value date put
+// the detail's maturity a few days after the one the AO was created with.
+// AOs stored before the strike date existed fall back to the value date.
 const detailMaturityDate = computed(() => {
   if (detailCalendarEnd.value) return detailCalendarEnd.value
   const p = rfq.current?.params || {}
-  if (!p.value_date || !p.T) return ''
-  return addYears(p.value_date, p.T)
+  const origin = p.strike_date || p.value_date
+  if (!origin || !p.T) return ''
+  return addYears(origin, p.T)
 })
 
 // L'horizon du détail, pour la courbe de dividende : la même règle que
@@ -1947,6 +1951,23 @@ const champsManquants = computed(() => {
                                   ['value_date', 'date de valeur'],
                                   ['payment_date', 'date de paiement']]) {
     if (!form[champ]) trous.push(libelle)
+  }
+  if (form.kind === 'to_trade') {
+    for (const calendar of scriptConstats.value) {
+      const value = constatOverrides[calendar.name]
+      if (calendar.kind === 'single') {
+        const day = typeof value === 'string' ? value : value?.date
+        if (!day) trous.push(`date du calendrier ${calendar.name}`)
+        continue
+      }
+      for (const [field, label] of [['start_date', 'début'], ['end_date', 'fin'],
+                                    ['roll_date', 'date de roll'], ['frequency', 'fréquence']]) {
+        if (!value?.[field]) trous.push(`${label} du calendrier ${calendar.name}`)
+      }
+      if (calendar.kind === 'nested_schedule' && !value?.sub_frequency) {
+        trous.push(`sous-fréquence du calendrier ${calendar.name}`)
+      }
+    }
   }
   return trous
 })
@@ -2056,6 +2077,7 @@ async function submitCreate() {
         constats: buildConstatsPayload(scriptConstats.value, constatOverrides),
         notional: nominalValue.value, currency: form.currency,
         strike_date: form.strike_date, value_date: form.value_date,
+        maturity_date: createMaturityDate.value || null,
         payment_date: form.payment_date,
         // Traçabilité : les dates stockées sont déjà les dates effectives, la
         // convention dit seulement comment on y est arrivé.

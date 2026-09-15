@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 import bcrypt
 from sqlalchemy import event, text
 from sqlmodel import SQLModel, Session, create_engine, select
@@ -782,9 +783,71 @@ def _backfill_rfq_statuses():
         s.commit()
 
 
+def _retire_four_eyes_fixing_policy():
+    """Move historical deals to the single automatic provider workflow."""
+    from ..core.audit import record_audit_event
+
+    marker = "fixing_policy_auto_only_v1"
+    with Session(engine) as session:
+        session.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                key TEXT PRIMARY KEY,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        if session.execute(text(
+                "SELECT 1 FROM app_migrations WHERE key = :key"),
+                {"key": marker}).first():
+            return
+
+        legacy_deals = session.exec(select(Deal).where(
+            Deal.fixing_policy != "AUTO_YAHOO")).all()
+        migrated_ids: list[int] = []
+        for deal in legacy_deals:
+            previous = deal.fixing_policy
+            deal.fixing_policy = "AUTO_YAHOO"
+            session.add(deal)
+            migrated_ids.append(deal.id)
+            record_audit_event(
+                session,
+                action="FIXING_POLICY_AUTOMATED",
+                object_type="DEAL",
+                object_id=deal.id,
+                actor_user_id=None,
+                actor_type="SYSTEM",
+                result="SUCCESS",
+                before={"fixing_policy": previous},
+                after={"fixing_policy": "AUTO_YAHOO"},
+                reason=(
+                    "Retrait du workflow Maker/Checker ; les clôtures "
+                    "fournisseur contrôlées deviennent officielles automatiquement."),
+                data_source="FIXING_OFFICIAL",
+                metadata={"migration": marker},
+            )
+
+        if migrated_ids:
+            pending = session.exec(select(LifecycleProposal).where(
+                LifecycleProposal.deal_id.in_(migrated_ids),
+                LifecycleProposal.status.in_([
+                    "PROPOSED", "VALIDATED", "MANUAL_REVIEW_REQUIRED",
+                ]),
+            )).all()
+            for proposal in pending:
+                proposal.status = "STALE"
+                proposal.error_message = (
+                    "Proposition humaine retirée lors du passage aux fixings automatiques.")
+                proposal.updated_at = datetime.utcnow()
+                session.add(proposal)
+
+        session.execute(text(
+            "INSERT INTO app_migrations(key) VALUES (:key)"), {"key": marker})
+        session.commit()
+
+
 def init_db():
     SQLModel.metadata.create_all(engine)
     _migrate()
+    _retire_four_eyes_fixing_policy()
     _seed()
     _seed_rfq_providers()
     _seed_counterparties()

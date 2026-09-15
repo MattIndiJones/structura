@@ -25,6 +25,11 @@ export const useRfqStore = defineStore('rfq', () => {
   // modèle stocké côté serveur n'est qu'un nombre : sans ça, impossible de
   // montrer d'où il vient (flux par date, IC 95 %, fugit).
   const lastPricing = ref(null)
+  // UI fields can emit several PATCHes in immediate succession (price, then
+  // status).  The server returns the whole quote, so concurrent responses can
+  // otherwise overwrite a newer price with the older snapshot.  Serialize by
+  // quote while leaving different providers independent.
+  const quoteUpdateQueues = new Map()
 
   async function fetchProviders() {
     const res = await apiFetch('/api/rfq/providers')
@@ -98,17 +103,27 @@ export const useRfqStore = defineStore('rfq', () => {
   }
 
   async function updateQuote(rfqId, quoteId, payload) {
-    const res = await apiFetch(`/api/rfq/${rfqId}/quotes/${quoteId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+    const key = `${rfqId}:${quoteId}`
+    const previous = quoteUpdateQueues.get(key) || Promise.resolve()
+    const request = previous.catch(() => {}).then(async () => {
+      const res = await apiFetch(`/api/rfq/${rfqId}/quotes/${quoteId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const quote = await _json(res, 'Erreur mise à jour quote')
+      if (current.value?.id === rfqId) {
+        const idx = current.value.quotes.findIndex(q => q.id === quoteId)
+        if (idx !== -1) current.value.quotes[idx] = quote
+      }
+      return quote
     })
-    const quote = await _json(res, 'Erreur mise à jour quote')
-    if (current.value?.id === rfqId) {
-      const idx = current.value.quotes.findIndex(q => q.id === quoteId)
-      if (idx !== -1) current.value.quotes[idx] = quote
+    quoteUpdateQueues.set(key, request)
+    try {
+      return await request
+    } finally {
+      if (quoteUpdateQueues.get(key) === request) quoteUpdateQueues.delete(key)
     }
-    return quote
   }
 
   async function removeQuote(rfqId, quoteId) {
@@ -133,46 +148,71 @@ export const useRfqStore = defineStore('rfq', () => {
     return update(rfqId, { selected_quote_id: quoteId })
   }
 
-  // Prices the RFQ's frozen script against Structura's own Monte Carlo engine
-  // (same /api/price endpoint the Pricer uses) and stores the result on the RFQ.
+  function addDaysIso(isoDate, days) {
+    const date = new Date(`${isoDate}T00:00:00Z`)
+    date.setUTCDate(date.getUTCDate() + Math.round(days))
+    return date.toISOString().slice(0, 10)
+  }
+
+  function rfqMaturityDate(p) {
+    if (p.maturity_date) return p.maturity_date
+    const dates = []
+    for (const value of Object.values(p.constats || {})) {
+      if (typeof value === 'string') dates.push(value)
+      else if (value?.end_date) dates.push(value.end_date)
+    }
+    if (dates.length) return dates.sort().at(-1)
+    const origin = p.strike_date || p.value_date
+    return origin && p.T ? addDaysIso(origin, p.T * 365.25) : null
+  }
+
+  // Prices the RFQ's frozen script against the same dated route as the Pricer.
+  // A historical or forward-start tender must replay/simulate its initial
+  // fixing relative to the valuation date; /api/price only represents t=0.
   async function computeModelPrice(rfq) {
     const p = rfq.params || {}
-    const res = await apiFetch('/api/price', {
+    const valuationDate = p.valuation_date || rfq.ao_date || new Date().toISOString().slice(0, 10)
+    const dated = !!(p.strike_date && valuationDate !== p.strike_date)
+    const maturityDate = rfqMaturityDate(p)
+    if (dated && !maturityDate) {
+      throw new Error('La maturité contractuelle est requise pour valoriser cette RFQ à sa date.')
+    }
+    const payload = {
+      script: rfq.script_snapshot,
+      underlyings: p.underlyings || [],
+      corr_matrix: p.corr_matrix || [],
+      r: p.r ?? 0.03,
+      T: p.T ?? 3.0,
+      N: p.N ?? 20000,
+      model: p.model || 'constant',
+      antithetic: p.antithetic ?? true,
+      yield_curve: p.yield_curve || [],
+      funding_curve: p.funding_curve || [],
+      funding_spread: p.funding_spread ?? 0,
+      sigma_r: p.sigma_r ?? 0,
+      a_r: p.a_r ?? 0,
+      barrier_monitoring: p.barrier_monitoring || 'weekly',
+      user_params: p.user_params || {},
+      constats: p.constats || {},
+      frozen_schedule: p.frozen_schedule || null,
+      strike_date: p.strike_date || null,
+      value_date: p.value_date || null,
+      payment_date: p.payment_date || null,
+      maturity_date: maturityDate,
+      settlement_ccy: p.currency || null,
+      anchor: p.strike_date || p.value_date || null,
+      ...(dated ? { valuation_date: valuationDate } : {}),
+    }
+    const res = await apiFetch(dated ? '/api/price/in-life' : '/api/price', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        script: rfq.script_snapshot,
-        underlyings: p.underlyings || [],
-        corr_matrix: p.corr_matrix || [],
-        r: p.r ?? 0.03,
-        T: p.T ?? 3.0,
-        N: p.N ?? 20000,
-        model: p.model || 'constant',
-        // Les hypothèses de marché stockées avec l'AO. Sans ce passage, elles
-        // étaient saisissables, enregistrées… et sans le moindre effet sur le
-        // prix modèle. Le projet a déjà connu ce fil débranché : une courbe de
-        // dividende à 8 % vaut −491,6 bps.
-        yield_curve: p.yield_curve || [],
-        funding_curve: p.funding_curve || [],
-        funding_spread: p.funding_spread ?? 0,
-        user_params: p.user_params || {},
-        constats: p.constats || {},
-        frozen_schedule: p.frozen_schedule || null,
-        // Trois dates, trois rôles distincts : la diffusion démarre au
-        // strike (c'est là que le niveau initial se constate), le prix
-        // s'exprime à la value date (c'est le montant échangé au règlement),
-        // et le remboursement final tombe à la payment date. La devise nomme
-        // le calendrier de jours ouvrés qui porte tout ça.
-        strike_date: p.strike_date || null,
-        value_date: p.value_date || null,
-        payment_date: p.payment_date || null,
-        settlement_ccy: p.currency || null,
-        // Repli historique : sans date de strike, l'axe reste ancré sur la
-        // value date, comme avant que les trois dates existent.
-        anchor: p.strike_date || p.value_date || null,
-      }),
+      body: JSON.stringify(payload),
     })
     const data = await _json(res, 'Erreur calcul du prix modèle')
+    if (data.early_recall || data.price == null) {
+      const recallDate = data.recall_date ? ` le ${data.recall_date}` : ''
+      throw new Error(data.message || `Le produit a déjà été rappelé${recallDate} : aucun prix actif à comparer.`)
+    }
     // On garde la réponse entière, pas seulement le prix : c'est elle qui
     // permet au détail de l'AO d'expliquer le chiffre qu'on oppose au
     // fournisseur, ligne de flux par ligne de flux.

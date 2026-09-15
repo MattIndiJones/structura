@@ -21,6 +21,27 @@ export const useProductsStore = defineStore('products', () => {
   const saving = ref(false)
   const error = ref('')
 
+  async function getProduct(id) {
+    const res = await apiFetch(`/api/products/${id}`)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(message(data, 'Produit introuvable.'))
+    return data
+  }
+
+  async function fetchCalculation(productId, calculationId) {
+    const res = await apiFetch(`/api/products/${productId}/calculations/${calculationId}`)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(message(data, 'Calcul conservé introuvable.'))
+    return data
+  }
+
+  // Used by the library's expandable rows. It deliberately does not toggle
+  // the store-wide loader, otherwise opening one row would replace the whole
+  // product table with the page spinner.
+  async function fetchDetails(id) {
+    return getProduct(id)
+  }
+
   async function fetchAll({ archived = false } = {}) {
     loading.value = true
     error.value = ''
@@ -38,21 +59,27 @@ export const useProductsStore = defineStore('products', () => {
     }
   }
 
-  async function fetchOne(id) {
+  async function fetchOne(id, { calculationId = null } = {}) {
     loading.value = true
     error.value = ''
     try {
-      const res = await apiFetch(`/api/products/${id}`)
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(message(data, 'Produit introuvable.'))
+      const data = await getProduct(id)
       let calculationInput = null
-      const calculation = data.calculations?.at(-1)
+      const calculation = calculationId == null
+        ? data.calculations?.at(-1)
+        : data.calculations?.find(item => item.id === Number(calculationId))
+      if (calculationId != null && !calculation) {
+        throw new Error('Ce calcul n’appartient pas au produit ou n’existe plus.')
+      }
+      if (calculation && calculation.terms_version !== data.terms_version) {
+        throw new Error(
+          'Ce calcul porte sur une ancienne version des termes. Il reste consultable depuis la bibliothèque.')
+      }
       if (calculation) {
-        const calcRes = await apiFetch(`/api/products/${id}/calculations/${calculation.id}`)
-        if (calcRes.ok) calculationInput = (await calcRes.json()).input
+        calculationInput = (await fetchCalculation(id, calculation.id)).input
       }
       current.value = data
-      return { product: data, calculationInput }
+      return { product: data, calculationInput, calculationId: calculation?.id ?? null }
     } catch (e) {
       error.value = e.message
       return null
@@ -132,6 +159,7 @@ export const useProductsStore = defineStore('products', () => {
 
   return {
     items, current, loading, saving, error,
-    fetchAll, fetchOne, retainPricing, retainCalculation, setArchived, release,
+    fetchAll, fetchOne, fetchDetails, fetchCalculation,
+    retainPricing, retainCalculation, setArchived, release,
   }
 })

@@ -434,6 +434,10 @@ const productTitle = computed(() => store.productTitle)
 
 async function compute() {
   if (!store.result || !store.kid) return
+  if (!(await store.ensureScriptValidated())) {
+    error.value = 'Le script ne valide pas : corrigez-le dans l’onglet Script avant l’EMT.'
+    return
+  }
   loading.value = true
   error.value = ''
   emt.value = null

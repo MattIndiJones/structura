@@ -11,7 +11,9 @@
       <!-- ── Paramètres KID ─────────────────────────────────── -->
       <div class="card">
         <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Paramètres KID</h3>
-        <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+        <!-- items-end: a label that wraps onto two lines must not push its
+             input below its neighbours' — the inputs share the row's baseline. -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 items-end">
           <div>
             <label class="label">CRM (risque crédit)
               <HelpTip text="Classe de risque de crédit de l'émetteur (notation), 1=AAA à 6=CCC et moins. Combiné au MRM (risque marché, calculé depuis la VEV) via la table PRIIPs pour donner le SRI final — un émetteur moins bien noté remonte le SRI même si le payoff est identique." />
@@ -302,6 +304,11 @@ const totalCostImpact = computed(() => {
 // ── Compute KID ──────────────────────────────────────────
 async function compute() {
   if (!store.result) return
+  // The KID describes the validated script, never a text being typed.
+  if (!(await store.ensureScriptValidated())) {
+    error.value = 'Le script ne valide pas : corrigez-le dans l’onglet Script avant le KID.'
+    return
+  }
   loading.value = true
   error.value = ''
   kid.value = null

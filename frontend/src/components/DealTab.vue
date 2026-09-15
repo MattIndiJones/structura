@@ -40,14 +40,6 @@
       </template>
     </div>
 
-    <div v-if="store.contractTermsLocked"
-         class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
-      <p class="text-sm font-bold">🔒 Deal booké — données contractuelles figées</p>
-      <p class="text-xs mt-0.5">
-        Ces informations décrivent le deal existant. Utilisez « Booker un autre deal » pour repartir explicitement de ce produit.
-      </p>
-    </div>
-
     <!-- ── Identité du deal ─────────────────────────────────── -->
     <fieldset class="card" :disabled="store.contractTermsLocked">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Identité</h2>
@@ -197,15 +189,14 @@
         </div>
 
         <div class="col-span-2">
-          <label class="label">Traitement des constatations
-            <HelpTip width="w-80" text="Classique : la clôture Yahoo non ajustée devient automatiquement le fixing de référence si tous les contrôles passent. Contrôlé : chaque fixing suit le workflow Ops Maker / Ops Checker. La politique est figée au booking." />
-          </label>
-          <select v-model="form.fixing_policy" class="select">
-            <option value="AUTO_YAHOO">Classique — Yahoo automatique</option>
-            <option value="FOUR_EYES">Produit contrôlé — validation à quatre yeux</option>
-          </select>
+          <label class="label">Source des constatations</label>
+          <div class="input flex items-center gap-2" style="background: var(--surface2); color: var(--text);">
+            <span aria-hidden="true">↻</span>
+            <span>Automatique — clôture non ajustée du fournisseur configuré</span>
+          </div>
           <p class="text-[10px] text-slate-500 mt-1">
-            Une anomalie Yahoo bascule toujours la constatation en contrôle manuel, sans écraser le dernier fixing officiel.
+            Chaque fixing conserve le fournisseur, la date de marché, la convention et son empreinte d’audit.
+            Une donnée absente ou incohérente reste visible comme exception et n’écrase jamais le dernier fixing officiel.
           </p>
         </div>
 

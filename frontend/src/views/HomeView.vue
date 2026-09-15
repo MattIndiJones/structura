@@ -33,7 +33,7 @@
                 <div class="w-10 h-10 rounded-lg bg-blue-900/50 flex items-center justify-center text-xl">📁</div>
                 <div>
                   <div class="font-bold text-slate-100 group-hover:text-blue-300 transition-colors">Pricing</div>
-                  <div class="text-xs text-slate-500">Scripts · Pricer · Documentation</div>
+                  <div class="text-xs text-slate-500">Scripts · Modèles · Pricer · Documentation</div>
                 </div>
               </div>
               <p class="text-xs text-slate-600">Structurez, pricez et documentez vos produits.</p>
@@ -152,6 +152,21 @@
                 </div>
               </div>
               <p class="text-xs text-slate-600">Reprenez un produit conservé, ses termes figés et ses calculs datés.</p>
+            </RouterLink>
+
+            <!-- Product models: one sheet, a basket size, a tenor → a filled Pricer -->
+            <RouterLink to="/product-models"
+              class="card flex flex-col gap-3
+                     hover:border-cyan-700 hover:bg-cyan-950/20 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-cyan-900/50 flex items-center justify-center text-xl">🧩</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-cyan-300 transition-colors">Modèles de produits</div>
+                  <div class="text-xs text-slate-500">Produit · sous-jacents · ténor</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Choisissez un produit générique : le Pricer s'ouvre avec son script et ses calendriers.</p>
             </RouterLink>
 
             <!-- Nouveau script -->

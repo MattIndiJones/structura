@@ -20,7 +20,7 @@ from ..db.models import Deal, DealEvent
 from ..services.market_data import (
     dividend_profile, load_hist_prices, market_data_provider_for_deal,
 )
-from .calibration import realized_market
+from .calibration import calibration_history_start, realized_market
 from .inlife_valuation import InLifeProduct, ValuationError, build_residual
 from .market_snapshot import snapshot_rate, snapshot_rate_is_default
 from .valuation_context import (
@@ -235,8 +235,9 @@ def mtm_core(
         raise HTTPException(422, "Aucun ticker défini sur ce deal")
     # Avant le strike, la fenêtre partirait d'une date postérieure à sa propre
     # fin : Yahoo refuse l'intervalle et le MtM s'arrêtait là. On borne au jour
-    # de valorisation — l'historique ne sert alors qu'à la recalibration
-    # réalisée et à l'affichage, le rejeu n'ayant rien à rejouer.
+    # de valorisation — l'historique ne sert alors qu'à l'affichage, le rejeu
+    # n'ayant rien à rejouer. La recalibration réalisée charge sa propre
+    # fenêtre plus bas (calibration_history_start).
     fetch_start = (min(produit.strike_date, today) - timedelta(days=7)).isoformat()
     if injected_price_loader:
         px_data = load_prices(tickers, fetch_start, today.isoformat())
@@ -308,10 +309,15 @@ def mtm_core(
     }
     statistical_px_data = None
     if body.recalibrate == "realized":
+        # The calibration reads its own window, ending at the valuation date.
+        # Reusing the replay window (strike − 7 days) capped the realized vol at
+        # the time elapsed since the strike, and gave a forward-start deal one
+        # week of history — too few returns, MtM refused.
+        statistical_start = calibration_history_start(today, body.window_days).isoformat()
         if injected_price_loader:
             try:
                 statistical_px_data = load_prices(
-                    tickers, fetch_start, today.isoformat(), adjusted=True)
+                    tickers, statistical_start, today.isoformat(), adjusted=True)
             except TypeError:
                 # Test/legacy injected loaders may expose the former three
                 # argument contract. Production always takes the explicit
@@ -319,7 +325,7 @@ def mtm_core(
                 statistical_px_data = px_data
         else:
             statistical_px_data = load_prices(
-                tickers, fetch_start, today.isoformat(), adjusted=True,
+                tickers, statistical_start, today.isoformat(), adjusted=True,
                 provider=market_provider)
         if "error" in statistical_px_data:
             raise HTTPException(422, statistical_px_data["error"])

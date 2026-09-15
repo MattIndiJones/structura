@@ -1,6 +1,6 @@
 """Construction du prompt de l'assistant de scripting.
 
-Le corps du prompt système est `docs/PAYSCRIPT_REFERENCE.md`, lu à l'exécution.
+Le corps du prompt système est `docs/reference/PAYSCRIPT_REFERENCE.md`, lu à l'exécution.
 Recopier la grammaire ici en ferait une seconde source de vérité qui dériverait
 en silence : le prompt promettrait au modèle une syntaxe que le parser refuse,
 et l'assistant échouerait à chaque appel sans que rien n'explique pourquoi.
@@ -16,7 +16,7 @@ from .examples_extra import all_examples
 
 # backend/app/services/llm/prompt.py -> parents[4] == racine du dépôt
 REFERENCE_PATH = (Path(__file__).resolve().parents[4]
-                  / "docs" / "PAYSCRIPT_REFERENCE.md")
+                  / "docs" / "reference" / "PAYSCRIPT_REFERENCE.md")
 
 SCRIPT_MARK = "===SCRIPT==="
 EXPLAIN_MARK = "===EXPLICATION==="
@@ -133,7 +133,7 @@ RÈGLES IMPÉRATIVES
 8. Déclare en `PARAM` tout niveau chiffré, avec sa valeur par défaut. N'écris
    jamais un niveau en dur dans une expression.
 9. Un nom de PARAM ou de SET ne peut pas être un mot du langage (§ Noms réservés).
-10. Les dates `AT` sont en années depuis aujourd'hui, strictement positives.
+10. Les dates `AT` sont en années depuis la date de strike, strictement positives.
 
 ═══════════════════════════════════════════════════════════════════
 FORMAT DE RÉPONSE — impératif

@@ -115,7 +115,7 @@ class UatGenerationRequest(BaseModel):
     nominal_min: float = Field(default=100_000.0, gt=0, le=100_000_000.0)
     nominal_max: float = Field(default=2_000_000.0, gt=0, le=100_000_000.0)
     currencies: list[str] = Field(default_factory=lambda: ["EUR"])
-    fixing_policy: Literal["AUTO_YAHOO", "FOUR_EYES", "MIX"] = "AUTO_YAHOO"
+    fixing_policy: Literal["AUTO_YAHOO"] = "AUTO_YAHOO"
     quotes_per_rfq: int = Field(default=2, ge=1, le=5)
     # None means "use every mapped active provider" for CLI/backward callers.
     # An explicit [] from the Admin form means the operator selected none and
@@ -556,14 +556,7 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
                              for j in range(count_underlyings)]
                             for i in range(count_underlyings)],
         }
-        fixing_policy = (rng.choice(["AUTO_YAHOO", "FOUR_EYES"])
-                         if body.fixing_policy == "MIX" else body.fixing_policy)
-        # Resolved and system-officialized fixtures exercise the production
-        # AUTO_YAHOO transition; the pending ones exercise the human path and
-        # are forced the other way, because a deliberately unresolved fixing on
-        # an automatic deal is a contradiction, not a test case.
-        if lifecycle_profile in TERMINAL_PROFILES | {"ACTIVE_2Y_OFFICIAL"}:
-            fixing_policy = "AUTO_YAHOO"
+        fixing_policy = "AUTO_YAHOO"
         profile_label = LIFECYCLE_PROFILES[lifecycle_profile]
         ao_date = _to_business_day(min(today, trade - timedelta(days=2)))
         specs.append({
@@ -967,11 +960,6 @@ def _materialize_lifecycle_profile(
     if not reached:
         # FORWARD_START, and only it: even the strike is still ahead.
         return result
-    if spec["fixing_policy"] != "AUTO_YAHOO":
-        # A controlled deal has no automatic source: its values are entered by
-        # hand. Nothing is invented for it here.
-        return result
-
     _load_yahoo_fixings(deal, target, session, result)
     session.flush()
     record_audit_event(

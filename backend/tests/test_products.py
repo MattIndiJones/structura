@@ -125,6 +125,11 @@ def test_prix_signe_est_conserve_comme_calcul_separe(product_client):
         f"/api/products/{product['product_id']}/calculations/{run.id}")
     assert detail.status_code == 200
     assert detail.json()["result"]["price"] == pytest.approx(0.9825)
+    market = detail.json()["market_snapshot"]
+    assert market["r"] == pytest.approx(3.0)
+    assert market["underlyings"][0]["sigma"] == pytest.approx(20.0)
+    assert market["underlyings"][0]["q"] == pytest.approx(1.0)
+    assert market["corrMatrix"] == [[1.0]]
 
 
 def test_recu_du_pricing_http_peut_etre_conserve_tel_quel(product_client):

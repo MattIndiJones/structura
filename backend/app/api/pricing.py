@@ -82,6 +82,11 @@ def parse_endpoint(req: ParseRequest):
             has_stop=compiled.has_stop,
             has_maturity_event=any(
                 event.type == "AT_MATURITY" for event in compiled.events),
+            # The years written in `AT 1, 2, 3:` — known at parse time, unlike
+            # CONSTAT dates. The Pricer dates them from the strike to keep the
+            # maturity on or after the last observation the script declares.
+            at_dates=sorted({round(float(d), 6)
+                             for event in compiled.events for d in (event.dates or [])}),
             monitors=compiled.monitors or [],
         )
     except ValueError as e:

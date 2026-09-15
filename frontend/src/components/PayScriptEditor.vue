@@ -1,14 +1,6 @@
 ﻿<template>
   <div class="flex flex-col gap-4">
 
-    <div v-if="store.contractTermsLocked"
-         class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
-      <p class="text-sm font-bold">🔒 PayScript figé au booking</p>
-      <p class="text-xs mt-0.5">
-        Le script reste consultable. Pour changer le payoff, créez un nouveau produit ou une déclinaison explicite.
-      </p>
-    </div>
-
     <!-- Toolbar -->
     <div class="flex items-center gap-2 flex-wrap">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mr-auto">PayScript</h2>
@@ -41,6 +33,15 @@
       </button>
       <HelpTip width="w-72" text="Décrivez le produit en français, un modèle propose un script PayScript. Rien n'est appliqué automatiquement : le script arrive accompagné d'une reformulation en français et d'une fiche de contrôle, et c'est vous qui l'adoptez. Ollama tourne en local — la description ne quitte pas la machine." />
 
+      <!-- Explicit validation: the same gesture as Ctrl+S (Cmd+S on a Mac). -->
+      <button class="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 shrink-0"
+              :disabled="store.contractTermsLocked || validating"
+              title="Valider le script (Ctrl+S) : ses déclarations s'appliquent à Economics"
+              @click="validate">
+        <span v-if="validating" class="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin"></span>
+        Valider
+      </button>
+
       <!-- Script name chip (when loaded from DB) -->
       <span v-if="store.currentScriptName"
             class="text-[10px] text-slate-500 border border-slate-700 rounded px-1.5 py-0.5 truncate max-w-[140px]"
@@ -65,6 +66,17 @@
     </div>
 
     <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
+    <AlertMessage v-if="store.scriptDirty && !store.contractTermsLocked" kind="warning">
+      Script modifié, non validé — Ctrl+S ou « Valider » applique ses déclarations à Economics.
+    </AlertMessage>
+    <AlertMessage v-else-if="validatedNotice && !store.contractTermsLocked" kind="success"
+                  dismissible @dismiss="validatedNotice = false">
+      Script validé.
+    </AlertMessage>
+    <AlertMessage v-if="reportLines.length" kind="info" dismissible @dismiss="store.validationReport = null">
+      Valeurs mises à jour par le script à la validation :
+      <span v-for="line in reportLines" :key="line" class="block font-mono text-[11px]">{{ line }}</span>
+    </AlertMessage>
 
     <!-- Save modal -->
     <BaseModal v-model="saveModal.open" title="Sauvegarder le script" max-width="420px">
@@ -111,7 +123,6 @@
           :maxlength="store.calculationLimits.maxScriptChars"
           spellcheck="false"
           placeholder="# Écrivez votre PayScript ici…"
-          @input="onInput"
           @keydown.tab="onEditorTab"
           style="min-height:340px"
         />
@@ -127,7 +138,7 @@
     <!-- Parse error -->
     <div v-if="store.parseError"
          class="bg-red-950/60 border border-red-800 rounded-lg p-3 text-xs text-red-300 font-mono whitespace-pre-wrap">
-      <span class="font-bold text-red-400">Erreur PayScript :</span>
+      <span class="font-bold text-red-400">Erreur PayScript{{ store.scriptDirty ? ' (dernière validation)' : '' }} :</span>
       {{ Array.isArray(store.parseError) ? store.parseError.join('\n') : store.parseError }}
     </div>
 
@@ -176,7 +187,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
@@ -199,10 +210,57 @@ const groupedTemplates = computed(() => {
   }
   return groups
 })
-let debounceTimer = null
 
 const expertMode = ref(false)
 const assistantOpen = ref(false)
+
+// ── Validation (Ctrl+S / « Valider ») ─────────────────────────────
+// Validating never saves: saving stays on the button at the top right.
+const validating = ref(false)
+const validatedNotice = ref(false)
+
+async function validate() {
+  if (store.contractTermsLocked || validating.value) return
+  validating.value = true
+  validatedNotice.value = false
+  try {
+    validatedNotice.value = await store.validateScript()
+  } finally {
+    validating.value = false
+  }
+}
+
+// Intercepted anywhere in the Pricer, not only in the text area: a Ctrl+S
+// typed from Economics used to open the browser's "Save page" dialog.
+function onShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return
+  if (String(event.key).toLowerCase() !== 's') return
+  event.preventDefault()
+  validate()
+}
+
+onMounted(() => window.addEventListener('keydown', onShortcut))
+onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
+
+watch(() => store.scriptDirty, dirty => { if (dirty) validatedNotice.value = false })
+
+function formatDeclared(value, isPct) {
+  if (value === '' || value == null || Number.isNaN(Number(value))) return '—'
+  const text = Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 6 })
+  return isPct ? `${text} %` : text
+}
+
+const reportLines = computed(() => {
+  const report = store.validationReport
+  if (!report) return []
+  return [
+    ...report.replaced.map(item =>
+      `${item.name} : ${formatDeclared(item.before, item.beforePct)} → ${formatDeclared(item.after, item.afterPct)}`),
+    ...report.keptRows.map(item =>
+      `${item.name} : ${item.count} ligne(s) saisie(s) conservée(s)`
+      + (item.unitChanged ? ' — unité changée, à vérifier' : '')),
+  ]
+})
 
 // ── Save / update ──────────────────────────────────────────────────
 const saving       = ref(false)
@@ -426,12 +484,6 @@ function _applyTenor(ov, key, tenor) {
 }
 
 // ── Misc ───────────────────────────────────────────────────────────
-function onInput() {
-  if (store.contractTermsLocked) return
-  clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => store.parseScript(), 500)
-}
-
 function onEditorTab(event) {
   if (store.contractTermsLocked) return
   event.preventDefault()
@@ -444,75 +496,78 @@ function insertTab(e) {
   ta.selectionStart = ta.selectionEnd = s + 2
 }
 
+// Entries are listed in alphabetical order within each section (sections keep
+// their reading order). Insert a new entry at its alphabetical place.
 const referenceSections = [
   {
     title: 'Déclarations & dates',
     items: [
-      { kw: 'PARAM K = 5%', desc: 'Paramètre modifiable par l\'UI ("desc" ou # desc optionnelle)' },
-      { kw: 'PARAM() K = 5%', desc: 'Paramètre par observation : tableau d\'une valeur par date AT dans l\'UI (la dernière ligne s\'étend, une ligne = constant). Le = 5% pré-remplit la 1ère ligne' },
-      { kw: 'PARAM M_XXX', desc: 'Préfixe M_ = surveillé par la watchlist Booking. Direction et observable déduits de l\'usage : WOF >= M_X = rappel par le haut, WOF < M_X = KI par le bas' },
-      { kw: 'AT 1, 2, 3:', desc: 'Événement à des dates précises (années)' },
+      { kw: 'AT 1, 2, 3:', desc: 'Événement à des dates précises, en années depuis la date de strike' },
       { kw: 'AT 1..5:0.5', desc: 'Événement sur une plage (début..fin:pas, pas=1 par défaut)' },
       { kw: 'AT MATURITY:', desc: 'Événement à maturité' },
-      { kw: 'CONSTAT Nom', desc: 'Date unique nommée, remplie via l\'UI (mode expert)' },
-      { kw: 'CONSTAT() Nom', desc: 'Calendrier nommé : début/fin/roll/fréquence/stub, rempli via l\'UI' },
-      { kw: 'CONSTAT()() Nom', desc: 'Comme CONSTAT() + une sous-fréquence (subdivise chaque intervalle)' },
       { kw: 'AT Nom:', desc: 'Événement à chaque date d\'un calendrier nommé' },
       { kw: 'AT Nom.first:', desc: 'Événement additionnel à la 1ère date du calendrier' },
       { kw: 'AT Nom.last:', desc: 'Événement additionnel à la dernière date (ex : check KI à maturité)' },
+      { kw: 'AT Nom.last.last:', desc: 'Deux niveaux de qualificateur : le premier désigne une constatation, le second UN RELEVÉ dans sa fenêtre. .last = la dernière constatation (donc la moyenne), .last.last = son dernier relevé (donc le cours). C\'est ainsi qu\'un PDI sur clôture cohabite avec un coupon sur moyenne, même date, même calendrier' },
       { kw: 'AT Nom[3]:', desc: 'Événement additionnel à la 3e date (1-indexé)' },
+      { kw: 'CONSTAT Nom', desc: 'Date unique nommée, remplie via l\'UI (mode expert)' },
       { kw: 'CONSTAT Nom MIN|MAX|AVG', desc: 'Constatation sur PERIODE : chaque date devient le min/max/moyenne des cours de CHAQUE sous-jacent sur une fenetre, et WOF/BOF/BASKET n\'agregent qu\'ensuite. Longueur et frequence de la fenetre se saisissent a l\'ecran : ce sont des donnees de term sheet, pas du payoff' },
       { kw: 'CONSTAT STRIKE_FIX AVG', desc: 'Nom reserve : la fenetre de depart, celle qui fixe S0 par sous-jacent. Elle PART de sa date vers l\'avant, la ou toute autre fenetre arrive a la sienne. Ensuite WOF/BOF/BASKET valent directement la performance contre S0. Tant qu\'elle n\'est pas close, les barrieres americaines (WOF_MIN) ne courent pas' },
+      { kw: 'CONSTAT() Nom', desc: 'Calendrier nommé : début/fin/roll/fréquence/stub, rempli via l\'UI' },
       { kw: 'CONSTAT() Nom AVG PERIOD', desc: 'Fenêtre = LA PÉRIODE, d\'une constatation à la suivante, échantillonnée à la fréquence de relevé saisie à l\'écran. Trois constatations annuelles moyennées sur leurs relevés trimestriels, par exemple. Sans PERIOD, la fenêtre a une longueur fixe avant chaque date' },
-      { kw: 'AT Nom.last.last:', desc: 'Deux niveaux de qualificateur : le premier désigne une constatation, le second UN RELEVÉ dans sa fenêtre. .last = la dernière constatation (donc la moyenne), .last.last = son dernier relevé (donc le cours). C\'est ainsi qu\'un PDI sur clôture cohabite avec un coupon sur moyenne, même date, même calendrier' },
+      { kw: 'CONSTAT()() Nom', desc: 'Comme CONSTAT() + une sous-fréquence (subdivise chaque intervalle)' },
+      { kw: 'Ctrl+S / Valider', desc: 'Valide le script : une valeur initiale ou une unité modifiée s\'applique à Economics. N\'enregistre pas' },
+      { kw: 'PARAM K = 5%', desc: 'Paramètre modifiable par l\'UI ("desc" ou # desc optionnelle)' },
+      { kw: 'PARAM M_XXX', desc: 'Préfixe M_ = surveillé par la watchlist Booking. Direction et observable déduits de l\'usage : WOF >= M_X = rappel par le haut, WOF < M_X = KI par le bas' },
+      { kw: 'PARAM() K = 5%', desc: 'Paramètre par observation : tableau d\'une valeur par date AT dans l\'UI (la dernière ligne s\'étend, une ligne = constant). Valeur obligatoire, comme pour PARAM : le = 5% pré-remplit la 1ère ligne' },
     ],
   },
   {
     title: 'Instructions',
     items: [
-      { kw: 'SET X = expr', desc: 'Stocker une valeur (variable mémo)' },
-      { kw: 'PAY expr "label"', desc: 'Flux actualisé au pricing, étiquette optionnelle (alias : FLOW)' },
       { kw: 'ACCRUE expr', desc: 'Accumuler une valeur dans ACCUM' },
       { kw: 'IF cond: / ELSE IF: / ELSE:', desc: 'Branchement conditionnel' },
+      { kw: 'PAY expr "label"', desc: 'Flux actualisé au pricing, étiquette optionnelle (alias : FLOW)' },
+      { kw: 'SET X = expr', desc: 'Stocker une valeur (variable mémo)' },
       { kw: 'STOP', desc: 'Arrêter le chemin (autocall)' },
     ],
   },
   {
     title: 'Variables intégrées',
     items: [
-      { kw: 'WOF', desc: 'Worst-of actuel (min des spots)' },
-      { kw: 'BOF', desc: 'Best-of actuel (max des spots)' },
-      { kw: 'WOF_MIN', desc: 'Min historique du WoF depuis t=0' },
-      { kw: 'BOF_MAX', desc: 'Max historique du BoF depuis t=0' },
       { kw: 'ACCUM', desc: 'Valeur accumulée via ACCRUE' },
+      { kw: 'BOF', desc: 'Best-of actuel (max des spots)' },
+      { kw: 'BOF_MAX', desc: 'Max historique du BoF depuis t=0' },
       { kw: 'INDEX', desc: 'Numéro d\'observation (1, 2, …)' },
-      { kw: 'T', desc: 'Temps actuel (en années)' },
       { kw: 'N', desc: 'Nombre de sous-jacents' },
+      { kw: 'REALVOL', desc: 'Vol réalisée annualisée du WoF depuis t=0' },
       { kw: 'S[i]', desc: 'Spot du sous-jacent i (1-indexé)' },
       { kw: 'S_MIN[i] / S_MAX[i]', desc: 'Min/max historique du sous-jacent i' },
       { kw: 'S_PREV[i]', desc: 'Spot du sous-jacent i à l\'observation précédente' },
-      { kw: 'REALVOL', desc: 'Vol réalisée annualisée du WoF depuis t=0' },
+      { kw: 'T', desc: 'Temps actuel (en années)' },
+      { kw: 'WOF', desc: 'Worst-of actuel (min des spots)' },
+      { kw: 'WOF_MIN', desc: 'Min historique du WoF depuis t=0' },
     ],
   },
   {
     title: 'Fonctions',
     items: [
-      { kw: 'MAX(a, b) / MIN(a, b)', desc: 'Maximum / minimum' },
       { kw: 'ABS(x)', desc: 'Valeur absolue' },
-      { kw: 'FLOOR(x) / CEIL(x)', desc: 'Arrondi inférieur / supérieur' },
-      { kw: 'SQRT(x) / LOG(x) / EXP(x)', desc: 'Racine carrée, log népérien, exponentielle' },
-      { kw: 'ROUND(x)', desc: 'Arrondi à l\'entier' },
-      { kw: 'INDIC(cond)', desc: '1 si vrai, 0 sinon' },
       { kw: 'BASKET', desc: 'Moyenne simple des spots (équipondérée)' },
       { kw: 'BASKET(w1, w2, …)', desc: 'Panier pondéré des spots' },
+      { kw: 'CEIL(x) / FLOOR(x)', desc: 'Arrondi supérieur / inférieur' },
+      { kw: 'EXP(x) / LOG(x) / SQRT(x)', desc: 'Exponentielle, log népérien, racine carrée' },
+      { kw: 'INDIC(cond)', desc: '1 si vrai, 0 sinon' },
+      { kw: 'MAX(a, b) / MIN(a, b)', desc: 'Maximum / minimum' },
+      { kw: 'ROUND(x)', desc: 'Arrondi à l\'entier' },
     ],
   },
   {
     title: 'Opérateurs logiques & comparaisons',
     items: [
-      { kw: 'AND / OR / NOT', desc: 'Et / ou / négation' },
-      { kw: 'TRUE / FALSE', desc: 'Booléens' },
       { kw: '>=  <=  =  !=', desc: 'Comparateurs (= et == sont équivalents)' },
+      { kw: 'AND / OR / NOT', desc: 'Et / ou / négation' },
+      { kw: 'FALSE / TRUE', desc: 'Booléens' },
     ],
   },
 ]

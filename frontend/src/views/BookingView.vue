@@ -214,7 +214,7 @@
                     </td>
                     <td class="py-2 pr-3 whitespace-nowrap">
                       <span v-if="w.product_type" class="text-slate-500 text-[10px] border border-slate-700 rounded px-1.5 py-0.5">
-                        {{ w.product_type }}
+                        {{ productTypeLabel(w.product_type) }}
                       </span>
                       <span v-else class="text-slate-600">—</span>
                     </td>
@@ -348,18 +348,16 @@
                 </div>
                 <div class="deal-card__identity-meta">
                   <span v-if="d.product_type" class="font-medium text-slate-400">
-                    {{ d.product_type }}
+                    {{ productTypeLabel(d.product_type) }}
                   </span>
                   <span v-if="d.product_type && d.contrepartie" class="text-slate-600">·</span>
                   <span class="text-slate-300">{{ d.contrepartie }}</span>
                   <span class="text-[10px] border rounded px-1.5 py-0.5"
-                    :class="d.fixing_policy === 'FOUR_EYES'
-                      ? 'border-amber-800/60 bg-amber-950/30 text-amber-400'
-                      : 'border-blue-800/60 bg-blue-950/30 text-blue-400'">
-                    {{ d.fixing_policy === 'FOUR_EYES' ? 'Contrôle 4 yeux' : 'Yahoo auto' }}
+                    style="border-color: var(--border); background: var(--surface2); color: var(--accent);">
+                    Fixings automatiques
                   </span>
-                  <span :class="statusClass(d.status)" class="badge uppercase">
-                    {{ d.status === 'en_reglement' ? 'en règlement' : d.status }}
+                  <span :class="statusClass(d.status)" class="badge">
+                    {{ statusLabel(d.status) }}
                   </span>
                 </div>
               </div>
@@ -946,13 +944,13 @@
                           <td class="py-1.5 pr-3">
                             <span :class="fixingStatusClass(ev.fixing_status)"
                               class="px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap">
-                              {{ fixingStatusLabel(ev.fixing_status, d.fixing_policy) }}
+                              {{ fixingStatusLabel(ev.fixing_status) }}
                             </span>
                           </td>
                           <td class="py-1.5 pr-3">
                             <span :class="operationalEventClass(ev)"
                               class="px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap">
-                              {{ operationalEventLabel(ev, d.fixing_policy) }}
+                              {{ operationalEventLabel(ev) }}
                             </span>
                           </td>
                           <td class="py-1.5">
@@ -1083,6 +1081,7 @@ import AutoFixingExceptionModal from '../components/AutoFixingExceptionModal.vue
 import { useDataFilter } from '../composables/useDataFilter.js'
 import { formatInt, formatPercent, formatDate } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel, barrierGauges } from '../utils/barriers.js'
+import { productTypeLabel } from '../data/payscriptTemplates.js'
 import {
   compterConstatations, compterReleves, estReleve, libelleReduction, ordonnerEvenements,
   rangConstatation,
@@ -1262,17 +1261,17 @@ function eventStatusClass(s) {
   return map[s] || 'bg-slate-800 text-slate-500'
 }
 
-function fixingStatusLabel(status, policy = '') {
+function fixingStatusLabel(status) {
   const labels = {
     EXPECTED: 'Attendu',
-    RECEIVED: policy === 'AUTO_YAHOO' ? 'Reçu — décision utilisateur' : 'Reçu — Checker requis',
-    VALIDATED: 'Validé',
+    RECEIVED: 'Reçu — exception source',
+    VALIDATED: 'Officiel',
     APPLIED: 'Appliqué',
     PARTIAL: 'Incomplet',
     MISSING: 'Manquant',
     REJECTED: 'Rejeté',
     CONTESTED: 'Contesté',
-    MANUAL_REVIEW_REQUIRED: policy === 'AUTO_YAHOO' ? 'À décider' : 'À contrôler',
+    MANUAL_REVIEW_REQUIRED: 'Exception source',
   }
   return labels[status] || status || 'Inconnu'
 }
@@ -1286,12 +1285,10 @@ function fixingStatusClass(status) {
   return 'bg-slate-800 text-slate-500'
 }
 
-function operationalEventLabel(ev, policy = '') {
+function operationalEventLabel(ev) {
   if (ev.event_date > todayIso) return 'À venir'
-  if (ev.fixing_status === 'EXPECTED') return 'Clôture attendue'
-  if (ev.fixing_status === 'RECEIVED') {
-    return policy === 'AUTO_YAHOO' ? 'À traiter par l’utilisateur' : 'En attente de validation'
-  }
+  if (ev.fixing_status === 'EXPECTED') return 'À récupérer'
+  if (ev.fixing_status === 'RECEIVED') return 'Exception à traiter'
   if (['PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)) {
     return 'Exception à traiter'
   }
@@ -2008,6 +2005,16 @@ function statusClass(s) {
     'résilié': 'badge-negative',
   }
   return map[s] || 'badge-muted'
+}
+
+function statusLabel(status) {
+  return {
+    actif: 'En cours',
+    en_reglement: 'En règlement',
+    'callé': 'Rappelé',
+    'échu': 'Échu',
+    'résilié': 'Résilié',
+  }[status] || status || 'Statut inconnu'
 }
 
 const formatNominal = formatInt

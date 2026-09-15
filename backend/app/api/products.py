@@ -13,7 +13,8 @@ from ..core.product.inputs import describe_product, pricing_input, terms_from_in
 from ..core.product.models import CommercialContext, Product, TradeIntent
 from ..core.schemas import PricingRequest
 from ..core.valuation_context import (
-    json_transport_fingerprint, pricing_input_payload, verify_pricing_receipt,
+    json_transport_fingerprint, market_snapshot_from_pricing_input,
+    pricing_input_payload, verify_pricing_receipt,
 )
 from ..db.database import get_session
 from ..db.models import ProductCalculationRun, ProductRecord, User
@@ -373,6 +374,7 @@ def get_product_calculation(
     row = session.get(ProductCalculationRun, calculation_id)
     if row is None or row.product_id != product_id:
         raise HTTPException(status_code=404, detail="Calcul produit introuvable.")
+    pricing_input = json.loads(row.input_json)
     return {
         "id": row.id,
         "product_id": row.product_id,
@@ -383,6 +385,11 @@ def get_product_calculation(
         "valuation_date": row.valuation_date,
         "source": row.source,
         "input_hash": row.input_hash,
-        "input": json.loads(row.input_json),
+        "input": pricing_input,
+        # The Product keeps contractual terms only. Market assumptions belong
+        # to each dated calculation and are reconstructed from its immutable,
+        # fingerprinted engine input, including for calculations retained
+        # before this field was exposed by the API.
+        "market_snapshot": market_snapshot_from_pricing_input(pricing_input),
         "result": json.loads(row.result_json),
     }

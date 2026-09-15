@@ -25,7 +25,7 @@ const ready  = ref(false)
 async function charger() {
   const { id, variantId, productId } = route.params
   if (productId) {
-    await loadProductFromDb(parseInt(productId))
+    await loadProductFromDb(parseInt(productId), route.query.calculation)
   } else if (variantId) {
     await loadVariantFromDb(parseInt(variantId))
   } else if (id) {
@@ -43,13 +43,17 @@ onMounted(charger)
 // ce watch, cliquer « Origine » ou une autre déclinaison changeait l'URL et
 // laissait l'écran sur le produit précédent — et créer une variante n'ouvrait
 // jamais la variante créée.
-watch(() => [route.params.id, route.params.variantId, route.params.productId], async () => {
+watch(() => [route.params.id, route.params.variantId, route.params.productId,
+             route.query.calculation], async () => {
   ready.value = false
   await charger()
 })
 
-async function loadProductFromDb(id) {
-  const loaded = await products.fetchOne(id)
+async function loadProductFromDb(id, requestedCalculationId = null) {
+  const parsedCalculationId = Number.parseInt(String(requestedCalculationId || ''), 10)
+  const loaded = await products.fetchOne(id, {
+    calculationId: Number.isFinite(parsedCalculationId) ? parsedCalculationId : null,
+  })
   if (!loaded) { store.resetToDefaults(); return }
   await store.loadFromProduct(loaded.product, loaded.calculationInput)
 }

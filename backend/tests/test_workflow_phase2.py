@@ -245,6 +245,71 @@ def test_auto_yahoo_refresh_uses_official_replay_as_lifecycle_truth(monkeypatch)
     assert response["evaluation"]["outcome"] == "en_cours"
 
 
+def test_auto_yahoo_stops_before_observations_after_an_autocall(monkeypatch):
+    session = _session()
+    deal = _deal(session)
+    existing = _events(session, deal)
+    later = DealEvent(
+        deal_id=deal.id,
+        event_index=2,
+        event_date=date.today().isoformat(),
+        t_years=2 / 252,
+        spots_json=json.dumps({"UL1": 100.0}),
+        fixing_status=FixingStatus.VALIDATED,
+        data_category=DataCategory.FIXING_OFFICIAL,
+        source="Yahoo Finance",
+        status="attendu",
+        label="Observation post-rappel",
+    )
+    session.add(later)
+    session.commit()
+    session.refresh(later)
+    validated = []
+
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *_args, **_kwargs: {"provider": "test"},
+    )
+
+    def validate(_deal, event, *_args):
+        validated.append(event.id)
+        return False, None
+
+    monkeypatch.setattr(deals_api, "_auto_validate_yahoo_event", validate)
+    monkeypatch.setattr(
+        deals_api, "_reference_history_arrays",
+        lambda *_args, **_kwargs: ([deal.strike_date], {"TK1": [100.0]}),
+    )
+
+    def replay(_deal, events):
+        terminal = len(events) == 2
+        return ({
+            "outcome": "callé" if terminal else "en_cours",
+            "event_id": events[-1].id,
+            "event_date": events[-1].event_date,
+            "realized_payout": 1.08 if terminal else 0.0,
+        }, [])
+
+    monkeypatch.setattr(deals_api, "replay_official_fixings", replay)
+    captured = {}
+
+    def apply(_deal, evaluation, *_args):
+        captured["evaluation"] = evaluation
+        return None
+
+    monkeypatch.setattr(deals_api, "_auto_apply_lifecycle", apply)
+
+    deals_api._refresh_auto_yahoo_deal_core(
+        deal, session, actor_user_id=99,
+        underlyings=[{"name": "UL1", "ticker": "TK1"}],
+        tickers=["TK1"],
+    )
+
+    assert validated == [existing[0].id, existing[1].id]
+    assert later.id not in validated
+    assert captured["evaluation"]["outcome"] == "callé"
+
+
 def test_admin_can_run_mtm_and_greeks_on_a_foreign_uat_deal(monkeypatch):
     session = _session()
     deal = _deal(session)

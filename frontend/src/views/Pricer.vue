@@ -45,7 +45,7 @@
         </button>
         <button
           class="btn-primary flex items-center gap-2 text-sm"
-          :disabled="store.loading || store.marketDataLoading || !!store.parseError"
+          :disabled="store.loading || store.marketDataLoading || (!!store.parseError && !store.scriptDirty)"
           @click="store.runPricing()">
           <span v-if="store.loading" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
           {{ store.marketDataLoading ? 'Marché…' : store.loading ? 'Calcul…' : '▶ Pricer' }}
@@ -60,14 +60,17 @@
     <VariantBar />
 
     <div v-if="store.contractTermsLocked"
-         class="mx-5 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-amber-950 shrink-0">
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span class="text-sm font-bold">🔒 {{ store.openedDeal ? 'Deal booké' : 'Product conservé' }}</span>
-        <span class="font-mono text-xs font-semibold">
+         class="mx-5 mt-3 rounded-lg border px-3 py-2 shrink-0"
+         style="border-color: var(--border); background: var(--surface2); color: var(--text);">
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span class="inline-flex h-6 w-6 items-center justify-center rounded-full"
+              style="background: color-mix(in srgb, var(--accent) 12%, transparent);" aria-hidden="true">🔒</span>
+        <span class="font-semibold">{{ store.openedDeal ? 'Contrat booké' : 'Produit conservé' }}</span>
+        <span class="font-mono font-semibold" style="color: var(--accent);">
           {{ store.openedDeal?.reference || store.currentProduct?.reference }}
         </span>
-        <span class="text-xs">
-          Termes figés · seules les hypothèses de valorisation sont modifiables.
+        <span style="color: var(--muted);">
+          Payoff, panier et dates figés. Marché, modèle et date de valorisation restent modifiables pour le repricing.
         </span>
       </div>
     </div>
@@ -138,6 +141,7 @@ import { useDealsStore } from '../stores/deals.js'
 import { useRfqStore } from '../stores/rfq.js'
 import { useProductsStore } from '../stores/products.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
+import { findProductModel } from '../utils/productModels.js'
 
 const store = usePricingStore()
 const dealsStore = useDealsStore()
@@ -203,6 +207,19 @@ onMounted(async () => {
       }
     }
     store.leftTab = 'deal'
+    return
+  }
+
+  // Opened from « Modèles de produits » (/pricer?modele=…&sousJacents=…&tenor=…):
+  // the same mechanism as the RFQ deep link, the screen itself is unchanged.
+  // An ephemeral session — nothing is kept without an explicit action.
+  const model = findProductModel(route.query.modele)
+  if (model) {
+    await store.loadFromProductModel(model, {
+      underlyingCount: route.query.sousJacents ? Number(route.query.sousJacents) : null,
+      tenorCode: route.query.tenor || null,
+    })
+    store.leftTab = 'script'
   }
 })
 

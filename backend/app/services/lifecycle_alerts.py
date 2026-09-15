@@ -1,9 +1,8 @@
 """Daily lifecycle refresh + alert creation.
 
-One pass over ACTIVE deals follows the fixing policy frozen at booking:
-``AUTO_YAHOO`` officialises controlled unadjusted closes and may apply a
-deterministic terminal result; ``FOUR_EYES`` keeps Yahoo non-binding and only
-creates a proposal. Barrier alerts remain indicative in both modes.
+One pass over ACTIVE deals officialises controlled, unadjusted provider closes
+and may apply a deterministic terminal result. Barrier alerts remain
+indicative until their contractual observation date.
 
 Ran two ways:
 - by the in-process scheduler (main.py) every day at 23:00 local time,

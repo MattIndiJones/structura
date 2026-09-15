@@ -8,13 +8,25 @@
 
       <!-- Résumé du deal -->
       <div class="card">
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          <div>
-            <div class="text-slate-500 mb-0.5">Référence</div>
-            <div class="font-mono font-semibold text-slate-200">
-              {{ deal.reference }} <span class="text-slate-500">v{{ deal.contract_version || 1 }}</span>
+        <div class="flex flex-wrap items-start justify-between gap-3 pb-3 mb-3 border-b"
+             style="border-color: var(--border);">
+          <div class="min-w-0">
+            <div class="text-[10px] uppercase tracking-wider" style="color: var(--muted);">Deal booké</div>
+            <div class="font-mono text-sm font-semibold break-all" style="color: var(--text);">
+              {{ deal.reference }}
+              <span class="text-xs font-normal" style="color: var(--muted);">v{{ deal.contract_version || 1 }}</span>
             </div>
           </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="px-2 py-1 rounded-full border text-[10px] font-semibold"
+                  :class="dealStatusClass(deal.status)">{{ dealStatusLabel(deal.status) }}</span>
+            <span class="px-2 py-1 rounded-full border text-[10px] font-semibold"
+                  style="border-color: var(--border); background: var(--surface2); color: var(--accent);">
+              Fixings automatiques · {{ deal.market_data_provider || 'fournisseur configuré' }}
+            </span>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div>
             <div class="text-slate-500 mb-0.5">Contrepartie</div>
             <div class="text-slate-200">{{ deal.contrepartie }}</div>
@@ -83,27 +95,13 @@
           </div>
           <div v-else class="mt-3 pt-3 border-t border-slate-700">
             <p class="text-xs text-amber-500/80">
-              {{ deal.fixing_policy === 'FOUR_EYES'
-                ? 'S₀ à renseigner — un Ops Maker doit soumettre l’observation Strike avec sa pièce source.'
-                : 'S₀ en attente — la clôture Yahoo non ajustée sera appliquée automatiquement après publication et contrôle.' }}
+              S₀ en attente — la clôture non ajustée du fournisseur sera appliquée automatiquement après les contrôles de qualité.
             </p>
           </div>
         </template>
 
-        <!-- Statut + Re-pricer -->
+        <!-- Re-pricer -->
         <div class="mt-3 flex items-center gap-2 flex-wrap">
-          <span class="px-2 py-1 rounded border border-slate-700 bg-slate-800 text-xs text-slate-300">
-            {{ deal.status }}
-          </span>
-          <span class="px-2 py-1 rounded border text-xs"
-            :class="deal.fixing_policy === 'FOUR_EYES'
-              ? 'border-amber-800/60 bg-amber-950/30 text-amber-400'
-              : 'border-blue-800/60 bg-blue-950/30 text-blue-400'">
-            {{ deal.fixing_policy === 'FOUR_EYES' ? 'Contrôle 4 yeux' : 'Yahoo automatique' }}
-          </span>
-          <HelpTip :text="deal.fixing_policy === 'FOUR_EYES'
-            ? 'Le statut contractuel est en lecture seule. Un résultat terminal passe par validation humaine et application auditée.'
-            : 'Les clôtures Yahoo non ajustées sont appliquées automatiquement si les contrôles passent. Toute anomalie bloque le traitement et crée une exception explicite.'" />
           <button class="btn-secondary text-xs px-3 py-1.5" @click="reprice" :disabled="repricing">
             <span v-if="repricing"
               class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -135,7 +133,7 @@
             :disabled="dealsStore.loading" @click="doRefresh">
             <span v-if="dealsStore.loading"
               class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
-            📡 Actualiser monitoring indicatif
+            📡 Actualiser les fixings
           </button>
         </div>
 
@@ -151,30 +149,6 @@
             @click="openAutoException(autoExceptionEvents[0])">
             Traiter les exceptions
           </button>
-        </div>
-
-        <div v-if="deal.lifecycle_proposals?.length" class="mb-3 flex flex-col gap-2">
-          <div v-for="proposal in deal.lifecycle_proposals" :key="proposal.id"
-               class="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 flex items-center justify-between gap-3">
-            <div class="text-xs">
-              <span class="font-semibold text-amber-300">Résolution proposée : {{ proposal.proposed_outcome }}</span>
-              <span class="ml-2 text-slate-500">{{ proposal.status }} · source {{ proposal.data_source }}</span>
-              <div class="text-[10px] text-slate-500 mt-0.5">
-                {{ proposal.result?.event_date || 'date inconnue' }} · l’autorisation Checker applique atomiquement le résultat contractuel
-              </div>
-              <div v-if="proposal.comparison_status" class="text-[10px] mt-0.5"
-                   :class="proposal.comparison_status === 'MATCH' ? 'text-emerald-400' : 'text-amber-400'">
-                Rejeu des observations validées : {{ proposal.comparison_status }}
-                <span v-if="proposal.official_result?.realized_payout != null">
-                  · payout {{ (proposal.official_result.realized_payout * 100).toFixed(4) }}%
-                </span>
-              </div>
-            </div>
-            <div class="flex gap-2 shrink-0">
-              <button v-if="isOpsChecker && proposal.status === 'PROPOSED'" class="btn-secondary text-xs px-2 py-1"
-                      @click="validateProposal(proposal)">Autoriser et appliquer</button>
-            </div>
-          </div>
         </div>
 
         <!-- Bandeau résultat refresh -->
@@ -207,9 +181,7 @@
                   <span class="text-slate-600 font-normal ml-1">retenu / indicatif</span>
                 </th>
                 <th class="text-left text-slate-500 font-medium pb-2 pr-3">Fixing
-                  <HelpTip :text="deal.fixing_policy === 'FOUR_EYES'
-                    ? 'Un Ops Maker soumet un fixing candidat avec sa preuve ; un Ops Checker distinct le valide avant toute résolution.'
-                    : 'La clôture Yahoo non ajustée fait foi opérationnellement après contrôles automatiques. Une donnée manquante, périmée, atypique ou corrigée bascule en exception.'" />
+                  <HelpTip text="La clôture non ajustée du fournisseur fait foi après les contrôles automatiques. Une donnée manquante, périmée, atypique ou corrigée reste visible comme exception." />
                 </th>
                 <th class="text-left text-slate-500 font-medium pb-2">Statut
                   <HelpTip text="Le statut affiché combine la date, l'état du fixing et le résultat contractuel : à venir, clôture attendue, validation requise, exception, observé, callé, KI ou final." />
@@ -275,7 +247,7 @@
                 <td class="py-2 pr-3">
                   <span :class="sourceClass(ev.source)"
                     class="px-1.5 py-0.5 rounded text-[10px] font-medium">
-                    {{ fixingStatusLabel(ev.fixing_status, deal.fixing_policy) }}<span v-if="ev.fixing_version"> · v{{ ev.fixing_version }}</span>
+                    {{ fixingStatusLabel(ev.fixing_status) }}<span v-if="ev.fixing_version"> · v{{ ev.fixing_version }}</span>
                   </span>
                   <div v-if="ev.fixing_provider" class="text-[10px] text-slate-500 mt-1">
                     {{ ev.fixing_provider }} · {{ ev.fixing_external_reference }}
@@ -323,8 +295,8 @@
                       <div v-if="ev.fixing_versions?.length" class="pt-1 border-t border-slate-800">
                         <div class="text-slate-600 mb-0.5">Historique immuable :</div>
                         <div v-for="version in ev.fixing_versions" :key="version.id" class="font-mono">
-                          v{{ version.version }} · {{ version.status }} · Maker #{{ version.entered_by }}
-                          <span v-if="version.validated_by"> · Checker #{{ version.validated_by }}</span>
+                          v{{ version.version }} · {{ fixingStatusLabel(version.status) }} ·
+                          {{ version.capture_actor_type === 'PROCESS' ? 'processus fournisseur' : `utilisateur #${version.entered_by}` }}
                           <span v-if="version.rejected_by"> · rejetée par #{{ version.rejected_by }}</span>
                         </div>
                       </div>
@@ -348,7 +320,7 @@
                 <td class="py-2">
                   <span class="text-[10px] border rounded px-1.5 py-0.5"
                     :class="eventOperationalClass(ev)">
-                    {{ eventOperationalLabel(ev, deal.fixing_policy) }}
+                    {{ eventOperationalLabel(ev) }}
                   </span>
                 </td>
               </tr>
@@ -360,10 +332,10 @@
           <div class="flex items-start justify-between gap-3 mb-3">
             <div>
               <h3 class="text-xs font-semibold text-blue-300">
-                {{ fixingEvent.fixing_version ? `Correction du fixing v${fixingEvent.fixing_version}` : 'Nouveau fixing candidat' }}
+                {{ fixingEvent.fixing_version ? `Correction du fixing v${fixingEvent.fixing_version}` : 'Nouvelle observation' }}
               </h3>
               <p class="text-[10px] text-slate-500 mt-0.5">
-                {{ fixingEvent.label }} · {{ fixingEvent.event_date }} · la saisie restera candidate jusqu’au contrôle d’un Checker distinct
+                {{ fixingEvent.label }} · {{ fixingEvent.event_date }} · correction exceptionnelle avec provenance complète
               </p>
             </div>
             <button class="btn-ghost text-xs" @click="closeFixingForm">Fermer</button>
@@ -436,15 +408,15 @@
           <div class="mt-3 flex items-center gap-2">
             <button class="btn-primary text-xs px-3 py-1.5" :disabled="savingEventId === fixingEvent.id"
                     @click="submitFixing">
-              {{ fixingEvent.fixing_version ? 'Soumettre la correction' : 'Soumettre au Checker' }}
+              {{ fixingEvent.fixing_version ? 'Enregistrer la correction' : 'Enregistrer l’observation' }}
             </button>
             <span class="text-[10px] text-slate-500">Tous les champs de provenance sont obligatoires.</span>
           </div>
         </div>
 
         <p v-if="allEventsFuture && deal.events?.length" class="mt-3 text-[11px] text-slate-600 italic">
-          Tous les événements sont futurs — le formulaire d’observation sera disponible pour
-          l’Ops Maker après chaque date de constatation.
+          Tous les événements sont futurs — les clôtures seront récupérées automatiquement
+          à chaque date contractuelle.
         </p>
       </div>
 
@@ -771,11 +743,6 @@ function attributionLabel(snapshot) {
     snapshot.opportunity?.reference, snapshot.contact?.name].filter(Boolean).join(' · ') || '—'
 }
 const isDealOwner = computed(() => deal.value?.user_id === authStore.user?.id)
-const isOpsMaker = computed(() => authStore.user?.role === 'ops_maker' &&
-  deal.value?.entity_id === authStore.user?.entity_id)
-const isOpsChecker = computed(() => authStore.user?.role === 'checker' &&
-  deal.value?.entity_id === authStore.user?.entity_id &&
-  deal.value?.user_id !== authStore.user?.id)
 const fixingEvent = computed(() => deal.value?.events?.find(
   event => event.id === fixingEventId.value) ?? null)
 const autoExceptionStatuses = new Set([
@@ -833,7 +800,13 @@ onMounted(async () => {
 async function selectDeal(id) {
   dealsStore.refreshStatus = ''
   await dealsStore.selectDeal(id)
-  if (dealsStore.currentDeal) await loadAudit()
+  if (!dealsStore.currentDeal) return
+  const needsFixings = dealsStore.currentDeal.status === 'actif'
+    && (dealsStore.currentDeal.events || []).some(event =>
+      event.event_date <= today
+      && !['VALIDATED', 'APPLIED'].includes(event.fixing_status))
+  if (needsFixings) await doRefresh()
+  await loadAudit()
 }
 
 // ── Formatting ────────────────────────────────────────────
@@ -844,6 +817,24 @@ function formatNominal(n) {
 function formatSpot(s) {
   if (!s) return '–'
   return s.toLocaleString('fr-FR', { maximumFractionDigits: 2 })
+}
+
+function dealStatusLabel(status) {
+  return {
+    actif: 'En cours',
+    callé: 'Rappelé',
+    en_reglement: 'En règlement',
+    échu: 'Échu',
+  }[status] || status || 'Statut inconnu'
+}
+
+function dealStatusClass(status) {
+  if (status === 'actif') return 'border-blue-200 bg-blue-50 text-blue-700'
+  if (status === 'callé' || status === 'échu') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  }
+  if (status === 'en_reglement') return 'border-amber-200 bg-amber-50 text-amber-700'
+  return 'border-slate-200 bg-slate-50 text-slate-600'
 }
 
 function s0ForUnderlying(name) {
@@ -889,7 +880,7 @@ const refreshBanner = computed(() => {
   if (s.includes('0 événement')) {
     return {
       type: 'warn', icon: 'ℹ',
-      text: 'Aucun événement passé à mettre à jour — les spots peuvent être saisis manuellement.',
+      text: 'Aucun nouveau fixing fournisseur à récupérer.',
     }
   }
   return { type: 'ok', icon: '✓', text: s.replace(/^[✓\s]+/, '') }
@@ -903,31 +894,28 @@ function showSaveMsg(text) {
 }
 
 function canSubmitFixing(ev) {
-  return isOpsMaker.value && deal.value?.user_id !== authStore.user?.id &&
-    ev.event_date <= today && ev.fixing_status !== 'APPLIED'
+  return false
 }
 
-function fixingStatusLabel(status, policy = '') {
+function fixingStatusLabel(status) {
   const labels = {
     EXPECTED: 'Attendu',
-    RECEIVED: policy === 'AUTO_YAHOO' ? 'Reçu — décision utilisateur' : 'Reçu — Checker requis',
-    VALIDATED: 'Validé',
+    RECEIVED: 'Reçu — exception source',
+    VALIDATED: 'Officiel',
     APPLIED: 'Appliqué',
     PARTIAL: 'Incomplet',
     MISSING: 'Manquant',
     REJECTED: 'Rejeté',
     CONTESTED: 'Contesté',
-    MANUAL_REVIEW_REQUIRED: policy === 'AUTO_YAHOO' ? 'À décider' : 'À contrôler',
+    MANUAL_REVIEW_REQUIRED: 'Exception source',
   }
   return labels[status] || status || 'Inconnu'
 }
 
-function eventOperationalLabel(ev, policy = '') {
+function eventOperationalLabel(ev) {
   if (ev.event_date > today) return 'À venir'
-  if (ev.fixing_status === 'EXPECTED') return 'Clôture attendue'
-  if (ev.fixing_status === 'RECEIVED') {
-    return policy === 'AUTO_YAHOO' ? 'À traiter par l’utilisateur' : 'En attente de validation'
-  }
+  if (ev.fixing_status === 'EXPECTED') return 'À récupérer'
+  if (ev.fixing_status === 'RECEIVED') return 'Exception à traiter'
   if (['PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)) {
     return 'Exception à traiter'
   }
@@ -948,9 +936,7 @@ function eventOperationalClass(ev) {
 }
 
 function canValidateFixing(ev) {
-  return isOpsChecker.value &&
-    ['RECEIVED', 'PARTIAL', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status) &&
-    ev.fixing_entered_by !== authStore.user?.id
+  return false
 }
 
 function canResolveAutoException(ev) {
@@ -1083,7 +1069,7 @@ async function submitFixing() {
       reason: fixingForm.reason.trim(),
       supersedes_version: fixingForm.supersedes_version,
     })
-    showSaveMsg(`✓ Fixing v${(ev.fixing_version || 0) + 1} soumis au Checker avec sa preuve`)
+    showSaveMsg(`✓ Fixing v${(ev.fixing_version || 0) + 1} enregistré avec sa preuve`)
     closeFixingForm()
     await loadAudit()
   } catch (e) {

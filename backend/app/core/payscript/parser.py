@@ -4,11 +4,12 @@ Transpiles PayScript code to compiled Python event functions.
 
 Grammar:
   PARAM NAME = value[%]   [# description]
-  PARAM() NAME [= seed%]  (per-observation values: the UI supplies a table of
+  PARAM() NAME = value[%] (per-observation values: the UI supplies a table of
                            rows, one per observation, resolved by INDEX at
                            runtime; the last row extends to any further
                            observations, so one row behaves like a scalar.
-                           The optional `= seed` only pre-fills row 1.)
+                           The value is mandatory, like PARAM's, and pre-fills
+                           row 1.)
   CONSTAT NAME            (single date, filled in via the UI)
   CONSTAT() NAME          (a CONSTAT() calendar: start/end/roll/freq/stub)
   CONSTAT()() NAME        (CONSTAT() + a sub-frequency)
@@ -65,7 +66,7 @@ _SAFE_MATH = {
 #
 # Ces tables vivaient à l'intérieur de _transpile_expr. Elles sont remontées au
 # niveau module parce que deux consommateurs doivent pouvoir les LIRE et non
-# seulement les exécuter : la référence de langage (docs/PAYSCRIPT_REFERENCE.md)
+# seulement les exécuter : la référence de langage (docs/reference/PAYSCRIPT_REFERENCE.md)
 # et le prompt de l'assistant IA, qui décrit à un modèle ce qu'il a le droit
 # d'écrire. Un test compare le vocabulaire réel à la référence, de sorte qu'un
 # mot ajouté ici sans documentation — ou documenté sans exister — casse la
@@ -642,17 +643,30 @@ def parse_script(code: str) -> CompiledScript:
             errors.append(f'Ligne {no}: indentation 0 attendue pour "{text}"')
             i += 1; continue
 
-        # PARAM() NAME [= seed[%]] ["description" | # description] — per-
-        # observation values. The seed (optional) only pre-fills the first UI
-        # row; the actual rows arrive at pricing time via user_params.
-        m = re.match(r'^PARAM\(\)\s+([A-Za-z_]\w*)\s*(?:=\s*([\d.]+)(%?))?\s*(?:"([^"]*)")?\s*$', text, re.I)
+        # A declaration without its value used to mean two different things:
+        # refused as an unknown statement for PARAM, silently accepted at 0 %
+        # for PARAM(). Both now say what is missing (decision D4, 11/09/2026):
+        # the script declares the unit and the initial value, Economics then
+        # carries the value.
+        m_missing = re.match(r'^(PARAM\(\)|PARAM)\s+([A-Za-z_]\w*)\s*(?:"[^"]*")?\s*$', text, re.I)
+        if m_missing:
+            keyword, name = m_missing.group(1).upper(), m_missing.group(2).upper()
+            errors.append(
+                f'Ligne {no}: {keyword} {name} attend une valeur initiale '
+                f'avec son unité, ex. `{keyword} {name} = 100%`.')
+            i += 1; continue
+
+        # PARAM() NAME = value[%] ["description" | # description] — per-
+        # observation values. The value pre-fills the first UI row; the actual
+        # rows arrive at pricing time via user_params.
+        m = re.match(r'^PARAM\(\)\s+([A-Za-z_]\w*)\s*=\s*([\d.]+)(%?)\s*(?:"([^"]*)")?\s*$', text, re.I)
         if m:
             name = m.group(1).upper()
             bad = check_reserved(name, no, 'PARAM()')
             if bad:
                 errors.append(bad); i += 1; continue
-            raw_val = float(m.group(2)) if m.group(2) else 0.0
-            is_pct = m.group(3) == '%' if m.group(2) else True
+            raw_val = float(m.group(2))
+            is_pct = m.group(3) == '%'
             stored = raw_val / 100 if is_pct else raw_val
             desc = (m.group(4) or '').strip() or ln.get('comment') or name
             params.append(Param(name=name, raw_default=raw_val, stored_val=stored,

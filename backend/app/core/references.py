@@ -13,8 +13,10 @@ single SQLite UPSERT, so concurrent writers serialize on that row. Unique
 indexes remain the final structural guard.
 """
 from __future__ import annotations
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlmodel import Session, select
+
+from ..db.models import AuditEvent
 
 
 def next_reference(session: Session, model, prefix: str) -> str:
@@ -42,3 +44,34 @@ def next_reference(session: Session, model, prefix: str) -> str:
         RETURNING last_value
     """), {"prefix": prefix, "initial": initial, "highest": highest}).scalar_one()
     return f"{prefix}{int(allocated):03d}"
+
+
+def next_audited_id(session: Session, model, object_type: str) -> int:
+    """Allocate a durable numeric identity for an audited business object.
+
+    SQLite normally reuses an INTEGER PRIMARY KEY after physical deletion.
+    Audit rows are append-only and refer to that key, so reuse would attach an
+    old RFQ's history to a new RFQ.  The shared counter starts above both the
+    live table and the append-only audit trail and never moves backwards.
+    """
+    table_highest = session.exec(select(func.max(model.id))).one() or 0
+    audit_highest = session.exec(
+        select(func.max(AuditEvent.object_id)).where(
+            AuditEvent.object_type == object_type)
+    ).one() or 0
+    highest = max(int(table_highest), int(audit_highest))
+    counter_key = f"pk:{model.__tablename__}:{object_type}"
+    return int(session.execute(text("""
+        INSERT INTO reference_counters(prefix, last_value)
+        VALUES (:prefix, :initial)
+        ON CONFLICT(prefix) DO UPDATE SET last_value =
+            CASE
+                WHEN reference_counters.last_value < :highest THEN :initial
+                ELSE reference_counters.last_value + 1
+            END
+        RETURNING last_value
+    """), {
+        "prefix": counter_key,
+        "initial": highest + 1,
+        "highest": highest,
+    }).scalar_one())

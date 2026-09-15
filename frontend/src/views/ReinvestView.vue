@@ -24,7 +24,7 @@
           <select class="select text-sm" v-model.number="selectedDealId" @change="onSelectDeal">
             <option :value="null">— Choisir un deal —</option>
             <option v-for="d in activeDeals" :key="d.id" :value="d.id">
-              {{ d.reference }} — {{ d.product_type || 'produit structuré' }} ({{ d.underlyings.map(u => u.name).join(', ') }})
+              {{ d.reference }} — {{ productTypeLabel(d.product_type) || 'produit structuré' }} ({{ d.underlyings.map(u => u.name).join(', ') }})
             </option>
           </select>
           <div v-if="dealsStore.loading" class="text-xs text-slate-600 mt-2">Chargement des deals…</div>
@@ -342,6 +342,7 @@
 </template>
 
 <script setup>
+import { productTypeLabel } from '../data/payscriptTemplates.js'
 import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useDealsStore } from '../stores/deals.js'

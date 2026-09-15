@@ -16,10 +16,10 @@ from ..core.client_controls import (
     ClientRuleError, OPPORTUNITY_TERMINAL, client_provenance_snapshot,
     require_deal_attribution_coherent, require_opportunity_rfq_ready,
 )
-from ..core.references import next_reference
+from ..core.references import next_audited_id, next_reference
 from ..core.audit import record_audit_event
 from ..core.rfq_controls import (
-    maturity_iso, pricing_input_hash, product_terms, product_terms_hash,
+    contract_calendar_failures, maturity_iso, pricing_input_hash, product_terms, product_terms_hash,
     rfq_readiness_failures,
 )
 from ..core.payscript.parser import parse_script
@@ -716,6 +716,16 @@ def _create_rfq(
                  "CONSTAT réel) pour la précision requise — sauvegardez-le dans le Pricer, "
                  "ou repartez du script d'un deal déjà booké en mode Expert.")
 
+    if body.kind == "to_trade":
+        calendar_failures = contract_calendar_failures(
+            body.script_snapshot, body.params or {})
+        if calendar_failures:
+            raise HTTPException(422, detail={
+                "code": calendar_failures[0].code,
+                "message": calendar_failures[0].message,
+                "failures": [failure.as_dict() for failure in calendar_failures],
+            })
+
     _refuser_reglement_avant_maturite(body.params or {})
 
     # Rattachement commercial facultatif. L'absence complète de contexte est
@@ -743,6 +753,7 @@ def _create_rfq(
     reference = (next_reference(session, RfqRequest, reference_prefix)
                  if reference_prefix else _gen_ref(session))
     rfq = RfqRequest(
+        id=next_audited_id(session, RfqRequest, "RFQ"),
         reference=reference,
         entity_id=current.entity_id,
         user_id=current.id,
@@ -1138,6 +1149,7 @@ def add_quote(
                  f"la ligne existante, ou utilisez le last look pour enregistrer une seconde "
                  f"cotation de sa part.")
     q = RfqQuote(
+        id=next_audited_id(session, RfqQuote, "RFQ_QUOTE"),
         rfq_id=rfq_id,
         provider=provider,
         contact=body.contact,
@@ -1225,7 +1237,8 @@ def update_quote(
             select(RfqQuote).where(RfqQuote.parent_quote_id == quote_id)
         ).first()
         if want and not child:
-            child = RfqQuote(rfq_id=rfq_id, provider=q.provider, contact=q.contact,
+            child = RfqQuote(id=next_audited_id(session, RfqQuote, "RFQ_QUOTE"),
+                             rfq_id=rfq_id, provider=q.provider, contact=q.contact,
                               parent_quote_id=quote_id)
             session.add(child)
         elif not want and child:

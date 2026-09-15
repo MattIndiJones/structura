@@ -255,6 +255,9 @@ class ParseResponse(BaseModel):
     events_count: int
     has_stop: bool = False
     has_maturity_event: bool = False
+    # Literal observation dates of `AT 1, 2, 3:` blocks, in years from the
+    # strike. CONSTAT dates are not known at parse time and never appear here.
+    at_dates: List[float] = []
     # M_-prefixed PARAMs and how the script compares them — see
     # payscript/parser._analyze_monitors. [{name, observable, direction}].
     monitors: List[Dict[str, Any]] = []

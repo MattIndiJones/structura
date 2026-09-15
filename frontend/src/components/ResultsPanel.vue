@@ -449,7 +449,7 @@
          strike. L'ancrer sur le strike datait les échéances futures deux ans
          dans le passé. -->
     <FluxDecomposition :result="store.result"
-                       :origin-date="store.result?.in_life
+                       :origin-date="store.result?.in_life || store.result?.pre_strike
                          ? store.result.valuation_date : inputs?.strike_date"
                        :contract-origin-date="inputs?.strike_date"
                        :value-date="inputs?.value_date" />
@@ -623,7 +623,7 @@ const observationRows = computed(() => {
   const origineContrat = inputs.value.strike_date || inputs.value.value_date
   const schedule = res.schedule?.constatations
   if (Array.isArray(schedule) && schedule.length) {
-    const cutoff = res.in_life ? res.valuation_date : origineContrat
+    const cutoff = (res.in_life || res.pre_strike) ? res.valuation_date : origineContrat
     return schedule.map((c, idx) => {
       const date = c.date || (origineContrat ? addDaysStr(origineContrat, c.t * 365.25) : null)
       const calendrier = c.calendrier ? `${c.calendrier} ` : 'Obs. '
@@ -640,7 +640,7 @@ const observationRows = computed(() => {
   // date de valorisation, puisque seule la vie restante est simulée. L'ancrer
   // sur la value date décalait toutes les échéances ; l'ancrer sur le strike
   // en cours de vie les ramenait deux ans en arrière, toutes marquées passées.
-  const enCours = !!res.in_life
+  const enCours = !!(res.in_life || res.pre_strike)
   const origine = enCours ? res.valuation_date
                           : (inputs.value.strike_date || inputs.value.value_date)
   if (!origine) return []

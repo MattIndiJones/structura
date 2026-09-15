@@ -46,6 +46,13 @@ const routes = [
     meta: { title: 'Mes Produits' },
   },
   {
+    // A generic product, an underlying count, a tenor: the Pricer opens filled
+    // (?modele=…). No extra input screen.
+    path: '/product-models',
+    component: () => import('../views/ProductModelsView.vue'),
+    meta: { title: 'Modèles de produits' },
+  },
+  {
     path: '/documentation',
     component: () => import('../views/DocumentationView.vue'),
     meta: { title: 'Documentation' },

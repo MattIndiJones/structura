@@ -46,9 +46,20 @@ def scenarios_endpoint(req: ScenarioRequest):
         etat.pop("spot_base", None)
         r_eff, T_eff = ctx.r, ctx.T_remaining
         yc = ctx.sur_axe_residuel(req.yield_curve)
+        strike_set_t = ctx.residuel.strike_set_t
+        maturity_payment_t = ctx.payment_t
+        value_date_t = 0.0
     else:
         etat, spots, r_eff, yc = None, None, req.r, (req.yield_curve or [])
         T_eff = effective_T_max(compiled, req.T)
+        origin = analysis_origin(req)
+        strike_set_t = None
+        maturity_payment_t = (
+            round((req.payment_date - origin).days / 365.25, 6)
+            if req.payment_date else None)
+        value_date_t = (
+            round((req.value_date - origin).days / 365.25, 6)
+            if req.value_date else 0.0)
 
     try:
         validate_compiled_dates(compiled)
@@ -89,11 +100,15 @@ def scenarios_endpoint(req: ScenarioRequest):
             residual_passe=ctx.residuel.passe_jusqu_a if ctx is not None else None,
             residual_releves=(ctx.residuel.state.get("releves_realises")
                               if ctx is not None else None),
+            strike_set_t=strike_set_t,
+            maturity_payment_t=maturity_payment_t,
+            value_date_t=value_date_t,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     if isinstance(res, dict):
-        res["in_life"] = ctx is not None
+        res["in_life"] = bool(ctx is not None and ctx.T_elapsed > 0)
+        res["pre_strike"] = bool(ctx is not None and ctx.residuel.pre_strike)
         if ctx is not None:
             res["valuation_date"] = ctx.valuation.isoformat()
             res["years_remaining"] = round(ctx.T_remaining, 4)
