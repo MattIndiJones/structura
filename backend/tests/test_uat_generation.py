@@ -288,28 +288,11 @@ def test_forward_start_has_nothing_to_fix_yet():
     assert batch["result"]["scenarios"][0]["official_fixings"] == 0
 
 
-@pytest.mark.parametrize("profile", ["ACTIVE_1Y_PENDING", "MATURED_PENDING"])
-def test_controlled_deal_is_never_auto_filled(profile):
-    """A FOUR_EYES deal has no automatic source, so nothing is invented for it.
-
-    Its values are entered by hand — but they are left plainly empty rather
-    than dressed up: the exception modal labels the indicative column "dernière
-    valeur Yahoo", and a fabricated number there is officialised in one click.
-    """
-    session, admin, target = _session_and_users()
-    batch = generate_batch(_request(
-        target, mode="BOOKED_ONLY", count=1, seed=29,
-        product_types=["ATHENA"], lifecycle_profile=profile,
-        fixing_policy="FOUR_EYES",
-    ), admin, session)
-    deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).one()
-    events = session.exec(select(DealEvent).where(
-        DealEvent.deal_id == deal.id)).all()
-
-    assert deal.fixing_policy == "FOUR_EYES"
-    assert batch["result"]["scenarios"][0]["official_fixings"] == 0
-    assert all(not json.loads(e.spots_json or "{}") for e in events)
-    assert all(not json.loads(e.indicative_spots_json or "{}") for e in events)
+@pytest.mark.parametrize("retired_policy", ["FOUR_EYES", "MIX"])
+def test_uat_generator_refuses_retired_fixing_policies(retired_policy):
+    session, _, target = _session_and_users()
+    with pytest.raises(ValueError):
+        _request(target, fixing_policy=retired_policy)
 
 
 def test_complete_mix_covers_all_eight_profiles_and_cleans_terminal_dependencies():

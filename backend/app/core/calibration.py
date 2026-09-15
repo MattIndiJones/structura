@@ -2,8 +2,14 @@
 
 Feeds the residual-MtM "marché actuel" mode (api/deals.py:deal_mtm): instead
 of the σ/corr frozen in the booking snapshot, estimate them from the recent
-daily history — the same price series already fetched for the lifecycle
-replay, so no extra market-data call is ever needed.
+daily history, loaded over its own window (`calibration_history_start`).
+
+That window used to be the lifecycle replay's — from the strike minus seven
+days — to spare one market-data call. The saving made the "1-year" realized
+vol a since-strike vol for every deal younger than a year, and left a
+forward-start deal with a single week of history: 4 returns, below
+MIN_RETURNS, so its MtM was refused. The replay and the calibration answer
+different questions and no longer share a window.
 
 Conventions (deliberate, keep in sync with the engine):
 - σ_i = sqrt(252 · mean(r²)) on daily log-returns — a quadratic-variation
@@ -18,9 +24,23 @@ Conventions (deliberate, keep in sync with the engine):
 """
 from __future__ import annotations
 import math
+from datetime import date, timedelta
+
 import numpy as np
 
 MIN_RETURNS = 20
+
+
+def calibration_history_start(asof: date, window_days: int = 252) -> date:
+    """First calendar day to load for a realized calibration ending at `asof`.
+
+    Twice the requested number of returns in calendar days, and never less than
+    a year: enough to keep `window_days` common trading returns through
+    weekends, holidays and exchange closures. Independent of the product's
+    strike — the estimate describes the market at `asof`, not the deal's life.
+    Shared by the dated Pricer calibration (services/market_data.load_hist_vol)
+    and the residual MtM, so both read the same window."""
+    return asof - timedelta(days=max(365, int(window_days) * 2))
 
 
 def realized_market(prices: dict, tickers: list[str], window_days: int = 252) -> dict:

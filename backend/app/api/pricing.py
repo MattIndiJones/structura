@@ -32,6 +32,8 @@ from ..core.compute_budget import (
 from ..core.valuation_context import (
     ValuationContext, build_pricing_receipt, run_valuation,
 )
+from ..services.product_receipts import signed_receipt
+from .auth import receipt_signing_secret
 
 router = APIRouter(prefix="/api", tags=["pricing"])
 
@@ -80,6 +82,11 @@ def parse_endpoint(req: ParseRequest):
             has_stop=compiled.has_stop,
             has_maturity_event=any(
                 event.type == "AT_MATURITY" for event in compiled.events),
+            # The years written in `AT 1, 2, 3:` — known at parse time, unlike
+            # CONSTAT dates. The Pricer dates them from the strike to keep the
+            # maturity on or after the last observation the script declares.
+            at_dates=sorted({round(float(d), 6)
+                             for event in compiled.events for d in (event.dates or [])}),
             monitors=compiled.monitors or [],
         )
     except ValueError as e:
@@ -198,7 +205,17 @@ def price_endpoint(req: PricingRequest):
         schedule=(compiled.echeancier.to_dict()
                   if getattr(compiled, "echeancier", None) else None),
         calculation_budget=calculation_budget.to_dict(),
-        pricing_receipt=build_pricing_receipt(req, result["price"]),
+        pricing_receipt=signed_receipt(
+            build_pricing_receipt(req, result["price"]),
+            secret=receipt_signing_secret(),
+            result={
+                "price": result["price"],
+                "ic95": result["ic95"],
+                "median": result["median"],
+                "var5": result["var5"],
+                "prob_gt100": result["prob_gt100"],
+            },
+        ),
         corr_repair=result.get("corr_repair"),
         barrier_monitoring=result.get("barrier_monitoring", req.barrier_monitoring),
         barrier_monitoring_note=result.get("barrier_monitoring_note"),

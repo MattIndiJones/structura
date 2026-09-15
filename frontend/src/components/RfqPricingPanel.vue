@@ -106,10 +106,14 @@
         </div>
         <div class="flex flex-wrap gap-x-4 gap-y-1 text-slate-400 font-mono">
           <span>{{ modelLabel }}</span>
-          <span v-if="h.sigma != null">σ {{ formatNumber(h.sigma * 100, 2) }} %</span>
-          <span v-if="h.q != null">q {{ formatNumber(h.q * 100, 2) }} %</span>
           <span v-if="h.r != null">r {{ formatNumber(h.r * 100, 2) }} %</span>
           <span v-if="h.N != null">N {{ formatInt(h.N) }}</span>
+        </div>
+        <div v-for="underlying in h.underlyings || []" :key="underlying.ticker || underlying.name"
+             class="flex flex-wrap gap-x-3 text-slate-500 font-mono">
+          <span class="text-slate-300">{{ underlying.ticker || underlying.name }}</span>
+          <span v-if="underlying.sigma != null">σ {{ formatNumber(underlying.sigma * 100, 2) }} %</span>
+          <span v-if="underlying.q != null">q {{ formatNumber(underlying.q * 100, 2) }} %</span>
         </div>
       </div>
 

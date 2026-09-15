@@ -245,6 +245,71 @@ def test_auto_yahoo_refresh_uses_official_replay_as_lifecycle_truth(monkeypatch)
     assert response["evaluation"]["outcome"] == "en_cours"
 
 
+def test_auto_yahoo_stops_before_observations_after_an_autocall(monkeypatch):
+    session = _session()
+    deal = _deal(session)
+    existing = _events(session, deal)
+    later = DealEvent(
+        deal_id=deal.id,
+        event_index=2,
+        event_date=date.today().isoformat(),
+        t_years=2 / 252,
+        spots_json=json.dumps({"UL1": 100.0}),
+        fixing_status=FixingStatus.VALIDATED,
+        data_category=DataCategory.FIXING_OFFICIAL,
+        source="Yahoo Finance",
+        status="attendu",
+        label="Observation post-rappel",
+    )
+    session.add(later)
+    session.commit()
+    session.refresh(later)
+    validated = []
+
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *_args, **_kwargs: {"provider": "test"},
+    )
+
+    def validate(_deal, event, *_args):
+        validated.append(event.id)
+        return False, None
+
+    monkeypatch.setattr(deals_api, "_auto_validate_yahoo_event", validate)
+    monkeypatch.setattr(
+        deals_api, "_reference_history_arrays",
+        lambda *_args, **_kwargs: ([deal.strike_date], {"TK1": [100.0]}),
+    )
+
+    def replay(_deal, events):
+        terminal = len(events) == 2
+        return ({
+            "outcome": "callé" if terminal else "en_cours",
+            "event_id": events[-1].id,
+            "event_date": events[-1].event_date,
+            "realized_payout": 1.08 if terminal else 0.0,
+        }, [])
+
+    monkeypatch.setattr(deals_api, "replay_official_fixings", replay)
+    captured = {}
+
+    def apply(_deal, evaluation, *_args):
+        captured["evaluation"] = evaluation
+        return None
+
+    monkeypatch.setattr(deals_api, "_auto_apply_lifecycle", apply)
+
+    deals_api._refresh_auto_yahoo_deal_core(
+        deal, session, actor_user_id=99,
+        underlyings=[{"name": "UL1", "ticker": "TK1"}],
+        tickers=["TK1"],
+    )
+
+    assert validated == [existing[0].id, existing[1].id]
+    assert later.id not in validated
+    assert captured["evaluation"]["outcome"] == "callé"
+
+
 def test_admin_can_run_mtm_and_greeks_on_a_foreign_uat_deal(monkeypatch):
     session = _session()
     deal = _deal(session)
@@ -679,3 +744,25 @@ def test_deal_audit_timeline_is_owner_scoped_and_filterable():
     assert timeline["items"][0]["action"] == "AMENDMENT_REQUESTED"
     with pytest.raises(HTTPException):
         deals_api.get_deal_audit(deal.id, OTHER_CHECKER, session)
+
+
+def test_deal_audit_timeline_excludes_rows_from_a_recycled_legacy_id():
+    session = _session()
+    deal = _deal(session)
+    event = _events(session, deal)[0]
+    old_time = deal.created_at - timedelta(hours=1)
+    new_time = deal.created_at + timedelta(seconds=1)
+    session.add(AuditEvent(
+        action="OLD_BOOKING", object_type="DEAL", object_id=deal.id,
+        result="SUCCESS", created_at=old_time))
+    session.add(AuditEvent(
+        action="OLD_FIXING", object_type="DEAL_EVENT", object_id=event.id,
+        result="SUCCESS", created_at=old_time))
+    session.add(AuditEvent(
+        action="CURRENT_BOOKING", object_type="DEAL", object_id=deal.id,
+        result="SUCCESS", created_at=new_time))
+    session.commit()
+
+    timeline = deals_api.get_deal_audit(deal.id, MAKER, session)
+
+    assert [row["action"] for row in timeline["items"]] == ["CURRENT_BOOKING"]

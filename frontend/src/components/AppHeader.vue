@@ -44,7 +44,7 @@ const pricing = usePricingStore()
 const navItems = [
   { label: 'Accueil',    to: '/', prefixes: [] },
   { label: 'Clients',    to: { path: '/', query: { category: 'clients' } },             prefixes: ['/clients'],                              category: 'clients' },
-  { label: 'Pricing',    to: { path: '/', query: { category: 'pricing' } },             prefixes: ['/scripts', '/pricer', '/documentation'], category: 'pricing' },
+  { label: 'Pricing',    to: { path: '/', query: { category: 'pricing' } },             prefixes: ['/scripts', '/pricer', '/products', '/documentation'], category: 'pricing' },
   { label: 'Life Cycle', to: { path: '/', query: { category: 'life_cycle' } },           prefixes: ['/booking', '/reinvest'],                 category: 'life_cycle' },
   { label: 'Risk Mgmt',  to: { path: '/', query: { category: 'risk_management' } },      prefixes: ['/risk'],                                 category: 'risk_management' },
   { label: 'Études',     to: { path: '/', query: { category: 'studies' } },              prefixes: ['/amc', '/fifo'],                         category: 'studies' },

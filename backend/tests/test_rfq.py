@@ -24,11 +24,11 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from backend.app.api import deals as deals_api
 from backend.app.api import rfq as rfq_api
 from backend.app.db.models import (
-    Client, ClientMandate, Counterparty, Deal, Opportunity,
+    AuditEvent, Client, ClientMandate, Counterparty, Deal, Opportunity,
     RfqProvider, RfqQuote, RfqRequest,
 )
 from backend.app.core.references import next_reference
-from backend.app.core.rfq_controls import pricing_input_hash
+from backend.app.core.rfq_controls import booking_terms_differences, pricing_input_hash
 
 USER = SimpleNamespace(id=1, entity_id=1)
 
@@ -46,6 +46,105 @@ def _new_rfq(s: Session):
 
 def _add_quote(s: Session, rfq_id: int, provider: str = "BNP Paribas"):
     return rfq_api.add_quote(rfq_id, rfq_api.QuoteCreate(provider=provider), USER, s)
+
+
+def test_deleted_rfq_and_quote_ids_are_never_reused_by_sqlite():
+    s = _make_session()
+    first = _new_rfq(s)
+    first_quote = _add_quote(s, first["id"])
+    rfq_api.delete_rfq(first["id"], USER, s)
+
+    second = _new_rfq(s)
+    second_quote = _add_quote(s, second["id"])
+
+    assert second["id"] > first["id"]
+    assert second_quote["id"] > first_quote["id"]
+
+
+def test_to_trade_calendar_is_rejected_before_the_rfq_is_created():
+    s = _make_session()
+    strike = date.today() + timedelta(days=14)
+    end = strike + timedelta(days=365)
+    with pytest.raises(HTTPException) as exc:
+        rfq_api.create_rfq(rfq_api.RfqCreate(
+            name="Calendrier incomplet",
+            kind="to_trade",
+            script_snapshot="CONSTAT() OBS\nAT OBS:\n  PAY 1",
+            params={
+                "underlyings": [{"name": "UL", "ticker": "UL.PA", "ccy": "EUR"}],
+                "notional": 1_000_000,
+                "currency": "EUR",
+                "strike_date": strike.isoformat(),
+                "value_date": (strike - timedelta(days=2)).isoformat(),
+                "payment_date": (end + timedelta(days=3)).isoformat(),
+                "T": 1.0,
+                "constats": {"OBS": {
+                    "start_date": strike.isoformat(),
+                    "end_date": end.isoformat(),
+                    "frequency": "3M",
+                    # roll_date deliberately absent
+                }},
+            },
+        ), USER, s)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "CONTRACT_CALENDAR_INVALID"
+    assert s.exec(select(RfqRequest)).all() == []
+
+
+def test_multi_underlying_rfq_requires_a_complete_correlation_matrix():
+    s = _make_session()
+    strike = date.today()
+    end = strike + timedelta(days=365)
+    params = {
+        "underlyings": [
+            {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR"},
+            {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR"},
+        ],
+        "notional": 1_000_000, "currency": "EUR", "T": 1.0,
+        "strike_date": strike.isoformat(),
+        "value_date": strike.isoformat(),
+        "payment_date": (end + timedelta(days=3)).isoformat(),
+        "constats": {"OBS": {
+            "start_date": strike.isoformat(), "end_date": end.isoformat(),
+            "roll_date": (strike + timedelta(days=90)).isoformat(),
+            "frequency": "3M",
+        }},
+    }
+    with pytest.raises(HTTPException) as exc:
+        rfq_api.create_rfq(rfq_api.RfqCreate(
+            name="Worst-of incomplet", kind="to_trade",
+            script_snapshot="CONSTAT() OBS\nAT OBS:\n  PAY WOF",
+            params=params,
+        ), USER, s)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "CORRELATION_MATRIX_INVALID"
+    assert s.exec(select(RfqRequest)).all() == []
+
+
+def test_multi_underlying_repricing_cannot_replace_the_matrix_with_an_incomplete_one():
+    s = _make_session()
+    params = {
+        "underlyings": [
+            {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR"},
+            {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR"},
+        ],
+        "corr_matrix": [[1.0, 0.45], [0.45, 1.0]],
+    }
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+        name="Worst-of", script_snapshot="AT MATURITY\n  PAY WOF", params=params,
+    ), USER, s)
+
+    with pytest.raises(HTTPException) as exc:
+        rfq_api.update_rfq(
+            rfq["id"], rfq_api.RfqUpdate(pricing_params={"corr_matrix": [[1.0]]}),
+            USER, s)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "CORRELATION_MATRIX_INVALID"
+    stored = json.loads(s.get(RfqRequest, rfq["id"]).params_json)
+    assert stored["corr_matrix"] == [[1.0, 0.45], [0.45, 1.0]]
 
 
 # ── 1. Timezone round-trip + sort order ────────────────────────────────
@@ -253,12 +352,20 @@ def test_to_trade_rfq_requires_an_expert_calendar_script():
     except Exception as e:
         assert getattr(e, "status_code", None) == 422
 
-    # Expert-mode script (CONSTAT calendar) — allowed even with no script_id
-    # at all, e.g. sourced from an already-booked deal rather than the
-    # script library.
+    # Expert-mode script with its resolved calendar is allowed even with no
+    # script_id, e.g. sourced from an already-booked deal rather than the
+    # script library. A CONSTAT declaration alone is not executable.
+    start = date.today() + timedelta(days=7)
+    end = start + timedelta(days=365)
     rfq = rfq_api.create_rfq(
         rfq_api.RfqCreate(name="Autocall précis", kind="to_trade",
-                           script_snapshot="CONSTAT() Cal\nAT Cal:\n  PAY 0\nAT MATURITY\n  PAY 1"),
+                           script_snapshot="CONSTAT() Cal\nAT Cal:\n  PAY 0\nAT MATURITY\n  PAY 1",
+                           params={"constats": {"CAL": {
+                               "start_date": start.isoformat(),
+                               "end_date": end.isoformat(),
+                               "roll_date": end.isoformat(),
+                               "frequency": "3M",
+                           }}}),
         USER, s)
     assert rfq["kind"] == "to_trade"
 
@@ -289,6 +396,82 @@ def test_booking_from_an_rfq_links_deal_and_closes_the_rfq():
     assert deal["rfq_id"] == rfq["id"]
     closed_rfq = s.get(RfqRequest, rfq["id"])
     assert closed_rfq.status == "clos"
+
+
+def test_multi_underlying_rfq_reaches_the_deal_without_losing_market_inputs():
+    s = _make_session()
+    strike = date.today()
+    maturity = strike + timedelta(days=365)
+    payment = maturity + timedelta(days=3)
+    script = "CONSTAT() OBS\nAT OBS:\n  PAY WOF"
+    rfq_underlyings = [
+        {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR", "sigma": 0.21, "q": 0.018},
+        {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR", "sigma": 0.27, "q": 0.031},
+    ]
+    correlation = [[1.0, 0.45], [0.45, 1.0]]
+    constats = {"OBS": {
+        "start_date": strike.isoformat(), "end_date": maturity.isoformat(),
+        "roll_date": (strike + timedelta(days=90)).isoformat(),
+        "frequency": "3M",
+    }}
+    params = {
+        "underlyings": rfq_underlyings, "corr_matrix": correlation,
+        "notional": 1_000_000, "currency": "EUR", "T": 1.0,
+        "strike_date": strike.isoformat(), "value_date": strike.isoformat(),
+        "maturity_date": maturity.isoformat(), "payment_date": payment.isoformat(),
+        "constats": constats, "user_params": {}, "r": 0.03, "model": "constant",
+    }
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+        name="Worst-of LVMH DAX", kind="to_trade",
+        script_snapshot=script, params=params,
+    ), USER, s)
+    quote = _add_quote(s, rfq["id"], "BNP Paribas")
+    rfq_api.update_quote(
+        rfq["id"], quote["id"], rfq_api.QuoteUpdate(price=98.2), USER, s)
+    rfq_api.update_rfq(
+        rfq["id"], rfq_api.RfqUpdate(selected_quote_id=quote["id"]), USER, s)
+
+    booked_underlyings = [
+        {**underlying, "s0_abs": 100.0} for underlying in rfq_underlyings
+    ]
+    market_underlyings = [
+        {**rfq_underlyings[0], "sigma": 21.0, "q": 1.8},
+        {**rfq_underlyings[1], "sigma": 27.0, "q": 3.1},
+    ]
+    deal = _book_deal(_booking_body(
+        rfq_id=rfq["id"], script_snapshot=script,
+        nominal=1_000_000, devise="EUR", T=1.0,
+        strike_date=strike.isoformat(), value_date=strike.isoformat(),
+        maturity_date=maturity.isoformat(), payment_date=payment.isoformat(),
+        underlyings=booked_underlyings,
+        market_snapshot={
+            "underlyings": market_underlyings, "corrMatrix": correlation,
+            "constats": constats, "user_params": {}, "r": 3.0,
+            "model": "constant", "antithetic": True,
+        },
+        fair_value=97.9, price_traded=98.2,
+    ), USER, s)
+
+    assert [u["ticker"] for u in deal["underlyings"]] == ["MC.PA", "^GDAXI"]
+    assert deal["market_snapshot"]["underlyings"] == market_underlyings
+    assert deal["market_snapshot"]["corrMatrix"] == correlation
+    assert deal["rfq_provenance"]["product_terms"]["underlyings"] == [
+        {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR"},
+        {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR"},
+    ]
+    assert s.get(RfqRequest, rfq["id"]).status == "clos"
+
+
+def test_booking_never_reuses_a_deal_id_retained_by_the_audit_trail():
+    s = _make_session()
+    s.add(AuditEvent(
+        action="OLD_BOOKING", object_type="DEAL", object_id=80,
+        result="SUCCESS"))
+    s.commit()
+
+    deal = _book_deal(_booking_body(), USER, s)
+
+    assert deal["id"] > 80
 
 
 def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority():
@@ -1124,13 +1307,12 @@ def test_booking_refuses_what_is_not_a_trade(label, over, expect):
     assert expect in exc.value.detail
 
 
-def test_booking_refuses_a_settlement_before_its_own_strike():
+def test_booking_accepts_a_forward_start_paid_before_its_strike():
     s = _make_session()
-    with pytest.raises(HTTPException) as exc:
-        _book_deal(_booking_body(strike_date="2026-09-03",
-                                           value_date="2026-08-30"), USER, s)
-    assert exc.value.status_code == 422
-    assert "date de valeur" in exc.value.detail
+    deal = _book_deal(_booking_body(strike_date="2026-09-03",
+                                    value_date="2026-08-30"), USER, s)
+    assert deal["strike_date"] == "2026-09-03"
+    assert deal["value_date"] == "2026-08-30"
 
 
 def test_a_counterparty_outside_the_catalog_stays_accepted():
@@ -1327,6 +1509,177 @@ def test_calendrier_post_maturite_est_refuse():
             _expert_booking(maturity_date="2027-08-30", T=1.0), USER, s)
     assert exc.value.status_code == 422
     assert "dépasse la maturité" in exc.value.detail
+
+
+_NOTE_COUPONS_DEUX_ANS = """PARAM COUPON = 5%
+CONSTAT() COUPONS
+CONSTAT MATURITE
+AT COUPONS:
+  PAY COUPON
+AT MATURITE:
+  PAY 1
+"""
+
+
+def _dans_ans(annees: int) -> date:
+    jour = date.today()
+    try:
+        return jour.replace(year=jour.year + annees)
+    except ValueError:                      # 29 février
+        return jour.replace(year=jour.year + annees, day=28)
+
+
+def test_deux_ans_de_coupons_sur_une_note_a_trois_ans_se_booke():
+    """M4 (14/09/2026) : la maturité est la dernière date de constatation du
+    produit, tous échéanciers confondus. La règle du 13/09 retenait la fin des
+    coupons : maturité à deux ans, et la constatation finale à trois ans était
+    refusée comme postérieure à la maturité. Le contrôle du booking reste la
+    garantie ; c'est la maturité envoyée qui change."""
+    fin_coupons, maturite = _dans_ans(2).isoformat(), _dans_ans(3).isoformat()
+    constats = {
+        "COUPONS": {"start_date": date.today().isoformat(), "end_date": fin_coupons,
+                    "roll_date": fin_coupons, "frequency": "1Y", "stub": "short_last"},
+        "MATURITE": maturite,
+    }
+    base = dict(script_snapshot=_NOTE_COUPONS_DEUX_ANS,
+                market_snapshot={"constats": constats}, observation_times=[])
+
+    deal = _book_deal(_booking_body(
+        **base, maturity_date=maturite, T=_annees_depuis_strike(maturite)), USER, _make_session())
+    dates = [e["event_date"] for e in deal["events"]]
+    assert dates[-1] == maturite
+    assert fin_coupons in dates and len(dates) == 4     # strike + 2 coupons + maturité
+
+    # L'ancienne dérivation (fin des coupons) : le booking la refusait.
+    with pytest.raises(HTTPException) as exc:
+        _book_deal(_booking_body(
+            **base, maturity_date=fin_coupons, T=_annees_depuis_strike(fin_coupons)),
+            USER, _make_session())
+    assert "dépasse la maturité" in exc.value.detail
+
+
+# ── 18. Identité RFQ → deal : le contrat, pas son écriture ─────────────
+
+_AUTOCALL_A_ECHEANCIER = """PARAM COUPON = 8%
+PARAM M_AC_BAR = 100%
+PARAM M_KI_BAR = 60%
+
+CONSTAT() OBSERVATIONS
+
+AT OBSERVATIONS:
+  SET CALL = INDIC(WOF >= M_AC_BAR)
+  PAY CALL * COUPON * INDEX
+  PAY CALL * 1
+  IF CALL = 1:
+    STOP
+
+AT OBSERVATIONS.last:
+  SET KI = INDIC(WOF < M_KI_BAR)
+  PAY (1 - KI) * 1
+  PAY KI * WOF
+"""
+
+
+def _rfq_a_echeancier(s):
+    """RFQ-20260914-002, ramené à la date du jour : un autocall trimestriel à
+    trois ans, strike dans deux semaines.
+
+    Chaque écran écrit le même contrat à sa façon. L'écran RFQ fige T à quatre
+    décimales et un échéancier sans clés de fenêtre ; le Pricer renvoie T
+    recalculé depuis la maturité à six décimales, et deux clés de fenêtre
+    vides."""
+    strike = date.today() + timedelta(days=14)
+    try:
+        fin = strike.replace(year=strike.year + 3)
+    except ValueError:                      # 29 février
+        fin = strike.replace(year=strike.year + 3, day=28)
+    jours = (fin - strike).days
+    echeancier = {
+        "start_date": strike.isoformat(), "end_date": fin.isoformat(),
+        "roll_date": fin.isoformat(), "frequency": "3M", "stub": "short_last",
+        "sub_frequency": None, "convention": "none", "settlement_lag": 0,
+    }
+    params = {
+        "underlyings": [{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}],
+        "user_params": {"COUPON": 0.08, "M_AC_BAR": 1.0, "M_KI_BAR": 0.6},
+        "constats": {"OBSERVATIONS": echeancier},
+        "notional": 1_000_000.0, "currency": "EUR",
+        "strike_date": strike.isoformat(),
+        "value_date": (strike + timedelta(days=2)).isoformat(),
+        "payment_date": (fin + timedelta(days=5)).isoformat(),
+        "T": round(jours / 365.25, 4),            # RfqView.vue : yearsBetween
+        "model": "constant", "r": 0.03,
+    }
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+        name="Autocall à échéancier", script_snapshot=_AUTOCALL_A_ECHEANCIER,
+        params=params), USER, s)
+    q = _add_quote(s, rfq["id"], "BNP Paribas")
+    rfq_api.update_quote(rfq["id"], q["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
+    rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=q["id"]), USER, s)
+
+    body = _booking_body(
+        script_snapshot=_AUTOCALL_A_ECHEANCIER,
+        market_snapshot={
+            "underlyings": params["underlyings"],
+            "user_params": params["user_params"],
+            "constats": {"OBSERVATIONS": dict(
+                echeancier, window_length=None, window_frequency=None)},
+        },
+        rfq_id=rfq["id"], strike_date=params["strike_date"],
+        value_date=params["value_date"], maturity_date=fin.isoformat(),
+        payment_date=params["payment_date"],
+        T=round(jours / 365.25, 6),               # pricing.js : syncTenorFromMaturity
+        observation_times=[])
+    return params, body
+
+
+def test_le_meme_contrat_ecrit_par_le_pricer_se_booke_depuis_la_rfq():
+    """Comparés tels qu'écrits, T et l'échéancier différaient : toute RFQ à
+    échéancier CONSTAT était refusée au booking (« termes contractuels figés :
+    T, constats »), sans rien que l'écran permette de corriger."""
+    s = _make_session()
+    params, body = _rfq_a_echeancier(s)
+    assert body.T != params["T"]                  # deux écritures de la même maturité
+
+    deal = _book_deal(body, USER, s)
+
+    assert deal["rfq_provenance"]["retained"]["price"] == 98.0
+
+
+@pytest.mark.parametrize("changement, champ", [
+    ("maturite_un_jour_plus_tard", "T"),
+    ("frequence", "constats"),
+    ("fenetre_de_constatation", "constats"),
+])
+def test_un_autre_contrat_reste_refuse_au_booking_de_la_rfq(changement, champ):
+    """La comparaison tolère l'écriture, jamais le contrat : un jour de
+    maturité, une fréquence ou une fenêtre qui porte une valeur restent des
+    termes différents de ceux que les fournisseurs ont cotés."""
+    s = _make_session()
+    params, body = _rfq_a_echeancier(s)
+    observations = body.market_snapshot["constats"]["OBSERVATIONS"]
+    if changement == "maturite_un_jour_plus_tard":
+        body.T = round(body.T + 1 / 365.25, 6)
+    elif changement == "frequence":
+        observations["frequency"] = "6M"
+    else:
+        observations.update(window_length="10D", window_frequency="1D")
+
+    with pytest.raises(HTTPException) as exc:
+        _book_deal(body, USER, s)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail.endswith(
+        f"figés de la RFQ : {champ}. Rechargez le booking depuis la RFQ ; "
+        "pour un autre produit, créez une nouvelle RFQ.")
+
+
+def test_t_se_compare_en_jours_arrondis_comme_les_ecrans():
+    """T = 2 fait 730,5 jours. Le Pricer en tire une maturité 731 jours après
+    le strike (Math.round), puis T = 731 / 365,25 ; l'arrondi bancaire de
+    Python aurait compté 730 jours et inventé un jour d'écart."""
+    assert booking_terms_differences({"T": 2.0}, {"T": 731 / 365.25}) == []
+    assert booking_terms_differences({"T": 2.0}, {"T": 732 / 365.25}) == ["T"]
 
 
 def test_allocation_de_references_est_atomique_sous_concurrence(tmp_path):

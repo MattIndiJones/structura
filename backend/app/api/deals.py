@@ -19,7 +19,7 @@ from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent
                           Entity, User, Counterparty, Portfolio, LifecycleProposal,
                           OfficialFixingVersion, Opportunity, RfqQuote, RfqRequest, Script,
                           TradeAmendmentRequest, ValuationRun)
-from .auth import get_current_user
+from .auth import get_current_user, receipt_signing_secret
 from ..services.market_data import (
     DEFAULT_MARKET_DATA_PROVIDER, dividend_profile, load_hist_prices,
     load_yahoo_reference_closes, market_data_provider_for_deal,
@@ -31,7 +31,7 @@ from ..core.inlife_valuation import (
     _engine_underlyings, _shift_dividend_curve,
 )
 from ..core.calibration import realized_market
-from ..core.references import next_reference
+from ..core.references import next_audited_id, next_reference
 from ..core.audit import commit_rejection, record_audit_event
 from ..core.client_controls import (
     ClientRuleError, client_provenance_snapshot, require_deal_attribution_coherent,
@@ -44,7 +44,8 @@ from ..core.market_snapshot import snapshot_rate, snapshot_rate_is_default
 from ..core.payoff_terms import classify_param_barrier
 from ..core.agregats_officiels import calculer as calculer_agregat
 from ..core.rfq_controls import (
-    booking_gate_failures, failures_payload, product_terms, product_terms_hash,
+    booking_gate_failures, booking_terms_differences, failures_payload,
+    product_terms, product_terms_hash,
 )
 from ..core.workflow import (
     AmendmentStatus, DataCategory, FixingPolicy, FixingStatus, LifecycleStatus,
@@ -59,6 +60,13 @@ from ..core.deal_valuation import (
     DealGreeksRequest, MtmRequest, mtm_core as _deal_mtm_core,
 )
 from ..core.valuation_runs import stage_valuation_run, replay_valuation_run
+from ..core.product.inputs import terms_from_input
+from ..core.product.models import CommercialContext, FrozenObject, TradeIntent
+from ..services.product_repository import (
+    ProductError, load_product, owned_record, stage_revision,
+)
+from ..services.product_lifecycle import lifecycle_snapshot, stage_product_lifecycle
+from ..services.product_receipts import verify_server_receipt
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
 
@@ -66,11 +74,13 @@ router = APIRouter(prefix="/api/deals", tags=["deals"])
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
 class DealCreate(BaseModel):
+    product_id: Optional[int] = None
+    product_terms_version: Optional[int] = None
     sens: Literal["achat", "vente"] = "vente"
     contrepartie: str
     devise: str = "EUR"
     product_type: str = ""
-    fixing_policy: Literal["AUTO_YAHOO", "FOUR_EYES"] = "AUTO_YAHOO"
+    fixing_policy: Literal["AUTO_YAHOO"] = "AUTO_YAHOO"
     nominal: float
     fair_value: float
     price_traded: float
@@ -284,9 +294,6 @@ def _validate_economics(body) -> None:
         except (TypeError, ValueError):
             errors.append(f"la date de {label} est invalide ({raw!r})")
 
-    if body.strike_date and body.value_date and body.value_date < body.strike_date:
-        errors.append(f"la date de valeur ({body.value_date}) précède la date de strike "
-                      f"({body.strike_date})")
     if body.maturity_date and body.value_date and body.maturity_date <= body.value_date:
         errors.append(f"la maturité ({body.maturity_date}) n'est pas postérieure à la date "
                       f"de valeur ({body.value_date})")
@@ -346,10 +353,8 @@ def _validate_rfq_booking_identity(rfq: RfqRequest, body: DealCreate,
                  f"fournisseur retenu ({selected.provider} → {expected_counterparty}).")
 
     expected = product_terms(rfq.script_snapshot, json.loads(rfq.params_json or "{}"))
-    actual_all = _deal_product_terms(body)
-    actual = {key: actual_all.get(key) for key in expected}
-    if actual != expected:
-        changed = sorted(key for key in expected if actual.get(key) != expected.get(key))
+    changed = booking_terms_differences(expected, _deal_product_terms(body))
+    if changed:
         raise HTTPException(
             422, "Le deal ne correspond pas aux termes contractuels figés de la RFQ : "
                  + ", ".join(changed) + ". Rechargez le booking depuis la RFQ ; "
@@ -621,6 +626,8 @@ def _gen_ref(entity_name: str | None, session: Session) -> str:
 def _deal_row(d: Deal, events: list | None = None, session: Session | None = None) -> dict:
     row = {
         "id": d.id,
+        "product_id": d.product_id,
+        "product_terms_version": d.product_terms_version,
         "reference": d.reference,
         "entity_id": d.entity_id,
         "user_id": d.user_id,
@@ -1768,6 +1775,58 @@ def _book_deal(
             fermete_avant=fermete_avant,
             firmness_affirmee_au_booking=qualifiee_au_booking)
 
+    source_product = None
+    source_product_id = source_rfq.product_id if source_rfq is not None else body.product_id
+    if source_rfq is not None and body.product_id is not None \
+            and body.product_id != source_rfq.product_id:
+        _reject_booking(session, current, body, 422, {
+            "code": "RFQ_PRODUCT_MISMATCH",
+            "message": "Le Product demandé ne correspond pas à celui de la RFQ.",
+        })
+    if source_product_id is not None:
+        try:
+            owned_record(session, source_product_id, current)
+            source_product = load_product(session, source_product_id)
+        except ProductError as exc:
+            _reject_booking(session, current, body, exc.status, {
+                "code": exc.code, "message": str(exc),
+            })
+        expected_terms = (source_rfq.product_terms_version
+                          if source_rfq is not None else body.product_terms_version)
+        if expected_terms is not None and expected_terms != source_product.terms_version:
+            _reject_booking(session, current, body, 409, {
+                "code": "PRODUCT_TERMS_STALE",
+                "message": "La version du Product a changé depuis l’ouverture du dossier.",
+            })
+        if source_product.execution is not None:
+            _reject_booking(session, current, body, 409, {
+                "code": "PRODUCT_ALREADY_BOOKED",
+                "message": "Ce Product est déjà rattaché à une exécution.",
+            })
+        if source_rfq is None:
+            if not body.pricing_receipt:
+                _reject_booking(session, current, body, 422, {
+                    "code": "PRODUCT_REPRICE_REQUIRED",
+                    "message": "Repricez le Product avant un booking direct.",
+                })
+            try:
+                verified_product_receipt = verify_server_receipt(
+                    body.pricing_receipt, secret=receipt_signing_secret())
+                priced_terms = terms_from_input(
+                    verified_product_receipt["pricing_input"], allow_unresolved=False)
+            except (KeyError, TypeError, ValueError) as exc:
+                _reject_booking(session, current, body, 422, {
+                    "code": "PRODUCT_PRICING_RECEIPT_INVALID",
+                    "message": f"Le reçu serveur du pricing est invalide : {exc}",
+                })
+            if priced_terms.fingerprint != source_product.terms_fingerprint:
+                _reject_booking(session, current, body, 422, {
+                    "code": "PRODUCT_TERMS_MISMATCH",
+                    "message": "Le pricing courant ne porte plus les termes du Product ouvert.",
+                })
+        body.product_id = source_product_id
+        body.product_terms_version = source_product.terms_version
+
     # A new deal's script and frozen CONSTAT values are the contract.  Client
     # Monte-Carlo grid points are never a safe booking fallback.
     try:
@@ -1848,11 +1907,17 @@ def _book_deal(
     default_portfolio = get_or_create_default_portfolio(session, current.id)
 
     deal = Deal(
+        # AuditEvent keeps numeric object identities forever.  Letting SQLite
+        # recycle a deleted Deal id would splice the previous trade's history
+        # into the new one.
+        id=next_audited_id(session, Deal, "DEAL"),
         reference=reference,
         entity_id=current.entity_id,
         user_id=current.id,
         uat_batch_id=uat_batch_id,
         portfolio_id=default_portfolio.id,
+        product_id=body.product_id,
+        product_terms_version=body.product_terms_version,
         indicative_id=body.indicative_id,
         rfq_id=body.rfq_id,
         rfq_provenance_json=rfq_provenance,
@@ -1874,9 +1939,11 @@ def _book_deal(
         script_id=body.script_id,
         sens=body.sens,
         contrepartie=body.contrepartie,
+        counterparty_id=(session.exec(select(Counterparty.id).where(
+            Counterparty.name == body.contrepartie)).first()),
         devise=body.devise,
         product_type=body.product_type,
-        fixing_policy=body.fixing_policy,
+        fixing_policy=FixingPolicy.AUTO_YAHOO.value,
         nominal=body.nominal,
         fair_value=body.fair_value,
         price_traded=body.price_traded,
@@ -2051,6 +2118,51 @@ def _book_deal(
                 parent_event_id=constatation.id,
                 label=f"{label} · relevé {j}/{len(fenetre['releves'])}",
             ))
+
+    if source_product is not None:
+        product_rfqs = source_product.rfqs
+        if source_rfq is not None:
+            from .rfq import (_booked_deals_by_rfq, _counterparty_by_provider,
+                              _get_quotes, _rfq_row)
+            current_rfq = FrozenObject(_rfq_row(
+                source_rfq, _get_quotes(source_rfq.id, session),
+                _counterparty_by_provider(session),
+                _booked_deals_by_rfq(session, current.id)))
+            product_rfqs = tuple(
+                item for item in product_rfqs
+                if item.to_dict().get("id") != source_rfq.id
+            ) + (current_rfq,)
+        intent = TradeIntent(
+            **{
+                **source_product.intent.model_dump(mode="json"),
+                "nominal": deal.nominal,
+                "side": "BUY" if deal.sens == "vente" else "SELL",
+                "counterparty_id": deal.counterparty_id,
+                "counterparty_name": deal.contrepartie,
+                "product_type": deal.product_type,
+                "transaction_format": deal.transaction_format or "",
+                "instrument_family": deal.instrument_family or "",
+                "payoff_family": deal.payoff_family or "",
+                "payoff_description": deal.payoff_description or "",
+                "documentation_reference": deal.documentation_reference or "",
+            }
+        )
+        commercial = CommercialContext(
+            client_id=deal.client_id, mandate_id=deal.mandate_id,
+            opportunity_id=deal.opportunity_id,
+            primary_affiliation_id=deal.primary_affiliation_id,
+        )
+        source_product = source_product.model_copy(update={
+            "intent": intent,
+            "commercial": commercial,
+            "rfqs": product_rfqs,
+            "execution": FrozenObject(_contract_snapshot(deal)),
+            "lifecycle": lifecycle_snapshot(session, deal),
+        })
+        stage_revision(
+            session, source_product, expected_revision=source_product.revision,
+            actor_id=current.id, action="PRODUCT_BOOKED",
+            reason=f"Booking du Product dans le deal {deal.reference}.")
 
     try:
         record_audit_event(
@@ -2530,24 +2642,44 @@ def get_deal_audit(
     proposals = _get_lifecycle_proposals(deal_id, session)
     amendments = session.exec(select(TradeAmendmentRequest).where(
         TradeAmendmentRequest.deal_id == deal_id)).all()
+    # Legacy SQLite databases may already have recycled Deal, DealEvent or
+    # proposal ids after an administrative deletion.  The current trade cannot
+    # own any audit row written before it existed.  Keep this lower bound even
+    # though new Deal ids are now allocated durably: it repairs the timeline of
+    # databases that predate that allocator.
+    since_booking = AuditEvent.created_at >= deal.created_at
     clauses = [
-        (AuditEvent.object_type == "DEAL") & (AuditEvent.object_id == deal_id),
+        (AuditEvent.object_type == "DEAL")
+        & (AuditEvent.object_id == deal_id)
+        & since_booking,
     ]
     if deal.rfq_id:
-        clauses.append(
-            (AuditEvent.object_type == "RFQ") & (AuditEvent.object_id == deal.rfq_id))
+        linked_rfq = session.get(RfqRequest, deal.rfq_id)
+        rfq_clause = (
+            (AuditEvent.object_type == "RFQ") &
+            (AuditEvent.object_id == deal.rfq_id)
+        )
+        # Legacy SQLite databases may have reused an RFQ primary key after a
+        # physical deletion.  Events older than the linked RFQ cannot belong
+        # to it and must not contaminate the deal timeline.
+        if linked_rfq is not None:
+            rfq_clause &= AuditEvent.created_at >= linked_rfq.created_at
+        clauses.append(rfq_clause)
     if events:
         clauses.append(
             (AuditEvent.object_type == "DEAL_EVENT") &
-            (AuditEvent.object_id.in_([row.id for row in events])))
+            (AuditEvent.object_id.in_([row.id for row in events])) &
+            since_booking)
     if proposals:
         clauses.append(
             (AuditEvent.object_type == "LIFECYCLE_PROPOSAL") &
-            (AuditEvent.object_id.in_([row.id for row in proposals])))
+            (AuditEvent.object_id.in_([row.id for row in proposals])) &
+            since_booking)
     if amendments:
         clauses.append(
             (AuditEvent.object_type == "TRADE_AMENDMENT_REQUEST") &
-            (AuditEvent.object_id.in_([row.id for row in amendments])))
+            (AuditEvent.object_id.in_([row.id for row in amendments])) &
+            since_booking)
     statement = select(AuditEvent).where(or_(*clauses))
     if action:
         statement = statement.where(AuditEvent.action == action)
@@ -3202,6 +3334,11 @@ def update_event(
             "external_reference": version.external_reference,
         },
     )
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_FIXING_RECEIVED",
+        reason=version.capture_reason,
+    )
     session.commit()
     session.refresh(ev)
     return _event_row(ev)
@@ -3476,6 +3613,11 @@ def validate_fixing(
             "record_sha256": version.record_sha256,
         },
     )
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_FIXING_VALIDATED",
+        reason=body.reason,
+    )
     session.commit()
     session.refresh(ev)
     return _event_row(ev)
@@ -3735,6 +3877,11 @@ def reject_fixing(
             "checker_user_id": current.id,
         },
     )
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_FIXING_REJECTED",
+        reason=body.reason,
+    )
     session.commit()
     session.refresh(ev)
     return _event_row(ev)
@@ -3979,117 +4126,25 @@ def _refresh_deal_core(
     if not tickers:
         raise ValueError("Aucun sous-jacent défini sur ce deal")
 
-    if deal.fixing_policy == FixingPolicy.AUTO_YAHOO.value:
-        return _refresh_auto_yahoo_deal_core(
-            deal, session, actor_user_id, underlyings, tickers)
-
-    today = date.today().isoformat()
-    events = _get_events(deal.id, session)
-    past_events = [e for e in events if e.event_date <= today]
-    if not past_events:
-        return {"updated": 0, "message": "Aucun événement passé", "evaluation": None}
-
-    # Fetch from a week BEFORE the strike: a strike date falling on a
-    # weekend/holiday has no close of its own, and _closest_price's
-    # "last close <= date" convention needs the preceding trading day to
-    # exist in the window — otherwise S₀ silently stays empty.
-    fetch_start = (date.fromisoformat(deal.strike_date) - timedelta(days=7)).isoformat()
-    px_data = load_hist_prices(tickers, fetch_start, today)
-    if "error" in px_data:
-        raise ValueError(px_data["error"])
-
-    dates_list = px_data.get("dates", [])
-    prices = px_data.get("prices", {})
-    if not dates_list:
-        raise ValueError("Données historiques vides")
-
-    # Build a {date: idx} map for fast lookup
-    date_idx = {d: i for i, d in enumerate(dates_list)}
-
-    def _closest_price(ticker: str, target_date: str) -> tuple[float | None, str | None]:
-        if ticker not in prices:
-            return None, None
-        available = [d for d in dates_list if d <= target_date]
-        if not available:
-            return None, None
-        used_date = available[-1]
-        idx = date_idx[used_date]
-        val = prices[ticker][idx]
-        return (round(float(val), 4), used_date) if val is not None else (None, used_date)
-
-    updated = 0
-    for ev in past_events:
-        spots = {}
-        used_dates = {}
-        for u in underlyings:
-            tk = u.get("ticker", "")
-            name = u["name"]
-            spot, used_date = _closest_price(tk, ev.event_date)
-            if spot is not None:
-                spots[name] = spot
-                used_dates[name] = used_date
-        if len(spots) != len(underlyings):
-            missing = [u["name"] for u in underlyings if u["name"] not in spots]
-            raise ValueError(
-                f"Données indicatives partielles au {ev.event_date}; manquantes: {', '.join(missing)}")
-        if spots:
-            before = json.loads(ev.indicative_spots_json or "{}")
-            if before == spots:
-                continue
-            ev.indicative_spots_json = json.dumps(spots, sort_keys=True)
-            session.add(ev)
-            updated += 1
-            fallbacks = {
-                name: used for name, used in used_dates.items() if used != ev.event_date}
-            record_audit_event(
-                session,
-                action="INDICATIVE_DATA_USED",
-                object_type="DEAL_EVENT",
-                object_id=ev.id,
-                actor_user_id=actor_user_id,
-                actor_type="USER" if actor_user_id else "PROCESS",
-                result="SUCCESS",
-                before={"indicative_spots": before},
-                after={"indicative_spots": spots},
-                reason="Mise à jour de données de monitoring non opposables.",
-                data_source=DataCategory.INDICATIVE,
-                metadata={"provider": "Yahoo Finance", "price_dates": used_dates,
-                          "fallback_dates": fallbacks},
-            )
-            if fallbacks:
-                _ensure_alert(
-                    session,
-                    deal,
-                    "data_fallback",
-                    f"Fallback de date de marché au {ev.event_date}: {fallbacks}",
-                    f"data-fallback:{deal.id}:{ev.id}:{json.dumps(fallbacks, sort_keys=True)}",
-                )
-                record_audit_event(
-                    session,
-                    action="DATA_FALLBACK_USED",
-                    object_type="DEAL_EVENT",
-                    object_id=ev.id,
-                    actor_user_id=actor_user_id,
-                    actor_type="USER" if actor_user_id else "PROCESS",
-                    result="SUCCESS",
-                    reason="Dernière clôture disponible antérieure à la date contractuelle.",
-                    data_source=DataCategory.INDICATIVE,
-                    metadata={"fallback_dates": fallbacks},
-                )
-
-    evaluation = _evaluate_lifecycle(deal, events, dates_list, prices, tickers)
-    proposal = _create_lifecycle_proposal(
-        deal, evaluation, session, actor_user_id)
-
-    deal.updated_at = datetime.utcnow()
-    session.add(deal)
-    session.commit()
-    return {
-        "updated": updated,
-        "message": f"{updated} événement(s) indicatif(s) mis à jour",
-        "evaluation": evaluation,
-        "proposal": _proposal_row(proposal) if proposal else None,
-    }
+    if deal.fixing_policy != FixingPolicy.AUTO_YAHOO.value:
+        previous_policy = deal.fixing_policy
+        deal.fixing_policy = FixingPolicy.AUTO_YAHOO.value
+        session.add(deal)
+        record_audit_event(
+            session,
+            action="FIXING_POLICY_AUTOMATED",
+            object_type="DEAL",
+            object_id=deal.id,
+            actor_user_id=actor_user_id,
+            actor_type="USER" if actor_user_id else "PROCESS",
+            result="SUCCESS",
+            before={"fixing_policy": previous_policy},
+            after={"fixing_policy": FixingPolicy.AUTO_YAHOO.value},
+            reason="Retrait du workflow Maker/Checker ; les clôtures fournisseur contrôlées deviennent officielles automatiquement.",
+            data_source=DataCategory.FIXING_OFFICIAL,
+        )
+    return _refresh_auto_yahoo_deal_core(
+        deal, session, actor_user_id, underlyings, tickers)
 
 
 _AUTO_YAHOO_MAX_FALLBACK_DAYS = 4
@@ -4390,7 +4445,7 @@ def resolve_auto_fixing_exception(
             "AUTO_EXCEPTION_POLICY_REQUIRED", "fixing_policy",
             "La validation mono-utilisateur est réservée aux produits Yahoo automatiques.",
             expected=FixingPolicy.AUTO_YAHOO.value,
-            action="Utilisez le workflow Maker/Checker du produit contrôlé.",
+            action="Actualisez le deal pour appliquer la politique automatique.",
             received=deal.fixing_policy,
         ))
     if event.event_date > date.today().isoformat():
@@ -4714,6 +4769,11 @@ def resolve_auto_fixing_exception(
     )
     deal.updated_at = decided_at
     session.add(deal)
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_FIXING_EXCEPTION_DECIDED",
+        reason=body.reason,
+    )
     session.commit()
     session.refresh(event)
 
@@ -4722,6 +4782,13 @@ def resolve_auto_fixing_exception(
     if evaluation and evaluation.get("outcome") != "en_cours":
         proposal = _auto_apply_lifecycle(
             deal, evaluation, session, actor_user_id=current.id)
+        stage_product_lifecycle(
+            session, deal, actor_user_id=current.id,
+            action=("PRODUCT_LIFECYCLE_RESOLUTION_APPLIED"
+                    if proposal and proposal.status == LifecycleStatus.APPLIED.value
+                    else "PRODUCT_LIFECYCLE_REFRESHED"),
+            reason="Synchronisation après rejeu des fixings validés.",
+        )
         session.commit()
     remaining = _pending_auto_fixing_exceptions(deal, session)
     actor_label = getattr(current, "username", None) or f"utilisateur #{current.id}"
@@ -5285,12 +5352,29 @@ def _refresh_auto_yahoo_deal_core(
         raise ValueError(reference_data["error"])
     officialized = 0
     exceptions: list[dict] = []
-    for event in past_events:
+    official_prefix: list[DealEvent] = []
+    official_evaluation = None
+    replay_failures: list[dict] = []
+    # Contractual observations are consumed in order.  As soon as their
+    # authoritative prefix proves an autocall/maturity, later rows no longer
+    # belong to the life of the product and must neither be validated nor
+    # generate fallback alerts.
+    for event in sorted(past_events, key=lambda row: (row.t_years, row.event_index)):
         changed, exception = _auto_validate_yahoo_event(
             deal, event, underlyings, reference_data, session, actor_user_id)
         officialized += int(changed)
         if exception:
             exceptions.append(exception)
+            break
+        if (event.fixing_status != FixingStatus.VALIDATED.value or
+                event.data_category != DataCategory.FIXING_OFFICIAL.value):
+            break
+        official_prefix.append(event)
+        official_evaluation, replay_failures = replay_official_fixings(
+            deal, official_prefix)
+        if (official_evaluation and
+                official_evaluation.get("outcome") != "en_cours"):
+            break
     dates, prices = _reference_history_arrays(reference_data, tickers)
     if not dates:
         raise ValueError("Les clôtures Yahoo ne permettent pas de construire un historique commun")
@@ -5300,15 +5384,7 @@ def _refresh_auto_yahoo_deal_core(
     # data and a governed fallback for scripts whose path dependence cannot be
     # established from event fixings alone, but it must not decide an otherwise
     # replayable terminal outcome on dates that differ from the booked calendar.
-    official_prefix: list[DealEvent] = []
-    for event in sorted(past_events, key=lambda row: (row.t_years, row.event_index)):
-        if (event.fixing_status != FixingStatus.VALIDATED.value or
-                event.data_category != DataCategory.FIXING_OFFICIAL.value):
-            break
-        official_prefix.append(event)
-    official_evaluation = None
-    replay_failures: list[dict] = []
-    if official_prefix:
+    if official_prefix and official_evaluation is None:
         official_evaluation, replay_failures = replay_official_fixings(
             deal, official_prefix)
     evaluation = official_evaluation
@@ -5317,6 +5393,12 @@ def _refresh_auto_yahoo_deal_core(
     proposal = _auto_apply_lifecycle(deal, evaluation, session, actor_user_id)
     deal.updated_at = datetime.utcnow()
     session.add(deal)
+    stage_product_lifecycle(
+        session, deal, actor_user_id=actor_user_id,
+        action=("PRODUCT_LIFECYCLE_RESOLUTION_APPLIED"
+                if proposal and proposal.status == LifecycleStatus.APPLIED.value
+                else "PRODUCT_LIFECYCLE_REFRESHED"),
+        reason="Synchronisation après traitement lifecycle automatique.")
     session.commit()
     if exceptions:
         first_failure = exceptions[0]["failures"][0]
@@ -5898,6 +5980,11 @@ def apply_lifecycle_proposal(
         after={"proposal": _proposal_row(proposal), "deal": _deal_row(deal)},
         reason=body.reason,
         data_source=DataCategory.FIXING_OFFICIAL,
+    )
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_LIFECYCLE_RESOLUTION_APPLIED",
+        reason=body.reason,
     )
     session.commit()
     session.refresh(deal)
@@ -7045,20 +7132,70 @@ def _valuation_run_row(run: ValuationRun, include_payload: bool = False) -> dict
     return row
 
 
+@router.get("/valuation-runs/latest-mtm")
+def latest_mtm_runs(
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    deal_ids: str = "",
+):
+    """Latest persisted MtM for each requested accessible deal.
+
+    Booking shows several deals at once. Returning the immutable run payloads
+    in one call avoids two HTTP requests per row when the user comes back to
+    the page. The complete history remains available through the existing
+    per-deal endpoint.
+    """
+    try:
+        requested_ids = {
+            int(raw) for raw in deal_ids.split(",") if raw.strip()
+        }
+    except ValueError as exc:
+        raise HTTPException(422, "deal_ids doit contenir des identifiants entiers") from exc
+    if not requested_ids:
+        return []
+    if len(requested_ids) > 200:
+        raise HTTPException(422, "200 deals maximum par requête")
+
+    runs = session.exec(
+        select(ValuationRun)
+        .where(ValuationRun.run_type == "MTM")
+        .where(ValuationRun.deal_id.in_(requested_ids))
+        .order_by(ValuationRun.created_at.desc(), ValuationRun.id.desc())
+    ).all()
+    latest = []
+    seen = set()
+    for run in runs:
+        if run.deal_id in seen:
+            continue
+        deal = session.get(Deal, run.deal_id)
+        if not deal or not _can_access_deal(deal, current, session):
+            continue
+        seen.add(run.deal_id)
+        latest.append(_valuation_run_row(run, include_payload=True))
+    return latest
+
+
 @router.get("/{deal_id}/valuation-runs")
 def list_valuation_runs(
     deal_id: int,
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    run_type: Optional[str] = None,
+    include_payload: bool = False,
 ):
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
+    statement = select(ValuationRun).where(ValuationRun.deal_id == deal_id)
+    if run_type:
+        normalized_type = run_type.strip().upper()
+        if normalized_type not in {"MTM", "GREEKS", "REPORT"}:
+            raise HTTPException(422, "Type de run de valorisation inconnu")
+        statement = statement.where(ValuationRun.run_type == normalized_type)
     runs = session.exec(
-        select(ValuationRun).where(ValuationRun.deal_id == deal_id)
-        .order_by(ValuationRun.created_at.desc(), ValuationRun.id.desc())
+        statement.order_by(ValuationRun.created_at.desc(), ValuationRun.id.desc())
     ).all()
-    return [_valuation_run_row(run) for run in runs]
+    return [_valuation_run_row(run, include_payload=include_payload) for run in runs]
 
 
 @router.get("/valuation-runs/{run_id}")

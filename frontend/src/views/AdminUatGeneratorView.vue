@@ -125,12 +125,10 @@
                 <input v-model.number="form.nominal_max" class="input" type="number" min="1" step="10000" />
               </label>
               <label>
-                <span class="label">Politique de fixing</span>
-                <select v-model="form.fixing_policy" class="select">
-                  <option value="AUTO_YAHOO">Yahoo automatique</option>
-                  <option value="FOUR_EYES">Contrôle 4 yeux</option>
-                  <option value="MIX">Mix des deux</option>
-                </select>
+                <span class="label">Source des fixings</span>
+                <div class="input flex items-center text-xs" style="color: var(--text);">
+                  Fournisseur automatique
+                </div>
               </label>
               <label>
                 <span class="label">Profil historique / lifecycle</span>
@@ -452,7 +450,7 @@ const fmtDate = formatDateTime
 const fmtMoney = (value, currency) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 const dealCountLabel = count => `${count} ${count === 1 ? 'deal' : 'deals'}`
 const roleLabel = role => ({ admin: 'Admin', user: 'Utilisateur', ops_maker: 'Ops Maker', checker: 'Checker' }[role] || role)
-const fixingLabel = value => ({ AUTO_YAHOO: 'Yahoo auto', FOUR_EYES: '4 yeux' }[value] || value)
+const fixingLabel = value => ({ AUTO_YAHOO: 'Fournisseur auto' }[value] || value)
 const lifecycleLabel = value => config.lifecycle_profiles.find(profile => profile.key === value)?.label || value
 const scenarioLabel = value => ({ EXPIRED: 'quote expirée', INDICATIVE: 'quote indicative', NO_SELECTION: 'aucune quote sélectionnée' }[value] || value)
 const modeLabel = value => ({ FULL_CHAIN: 'RFQ → booking', RFQ_ONLY: 'RFQ', BOOKED_ONLY: 'Booking direct' }[value] || value)

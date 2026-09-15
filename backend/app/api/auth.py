@@ -82,6 +82,11 @@ _SECRET = _load_secret()
 _ALGO = "HS256"
 _EXPIRE_DAYS = 7
 
+
+def receipt_signing_secret() -> str:
+    """Key shared by API endpoints that issue and verify server receipts."""
+    return _SECRET
+
 _oauth2 = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 # ── Anti-bruteforce sur /login ──────────────────────────────────────────

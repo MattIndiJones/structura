@@ -52,6 +52,7 @@ class InLifeProduct:
     payment_date: Optional[date] = None
     # Snapshot de marché : constats, user_params, r, paramètres par sous-jacent.
     market: dict = field(default_factory=dict)
+    frozen_schedule: dict | None = None
 
 
 @dataclass
@@ -350,8 +351,12 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
         # Même origine qu'au booking : un MtM qui recalerait le calendrier
         # sur une autre date ne vaudrait plus le même produit.
         _origin = p.strike_date
-        compiled = resolve_constats(compiled, market.get("constats") or {}, anchor=_origin,
-                                    currency=p.currency or None)
+        if p.frozen_schedule is not None:
+            from .product.calendar import restore_calendar
+            compiled = restore_calendar(compiled, p.frozen_schedule)
+        else:
+            compiled = resolve_constats(compiled, market.get("constats") or {}, anchor=_origin,
+                                        currency=p.currency or None)
     except ValueError as e:
         raise ValuationError(f"Script/calendriers non exploitables pour le MtM résiduel "
                                  f"(deal booké avant la persistance des CONSTAT ?) : {e}")

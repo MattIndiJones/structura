@@ -16,20 +16,6 @@
       </div>
     </div>
 
-    <div v-if="contractTermsLocked"
-         class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
-      <div class="flex items-start gap-2">
-        <span aria-hidden="true">🔒</span>
-        <div>
-          <p class="text-sm font-bold">Termes contractuels figés</p>
-          <p class="text-xs mt-0.5">
-            Ce deal est booké. Le payoff, le panier, les dates et les economics restent ceux du contrat.
-            La date de valorisation, le marché et le modèle se modifient dans Marché &amp; Paramètres.
-          </p>
-        </div>
-      </div>
-    </div>
-
     <!-- ── Termes principaux ─────────────────────────────────── -->
     <fieldset class="card" :disabled="contractTermsLocked">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Termes principaux</h2>
@@ -81,15 +67,14 @@
         </div>
         <div>
           <label class="label">Maturité
-            <HelpTip text="Dernière constatation contractuelle. AT MATURITY utilise directement cette date. Lorsqu'un échéancier porte plusieurs constatations, sa dernière date reste la source de vérité." />
+            <HelpTip width="w-72" text="Dernière date de constatation du produit, tous échéanciers confondus, après convention de jour ouvré. La modifier déplace les constatations qui tombaient à l'ancienne maturité ; un échéancier qui se termine avant ne bouge pas. AT MATURITY utilise cette date. La date est prise en compte en quittant le champ." />
           </label>
           <input :value="store.maturityDate" type="date" class="input"
-            :readonly="contractTermsLocked || !store.maturityDateEditable"
-            :class="contractTermsLocked || !store.maturityDateEditable ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : ''"
-            @input="store.setMaturityDate($event.target.value)" />
-          <p v-if="contractTermsLocked || !store.maturityDateEditable" class="text-[10px] text-slate-500 mt-0.5">
-            {{ contractTermsLocked ? 'Figée au booking.' : 'Pilotée par la dernière date de l’échéancier ci-dessous.' }}
-          </p>
+            :readonly="contractTermsLocked"
+            :class="contractTermsLocked ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : ''"
+            @blur="commitMaturity" @keydown.enter.prevent="commitMaturity" />
+          <p v-if="contractTermsLocked" class="text-[10px] text-slate-500 mt-0.5">Figée au booking.</p>
+          <p v-else-if="store.maturityError" class="text-[10px] text-red-400 mt-0.5">{{ store.maturityError }}</p>
         </div>
         <div>
           <label class="label">Payment date <span class="text-slate-600 font-normal">(règlement final)</span>
@@ -278,7 +263,11 @@
                      :text="`Chaque date de ce CONSTAT applique ${calendar.reduction} aux cours de chaque sous-jacent sur la fenêtre définie ci-dessous, avant l'agrégation worst-of, best-of ou panier.`" />
           </div>
 
-          <template v-if="calendar.kind === 'single'">
+          <p v-if="!hasEditableShape(calendar)" class="text-xs text-amber-600">
+            Les valeurs de ce CONSTAT ne correspondent pas à sa déclaration dans le script.
+            Validez le script ; si le message persiste, sa forme a changé : renommez-le.
+          </p>
+          <template v-else-if="calendar.kind === 'single'">
             <div class="text-xs max-w-xs">
               <label class="label">Date</label>
               <SensitiveValue mode="input">
@@ -503,7 +492,13 @@ watch(() => store.globalParams.payment_date, (value) => {
   if (!proposingPaymentDate) paymentDateDirty.value = !!value
 }, { immediate: true })
 
+// Only the proposal for the latest maturity may land: opening a product moves
+// the maturity several times in a row, and an older answer arriving last
+// would propose a payment date for a maturity that no longer exists.
+let proposalRevision = 0
+
 async function proposePaymentDate(maturity) {
+  const revision = ++proposalRevision
   if (contractTermsLocked.value || !usableDate(maturity) || paymentDateDirty.value) return
   try {
     const response = await fetch('/api/calendar/resolve', {
@@ -513,11 +508,13 @@ async function proposePaymentDate(maturity) {
     })
     if (response.ok) {
       const proposed = (await response.json()).date
-      if (!paymentDateDirty.value) setProposedPaymentDate(proposed)
+      if (revision === proposalRevision && !paymentDateDirty.value) setProposedPaymentDate(proposed)
       return
     }
   } catch { /* repli week-end uniquement ci-dessous */ }
-  if (!paymentDateDirty.value) setProposedPaymentDate(addBizDays(maturity, 3))
+  if (revision === proposalRevision && !paymentDateDirty.value) {
+    setProposedPaymentDate(addBizDays(maturity, 3))
+  }
 }
 
 function setProposedPaymentDate(date) {
@@ -530,6 +527,17 @@ watch(() => store.maturityDate, proposePaymentDate, { immediate: true })
 watch(() => [store.maturityDate, store.globalParams.strike_date],
   () => store.syncTenorFromMaturity(), { immediate: true })
 
+// The maturity is committed on leaving the field (or on Enter), never on each
+// keystroke: a date input emits a complete date for every segment typed, and
+// an intermediate year would move the terminal constatations onto a date
+// that was only passing through.
+function commitMaturity(event) {
+  if (contractTermsLocked.value) return
+  const value = event.target.value
+  if (value === store.maturityDate) return
+  if (!store.setMaturityDate(value)) event.target.value = store.maturityDate
+}
+
 function formatParamDefault(param) {
   const value = param.display_default
   if (Array.isArray(value)) return value.map(item => `${item}${param.is_pct ? '%' : ''}`).join(' · ')
@@ -538,8 +546,23 @@ function formatParamDefault(param) {
 
 const activeUIdx = computed(() => store.activeUnderlyingIdx)
 const activeU = computed(() => store.underlyings[activeUIdx.value] ?? store.underlyings[0])
-const calendarControls = computed(() =>
-  store.scriptConstats.filter(calendar => !store.isMaturityConstat(calendar.name)))
+// Every CONSTAT keeps its card, `MATURITE` included: its window and convention
+// are typed there. The Maturity field moves the terminal constatations,
+// whatever their name.
+const calendarControls = computed(() => store.scriptConstats)
+
+// A card only binds to values whose shape matches the declaration. A mismatch
+// (a single date left under a name now declared CONSTAT(), for instance) used
+// to throw while rendering, which blanks the whole tab and can break the
+// Pricer's later navigation.
+function hasEditableShape(calendar) {
+  const value = store.constatOverrides[calendar.name]
+  if (calendar.kind === 'single') {
+    return calendar.reduction ? !!(value && typeof value === 'object') : typeof value === 'string'
+  }
+  return !!(value && typeof value === 'object' && value.frequency
+    && (calendar.kind !== 'nested_schedule' || value.sub_frequency))
+}
 
 function onAddUnderlying() {
   if (!contractTermsLocked.value) store.addUnderlying()
@@ -677,7 +700,7 @@ const observationDates = computed(() => {
   if (calendarDates.value.length) return calendarDates.value
   const strike = store.globalParams.strike_date
   if (!strike) return []
-  if (store.result?.in_life && store.result.valuation_date) {
+  if ((store.result?.in_life || store.result?.pre_strike) && store.result.valuation_date) {
     const past = [...new Set((store.result.past?.realized_flows || []).map(flow => flow.t))]
       .sort((a, b) => a - b).map(time => addDays(strike, time * 365.25))
     const future = observationTimes.value.map(time => addDays(store.result.valuation_date, time * 365.25))

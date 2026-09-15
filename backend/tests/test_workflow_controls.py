@@ -547,56 +547,95 @@ def test_validated_fixing_cannot_be_overwritten_and_creates_alert():
     assert session.exec(select(Alert).where(Alert.kind == "fixing_overwrite_rejected")).first()
 
 
-def test_indicative_refresh_neither_overwrites_official_nor_resolves(monkeypatch):
-    session = _session(); deal = _deal(session); strike, maturity = _events(session, deal)
-    strike.spots_json = json.dumps({"UL1": 95.0})
-    strike.fixing_status = FixingStatus.VALIDATED
-    strike.data_category = DataCategory.FIXING_OFFICIAL
-    session.add(strike); session.commit()
-
-    monkeypatch.setattr(deals_api, "load_hist_prices", lambda *args: {
-        "dates": [deal.strike_date, deal.maturity_date],
-        "prices": {"TK1": [100.0, 100.0]},
-    })
+def test_legacy_four_eyes_refresh_switches_to_automatic_fixings(monkeypatch):
+    session = _session(); deal = _deal(session); maturity = _events(session, deal)[-1]
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *args: _yahoo_closes(deal))
     monkeypatch.setattr(deals_api, "_evaluate_lifecycle", lambda *args: {
         "outcome": "final", "event_id": maturity.id,
         "event_date": maturity.event_date, "realized_payout": 1.0,
     })
+
     result = deals_api.refresh_deal_core(deal, session, actor_user_id=1)
-    session.refresh(deal); session.refresh(strike)
-    assert json.loads(strike.spots_json) == {"UL1": 95.0}
-    assert json.loads(strike.indicative_spots_json) == {"UL1": 100.0}
-    assert deal.status == "actif"
-    assert result["proposal"]["status"] == "PROPOSED"
+
+    session.refresh(deal)
+    assert deal.fixing_policy == FixingPolicy.AUTO_YAHOO.value
+    assert result["policy"] == FixingPolicy.AUTO_YAHOO.value
+    assert result["officialized"] == 2
+    assert all(event.fixing_status == FixingStatus.APPLIED.value
+               for event in _events(session, deal))
+    assert session.exec(select(AuditEvent).where(
+        AuditEvent.action == "FIXING_POLICY_AUTOMATED")).one()
 
 
-def test_repeated_monitoring_deduplicates_the_same_proposal(monkeypatch):
+def test_repeated_automatic_monitoring_applies_terminal_result_once(monkeypatch):
     session = _session(); deal = _deal(session); maturity = _events(session, deal)[-1]
-    monkeypatch.setattr(deals_api, "load_hist_prices", lambda *args: {
-        "dates": [deal.strike_date, deal.maturity_date],
-        "prices": {"TK1": [100.0, 100.0]},
-    })
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *args: _yahoo_closes(deal))
     monkeypatch.setattr(deals_api, "_evaluate_lifecycle", lambda *args: {
         "outcome": "final", "event_id": maturity.id,
         "event_date": maturity.event_date, "realized_payout": 1.0,
     })
     first = deals_api.refresh_deal_core(deal, session)
     session.refresh(deal)
-    second = deals_api.refresh_deal_core(deal, session)
+    deals_api.refresh_deal_core(deal, session)
     proposals = session.exec(select(LifecycleProposal).where(
         LifecycleProposal.deal_id == deal.id)).all()
-    assert first["proposal"]["id"] == second["proposal"]["id"]
+    assert first["proposal"]["status"] == LifecycleStatus.APPLIED.value
     assert len(proposals) == 1
+    assert len(session.exec(select(AuditEvent).where(
+        AuditEvent.action == "RESOLUTION_AUTO_APPLIED")).all()) == 1
 
 
 def test_refresh_error_is_visible_audited_and_alerted(monkeypatch):
     session = _session(); deal = _deal(session)
-    monkeypatch.setattr(deals_api, "load_hist_prices", lambda *args: {"error": "provider down"})
+    monkeypatch.setattr(
+        deals_api, "load_yahoo_reference_closes",
+        lambda *args: {"error": "provider down"})
     with pytest.raises(ValueError, match="provider down"):
         deals_api.refresh_deal_core(deal, session)
     assert session.exec(select(AuditEvent).where(
         AuditEvent.action == "LIFECYCLE_REFRESH_ERROR")).first()
     assert session.exec(select(Alert).where(Alert.kind == "lifecycle_error")).first()
+
+
+def test_startup_migration_retires_four_eyes_and_stales_pending_proposal(
+        tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'automatic-fixings.db'}")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        deal = _deal(session)
+        proposal = _proposal(session, deal)
+        deal_id, proposal_id = deal.id, proposal.id
+
+    monkeypatch.setattr(database_api, "engine", engine)
+    database_api._retire_four_eyes_fixing_policy()
+    database_api._retire_four_eyes_fixing_policy()
+
+    with Session(engine) as session:
+        assert session.get(Deal, deal_id).fixing_policy == FixingPolicy.AUTO_YAHOO.value
+        migrated_proposal = session.get(LifecycleProposal, proposal_id)
+        assert migrated_proposal.status == LifecycleStatus.STALE.value
+        assert "fixings automatiques" in migrated_proposal.error_message
+        audits = session.exec(select(AuditEvent).where(
+            AuditEvent.action == "FIXING_POLICY_AUTOMATED")).all()
+        assert len(audits) == 1
+
+
+def test_new_deal_schema_refuses_four_eyes_policy():
+    params = _params()
+    with pytest.raises(ValueError):
+        deals_api.DealCreate(
+            contrepartie="Bank", nominal=1_000_000, fair_value=99,
+            price_traded=99, trade_date=params["strike_date"],
+            strike_date=params["strike_date"], value_date=params["value_date"],
+            maturity_date=params["payment_date"], T=params["T"],
+            underlyings=params["underlyings"], observation_times=[1.0],
+            script_snapshot="AT MATURITY\n  PAY 1",
+            fixing_policy=FixingPolicy.FOUR_EYES.value,
+        )
 
 
 def _enable_auto_yahoo(session: Session, deal: Deal) -> Deal:

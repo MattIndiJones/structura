@@ -50,6 +50,22 @@ def test_base_price_independent_of_shock_lists():
     assert grid['base_price'] == round(direct['price'], 6)
 
 
+def test_pre_strike_grid_uses_the_future_fixing_in_every_cell():
+    """A spot stress before S0 moves today's spot and the future fixing by the
+    same scale under constant vol.  The grid must therefore stay invariant,
+    like the main price and Greeks, instead of treating S0 as already fixed."""
+    script = "AT MATURITY:\n  PAY WOF"
+    grid = compute_scenario_grid(
+        script, CALL_PARAMS, CORR,
+        r=0.03, T=1.0329, model='constant', seed=42,
+        user_params={}, spot_shocks=[-0.2, 0.0, 0.2], vol_shocks=[0.0],
+        strike_set_t=0.0329, maturity_payment_t=1.04,
+        value_date_t=0.04, N=2000,
+    )
+
+    assert grid['prices'][0] == [grid['base_price']] * 3
+
+
 def test_call_price_increases_with_spot_and_vol_shocks():
     """Sanity check on known monotonicity: a call's price increases with spot
     (each row left-to-right) and increases with vol (rows ordered by decreasing

@@ -92,6 +92,12 @@ export const useDealsStore = defineStore('deals', () => {
 
   async function selectDeal(id) {
     if (currentDeal.value?.id === id) return currentDeal.value
+    // These two collections describe the currently open deal.  Clear them at
+    // the same boundary as currentDeal so a quick navigation cannot display
+    // the previous trade's refresh result or audit trail while the new request
+    // is in flight.
+    refreshStatus.value = ''
+    auditEvents.value = []
     loading.value = true; error.value = null
     try {
       const res = await apiFetch(`/api/deals/${id}`)

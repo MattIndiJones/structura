@@ -89,6 +89,9 @@ def price_scenario_grid_job(payload: dict) -> dict:
         yield_curve=payload.get("yield_curve") or [],
         sigma_r=payload.get("sigma_r", 0.0), a_r=payload.get("a_r", 0.0),
         barrier_monitoring=payload.get("barrier_monitoring", "weekly"),
+        strike_set_t=payload.get("strike_set_t"),
+        maturity_payment_t=payload.get("maturity_payment_t"),
+        value_date_t=payload.get("value_date_t", 0.0),
         # L'etat contractuel deja realise, serialise avec le reste : sans lui
         # chaque cellule de la grille reprice un produit neuf.
         **(payload.get("residual_state") or {}),

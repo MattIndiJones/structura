@@ -155,6 +155,9 @@ class PricingRequest(BaseModel):
     # CONSTAT values, keyed by name — see core/payscript/parser.resolve_constats.
     # Empty dict is a no-op (the common/simple-mode case: no AT<ConstatName>:).
     constats: Dict[str, Any] = {}
+    # Calendrier contractuel déjà résolu d'un Product conservé. Le script reste
+    # parsé et validé ; seul le recalcul implicite des dates est évité.
+    frozen_schedule: Optional[Dict[str, Any]] = None
 
     @field_validator("seed", mode="before")
     @classmethod
@@ -176,6 +179,9 @@ class PricingRequest(BaseModel):
     # The product's own payment date — when the final redemption's cash moves.
     # From the term sheet, never derived from a fixing. None pays at maturity.
     payment_date: Optional[date] = None
+    # Contractual maturity label retained by Product. The engine horizon stays
+    # `T`; when both are supplied their consistency is an API responsibility.
+    maturity_date: Optional[date] = None
     # Where the initial level is fixed, and therefore where the diffusion
     # starts. When given it becomes the time axis' origin, in place of `anchor`.
     strike_date: Optional[date] = None
@@ -249,6 +255,9 @@ class ParseResponse(BaseModel):
     events_count: int
     has_stop: bool = False
     has_maturity_event: bool = False
+    # Literal observation dates of `AT 1, 2, 3:` blocks, in years from the
+    # strike. CONSTAT dates are not known at parse time and never appear here.
+    at_dates: List[float] = []
     # M_-prefixed PARAMs and how the script compares them — see
     # payscript/parser._analyze_monitors. [{name, observable, direction}].
     monitors: List[Dict[str, Any]] = []
@@ -288,6 +297,7 @@ class AnalysisBase(BaseModel):
     a_r: float = Field(default=0.0, ge=0.0, le=2.0)
     barrier_monitoring: str = Field(default="weekly", pattern="^(weekly|continuous)$")
     constats: Dict[str, Any] = {}
+    frozen_schedule: Optional[Dict[str, Any]] = None
     # See PricingRequest.anchor — every analytic derived from a script must
     # resolve its calendar the same way the price did, or the profile/probas/
     # stress grid describe a product on a different schedule than the one priced.

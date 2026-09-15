@@ -1,6 +1,6 @@
 """La référence de langage ne doit jamais mentir sur le langage.
 
-`docs/PAYSCRIPT_REFERENCE.md` a deux lecteurs : l'utilisateur, et le modèle de
+`docs/reference/PAYSCRIPT_REFERENCE.md` a deux lecteurs : l'utilisateur, et le modèle de
 l'assistant IA — c'est le corps de son prompt système. Une référence qui dérive
 du parser ne se voit pas : le modèle produit alors des scripts syntaxiquement
 conformes à une grammaire qui n'existe plus, et l'assistant échoue à chaque
@@ -20,7 +20,8 @@ from backend.app.core.payscript.parser import (
     TOP_LEVEL_STATEMENTS, BODY_STATEMENTS, BASKET_KEYWORD,
 )
 
-REFERENCE = Path(__file__).resolve().parents[2] / "docs" / "PAYSCRIPT_REFERENCE.md"
+REFERENCE = (Path(__file__).resolve().parents[2]
+             / "docs" / "reference" / "PAYSCRIPT_REFERENCE.md")
 
 
 def _documented_vocabulary() -> set[str]:

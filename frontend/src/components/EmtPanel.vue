@@ -434,6 +434,10 @@ const productTitle = computed(() => store.productTitle)
 
 async function compute() {
   if (!store.result || !store.kid) return
+  if (!(await store.ensureScriptValidated())) {
+    error.value = 'Le script ne valide pas : corrigez-le dans l’onglet Script avant l’EMT.'
+    return
+  }
   loading.value = true
   error.value = ''
   emt.value = null
@@ -444,6 +448,8 @@ async function compute() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...store.pricingBody(),
+        product_id: store.currentProduct?.product_id || null,
+        product_terms_version: store.currentProduct?.terms_version || null,
         sri: store.kid.sri,
         mrm: store.kid.mrm,
         crm: store.kid.crm,
@@ -473,12 +479,15 @@ async function saveEmt() {
   saving.value = true
   saveError.value = ''
   try {
-    const indicativeId = await store.ensureIndicative()
+    const productId = store.currentProduct?.product_id || null
+    const indicativeId = productId ? null : await store.ensureIndicative()
     const res = await apiFetch('/api/emt/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         indicative_id: indicativeId,
+        product_id: productId,
+        product_terms_version: store.currentProduct?.terms_version || null,
         product_title: productTitle.value,
         sri: emt.value.sri, mrm: emt.value.mrm, crm: emt.value.crm, T_rhp: emt.value.T_rhp,
         capital_tier: emt.value.capital_protection.tier,

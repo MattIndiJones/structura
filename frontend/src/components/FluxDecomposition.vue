@@ -208,7 +208,7 @@ function contractualDate(isoDate, t) {
 const scheduleRows = computed(() => {
   const constats = props.result?.schedule?.constatations
   if (!Array.isArray(constats) || constats.length === 0) return []
-  const cutoff = props.result?.in_life
+  const cutoff = props.result?.in_life || props.result?.pre_strike
     ? props.result.valuation_date
     : contractAnchor.value
 

@@ -35,6 +35,9 @@ from ..core.payscript.parser import parse_script, resolve_analysis_constats, res
 from .auth import get_current_user
 from ..db.database import get_session
 from ..db.models import User, EmtRecord, Indicative, Deal
+from ..core.product.models import FrozenObject
+from ..core.product.inputs import calculation_context, pricing_input
+from ..services.product_repository import ProductError, load_product, owned_record, stage_revision
 
 router = APIRouter(prefix="/api/emt", tags=["emt"])
 
@@ -42,6 +45,8 @@ _LEVERAGE_NAMES = {"GEARING", "LEVERAGE"}
 
 
 class EmtRequest(PricingRequest):
+    product_id: Optional[int] = None
+    product_terms_version: Optional[int] = None
     sri: int = Field(..., ge=1, le=7)
     mrm: int = Field(..., ge=1, le=7)
     crm: int = Field(..., ge=1, le=6)
@@ -141,8 +146,25 @@ def _risk_tolerance(sri: int) -> str:
 def emt_compute(
     req: EmtRequest,
     current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
 ):
     """Compute an indicative EMT / target-market profile from a KID already run."""
+    if req.product_id is not None:
+        try:
+            owned_record(session, req.product_id, current)
+            product = load_product(session, req.product_id)
+            if (req.product_terms_version is not None
+                    and req.product_terms_version != product.terms_version):
+                raise ProductError(
+                    "PRODUCT_TERMS_STALE",
+                    "La version des termes du Product a changé.")
+            req = EmtRequest.model_validate(pricing_input(
+                product, calculation_context(req.model_dump(mode="json"))))
+        except ProductError as exc:
+            raise HTTPException(
+                exc.status, detail={"code": exc.code, "message": str(exc)})
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
     try:
         compiled = parse_script(req.script)
         compiled = resolve_analysis_constats(compiled, req)
@@ -251,6 +273,8 @@ def synthesize_emt(
 # ── Persistence — append-only, one row per generation ────────────────────
 
 class EmtSaveRequest(BaseModel):
+    product_id: Optional[int] = None
+    product_terms_version: Optional[int] = None
     indicative_id: Optional[int] = None
     deal_id: Optional[int] = None
     product_title: str = "Produit structuré"
@@ -264,7 +288,7 @@ class EmtSaveRequest(BaseModel):
     knowledge_label: str
     risk_tolerance: str
     objective: str
-    features: dict = {}
+    features: dict = Field(default_factory=dict)
     client_type: str = "retail"
     distribution: str = "advice"
     negative_target_market: str = ""
@@ -276,6 +300,8 @@ def _emt_record_row(e: EmtRecord) -> dict:
         "id": e.id,
         "indicative_id": e.indicative_id,
         "deal_id": e.deal_id,
+        "product_id": e.product_id,
+        "product_terms_version": e.product_terms_version,
         "product_title": e.product_title,
         "sri": e.sri, "mrm": e.mrm, "crm": e.crm, "T_rhp": e.t_rhp,
         "capital_tier": e.capital_tier, "capital_label": e.capital_label,
@@ -295,18 +321,35 @@ def save_emt(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    if not req.indicative_id and not req.deal_id:
-        raise HTTPException(422, "indicative_id ou deal_id requis.")
+    if not req.indicative_id and not req.deal_id and not req.product_id:
+        raise HTTPException(422, "product_id, indicative_id ou deal_id requis.")
+    linked_product_id = req.product_id
     if req.indicative_id:
         ind = session.get(Indicative, req.indicative_id)
         if not ind or ind.user_id != current.id:
             raise HTTPException(404, "Indicatif introuvable")
+        linked_product_id = linked_product_id or ind.product_id
     if req.deal_id:
         deal = session.get(Deal, req.deal_id)
         if not deal or deal.user_id != current.id:
             raise HTTPException(404, "Deal introuvable")
+        if linked_product_id is not None and deal.product_id not in {None, linked_product_id}:
+            raise HTTPException(422, "Le deal ne correspond pas au Product demandé.")
+        linked_product_id = linked_product_id or deal.product_id
+
+    product = None
+    if linked_product_id is not None:
+        try:
+            owned_record(session, linked_product_id, current)
+            product = load_product(session, linked_product_id)
+        except ProductError as exc:
+            raise HTTPException(exc.status, detail={"code": exc.code, "message": str(exc)})
+        if req.product_terms_version is not None and req.product_terms_version != product.terms_version:
+            raise HTTPException(409, "La version des termes du Product a changé.")
 
     rec = EmtRecord(
+        product_id=linked_product_id,
+        product_terms_version=product.terms_version if product else None,
         indicative_id=req.indicative_id, deal_id=req.deal_id, user_id=current.id,
         product_title=req.product_title,
         sri=req.sri, mrm=req.mrm, crm=req.crm, t_rhp=req.T_rhp,
@@ -318,6 +361,15 @@ def save_emt(
         negative_target_market=req.negative_target_market, description=req.description,
     )
     session.add(rec)
+    session.flush()
+    if product is not None:
+        document = FrozenObject({"kind": "EMT", "record_id": rec.id,
+                                 "terms_version": product.terms_version,
+                                 "created_at": rec.created_at.isoformat()})
+        product = product.model_copy(update={"documents": (*product.documents, document)})
+        stage_revision(session, product, expected_revision=product.revision,
+                       actor_id=current.id, action="PRODUCT_EMT_RETAINED",
+                       reason="Conservation d’un EMT sur le Product.")
     session.commit()
     session.refresh(rec)
     return _emt_record_row(rec)
@@ -329,13 +381,16 @@ def list_emt_records(
     session: Annotated[Session, Depends(get_session)],
     indicative_id: Optional[int] = None,
     deal_id: Optional[int] = None,
+    product_id: Optional[int] = None,
 ):
-    if not indicative_id and not deal_id:
-        raise HTTPException(422, "indicative_id ou deal_id requis.")
+    if not indicative_id and not deal_id and not product_id:
+        raise HTTPException(422, "product_id, indicative_id ou deal_id requis.")
     q = select(EmtRecord).where(EmtRecord.user_id == current.id)
     if indicative_id:
         q = q.where(EmtRecord.indicative_id == indicative_id)
     if deal_id:
         q = q.where(EmtRecord.deal_id == deal_id)
+    if product_id:
+        q = q.where(EmtRecord.product_id == product_id)
     rows = session.exec(q.order_by(EmtRecord.created_at.desc())).all()
     return [_emt_record_row(r) for r in rows]

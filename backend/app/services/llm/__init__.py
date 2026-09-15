@@ -30,7 +30,7 @@ __all__ = ["generate", "preview_prompt", "available_providers", "PROVIDERS",
 # la troisième : au-delà, on triple le coût et l'attente pour rien, et mieux
 # vaut rendre la main avec l'erreur du parser que l'utilisateur peut lire.
 MAX_REPAIRS = 1
-PROMPT_VERSION = "payscript-assistant-2026-09-12"
+PROMPT_VERSION = "payscript-assistant-2026-09-14"
 
 
 def _examples_version() -> str:

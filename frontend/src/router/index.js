@@ -36,6 +36,23 @@ const routes = [
     meta: { title: 'Pricer' },
   },
   {
+    path: '/products/:productId/pricer',
+    component: () => import('../views/PricerView.vue'),
+    meta: { title: 'Produit — Pricer' },
+  },
+  {
+    path: '/products',
+    component: () => import('../views/ProductsView.vue'),
+    meta: { title: 'Mes Produits' },
+  },
+  {
+    // A generic product, an underlying count, a tenor: the Pricer opens filled
+    // (?modele=…). No extra input screen.
+    path: '/product-models',
+    component: () => import('../views/ProductModelsView.vue'),
+    meta: { title: 'Modèles de produits' },
+  },
+  {
     path: '/documentation',
     component: () => import('../views/DocumentationView.vue'),
     meta: { title: 'Documentation' },
@@ -44,6 +61,11 @@ const routes = [
     path: '/booking',
     component: () => import('../views/BookingView.vue'),
     meta: { title: 'Booking — produits bookés' },
+  },
+  {
+    path: '/booking/:dealId/valuations',
+    component: () => import('../views/DealValuationsView.vue'),
+    meta: { title: 'Historique des MtM' },
   },
   {
     path: '/risk',

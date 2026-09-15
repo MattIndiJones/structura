@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { apiFetch } from '../utils/api.js'
 import { calculerDelta, contexteDepuisCorps } from '../composables/useVariantDelta.js'
 import { courbeDividende } from '../composables/useDividendCurve.js'
 import { CALCULATION_LIMITS, estimatePricingCalculation } from '../utils/calculationBudget.js'
+import { buildModelCalendars } from '../utils/productModels.js'
+import { normaliseCorrelation } from '../utils/rfqBasket.js'
 
 const DEFAULT_SCRIPT = `# Autocall Athena 3 ans
 PARAM COUPON = 8%
@@ -31,13 +33,26 @@ export const usePricingStore = defineStore('pricing', () => {
   const script = ref(DEFAULT_SCRIPT)
   const scriptParams = ref([])
   const parseError = ref(null)
+  // Validation is a gesture: Ctrl+S, « Valider », or the start of a
+  // calculation. Typing never commits a declaration any more — a
+  // `PARAM M_KI_BAR = 6` caught before its `0%` used to price a 6 % barrier.
+  // `validatedScript` is the text the declarations above describe;
+  // `checkedScript` the text of the last attempt, which `parseError` describes.
+  const validatedScript = ref('')
+  const checkedScript = ref('')
+  const scriptDirty = computed(() => script.value !== checkedScript.value)
+  // What the last explicit validation changed in Economics: typed values that
+  // were replaced, PARAM() rows that were kept. The editor shows it, so that
+  // no typed value disappears without saying so.
+  const validationReport = ref(null)
+  // Years of the `AT 1, 2, 3:` blocks, counted from the strike (empty without one).
+  const scriptAtDates = ref([])
 
   // User-edited PARAM values, keyed by name, in display units (e.g. 8 for "8%").
-  // Seeded once per name from the script's declared default and never touched
-  // again by re-parses — only _syncParamOverrides() (added/removed names) and
-  // the user's own typing change it. This is what makes the PARAM inputs
-  // "sticky" across script edits instead of snapping back to the script's
-  // default on every debounced re-parse.
+  // Seeded once per name from the script's declared default. A validated
+  // change of that declaration (value or unit) then carries the new value
+  // over — see _applyDeclarationChanges; an unchanged declaration never
+  // touches what was typed, and neither does a load.
   const paramOverrides = reactive({})
 
   /**
@@ -70,6 +85,57 @@ export const usePricingStore = defineStore('pricing', () => {
         paramOverrides[p.name] = paramOverrides[p.name][0] ?? p.display_default
       }
     }
+  }
+
+  function _sameNumber(a, b) {
+    if (a === '' || a == null || b === '' || b == null) return false
+    return Number(a) === Number(b)
+  }
+
+  /**
+   * Carries the declarations the script just changed over to Economics.
+   *
+   * Decision of 14/09/2026: the last explicit change wins. A PARAM whose
+   * initial value or unit changed since the previous validation takes the new
+   * value, even over a typed one — and the replaced value is reported. An
+   * unchanged declaration touches nothing: validating never erases a typed value.
+   *
+   * `PARAM()`: only the rows still at the old initial value follow the
+   * script; typed rows are kept (M11).
+   *
+   * New names are not handled here: `_syncParamOverrides` seeds them.
+   */
+  function _applyDeclarationChanges(before, after) {
+    const report = { replaced: [], keptRows: [] }
+    const previous = new Map((before || []).map(p => [p.name, p]))
+    for (const p of after || []) {
+      const old = previous.get(p.name)
+      if (!old || !(p.name in paramOverrides)) continue
+      const unitChanged = !!old.is_pct !== !!p.is_pct
+      if (!unitChanged && _sameNumber(old.display_default, p.display_default)) continue
+      const current = paramOverrides[p.name]
+      if (p.kind === 'array') {
+        let kept = 0
+        paramOverrides[p.name] = (Array.isArray(current) ? current : [current]).map(row => {
+          if (_sameNumber(row, old.display_default)) return p.display_default
+          kept += 1
+          return row
+        })
+        if (kept) report.keptRows.push({ name: p.name, count: kept, unitChanged })
+      } else {
+        const value = Array.isArray(current) ? current[0] : current
+        paramOverrides[p.name] = p.display_default
+        const typed = !_sameNumber(value, old.display_default)
+        const unchangedOnScreen = !unitChanged && _sameNumber(value, p.display_default)
+        if (typed && !unchangedOnScreen) {
+          report.replaced.push({
+            name: p.name, before: value, beforePct: !!old.is_pct,
+            after: p.display_default, afterPct: !!p.is_pct,
+          })
+        }
+      }
+    }
+    return report
   }
 
   // ── CONSTAT (calendrier — mode expert) ──────────────────────────────
@@ -328,6 +394,9 @@ export const usePricingStore = defineStore('pricing', () => {
   // created lazily on first KID/EMT save, reused for every save after that
   // until reset. See db/models.py:Indicative for the full rationale. ──────
   const currentIndicativeId = ref(null)
+  // Dossier Product conservé actuellement ouvert. Null signifie que la
+  // session reste un brouillon de pricing entièrement éphémère.
+  const currentProduct = ref(null)
 
   // RFQ this pricing session was pre-filled from (see loadFromRfq below) —
   // sent as Deal.rfq_id at booking time so the winning quote's RFQ can be
@@ -348,7 +417,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // A deal loaded through loadFromDeal is a persisted contract. The Pricer may
   // change its valuation assumptions, but it must not turn that contract into
   // another payoff while continuing to display the booked reference.
-  const contractTermsLocked = computed(() => !!openedDeal.value)
+  const contractTermsLocked = computed(() => !!openedDeal.value || !!currentProduct.value)
 
   function _activeBookedContract() {
     return contractTermsLocked.value ? bookedContractTerms.value : null
@@ -674,6 +743,7 @@ export const usePricingStore = defineStore('pricing', () => {
       // elle décrit le produit à l'émission — comportement historique.
       valuation_date: globalParams.valuation_date || null,
       maturity_date: frozen?.maturity_date ?? _maturityDate(),
+      frozen_schedule: currentProduct.value?.terms?.resolved_events || null,
       // Le calendrier CONSTAT porte des dates absolues ; le moteur veut des
       // fractions d'année depuis l'origine de son axe, qui est la date de
       // STRIKE — là où le niveau initial se constate. Repli sur la value date
@@ -718,6 +788,37 @@ export const usePricingStore = defineStore('pricing', () => {
     }
   }
 
+  const PRODUCT_TERM_FIELDS = new Set([
+    'script', 'user_params', 'constats', 'T', 'strike_date', 'value_date',
+    'maturity_date', 'payment_date', 'anchor', 'settlement_ccy', 'frozen_schedule',
+  ])
+
+  async function _authoritativeProductRequest(request) {
+    const product = currentProduct.value
+    if (!product) return request
+    const context = Object.fromEntries(
+      Object.entries(request).filter(([key]) => !PRODUCT_TERM_FIELDS.has(key)))
+    context.underlyings = (request.underlyings || []).map(underlying => {
+      const { name, ticker, ccy, ...market } = underlying
+      return market
+    })
+    const res = await apiFetch(`/api/products/${product.product_id}/pricing-input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expected_terms_version: product.terms_version,
+        context,
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const detail = typeof data?.detail === 'string'
+        ? data.detail : data?.detail?.message
+      throw new Error(detail || 'Les termes du Product n’ont pas pu être chargés.')
+    }
+    return data
+  }
+
   const resultIsStale = computed(() => {
     if (!result.value?._requestKey) return false
     try { return result.value._requestKey !== _requestKey(_pricingBody()) }
@@ -725,14 +826,31 @@ export const usePricingStore = defineStore('pricing', () => {
   })
 
   // ── Parse ─────────────────────────────────────────────────────────
-  async function parseScript() {
+  /**
+   * Reads what the script declares and aligns Economics on it.
+   *
+   * Two uses, which differ only in how values are carried over:
+   * - a LOAD (template, saved script, deal, RFQ, Product) calls `parseScript()`:
+   *   the declarations become the reference, only new names are seeded, and
+   *   the loader then restores its own values;
+   * - an explicit VALIDATION passes `{ explicit: true }`: a declaration changed
+   *   since the previous validation carries its new value over.
+   *
+   * Responses are sequenced: a stale one, or one arriving after a keystroke,
+   * is ignored. Resolves to true when this text is now validated.
+   */
+  async function parseScript({ explicit = false } = {}) {
     const revision = ++_parseRevision
     const parsedScript = script.value
-    if (!script.value.trim()) {
+    if (!parsedScript.trim()) {
       scriptParams.value = []; scriptConstats.value = []; parseError.value = null
       scriptHasMaturityEvent.value = false
+      scriptAtDates.value = []
       _syncParamOverrides(); _syncConstatOverrides()
-      return
+      validatedScript.value = parsedScript
+      checkedScript.value = parsedScript
+      validationReport.value = explicit ? { replaced: [], keptRows: [] } : null
+      return true
     }
     try {
       const res = await fetch('/api/parse', {
@@ -741,29 +859,83 @@ export const usePricingStore = defineStore('pricing', () => {
         body: JSON.stringify({ script: parsedScript }),
       })
       const data = await res.json()
-      if (revision !== _parseRevision || script.value !== parsedScript) return
-      if (data.ok) {
-        scriptParams.value = data.params; scriptConstats.value = data.constats || []
-        scriptHasStop.value = data.has_stop ?? false
-        scriptHasMaturityEvent.value = data.has_maturity_event ?? false
-        parseError.value = null
-      } else {
-        // Une erreur de parse veut dire « je ne sais pas ce que ce script
-        // déclare », pas « il ne déclare rien ». On garde donc la dernière
-        // lecture valide et on ne synchronise PAS : vider les déclarations
-        // puis synchroniser effaçait toutes les saisies, et l'éditeur repasse
-        // par un état non parsable à chaque ligne qu'on ajoute — il suffit
-        // d'une pause de 500 ms au milieu d'un `SET`.
+      if (revision !== _parseRevision || script.value !== parsedScript) return false
+      checkedScript.value = parsedScript
+      if (!data.ok) {
+        // A parse error means "I don't know what this script declares", not
+        // "it declares nothing". The last valid reading is kept and NOT
+        // synchronised: clearing the declarations then syncing used to wipe
+        // every typed value.
         //
-        // Rien ne peut être valorisé avec des déclarations périmées : le
-        // bouton Pricer est désactivé tant que `parseError` est renseigné.
+        // Nothing can be valued on stale declarations: a calculation
+        // revalidates the script first and stops on this error.
         parseError.value = data.errors
-        return
+        return false
       }
+      const previousParams = scriptParams.value
+      scriptParams.value = data.params; scriptConstats.value = data.constats || []
+      scriptHasStop.value = data.has_stop ?? false
+      scriptHasMaturityEvent.value = data.has_maturity_event ?? false
+      scriptAtDates.value = Array.isArray(data.at_dates) ? data.at_dates : []
+      parseError.value = null
+      validatedScript.value = parsedScript
+      const report = explicit
+        ? _applyDeclarationChanges(previousParams, scriptParams.value) : null
       _syncParamOverrides(); _syncConstatOverrides()
+      validationReport.value = report
+      return true
     } catch (e) {
-      if (revision === _parseRevision && script.value === parsedScript) parseError.value = e.message
+      if (revision === _parseRevision && script.value === parsedScript) {
+        checkedScript.value = parsedScript
+        parseError.value = e.message
+      }
+      return false
     }
+  }
+
+  /** Ctrl+S and the « Valider » button: the explicit validation. */
+  function validateScript() {
+    return parseScript({ explicit: true })
+  }
+
+  /**
+   * What a calculation must wait for before building its request.
+   *
+   * `null` when there is nothing to validate — and deliberately SYNCHRONOUS: a
+   * click describes the screen as it was at the click, not after a keystroke
+   * slipped in between. Otherwise a promise resolving to false when the script
+   * does not validate, the error already set for the user.
+   *
+   * A frozen contract (booked deal, Product) prices its own script: the
+   * read-only editor text never enters the request.
+   */
+  function _prepareCalculation(report = message => { error.value = message }) {
+    if (contractTermsLocked.value) return null
+    if (script.value === validatedScript.value) {
+      // The text went back to the last valid version after a failed attempt:
+      // the declarations on screen describe it again.
+      if (parseError.value) { parseError.value = null; checkedScript.value = script.value }
+      return null
+    }
+    return validateScript().then(ok => {
+      if (!ok) report(_scriptErrorMessage())
+      return ok
+    })
+  }
+
+  function _scriptErrorMessage() {
+    if (script.value !== checkedScript.value || !parseError.value) {
+      return 'Le script a changé pendant sa validation : relancez le calcul.'
+    }
+    const detail = Array.isArray(parseError.value)
+      ? parseError.value.join('\n') : String(parseError.value)
+    return `Script non valide — corrigez-le dans l’onglet Script : ${detail.split('\n')[0]}`
+  }
+
+  /** For panels that build their own request (KID, EMT, comparators). */
+  async function ensureScriptValidated() {
+    const preparing = _prepareCalculation(() => {})
+    return preparing ? preparing : true
   }
 
   // Snapshot of the inputs that actually produced a pricing run, captured at
@@ -831,29 +1003,117 @@ export const usePricingStore = defineStore('pricing', () => {
     return isInLife() || isPreStrike()
   }
 
-  /** Maturité déduite : depuis la constatation initiale, qui est l'origine de
-   *  la diffusion. */
-  function _maturityDate() {
-    // Un calendrier CONSTAT dit la dernière constatation à la journée près.
-    // La déduire de la maturité en années la manquait de plusieurs jours —
-    // 19/06 au lieu du 14/06 sur un trois ans mensuel — parce que T×365,25
-    // n'est pas une date d'anniversaire.
-    const fins = scriptConstats.value
-      .filter(c => c.kind !== 'single')
-      .map(c => constatOverrides[c.name]?.end_date)
-      .filter(Boolean)
-    if (fins.length) return fins.reduce((a, b) => (b > a ? b : a))
-    const terminal = _maturitySingleConstat()
-    if (terminal) {
-      const value = constatOverrides[terminal.name]
-      const date = typeof value === 'string' ? value : value?.date
-      if (date) return date
+  // ── Maturity ──────────────────────────────────────────────────────
+  // Decision of 14/09/2026 (M4): the maturity is ALWAYS editable and equals the
+  // product's last constatation date, whatever the schedules. It replaces the
+  // 13/09 rule, which locked the field as soon as a schedule existed and kept
+  // its end — so two years of coupons on a three-year note showed a two-year
+  // maturity, which booking then refused.
+
+  function _plausibleIsoDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false
+    const year = Number(String(value).slice(0, 4))
+    return year >= 1990 && year <= 2200
+  }
+
+  /** Same arithmetic as booking's `_date_plus_years`: t × 365.25 days. */
+  function _datePlusYears(iso, years) {
+    const date = new Date(`${iso}T00:00:00Z`)
+    date.setUTCDate(date.getUTCDate() + Math.round(years * 365.25))
+    return date.toISOString().slice(0, 10)
+  }
+
+  // A constatation falling on a closed day moves by its convention, and
+  // booking compares the maturity with the ADJUSTED dates. The adjustment
+  // comes from the currency calendar, server side; until it is known, the
+  // typed date stands for the effective one.
+  const _effectiveDates = reactive({})
+  const _effectiveFailures = new Set()
+  const _effectiveInFlight = new Set()
+
+  function _effectiveKey(date, convention) {
+    return `${globalParams.deal_ccy || 'EUR'}|${convention}|${date}`
+  }
+
+  function _effectiveDate(date, convention) {
+    if (!date || !convention || convention === 'none') return date
+    return _effectiveDates[_effectiveKey(date, convention)] || date
+  }
+
+  async function _resolveEffectiveDate(key) {
+    if (key in _effectiveDates || _effectiveFailures.has(key) || _effectiveInFlight.has(key)) return
+    const [currency, convention, date] = key.split('|')
+    _effectiveInFlight.add(key)
+    try {
+      const res = await fetch('/api/calendar/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, currency, convention }),
+      })
+      const data = res?.ok ? await res.json() : null
+      if (data && _plausibleIsoDate(data.date)) _effectiveDates[key] = data.date
+      else _effectiveFailures.add(key)
+    } catch {
+      _effectiveFailures.add(key)
+    } finally {
+      _effectiveInFlight.delete(key)
     }
-    if (globalParams.maturity_date) return globalParams.maturity_date
-    if (!globalParams.strike_date || !globalParams.T) return null
-    const d = new Date(globalParams.strike_date)
-    d.setDate(d.getDate() + Math.round(globalParams.T * 365.25))
-    return d.toISOString().split('T')[0]
+  }
+
+  /**
+   * The product's dated constatations, each with its last date.
+   *
+   * Every CONSTAT counts — schedules and single dates alike — except
+   * `STRIKE_FIX`, which fixes the initial level: it is a departure window.
+   * No recognition by the name `MATURITE` any more: the terminal
+   * constatation is computed.
+   */
+  function _datedConstats() {
+    const out = []
+    for (const c of scriptConstats.value) {
+      if (c.name === 'STRIKE_FIX') continue
+      const value = constatOverrides[c.name]
+      let raw = ''
+      let convention = 'none'
+      if (c.kind === 'single') {
+        raw = typeof value === 'string' ? value : (value?.date || '')
+        if (value && typeof value === 'object') convention = value.convention || 'none'
+      } else if (value && typeof value === 'object') {
+        raw = value.end_date || ''
+        convention = value.convention || 'none'
+      }
+      if (raw) out.push({ name: c.name, kind: c.kind, raw, convention,
+                          date: _effectiveDate(raw, convention) })
+    }
+    return out
+  }
+
+  /** The script's `AT` years, dated from the strike. */
+  function _atEventDates() {
+    const strike = globalParams.strike_date
+    if (!_plausibleIsoDate(strike)) return []
+    return scriptAtDates.value
+      .filter(t => Number.isFinite(Number(t)) && Number(t) > 0)
+      .map(t => ({ t: Number(t), date: _datePlusYears(strike, Number(t)) }))
+  }
+
+  function _maturityDate() {
+    const constatDates = _datedConstats().map(entry => entry.date)
+    const dates = [...constatDates, ..._atEventDates().map(entry => entry.date)]
+    // `AT MATURITY` has no date of its own: it carries the Maturity field's.
+    // Without that block, the field only speaks for a product that has no
+    // dated constatation yet.
+    if (scriptHasMaturityEvent.value || !constatDates.length) {
+      // Historical fallback on strike + T, for a script without any calendar
+      // only: with a calendar, T is derived from the maturity and carries no
+      // information of its own.
+      const declared = globalParams.maturity_date
+        || (!constatDates.length && _plausibleIsoDate(globalParams.strike_date) && globalParams.T
+          ? _datePlusYears(globalParams.strike_date, globalParams.T) : '')
+      if (declared) dates.push(declared)
+    }
+    if (!dates.length) return null
+    return dates.reduce((a, b) => (b > a ? b : a))
   }
 
   // Une source unique pour l'affichage Economics et le payload de booking.
@@ -861,19 +1121,25 @@ export const usePricingStore = defineStore('pricing', () => {
   // diverger la date affichée de celle effectivement figée sur le deal.
   const maturityDate = computed(() => _maturityDate() || '')
 
-  const maturityDateEditable = computed(() =>
-    !scriptConstats.value.some(c => c.kind !== 'single'))
+  const maturityDateEditable = computed(() => !contractTermsLocked.value)
+  // Why the last typed maturity was refused, worded for the screen. Empty
+  // while nothing has been refused.
+  const maturityError = ref('')
 
-  function _maturitySingleConstat() {
-    const singles = scriptConstats.value.filter(c => c.kind === 'single')
-    return singles.find(c => ['MATURITE', 'MATURITY'].includes(c.name)) || null
-  }
-
-  function isMaturityConstat(name) {
-    return _maturitySingleConstat()?.name === name
-  }
+  watch(() => _datedConstats()
+    .filter(entry => entry.convention !== 'none' && _plausibleIsoDate(entry.raw))
+    .map(entry => _effectiveKey(entry.raw, entry.convention))
+    .join(','),
+  keys => { for (const key of keys ? keys.split(',') : []) _resolveEffectiveDate(key) })
 
   function syncTenorFromMaturity() {
+    // Une RFQ porte le tenor effectivement cote. Son echeancier peut finir un
+    // week-end puis etre ajuste au jour ouvre suivant pour le pricing :
+    // recalculer T depuis cette date effective transforme alors, a tort, le
+    // meme contrat en un tenor different et le booking est refuse. Depuis une
+    // RFQ, les termes restent ceux de l'AO ; tout autre produit doit passer par
+    // une nouvelle RFQ.
+    if (currentRfqId.value) return
     const maturity = _maturityDate()
     if (!maturity || !globalParams.strike_date) return
     const start = new Date(`${globalParams.strike_date}T00:00:00Z`)
@@ -884,17 +1150,71 @@ export const usePricingStore = defineStore('pricing', () => {
     }
   }
 
+  function _frDate(iso) {
+    const [year, month, day] = String(iso || '').split('-')
+    return day ? `${day}/${month}/${year}` : String(iso || '')
+  }
+
+  /**
+   * Moves the maturity. Returns true when the date is accepted.
+   *
+   * Only the TERMINAL constatations move, those that fell on the old
+   * maturity: a schedule's end (and its roll date when aligned on it), a
+   * single CONSTAT's date with its window. A schedule ending earlier stays
+   * put — two years of coupons on a three-year note remain expressible.
+   *
+   * Refused, with a message naming the obstacle:
+   * - before the end of a non-terminal schedule (M12);
+   * - before the last `AT` year written in the script (Normal mode).
+   */
   function setMaturityDate(value) {
-    if (contractTermsLocked.value || !maturityDateEditable.value) return
-    const terminal = _maturitySingleConstat()
-    if (terminal) {
-      const current = constatOverrides[terminal.name]
-      if (typeof current === 'string') constatOverrides[terminal.name] = value || ''
-      else if (current && typeof current === 'object') current.date = value || ''
-    } else {
-      globalParams.maturity_date = value || ''
+    if (contractTermsLocked.value) return false
+    maturityError.value = ''
+    if (!value) {
+      // Field cleared: no calendar date is erased, only the declared
+      // maturity is dropped.
+      globalParams.maturity_date = ''
+      syncTenorFromMaturity()
+      return true
     }
+    if (!_plausibleIsoDate(value)) {
+      maturityError.value = `Date de maturité invalide : ${value}.`
+      return false
+    }
+    const previous = _maturityDate()
+    const entries = _datedConstats()
+    const terminal = entries.filter(entry =>
+      previous && (entry.date === previous || entry.raw === previous))
+    const blocking = entries
+      .filter(entry => !terminal.includes(entry) && entry.date > value)
+      .sort((a, b) => (a.date < b.date ? 1 : -1))[0]
+    if (blocking) {
+      maturityError.value = blocking.kind === 'single'
+        ? `Maturité refusée : la constatation ${blocking.name} tombe le ${_frDate(blocking.date)}, `
+          + `après le ${_frDate(value)}. Avancez-la d'abord.`
+        : `Maturité refusée : l'échéancier ${blocking.name} se termine le ${_frDate(blocking.date)}, `
+          + `après le ${_frDate(value)}. Avancez d'abord sa date de fin.`
+      return false
+    }
+    const lastAt = _atEventDates().reduce((a, b) => (!a || b.date > a.date ? b : a), null)
+    if (lastAt && lastAt.date > value) {
+      maturityError.value = `Maturité refusée : le script observe encore à ${lastAt.t} an(s) `
+        + `(AT ${lastAt.t}), soit le ${_frDate(lastAt.date)}. Modifiez les dates AT du script.`
+      return false
+    }
+    for (const entry of terminal) {
+      const current = constatOverrides[entry.name]
+      if (entry.kind === 'single') {
+        if (typeof current === 'string') constatOverrides[entry.name] = value
+        else if (current && typeof current === 'object') current.date = value
+      } else if (current && typeof current === 'object') {
+        if (current.roll_date === current.end_date) current.roll_date = value
+        current.end_date = value
+      }
+    }
+    globalParams.maturity_date = value
     syncTenorFromMaturity()
+    return true
   }
 
   /** Corps de requête de la valorisation en cours de vie — partagé par le
@@ -977,7 +1297,9 @@ export const usePricingStore = defineStore('pricing', () => {
    *  la vie restante est simulée. Voir api/inlife.py pour pourquoi un simple
    *  « repartir du bon spot » ne suffirait pas sur un produit à mémoire. */
   async function runInLifePricing() {
-    const request = _inLifeBody()
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
+    let request = _inLifeBody()
     request.seed = 42
     const requestKey = _requestKey(request)
     const inputs = _snapshotInputs()
@@ -986,6 +1308,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null; result.value = null
     _startProgress((globalParams.N / 20000) * 350)
     try {
+      request = await _authoritativeProductRequest(request)
       const res = await apiFetch('/api/price/in-life', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1007,8 +1330,11 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   async function runPricing() {
+    // Pricing, Greeks and booking validate the script first and stop on error.
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     if (usesDatedPricing()) return runInLifePricing()
-    const request = _pricingBody()
+    let request = _pricingBody()
     request.seed = 42
     const requestKey = _requestKey(request)
     const inputs = _snapshotInputs()
@@ -1017,6 +1343,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null; result.value = null
     _startProgress((globalParams.N / 20000) * 350)
     try {
+      request = await _authoritativeProductRequest(request)
       const res = await fetch('/api/price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1051,6 +1378,8 @@ export const usePricingStore = defineStore('pricing', () => {
                   + 'renseignez une date de valorisation postérieure au strike.'
       return
     }
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     loading.value = true; error.value = null; impliedFunding.value = null
     _startProgress((globalParams.N / 20000) * 3500)
     try {
@@ -1074,6 +1403,8 @@ export const usePricingStore = defineStore('pricing', () => {
   // ── Greeks ────────────────────────────────────────────────────────
   async function runGreeks() {
     if (!result.value || !selectedGreeks.value.length) return
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     if (resultIsStale.value) {
       error.value = 'Le prix est périmé : relancez le pricing avant de calculer les Greeks.'
       return
@@ -1120,6 +1451,8 @@ export const usePricingStore = defineStore('pricing', () => {
 
   // ── Payoff Profile ────────────────────────────────────────────────
   async function runProfile() {
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     loading.value = true; error.value = null
     _startProgress(800)
     try {
@@ -1136,6 +1469,8 @@ export const usePricingStore = defineStore('pricing', () => {
 
   // ── MC Paths ──────────────────────────────────────────────────────
   async function runPaths() {
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     loading.value = true; error.value = null
     _startProgress(1500)
     try {
@@ -1152,6 +1487,8 @@ export const usePricingStore = defineStore('pricing', () => {
 
   // ── Probability analysis ──────────────────────────────────────────
   async function runProba() {
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     loading.value = true; error.value = null
     _startProgress(2000)
     try {
@@ -1168,6 +1505,8 @@ export const usePricingStore = defineStore('pricing', () => {
 
   // ── Historical backtest ───────────────────────────────────────────
   async function runBacktest(params = {}) {
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     loading.value = true; error.value = null
     _startProgress(8000)
     try {
@@ -1202,6 +1541,8 @@ export const usePricingStore = defineStore('pricing', () => {
   const comparatorLoading = ref(false)
 
   async function runBacktestCompare(candidates, params = {}) {
+    const preparing = _prepareCalculation(message => { comparatorError.value = message })
+    if (preparing && !(await preparing)) return
     comparatorLoading.value = true; comparatorError.value = ''
     try {
       const res = await apiFetch('/api/backtest/compare', {
@@ -1406,12 +1747,16 @@ export const usePricingStore = defineStore('pricing', () => {
       adopted_script_text: scriptGen.value.script,
       modified_after_adoption: false,
     }
-    parseScript()
+    // Adopting is an explicit change of the script: a changed declaration
+    // carries its new value over, exactly as on Ctrl+S.
+    validateScript()
   }
 
   // ── Mark to Future (nested Monte Carlo) ────────────────────────────
   async function runMtf(params = {}) {
     if (!result.value) { error.value = 'Lancez d\'abord un pricing (▶ Pricer).'; return }
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     const n_outer = params.n_outer || 200
     const n_inner = params.n_inner || 500
     const n_dates = params.n_dates || 5
@@ -1489,6 +1834,8 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   async function runSolver({ param_name, target_price_pct, lo, hi, N, tol, max_iter }) {
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     loading.value = true; error.value = null
     _startProgress((N || 8000) / 8000 * ((max_iter || 40) / 40) * 1500)
     try {
@@ -1511,6 +1858,8 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   async function runGrid({ param_x, x_min, x_max, x_steps, param_y, y_min, y_max, y_steps, N }) {
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     loading.value = true; error.value = null
     _startProgress((N || 4000) * (x_steps || 9) * (y_steps || 9) / (4000 * 81) * 3000)
     try {
@@ -1537,6 +1886,8 @@ export const usePricingStore = defineStore('pricing', () => {
   // for -10% spot, 5 for +5pp vol) — divided by 100 here to match the stored
   // fraction units run_mc expects (spot_mult/vol_add).
   async function runScenarios({ spot_shocks_pct, vol_shocks_pct, N }) {
+    const preparing = _prepareCalculation()
+    if (preparing && !(await preparing)) return
     loading.value = true; error.value = null
     const cells = (spot_shocks_pct.length || 9) * (vol_shocks_pct.length || 5)
     // Cells now reprice in parallel across up to 4 worker processes (see
@@ -1796,6 +2147,7 @@ export const usePricingStore = defineStore('pricing', () => {
     kid.value = null
     comparator.value = null
     currentIndicativeId.value = null
+    currentProduct.value = null
     currentRfqId.value = null
     openedDeal.value = null
     bookedContractTerms.value = null
@@ -1818,6 +2170,19 @@ export const usePricingStore = defineStore('pricing', () => {
     scriptGenerationProvenance.value = null
     adoptedGeneratedScriptText.value = ''
     script.value = DEFAULT_SCRIPT
+    // The next parse repopulates the declarations. Keeping the previous
+    // product's declarations while their values are deleted below let
+    // Economics render a calendar card (or a PARAM() table) with no value
+    // behind it: a render error that broke the Pricer when « Nouveau Pricing »
+    // or a product model replaced a session holding a CONSTAT() schedule.
+    scriptParams.value = []
+    scriptConstats.value = []
+    scriptAtDates.value = []
+    scriptHasStop.value = false
+    scriptHasMaturityEvent.value = false
+    parseError.value = null
+    validationReport.value = null
+    maturityError.value = ''
     underlyings.value = [_defaultUnderlying(1)]
     corrMatrix.value = [[1.0]]
     activeUnderlyingIdx.value = 0
@@ -1858,7 +2223,196 @@ export const usePricingStore = defineStore('pricing', () => {
   function resetToDefaults() {
     _resetInputState()
     _clearResults()
-    parseScript()
+    parseScript().then(_markSessionBaseline)
+  }
+
+  // ── Session: unsaved changes ──────────────────────────────────────
+  // What the user would lose if the session were replaced: the product
+  // (script, values, calendars, basket, typed dates) — not the market nor the
+  // results, which are recomputed. The payment date is left out: Economics
+  // proposes it on its own after every load.
+  let _sessionBaseline = null
+
+  function _sessionSnapshot() {
+    return JSON.stringify({
+      script: script.value,
+      params: _declares(paramOverrides, scriptParams.value),
+      constats: _declares(constatOverrides, scriptConstats.value),
+      underlyings: underlyings.value.map(u => [u.name, u.ticker, u.ccy]),
+      dates: [globalParams.strike_date, globalParams.value_date, globalParams.maturity_date],
+      nominal: globalParams.nominal,
+      ccy: globalParams.deal_ccy,
+    })
+  }
+
+  function _markSessionBaseline() {
+    _sessionBaseline = _sessionSnapshot()
+  }
+
+  /** True when replacing the session would lose a modified product. */
+  function hasUnsavedSession() {
+    if (_sessionBaseline === null || contractTermsLocked.value) return false
+    return _sessionSnapshot() !== _sessionBaseline
+  }
+
+  /**
+   * Opens a sheet of the « Modèles de produits » catalogue (M6–M9, 14/09/2026).
+   *
+   * With a tenor: the generic script, N underlyings at the Pricer's default
+   * assumptions (zero correlation, tickers to pick), and calendars generated
+   * from the Pricer's strike date (M8) to strike + tenor. The maturity follows
+   * (M4), and T with it; Economics then proposes the payment at maturity + 3
+   * business days.
+   *
+   * Without a tenor: the generic script and nothing else — no calendar and no
+   * invented date, strike included. Pricing's own messages say what is missing.
+   *
+   * Once opened, the dates are independent: changing the strike date
+   * afterwards does not move the calendar (M13).
+   */
+  async function loadFromProductModel(model, { underlyingCount = null, tenorCode = null } = {}) {
+    _resetInputState()
+    _clearResults()
+    const min = Math.max(1, model.underlyings?.min || 1)
+    const max = Math.max(min, Math.min(model.underlyings?.max || min, CALCULATION_LIMITS.maxUnderlyings))
+    const count = Math.max(min, Math.min(max, Number(underlyingCount) || min))
+    underlyings.value = Array.from({ length: count }, (_, i) => _defaultUnderlying(i + 1))
+    corrMatrix.value = Array.from({ length: count }, (_, i) =>
+      Array.from({ length: count }, (__, j) => (i === j ? 1.0 : 0.0)))
+    activeUnderlyingIdx.value = 0
+    script.value = model.script
+
+    const plan = tenorCode
+      ? buildModelCalendars(model, { strikeDate: globalParams.strike_date, tenorCode })
+      : null
+    if (!plan) {
+      globalParams.strike_date = ''
+      globalParams.value_date = ''
+    }
+
+    await parseScript()
+    for (const declared of scriptConstats.value) {
+      const generated = plan?.constats?.[declared.name]
+      if (!generated) continue
+      const current = constatOverrides[declared.name]
+      if (declared.kind === 'single') {
+        if (current && typeof current === 'object') {
+          current.date = generated.date
+          if (generated.window_length) current.window_length = { ...generated.window_length }
+          if (generated.window_frequency) current.window_frequency = { ...generated.window_frequency }
+        } else {
+          constatOverrides[declared.name] = generated.date
+        }
+      } else if (current && typeof current === 'object') {
+        Object.assign(current, {
+          start_date: generated.start_date, end_date: generated.end_date,
+          roll_date: generated.roll_date, stub: generated.stub,
+          convention: generated.convention, settlement_lag: generated.settlement_lag,
+        })
+        if (generated.frequency) current.frequency = { ...generated.frequency }
+        if (generated.window_length) current.window_length = { ...generated.window_length }
+        if (generated.window_frequency) current.window_frequency = { ...generated.window_frequency }
+      }
+    }
+    if (plan) syncTenorFromMaturity()
+    _markSessionBaseline()
+  }
+
+  function _productUnderlying(identity, market, index) {
+    const out = { ..._defaultUnderlying(index + 1), ...identity }
+    const pctFields = [
+      'sigma', 'q', 'sigma_fx', 'rho_sfx', 'v0', 'theta', 'xi', 'rho_h',
+      'rho_rS', 'alpha', 'beta', 'rho', 'nu', 'skew', 'curvature',
+    ]
+    for (const field of pctFields) {
+      if (market?.[field] != null) out[field] = Number(market[field]) * 100
+    }
+    if (market?.ccyh != null) out.ccyh = Number(market.ccyh) * 10000
+    if (market?.kappa != null) out.kappa = Number(market.kappa)
+    const curve = market?.dividend_curve || []
+    if (curve.length) {
+      out.dividendCurveEnabled = true
+      out.q = Number(curve[0][1]) * 100
+      out.dividendDecay = curve.length > 1 && Number(curve[0][1]) > 0
+        ? Math.max(0, Math.min(100,
+          (1 - Number(curve[1][1]) / Number(curve[0][1])) * 100))
+        : Number(market?.dividend_decay || 0) * 100
+    }
+    return out
+  }
+
+  /** Ouvre le Product comme source contractuelle et remet, si elle existe,
+   *  la dernière hypothèse de marché dans les champs du pricer. */
+  async function loadFromProduct(product, calculationInput = null) {
+    _resetInputState()
+    _clearResults()
+    const terms = product.terms
+    const market = calculationInput || {}
+    script.value = terms.script
+    currentScriptName.value = product.reference || product.name
+
+    const assumptions = market.underlyings || []
+    underlyings.value = terms.underlyings.map((identity, index) =>
+      _productUnderlying(identity, assumptions[index] || {}, index))
+    corrMatrix.value = Array.isArray(market.corr_matrix)
+      && market.corr_matrix.length === terms.underlyings.length
+      ? market.corr_matrix.map(row => [...row])
+      : terms.underlyings.map((_, i) => terms.underlyings.map((__, j) => i === j ? 1 : 0))
+    activeUnderlyingIdx.value = 0
+
+    Object.assign(globalParams, {
+      r: market.r != null ? Number(market.r) * 100 : globalParams.r,
+      T: terms.T,
+      N: market.N ?? globalParams.N,
+      model: market.model || globalParams.model,
+      antithetic: market.antithetic ?? globalParams.antithetic,
+      deal_ccy: terms.settlement_ccy || globalParams.deal_ccy,
+      nominal: product.intent?.nominal ?? globalParams.nominal,
+      strike_date: terms.strike_date || '',
+      value_date: terms.value_date || '',
+      maturity_date: terms.maturity_date || '',
+      payment_date: terms.payment_date || '',
+      valuation_date: market.valuation_date || '',
+      barrierMonitoring: market.barrier_monitoring || 'weekly',
+      rateModel: Number(market.sigma_r || 0) === 0
+        ? 'deterministic' : (Number(market.a_r || 0) === 0 ? 'abm' : 'hull_white'),
+      sigma_r: Number(market.sigma_r || 0) * 100,
+      a_r: Number(market.a_r || 0),
+    })
+    if (Array.isArray(market.yield_curve) && market.yield_curve.length) {
+      yieldCurve.enabled = true
+      yieldCurve.pillars = market.yield_curve.map(([T, rate]) => ({
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, rate: Number(rate) * 100,
+      }))
+    }
+    if (Array.isArray(market.funding_curve) && market.funding_curve.length) {
+      fundingCurve.enabled = true
+      fundingCurve.mode = 'pillars'
+      fundingCurve.pillars = market.funding_curve.map(([T, spread]) => ({
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: Number(spread) * 100,
+      }))
+    } else if (market.funding_spread != null) {
+      fundingCurve.enabled = Number(market.funding_spread) !== 0
+      fundingCurve.mode = 'flat'
+      fundingCurve.level = Number(market.funding_spread) * 100
+    }
+
+    await parseScript()
+    for (const parameter of terms.parameters || []) {
+      if (!(parameter.name in paramOverrides)) continue
+      paramOverrides[parameter.name] = Array.isArray(parameter.value)
+        ? parameter.value.map(value => fromStoredUnits(parameter.name, value))
+        : fromStoredUnits(parameter.name, parameter.value)
+    }
+    _restoreConstats(terms.constats || {})
+    currentProduct.value = product
+    _markSessionBaseline()
+  }
+
+  function _localTodayIso() {
+    const now = new Date()
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+      .toISOString().slice(0, 10)
   }
 
   // Reopen a booked deal's exact frozen state — script, market params, full
@@ -1911,10 +2465,10 @@ export const usePricingStore = defineStore('pricing', () => {
       value_date: deal.value_date,
       maturity_date: deal.maturity_date || '',
       payment_date: deal.payment_date || '',
-      // Un deal rouvert montre d'abord son pricing initial. Le passage en MtM
-      // reste un choix explicite : l'utilisateur change cette Pricing date,
-      // ce qui fait basculer _pricingBody vers /api/price/in-life.
-      valuation_date: deal.strike_date || '',
+      // La date de calcul est un choix de repricing, pas un terme contractuel.
+      // Un deal rouvert part donc toujours de la date locale du jour ; strike,
+      // value date et maturité restent, eux, ceux du contrat figé.
+      valuation_date: _localTodayIso(),
     })
 
     if (market.yieldCurve?.length) {
@@ -2009,6 +2563,7 @@ export const usePricingStore = defineStore('pricing', () => {
       payment_date: deal.payment_date,
       nominal: deal.nominal,
     }
+    _markSessionBaseline()
   }
 
   // Pre-fill the Pricer from an RFQ's retained ("retenue") quote — script,
@@ -2048,7 +2603,7 @@ export const usePricingStore = defineStore('pricing', () => {
           dividendDecay: dividend_decay != null ? dividend_decay * 100 : inferredDecay,
         }
       })
-      corrMatrix.value = p.corr_matrix?.length ? p.corr_matrix : [[1.0]]
+      corrMatrix.value = normaliseCorrelation(p.corr_matrix, underlyings.value.length)
       activeUnderlyingIdx.value = 0
     }
 
@@ -2150,6 +2705,7 @@ export const usePricingStore = defineStore('pricing', () => {
         ? { fair_value: rfqObj.model_price, fair_value_at: rfqObj.model_price_at }
         : {}),
     }
+    _markSessionBaseline()
   }
 
   /**
@@ -2245,6 +2801,7 @@ export const usePricingStore = defineStore('pricing', () => {
     }
 
     _clearResults()
+    _markSessionBaseline()
   }
 
   function _scriptBody() {
@@ -2410,6 +2967,7 @@ export const usePricingStore = defineStore('pricing', () => {
     const saved = await res.json()
     currentScriptId.value   = saved.id
     currentScriptName.value = saved.name
+    _markSessionBaseline()
     return saved
   }
 
@@ -2426,6 +2984,7 @@ export const usePricingStore = defineStore('pricing', () => {
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur mise à jour') }
     const updated = await res.json()
     currentScriptName.value = updated.name ?? currentScriptName.value
+    _markSessionBaseline()
     return updated
   }
 
@@ -2461,6 +3020,7 @@ export const usePricingStore = defineStore('pricing', () => {
     leftTab, rightTab,
     script, scriptParams, parseError, paramOverrides, scriptConstats, constatOverrides,
     scriptHasStop, scriptHasMaturityEvent,
+    scriptDirty, validationReport, validateScript, ensureScriptValidated,
     underlyings, corrMatrix, activeUnderlyingIdx,
     globalParams, maturityDate, maturityDateEditable, yieldCurve, greekSel, selectedGreeks,
     pricingEstimate, greeksEstimate, calculationLimits: CALCULATION_LIMITS,
@@ -2478,7 +3038,7 @@ export const usePricingStore = defineStore('pricing', () => {
     // deux voies de construction finiraient par classer des produits
     // que l'écran ne price pas.
     inLifeBody: _inLifeBody,
-    currentIndicativeId, productTitle, ensureIndicative,
+    currentIndicativeId, currentProduct, productTitle, ensureIndicative,
     currentRfqId, pendingDealPrefill, openedDeal, contractTermsLocked,
     parseScript, runPricing, runGreeks,
     runProfile, runPaths, runProba, runBacktest, runMtf,
@@ -2493,12 +3053,13 @@ export const usePricingStore = defineStore('pricing', () => {
           modified_after_adoption: script.value !== adoptedGeneratedScriptText.value }
       : null,
     loadYfOne, loadYfAll, onValuationDateChange, loadStrikeCloses,
-    setMaturityDate, syncTenorFromMaturity, isMaturityConstat,
+    setMaturityDate, syncTenorFromMaturity, maturityError,
     addUnderlying, removeUnderlying,
     resetToDefaults, loadFromDb, loadVariant, saveVariant, variantInfo,
     relacherVariante,
     variantDirty,
-    loadFromDeal, loadFromRfq, saveScript, updateScript,
+    loadFromDeal, loadFromRfq, loadFromProduct, saveScript, updateScript,
+    loadFromProductModel, hasUnsavedSession,
     pricingBody: _pricingBody,
   }
 })

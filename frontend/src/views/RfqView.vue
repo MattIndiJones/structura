@@ -101,6 +101,10 @@
           </div>
 
           <AlertMessage v-if="createError" kind="error">{{ createError }}</AlertMessage>
+          <AlertMessage v-if="sourceProduct" kind="info">
+            Cette RFQ utilise le Product <span class="font-mono font-semibold">{{ sourceProduct.reference }}</span>
+            en termes v{{ sourceProduct.terms_version }}. Le serveur reprend ses termes et son calendrier comme source faisant autorité.
+          </AlertMessage>
 
           <!-- Deux colonnes dès qu'il y a la place : à gauche ce qu'on
                demande et à qui, à droite le produit qu'on fait pricer. -->
@@ -274,18 +278,47 @@
             </div>
 
             <div class="card flex flex-col gap-3">
-              <!-- Sous-jacent -->
+              <!-- Panier contractuel -->
               <div class="grid grid-cols-2 gap-3">
-                <div class="flex flex-col gap-1">
-                  <label class="label">Sous-jacent</label>
-                  <select class="select" :value="form.underlying_ticker" @change="onUnderlyingSelect($event.target.value)">
-                    <option value="">— Choisir un sous-jacent —</option>
-                    <optgroup v-for="g in underlyingGroups" :key="g.group" :label="g.group">
-                      <option v-for="it in g.items" :key="it.ticker" :value="it.ticker">{{ it.label }}</option>
-                    </optgroup>
-                  </select>
-                  <input v-model="form.underlying_ticker" type="text" class="input font-mono text-xs mt-1"
-                         placeholder="Ticker (ou saisie libre)" />
+                <div class="col-span-2 flex flex-col gap-2">
+                  <div class="flex items-center justify-between gap-3">
+                    <label class="label mb-0">Panier ({{ createBasket.length }} sous-jacent{{ createBasket.length > 1 ? 's' : '' }})</label>
+                    <button type="button" class="btn-secondary text-xs px-2 py-1"
+                            :disabled="!!sourceProduct" @click="addCreateUnderlying">
+                      + Ajouter un sous-jacent
+                    </button>
+                  </div>
+                  <div v-for="(underlying, index) in createBasket" :key="index"
+                       :class="['rounded-lg border p-2 grid grid-cols-12 gap-2 cursor-pointer',
+                                createActiveUnderlyingIdx === index ? 'border-blue-500 bg-blue-950/10' : 'border-slate-800']"
+                       @click="createActiveUnderlyingIdx = index">
+                    <div class="col-span-4">
+                      <select class="select" :value="underlying.ticker"
+                              :disabled="!!sourceProduct"
+                              @change="onUnderlyingSelect(index, $event.target.value)">
+                        <option value="">— Choisir —</option>
+                        <optgroup v-for="g in underlyingGroups" :key="g.group" :label="g.group">
+                          <option v-for="it in g.items" :key="it.ticker" :value="it.ticker">{{ it.label }}</option>
+                        </optgroup>
+                      </select>
+                    </div>
+                    <input v-model="underlying.ticker" :readonly="!!sourceProduct"
+                           class="input col-span-3 font-mono text-xs" placeholder="Ticker" />
+                    <input v-model.number="underlying.sigma" type="number" step="0.1"
+                           class="input col-span-2" title="Volatilité en %" placeholder="Vol %" />
+                    <input v-model.number="underlying.q" type="number" step="0.1"
+                           class="input col-span-2" title="Dividende en %" placeholder="Div. %" />
+                    <button type="button" class="icon-btn-danger col-span-1"
+                            :disabled="createBasket.length === 1 || !!sourceProduct"
+                            :aria-label="`Retirer ${underlying.name || underlying.ticker}`"
+                            @click.stop="removeCreateUnderlying(index)">×</button>
+                    <input v-model="underlying.name" :readonly="!!sourceProduct"
+                           class="input col-span-9 text-xs" placeholder="Nom du sous-jacent" />
+                    <select v-model="underlying.ccy" class="select col-span-3" :disabled="!!sourceProduct">
+                      <option>EUR</option><option>USD</option><option>GBP</option>
+                      <option>JPY</option><option>CHF</option><option>SGD</option>
+                    </select>
+                  </div>
                 </div>
                 <div class="flex flex-col gap-1">
                   <label class="label">Nominal</label>
@@ -371,24 +404,16 @@
                 <summary class="label mb-0 cursor-pointer select-none">▸ Hypothèses de pricing (avancé)</summary>
                 <div class="flex items-center gap-3 mt-2">
                   <button type="button" class="btn-secondary text-xs px-3 py-1.5"
-                          :disabled="!form.underlying_ticker?.trim() || createYfLoading"
-                          :title="form.underlying_ticker?.trim()
-                                  ? `Vol réalisée 1 an et rendement du dividende de ${form.underlying_ticker} (Yahoo Finance)`
+                          :disabled="!createBasket[createActiveUnderlyingIdx]?.ticker?.trim() || createYfLoading"
+                          :title="createBasket[createActiveUnderlyingIdx]?.ticker?.trim()
+                                  ? `Vol réalisée 1 an et rendement du dividende de ${createBasket[createActiveUnderlyingIdx].ticker} (Yahoo Finance)`
                                   : 'Renseignez un ticker de sous-jacent ci-dessus'"
                           @click="loadCreateUnderlyingParams">
-                    📡 Charger les paramètres du sous-jacent
+                    📡 Charger {{ createBasket[createActiveUnderlyingIdx]?.ticker || 'le sous-jacent' }}
                   </button>
                   <span v-if="createYfStatus" class="text-[10px] text-slate-500">{{ createYfStatus }}</span>
                 </div>
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Vol implicite (%)</label>
-                    <input v-model.number="advanced.sigma" type="number" class="input" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Dividende (%)</label>
-                    <input v-model.number="advanced.q" type="number" step="0.1" class="input" />
-                  </div>
                   <div class="flex flex-col gap-1">
                     <label class="label">Taux sans risque (%)</label>
                     <input v-model.number="advanced.r" type="number" step="0.1" class="input" />
@@ -409,12 +434,30 @@
                   </div>
                 </div>
 
+                <div v-if="createBasket.length > 1" class="mt-3 overflow-x-auto">
+                  <div class="label mb-1">Corrélations du panier</div>
+                  <table class="text-[11px] border-collapse">
+                    <thead><tr><th class="p-1"></th><th v-for="u in createBasket" :key="u.ticker" class="p-1 font-mono">{{ u.ticker || '—' }}</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(row, i) in createCorrMatrix" :key="i">
+                        <th class="p-1 text-left font-mono">{{ createBasket[i]?.ticker || '—' }}</th>
+                        <td v-for="(_, j) in row" :key="j" class="p-1">
+                          <input v-if="j > i" type="number" min="-1" max="1" step="0.05"
+                                 class="input w-20 text-center" :value="createCorrMatrix[i][j]"
+                                 @input="setCorrelation(createCorrMatrix, i, j, $event.target.value)" />
+                          <span v-else class="inline-block w-20 text-center text-slate-600">{{ i === j ? '1.00' : createCorrMatrix[i][j].toFixed(2) }}</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
                 <!-- Les mêmes cartes que Marché & Paramètres, dans le MÊME ORDRE,
                      sur l'état de l'AO. Elles acceptent leur courbe en prop et retombent sur
                      le Pricer quand on ne leur en donne pas : une seule
                      implémentation, deux écrans, aucun état partagé. -->
                 <div class="flex flex-col gap-3 mt-3 pt-3 border-t border-slate-800">
-                  <DividendCurveCard :sous-jacents="ao.panier" :index-actif="0"
+                  <DividendCurveCard :sous-jacents="ao.panier" :index-actif="createActiveUnderlyingIdx"
                                      :horizon="form.T" />
                   <YieldCurveCard :courbe="ao.yieldCurve" :taux-plat="advanced.r" />
                   <FundingCurveCard :courbe="ao.fundingCurve" />
@@ -524,10 +567,9 @@
                   <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.ao_date) }}</div>
                 </div>
                 <div>
-                  <div class="label mb-0.5">Sous-jacent</div>
-                  <div class="text-xs text-slate-200">
-                    {{ underlyingSummary.name || '—' }}
-                    <span v-if="underlyingSummary.ticker" class="text-slate-500 font-mono">({{ underlyingSummary.ticker }})</span>
+                  <div class="label mb-0.5">Panier ({{ underlyingSummaries.length }})</div>
+                  <div class="text-xs text-slate-200 font-mono">
+                    {{ underlyingSummaries.join(' / ') || '—' }}
                   </div>
                 </div>
                 <div>
@@ -641,6 +683,14 @@
                     </div>
 
                     <div class="flex items-center gap-3 border-t border-slate-800 pt-3">
+                      <div v-if="detailBasket.length > 1" class="flex flex-wrap gap-1">
+                        <button v-for="(underlying, index) in detailBasket" :key="underlying.ticker || index"
+                                type="button" class="btn-secondary text-xs px-2 py-1"
+                                :class="detailActiveUnderlyingIdx === index ? 'border-blue-500 text-blue-300' : ''"
+                                @click="detailActiveUnderlyingIdx = index">
+                          {{ underlying.ticker || underlying.name }}
+                        </button>
+                      </div>
                       <button type="button" class="btn-secondary text-xs px-3 py-1.5"
                               :disabled="!underlyingSummary.ticker || detailYfLoading"
                               :title="underlyingSummary.ticker
@@ -654,11 +704,11 @@
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <div class="flex flex-col gap-1">
                         <label class="label">Vol implicite (%)</label>
-                        <input v-model.number="detailAdvanced.sigma" type="number" class="input" />
+                        <input v-model.number="detailBasket[detailActiveUnderlyingIdx].sigma" type="number" class="input" />
                       </div>
                       <div class="flex flex-col gap-1">
                         <label class="label">Dividende (%)</label>
-                        <input v-model.number="detailAdvanced.q" type="number" step="0.1" class="input" />
+                        <input v-model.number="detailBasket[detailActiveUnderlyingIdx].q" type="number" step="0.1" class="input" />
                       </div>
                       <div class="flex flex-col gap-1">
                         <label class="label">Taux sans risque (%)</label>
@@ -701,12 +751,30 @@
                       </div>
                     </div>
 
+                    <div v-if="detailBasket.length > 1" class="mt-3 overflow-x-auto border-t border-slate-800 pt-3">
+                      <div class="label mb-1">Corrélations du panier</div>
+                      <table class="text-[11px] border-collapse">
+                        <thead><tr><th class="p-1"></th><th v-for="u in detailBasket" :key="u.ticker" class="p-1 font-mono">{{ u.ticker || '—' }}</th></tr></thead>
+                        <tbody>
+                          <tr v-for="(row, i) in detailCorrMatrix" :key="i">
+                            <th class="p-1 text-left font-mono">{{ detailBasket[i]?.ticker || '—' }}</th>
+                            <td v-for="(_, j) in row" :key="j" class="p-1">
+                              <input v-if="j > i" type="number" min="-1" max="1" step="0.05"
+                                     class="input w-20 text-center" :value="detailCorrMatrix[i][j]"
+                                     @input="setCorrelation(detailCorrMatrix, i, j, $event.target.value)" />
+                              <span v-else class="inline-block w-20 text-center text-slate-600">{{ i === j ? '1.00' : detailCorrMatrix[i][j].toFixed(2) }}</span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
                     <!-- Les mêmes cartes qu'à la création, dans l'ordre du Pricer,
                          sur l'état du détail. Ce sont des hypothèses de MODÈLE : elles
                          restent ajustables cotations en main, contrairement
                          aux dates ci-dessus qui, elles, sont contractuelles. -->
                     <div class="flex flex-col gap-3 mt-3 pt-3 border-t border-slate-800">
-                      <DividendCurveCard :sous-jacents="aoDetail.panier" :index-actif="0"
+                      <DividendCurveCard :sous-jacents="aoDetail.panier" :index-actif="detailActiveUnderlyingIdx"
                                          :horizon="detailHorizon" />
                       <YieldCurveCard :courbe="aoDetail.yieldCurve" :taux-plat="detailAdvanced.r" />
                       <FundingCurveCard :courbe="aoDetail.fundingCurve" />
@@ -966,6 +1034,7 @@ import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useRfqStore } from '../stores/rfq.js'
+import { useProductsStore } from '../stores/products.js'
 import { useMarketAssumptions } from '../composables/useMarketAssumptions.js'
 import YieldCurveCard from '../components/YieldCurveCard.vue'
 import FundingCurveCard from '../components/FundingCurveCard.vue'
@@ -973,6 +1042,10 @@ import DividendCurveCard from '../components/DividendCurveCard.vue'
 import { apiFetch } from '../utils/api.js'
 import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
 import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
+import {
+  emptyRfqUnderlying, normaliseCorrelation, rfqBasketFromParams,
+  rfqUnderlyingToParams,
+} from '../utils/rfqBasket.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import BaseModal from '../components/ui/BaseModal.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -1059,8 +1132,11 @@ function restoreConstatOverrides(constats, overridesObj, saved) {
 }
 
 const rfq = useRfqStore()
+const products = useProductsStore()
 const router = useRouter()
 const route = useRoute()
+const sourceProduct = ref(null)
+const sourceProductPricingInput = ref(null)
 
 // Contexte commercial, quand on arrive depuis une fiche d'opportunité
 // (`/rfq?opportunity=12`). Purement additif : sans ce paramètre, l'écran se
@@ -1149,8 +1225,6 @@ const form = reactive({
   primary_affiliation_id: null,
   script_id: null,
   source_deal_id: null,  // set instead of script_id when sourced from expertDeals
-  underlying_name: 'Sous-jacent',
-  underlying_ticker: '',
   currency: 'CHF',
   T: 3,
   // Aucune date par défaut : elles viennent du term sheet, pas d'une règle
@@ -1200,7 +1274,52 @@ function onKindToggle(kind) {
   refreshParsedParams()
 }
 
-const advanced = reactive({ sigma: 20, q: 2, r: 3, N: 20000, model: 'constant' })
+const advanced = reactive({ r: 3, N: 20000, model: 'constant' })
+const createBasket = reactive(rfqBasketFromParams([], form.currency))
+const createActiveUnderlyingIdx = ref(0)
+const createCorrMatrix = ref([[1]])
+const detailBasket = reactive(rfqBasketFromParams([], form.currency))
+const detailActiveUnderlyingIdx = ref(0)
+const detailCorrMatrix = ref([[1]])
+
+function replaceBasket(target, rows) {
+  target.splice(0, target.length, ...rows)
+}
+
+function setCreateBasket(underlyings, correlation = null) {
+  replaceBasket(createBasket, rfqBasketFromParams(underlyings, form.currency))
+  createActiveUnderlyingIdx.value = 0
+  createCorrMatrix.value = normaliseCorrelation(correlation, createBasket.length)
+}
+
+function setDetailBasket(underlyings, correlation = null) {
+  replaceBasket(detailBasket, rfqBasketFromParams(underlyings, rfq.current?.params?.currency || 'EUR'))
+  detailActiveUnderlyingIdx.value = 0
+  detailCorrMatrix.value = normaliseCorrelation(correlation, detailBasket.length)
+}
+
+function addCreateUnderlying() {
+  createBasket.push(emptyRfqUnderlying(createBasket.length, form.currency))
+  createCorrMatrix.value = normaliseCorrelation(createCorrMatrix.value, createBasket.length)
+  createActiveUnderlyingIdx.value = createBasket.length - 1
+}
+
+function removeCreateUnderlying(index) {
+  if (createBasket.length <= 1 || sourceProduct.value) return
+  createBasket.splice(index, 1)
+  const reduced = createCorrMatrix.value
+    .filter((_, i) => i !== index)
+    .map(row => row.filter((_, j) => j !== index))
+  createCorrMatrix.value = normaliseCorrelation(reduced, createBasket.length)
+  createActiveUnderlyingIdx.value = Math.min(createActiveUnderlyingIdx.value, createBasket.length - 1)
+}
+
+function setCorrelation(target, i, j, raw) {
+  const value = Math.max(-1, Math.min(1, Number(raw) || 0))
+  const matrix = Array.isArray(target) ? target : target.value
+  matrix[i][j] = value
+  matrix[j][i] = value
+}
 
 // ── Hypothèses de marché de l'appel d'offres ──────────────────────
 //
@@ -1212,25 +1331,23 @@ const advanced = reactive({ sigma: 20, q: 2, r: 3, N: 20000, model: 'constant' }
 // Deux jeux indépendants — un pour la saisie, un pour le détail — rendus par
 // la même fabrique, qui porte aussi la conversion vers le moteur et le chemin
 // du retour. Voir `useMarketAssumptions`.
-// Le panier d'un AO est mono-sous-jacent : la carte de dividende édite sa
-// courbe à travers cette fiche, qui reflète `advanced`.
-const ao = useMarketAssumptions(computed(() => [{
-  name: form.underlying_name || form.underlying_ticker || 'Sous-jacent',
-  q: advanced.q,
-}]))
+const ao = useMarketAssumptions(computed(() => createBasket.map(row => ({
+  name: row.name || row.ticker || 'Sous-jacent', q: row.q,
+}))))
 
 // Le détail a son PROPRE jeu. Le partager avec le formulaire de création
 // ferait qu'ouvrir un AO existant écrase les hypothèses d'un AO en cours de
 // saisie — et l'inverse.
-const aoDetail = useMarketAssumptions(computed(() => [{
-  name: underlyingSummary.value?.name || 'Sous-jacent',
-  q: detailAdvanced.q,
-}]))
+const aoDetail = useMarketAssumptions(computed(() => detailBasket.map(row => ({
+  name: row.name || row.ticker || 'Sous-jacent', q: row.q,
+}))))
 
-function onUnderlyingSelect(ticker) {
-  form.underlying_ticker = ticker
+function onUnderlyingSelect(index, ticker) {
+  const row = createBasket[index]
+  if (!row) return
+  row.ticker = ticker
   const label = underlyingGroups.flatMap(g => g.items).find(it => it.ticker === ticker)?.label
-  if (label) form.underlying_name = label
+  if (label) row.name = label
 }
 
 // ── Termes du produit + calendrier(s) CONSTAT (dynamiques, extraits du script) ──
@@ -1280,10 +1397,14 @@ async function refreshParsedParams(overrideValues = null, overrideConstats = nul
 function onSourceToggle(src) {
   form.source = src
   duplicateSourceScript.value = null
+  sourceProduct.value = null
+  sourceProductPricingInput.value = null
   refreshParsedParams()
 }
 function onTemplateChange() {
   duplicateSourceScript.value = null
+  sourceProduct.value = null
+  sourceProductPricingInput.value = null
   refreshParsedParams()
 }
 // The picker offers two kinds of options in one <select>: rows from the
@@ -1347,6 +1468,8 @@ onMounted(async () => {
       selectedId.value = null
       rfq.current = null
     }
+    const productId = Number(route.query.product)
+    if (productId) await prefillFromProduct(productId)
   } finally {
     loadingList.value = false
   }
@@ -1369,6 +1492,8 @@ function openCreateForm() {
   createError.value = ''
   notice.value = ''
   duplicateSourceScript.value = null
+  sourceProduct.value = null
+  sourceProductPricingInput.value = null
   commercialLinkEnabled.value = false
   Object.assign(form, {
     name: '', ao_date: todayIso(), kind: 'indicatif', sens: 'achat', source: 'template', template_type: '',
@@ -1383,7 +1508,7 @@ function openCreateForm() {
     mandate_id: opportuniteContexte.value?.mandate_id ?? null,
     primary_affiliation_id:
       opportuniteContexte.value?.primary_contact?.affiliation_id ?? null,
-    underlying_name: 'Sous-jacent', underlying_ticker: '', currency: 'CHF', T: 3,
+    currency: 'CHF', T: 3,
     // Aucune date inventee : ni a l ouverture du formulaire, ni en dupliquant,
     // ni en convertissant. Elles viennent du term sheet de l affaire en cours,
     // pas de celle d avant.
@@ -1392,9 +1517,48 @@ function openCreateForm() {
   // Le drapeau de saisie suit les dates : sans ça, avoir saisi une date de
   // paiement sur une affaire empêcherait toute proposition sur la suivante.
   paymentDateSaisie.value = false
-  Object.assign(advanced, { sigma: 20, q: 2, r: 3, N: 20000, model: 'constant' })
+  Object.assign(advanced, { r: 3, N: 20000, model: 'constant' })
+  setCreateBasket([], form.currency)
+  ao.depuisParams({})
   nominalRaw.value = '1 000 000'
   parsedParams.value = []
+}
+
+async function prefillFromProduct(productId) {
+  const loaded = await products.fetchOne(productId)
+  if (!loaded) {
+    listError.value = products.error || 'Produit introuvable.'
+    return
+  }
+  openCreateForm()
+  sourceProduct.value = loaded.product
+  sourceProductPricingInput.value = loaded.calculationInput
+  const terms = loaded.product.terms
+  duplicateSourceScript.value = terms.script
+  form.source = 'script'
+  form.name = loaded.product.name
+  form.T = terms.T
+  form.currency = terms.settlement_ccy || 'EUR'
+  form.strike_date = terms.strike_date || ''
+  form.value_date = terms.value_date || ''
+  form.payment_date = terms.payment_date || ''
+  const productUnderlyings = terms.underlyings.map((identity, index) => ({
+    ...(loaded.calculationInput?.underlyings?.[index] || {}), ...identity,
+  }))
+  setCreateBasket(productUnderlyings, loaded.calculationInput?.corr_matrix)
+  ao.depuisParams({ underlyings: productUnderlyings, ...loaded.calculationInput })
+  nominalRaw.value = String(loaded.product.intent?.nominal || 1_000_000)
+  formatNominal()
+  advanced.r = Number(loaded.calculationInput?.r ?? 0.03) * 100
+  advanced.N = loaded.calculationInput?.N ?? 20000
+  advanced.model = loaded.calculationInput?.model || 'constant'
+  await refreshParsedParams()
+  for (const parameter of terms.parameters || []) {
+    paramOverrides[parameter.name] = Array.isArray(parameter.value)
+      ? parameter.value.map(value => parameter.is_pct ? value * 100 : value)
+      : (parameter.is_pct ? parameter.value * 100 : parameter.value)
+  }
+  restoreConstatOverrides(scriptConstats.value, constatOverrides, terms.constats || {})
 }
 
 async function toggleDirectCommercial() {
@@ -1455,7 +1619,6 @@ async function duplicateRfq(source) {
   selectedId.value = null
   createError.value = ''
   const p = source.params || {}
-  const u = (p.underlyings && p.underlyings[0]) || {}
   Object.assign(form, {
     name: `${source.name || source.reference} (copie)`,
     ao_date: todayIso(),
@@ -1474,8 +1637,6 @@ async function duplicateRfq(source) {
     documentation_reference: source.documentation_reference || '',
     script_id: source.script_id || null,
     source_deal_id: null,
-    underlying_name: u.name || 'Sous-jacent',
-    underlying_ticker: u.ticker || '',
     currency: p.currency || 'CHF',
     T: p.T ?? 3,
     // Aucune date inventee : ni a l ouverture du formulaire, ni en dupliquant,
@@ -1487,12 +1648,12 @@ async function duplicateRfq(source) {
   // paiement sur une affaire empêcherait toute proposition sur la suivante.
   paymentDateSaisie.value = false
   Object.assign(advanced, {
-    sigma: Math.round((u.sigma ?? 0.20) * 1000) / 10,
-    q: Math.round((u.q ?? 0.02) * 1000) / 10,
     r: Math.round((p.r ?? 0.03) * 1000) / 10,
     N: p.N ?? 20000,
     model: p.model || 'constant',
   })
+  setCreateBasket(p.underlyings, p.corr_matrix)
+  ao.depuisParams(p)
   nominalRaw.value = String(p.notional ?? 1000000)
   formatNominal()
   duplicateSourceScript.value = source.script_snapshot
@@ -1518,7 +1679,6 @@ async function convertToTrade(source) {
   selectedId.value = null
   createError.value = ''
   const p = source.params || {}
-  const u = (p.underlyings && p.underlyings[0]) || {}
   const sourceScript = source.script_id && scripts.value.find(s => s.id === source.script_id)
   const keepsScriptId = sourceScript?.script_text?.includes('CONSTAT')
   Object.assign(form, {
@@ -1539,8 +1699,6 @@ async function convertToTrade(source) {
     documentation_reference: source.documentation_reference || '',
     script_id: keepsScriptId ? source.script_id : null,
     source_deal_id: null,
-    underlying_name: u.name || 'Sous-jacent',
-    underlying_ticker: u.ticker || '',
     currency: p.currency || 'CHF',
     T: p.T ?? 3,
     // Aucune date inventee : ni a l ouverture du formulaire, ni en dupliquant,
@@ -1552,12 +1710,12 @@ async function convertToTrade(source) {
   // paiement sur une affaire empêcherait toute proposition sur la suivante.
   paymentDateSaisie.value = false
   Object.assign(advanced, {
-    sigma: Math.round((u.sigma ?? 0.20) * 1000) / 10,
-    q: Math.round((u.q ?? 0.02) * 1000) / 10,
     r: Math.round((p.r ?? 0.03) * 1000) / 10,
     N: p.N ?? 20000,
     model: p.model || 'constant',
   })
+  setCreateBasket(p.underlyings, p.corr_matrix)
+  ao.depuisParams(p)
   nominalRaw.value = String(p.notional ?? 1000000)
   formatNominal()
   duplicateSourceScript.value = null
@@ -1591,7 +1749,7 @@ const detailParamOverrides  = reactive({})
 const detailScriptConstats  = ref([])
 const detailConstatOverrides = reactive({})
 const detailAdvanced = reactive({
-  sigma: 20, q: 2, r: 3, N: 20000, model: 'constant',
+  r: 3, N: 20000, model: 'constant',
   strike_date: '', value_date: '', payment_date: '',
 })
 
@@ -1603,10 +1761,8 @@ async function refreshDetailParams() {
 async function _loadDetailParams() {
   const script = rfq.current?.script_snapshot || ''
   const p = rfq.current?.params || {}
-  const u = (p.underlyings && p.underlyings[0]) || {}
+  setDetailBasket(p.underlyings, p.corr_matrix)
   Object.assign(detailAdvanced, {
-    sigma: Math.round((u.sigma ?? 0.20) * 1000) / 10,
-    q: Math.round((u.q ?? 0.02) * 1000) / 10,
     r: Math.round((p.r ?? 0.03) * 1000) / 10,
     N: p.N ?? 20000,
     model: p.model || 'constant',
@@ -1753,7 +1909,10 @@ const rfqList = computed(() => rfq.list)
 const rfqFilter = useDataFilter(rfqList, rfqFilterFields, { sorts: rfqSorts })
 const filteredRfqs = computed(() => rfqFilter.filtered.value)
 
-const underlyingSummary = computed(() => (rfq.current?.params?.underlyings || [])[0] || {})
+const underlyingSummary = computed(() =>
+  detailBasket[detailActiveUnderlyingIdx.value] || detailBasket[0] || {})
+const underlyingSummaries = computed(() => detailBasket.map(row =>
+  row.ticker || row.name).filter(Boolean))
 
 // Même source que le "📡 Yahoo" du Pricer (pricing.js:loadYfOne) : vol
 // réalisée 1 an et rendement du dividende. Saisir ces deux nombres à la main
@@ -1792,10 +1951,11 @@ async function _loadUnderlyingParams(ticker, target, status, loading) {
 }
 
 function loadCreateUnderlyingParams() {
-  return _loadUnderlyingParams(form.underlying_ticker, advanced, createYfStatus, createYfLoading)
+  const row = createBasket[createActiveUnderlyingIdx.value]
+  return _loadUnderlyingParams(row?.ticker, row, createYfStatus, createYfLoading)
 }
 function loadDetailUnderlyingParams() {
-  return _loadUnderlyingParams(underlyingSummary.value.ticker, detailAdvanced,
+  return _loadUnderlyingParams(underlyingSummary.value.ticker, underlyingSummary.value,
                                detailYfStatus, detailYfLoading)
 }
 
@@ -1811,12 +1971,16 @@ const detailCalendarEnd = computed(() => {
 })
 
 // Same derivation rule as createMaturityDate/DealTab.vue: latest CONSTAT
-// schedule end date when the script has one, else value_date + T years.
+// schedule end date when the script has one, else strike + T years. The
+// engine's time axis starts at the strike — counting from the value date put
+// the detail's maturity a few days after the one the AO was created with.
+// AOs stored before the strike date existed fall back to the value date.
 const detailMaturityDate = computed(() => {
   if (detailCalendarEnd.value) return detailCalendarEnd.value
   const p = rfq.current?.params || {}
-  if (!p.value_date || !p.T) return ''
-  return addYears(p.value_date, p.T)
+  const origin = p.strike_date || p.value_date
+  if (!origin || !p.T) return ''
+  return addYears(origin, p.T)
 })
 
 // L'horizon du détail, pour la courbe de dividende : la même règle que
@@ -1890,10 +2054,31 @@ const champsManquants = computed(() => {
       && !duplicateSourceScript.value) {
     trous.push('script')
   }
+  createBasket.forEach((underlying, index) => {
+    if (!underlying.ticker?.trim()) trous.push(`ticker du sous-jacent ${index + 1}`)
+    if (!underlying.name?.trim()) trous.push(`nom du sous-jacent ${index + 1}`)
+  })
   for (const [champ, libelle] of [['strike_date', 'date de strike'],
                                   ['value_date', 'date de valeur'],
                                   ['payment_date', 'date de paiement']]) {
     if (!form[champ]) trous.push(libelle)
+  }
+  if (form.kind === 'to_trade') {
+    for (const calendar of scriptConstats.value) {
+      const value = constatOverrides[calendar.name]
+      if (calendar.kind === 'single') {
+        const day = typeof value === 'string' ? value : value?.date
+        if (!day) trous.push(`date du calendrier ${calendar.name}`)
+        continue
+      }
+      for (const [field, label] of [['start_date', 'début'], ['end_date', 'fin'],
+                                    ['roll_date', 'date de roll'], ['frequency', 'fréquence']]) {
+        if (!value?.[field]) trous.push(`${label} du calendrier ${calendar.name}`)
+      }
+      if (calendar.kind === 'nested_schedule' && !value?.sub_frequency) {
+        trous.push(`sous-fréquence du calendrier ${calendar.name}`)
+      }
+    }
   }
   return trous
 })
@@ -1932,7 +2117,15 @@ async function submitCreate() {
 
   creating.value = true
   try {
+    const productMarket = sourceProductPricingInput.value || {}
+    const horizon = createMaturityDate.value
+      ? yearsBetween(form.strike_date, createMaturityDate.value) : form.T
+    const basketPayload = createBasket.map((underlying, index) =>
+      rfqUnderlyingToParams(
+        underlying, ao.dividendeDuSousJacent(index, horizon)))
     const rfqObj = await rfq.create({
+      product_id: sourceProduct.value?.product_id || null,
+      product_terms_version: sourceProduct.value?.terms_version || null,
       name: form.name,
       ao_date: form.ao_date,
       kind: form.kind,
@@ -1952,36 +2145,39 @@ async function submitCreate() {
       script_id: form.source === 'script' ? form.script_id : null,
       script_snapshot,
       params: {
-        underlyings: [{
-          name: form.underlying_name, ticker: form.underlying_ticker,
-          ccy: form.currency, sigma: advanced.sigma / 100, q: advanced.q / 100,
-          ...ao.dividendeDuSousJacent(0, createMaturityDate.value
-            ? yearsBetween(form.strike_date, createMaturityDate.value) : form.T),
-        }],
-        corr_matrix: [[1]],
+        underlyings: basketPayload,
+        corr_matrix: normaliseCorrelation(createCorrMatrix.value, basketPayload.length),
         // T dérivé du calendrier CONSTAT quand il y en a un, et non du ténor
         // tapé : c'est la fin de calendrier que l'écran affiche comme maturité.
         // Laisser les deux diverger obligeait à « corriger » T à chaque calcul
         // de prix modèle — donc à toucher un terme contractuel après
         // sollicitation. T est fixé une fois, à la création, où il est encore
         // librement modifiable.
-        r: advanced.r / 100,
+        r: sourceProduct.value ? (productMarket.r ?? advanced.r / 100) : advanced.r / 100,
         // T est l'horizon de DIFFUSION : il se compte depuis le strike, pas
         // depuis le règlement. Deux jours ouvrés d'écart avec l'ancienne
         // définition, mais surtout deux définitions différentes du symbole.
-        T: (createMaturityDate.value
-            ? yearsBetween(form.strike_date, createMaturityDate.value)
-            : form.T),
-        N: advanced.N, model: advanced.model,
+        T: horizon,
+        N: sourceProduct.value ? (productMarket.N ?? advanced.N) : advanced.N,
+        model: sourceProduct.value ? (productMarket.model || advanced.model) : advanced.model,
         // Les trois hypothèses de marché saisies au-dessus. Sans elles dans le
         // payload, les cartes seraient éditables sans le moindre effet sur le
         // prix — le projet a déjà connu ça avec la courbe de dividende, qui vaut
         // pourtant −491,6 bps.
         ...ao.hypothesesDeMarche(),
+        ...(sourceProduct.value ? {
+          yield_curve: productMarket.yield_curve || [],
+          funding_curve: productMarket.funding_curve || [],
+          funding_spread: productMarket.funding_spread || 0,
+          sigma_r: productMarket.sigma_r || 0,
+          a_r: productMarket.a_r || 0,
+          barrier_monitoring: productMarket.barrier_monitoring || 'weekly',
+        } : {}),
         user_params,
         constats: buildConstatsPayload(scriptConstats.value, constatOverrides),
         notional: nominalValue.value, currency: form.currency,
         strike_date: form.strike_date, value_date: form.value_date,
+        maturity_date: createMaturityDate.value || null,
         payment_date: form.payment_date,
         // Traçabilité : les dates stockées sont déjà les dates effectives, la
         // convention dit seulement comment on y est arrivé.
@@ -2063,18 +2259,13 @@ async function computeModelPrice() {
     // sigma/q sont fusionnés par INDICE sur le panier stocké (voir
     // _merge_pricing_params) : la taille du panier vient de l'AO, pas du
     // formulaire de pricing.
-    const nUnderlyings = (rfq.current.params?.underlyings || []).length || 1
-    const pricingUnderlyings = Array.from({ length: nUnderlyings }, () => ({
-      sigma: detailAdvanced.sigma / 100,
-      q: detailAdvanced.q / 100,
-      // Le dividende se porte par SOUS-JACENT. Le hisser au niveau du produit
-      // le ferait ignorer en silence — une courbe à 8 % vaut pourtant
-      // −491,6 bps.
-      ...aoDetail.dividendeDuSousJacent(0, detailHorizon.value),
-    }))
+    const pricingUnderlyings = detailBasket.map((underlying, index) =>
+      rfqUnderlyingToParams(
+        underlying, aoDetail.dividendeDuSousJacent(index, detailHorizon.value)))
     await rfq.update(rfq.current.id, {
       pricing_params: {
         underlyings: pricingUnderlyings,
+        corr_matrix: normaliseCorrelation(detailCorrMatrix.value, pricingUnderlyings.length),
         r: detailAdvanced.r / 100,
         N: detailAdvanced.N,
         model: detailAdvanced.model,

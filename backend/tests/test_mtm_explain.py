@@ -176,10 +176,25 @@ def test_payloads_are_json_serializable(monkeypatch):
     s, deal = _make_session()
     monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices(lambda d: 100.0))
     try:
-        mtm = deals_api.deal_mtm(deal.id, USER, s, n_paths=4000,
-                                 body=deals_api.MtmRequest(recalibrate="none"))
+        request = deals_api.MtmRequest(
+            recalibrate="none", valuation_date=TODAY,
+        )
+        mtm = deals_api.deal_mtm(
+            deal.id, USER, s, n_paths=4000, body=request,
+        )
         _assert_plain_json(mtm)
         json.dumps(mtm)
+        runs = deals_api.list_valuation_runs(deal.id, USER, s)
+        saved = deals_api.get_valuation_run(runs[0]["id"], USER, s)
+        assert saved["run_type"] == "MTM"
+        assert saved["result"] == mtm
+        assert saved["diagnostics"]["request"]["valuation_date"] == TODAY.isoformat()
+        latest = deals_api.latest_mtm_runs(USER, s, str(deal.id))
+        assert latest == [saved]
+        history = deals_api.list_valuation_runs(
+            deal.id, USER, s, run_type="mtm", include_payload=True,
+        )
+        assert history == [saved]
         exp = deals_api.deal_mtm_explain(deal.id, USER, s, n_paths=4000, body=BODY)
         _assert_plain_json(exp)
         json.dumps(exp)

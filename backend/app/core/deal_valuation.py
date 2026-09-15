@@ -20,13 +20,14 @@ from ..db.models import Deal, DealEvent
 from ..services.market_data import (
     dividend_profile, load_hist_prices, market_data_provider_for_deal,
 )
-from .calibration import realized_market
+from .calibration import calibration_history_start, realized_market
 from .inlife_valuation import InLifeProduct, ValuationError, build_residual
 from .market_snapshot import snapshot_rate, snapshot_rate_is_default
 from .valuation_context import (
     ValuationContext, deterministic_cashflow_pv,
     funding_from_market_snapshot, run_valuation,
 )
+from ..services.product_repository import ProductError, load_product
 
 
 _EXIT_CAPTURE = 0.97
@@ -43,6 +44,7 @@ class MtmRequest(BaseModel):
     overrides: Optional[dict[str, MtmOverrideUL]] = None
     r: Optional[float] = None
     window_days: int = 252
+    valuation_date: Optional[date] = None
 
 
 class DealGreeksRequest(MtmRequest):
@@ -89,20 +91,48 @@ def mtm_core(
     load_prices = load_prices or load_hist_prices
     dividend_loader = dividend_loader or dividend_profile
     realized_loader = realized_loader or realized_market
-    deal_id = deal.id
-    today = asof or date.today()
-    market_provider = market_data_provider_for_deal(deal, session)
     body = body or MtmRequest()
+    deal_id = deal.id
+    calendar_today = date.today()
+    today = asof or body.valuation_date or calendar_today
+    if today > calendar_today:
+        raise HTTPException(422, "La date de valorisation ne peut pas être future")
+    if deal.trade_date:
+        try:
+            trade_date = date.fromisoformat(deal.trade_date)
+        except ValueError:
+            raise HTTPException(422, "La date de trade du deal est invalide")
+        if today < trade_date:
+            raise HTTPException(
+                422,
+                "La date de valorisation ne peut pas précéder la date de trade",
+            )
+    market_provider = market_data_provider_for_deal(deal, session)
+    product = None
+    if getattr(deal, "product_id", None) is not None:
+        try:
+            product = load_product(session, deal.product_id)
+        except ProductError as exc:
+            raise HTTPException(exc.status, {"code": exc.code, "message": str(exc)})
+        if deal.product_terms_version != product.terms_version:
+            raise HTTPException(409, {
+                "code": "PRODUCT_TERMS_VERSION_MISMATCH",
+                "message": "Le deal ne référence pas la version courante de ses termes Product.",
+            })
+    terms = product.terms if product is not None else None
 
     # Once the contractual payoff is known, there is no path left to simulate.
     # The receivable nevertheless remains a live credit exposure until cash
     # settlement, so it has a deterministic MtM during this short window.
     if deal.status == "en_reglement":
-        payment = date.fromisoformat(deal.payment_date)
+        payment_value = (terms.payment_date.isoformat()
+                         if terms and terms.payment_date else deal.payment_date)
+        payment = date.fromisoformat(payment_value)
         if today >= payment:
             raise HTTPException(422, "Règlement atteint — l'exposition est soldée")
         market = json.loads(deal.market_snapshot_json or "{}")
-        elapsed_origin = date.fromisoformat(deal.strike_date or deal.value_date)
+        elapsed_origin = (terms.strike_date if terms and terms.strike_date else
+                          date.fromisoformat(deal.strike_date or deal.value_date))
         elapsed = max(0.0, (today - elapsed_origin).days / 365.25)
         funding_curve, funding_spread = funding_from_market_snapshot(market, elapsed)
         r_frac = body.r / 100.0 if body.r is not None else snapshot_rate(market)
@@ -120,6 +150,7 @@ def mtm_core(
             funding_curve=funding_curve, funding_spread=funding_spread)
         payload = {
             "deal_id": deal_id, "reference": deal.reference,
+            "valuation_date": today.isoformat(),
             "status": "en_reglement", "settlement_pending": True,
             "mtm": mtm, "ic95": [mtm, mtm], "prob_gt100": float(mtm > 1.0),
             "fugit": remaining, "T_elapsed": round(elapsed, 4),
@@ -158,14 +189,17 @@ def mtm_core(
         raise HTTPException(422, f"Deal {deal.status} — plus d'optionnalité à valoriser "
                                  f"(remboursement réalisé: {deal.realized_payout})")
 
-    maturity = date.fromisoformat(deal.maturity_date)
-    value_d = date.fromisoformat(deal.value_date)
+    maturity = (terms.maturity_date if terms and terms.maturity_date
+                else date.fromisoformat(deal.maturity_date))
+    value_d = (terms.value_date if terms and terms.value_date
+               else date.fromisoformat(deal.value_date))
     if today >= maturity:
         raise HTTPException(422, "Échéance atteinte — lancer le refresh du cycle de vie "
                                  "pour résoudre le deal plutôt que le valoriser")
     # Meme origine que les temps d observation : la date de strike. Compter le
     # temps ecoule depuis la value date decalerait tout le residuel.
-    _elapsed_origin = (date.fromisoformat(deal.strike_date) if deal.strike_date else value_d)
+    _elapsed_origin = (terms.strike_date if terms and terms.strike_date else
+                       (date.fromisoformat(deal.strike_date) if deal.strike_date else value_d))
     # Avant la constatation initiale, `T_elapsed` devient NÉGATIF : rien ne
     # s'est écoulé, et l'écart au strike décale les constatations vers l'avenir
     # (_shift_events_for_mtf soustrait T_elapsed). L'axe commence dans les deux
@@ -176,24 +210,37 @@ def mtm_core(
     T_elapsed = (today - _elapsed_origin).days / 365.25
     T_remaining = max(1 / 52, (maturity - today).days / 365.25)
     residual_payment_t = (
-        (date.fromisoformat(deal.payment_date) - today).days / 365.25
-        if deal.payment_date else None)
+        ((terms.payment_date if terms and terms.payment_date
+          else date.fromisoformat(deal.payment_date)) - today).days / 365.25
+        if (terms and terms.payment_date) or deal.payment_date else None)
     strike_set_t = -T_elapsed if pre_strike else None
 
     # Le rejeu du passé et la construction du résiduel vivent dans le cœur
     # (core/inlife_valuation) : le Pricer doit pouvoir les appeler sans qu'un
     # deal existe. Ici on ne fait que traduire un deal en paramètres.
     strike_event = next((e for e in _get_events(deal_id, session) if e.t_years == 0.0), None)
+    deal_market = json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {}
+    if terms is not None:
+        deal_market = {
+            **deal_market,
+            "constats": terms.constats.to_dict(),
+            "user_params": terms.user_params(),
+        }
     produit = InLifeProduct(
-        script_snapshot=deal.script_snapshot,
-        underlyings=json.loads(deal.underlyings_json),
+        script_snapshot=terms.script if terms is not None else deal.script_snapshot,
+        underlyings=([u.model_dump(mode="json") for u in terms.underlyings]
+                     if terms is not None else json.loads(deal.underlyings_json)),
         strike_levels=json.loads(strike_event.spots_json) if strike_event else {},
-        strike_date=(date.fromisoformat(deal.strike_date) if deal.strike_date else value_d),
+        strike_date=(terms.strike_date if terms and terms.strike_date else
+                     (date.fromisoformat(deal.strike_date) if deal.strike_date else value_d)),
         value_date=value_d,
-        tenor=deal.T,
-        currency=(deal.devise or "").strip().upper(),
-        payment_date=(date.fromisoformat(deal.payment_date) if deal.payment_date else None),
-        market=json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {},
+        tenor=terms.T if terms is not None else deal.T,
+        currency=((terms.settlement_ccy if terms else deal.devise) or "").strip().upper(),
+        payment_date=(terms.payment_date if terms and terms.payment_date else
+                      (date.fromisoformat(deal.payment_date) if deal.payment_date else None)),
+        market=deal_market,
+        frozen_schedule=(terms.resolved_events.to_dict()
+                         if terms is not None and terms.resolved_events else None),
     )
     # Historique réalisé depuis le strike (même fenêtre J-7 que le refresh du
     # cycle de vie : un strike un week-end ou un férié a besoin de la clôture
@@ -203,8 +250,9 @@ def mtm_core(
         raise HTTPException(422, "Aucun ticker défini sur ce deal")
     # Avant le strike, la fenêtre partirait d'une date postérieure à sa propre
     # fin : Yahoo refuse l'intervalle et le MtM s'arrêtait là. On borne au jour
-    # de valorisation — l'historique ne sert alors qu'à la recalibration
-    # réalisée et à l'affichage, le rejeu n'ayant rien à rejouer.
+    # de valorisation — l'historique ne sert alors qu'à l'affichage, le rejeu
+    # n'ayant rien à rejouer. La recalibration réalisée charge sa propre
+    # fenêtre plus bas (calibration_history_start).
     fetch_start = (min(produit.strike_date, today) - timedelta(days=7)).isoformat()
     if injected_price_loader:
         px_data = load_prices(tickers, fetch_start, today.isoformat())
@@ -276,10 +324,15 @@ def mtm_core(
     }
     statistical_px_data = None
     if body.recalibrate == "realized":
+        # The calibration reads its own window, ending at the valuation date.
+        # Reusing the replay window (strike − 7 days) capped the realized vol at
+        # the time elapsed since the strike, and gave a forward-start deal one
+        # week of history — too few returns, MtM refused.
+        statistical_start = calibration_history_start(today, body.window_days).isoformat()
         if injected_price_loader:
             try:
                 statistical_px_data = load_prices(
-                    tickers, fetch_start, today.isoformat(), adjusted=True)
+                    tickers, statistical_start, today.isoformat(), adjusted=True)
             except TypeError:
                 # Test/legacy injected loaders may expose the former three
                 # argument contract. Production always takes the explicit
@@ -287,7 +340,7 @@ def mtm_core(
                 statistical_px_data = px_data
         else:
             statistical_px_data = load_prices(
-                tickers, fetch_start, today.isoformat(), adjusted=True,
+                tickers, statistical_start, today.isoformat(), adjusted=True,
                 provider=market_provider)
         if "error" in statistical_px_data:
             raise HTTPException(422, statistical_px_data["error"])
@@ -471,6 +524,7 @@ def mtm_core(
     payload = {
         "deal_id": deal_id,
         "reference": deal.reference,
+        "valuation_date": today.isoformat(),
         "mtm": result["price"],
         "ic95": result["ic95"],
         "prob_gt100": result["prob_gt100"],

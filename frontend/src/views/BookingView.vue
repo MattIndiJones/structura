@@ -214,7 +214,7 @@
                     </td>
                     <td class="py-2 pr-3 whitespace-nowrap">
                       <span v-if="w.product_type" class="text-slate-500 text-[10px] border border-slate-700 rounded px-1.5 py-0.5">
-                        {{ w.product_type }}
+                        {{ productTypeLabel(w.product_type) }}
                       </span>
                       <span v-else class="text-slate-600">—</span>
                     </td>
@@ -348,18 +348,16 @@
                 </div>
                 <div class="deal-card__identity-meta">
                   <span v-if="d.product_type" class="font-medium text-slate-400">
-                    {{ d.product_type }}
+                    {{ productTypeLabel(d.product_type) }}
                   </span>
                   <span v-if="d.product_type && d.contrepartie" class="text-slate-600">·</span>
                   <span class="text-slate-300">{{ d.contrepartie }}</span>
                   <span class="text-[10px] border rounded px-1.5 py-0.5"
-                    :class="d.fixing_policy === 'FOUR_EYES'
-                      ? 'border-amber-800/60 bg-amber-950/30 text-amber-400'
-                      : 'border-blue-800/60 bg-blue-950/30 text-blue-400'">
-                    {{ d.fixing_policy === 'FOUR_EYES' ? 'Contrôle 4 yeux' : 'Yahoo auto' }}
+                    style="border-color: var(--border); background: var(--surface2); color: var(--accent);">
+                    Fixings automatiques
                   </span>
-                  <span :class="statusClass(d.status)" class="badge uppercase">
-                    {{ d.status === 'en_reglement' ? 'en règlement' : d.status }}
+                  <span :class="statusClass(d.status)" class="badge">
+                    {{ statusLabel(d.status) }}
                   </span>
                 </div>
               </div>
@@ -395,9 +393,23 @@
                     class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
                   ↻ Refresh
                 </button>
-                <RouterLink :to="`/pricer?dealId=${d.id}`" class="btn-secondary text-xs px-3 py-1.5" @click.stop>
-                  → Ouvrir
-                </RouterLink>
+                <details class="deal-open-menu" @click.stop>
+                  <summary class="btn-secondary text-xs px-3 py-1.5">
+                    → Ouvrir <span aria-hidden="true">▾</span>
+                  </summary>
+                  <div class="deal-open-menu__items">
+                    <RouterLink
+                      :to="{ path: '/pricer', query: { dealId: d.id, tab: 'script' } }"
+                      class="deal-open-menu__item">
+                      Ouvrir ici
+                    </RouterLink>
+                    <RouterLink
+                      :to="{ path: '/pricer', query: { dealId: d.id, tab: 'script' } }"
+                      class="deal-open-menu__item" target="_blank" rel="noopener noreferrer">
+                      Ouvrir dans un nouvel onglet ↗
+                    </RouterLink>
+                  </div>
+                </details>
               </div>
             </div>
 
@@ -547,6 +559,13 @@
                   <span class="deal-label">Base du calcul</span>
                   <strong class="deal-value">{{ mtmModeFor(d.id) === 'realized' ? 'Marché actuel' : 'Paramètres du booking' }}</strong>
                 </div>
+                <label v-if="['actif', 'en_reglement'].includes(d.status)" class="deal-basis">
+                  <span class="deal-label">Date du calcul</span>
+                  <input type="date" class="input deal-panel__select w-full text-xs py-1.5"
+                    :value="mtmDateFor(d.id)" :min="mtmMinDate(d)" :max="todayIso"
+                    @click.stop @change="setMtmDate(d.id, $event.target.value)"
+                    title="Date à laquelle le deal et son marché sont valorisés" />
+                </label>
                 <p class="deal-basis-note">
                   {{ mtmModeFor(d.id) === 'realized'
                     ? 'Données Yahoo actualisées. Le taux et le funding restent ceux du booking.'
@@ -585,6 +604,10 @@
                 <header class="deal-panel__head">
                   <span class="deal-panel__dot" aria-hidden="true"></span>
                   <h3 class="deal-panel__title">Résultat</h3>
+                  <RouterLink :to="`/booking/${d.id}/valuations`"
+                    class="deal-history-link" @click.stop>
+                    Historique
+                  </RouterLink>
                 </header>
                 <!-- Rien de calculé (ou calcul en cours) : l'action est au centre du
                      panneau plutôt qu'en bas d'un grand vide. -->
@@ -621,6 +644,12 @@
                       <div class="deal-mtm__value">{{ (mtmResults[d.id].mtm * 100).toFixed(2) }}%</div>
                       <div class="deal-mtm__ci">
                         IC 95% · {{ (mtmResults[d.id].ic95[0] * 100).toFixed(2) }}% à {{ (mtmResults[d.id].ic95[1] * 100).toFixed(2) }}%
+                      </div>
+                      <div class="deal-mtm__ci">
+                        Valorisation au {{ formatDate(mtmResultDate(d.id)) }}
+                        <span v-if="mtmResults[d.id]._runCreatedAt">
+                          · calcul enregistré le {{ new Date(mtmResults[d.id]._runCreatedAt).toLocaleString('fr-FR') }}
+                        </span>
                       </div>
                     </div>
                     <div class="deal-result-grid">
@@ -946,13 +975,13 @@
                           <td class="py-1.5 pr-3">
                             <span :class="fixingStatusClass(ev.fixing_status)"
                               class="px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap">
-                              {{ fixingStatusLabel(ev.fixing_status, d.fixing_policy) }}
+                              {{ fixingStatusLabel(ev.fixing_status) }}
                             </span>
                           </td>
                           <td class="py-1.5 pr-3">
                             <span :class="operationalEventClass(ev)"
                               class="px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap">
-                              {{ operationalEventLabel(ev, d.fixing_policy) }}
+                              {{ operationalEventLabel(ev) }}
                             </span>
                           </td>
                           <td class="py-1.5">
@@ -1083,6 +1112,7 @@ import AutoFixingExceptionModal from '../components/AutoFixingExceptionModal.vue
 import { useDataFilter } from '../composables/useDataFilter.js'
 import { formatInt, formatPercent, formatDate } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel, barrierGauges } from '../utils/barriers.js'
+import { productTypeLabel } from '../data/payscriptTemplates.js'
 import {
   compterConstatations, compterReleves, estReleve, libelleReduction, ordonnerEvenements,
   rangConstatation,
@@ -1185,6 +1215,7 @@ async function toggleDetail(id) {
   expanded[id] = opening
   if (!opening) return
   if (!details[id]) await loadDetail(id)
+  await loadSavedMtm(id)
   await focusDealCard(id)
 }
 
@@ -1262,17 +1293,17 @@ function eventStatusClass(s) {
   return map[s] || 'bg-slate-800 text-slate-500'
 }
 
-function fixingStatusLabel(status, policy = '') {
+function fixingStatusLabel(status) {
   const labels = {
     EXPECTED: 'Attendu',
-    RECEIVED: policy === 'AUTO_YAHOO' ? 'Reçu — décision utilisateur' : 'Reçu — Checker requis',
-    VALIDATED: 'Validé',
+    RECEIVED: 'Reçu — exception source',
+    VALIDATED: 'Officiel',
     APPLIED: 'Appliqué',
     PARTIAL: 'Incomplet',
     MISSING: 'Manquant',
     REJECTED: 'Rejeté',
     CONTESTED: 'Contesté',
-    MANUAL_REVIEW_REQUIRED: policy === 'AUTO_YAHOO' ? 'À décider' : 'À contrôler',
+    MANUAL_REVIEW_REQUIRED: 'Exception source',
   }
   return labels[status] || status || 'Inconnu'
 }
@@ -1286,12 +1317,10 @@ function fixingStatusClass(status) {
   return 'bg-slate-800 text-slate-500'
 }
 
-function operationalEventLabel(ev, policy = '') {
+function operationalEventLabel(ev) {
   if (ev.event_date > todayIso) return 'À venir'
-  if (ev.fixing_status === 'EXPECTED') return 'Clôture attendue'
-  if (ev.fixing_status === 'RECEIVED') {
-    return policy === 'AUTO_YAHOO' ? 'À traiter par l’utilisateur' : 'En attente de validation'
-  }
+  if (ev.fixing_status === 'EXPECTED') return 'À récupérer'
+  if (ev.fixing_status === 'RECEIVED') return 'Exception à traiter'
   if (['PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)) {
     return 'Exception à traiter'
   }
@@ -1491,9 +1520,27 @@ async function refreshBook() {
 const mtmLoading = reactive({})
 const mtmResults = reactive({})
 const mtmMode = reactive({})   // deal id -> 'realized' (défaut) | 'booking'
+const mtmDate = reactive({})
+const mtmRestored = reactive({})
 
 function mtmModeFor(id) {
   return mtmMode[id] || 'realized'
+}
+
+function mtmDateFor(id) {
+  return mtmDate[id] || todayIso
+}
+
+function mtmMinDate(deal) {
+  if (deal.status === 'en_reglement') return deal.maturity_date || deal.trade_date || undefined
+  return deal.trade_date || undefined
+}
+
+function mtmResultDate(id) {
+  const result = mtmResults[id]
+  return result?.valuation_date
+    || result?.market_used?.data?.contractual_history?.requested_end
+    || mtmDateFor(id)
 }
 
 function setMtmMode(id, mode) {
@@ -1501,6 +1548,53 @@ function setMtmMode(id, mode) {
   mtmMode[id] = mode
   // A result must never remain visible under a newly selected parameter set.
   mtmResults[id] = null
+}
+
+function setMtmDate(id, valuationDate) {
+  const nextDate = valuationDate || todayIso
+  if (mtmDateFor(id) === nextDate) return
+  mtmDate[id] = nextDate
+  // Le chiffre visible doit toujours correspondre aux paramètres affichés.
+  mtmResults[id] = null
+}
+
+function applySavedMtm(saved) {
+  const id = saved.deal_id
+  const result = saved.result || {}
+  if (result.mtm == null && !result.resolved_pending) return
+
+  const request = saved.diagnostics?.request || {}
+  mtmMode[id] = request.recalibrate === 'none' ? 'booking' : 'realized'
+  const savedDate = request.valuation_date
+    || result.valuation_date
+    || result.market_used?.data?.contractual_history?.requested_end
+  if (savedDate) mtmDate[id] = savedDate
+  mtmResults[id] = {
+    ...result,
+    _runCreatedAt: saved.created_at,
+    _restored: true,
+  }
+}
+
+async function loadSavedMtms(ids) {
+  const pendingIds = [...new Set(ids)]
+    .filter(id => id && !mtmRestored[id] && !mtmLoading[id])
+  if (!pendingIds.length) return
+  for (const id of pendingIds) mtmRestored[id] = true
+  try {
+    const query = encodeURIComponent(pendingIds.join(','))
+    const response = await apiFetch(`/api/deals/valuation-runs/latest-mtm?deal_ids=${query}`)
+    if (!response.ok) return
+    const savedRuns = await response.json()
+    for (const saved of savedRuns) applySavedMtm(saved)
+  } catch {
+    // L'historique est un confort d'affichage : un échec de lecture ne doit
+    // jamais empêcher un nouveau calcul explicite.
+  }
+}
+
+async function loadSavedMtm(id) {
+  await loadSavedMtms([id])
 }
 
 function modelBusinessLabel(model) {
@@ -1552,14 +1646,18 @@ async function runMtm(id) {
   mtmResults[id] = null
   try {
     const mode = mtmModeFor(id)
+    const valuationDate = mtmDateFor(id)
     const res = await apiFetch(`/api/deals/${id}/mtm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recalibrate: mode === 'realized' ? 'realized' : 'none' }),
+      body: JSON.stringify({
+        recalibrate: mode === 'realized' ? 'realized' : 'none',
+        valuation_date: valuationDate,
+      }),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || 'Erreur MtM')
-    mtmResults[id] = data
+    mtmResults[id] = { ...data, _runCreatedAt: new Date().toISOString() }
   } catch (e) {
     mtmResults[id] = { error: e.message }
   } finally {
@@ -1588,7 +1686,10 @@ async function runGreeks(id) {
     const res = await apiFetch(`/api/deals/${id}/greeks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recalibrate: mode === 'realized' ? 'realized' : 'none' }),
+      body: JSON.stringify({
+        recalibrate: mode === 'realized' ? 'realized' : 'none',
+        valuation_date: mtmDateFor(id),
+      }),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || 'Erreur Greeks')
@@ -1642,7 +1743,9 @@ const explainD1 = reactive({})
 const explainD2 = reactive({})
 const explainLoading = reactive({})
 const explainResults = reactive({})
-const todayIso = new Date().toISOString().slice(0, 10)
+const now = new Date()
+const todayIso = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+  .toISOString().slice(0, 10)
 
 async function runExplain(d) {
   explainLoading[d.id] = true
@@ -1710,7 +1813,10 @@ async function downloadNote(d) {
     const res = await apiFetch(`/api/deals/${d.id}/mtm/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recalibrate: mode === 'realized' ? 'realized' : 'none' }),
+      body: JSON.stringify({
+        recalibrate: mode === 'realized' ? 'realized' : 'none',
+        valuation_date: mtmDateFor(d.id),
+      }),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
@@ -1884,6 +1990,7 @@ async function openDealDetail(id) {
   activeTab.value = 'deals'
   expanded[id] = true
   if (!details[id]) await loadDetail(id)
+  await loadSavedMtm(id)
   await focusDealCard(id)
 }
 
@@ -2010,6 +2117,16 @@ function statusClass(s) {
   return map[s] || 'badge-muted'
 }
 
+function statusLabel(status) {
+  return {
+    actif: 'En cours',
+    en_reglement: 'En règlement',
+    'callé': 'Rappelé',
+    'échu': 'Échu',
+    'résilié': 'Résilié',
+  }[status] || status || 'Statut inconnu'
+}
+
 const formatNominal = formatInt
 
 function describeOutcome(ev) {
@@ -2040,6 +2157,11 @@ async function refresh(dealId) {
 
 onMounted(async () => {
   await dealsStore.loadDeals()
+  await loadSavedMtms(
+    dealsStore.deals
+      .filter(deal => ['actif', 'en_reglement'].includes(deal.status))
+      .map(deal => deal.id),
+  )
   loadWatchlist()
   loadAlerts()
   portfoliosStore.load()
@@ -2089,6 +2211,51 @@ onMounted(async () => {
   overflow-x: auto;
   padding-bottom: 0.125rem;
   scrollbar-width: thin;
+}
+
+.deal-open-menu {
+  flex: 0 0 auto;
+}
+
+.deal-open-menu[open] {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.deal-open-menu > summary {
+  display: inline-flex;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+
+.deal-open-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.deal-open-menu__items {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.deal-open-menu__item {
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--surface);
+  padding: 0.375rem 0.55rem;
+  color: var(--text);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.deal-open-menu__item:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .deal-card__portfolio {
@@ -2195,6 +2362,18 @@ onMounted(async () => {
   letter-spacing: 0.08em;
   line-height: 1.2;
   text-transform: uppercase;
+}
+
+.deal-history-link {
+  margin-left: auto;
+  border-bottom: 1px solid transparent;
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.deal-history-link:hover {
+  border-bottom-color: var(--accent);
 }
 
 .deal-well {
@@ -2543,7 +2722,8 @@ onMounted(async () => {
   gap: 0.3rem;
 }
 
-.deal-panel__select.select {
+.deal-panel__select.select,
+.deal-panel__select.input {
   border-color: var(--panel-edge);
   background-color: var(--surface);
   color: var(--text);
@@ -2551,7 +2731,9 @@ onMounted(async () => {
 }
 
 .deal-panel__select.select:hover,
-.deal-panel__select.select:focus {
+.deal-panel__select.select:focus,
+.deal-panel__select.input:hover,
+.deal-panel__select.input:focus {
   border-color: var(--panel-accent);
 }
 

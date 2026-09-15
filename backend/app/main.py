@@ -45,6 +45,7 @@ from .api.admin import router as admin_router
 from .api.alerts import router as alerts_router
 from .api.compute import router as compute_router
 from .api.var import router as var_router
+from .api.products import router as products_router
 from .db.database import init_db
 from .services.lifecycle_alerts import (
     SCHEDULER_TIMEZONE, configure_lifecycle_handlers,
@@ -76,8 +77,8 @@ def on_startup():
 
 # Daily lifecycle pass at 23:00 local — after the US close, since deal events
 # are close-of-day observations and Yahoo only serves reliable closes. The
-# fixing policy frozen on each deal decides whether the pass is automatic or
-# proposal-only. Safe as a plain in-process task: run.py runs a single worker
+# provider controls decide whether a close can become official automatically.
+# Safe as a plain in-process task: run.py runs a single worker
 # with reload disabled, and run_scheduled_refresh() never raises.
 @app.on_event("startup")
 async def start_lifecycle_scheduler():
@@ -125,6 +126,7 @@ app.include_router(admin_router)
 app.include_router(alerts_router)
 app.include_router(compute_router)
 app.include_router(var_router)
+app.include_router(products_router)
 app.include_router(pricing_router)
 app.include_router(market_data_router)
 app.include_router(simulation_router)

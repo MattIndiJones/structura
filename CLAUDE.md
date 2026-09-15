@@ -48,7 +48,7 @@ en français. Code, commentaires, noms de fichiers/variables : anglais.
 ## Conventions de pricing — non négociables
 
 Acquis du chantier des 26-27/08/2026 (commit `9817771`). Chacune de ces règles vient
-d'un prix faux qui ne se signalait pas. Le détail est dans `REPRISE_2026-08-27.md`.
+d'un prix faux qui ne se signalait pas. Le détail est dans `docs/handoffs/REPRISE_2026-08-27.md`.
 
 ### Les quatre dates
 
@@ -135,7 +135,7 @@ voit pas un fil débranché : écrire un test qui exige que le prix **bouge**.
 **Et écrire les magnitudes comme ce qu'elles sont : des mesures d'instance.** Les quatre
 chiffres de cette page — 5,7 bps, −491,6 bps, −0,48 pt, le sens de la courbe de taux —
 venaient tous de la note Marex et se lisaient comme des constantes. Aucun ne se reproduit
-sur un autocall générique (audit du 08/09/2026, `AUDIT_CONVENTIONS_PRICING_2026-09-08.md`).
+sur un autocall générique (audit du 08/09/2026, `docs/audits/AUDIT_CONVENTIONS_PRICING_2026-09-08.md`).
 Les quatre règles, elles, tiennent : c'est leur illustration qui était trop étroite. Un
 chiffre présenté comme général et qu'on ne retrouve pas fait douter de la règle qu'il
 devait servir.
@@ -163,10 +163,14 @@ son absence casse toute résolution de calendrier CONSTAT.
 
 Deux niveaux, et ils ne servent pas à la même chose :
 
-- **Ce fichier et les `REPRISE_<date>.md` à la racine** sont versionnés : ils suivent le
-  dépôt d'une machine à l'autre. Tout ce qui doit survivre à un changement de poste va
-  ici. `REPRISE_2026-08-27.md` est le plus récent — il porte le compte rendu des deux
-  journées AO/pricing, les points à vérifier et ce qui reste à faire.
+- **Ce fichier et les notes de `docs/`** sont versionnés : ils suivent le dépôt d'une
+  machine à l'autre. Tout ce qui doit survivre à un changement de poste va ici.
+  `docs/README.md` est l'index : chaque note y est rangée par nature (`audits/`,
+  `projects/<domaine>/`, `reference/`, `lessons/`, `handoffs/`, `archive/`) avec ce qui
+  est fait et ce qui reste à faire. **Une nouvelle note va dans son dossier et entre dans
+  l'index, jamais à la racine.** Le dernier point de reprise est
+  `docs/handoffs/REPRISE_2026-08-27.md` (journées AO/pricing) ; les chantiers ouverts
+  depuis tiennent leur état dans leur note de `docs/projects/`.
 - **Le système de mémoire automatique** garde l'historique détaillé et les préférences de
   travail. Le consulter et le tenir à jour plutôt que redemander le contexte à Philippe —
   mais il vit hors du dépôt, donc il **ne suit pas** un changement de machine.

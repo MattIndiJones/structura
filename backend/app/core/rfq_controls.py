@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
@@ -12,6 +13,7 @@ from typing import Any
 
 from ..db.models import RfqQuote, RfqRequest
 from .payscript.parser import parse_script, resolve_constats
+from .schemas import validate_correlation_matrix
 
 
 MODEL_PRICE_MAX_AGE_MINUTES = max(
@@ -82,6 +84,45 @@ def _hash(value: dict) -> str:
 
 def product_terms_hash(terms: dict) -> str:
     return _hash(_normalise(terms))
+
+
+def booking_terms_differences(expected: dict, actual: dict) -> list[str]:
+    """Keys of an RFQ's frozen terms that a booking really changes.
+
+    `product_terms` is one canonical WRITING of the contract, and two screens
+    write the same contract differently. The RFQ screen rounds T to four
+    decimals, the Pricer re-derives it from the maturity to six; the Pricer
+    sends a schedule's empty observation window as two null keys the RFQ
+    screen never writes. Compared as written, every RFQ carrying a CONSTAT
+    schedule was refused at booking, with nothing on screen to fix.
+
+    Compared as a contract, a real change is still refused. T counts in whole
+    days, the unit it is derived from: one day later is another maturity. A
+    constatation drops only its null keys: any value still counts.
+
+    The terms themselves stay untouched, as does their hash on the deal's
+    provenance: only this comparison reads through the writing.
+    """
+    def as_contract(terms: dict) -> dict:
+        view = dict(terms)
+        tenor = view.get("T")
+        if isinstance(tenor, (int, float)) and not isinstance(tenor, bool):
+            # Half up, like the date arithmetic both screens derive T from
+            # (JavaScript Math.round). Python's banker's round() would count
+            # T = 2 as 730 days, where the Pricer puts the maturity 731 days
+            # after the strike.
+            view["T"] = math.floor(float(tenor) * 365.25 + 0.5)
+        constats = view.get("constats")
+        if isinstance(constats, dict):
+            view["constats"] = {
+                name: ({k: v for k, v in value.items() if v is not None}
+                       if isinstance(value, dict) else value)
+                for name, value in constats.items()
+            }
+        return view
+
+    frozen, booked = as_contract(expected), as_contract(actual)
+    return sorted(key for key in expected if booked.get(key) != frozen.get(key))
 
 
 def pricing_input_hash(script_snapshot: str, params: dict | None) -> str:
@@ -157,6 +198,19 @@ def rfq_readiness_failures(rfq: RfqRequest) -> list[ControlFailure]:
                     "UNDERLYING_INCOMPLETE",
                     f"Sous-jacent {idx} incomplet : {', '.join(missing)}."))
 
+    correlation = params.get("corr_matrix")
+    # A one-name RFQ has no pairwise correlation to specify.  From two names
+    # onward the matrix is a material pricing and Risk input, so an API caller
+    # must provide the complete basket matrix instead of relying on a hidden
+    # identity fallback in a later module.
+    if len(underlyings) > 1 or correlation:
+        try:
+            validate_correlation_matrix(correlation or [], len(underlyings))
+        except (TypeError, ValueError) as exc:
+            failures.append(ControlFailure(
+                "CORRELATION_MATRIX_INVALID",
+                f"Matrice de corrélation RFQ invalide : {exc}"))
+
     notional = params.get("notional")
     if not isinstance(notional, (int, float)) or isinstance(notional, bool) or notional <= 0:
         failures.append(ControlFailure(
@@ -208,20 +262,34 @@ def rfq_readiness_failures(rfq: RfqRequest) -> list[ControlFailure]:
     if not isinstance(tenor, (int, float)) or isinstance(tenor, bool) or tenor <= 0:
         failures.append(ControlFailure("TENOR_INVALID", "La maturité T de la RFQ doit être positive."))
 
-    if rfq.script_snapshot:
-        try:
-            compiled = parse_script(rfq.script_snapshot)
-            # Le calendrier se compte depuis la constatation initiale : c'est
-            # là que le produit commence, pas au règlement.
-            anchor = (date.fromisoformat(params["strike_date"])
-                      if _valid_iso_date(params.get("strike_date")) else None)
-            resolve_constats(compiled, params.get("constats") or {}, anchor=anchor,
-                             currency=str(params.get("currency") or "").strip().upper() or None)
-        except (KeyError, TypeError, ValueError) as exc:
-            failures.append(ControlFailure(
-                "CONTRACT_CALENDAR_INVALID",
-                f"Le calendrier contractuel n'est pas exploitable : {exc}."))
+    failures.extend(contract_calendar_failures(rfq.script_snapshot, params))
     return failures
+
+
+def contract_calendar_failures(script_snapshot: str, params: dict) -> list[ControlFailure]:
+    """Compile and resolve the exact calendar carried by an RFQ payload.
+
+    This focused control is shared by RFQ creation and the booking gate.  A
+    to-trade tender must never become immutable with a missing roll date or an
+    incomplete nested frequency only to fail later, after quotes were entered.
+    """
+    if not (script_snapshot or "").strip():
+        return []
+    try:
+        compiled = parse_script(script_snapshot)
+        # Contract calendars are measured from the initial fixing, including
+        # on a forward start where settlement happens before that fixing.
+        anchor = (date.fromisoformat(params["strike_date"])
+                  if _valid_iso_date(params.get("strike_date")) else None)
+        resolve_constats(
+            compiled, params.get("constats") or {}, anchor=anchor,
+            currency=str(params.get("currency") or "").strip().upper() or None,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return [ControlFailure(
+            "CONTRACT_CALENDAR_INVALID",
+            f"Le calendrier contractuel n'est pas exploitable : {exc}.")]
+    return []
 
 def booking_gate_failures(
     rfq: RfqRequest,

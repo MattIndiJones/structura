@@ -45,7 +45,7 @@
         </button>
         <button
           class="btn-primary flex items-center gap-2 text-sm"
-          :disabled="store.loading || store.marketDataLoading || !!store.parseError"
+          :disabled="store.loading || store.marketDataLoading || (!!store.parseError && !store.scriptDirty)"
           @click="store.runPricing()">
           <span v-if="store.loading" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
           {{ store.marketDataLoading ? 'Marché…' : store.loading ? 'Calcul…' : '▶ Pricer' }}
@@ -53,17 +53,24 @@
       </div>
     </div>
 
+    <ProductContextBar />
+
     <!-- Les déclinaisons du deal, juste sous la barre d'outils : ce qu'on
          regarde doit se lire avant ce qu'on lit. -->
     <VariantBar />
 
     <div v-if="store.contractTermsLocked"
-         class="mx-5 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-amber-950 shrink-0">
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span class="text-sm font-bold">🔒 Deal booké</span>
-        <span class="font-mono text-xs font-semibold">{{ store.openedDeal.reference }}</span>
-        <span class="text-xs">
-          Termes contractuels figés · seules les hypothèses de valorisation sont modifiables.
+         class="mx-5 mt-3 rounded-lg border px-3 py-2 shrink-0"
+         style="border-color: var(--border); background: var(--surface2); color: var(--text);">
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span class="inline-flex h-6 w-6 items-center justify-center rounded-full"
+              style="background: color-mix(in srgb, var(--accent) 12%, transparent);" aria-hidden="true">🔒</span>
+        <span class="font-semibold">{{ store.openedDeal ? 'Contrat booké' : 'Produit conservé' }}</span>
+        <span class="font-mono font-semibold" style="color: var(--accent);">
+          {{ store.openedDeal?.reference || store.currentProduct?.reference }}
+        </span>
+        <span style="color: var(--muted);">
+          Payoff, panier et dates figés. Marché, modèle et date de valorisation restent modifiables pour le repricing.
         </span>
       </div>
     </div>
@@ -126,16 +133,20 @@ import ResultsPanel    from '../components/ResultsPanel.vue'
 import KidPanel        from '../components/KidPanel.vue'
 import EmtPanel        from '../components/EmtPanel.vue'
 import SensitiveValue  from '../components/SensitiveValue.vue'
+import ProductContextBar from '../components/ProductContextBar.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDealsStore } from '../stores/deals.js'
 import { useRfqStore } from '../stores/rfq.js'
+import { useProductsStore } from '../stores/products.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
+import { findProductModel } from '../utils/productModels.js'
 
 const store = usePricingStore()
 const dealsStore = useDealsStore()
 const rfqStore = useRfqStore()
+const productsStore = useProductsStore()
 const demo = useDemoModeStore()
 const route = useRoute()
 
@@ -170,14 +181,15 @@ function goToEvents(dealId) {
 }
 
 // Deep link from the Booking view (/pricer?dealId=…) — reload that deal's
-// exact frozen state (script + params + underlyings) into every tab, not
-// just Events, then jump straight there instead of landing on Script.
+// exact frozen state (script + params + underlyings) into every tab. Callers
+// can name the landing tab; legacy links still open the lifecycle events.
 onMounted(async () => {
   const dealId = route.query.dealId
   if (dealId) {
     const deal = await dealsStore.selectDeal(Number(dealId))
     if (deal) await store.loadFromDeal(deal)
-    goToEvents(Number(dealId))
+    if (route.query.tab === 'script') store.leftTab = 'script'
+    else goToEvents(Number(dealId))
     return
   }
 
@@ -188,8 +200,27 @@ onMounted(async () => {
   const fromRfq = route.query.fromRfq
   if (fromRfq) {
     const rfqObj = await rfqStore.fetchOne(Number(fromRfq))
-    if (rfqObj) await store.loadFromRfq(rfqObj)
+    if (rfqObj) {
+      await store.loadFromRfq(rfqObj)
+      if (rfqObj.product_id) {
+        const loaded = await productsStore.fetchOne(rfqObj.product_id)
+        if (loaded) store.currentProduct = loaded.product
+      }
+    }
     store.leftTab = 'deal'
+    return
+  }
+
+  // Opened from « Modèles de produits » (/pricer?modele=…&sousJacents=…&tenor=…):
+  // the same mechanism as the RFQ deep link, the screen itself is unchanged.
+  // An ephemeral session — nothing is kept without an explicit action.
+  const model = findProductModel(route.query.modele)
+  if (model) {
+    await store.loadFromProductModel(model, {
+      underlyingCount: route.query.sousJacents ? Number(route.query.sousJacents) : null,
+      tenorCode: route.query.tenor || null,
+    })
+    store.leftTab = 'script'
   }
 })
 

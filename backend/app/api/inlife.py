@@ -10,7 +10,9 @@ Ce module ouvre la même machinerie que le MtM des deals (core/inlife_valuation)
 à un produit décrit par un formulaire. Le mode ne se choisit pas : il se déduit
 de la date de valorisation. Égale à la date de strike, on price à l'émission ;
 postérieure, on rejoue le passé sur cours réels et on ne simule que la vie
-restante.
+restante ; antérieure (forward start), rien n'est rejoué et chaque trajectoire
+fixe son propre strike à la date de strike — le régime du MtM d'un deal booké
+non encore striké.
 
 Ce qui rend le rejeu indispensable plutôt que confortable : sur un produit à
 mémoire ou à barrière déjà touchée, une valorisation repartie de zéro avec le
@@ -45,6 +47,8 @@ from ..core.valuation_context import (
 from ..db.models import User
 from ..services.market_data import load_hist_prices
 from .auth import get_current_user
+from .auth import receipt_signing_secret
+from ..services.product_receipts import signed_receipt
 from .pricing import _clean_flux
 
 router = APIRouter(prefix="/api", tags=["pricing"])
@@ -63,6 +67,7 @@ class InLifePricingRequest(BaseModel):
     model: str = "constant"
     user_params: dict = Field(default_factory=dict)
     constats: dict = Field(default_factory=dict)
+    frozen_schedule: Optional[dict] = None
     seed: int = 42
     antithetic: bool = True
     # Mêmes leviers de marché que /api/price. Ils manquaient ici : une courbe
@@ -241,8 +246,11 @@ class ResidualContext:
     def sur_axe_residuel(self, courbe):
         """Décale les piliers d'une courbe sur l'axe du MC résiduel."""
         courbe = list(courbe or [])
-        residuelle = [[max(0.0, t - self.T_elapsed), niveau]
-                      for t, niveau in courbe if t > self.T_elapsed]
+        # Before the strike nothing has elapsed: the curve starts at the
+        # valuation date, as the dividend curve and the deal MtM already do.
+        ecoule = max(0.0, self.T_elapsed)
+        residuelle = [[max(0.0, t - ecoule), niveau]
+                      for t, niveau in courbe if t > ecoule]
         if residuelle or not courbe:
             return residuelle
         # Convention d'extrapolation du moteur : le dernier pilier reste plat.
@@ -284,14 +292,17 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
     l'identique.
     """
     valuation = req.valuation_date or req.strike_date
-    if valuation < req.strike_date:
-        raise HTTPException(
-            422, f"La date de valorisation ({valuation}) précède la constatation "
-                 f"initiale ({req.strike_date}) : il n'y a pas encore de produit.")
     if valuation >= req.maturity_date:
         raise HTTPException(
             422, f"La date de valorisation ({valuation}) atteint la maturité "
                  f"({req.maturity_date}) : il n'y a plus d'optionnalité à valoriser.")
+    # Before the initial fixing the product is not struck yet, but it does have
+    # a value — the same regime as the MtM of a booked deal whose strike is to
+    # come (core/inlife_valuation.build_residual): nothing is replayed, no S0 is
+    # read, and every path fixes its own strike at the strike date. This route
+    # used to refuse it while the deal MtM priced it, so the Pricer had no price
+    # where Booking had one.
+    pre_strike = valuation < req.strike_date
 
     tickers = [u.ticker for u in req.underlyings if u.ticker]
     if not tickers:
@@ -299,13 +310,15 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
                                   "qu'on puisse aller chercher son historique.")
 
     # Fenêtre J-7 avant le strike : une constatation initiale un week-end ou un
-    # férié a besoin de la clôture qui la précède.
-    debut = (req.strike_date - timedelta(days=7)).isoformat()
+    # férié a besoin de la clôture qui la précède. Before the strike the window
+    # would start after its own end, so it is bounded by the valuation date, as
+    # in the deal MtM.
+    debut = (min(req.strike_date, valuation) - timedelta(days=7)).isoformat()
     px = load_hist_prices(tickers, debut, valuation.isoformat())
     if "error" in px:
         raise HTTPException(422, px["error"])
     dates_list, prices = px.get("dates", []), px.get("prices", {})
-    if not dates_list:
+    if not dates_list and not pre_strike:
         raise HTTPException(
             422, "Aucun historique sur la période — vérifiez les tickers et la date "
                  "de constatation initiale.")
@@ -313,7 +326,7 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
     # Un payoff qui dépend du chemin ne se reconstitue pas sans historique :
     # mieux vaut refuser que rendre un nombre plausible et faux.
     manquants = [tk for tk in tickers if not prices.get(tk)]
-    if manquants:
+    if manquants and not pre_strike:
         chemin = path_dependency_reasons(req.script)
         detail = (f"Historique absent pour {', '.join(manquants)}.")
         if chemin:
@@ -322,7 +335,7 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
         raise HTTPException(422, detail)
 
     niveaux = dict(getattr(req, "strike_levels", None) or {})
-    if not niveaux:
+    if not niveaux and not pre_strike:
         au_strike = _closes_at(prices, dates_list, req.strike_date.isoformat())
         for u in req.underlyings:
             niveau = au_strike.get(u.ticker)
@@ -356,9 +369,12 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
         currency=(req.settlement_ccy or "").strip().upper(),
         payment_date=req.payment_date,
         market=market,
+        frozen_schedule=req.frozen_schedule,
     )
 
-    T_elapsed = max(0.0, (valuation - req.strike_date).days / 365.25)
+    # Negative before the strike: build_residual shifts the constatations later
+    # by the gap and returns the step at which each path fixes its strike.
+    T_elapsed = (valuation - req.strike_date).days / 365.25
     try:
         residuel = build_residual(produit, prices, dates_list, T_elapsed,
                                   valuation, variant=variant)
@@ -474,8 +490,13 @@ def price_in_life(
         except ValueError as exc:
             raise HTTPException(422, f"Greeks résiduels impossibles : {exc}")
 
-    perfs = {u["name"]: round(niveau, 6) for u, niveau
-             in zip(produit.underlyings, residuel.norm_spots)}
+    # Before the initial fixing, ``norm_spots == [1, ...]`` is only the
+    # engine's simulation base.  It is not an observed performance and must
+    # not be presented as a factual "current level = 100% of strike".
+    perfs = ({}
+             if residuel.pre_strike else
+             {u["name"]: round(niveau, 6) for u, niveau
+              in zip(produit.underlyings, residuel.norm_spots)})
 
     # L'environnement du moteur mêle les PARAM du script aux variables que le
     # passé a réellement écrites. Les renvoyer ensemble sous le nom de
@@ -518,20 +539,31 @@ def price_in_life(
         "fugit": res.get("fugit"),
         "valuation_date": valuation.isoformat(),
         "in_life": T_elapsed > 0,
+        # Valued before its initial fixing: the strike is simulated path by path.
+        "pre_strike": bool(residuel.pre_strike),
         # Ce que la variante fait de l'état repris du passé. Vide hors variante.
         # Affiché à côté du prix : un avenant qui n'utilise plus une variable de
         # mémoire fait disparaître ce que le client a accumulé, et ce fait doit
         # se lire plutôt que se deviner.
         "variant_state_check": ctx.variant_state_check,
-        "pricing_receipt": build_pricing_receipt(req, res["price"]),
+        "pricing_receipt": signed_receipt(
+            build_pricing_receipt(req, res["price"]),
+            secret=receipt_signing_secret(),
+            result={
+                "price": res["price"], "ic95": res["ic95"],
+                "median": res["median"], "var5": res["var5"],
+                "prob_gt100": res["prob_gt100"],
+            }),
         # De quoi écrire le bandeau d'état sans le recalculer côté écran.
         "past": {
-            "years_elapsed": round(T_elapsed, 4),
+            "years_elapsed": round(max(0.0, T_elapsed), 4),
             "years_remaining": round(T_remaining, 4),
             "observations_done": etat["index"],
             "realized_flows": residuel.realized_flows,
             "memory": etat_repris,
-            "worst_of": round(min(residuel.norm_spots), 6) if residuel.norm_spots else None,
+            "worst_of": (None if residuel.pre_strike else
+                         round(min(residuel.norm_spots), 6)
+                         if residuel.norm_spots else None),
             "performances": perfs,
             "strike_levels": niveaux,
         },

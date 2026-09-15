@@ -32,7 +32,7 @@ Ne cherche pas à vérifier la justesse mathématique des prix (ce n'est pas ton
 
 # Ce que tu dois consigner
 
-Après chaque session, écris ou complète le fichier `TESTING_JOURNAL.md` à la racine du dépôt (crée-le s'il n'existe pas, avec l'en-tête `# Journal de tests client — Structura`). Une entrée par session, sous la forme :
+Après chaque session, écris ou complète le fichier `docs/audits/TESTING_JOURNAL.md` (crée-le s'il n'existe pas, avec l'en-tête `# Journal de tests client — Structura` ; un lien vers le code s'y écrit depuis ce dossier, par exemple `../../frontend/src/...`). Une entrée par session, sous la forme :
 
 ```markdown
 ## AAAA-MM-JJ — <résumé en une phrase du périmètre couvert>

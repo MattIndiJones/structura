@@ -8,6 +8,7 @@ Les tests n'appellent pas Yahoo : ils fournissent un historique fabriqué, ce
 qui permet de vérifier ce qui compte vraiment — que l'état du passé entre bien
 dans la valeur.
 """
+import math
 from datetime import date, timedelta
 from types import SimpleNamespace
 
@@ -135,11 +136,139 @@ def test_la_memoire_accumulee_entre_dans_la_valeur(marche):
     assert memoire["DUE"] == pytest.approx(0.14, abs=1e-6)
 
 
-def test_valoriser_avant_la_constatation_initiale_est_refuse(marche):
-    with pytest.raises(HTTPException) as exc:
-        api.price_in_life(_requete(valuation_date=STRIKE - timedelta(days=1)), USER)
-    assert exc.value.status_code == 422
-    assert "précède la constatation initiale" in exc.value.detail
+def _marche_jusqu_a(monkeypatch, appels=None):
+    """Historique fabriqué sur la fenêtre DEMANDÉE — un forward start n'a que
+    quelques jours de cours avant sa date de valorisation."""
+    def _charger(tickers, debut, fin):
+        if appels is not None:
+            appels.append((debut, fin))
+        return _historique(date.fromisoformat(debut), date.fromisoformat(fin), 40.0)
+    monkeypatch.setattr(api, "load_hist_prices", _charger)
+
+
+def test_avant_la_constatation_initiale_le_fixing_est_simule(monkeypatch):
+    """Un forward start valorisé depuis le Pricer. Cette route le refusait
+    (« il n'y a pas encore de produit ») pendant que le MtM du même deal, dans
+    Booking, le pricait : le Pricer n'avait pas de prix là où Booking en avait
+    un. Même régime désormais — rien de rejoué, aucun S₀ lu, le strike simulé
+    trajectoire par trajectoire."""
+    valorisation = STRIKE - timedelta(days=90)
+    appels = []
+    _marche_jusqu_a(monkeypatch, appels)
+
+    res = api.price_in_life(_requete(valuation_date=valorisation), USER)
+
+    assert res["pre_strike"] is True
+    assert res["in_life"] is False
+    assert res["past"]["performances"] == {}
+    assert res["past"]["worst_of"] is None
+    assert res["past"]["observations_done"] == 0
+    assert res["past"]["years_elapsed"] == 0.0
+    assert res["past"]["strike_levels"] == {}
+    assert 0.0 < res["price"] < 2.0
+    # La fenêtre de cours s'arrête à la valorisation : partir du strike moins
+    # sept jours la ferait commencer après sa propre fin.
+    assert appels[0] == ((valorisation - timedelta(days=7)).isoformat(),
+                         valorisation.isoformat())
+
+
+def test_avant_le_strike_l_actualisation_part_de_la_date_de_valorisation(monkeypatch):
+    """La sonde : un zéro-coupon valorisé six mois avant son strike vaut
+    exp(-r · (maturité - valorisation)). Un axe ancré sur le strike rendrait
+    exp(-r · (maturité - strike)), plus d'un point plus haut."""
+    valorisation = STRIKE - timedelta(days=180)
+    _marche_jusqu_a(monkeypatch)
+
+    res = api.price_in_life(_requete(
+        script="AT MATURITY:\n  PAY 1\n", constats={}, payment_date=None,
+        valuation_date=valorisation), USER)
+
+    horizon = (MATURITE - valorisation).days / 365.25
+    assert res["price"] == pytest.approx(math.exp(-0.03 * horizon), abs=1e-3)
+    assert abs(res["price"] - math.exp(-0.03 * (MATURITE - STRIKE).days / 365.25)) > 0.01
+
+
+def test_avant_le_strike_le_pricer_et_booking_donnent_le_meme_prix(monkeypatch):
+    """Le même forward start, le même marché, la même date : le Pricer
+    (/api/price/in-life) et le MtM du deal booké (deal_valuation.mtm_core)
+    passent par le même produit résiduel et doivent rendre le même nombre.
+    C'est l'écart que Philippe a vu le 14/09 : un prix dans Booking, aucun
+    dans le Pricer."""
+    import json
+    from sqlmodel import Session, SQLModel, create_engine
+    from backend.app.core.deal_valuation import MtmRequest, mtm_core
+    from backend.app.db.models import Deal
+
+    valorisation = STRIKE - timedelta(days=90)
+    _marche_jusqu_a(monkeypatch)
+    pricer = api.price_in_life(_requete(valuation_date=valorisation), USER)
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    session = Session(engine)
+    deal = Deal(
+        reference="FWD-CROISE", user_id=1, entity_id=1, script_snapshot=PHOENIX_MEMOIRE,
+        sens="vente", contrepartie="Bank", devise="EUR", nominal=1_000_000,
+        strike_date=STRIKE.isoformat(), value_date="2024-06-18",
+        maturity_date=MATURITE.isoformat(), payment_date="2027-06-23",
+        T=(MATURITE - STRIKE).days / 365.25,
+        underlyings_json=json.dumps([{"name": "U1", "ticker": "UL.PA", "ccy": "EUR"}]),
+        market_snapshot_json=json.dumps({
+            "r": 3.0, "model": "constant", "constats": CALENDRIER,
+            "underlyings": [{"name": "U1", "sigma": 25.0, "q": 2.0}],
+        }),
+        status="actif",
+    )
+    session.add(deal)
+    session.commit()
+    session.refresh(deal)
+
+    def charger(tickers, debut, fin=None, adjusted=False):
+        return _historique(date.fromisoformat(debut), date.fromisoformat(fin), 40.0)
+
+    booking, _ = mtm_core(
+        deal, session, 2000,
+        MtmRequest(recalibrate="none", valuation_date=valorisation),
+        load_prices=charger,
+                          dividend_loader=lambda *_: {"ok": False})
+
+    assert booking["pre_strike"] is True
+    assert booking["valuation_date"] == valorisation.isoformat()
+    assert pricer["price"] == pytest.approx(booking["mtm"], abs=1e-9)
+
+
+def test_la_date_mtm_est_bornee_par_le_trade_et_aujourdhui():
+    from backend.app.core.deal_valuation import MtmRequest, mtm_core
+
+    deal = SimpleNamespace(
+        id=1,
+        trade_date=(date.today() - timedelta(days=5)).isoformat(),
+    )
+    with pytest.raises(HTTPException, match="future"):
+        mtm_core(
+            deal, None,
+            body=MtmRequest(valuation_date=date.today() + timedelta(days=1)),
+        )
+    with pytest.raises(HTTPException, match="précéder la date de trade"):
+        mtm_core(
+            deal, None,
+            body=MtmRequest(valuation_date=date.today() - timedelta(days=6)),
+        )
+
+
+def test_le_prix_avant_le_strike_bouge_avec_la_volatilite(monkeypatch):
+    """Un fil débranché laisserait le prix immobile : la volatilité doit
+    atteindre la fenêtre simulée avant le strike comme le reste."""
+    valorisation = STRIKE - timedelta(days=90)
+    _marche_jusqu_a(monkeypatch)
+
+    def prix(sigma):
+        return api.price_in_life(_requete(
+            valuation_date=valorisation,
+            underlyings=[UnderlyingParams(name="U1", ticker="UL.PA", ccy="EUR",
+                                          sigma=sigma, q=0.02)]), USER)["price"]
+
+    assert abs(prix(0.40) - prix(0.15)) > 0.005
 
 
 def test_valoriser_apres_la_maturite_est_refuse(marche):
