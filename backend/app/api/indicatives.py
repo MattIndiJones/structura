@@ -15,13 +15,23 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import Indicative, Entity, User, Deal
+from ..core.product.inputs import terms_from_input
+from ..core.product.models import FrozenObject, TradeIntent
 from ..core.references import next_reference
+from ..services.product_repository import (
+    ProductError, load_product, owned_record, stage_internal_product,
+    stage_revision,
+)
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api/indicatives", tags=["indicatives"])
 
 
 class IndicativeCreate(BaseModel):
+    product_id: Optional[int] = None
+    product_terms_version: Optional[int] = None
+    product_name: str = ""
+    pricing_input: Optional[dict] = None
     contrepartie: str = ""
     devise: str = "EUR"
     nominal: float = 0.0
@@ -52,6 +62,8 @@ def _row(i: Indicative) -> dict:
         "reference": i.reference,
         "entity_id": i.entity_id,
         "user_id": i.user_id,
+        "product_id": i.product_id,
+        "product_terms_version": i.product_terms_version,
         "contrepartie": i.contrepartie,
         "devise": i.devise,
         "nominal": i.nominal,
@@ -65,6 +77,33 @@ def _row(i: Indicative) -> dict:
     }
 
 
+def _indicative_snapshot(indicative: Indicative) -> FrozenObject:
+    return FrozenObject(_row(indicative))
+
+
+def _sync_product_indicative(
+    session: Session, indicative: Indicative, product, current: User, *, action: str,
+):
+    indicatives = tuple(
+        item for item in product.indicatives
+        if item.to_dict().get("id") != indicative.id
+    ) + (_indicative_snapshot(indicative),)
+    intent = TradeIntent(**{
+        **product.intent.model_dump(mode="json"),
+        "nominal": indicative.nominal or product.intent.nominal,
+        "counterparty_name": (
+            indicative.contrepartie or product.intent.counterparty_name),
+    })
+    return stage_revision(
+        session,
+        product.model_copy(update={"indicatives": indicatives, "intent": intent}),
+        expected_revision=product.revision,
+        actor_id=current.id,
+        action=action,
+        reason=f"Synchronisation de {indicative.reference} dans le Product.",
+    )
+
+
 @router.post("", status_code=201)
 def create_indicative(
     body: IndicativeCreate,
@@ -74,19 +113,74 @@ def create_indicative(
     entity = session.get(Entity, current.entity_id) if current.entity_id else None
     reference = _gen_ref(entity.name if entity else None, session)
 
+    try:
+        if body.product_id is not None:
+            owned_record(session, body.product_id, current)
+            product = load_product(session, body.product_id)
+            if (body.product_terms_version is not None
+                    and body.product_terms_version != product.terms_version):
+                raise ProductError(
+                    "PRODUCT_TERMS_STALE",
+                    "La version des termes du Product a changé.")
+            if body.pricing_input:
+                submitted_terms = terms_from_input(
+                    body.pricing_input, allow_unresolved=False)
+                if submitted_terms.fingerprint != product.terms_fingerprint:
+                    raise ProductError(
+                        "PRODUCT_TERMS_MISMATCH",
+                        "La fiche indicative ne porte pas les termes du Product ouvert.",
+                        422,
+                    )
+        else:
+            if not body.pricing_input:
+                raise ProductError(
+                    "INDICATIVE_PRODUCT_INPUT_REQUIRED",
+                    "Les termes complets du Product sont requis pour créer un indicatif.",
+                    422,
+                )
+            product = stage_internal_product(
+                session,
+                user=current,
+                name=body.product_name or "Produit structuré",
+                terms=terms_from_input(body.pricing_input, allow_unresolved=False),
+                intent=TradeIntent(
+                    nominal=body.nominal or None,
+                    counterparty_name=body.contrepartie,
+                ),
+                reason="Création interne du Product pour la fiche indicative.",
+            )
+    except (ProductError, ValueError) as exc:
+        session.rollback()
+        detail = ({"code": exc.code, "message": str(exc)}
+                  if isinstance(exc, ProductError) else {
+                      "code": "PRODUCT_TERMS_INVALID", "message": str(exc)})
+        raise HTTPException(
+            exc.status if isinstance(exc, ProductError) else 422,
+            detail=detail,
+        ) from exc
+
     ind = Indicative(
+        product_id=product.product_id,
+        product_terms_version=product.terms_version,
         reference=reference,
         entity_id=current.entity_id,
         user_id=current.id,
-        script_snapshot=body.script_snapshot,
+        script_snapshot=product.terms.script,
         script_id=body.script_id,
         contrepartie=body.contrepartie,
         devise=body.devise,
         nominal=body.nominal,
-        underlyings_json=json.dumps(body.underlyings),
-        market_snapshot_json=json.dumps(body.market_snapshot),
+        underlyings_json=json.dumps([
+            item.model_dump(mode="json") for item in product.terms.underlyings]),
+        market_snapshot_json=json.dumps({
+            **body.market_snapshot,
+            **({"pricing_input": body.pricing_input} if body.pricing_input else {}),
+        }),
     )
     session.add(ind)
+    session.flush()
+    _sync_product_indicative(
+        session, ind, product, current, action="PRODUCT_INDICATIVE_CREATED")
     session.commit()
     session.refresh(ind)
     return _row(ind)
@@ -127,7 +221,21 @@ def update_indicative(
     if not ind or ind.user_id != current.id:
         raise HTTPException(404, "Indicatif introuvable")
 
+    if ind.product_id is None:
+        raise HTTPException(409, detail={
+            "code": "INDICATIVE_PRODUCT_MISSING",
+            "message": "Cet indicatif ne possède pas de Product canonique.",
+        })
+    product = load_product(session, ind.product_id)
     data = body.model_dump(exclude_unset=True)
+    if ("script_snapshot" in data and data["script_snapshot"] != ind.script_snapshot) \
+            or ("underlyings" in data and data["underlyings"] != json.loads(ind.underlyings_json)):
+        raise HTTPException(409, detail={
+            "code": "PRODUCT_TERMS_REVISION_REQUIRED",
+            "message": "Révisez les termes du Product avant de modifier le contrat indicatif.",
+        })
+    data.pop("script_snapshot", None)
+    data.pop("underlyings", None)
     if "underlyings" in data:
         ind.underlyings_json = json.dumps(data.pop("underlyings"))
     if "market_snapshot" in data:
@@ -138,6 +246,8 @@ def update_indicative(
 
     ind.updated_at = datetime.utcnow()
     session.add(ind)
+    _sync_product_indicative(
+        session, ind, product, current, action="PRODUCT_INDICATIVE_UPDATED")
     session.commit()
     return _row(ind)
 

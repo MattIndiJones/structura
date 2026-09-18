@@ -2,7 +2,7 @@
   <div class="product-context px-5 py-2 border-b flex flex-wrap items-center gap-3">
     <template v-if="pricing.currentProduct">
       <span class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--muted);">
-        Produit conservé
+        {{ pricing.currentProduct.listed ? 'Produit conservé' : 'Produit interne' }}
       </span>
       <span class="font-mono text-xs font-semibold" style="color: var(--accent);">
         {{ pricing.currentProduct.reference }}
@@ -15,8 +15,13 @@
               :disabled="products.saving" @click="retainCalculation">
         {{ products.saving ? 'Conservation…' : 'Conserver ce calcul' }}
       </button>
+      <button v-if="!pricing.currentProduct.listed" class="btn-secondary text-xs"
+              :class="canRetainCalculation ? '' : 'ml-auto'"
+              :disabled="products.saving" @click="openRetention">
+        Conserver le produit
+      </button>
       <RouterLink :to="{ path: '/rfq', query: { product: pricing.currentProduct.product_id } }"
-                  :class="['btn-secondary text-xs', canRetainCalculation ? '' : 'ml-auto']">
+                  :class="['btn-secondary text-xs', canRetainCalculation || !pricing.currentProduct.listed ? '' : 'ml-auto']">
         Ouvrir une RFQ
       </RouterLink>
       <RouterLink to="/products" class="text-xs font-semibold" style="color: var(--accent);">
@@ -33,6 +38,14 @@
       <button class="btn-secondary text-xs ml-auto" :disabled="!!pricing.parseError" @click="openRetention">
         Conserver le produit
       </button>
+      <button class="btn-secondary text-xs"
+              :disabled="!!pricing.parseError || products.saving"
+              @click="openDirectRfq">
+        {{ products.saving ? 'Préparation…' : 'Ouvrir une RFQ' }}
+      </button>
+      <span v-if="products.error" class="text-xs" style="color: var(--danger);">
+        {{ products.error }}
+      </span>
     </template>
   </div>
 
@@ -65,7 +78,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useProductsStore } from '../stores/products.js'
 import BaseModal from './ui/BaseModal.vue'
@@ -73,6 +86,7 @@ import AlertMessage from './ui/AlertMessage.vue'
 
 const pricing = usePricingStore()
 const products = useProductsStore()
+const router = useRouter()
 const modal = ref(false)
 const name = ref('')
 
@@ -103,6 +117,16 @@ function openRetention() {
 async function retain() {
   if (!name.value || products.saving) return
   const receipt = retainsCurrentPrice.value ? pricing.result.pricing_receipt : null
+  if (pricing.currentProduct && !pricing.currentProduct.listed) {
+    let saved = pricing.currentProduct
+    if (receipt && canRetainCalculation.value) {
+      saved = await products.retainCalculation(saved, receipt)
+    }
+    saved = await products.setListed(saved, { listed: true, name: name.value })
+    pricing.currentProduct = saved
+    modal.value = false
+    return
+  }
   const pricingInput = receipt?.pricing_input || pricing.pricingBody()
   const saved = await products.retainPricing({
     name: name.value,
@@ -122,6 +146,28 @@ async function retainCalculation() {
   const saved = await products.retainCalculation(
     pricing.currentProduct, pricing.result.pricing_receipt)
   pricing.currentProduct = saved
+}
+
+async function openDirectRfq() {
+  if (products.saving || pricing.parseError) return
+  try {
+    const receipt = retainsCurrentPrice.value ? pricing.result.pricing_receipt : null
+    const product = await products.retainPricing({
+      name: pricing.productTitle,
+      pricingInput: receipt?.pricing_input || pricing.pricingBody(),
+      pricingReceipt: receipt,
+      listed: false,
+      intent: {
+        nominal: Number(pricing.globalParams.nominal) > 0
+          ? Number(pricing.globalParams.nominal) : null,
+        side: 'BUY',
+      },
+    })
+    pricing.currentProduct = product
+    await router.push({ path: '/rfq', query: { product: product.product_id } })
+  } catch {
+    // Le store expose déjà le message précis dans la barre de contexte.
+  }
 }
 </script>
 

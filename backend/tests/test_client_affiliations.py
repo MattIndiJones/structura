@@ -26,8 +26,8 @@ from backend.app.core.client_controls import (
     require_deal_attribution_coherent,
 )
 from backend.app.db.models import (
-    Affiliation, Client, Deal, Interaction, Opportunity, OpportunityParticipant,
-    Person,
+    Affiliation, Client, ClientMandate, Deal, Interaction, Opportunity,
+    OpportunityParticipant, Person,
 )
 
 
@@ -283,11 +283,18 @@ def test_un_trade_ne_peut_pas_melanger_deux_clients():
     bank_a, bank_b = _client(session, "Bank A"), _client(session, "Bank B")
     jean = _person(session, "Jean", "Dupont")
     chez_a = _affilie(session, jean, bank_a, "2022-01-01")
+    mandat_b = ClientMandate(
+        entity_id=1, client_id=bank_b.id, name="Mandat Bank B",
+        mandate_type="mandate", status="active",
+    )
+    session.add(mandat_b)
+    session.commit()
+    session.refresh(mandat_b)
 
     with pytest.raises(ClientRuleError) as capture:
         require_deal_attribution_coherent(
             session, client_id=bank_b.id, affiliation_id=chez_a.id,
-            opportunity_id=None)
+            opportunity_id=None, mandate_id=mandat_b.id)
     assert capture.value.code == "AFFILIATION_CLIENT_MISMATCH"
 
 

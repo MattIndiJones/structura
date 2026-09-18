@@ -53,17 +53,14 @@ def test_le_remboursement_est_actualise_a_l_horizon_reel():
         assert abs(prix - _m.exp(-R * T)) < 1e-6, (T, prix)
 
 
-def test_a_resolution_hebdomadaire_la_bascule_est_neutre_sur_le_prix():
-    # Constat important : la grille de simulation est hebdomadaire (SY = 52).
-    # Deux jours ouvres tombent SOUS sa resolution — ts = round(T * 52) rend le
-    # meme nombre de pas avec ou sans la bascule, donc les memes trajectoires.
-    # Cote actualisation, les deux effets se compensent exactement. La bascule
-    # est donc juste sur le fond et neutre sur le chiffre tant que la grille
-    # reste hebdomadaire : elle ne prendra une valeur numerique que sur une
-    # grille assez fine pour representer l ecart strike/value.
+def test_l_horizon_exact_rend_visible_le_decalage_de_deux_jours():
+    # Le nombre de pas reste hebdomadaire, mais chaque pas vaut exactement T/ts.
+    # Les deux jours entre strike et value date augmentent donc bien le temps de
+    # diffusion. Le rebasage compense l'actualisation, pas cette volatilite :
+    # avec les memes nombres aleatoires, un call beneficie de l'horizon accru.
     sans = _price(CALL, 1.0)
     avec = _price(CALL, 1.0 + DEUX_JOURS, value_date_t=DEUX_JOURS)
-    assert avec == sans, (sans, avec)
+    assert avec > sans, (sans, avec)
 
 
 def test_un_ecart_superieur_au_pas_de_grille_se_voit():

@@ -16,6 +16,7 @@ from backend.app.core.valuation_context import (
     build_pricing_receipt, canonical_fingerprint, pricing_input_payload,
 )
 from backend.app.db.database import get_session
+from backend.app.db.product_migrations import migrate_product_links
 from backend.app.db.models import (
     Counterparty, Deal, ProductCalculationRun, ProductRecord,
     ProductTermsVersion, RfqRequest, User,
@@ -95,6 +96,26 @@ def _browser_json_roundtrip(value):
     return value
 
 
+def test_product_link_migration_installs_all_insert_guards():
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        migrate_product_links(connection)
+        migrate_product_links(connection)
+        names = {row[0] for row in connection.execute(text(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='trigger' AND name LIKE 'require_%_product_insert'"
+        )).all()}
+    assert names == {
+        "require_deals_product_insert",
+        "require_rfq_requests_product_insert",
+        "require_indicatives_product_insert",
+        "require_documents_product_insert",
+        "require_kid_records_product_insert",
+        "require_emt_records_product_insert",
+    }
+
+
 def test_conservation_sans_prix_ne_stocke_que_les_termes(product_client):
     product = _create(product_client)
     assert product["revision"] == 1
@@ -107,6 +128,37 @@ def test_conservation_sans_prix_ne_stocke_que_les_termes(product_client):
     assert "sigma" not in terms.terms_json
     assert "corr_matrix" not in terms.terms_json
     assert "r" not in saved
+
+
+def test_indicatif_persistant_cree_un_product_interne_et_y_rattache_le_kid(product_client):
+    pricing_input = _pricing_input()
+    response = product_client.post("/api/indicatives", json={
+        "product_name": "Autocall indicatif",
+        "pricing_input": pricing_input,
+        "script_snapshot": pricing_input["script"],
+        "underlyings": pricing_input["underlyings"],
+        "devise": "EUR",
+        "market_snapshot": {"r": 3.0, "T": 1.0, "model": "constant"},
+    })
+    assert response.status_code == 201, response.text
+    indicative = response.json()
+    product = product_client.session.get(ProductRecord, indicative["product_id"])
+    assert product is not None and product.listed is False
+    assert indicative["product_terms_version"] == 1
+    assert product_client.get("/api/products").json() == []
+
+    kid = product_client.post("/api/kid/save", json={
+        "indicative_id": indicative["id"],
+        "product_title": "Autocall indicatif",
+        "sri": 4, "mrm": 4, "crm": 2, "vev": 0.15, "T_rhp": 1.0,
+        "horizons": [], "costs": {},
+    })
+    assert kid.status_code == 201, kid.text
+    assert kid.json()["product_id"] == indicative["product_id"]
+    refreshed = product_client.get(
+        f"/api/products/{indicative['product_id']}").json()
+    assert refreshed["indicatives"][0]["id"] == indicative["id"]
+    assert refreshed["documents"][-1]["kind"] == "KID"
 
 
 def test_prix_signe_est_conserve_comme_calcul_separe(product_client):
@@ -401,6 +453,71 @@ def test_booking_direct_rattache_l_execution_au_product(product_client):
     assert any(event["label"] == "Maturité"
                for event in refreshed["lifecycle"]["events"])
     assert refreshed["revision"] == 3
+
+
+def test_booking_direct_cree_un_product_interne_sans_doublon(product_client):
+    pricing_input = _pricing_input()
+    request = PricingRequest.model_validate(pricing_input)
+    receipt = signed_receipt(
+        build_pricing_receipt(request, 0.9825),
+        secret=receipt_signing_secret(), result={"price": 0.9825},
+    )
+    response = product_client.post("/api/deals", json={
+        "sens": "vente", "contrepartie": "Banque Test", "devise": "EUR",
+        "nominal": 1_000_000, "fair_value": 98.25, "price_traded": 98.20,
+        "trade_date": "2026-09-14", "strike_date": "2026-09-14",
+        "value_date": "2026-09-16", "maturity_date": "2027-09-14",
+        "payment_date": "2027-09-16", "T": 1.0,
+        "underlyings": [{"name": "SX5E", "ticker": "^STOXX50E", "ccy": "EUR"}],
+        "observation_times": [1.0], "script_snapshot": pricing_input["script"],
+        "market_snapshot": {}, "pricing_receipt": receipt,
+    })
+    assert response.status_code == 201, response.text
+    deal = response.json()
+    assert deal["product_id"] is not None
+    product = product_client.session.get(ProductRecord, deal["product_id"])
+    assert product.listed is False
+    refreshed = product_client.get(f"/api/products/{deal['product_id']}").json()
+    assert refreshed["execution"]["deal_id"] == deal["id"]
+    assert len(refreshed["calculations"]) == 1
+    assert product_client.get("/api/products").json() == []
+
+
+def test_booking_depuis_un_indicatif_reutilise_exactement_son_product(product_client):
+    pricing_input = _pricing_input()
+    indicative_response = product_client.post("/api/indicatives", json={
+        "product_name": "Autocall à documenter",
+        "pricing_input": pricing_input,
+        "script_snapshot": pricing_input["script"],
+        "underlyings": pricing_input["underlyings"],
+        "devise": "EUR",
+    })
+    assert indicative_response.status_code == 201, indicative_response.text
+    indicative = indicative_response.json()
+    receipt = signed_receipt(
+        build_pricing_receipt(PricingRequest.model_validate(pricing_input), 0.9825),
+        secret=receipt_signing_secret(), result={"price": 0.9825},
+    )
+
+    response = product_client.post("/api/deals", json={
+        "indicative_id": indicative["id"],
+        "sens": "vente", "contrepartie": "Banque Test", "devise": "EUR",
+        "nominal": 1_000_000, "fair_value": 98.25, "price_traded": 98.20,
+        "trade_date": "2026-09-14", "strike_date": "2026-09-14",
+        "value_date": "2026-09-16", "maturity_date": "2027-09-14",
+        "payment_date": "2027-09-16", "T": 1.0,
+        "underlyings": [{"name": "SX5E", "ticker": "^STOXX50E", "ccy": "EUR"}],
+        "observation_times": [1.0], "script_snapshot": pricing_input["script"],
+        "market_snapshot": {}, "pricing_receipt": receipt,
+    })
+    assert response.status_code == 201, response.text
+    deal = response.json()
+    assert deal["product_id"] == indicative["product_id"]
+    products = product_client.session.exec(select(ProductRecord)).all()
+    assert len(products) == 1
+    refreshed = product_client.get(f"/api/products/{deal['product_id']}").json()
+    assert refreshed["execution"]["deal_id"] == deal["id"]
+    assert refreshed["indicatives"][0]["status"] == "converti"
 
 
 def test_booking_direct_refuse_un_recu_non_signe(product_client):

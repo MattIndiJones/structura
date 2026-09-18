@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-import httpx
 
 
 # ── System prompts ─────────────────────────────────────────────────────────
@@ -948,87 +947,28 @@ def build_synthesis_payload(
 
 # ── LLM callers ────────────────────────────────────────────────────────────
 
-def call_ollama(
-    payload: str,
-    system_prompt: str,
-    url: str,
-    model: str,
-    timeout: int = 180,
-) -> str:
-    endpoint = url.rstrip("/") + "/api/chat"
-    body = {
-        "model": model,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": payload},
-        ],
-    }
-    resp = httpx.post(endpoint, json=body, timeout=timeout)
-    resp.raise_for_status()
-    return resp.json()["message"]["content"]
+# Backwards-compatible entry points; transport and catalog live in services/llm.
+def call_ollama(payload, system_prompt, url, model, timeout=180):
+    from ..services.llm.providers import complete_with_metadata
+    return complete_with_metadata("ollama", model, system_prompt, payload,
+                                  ollama_url=url, temperature=0.3, max_tokens=3000).text
 
 
-def list_ollama_models(url: str, timeout: int = 10) -> list[str]:
-    endpoint = url.rstrip("/") + "/api/tags"
-    resp = httpx.get(endpoint, timeout=timeout)
-    resp.raise_for_status()
-    data = resp.json()
-    return [m["name"] for m in (data.get("models") or [])]
+def list_ollama_models(url, timeout=10):
+    from ..services.llm.providers import ollama_models, validate_ollama_url, LlmError
+    result = ollama_models(validate_ollama_url(url))
+    if result is None:
+        raise LlmError("Ollama ne répond pas à l'adresse configurée.")
+    return result
 
 
-def call_claude(
-    payload: str,
-    system_prompt: str,
-    api_key: str,
-    model: str = "claude-sonnet-4-6",
-    timeout: int = 180,
-) -> str:
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    body = {
-        "model": model,
-        "max_tokens": 3000,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": payload}],
-    }
-    resp = httpx.post(
-        "https://api.anthropic.com/v1/messages",
-        json=body,
-        headers=headers,
-        timeout=timeout,
-    )
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"]
+def call_claude(payload, system_prompt, api_key, model=None, timeout=180):
+    from ..services.llm.providers import complete_with_metadata
+    return complete_with_metadata("anthropic", model, system_prompt, payload,
+                                  api_key=api_key, temperature=0.3, max_tokens=3000).text
 
 
-def call_openai(
-    payload: str,
-    system_prompt: str,
-    api_key: str,
-    model: str = "gpt-4o",
-    timeout: int = 180,
-) -> str:
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    body = {
-        "model": model,
-        "max_tokens": 3000,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": payload},
-        ],
-    }
-    resp = httpx.post(
-        "https://api.openai.com/v1/chat/completions",
-        json=body,
-        headers=headers,
-        timeout=timeout,
-    )
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+def call_openai(payload, system_prompt, api_key, model=None, timeout=180):
+    from ..services.llm.providers import complete_with_metadata
+    return complete_with_metadata("openai", model, system_prompt, payload,
+                                  api_key=api_key, temperature=0.3, max_tokens=3000).text

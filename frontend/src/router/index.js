@@ -63,6 +63,11 @@ const routes = [
     meta: { title: 'Booking — produits bookés' },
   },
   {
+    path: '/valo-explain',
+    component: () => import('../views/ValoExplainView.vue'),
+    meta: { title: 'Valo Explain — notes de valorisation' },
+  },
+  {
     path: '/booking/:dealId/valuations',
     component: () => import('../views/DealValuationsView.vue'),
     meta: { title: 'Historique des MtM' },

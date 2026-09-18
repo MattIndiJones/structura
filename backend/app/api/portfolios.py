@@ -15,7 +15,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import Portfolio, Deal, User, Counterparty, position_sign
+from ..db.models import (
+    Portfolio, Deal, DealPortfolioMembership, ShockRun, User, Entity,
+    Counterparty, position_sign,
+)
 from .auth import get_current_user
 from .admin import _CATALOG
 from .deals import MtmExplainRequest
@@ -43,34 +46,75 @@ def _fx_missing_row(d: Deal) -> dict:
 
 class PortfolioCreate(BaseModel):
     name: str
+    # An administrator may create the portfolio for the owner of the deals it
+    # will contain. Ordinary users are always scoped to their own account.
+    user_id: Optional[int] = None
 
 
 class PortfolioRename(BaseModel):
     name: str
 
 
-def _portfolio_row(p: Portfolio, deal_count: int) -> dict:
+def _portfolio_row(
+    p: Portfolio,
+    deal_count: int,
+    owner_username: str | None = None,
+    owner_entity_name: str | None = None,
+) -> dict:
     return {
         "id": p.id, "name": p.name,
+        "user_id": p.user_id,
+        "owner_username": owner_username,
+        "owner_entity_name": owner_entity_name,
         "is_default": p.is_default,
         "created_at": p.created_at.isoformat(),
         "deal_count": deal_count,
     }
 
 
-def get_or_create_default_portfolio(session: Session, user_id: int) -> Portfolio:
-    """The one portfolio every deal of this user always falls back to — a
-    deal must never be left unmonitored. Created lazily on first use (at
-    booking time, or by the boot-time backfill for pre-existing deals)."""
-    default = session.exec(
-        select(Portfolio).where(Portfolio.user_id == user_id, Portfolio.is_default == True)  # noqa: E712
-    ).first()
-    if default:
-        return default
-    default = Portfolio(name="Portefeuille par défaut", user_id=user_id, is_default=True)
-    session.add(default)
-    session.flush()
-    return default
+def _is_admin(user: User) -> bool:
+    return getattr(user, "role", "user") == "admin"
+
+
+def _active_deals_statement(current: User):
+    statement = select(Deal).where(Deal.status == "actif")
+    if not _is_admin(current):
+        statement = statement.where(Deal.user_id == current.id)
+    return statement
+
+
+def _portfolio_accessible(p: Portfolio | None, current: User) -> bool:
+    return bool(p and (_is_admin(current) or p.user_id == current.id))
+
+
+def _portfolio_deals(
+    session: Session,
+    portfolio_id: int,
+    statuses: tuple[str, ...] | None = None,
+) -> list[Deal]:
+    """Load members once, deduplicated by economic deal identity.
+
+    The legacy pointer fallback exists only for databases and fixtures which
+    have not run the one-time membership backfill yet.
+    """
+    statement = (
+        select(Deal)
+        .join(
+            DealPortfolioMembership,
+            DealPortfolioMembership.deal_id == Deal.id,
+        )
+        .where(DealPortfolioMembership.portfolio_id == portfolio_id)
+    )
+    if statuses:
+        statement = statement.where(Deal.status.in_(statuses))
+    by_id = {deal.id: deal for deal in session.exec(statement).all()}
+
+    legacy_statement = select(Deal).where(Deal.portfolio_id == portfolio_id)
+    if statuses:
+        legacy_statement = legacy_statement.where(Deal.status.in_(statuses))
+    for deal in session.exec(legacy_statement).all():
+        by_id.setdefault(deal.id, deal)
+    return list(by_id.values())
 
 
 @router.get("")
@@ -78,16 +122,27 @@ def list_portfolios(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    portfolios = session.exec(
-        select(Portfolio).where(Portfolio.user_id == current.id)
-    ).all()
+    statement = select(Portfolio)
+    if not _is_admin(current):
+        statement = statement.where(Portfolio.user_id == current.id)
+    portfolios = session.exec(statement).all()
     rows = []
     for p in portfolios:
-        n = len(session.exec(
-            select(Deal.id).where(Deal.portfolio_id == p.id)
-        ).all())
-        rows.append(_portfolio_row(p, n))
-    return sorted(rows, key=lambda r: (not r["is_default"], r["name"]))
+        owner = session.get(User, p.user_id)
+        entity = session.get(Entity, owner.entity_id) if owner and owner.entity_id else None
+        # The same deal may appear in several portfolios. Each badge counts
+        # the distinct live positions in that view.
+        n = len(_portfolio_deals(session, p.id, ("actif",)))
+        rows.append(_portfolio_row(
+            p,
+            n,
+            owner.username if owner else f"Compte #{p.user_id}",
+            entity.name if entity else None,
+        ))
+    return sorted(rows, key=lambda r: (
+        r["owner_username"] if _is_admin(current) else "",
+        r["name"],
+    ))
 
 
 @router.post("", status_code=201)
@@ -96,11 +151,21 @@ def create_portfolio(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    p = Portfolio(name=body.name.strip(), user_id=current.id)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "Le nom du portefeuille est obligatoire")
+    target_user_id = body.user_id if _is_admin(current) and body.user_id is not None else current.id
+    if not _is_admin(current) and body.user_id not in {None, current.id}:
+        raise HTTPException(403, "Vous ne pouvez créer un portefeuille que pour votre compte")
+    owner = session.get(User, target_user_id)
+    if not owner:
+        raise HTTPException(404, "Compte propriétaire introuvable")
+    p = Portfolio(name=name, user_id=target_user_id)
     session.add(p)
     session.commit()
     session.refresh(p)
-    return _portfolio_row(p, 0)
+    entity = session.get(Entity, owner.entity_id) if owner.entity_id else None
+    return _portfolio_row(p, 0, owner.username, entity.name if entity else None)
 
 
 @router.put("/{portfolio_id}")
@@ -111,7 +176,7 @@ def rename_portfolio(
     session: Annotated[Session, Depends(get_session)],
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or p.user_id != current.id:
+    if not p or (not _is_admin(current) and p.user_id != current.id):
         raise HTTPException(404, "Portefeuille introuvable")
     p.name = body.name.strip()
     session.add(p)
@@ -126,19 +191,26 @@ def delete_portfolio(
     session: Annotated[Session, Depends(get_session)],
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or p.user_id != current.id:
+    if not p or (not _is_admin(current) and p.user_id != current.id):
         raise HTTPException(404, "Portefeuille introuvable")
-    if p.is_default:
-        raise HTTPException(422, "Le portefeuille par défaut ne peut pas être supprimé — "
-                                  "un deal doit toujours rester rattaché à un portefeuille")
-    # Deals inside are moved to the default portfolio, never left unassigned
-    # nor deleted — same "detach, don't lose" logic as delete_folder
-    # reparenting its children, but here there's always a home to fall back to.
-    default = get_or_create_default_portfolio(session, current.id)
-    members = session.exec(select(Deal).where(Deal.portfolio_id == portfolio_id)).all()
-    for d in members:
-        d.portfolio_id = default.id
-        session.add(d)
+    # A portfolio is a view. Deleting it detaches its memberships only; deals
+    # and valuation history remain intact. Historical shock runs are kept but
+    # detached so their JSON snapshot remains available without blocking the
+    # foreign-key deletion.
+    memberships = session.exec(select(DealPortfolioMembership).where(
+        DealPortfolioMembership.portfolio_id == portfolio_id)).all()
+    for membership in memberships:
+        session.delete(membership)
+    legacy_members = session.exec(select(Deal).where(
+        Deal.portfolio_id == portfolio_id)).all()
+    for deal in legacy_members:
+        deal.portfolio_id = None
+        session.add(deal)
+    runs = session.exec(select(ShockRun).where(
+        ShockRun.portfolio_id == portfolio_id)).all()
+    for run in runs:
+        run.portfolio_id = None
+        session.add(run)
     session.delete(p)
     session.commit()
 
@@ -319,9 +391,7 @@ def risk_global(
     """Risk aggregated across every active deal of the user, across all of
     their portfolios (every deal always belongs to one, at minimum the
     default portfolio) — the total book is always the true total."""
-    deals = session.exec(
-        select(Deal).where(Deal.user_id == current.id, Deal.status == "actif")
-    ).all()
+    deals = session.exec(_active_deals_statement(current)).all()
     payload = _aggregate_risk(list(deals), session)
     payload["scope"] = "global"
     return payload
@@ -439,9 +509,7 @@ def pnl_explain_global(
     """P&L explain aggregated across every active deal of the user. date1
     omitted means each deal explains from its own value date (P&L depuis
     l'origine) ; date2 omitted means today."""
-    deals = session.exec(
-        select(Deal).where(Deal.user_id == current.id, Deal.status == "actif")
-    ).all()
+    deals = session.exec(_active_deals_statement(current)).all()
     result = _run_explain_on_book(list(deals), session, n_paths,
                                   body or MtmExplainRequest())
     result["scope"] = "global"
@@ -457,11 +525,9 @@ def pnl_explain_portfolio(
     body: Optional[MtmExplainRequest] = None,
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or p.user_id != current.id:
+    if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = session.exec(
-        select(Deal).where(Deal.portfolio_id == portfolio_id, Deal.status == "actif")
-    ).all()
+    deals = _portfolio_deals(session, portfolio_id, ("actif",))
     result = _run_explain_on_book(list(deals), session, n_paths,
                                   body or MtmExplainRequest())
     result["scope"] = "portfolio"
@@ -477,11 +543,9 @@ def portfolio_risk(
     session: Annotated[Session, Depends(get_session)],
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or p.user_id != current.id:
+    if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = session.exec(
-        select(Deal).where(Deal.portfolio_id == portfolio_id, Deal.status == "actif")
-    ).all()
+    deals = _portfolio_deals(session, portfolio_id, ("actif",))
     payload = _aggregate_risk(list(deals), session)
     payload["scope"] = "portfolio"
     payload["portfolio_id"] = portfolio_id
@@ -655,9 +719,7 @@ def barriers_global(
     """Barrier proximity ranked across every active deal of the user, across
     all of their portfolios — same 'always the true total' contract as
     /risk-global."""
-    deals = session.exec(
-        select(Deal).where(Deal.user_id == current.id, Deal.status == "actif")
-    ).all()
+    deals = session.exec(_active_deals_statement(current)).all()
     payload = _aggregate_barriers(list(deals), session)
     payload["scope"] = "global"
     return payload
@@ -670,11 +732,9 @@ def portfolio_barriers(
     session: Annotated[Session, Depends(get_session)],
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or p.user_id != current.id:
+    if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = session.exec(
-        select(Deal).where(Deal.portfolio_id == portfolio_id, Deal.status == "actif")
-    ).all()
+    deals = _portfolio_deals(session, portfolio_id, ("actif",))
     payload = _aggregate_barriers(list(deals), session)
     payload["scope"] = "portfolio"
     payload["portfolio_id"] = portfolio_id
@@ -690,12 +750,10 @@ def exposure_by_counterparty_global(
     """Concentration by counterparty across every active deal of the user,
     across all of their portfolios — same 'always the true total' contract
     as /risk-global."""
-    deals = session.exec(
-        select(Deal).where(
-            Deal.user_id == current.id,
-            Deal.status.in_(["actif", "en_reglement"]),
-        )
-    ).all()
+    statement = select(Deal).where(Deal.status.in_(["actif", "en_reglement"]))
+    if not _is_admin(current):
+        statement = statement.where(Deal.user_id == current.id)
+    deals = session.exec(statement).all()
     payload = _aggregate_exposure_by_counterparty(list(deals), session)
     payload["scope"] = "global"
     return payload
@@ -708,14 +766,9 @@ def exposure_by_counterparty_portfolio(
     session: Annotated[Session, Depends(get_session)],
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or p.user_id != current.id:
+    if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = session.exec(
-        select(Deal).where(
-            Deal.portfolio_id == portfolio_id,
-            Deal.status.in_(["actif", "en_reglement"]),
-        )
-    ).all()
+    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"))
     payload = _aggregate_exposure_by_counterparty(list(deals), session)
     payload["scope"] = "portfolio"
     payload["portfolio_id"] = portfolio_id

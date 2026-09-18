@@ -3,7 +3,8 @@ data, no network. The builders are pure functions of plain dicts."""
 import pytest
 
 from backend.app.core.deal_valuation_pdf import (
-    generate_valuation_pdf, generate_explain_pdf, build_explanation,
+    _calendar_event_label, generate_valuation_pdf, generate_explain_pdf,
+    build_explanation,
 )
 
 
@@ -61,6 +62,15 @@ def test_pdf_generates_single_underlying():
     pdf = generate_valuation_pdf(_data())
     assert pdf.startswith(b"%PDF")
     assert len(pdf) > 20_000    # header + tables + chart, not an empty shell
+
+
+@pytest.mark.parametrize(("source", "expected"), [
+    ("Obs. 1 (0.50Y)", "Observation 1"),
+    ("Obs. 2 (t 1.0)", "Observation 2"),
+    ("Maturité", "Maturité"),
+])
+def test_schedule_uses_contractual_dates_instead_of_model_tenors(source, expected):
+    assert _calendar_event_label(source) == expected
 
 
 def test_pdf_multi_underlying_legacy_no_monitors():

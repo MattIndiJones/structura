@@ -9,7 +9,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from fastapi import HTTPException
 
 from backend.app.core import admin_registry
-from backend.app.db.models import AuditEvent, Deal, RfqRequest
+from backend.app.db.models import AuditEvent, Deal, Entity, RfqRequest, User
 
 
 def _make_session() -> Session:
@@ -44,6 +44,39 @@ def test_get_row_exposes_summary_only_for_immutable_deals():
     assert detail["contrepartie"] == "BNP Paribas"
     assert "price_traded" not in detail
     assert "trade_date" not in detail
+
+
+def test_deals_inventory_exposes_owner_and_entity_names():
+    s = _make_session()
+    entity = Entity(name="Structura France")
+    s.add(entity)
+    s.flush()
+    owner = User(
+        username="book.owner",
+        email="book.owner@example.test",
+        password_hash="unused",
+        entity_id=entity.id,
+    )
+    s.add(owner)
+    s.commit()
+    s.refresh(owner)
+
+    deal = Deal(
+        reference="OWNED-001",
+        user_id=owner.id,
+        contrepartie="UBS",
+        product_type="Autocall Athena",
+        status="actif",
+    )
+    s.add(deal)
+    s.commit()
+
+    row = admin_registry.list_rows("deals", s)[0]
+
+    assert row["owner"] == "book.owner"
+    assert row["entity"] == "Structura France"
+    assert row["entity_id"] == entity.id
+    assert row["product_type"] == "Autocall Athena"
 
 
 def test_deals_table_refuses_former_admin_correction_path_and_audits_it():

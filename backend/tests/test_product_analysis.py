@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.app.services.llm import LlmError
+from backend.app.services.llm.providers import Completion
 from backend.app.services.llm.analysis import (
     CADRE, INTENTIONS, analyse_produit, construire_prompts,
 )
@@ -49,9 +50,9 @@ def test_l_apercu_est_exactement_ce_qui_part(monkeypatch, intention):
 
     def _capture(provider, model, system, user, **kw):
         envoye["system"], envoye["user"] = system, user
-        return "réponse du modèle"
+        return Completion("réponse du modèle", "test")
 
-    monkeypatch.setattr("backend.app.services.llm.analysis.complete", _capture)
+    monkeypatch.setattr("backend.app.services.llm.providers.complete_with_metadata", _capture)
 
     apercu = construire_prompts(RESUME, intention, question)
     analyse_produit(RESUME, intention, question=question)
@@ -66,7 +67,7 @@ def test_l_apercu_n_appelle_pas_le_modele(monkeypatch, client):
     def _interdit(*a, **kw):
         raise AssertionError("l'aperçu a appelé le modèle")
 
-    monkeypatch.setattr("backend.app.services.llm.analysis.complete", _interdit)
+    monkeypatch.setattr("backend.app.services.llm.providers.complete_with_metadata", _interdit)
 
     res = client.post("/api/product/analyse/prompt",
                       json={"resume": RESUME, "intention": "critique"})
@@ -166,8 +167,8 @@ def test_la_question_libre_remplace_bien_la_consigne():
 def test_l_avis_arrive_avec_sa_provenance(monkeypatch):
     """Un texte de modèle qui traîne sans dire d'où il vient finit par se lire
     comme une conclusion validée, six mois plus tard."""
-    monkeypatch.setattr("backend.app.services.llm.analysis.complete",
-                        lambda *a, **kw: "  un avis  ")
+    monkeypatch.setattr("backend.app.services.llm.providers.complete_with_metadata",
+                        lambda *a, **kw: Completion("  un avis  ", "llama3"))
     res = analyse_produit(RESUME, "analyse", provider="ollama", model="llama3")
 
     assert res["texte"] == "un avis"

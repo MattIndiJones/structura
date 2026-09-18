@@ -136,7 +136,7 @@
           <div v-if="watchlist.length || watchlistError" class="card">
             <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
               Watchlist — proximité barrières
-              <HelpTip width="w-72" text="Deals actifs triés par urgence : écart du worst-of actuel à chaque barrière détectée dans le script (en points du strike), et prochaine date d'observation. Détection par convention de nommage des PARAM (AC_BAR, KI_BAR…) — un script aux noms inhabituels peut passer à travers. Les niveaux sont ceux réellement figés au booking ; le défaut du script n'est utilisé qu'en l'absence de surcharge." />
+              <HelpTip width="w-72" text="Deals actifs triés par défaut par prochaine observation, puis par proximité de barrière à date égale. Cliquez sur un en-tête pour choisir le tri, puis recliquez pour inverser son sens. Détection par convention de nommage des PARAM (AC_BAR, KI_BAR…) — un script aux noms inhabituels peut passer à travers. Les niveaux sont ceux réellement figés au booking ; le défaut du script n'est utilisé qu'en l'absence de surcharge." />
             </h2>
 
             <div v-if="watchlistError" class="text-xs text-amber-400">⚠ {{ watchlistError }}</div>
@@ -155,29 +155,20 @@
               <table class="w-full text-xs border-collapse">
                 <thead>
                   <tr class="border-b border-slate-700">
-                    <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Réf
-                      <HelpTip text="Référence du deal. Cliquez sur la référence pour ouvrir sa fiche détaillée dans l'onglet Deals ; l'icône ⇥ l'ouvre directement dans le Pricer." />
-                    </th>
-                    <th class="text-left text-slate-500 font-medium pb-2 pr-3">Contrepartie
-                      <HelpTip text="Entité juridique faisant face au deal. Le client commercial éventuel est porté séparément par le filtre de contexte." />
-                    </th>
-                    <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Sous-jacent
-                      <HelpTip text="Sous-jacent(s) du deal. Pour un worst-of, tous les sous-jacents du panier sont listés." />
-                    </th>
-                    <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Produit
-                      <HelpTip text="Libellé métier ou scénario du produit. La famille du payoff reste dans Type et l'identifiant technique reste dans Réf, afin de ne pas répéter la même information." />
-                    </th>
-                    <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Type
-                      <HelpTip text="Type de produit tel que booké (Autocall Athena, Phoenix Mémoire, Barrier RC…)." />
-                    </th>
-                    <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">Prochaine obs
-                      <HelpTip text="Date de la prochaine observation du script (rappel, coupon ou constat de barrière) et nombre de jours restants. Trié par défaut de la plus proche à la plus lointaine." />
-                    </th>
-                    <th class="text-left text-slate-500 font-medium pb-2 pr-3 whitespace-nowrap">WOF
-                      <HelpTip text="Performance actuelle du pire sous-jacent par rapport à son strike (cours le plus récent). Entre parenthèses : le minimum touché depuis le strike — c'est lui qu'une barrière KI en continu compare." />
-                    </th>
-                    <th class="text-left text-slate-500 font-medium pb-2">Barrières
-                      <HelpTip width="w-72" text="Barrières PARAM détectées dans le script (convention M_), avec l'écart actuel en points du strike et le sens de lecture : vert = zone favorable (rappel proche / KI éloigné), rouge = barrière franchie ou zone de danger." />
+                    <th v-for="column in wlColumns" :key="column.key" scope="col"
+                      class="watchlist-heading" :class="{ num: column.key === 'wof' }"
+                      :aria-sort="wlFilter.sortBy.value === column.key
+                        ? (wlFilter.sortDir.value === 'asc' ? 'ascending' : 'descending') : 'none'">
+                      <div class="watchlist-heading__content" :class="{ 'justify-end': column.key === 'wof' }">
+                        <button type="button" class="watchlist-heading__sort"
+                          :class="{ 'watchlist-heading__sort--active': wlFilter.sortBy.value === column.key }"
+                          :title="watchlistSortTitle(column)" :aria-label="watchlistSortTitle(column)"
+                          @click="sortWatchlistBy(column.key)">
+                          <span>{{ column.heading || column.label }}</span>
+                          <span aria-hidden="true" class="watchlist-heading__arrow">{{ wlFilter.sortBy.value === column.key ? (wlFilter.sortDir.value === 'asc' ? '↑' : '↓') : '↕' }}</span>
+                        </button>
+                        <HelpTip width="w-72" :text="column.help" />
+                      </div>
                     </th>
                   </tr>
                 </thead>
@@ -295,10 +286,10 @@
             </div>
             <div class="flex flex-col gap-1">
               <label class="text-[10px] text-slate-500 uppercase tracking-wider">Portefeuille</label>
-              <select v-model="filters.portfolioId" class="select text-xs py-1.5 w-32 max-w-32">
+              <select v-model="filters.portfolioId" class="select text-xs py-1.5 booking-portfolio-filter">
                 <option value="">Tous</option>
                 <option v-for="p in portfolios" :key="p.id" :value="String(p.id)">
-                  {{ p.is_default ? '⭐ ' : '' }}{{ p.name }}
+                  {{ p.name }}
                 </option>
               </select>
             </div>
@@ -362,18 +353,28 @@
                 </div>
               </div>
               <div class="deal-card__actions" @click.stop>
-                <select v-if="canAssignPortfolio(d)"
-                  class="select deal-card__portfolio text-[10px] py-1"
-                  :value="d.portfolio_id ? String(d.portfolio_id) : ''"
-                  @click.stop @change="assignDealPortfolio(d.id, $event.target.value)"
-                  title="Portefeuille auquel ce deal est rangé — utilisé pour l'agrégation des Greeks">
-                  <option v-for="p in portfolios" :key="p.id" :value="String(p.id)">
-                    {{ p.is_default ? '⭐ ' : '' }}{{ p.name }}
-                  </option>
-                </select>
+                <template v-if="canAssignPortfolio(d)">
+                  <ActionMenu :label="dealPortfolioLabel(d)" class="deal-card__portfolio"
+                    :title="`${dealPortfolioLabel(d)} — un deal peut alimenter plusieurs vues de risque`" @click.stop>
+                      <label v-for="p in portfoliosForDeal(d)" :key="p.id"
+                        class="flex items-center gap-2 px-2 py-1.5 text-[10px] cursor-pointer hover:bg-slate-800 rounded">
+                        <input type="checkbox" :checked="dealHasPortfolio(d, p.id)"
+                          :disabled="portfolioAssigning[d.id]"
+                          @change="toggleDealPortfolio(d, p.id, $event.target.checked)" />
+                        <span>{{ p.name }}</span>
+                      </label>
+                      <div v-if="!portfoliosForDeal(d).length" class="px-2 py-1 text-[10px] text-slate-500">
+                        Aucun portefeuille pour ce compte.
+                      </div>
+                  </ActionMenu>
+                  <span v-if="portfolioAssignmentStatus[d.id]" class="text-[10px] max-w-40"
+                    :class="portfolioAssignmentStatus[d.id].startsWith('⚠') ? 'text-red-500' : 'text-emerald-600'">
+                    {{ portfolioAssignmentStatus[d.id] }}
+                  </span>
+                </template>
                 <span v-else class="deal-card__portfolio-label"
-                  title="Portefeuille du propriétaire du deal — modification réservée au propriétaire">
-                  {{ d.portfolio_id ? `PF #${d.portfolio_id}` : 'Sans PF' }}
+                  :title="`${dealPortfolioLabel(d)} — modification réservée au propriétaire`">
+                  {{ dealPortfolioLabel(d) }}
                 </span>
                 <button v-if="d.status === 'actif'" class="btn-secondary text-xs px-3 py-1.5"
                   :disabled="greeksLoading[d.id]" @click.stop="runGreeks(d.id)"
@@ -393,11 +394,7 @@
                     class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
                   ↻ Refresh
                 </button>
-                <details class="deal-open-menu" @click.stop>
-                  <summary class="btn-secondary text-xs px-3 py-1.5">
-                    → Ouvrir <span aria-hidden="true">▾</span>
-                  </summary>
-                  <div class="deal-open-menu__items">
+                <ActionMenu label="→ Ouvrir" @click.stop>
                     <RouterLink
                       :to="{ path: '/pricer', query: { dealId: d.id, tab: 'script' } }"
                       class="deal-open-menu__item">
@@ -408,8 +405,7 @@
                       class="deal-open-menu__item" target="_blank" rel="noopener noreferrer">
                       Ouvrir dans un nouvel onglet ↗
                     </RouterLink>
-                  </div>
-                </details>
+                </ActionMenu>
               </div>
             </div>
 
@@ -548,7 +544,7 @@
                 <label v-if="d.status === 'actif'" class="deal-basis">
                   <span class="deal-label">Base du calcul</span>
                   <select class="select deal-panel__select w-full text-xs py-1.5"
-                    :value="mtmModeFor(d.id)" @click.stop
+                    :value="mtmModeFor(d.id)" :disabled="mtmLoading[d.id]" @click.stop
                     @change="setMtmMode(d.id, $event.target.value)"
                     title="Choix des hypothèses utilisées pour le prochain calcul">
                     <option value="realized">Marché actuel</option>
@@ -560,9 +556,9 @@
                   <strong class="deal-value">{{ mtmModeFor(d.id) === 'realized' ? 'Marché actuel' : 'Paramètres du booking' }}</strong>
                 </div>
                 <label v-if="['actif', 'en_reglement'].includes(d.status)" class="deal-basis">
-                  <span class="deal-label">Date du calcul</span>
+                  <span class="deal-label">Date de valorisation</span>
                   <input type="date" class="input deal-panel__select w-full text-xs py-1.5"
-                    :value="mtmDateFor(d.id)" :min="mtmMinDate(d)" :max="todayIso"
+                    :disabled="mtmLoading[d.id]" :value="mtmDateFor(d.id)" :min="mtmMinDate(d)" :max="todayIso"
                     @click.stop @change="setMtmDate(d.id, $event.target.value)"
                     title="Date à laquelle le deal et son marché sont valorisés" />
                 </label>
@@ -611,13 +607,18 @@
                 </header>
                 <!-- Rien de calculé (ou calcul en cours) : l'action est au centre du
                      panneau plutôt qu'en bas d'un grand vide. -->
-                <div v-if="!mtmResults[d.id]" class="deal-result-empty">
+                <div v-if="!mtmResults[d.id]" class="deal-result-empty" role="status" aria-live="polite">
                   <template v-if="['actif', 'en_reglement'].includes(d.status)">
-                    <strong>{{ mtmLoading[d.id] ? 'Calcul du MTM en cours…' : 'Aucun MTM calculé' }}</strong>
+                    <strong>{{ mtmLoading[d.id] ? mtmProgressLabel(d.id) : 'Aucun MtM pour cette sélection' }}</strong>
                     <span>
-                      {{ mtmLoading[d.id] ? 'Avec' : 'Le premier calcul utilisera' }}
-                      {{ mtmModeFor(d.id) === 'realized' ? 'le marché actuel' : 'les paramètres du booking' }}.
+                      {{ mtmLoading[d.id] ? 'Valorisation avec' : 'Le calcul utilisera' }}
+                      {{ mtmModeFor(d.id) === 'realized' ? 'le marché actuel' : 'les paramètres du booking' }}
+                      au {{ formatDate(mtmDateFor(d.id)) }}.
                     </span>
+                    <span v-if="mtmLoading[d.id] && mtmModeFor(d.id) === 'realized'">
+                      Les données en cache sont réutilisées si valides ; les données manquantes sont chargées avant le calcul.
+                    </span>
+                    <span v-else-if="!mtmLoading[d.id]">Seuls les calculs du jour sont réaffichés. Les précédents restent dans l’historique.</span>
                     <button class="btn-primary text-xs px-3 py-1.5 mt-1"
                       :disabled="mtmLoading[d.id]" @click.stop="runMtm(d.id)"
                       :title="mtmButtonTitle(d)">
@@ -648,7 +649,7 @@
                       <div class="deal-mtm__ci">
                         Valorisation au {{ formatDate(mtmResultDate(d.id)) }}
                         <span v-if="mtmResults[d.id]._runCreatedAt">
-                          · calcul enregistré le {{ new Date(mtmResults[d.id]._runCreatedAt).toLocaleString('fr-FR') }}
+                          · {{ mtmResults[d.id]._restored ? 'calcul du jour restauré, enregistré le' : 'calcul effectué le' }} {{ new Date(mtmResults[d.id]._runCreatedAt).toLocaleString('fr-FR') }}
                         </span>
                       </div>
                     </div>
@@ -693,11 +694,12 @@
                         class="w-3 h-3 border-2 border-slate-200 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
                       Calculer le MTM
                     </button>
-                    <button v-if="d.status === 'actif' && mtmResults[d.id]?.mtm != null"
-                      class="btn-secondary text-[10px] px-2 py-1" :disabled="noteLoading[d.id]"
-                      @click.stop="downloadNote(d)" title="Génère la note de valorisation avec les mêmes hypothèses que le mode sélectionné">
+                    <RouterLink v-if="d.status === 'actif' && mtmResults[d.id]?.valuation_run_id"
+                      class="btn-secondary text-[10px] px-2 py-1"
+                      :to="{ path: '/valo-explain', query: { deal: d.id, run: mtmResults[d.id].valuation_run_id, auto: '1' } }"
+                      @click.stop title="Ouvrir Valo Explain à partir de ce calcul enregistré">
                       📄 Note de valo
-                    </button>
+                    </RouterLink>
                     <button v-if="d.status === 'actif' && mtmResults[d.id]?.mtm != null"
                       class="btn-secondary text-[10px] px-2 py-1" :disabled="rollLoading[d.id]"
                       @click.stop="runRoll(d)" title="Reprice le même produit avec un nouveau départ forward">
@@ -1006,19 +1008,25 @@
                   </div>
                   <div class="flex items-center gap-2 flex-wrap text-xs">
                     <label class="text-slate-500">du</label>
-                    <input type="date" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
-                      :value="explainD1[d.id] || d.value_date"
+                    <input type="date" class="input text-xs py-1 w-auto"
+                      :value="explainD1[d.id] || defaultExplainStart(d)"
+                      :max="explainD2[d.id] || todayIso"
                       @change="explainD1[d.id] = $event.target.value" />
                     <label class="text-slate-500">au</label>
-                    <input type="date" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
+                    <input type="date" class="input text-xs py-1 w-auto"
                       :value="explainD2[d.id] || todayIso"
+                      :min="explainD1[d.id] || defaultExplainStart(d)" :max="todayIso"
                       @change="explainD2[d.id] = $event.target.value" />
-                    <button class="btn-secondary text-xs px-3 py-1.5" :disabled="explainLoading[d.id]"
+                    <button class="btn-secondary text-xs px-3 py-1.5"
+                      :disabled="explainLoading[d.id] || !explainDatesValid(d)"
                       @click="runExplain(d)">
                       <span v-if="explainLoading[d.id]"
                         class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
                       ⚖ Expliquer
                     </button>
+                  </div>
+                  <div v-if="!explainDatesValid(d)" class="text-[10px] text-red-500 mt-1">
+                    La date de début doit être antérieure ou égale à la date de fin.
                   </div>
                   <div v-if="explainResults[d.id]" class="mt-2">
                     <div v-if="explainResults[d.id].error" class="text-amber-400 text-xs">
@@ -1097,8 +1105,9 @@
 </template>
 
 <script setup>
+import ActionMenu from '../components/ui/ActionMenu.vue'
 import BackLink from '../components/ui/BackLink.vue'
-import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
 import { usePortfoliosStore, shockPresets, blankShockForm } from '../stores/portfolios.js'
@@ -1109,6 +1118,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import DataFilterBar from '../components/ui/DataFilterBar.vue'
 import AutoFixingExceptionModal from '../components/AutoFixingExceptionModal.vue'
+import { useBookingMtm } from '../composables/useBookingMtm.js'
 import { useDataFilter } from '../composables/useDataFilter.js'
 import { formatInt, formatPercent, formatDate } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel, barrierGauges } from '../utils/barriers.js'
@@ -1128,13 +1138,47 @@ const authStore = useAuthStore()
 // for its filter/assignment dropdowns.
 const portfolios = computed(() => portfoliosStore.portfolios)
 const shockHistory = portfoliosStore.shockHistory
+const portfolioAssigning = reactive({})
+const portfolioAssignmentStatus = reactive({})
 
-function assignDealPortfolio(dealId, rawValue) {
-  return portfoliosStore.assignDeal(dealId, rawValue)
+function dealHasPortfolio(deal, portfolioId) {
+  return (deal.portfolio_ids || []).includes(portfolioId)
+}
+
+function dealPortfolioLabel(deal) {
+  const ids = deal.portfolio_ids || []
+  if (!ids.length) return 'Non classé'
+  if (ids.length === 1) return portfolios.value.find(p => p.id === ids[0])?.name || '1 portefeuille'
+  return `${ids.length} portefeuilles`
+}
+
+async function toggleDealPortfolio(deal, portfolioId, checked) {
+  if (portfolioAssigning[deal.id]) return
+  const target = portfolios.value.find(p => p.id === portfolioId)
+  const currentIds = deal.portfolio_ids || []
+  const nextIds = checked
+    ? [...new Set([...currentIds, portfolioId])]
+    : currentIds.filter(id => id !== portfolioId)
+  portfolioAssigning[deal.id] = true
+  portfolioAssignmentStatus[deal.id] = ''
+  try {
+    await portfoliosStore.setDealPortfolios(deal.id, nextIds)
+    portfolioAssignmentStatus[deal.id] = checked
+      ? `✓ Ajouté à ${target?.name || 'portefeuille'}`
+      : `✓ Retiré de ${target?.name || 'portefeuille'}`
+  } catch (e) {
+    portfolioAssignmentStatus[deal.id] = `⚠ ${e.message}`
+  } finally {
+    portfolioAssigning[deal.id] = false
+  }
 }
 
 function canAssignPortfolio(deal) {
-  return deal.user_id === authStore.user?.id
+  return authStore.isAdmin || deal.user_id === authStore.user?.id
+}
+
+function portfoliosForDeal(deal) {
+  return portfolios.value.filter(p => p.user_id === deal.user_id)
 }
 
 const activeTab = ref('watchlist')
@@ -1176,7 +1220,7 @@ const autoExceptionStatuses = new Set([
 
 function canResolveAutoException(deal, event) {
   return deal?.fixing_policy === 'AUTO_YAHOO' &&
-    event?.event_date <= todayIso && autoExceptionStatuses.has(event?.fixing_status)
+    event?.event_date <= todayIso.value && autoExceptionStatuses.has(event?.fixing_status)
 }
 
 function autoExceptionEvents(dealId) {
@@ -1318,7 +1362,7 @@ function fixingStatusClass(status) {
 }
 
 function operationalEventLabel(ev) {
-  if (ev.event_date > todayIso) return 'À venir'
+  if (ev.event_date > todayIso.value) return 'À venir'
   if (ev.fixing_status === 'EXPECTED') return 'À récupérer'
   if (ev.fixing_status === 'RECEIVED') return 'Exception à traiter'
   if (['PARTIAL', 'MISSING', 'REJECTED', 'CONTESTED', 'MANUAL_REVIEW_REQUIRED'].includes(ev.fixing_status)) {
@@ -1517,18 +1561,17 @@ async function refreshBook() {
 }
 
 // ── MtM résiduel ────────────────────────────────────────────────────
-const mtmLoading = reactive({})
-const mtmResults = reactive({})
-const mtmMode = reactive({})   // deal id -> 'realized' (défaut) | 'booking'
-const mtmDate = reactive({})
-const mtmRestored = reactive({})
-
-function mtmModeFor(id) {
-  return mtmMode[id] || 'realized'
-}
-
-function mtmDateFor(id) {
-  return mtmDate[id] || todayIso
+const {
+  todayIso, mtmLoading, mtmResults, mtmModeFor, mtmDateFor, setMtmMode, setMtmDate,
+  loadSavedMtms, loadSavedMtm, runMtm, mtmProgressLabel, syncDay,
+} = useBookingMtm()
+let dayTimer
+function refreshDay() {
+  syncDay()
+  clearTimeout(dayTimer)
+  const now = new Date()
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  dayTimer = setTimeout(refreshDay, midnight - now + 50)
 }
 
 function mtmMinDate(deal) {
@@ -1541,60 +1584,6 @@ function mtmResultDate(id) {
   return result?.valuation_date
     || result?.market_used?.data?.contractual_history?.requested_end
     || mtmDateFor(id)
-}
-
-function setMtmMode(id, mode) {
-  if (mtmModeFor(id) === mode) return
-  mtmMode[id] = mode
-  // A result must never remain visible under a newly selected parameter set.
-  mtmResults[id] = null
-}
-
-function setMtmDate(id, valuationDate) {
-  const nextDate = valuationDate || todayIso
-  if (mtmDateFor(id) === nextDate) return
-  mtmDate[id] = nextDate
-  // Le chiffre visible doit toujours correspondre aux paramètres affichés.
-  mtmResults[id] = null
-}
-
-function applySavedMtm(saved) {
-  const id = saved.deal_id
-  const result = saved.result || {}
-  if (result.mtm == null && !result.resolved_pending) return
-
-  const request = saved.diagnostics?.request || {}
-  mtmMode[id] = request.recalibrate === 'none' ? 'booking' : 'realized'
-  const savedDate = request.valuation_date
-    || result.valuation_date
-    || result.market_used?.data?.contractual_history?.requested_end
-  if (savedDate) mtmDate[id] = savedDate
-  mtmResults[id] = {
-    ...result,
-    _runCreatedAt: saved.created_at,
-    _restored: true,
-  }
-}
-
-async function loadSavedMtms(ids) {
-  const pendingIds = [...new Set(ids)]
-    .filter(id => id && !mtmRestored[id] && !mtmLoading[id])
-  if (!pendingIds.length) return
-  for (const id of pendingIds) mtmRestored[id] = true
-  try {
-    const query = encodeURIComponent(pendingIds.join(','))
-    const response = await apiFetch(`/api/deals/valuation-runs/latest-mtm?deal_ids=${query}`)
-    if (!response.ok) return
-    const savedRuns = await response.json()
-    for (const saved of savedRuns) applySavedMtm(saved)
-  } catch {
-    // L'historique est un confort d'affichage : un échec de lecture ne doit
-    // jamais empêcher un nouveau calcul explicite.
-  }
-}
-
-async function loadSavedMtm(id) {
-  await loadSavedMtms([id])
 }
 
 function modelBusinessLabel(model) {
@@ -1639,30 +1628,6 @@ function effectiveProviderLabel(deal) {
   const provider = mtmResults[deal.id]?.market_used?.data?.provider || deal.market_data_provider
   if (provider === 'YAHOO_FINANCE' || provider === 'YAHOO') return 'Yahoo Finance'
   return provider || 'Yahoo Finance'
-}
-
-async function runMtm(id) {
-  mtmLoading[id] = true
-  mtmResults[id] = null
-  try {
-    const mode = mtmModeFor(id)
-    const valuationDate = mtmDateFor(id)
-    const res = await apiFetch(`/api/deals/${id}/mtm`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recalibrate: mode === 'realized' ? 'realized' : 'none',
-        valuation_date: valuationDate,
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || 'Erreur MtM')
-    mtmResults[id] = { ...data, _runCreatedAt: new Date().toISOString() }
-  } catch (e) {
-    mtmResults[id] = { error: e.message }
-  } finally {
-    mtmLoading[id] = false
-  }
 }
 
 // ── Greeks (bump-and-reprice CRN) ────────────────────────────────────
@@ -1743,9 +1708,19 @@ const explainD1 = reactive({})
 const explainD2 = reactive({})
 const explainLoading = reactive({})
 const explainResults = reactive({})
-const now = new Date()
-const todayIso = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
-  .toISOString().slice(0, 10)
+function defaultExplainStart(d) {
+  // Value date is the normal P&L origin. For a freshly-booked deal whose
+  // settlement is still in the future, use the trade date (or strike as a
+  // final fallback) so the screen never proposes a future-to-past period.
+  return [d.value_date, d.trade_date, d.strike_date]
+    .find(value => value && value <= todayIso.value) || todayIso.value
+}
+
+function explainDatesValid(d) {
+  const date1 = explainD1[d.id] || defaultExplainStart(d)
+  const date2 = explainD2[d.id] || todayIso.value
+  return !!date1 && !!date2 && date1 <= date2 && date2 <= todayIso.value
+}
 
 async function runExplain(d) {
   explainLoading[d.id] = true
@@ -1755,8 +1730,8 @@ async function runExplain(d) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        date1: explainD1[d.id] || d.value_date,
-        date2: explainD2[d.id] || todayIso,
+        date1: explainD1[d.id] || defaultExplainStart(d),
+        date2: explainD2[d.id] || todayIso.value,
         recalibrate: 'realized',
       }),
     })
@@ -1779,8 +1754,8 @@ async function downloadExplainNote(d) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        date1: explainD1[d.id] || d.value_date,
-        date2: explainD2[d.id] || todayIso,
+        date1: explainD1[d.id] || defaultExplainStart(d),
+        date2: explainD2[d.id] || todayIso.value,
         recalibrate: 'realized',
       }),
     })
@@ -1799,40 +1774,6 @@ async function downloadExplainNote(d) {
     refreshResults[d.id] = `⚠ Note d'explication : ${e.message}`
   } finally {
     explainNoteLoading[d.id] = false
-  }
-}
-
-// Client-facing valuation note (PDF) — same body as the displayed MtM so the
-// figure in the PDF is exactly the one on screen.
-const noteLoading = reactive({})
-
-async function downloadNote(d) {
-  noteLoading[d.id] = true
-  try {
-    const mode = mtmModeFor(d.id)
-    const res = await apiFetch(`/api/deals/${d.id}/mtm/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recalibrate: mode === 'realized' ? 'realized' : 'none',
-        valuation_date: mtmDateFor(d.id),
-      }),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw new Error(err.detail || 'Erreur génération PDF')
-    }
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `Note_valo_${d.reference}_${new Date().toISOString().slice(0, 10)}.pdf`
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (e) {
-    refreshResults[d.id] = `⚠ Note de valo : ${e.message}`
-  } finally {
-    noteLoading[d.id] = false
   }
 }
 
@@ -1974,13 +1915,46 @@ const wlFilterFields = [
     get: w => (w.underlyings || []).map(u => u.ticker).filter(Boolean) },
   { key: 'product_type', label: 'Type', kind: 'select' },
 ]
-const wlSorts = [
-  { key: 'days_to_next', label: 'Prochaine obs.' },
-  { key: 'reference', label: 'Référence' },
-  { key: 'product_name', label: 'Produit', get: watchlistProductName },
-  { key: 'min_gap', label: 'Barrière la plus proche' },
+const wlColumns = [
+  { key: 'reference', label: 'Référence', heading: 'Réf',
+    help: "Référence du deal. Cliquez sur la référence d’une ligne pour ouvrir sa fiche ; l’icône ⇥ ouvre le Pricer." },
+  { key: 'contrepartie', label: 'Contrepartie',
+    help: 'Entité juridique faisant face au deal. Le client commercial éventuel est porté séparément par le filtre de contexte.' },
+  { key: 'underlyings', label: 'Sous-jacent',
+    get: row => (row.underlyings || []).map(u => u.ticker || u.name).join(' / '),
+    help: 'Tri alphabétique sur les sous-jacents tels qu’affichés. Pour un panier, la comparaison commence par le premier sous-jacent.' },
+  { key: 'product_name', label: 'Produit', get: watchlistProductName,
+    help: 'Tri alphabétique sur le libellé métier affiché. La famille du payoff figure dans Type et l’identifiant technique dans Réf.' },
+  { key: 'product_type', label: 'Type', get: row => row.product_type ? productTypeLabel(row.product_type) : '',
+    help: 'Tri alphabétique sur le type affiché : Autocall Athena, Phoenix Mémoire, Reverse Convertible…' },
+  { key: 'days_to_next', label: 'Prochaine obs.', heading: 'Prochaine obs',
+    help: 'Date de la prochaine observation et jours restants. Tri par défaut : de la plus proche à la plus lointaine ; sans observation en dernier.' },
+  { key: 'wof', label: 'WOF',
+    help: 'Tri numérique sur la performance actuelle du pire sous-jacent par rapport au strike. Le minimum historique entre parenthèses ne sert pas au tri.' },
+  { key: 'min_gap', label: 'Barrière la plus proche', heading: 'Barrières',
+    help: 'Tri sur la plus petite distance absolue à une barrière, en points du strike : croissant = plus proche d’abord. Les écarts non calculables restent en dernier. La couleur indique séparément le sens favorable ou défavorable.' },
 ]
-const wlFilter = useDataFilter(watchlistByUrgency, wlFilterFields, { sorts: wlSorts })
+const wlSorts = wlColumns
+const wlFilter = useDataFilter(watchlistByUrgency, wlFilterFields, {
+  sorts: wlSorts, defaultSort: 'days_to_next',
+})
+
+function sortWatchlistBy(key) {
+  if (wlFilter.sortBy.value === key) wlFilter.toggleSortDir()
+  else {
+    wlFilter.sortBy.value = key
+    wlFilter.sortDir.value = 'asc'
+  }
+}
+
+function watchlistSortTitle(column) {
+  const descending = wlFilter.sortBy.value === column.key && wlFilter.sortDir.value === 'asc'
+  const numeric = ['days_to_next', 'wof', 'min_gap'].includes(column.key)
+  const direction = numeric
+    ? (descending ? 'décroissant' : 'croissant')
+    : (descending ? 'alphabétique Z à A' : 'alphabétique A à Z')
+  return `${column.label} : trier par ordre ${direction}`
+}
 const sortedWatchlist = computed(() => wlFilter.filtered.value)
 
 // Reference click in the watchlist → jump to the deal's own card in the
@@ -2050,7 +2024,7 @@ const filteredDeals = computed(() => {
     if (filters.productType && d.product_type !== filters.productType) return false
     if (filters.contrepartie && !d.contrepartie.toLowerCase().includes(filters.contrepartie.toLowerCase())) return false
     if (filters.ticker && !(d.underlyings || []).some(u => u.ticker === filters.ticker)) return false
-    if (filters.portfolioId && String(d.portfolio_id) !== filters.portfolioId) return false
+    if (filters.portfolioId && !(d.portfolio_ids || []).map(String).includes(filters.portfolioId)) return false
     return true
   })
   return [...list].sort((a, b) => {
@@ -2156,6 +2130,9 @@ async function refresh(dealId) {
 }
 
 onMounted(async () => {
+  refreshDay()
+  window.addEventListener('focus', refreshDay)
+  document.addEventListener('visibilitychange', refreshDay)
   await dealsStore.loadDeals()
   await loadSavedMtms(
     dealsStore.deals
@@ -2170,21 +2147,72 @@ onMounted(async () => {
   const dealId = Number(route.query.deal)
   if (dealId) openDealDetail(dealId)
 })
+onUnmounted(() => {
+  clearTimeout(dayTimer)
+  clearTimeout(copyReferenceTimer)
+  window.removeEventListener('focus', refreshDay)
+  document.removeEventListener('visibilitychange', refreshDay)
+})
 </script>
 
 <style scoped>
+.watchlist-heading {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.watchlist-heading__content {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.watchlist-heading__content > :last-child {
+  flex-shrink: 0;
+}
+
+.watchlist-heading__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 1.75rem;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.watchlist-heading__sort:hover,
+.watchlist-heading__sort--active {
+  color: var(--accent);
+}
+
+.watchlist-heading__sort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.watchlist-heading__arrow {
+  width: 0.7rem;
+  text-align: center;
+}
+
 .deal-card--alternate {
   background: var(--surface2);
 }
 
 .deal-card__header {
-  display: grid;
-  grid-template-columns: minmax(15rem, 1fr) max-content;
-  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 0.75rem;
 }
 
 .deal-card__identity {
+  flex: 1 1 22rem;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -2203,43 +2231,26 @@ onMounted(async () => {
 
 .deal-card__actions {
   display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  justify-self: end;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
   gap: 0.5rem;
+  min-width: 0;
   max-width: 100%;
-  overflow-x: auto;
-  padding-bottom: 0.125rem;
-  scrollbar-width: thin;
+  margin-left: auto;
 }
 
-.deal-open-menu {
+.deal-card__actions > button {
   flex: 0 0 auto;
-}
-
-.deal-open-menu[open] {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.deal-open-menu > summary {
-  display: inline-flex;
-  cursor: pointer;
-  list-style: none;
-  align-items: center;
-  gap: 0.3rem;
+  min-height: 2rem;
   white-space: nowrap;
 }
 
-.deal-open-menu > summary::-webkit-details-marker {
-  display: none;
-}
-
-.deal-open-menu__items {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+.booking-portfolio-filter {
+  width: auto;
+  min-width: min(14rem, 100%);
+  max-width: 100%;
 }
 
 .deal-open-menu__item {
@@ -2258,23 +2269,20 @@ onMounted(async () => {
   color: var(--accent);
 }
 
-.deal-card__portfolio {
-  width: 7rem;
-  max-width: 7rem;
+.deal-card__portfolio,
+.deal-card__portfolio-label {
+  max-width: min(22rem, 100%);
 }
 
 .deal-card__portfolio-label {
-  width: 4.75rem;
-  flex: 0 0 4.75rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
   border: 1px solid var(--border);
   border-radius: 0.375rem;
-  padding: 0.25rem 0.4rem;
+  padding: 0.375rem 0.65rem;
   color: var(--muted);
-  font-size: 0.625rem;
-  text-align: center;
+  font-size: 0.75rem;
 }
 
 /* ── Synthèse du deal : quatre panneaux, une identité chacun ──────────────
@@ -2848,8 +2856,10 @@ onMounted(async () => {
 }
 
 @media (max-width: 900px) {
-  .deal-card__header {
-    grid-template-columns: minmax(10rem, 1fr) minmax(0, 2fr);
+  .deal-card__actions {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
   }
 
   .deal-overview-grid {

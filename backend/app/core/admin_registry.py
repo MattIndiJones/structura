@@ -22,10 +22,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from ..db.models import (
     Script, Folder, Deal, DealEvent, Document, AmcStudy, Indicative,
-    KidRecord, EmtRecord, RfqRequest, RfqQuote, User, AdminAuditLog,
+    KidRecord, EmtRecord, RfqRequest, RfqQuote, User, Entity, AdminAuditLog,
     Alert, ShockRun, LifecycleProposal, TradeAmendmentRequest,
     DealContractVersion, OfficialFixingVersion,
-    ValuationRun,
+    ValuationRun, ValuationNote,
 )
 from .audit import commit_rejection
 
@@ -88,7 +88,10 @@ REGISTRY: dict[str, dict] = {
     },
     "deals": {
         "model": Deal, "label": "Deals",
-        "columns": ["id", "reference", "contrepartie", "devise", "nominal", "status", "user_id", "created_at"],
+        "columns": [
+            "id", "reference", "contrepartie", "product_type", "devise",
+            "nominal", "status", "user_id", "entity_id", "created_at",
+        ],
         "prepare": _prepare_deal_delete,
         # ORDER MATTERS and is enforced by a flush between each entry, because
         # SQLAlchemy's own ordering cannot be trusted here (see the cycle in
@@ -110,10 +113,9 @@ REGISTRY: dict[str, dict] = {
             (Document, "deal_id"),
             (DealEvent, "deal_id"),
         ],
-        # KID and EMT stay blockers rather than cascades: they are the
-        # regulatory records the client was actually handed, and they must
-        # outlive an administrative purge or be removed deliberately first.
-        "blockers": [(KidRecord, "deal_id"), (EmtRecord, "deal_id")],
+        # Issued documents and valuation notes protect their supporting deal
+        # from ordinary deletion. Explicit UAT cleanup is scoped separately.
+        "blockers": [(KidRecord, "deal_id"), (EmtRecord, "deal_id"), (ValuationNote, "deal_id")],
         "editable_fields": {},
     },
     "documents": {
@@ -161,14 +163,23 @@ def list_rows(table_key: str, session: Session) -> list[dict]:
     model = cfg["model"]
     rows = session.exec(select(model).order_by(model.id.desc())).all()
 
-    owners: dict[int, str] = {}
-    def owner_name(uid: int | None) -> str | None:
+    owners: dict[int, User | None] = {}
+    entities: dict[int, str] = {}
+
+    def owner_record(uid: int | None) -> User | None:
         if uid is None:
             return None
         if uid not in owners:
-            u = session.get(User, uid)
-            owners[uid] = u.username if u else "?"
+            owners[uid] = session.get(User, uid)
         return owners[uid]
+
+    def entity_name(entity_id: int | None) -> str | None:
+        if entity_id is None:
+            return None
+        if entity_id not in entities:
+            entity = session.get(Entity, entity_id)
+            entities[entity_id] = entity.name if entity else "?"
+        return entities[entity_id]
 
     out = []
     for row in rows:
@@ -177,7 +188,15 @@ def list_rows(table_key: str, session: Session) -> list[dict]:
             v = getattr(row, col, None)
             entry[col] = v.isoformat() if isinstance(v, datetime) else v
         if "user_id" in cfg["columns"]:
-            entry["owner"] = owner_name(row.user_id)
+            owner = owner_record(row.user_id)
+            entry["owner"] = owner.username if owner else "?"
+            if table_key == "deals":
+                # Deal.entity_id is the frozen booking attribution. Legacy
+                # rows can lack it, so use the owner's current entity only as
+                # an explicit display fallback in the admin inventory.
+                effective_entity_id = row.entity_id or (owner.entity_id if owner else None)
+                entry["entity_id"] = effective_entity_id
+                entry["entity"] = entity_name(effective_entity_id)
         out.append(entry)
     return out
 

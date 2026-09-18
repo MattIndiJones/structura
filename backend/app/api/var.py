@@ -41,7 +41,10 @@ class VarRequest(BaseModel):
     horizon_days: int = Field(default=1, ge=1, le=20)
     lookback_years: float = Field(default=5.0, ge=0.5, le=10.0)
     n_parametric: int = Field(default=2000, ge=100, le=5000)
-    n_paths_per_scenario: int = Field(default=3000, ge=500, le=20000)
+    # deal_valuation enforces the same 1,000-path numerical floor. Exposing
+    # 500 here made the accepted request differ silently from the run and its
+    # budget estimate.
+    n_paths_per_scenario: int = Field(default=3000, ge=1000, le=20000)
     max_workers: int = Field(default=4, ge=1, le=4)
     confirmation_token: str | None = None
 
@@ -420,12 +423,10 @@ def launch_var_global(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    deals = session.exec(
-        select(Deal).where(
-            Deal.user_id == current.id,
-            Deal.status.in_(["actif", "en_reglement"]),
-        )
-    ).all()
+    statement = select(Deal).where(Deal.status.in_(["actif", "en_reglement"]))
+    if getattr(current, "role", "user") != "admin":
+        statement = statement.where(Deal.user_id == current.id)
+    deals = session.exec(statement).all()
     result = _launch_var_study(list(deals), session, current.id, "VaR — tous portefeuilles", body)
     result["scope"] = "global"
     return result
@@ -439,14 +440,10 @@ def launch_var_portfolio(
     session: Annotated[Session, Depends(get_session)],
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or p.user_id != current.id:
+    if not p or (getattr(current, "role", "user") != "admin" and p.user_id != current.id):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = session.exec(
-        select(Deal).where(
-            Deal.portfolio_id == portfolio_id,
-            Deal.status.in_(["actif", "en_reglement"]),
-        )
-    ).all()
+    from .portfolios import _portfolio_deals
+    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"))
     result = _launch_var_study(list(deals), session, current.id, f"VaR — {p.name}", body)
     result["scope"] = "portfolio"
     result["portfolio_id"] = portfolio_id

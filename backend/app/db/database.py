@@ -6,7 +6,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from .models import (
     Entity, User, Folder, Script, Deal, DealEvent, Document, AmcStudy,
     Indicative, KidRecord, EmtRecord, RfqRequest, RfqQuote, RfqProvider,
-    Counterparty, Alert, Portfolio, ShockRun, ComputeBatch, ComputeJob,
+    Counterparty, Alert, Portfolio, DealPortfolioMembership, ShockRun, ComputeBatch, ComputeJob,
     AuditEvent, LifecycleProposal, TradeAmendmentRequest, DealContractVersion,
     OfficialFixingVersion, UatGenerationBatch, Underlying,
     ValuationRun, SchedulerRun,
@@ -712,32 +712,30 @@ def _make_kid_vev_nullable(conn) -> None:
     conn.commit()
 
 
-def _backfill_default_portfolios():
-    """Risk must always be monitored somewhere — every deal.portfolio_id is
-    non-NULL from here on. Assigns any orphan deal (pre-existing db, or a
-    deal booked before this feature) to its owner's default portfolio,
-    creating that portfolio (is_default=True, never deletable — see
-    api/portfolios.py) the first time it's needed. Idempotent: a user with
-    no orphans and no default portfolio yet gets neither created."""
-    from sqlmodel import select
+def _backfill_portfolio_memberships():
+    """Copy the former single-portfolio links into the association table.
+
+    The legacy pointer is deliberately left in place for rollback and old
+    exports, but no new booking writes it. Former default portfolios become
+    ordinary deletable portfolios; an unclassified deal is now a valid and
+    explicit state in the UI.
+    """
     with Session(engine) as s:
-        orphan_user_ids = {
-            d.user_id for d in s.exec(select(Deal).where(Deal.portfolio_id == None)).all()  # noqa: E711
+        existing = {
+            (m.deal_id, m.portfolio_id)
+            for m in s.exec(select(DealPortfolioMembership)).all()
         }
-        for uid in orphan_user_ids:
-            default = s.exec(
-                select(Portfolio).where(Portfolio.user_id == uid, Portfolio.is_default == True)  # noqa: E712
-            ).first()
-            if not default:
-                default = Portfolio(name="Portefeuille par défaut", user_id=uid, is_default=True)
-                s.add(default)
-                s.flush()
-            orphans = s.exec(
-                select(Deal).where(Deal.user_id == uid, Deal.portfolio_id == None)  # noqa: E711
-            ).all()
-            for d in orphans:
-                d.portfolio_id = default.id
-                s.add(d)
+        for deal in s.exec(select(Deal).where(Deal.portfolio_id != None)).all():  # noqa: E711
+            key = (deal.id, deal.portfolio_id)
+            if key not in existing:
+                s.add(DealPortfolioMembership(
+                    deal_id=deal.id,
+                    portfolio_id=deal.portfolio_id,
+                    added_by_user_id=deal.user_id,
+                ))
+        for portfolio in s.exec(select(Portfolio).where(Portfolio.is_default == True)).all():  # noqa: E712
+            portfolio.is_default = False
+            s.add(portfolio)
         s.commit()
 
 
@@ -852,7 +850,7 @@ def init_db():
     _seed_rfq_providers()
     _seed_counterparties()
     _seed_underlyings()
-    _backfill_default_portfolios()
+    _backfill_portfolio_memberships()
     _backfill_rfq_statuses()
 
 

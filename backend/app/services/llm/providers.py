@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import httpx
+from urllib.parse import urlsplit
 
 from .keys import load_key, missing_key_message
 
@@ -59,8 +60,7 @@ PROVIDERS = {
     ),
     "anthropic": ProviderInfo(
         key="anthropic", label="Claude (Anthropic)", needs_key=True,
-        # Famille Claude 5 (rafraîchie le 08/09/2026). L'identifiant du Haiku
-        # porte sa date de version, contrairement aux deux autres.
+        # Shared configured catalog; availability is checked by the provider on use.
         default_model="claude-sonnet-5",
         models=("claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5-20251001"),
     ),
@@ -73,7 +73,14 @@ class LlmError(RuntimeError):
     """Échec côté fournisseur — remonté tel quel à l'utilisateur, en français."""
 
 
-def ollama_models() -> list[str] | None:
+def validate_ollama_url(url: str) -> str:
+    parts = urlsplit(url)
+    if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
+        raise LlmError("Adresse Ollama invalide : utilisez une adresse HTTP(S) sans identifiants.")
+    return url.rstrip("/")
+
+
+def ollama_models(url: str | None = None) -> list[str] | None:
     """Modèles réellement INSTALLÉS localement, ou None si Ollama ne répond pas.
 
     La liste indicative de PROVIDERS ne sert qu'à documenter des choix
@@ -81,7 +88,7 @@ def ollama_models() -> list[str] | None:
     conduit tout droit à « Modèle inconnu d'Ollama » après une génération
     lancée pour rien. Un sélecteur doit lister ce qui existe."""
     try:
-        r = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=2.5)
+        r = httpx.get(f"{validate_ollama_url(url or OLLAMA_URL)}/api/tags", timeout=2.5)
         if r.status_code >= 400:
             return None
         noms = [m.get("name", "") for m in (r.json().get("models") or [])]
@@ -90,12 +97,14 @@ def ollama_models() -> list[str] | None:
         return None                      # éteint, injoignable, format inattendu
 
 
-def available_providers() -> list[dict]:
+def available_providers(ollama_url: str | None = None) -> list[dict]:
     """Ce que l'interface affiche dans le sélecteur, avec l'état de chaque
     moteur. Ollama est sondé (2,5 s au pire) pour lister ses modèles installés :
     l'alternative — une liste figée — fait choisir un modèle absent et n'échoue
     qu'après la génération."""
-    installed = ollama_models()
+    if ollama_url:
+        validate_ollama_url(ollama_url)
+    installed = ollama_models(ollama_url) if ollama_url else ollama_models()
     out = []
     for info in PROVIDERS.values():
         ready = (not info.needs_key) or bool(load_key(info.key))
@@ -106,9 +115,10 @@ def available_providers() -> list[dict]:
         if info.key == "ollama":
             if installed is None:
                 ready = False
-                hint = ("Ollama ne répond pas sur localhost:11434. Lancez "
-                        "`ollama serve`, puis rouvrez cette fenêtre.")
+                models = []
+                hint = "Ollama ne répond pas à l'adresse configurée. Vérifiez le service puis actualisez les modèles."
             elif not installed:
+                models = []
                 ready = False
                 hint = ("Ollama tourne mais aucun modèle n'est installé. "
                         "Suggestion : `ollama pull qwen2.5-coder:14b`.")
@@ -139,7 +149,7 @@ def _post(url: str, payload: dict, headers: dict | None = None) -> dict:
                 "(`ollama serve`) et vérifiez que le modèle est installé "
                 "(`ollama pull <modèle>`)."
             ) from e
-        raise LlmError(f"Connexion impossible au fournisseur : {e}") from e
+        raise LlmError("Connexion impossible au fournisseur IA.") from e
     except httpx.TimeoutException as e:
         raise LlmError(
             f"Le modèle n'a pas répondu en {TIMEOUT_S:.0f} s. Un modèle local "
@@ -147,7 +157,6 @@ def _post(url: str, payload: dict, headers: dict | None = None) -> dict:
             f"plus petit."
         ) from e
     if r.status_code >= 400:
-        detail = r.text[:400]
         if r.status_code in (401, 403):
             raise LlmError(f"Clé d'API refusée par le fournisseur ({r.status_code}).")
         if r.status_code == 404 and "11434" in url:
@@ -157,25 +166,28 @@ def _post(url: str, payload: dict, headers: dict | None = None) -> dict:
             )
         if r.status_code == 429:
             raise LlmError("Quota du fournisseur atteint (429). Réessayez plus tard.")
-        raise LlmError(f"Erreur du fournisseur ({r.status_code}) : {detail}")
-    return r.json()
+        raise LlmError(f"Erreur du fournisseur ({r.status_code}). Vérifiez le modèle et la configuration.")
+    try:
+        return r.json()
+    except ValueError as e:
+        raise LlmError("Réponse du fournisseur illisible.") from e
 
 
 def _complete_ollama(model: str, system: str, user: str, temperature: float,
-                     max_tokens: int) -> str:
-    data = _post(f"{OLLAMA_URL}/api/chat", {
+                     max_tokens: int, *, api_key: str = "", ollama_url: str | None = None) -> Completion:
+    data = _post(f"{validate_ollama_url(ollama_url or OLLAMA_URL)}/api/chat", {
         "model": model,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
         "stream": False,
         "options": {"temperature": temperature, "num_predict": max_tokens},
     })
-    return (data.get("message") or {}).get("content", "")
+    return Completion((data.get("message") or {}).get("content", ""), data.get("model") or model)
 
 
 def _complete_openai(model: str, system: str, user: str, temperature: float,
-                     max_tokens: int) -> str:
-    key = load_key("openai")
+                     max_tokens: int, *, api_key: str = "", ollama_url: str | None = None) -> Completion:
+    key = api_key or load_key("openai")
     if not key:
         raise LlmError(missing_key_message("openai"))
     data = _post("https://api.openai.com/v1/chat/completions", {
@@ -186,12 +198,12 @@ def _complete_openai(model: str, system: str, user: str, temperature: float,
         "max_tokens": max_tokens,
     }, {"Authorization": f"Bearer {key}"})
     choices = data.get("choices") or []
-    return choices[0]["message"]["content"] if choices else ""
+    return Completion(choices[0]["message"]["content"] if choices else "", data.get("model") or model)
 
 
 def _complete_anthropic(model: str, system: str, user: str, temperature: float,
-                        max_tokens: int) -> str:
-    key = load_key("anthropic")
+                        max_tokens: int, *, api_key: str = "", ollama_url: str | None = None) -> Completion:
+    key = api_key or load_key("anthropic")
     if not key:
         raise LlmError(missing_key_message("anthropic"))
     data = _post("https://api.anthropic.com/v1/messages", {
@@ -202,7 +214,7 @@ def _complete_anthropic(model: str, system: str, user: str, temperature: float,
         "max_tokens": max_tokens,
     }, {"x-api-key": key, "anthropic-version": "2023-06-01"})
     blocks = data.get("content") or []
-    return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    return Completion("".join(b.get("text", "") for b in blocks if b.get("type") == "text"), data.get("model") or model)
 
 
 _DISPATCH = {
@@ -212,7 +224,7 @@ _DISPATCH = {
 }
 
 
-def _modele_effectif(info: ProviderInfo, model: str | None) -> str:
+def _modele_effectif(info: ProviderInfo, model: str | None, ollama_url: str | None = None) -> str:
     """Le modèle à appeler réellement, jamais un nom absent de la machine.
 
     Le défaut de PROVIDERS est celui de l'assistant de SCRIPTING — un modèle de
@@ -226,28 +238,35 @@ def _modele_effectif(info: ProviderInfo, model: str | None) -> str:
     demande = model or info.default_model
     if info.key != "ollama":
         return demande
-    installes = ollama_models()
+    installes = ollama_models(ollama_url) if ollama_url else ollama_models()
     if not installes or demande in installes:
         return demande
-    # Le défaut recommandé s'il est là, sinon le premier installé.
+    if model:
+        raise LlmError("Le modèle Ollama sélectionné n'est plus installé. Actualisez la liste et choisissez un modèle.")
+    # Choose an installed default only when no model was explicitly selected.
     return info.default_model if info.default_model in installes else installes[0]
 
 
 def complete_with_metadata(provider: str, model: str | None, system: str,
                            user: str, *, temperature: float = 0.1,
-                           max_tokens: int = 2000) -> Completion:
-    """Réponse et modèle réellement appelé, y compris après repli Ollama."""
+                           max_tokens: int = 2000, api_key: str = "",
+                           ollama_url: str | None = None) -> Completion:
+    """Response and resolved model, without replacing an explicit user selection."""
+    provider = "anthropic" if provider == "claude" else provider
     info = PROVIDERS.get(provider)
     if info is None:
         raise LlmError(
             f"Moteur inconnu : {provider!r} — valeurs admises : "
             f"{', '.join(PROVIDERS)}.")
-    effective_model = _modele_effectif(info, model)
+    if provider == "ollama" and ollama_url:
+        validate_ollama_url(ollama_url)
+    effective_model = _modele_effectif(info, model, ollama_url)
+    connection = {"api_key": api_key, "ollama_url": ollama_url} if api_key or ollama_url else {}
     out = _DISPATCH[provider](effective_model, system, user,
-                              temperature, max_tokens)
-    if not (out or "").strip():
+                              temperature, max_tokens, **connection)
+    if not (out.text or "").strip():
         raise LlmError("Le modèle a renvoyé une réponse vide.")
-    return Completion(text=out, effective_model=effective_model)
+    return out
 
 
 def complete(provider: str, model: str | None, system: str, user: str, *,

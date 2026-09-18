@@ -357,7 +357,7 @@ def test_le_prompt_est_consultable_sans_appeler_de_modele():
     p = preview_prompt("un autocall 3 ans barrière PDI -40%", n_underlyings=1,
                        maturity=3.0)
     assert set(p) == {"system", "user", "examples", "examples_version",
-                      "chars", "approx_tokens"}
+                      "chars", "approx_tokens", "prompt_version", "base_hash"}
     assert p["chars"] == len(p["system"]) + len(p["user"])
     assert p["approx_tokens"] > 500
     assert p["examples"] and all(isinstance(e, str) for e in p["examples"])

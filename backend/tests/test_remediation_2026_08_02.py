@@ -479,6 +479,7 @@ def _rfq_session():
             {"name": "Microsoft", "ticker": "MSFT", "ccy": "EUR", "sigma": 0.20, "q": 0.02},
             {"name": "Apple", "ticker": "AAPL", "ccy": "EUR", "sigma": 0.24, "q": 0.01},
         ],
+        "corr_matrix": [[1.0, 0.35], [0.35, 1.0]],
         "r": 0.03, "T": 4.75, "N": 20000, "model": "constant",
         "user_params": {"CPN": 0.08}, "constats": {"OBS": {"end_date": "2031-08-01"}},
         "notional": 1_060_000.0, "currency": "EUR",

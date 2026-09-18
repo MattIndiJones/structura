@@ -17,9 +17,7 @@ donc exactement ce qui part.
 """
 from __future__ import annotations
 
-import time
-
-from .providers import DEFAULT_PROVIDER, LlmError, complete
+from .providers import DEFAULT_PROVIDER, LlmError
 
 CADRE = """Tu es un structureur senior de produits structurés, interlocuteur d'un
 pair du métier. Tu réponds en français, sans réexpliquer les bases de la finance
@@ -134,13 +132,14 @@ def construire_prompts(resume: str, intention: str, question: str = "") -> dict:
         # remplace pas — sinon le menu ne servirait à rien dès qu'on écrit.
         consigne = f"{consigne}\n\nPrécision de l'utilisateur : {question.strip()}"
 
-    return {"system": CADRE, "user": f"{consigne}\n\n---\n\n{resume}",
+    from .workbench import prompt_preview
+    return {**prompt_preview(CADRE, f"{consigne}\n\n---\n\n{resume}", "product-analysis-v1"),
             "intention": intention, "intention_label": conf["label"]}
 
 
 def analyse_produit(resume: str, intention: str, *, question: str = "",
                     provider: str = DEFAULT_PROVIDER,
-                    model: str | None = None) -> dict:
+                    model: str | None = None, options=None) -> dict:
     """Un second avis, avec sa provenance.
 
     Rend toujours de quoi étiqueter la réponse — fournisseur, modèle, horodatage
@@ -148,16 +147,13 @@ def analyse_produit(resume: str, intention: str, *, question: str = "",
     comme une conclusion validée."""
     prompts = construire_prompts(resume, intention, question)
 
-    t0 = time.perf_counter()
-    texte = complete(provider, model, prompts["system"], prompts["user"],
-                     temperature=0.4, max_tokens=2500)
+    from ...core.ai_contract import AiOptions
+    from .workbench import generate_text
+    options = options or AiOptions(provider=provider, model=model)
+    result = generate_text(prompts, options, temperature=0.4, max_tokens=2500)
     return {
-        "texte": texte.strip(),
+        **result,
+        "texte": result["text"].strip(),
         "intention": intention,
         "intention_label": prompts["intention_label"],
-        "provider": provider,
-        "model": model or "",
-        "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
-        # Le desk doit pouvoir dire d'où vient un avis, six mois plus tard.
-        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }

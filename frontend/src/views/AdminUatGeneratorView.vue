@@ -5,8 +5,8 @@
         <div>
           <h1 class="page-title">Générateur UAT</h1>
           <p class="page-subtitle">
-            Crée des RFQ et des deals synthétiques reproductibles en passant par les contrôles
-            réels de RFQ, sélection, booking, fixings versionnés et lifecycle.
+            Crée des Products synthétiques puis les fait passer par les parcours réels du Pricer,
+            des RFQ, du booking, des fixings, des valorisations et du risque.
           </p>
         </div>
         <div class="page-actions">
@@ -20,8 +20,8 @@
       <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
       <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
       <AlertMessage kind="warning">
-        Données de test uniquement : toutes les références commencent par <strong>UAT</strong>.
-        La suppression se fait par lot explicite et ne touche jamais les données ordinaires.
+        Données de test uniquement : chaque objet porte le lot UAT qui l'a créé.
+        La suppression cible ce rattachement explicite et ne touche jamais les données ordinaires.
       </AlertMessage>
 
       <LoadingSpinner v-if="loading" class="py-12" />
@@ -31,11 +31,12 @@
             <div>
               <h2 class="font-bold text-sm">1. Périmètre du lot</h2>
               <p class="text-xs mt-1" style="color: var(--subtle);">
-                La graine rend le contenu économique identique à configuration inchangée.
+                Le Product est créé au premier acte persistant, reste interne sauf conservation
+                volontaire, puis garde la même identité dans tous les modules.
               </p>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
               <label>
                 <span class="label">Compte destinataire</span>
                 <select v-model.number="form.target_user_id" class="select">
@@ -47,18 +48,16 @@
               <label>
                 <span class="label">Chaîne testée</span>
                 <select v-model="form.mode" class="select">
-                  <option value="FULL_CHAIN">RFQ → booking</option>
-                  <option value="RFQ_ONLY">RFQ uniquement</option>
-                  <option value="BOOKED_ONLY">Deals bookés sans RFQ</option>
+                  <option value="FULL_CHAIN">RFQ → Product interne → Pricer → Booking → Risk</option>
+                  <option value="PRICER_RFQ_CHAIN">Pricer → Product interne → RFQ → Pricer → Booking → Risk</option>
+                  <option value="SAVED_PRODUCT_RFQ_CHAIN">Pricer → Product conservé → RFQ → Pricer → Booking → Risk</option>
+                  <option value="BOOKED_ONLY">Pricer → Product interne → Booking direct → Risk</option>
+                  <option value="RFQ_ONLY">RFQ → Product interne (non traitée)</option>
                 </select>
               </label>
               <label>
                 <span class="label">Nombre</span>
                 <input v-model.number="form.count" class="input" type="number" min="1" max="100" />
-              </label>
-              <label>
-                <span class="label">Graine</span>
-                <input v-model.number="form.seed" class="input font-mono" type="number" min="0" />
               </label>
             </div>
 
@@ -96,13 +95,13 @@
               <label>
                 <span class="label">Sous-jacents min.</span>
                 <select v-model.number="form.min_underlyings" class="select">
-                  <option :value="1">1</option><option :value="2">2</option><option :value="3">3</option>
+                  <option v-for="n in Math.min(config.underlyings.length, 12)" :key="n" :value="n">{{ n }}</option>
                 </select>
               </label>
               <label>
                 <span class="label">Sous-jacents max.</span>
                 <select v-model.number="form.max_underlyings" class="select">
-                  <option :value="1">1</option><option :value="2">2</option><option :value="3">3</option>
+                  <option v-for="n in Math.min(config.underlyings.length, 12)" :key="n" :value="n">{{ n }}</option>
                 </select>
               </label>
               <label>
@@ -178,6 +177,36 @@
               </fieldset>
             </div>
 
+            <div class="rounded-xl p-3 border flex flex-col gap-3"
+                 style="border-color: var(--border); background: var(--surface2);">
+              <div>
+                <div class="label">Calculs conservés</div>
+                <p class="text-[11px] mt-1" style="color: var(--subtle);">
+                  Les calculs Product conservent chacun leur marché. Les MTM datés alimentent
+                  l'historique du deal ; les Greeks rendent le deal exploitable dans Risk.
+                </p>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label v-if="form.mode !== 'RFQ_ONLY'">
+                  <span class="label">Pricings par Product</span>
+                  <select v-model.number="form.product_calculations" class="select">
+                    <option v-for="n in 5" :key="n" :value="n">{{ n }}</option>
+                  </select>
+                </label>
+                <label v-if="form.mode !== 'RFQ_ONLY'">
+                  <span class="label">Dates de MTM par deal</span>
+                  <select v-model.number="form.mtm_history_count" class="select">
+                    <option :value="0">Aucune</option>
+                    <option v-for="n in 5" :key="n" :value="n">{{ n }}</option>
+                  </select>
+                </label>
+                <label v-if="form.mode !== 'RFQ_ONLY'" class="flex items-center gap-2 pt-5 text-xs cursor-pointer">
+                  <input v-model="form.compute_greeks" type="checkbox" />
+                  <span>Calculer les Greeks pour Risk</span>
+                </label>
+              </div>
+            </div>
+
             <div class="flex items-center justify-between gap-3 pt-1 border-t" style="border-color: var(--border);">
               <p class="text-[11px]" style="color: var(--subtle);">
                 Une prévisualisation valide est obligatoire avant génération.
@@ -204,14 +233,25 @@
               Configurez le lot puis lancez la prévisualisation.
             </div>
             <template v-else>
-              <div class="grid grid-cols-2 gap-2">
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div class="stat-box"><div class="label">Products</div><div class="font-mono text-lg">{{ preview.product_count }}</div></div>
+                <div class="stat-box"><div class="label">Pricings</div><div class="font-mono text-lg">{{ preview.calculation_count }}</div></div>
                 <div class="stat-box"><div class="label">RFQ</div><div class="font-mono text-lg">{{ preview.rfq_count }}</div></div>
                 <div class="stat-box"><div class="label">Deals</div><div class="font-mono text-lg">{{ preview.deal_count }}</div></div>
+                <div v-if="preview.deal_count" class="stat-box"><div class="label">MTM max.</div><div class="font-mono text-lg">{{ preview.valuation_count_estimate }}</div></div>
+                <div v-if="preview.deal_count" class="stat-box"><div class="label">Risk max.</div><div class="font-mono text-lg">{{ preview.risk_count_estimate }}</div></div>
               </div>
               <div v-if="Object.keys(preview.profile_counts || {}).length" class="flex flex-wrap gap-1.5">
                 <span v-for="(count, profile) in preview.profile_counts" :key="profile" class="badge badge-muted">
                   {{ lifecycleLabel(profile) }} · {{ count }}
                 </span>
+              </div>
+              <div v-if="preview.pricing_scenarios?.length > 1" class="rounded-xl p-3 text-[11px] border"
+                   style="border-color: var(--border); background: var(--surface2);">
+                <div class="label mb-1.5">Marchés des pricings conservés</div>
+                <div v-for="scenario in preview.pricing_scenarios" :key="scenario.index" class="mt-1">
+                  <span class="font-mono">P{{ scenario.index }}</span> · {{ scenario.label }}
+                </div>
               </div>
               <template v-if="preview.warnings?.length">
                 <AlertMessage v-for="warning in preview.warnings" :key="warning" kind="warning">{{ warning }}</AlertMessage>
@@ -256,7 +296,6 @@
                 <th class="py-2 pr-3 font-medium">Lot</th>
                 <th class="py-2 pr-3 font-medium">Compte</th>
                 <th class="py-2 pr-3 font-medium">Mode</th>
-                <th class="py-2 pr-3 font-medium">Seed</th>
                 <th class="py-2 pr-3 font-medium">Objets</th>
                 <th class="py-2 pr-3 font-medium">Statut</th>
                 <th class="py-2 pr-3 font-medium">Créé le</th>
@@ -270,9 +309,32 @@
                   <div class="font-mono text-[10px]" style="color: var(--subtle);">{{ batch.batch_key }}</div>
                 </td>
                 <td class="py-2 pr-3">{{ batch.target_user }}</td>
-                <td class="py-2 pr-3 whitespace-nowrap">{{ modeLabel(batch.mode) }}</td>
-                <td class="py-2 pr-3 font-mono">{{ batch.seed }}</td>
-                <td class="py-2 pr-3 font-mono whitespace-nowrap">{{ batch.rfq_count }} RFQ · {{ dealCountLabel(batch.deal_count) }}</td>
+                <td class="py-2 pr-3">{{ modeLabel(batch.mode) }}</td>
+                <td class="py-2 pr-3 font-mono whitespace-nowrap">
+                  {{ batch.product_count }} Product{{ batch.product_count === 1 ? '' : 's' }} ·
+                  {{ batch.rfq_count }} RFQ · {{ dealCountLabel(batch.deal_count) }}
+                  <div v-if="batch.valuation_count || batch.risk_count" class="text-[10px] mt-0.5" style="color: var(--subtle);">
+                    {{ batch.valuation_count }} MTM · {{ batch.risk_count }} calcul{{ batch.risk_count === 1 ? '' : 's' }} Risk
+                  </div>
+                  <div v-if="batch.result?.calculation_errors?.length" class="text-[10px] mt-0.5 text-amber-600">
+                    {{ batch.result.calculation_errors.length }} calcul{{ batch.result.calculation_errors.length === 1 ? '' : 's' }} non produit{{ batch.result.calculation_errors.length === 1 ? '' : 's' }}
+                  </div>
+                  <div v-if="batch.calculation_skip_count" class="text-[10px] mt-0.5" style="color: var(--subtle);">
+                    {{ batch.calculation_skip_count }} calcul{{ batch.calculation_skip_count === 1 ? '' : 's' }} non applicable{{ batch.calculation_skip_count === 1 ? '' : 's' }} au statut du deal
+                  </div>
+                  <details v-if="batch.result?.calculation_errors?.length || batch.result?.calculation_skips?.length"
+                           class="mt-1 max-w-lg whitespace-normal">
+                    <summary class="cursor-pointer text-[10px]" style="color: var(--accent);">Voir le diagnostic</summary>
+                    <div class="mt-1 flex flex-col gap-1 text-[10px]">
+                      <div v-for="item in batch.result.calculation_errors || []" :key="`error-${item.deal_reference}-${item.kind}-${item.valuation_date}`" class="text-red-600">
+                        {{ item.deal_reference }} · {{ item.kind }}<span v-if="item.valuation_date"> · {{ item.valuation_date }}</span> : {{ item.reason }}
+                      </div>
+                      <div v-for="item in batch.result.calculation_skips || []" :key="`skip-${item.deal_reference}-${item.kind}`" style="color: var(--subtle);">
+                        {{ item.deal_reference }} · {{ item.kind }} : {{ item.reason }}
+                      </div>
+                    </div>
+                  </details>
+                </td>
                 <td class="py-2 pr-3"><span class="badge" :class="batchStatusClass(batch.status)">{{ batchStatusLabel(batch.status) }}</span></td>
                 <td class="py-2 pr-3 font-mono whitespace-nowrap" style="color: var(--subtle);">{{ fmtDate(batch.created_at) }}</td>
                 <td class="py-2 text-right">
@@ -292,6 +354,7 @@
 import { reactive, ref, onMounted, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
+import { confirmer } from '../composables/useConfirm.js'
 import AlertMessage from '../components/ui/AlertMessage.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import { formatDateTime } from '../utils/format.js'
@@ -310,6 +373,7 @@ const form = reactive({
   target_user_id: null,
   mode: 'FULL_CHAIN',
   count: 8,
+  // Internal reproducibility parameter; the pricing engine seed stays global.
   seed: 42,
   label: '',
   product_types: [],
@@ -325,6 +389,9 @@ const form = reactive({
   quotes_per_rfq: 2,
   provider_ids: [],
   rfq_profile: 'EXECUTABLE',
+  product_calculations: 3,
+  mtm_history_count: 3,
+  compute_greeks: true,
   lifecycle_profile: 'COMPLETE_MIX',
 })
 
@@ -394,7 +461,7 @@ async function previewBatch() {
 async function generateBatch() {
   if (!preview.value) return
   if (!await confirmer({ titre: 'Générer ce jeu de test ?',
-                       message: `${preview.value.rfq_count} RFQ et `
+                       message: `${preview.value.product_count} Products, ${preview.value.rfq_count} RFQ et `
                               + `${dealCountLabel(preview.value.deal_count)} seront créés sur ce compte.`,
                        confirmer: 'Générer' })) return
   generating.value = true
@@ -409,7 +476,7 @@ async function generateBatch() {
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(detailText(data, 'Génération impossible'))
     batches.value.unshift({ ...data, busy: false })
-    notice.value = `Lot ${data.batch_key} créé : ${data.rfq_count} RFQ et ${dealCountLabel(data.deal_count)}.`
+    notice.value = `Lot ${data.batch_key} créé : ${data.product_count} Products, ${data.rfq_count} RFQ et ${dealCountLabel(data.deal_count)}.`
     preview.value = null
   } catch (e) {
     error.value = e.message
@@ -426,7 +493,7 @@ async function refreshBatches() {
 
 async function deleteBatch(batch) {
   if (!await confirmer({ titre: `Supprimer le lot ${batch.batch_key} ?`,
-                       message: `${batch.rfq_count} RFQ et `
+                       message: `${batch.product_count} Products, ${batch.rfq_count} RFQ et `
                               + `${dealCountLabel(batch.deal_count)} de ce lot seulement.`,
                        confirmer: 'Supprimer le lot', danger: true })) return
   batch.busy = true
@@ -438,7 +505,7 @@ async function deleteBatch(batch) {
     if (!res.ok) throw new Error(detailText(data, 'Suppression impossible'))
     batch.status = 'DELETED'
     batch.deleted_at = new Date().toISOString()
-    notice.value = `Lot supprimé : ${data.deleted_rfqs} RFQ, ${dealCountLabel(data.deleted_deals)}.`
+    notice.value = `Lot supprimé : ${data.deleted_products} Products, ${data.deleted_rfqs} RFQ, ${dealCountLabel(data.deleted_deals)}.`
   } catch (e) {
     error.value = e.message
   } finally {
@@ -453,7 +520,13 @@ const roleLabel = role => ({ admin: 'Admin', user: 'Utilisateur', ops_maker: 'Op
 const fixingLabel = value => ({ AUTO_YAHOO: 'Fournisseur auto' }[value] || value)
 const lifecycleLabel = value => config.lifecycle_profiles.find(profile => profile.key === value)?.label || value
 const scenarioLabel = value => ({ EXPIRED: 'quote expirée', INDICATIVE: 'quote indicative', NO_SELECTION: 'aucune quote sélectionnée' }[value] || value)
-const modeLabel = value => ({ FULL_CHAIN: 'RFQ → booking', RFQ_ONLY: 'RFQ', BOOKED_ONLY: 'Booking direct' }[value] || value)
+const modeLabel = value => ({
+  FULL_CHAIN: 'RFQ → Product interne → Pricer → Booking → Risk',
+  PRICER_RFQ_CHAIN: 'Pricer → Product interne → RFQ → Pricer → Booking → Risk',
+  SAVED_PRODUCT_RFQ_CHAIN: 'Pricer → Product conservé → RFQ → Pricer → Booking → Risk',
+  BOOKED_ONLY: 'Pricer → Product interne → Booking direct → Risk',
+  RFQ_ONLY: 'RFQ → Product interne (non traitée)',
+}[value] || value)
 const batchStatusLabel = value => ({ RUNNING: 'En cours', COMPLETED: 'Terminé', FAILED: 'Échec', DELETED: 'Supprimé' }[value] || value)
 const batchStatusClass = value => ({ RUNNING: 'badge-accent', COMPLETED: 'badge-positive', FAILED: 'badge-negative', DELETED: 'badge-muted' }[value] || 'badge-muted')
 

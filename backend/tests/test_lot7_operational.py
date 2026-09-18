@@ -122,6 +122,12 @@ def test_runs_de_valorisation_sont_append_only_et_rejouables(monkeypatch):
         )
         session.add(deal); session.commit(); session.refresh(deal)
         ctx = {
+            "product_terms": {
+                "script": "AT MATURITY\n  PAY 1\n",
+                "value_date": "2026-01-03",
+                "strike_date": "2026-01-01",
+                "settlement_ccy": "EUR",
+            },
             "valuation_context": {"constats": {}, "underlyings": [{}]},
             "T_elapsed": 0.5, "passe_jusqu_a": 0.5, "state": {},
             "norm_spots": [1.0], "corr": [[1.0]], "N_used": 2000,

@@ -482,15 +482,15 @@ def mtf_endpoint(req: MtfRequest):
     return res
 
 
+@router.get("/ai/providers")
 @router.get("/script/providers")
-def script_providers_endpoint():
-    """Moteurs disponibles pour l'assistant, avec l'état de chacun.
-
-    Ollama est annoncé disponible sans sonder localhost : une seconde d'attente
-    à chaque affichage de page pour une information que le premier appel donnera
-    de toute façon."""
-    from ..services.llm import available_providers, DEFAULT_PROVIDER
-    return {"providers": available_providers(), "default": DEFAULT_PROVIDER}
+def script_providers_endpoint(ollama_url: str | None = None):
+    """Common catalog: configured cloud providers and installed Ollama models."""
+    from ..services.llm import available_providers, DEFAULT_PROVIDER, LlmError
+    try:
+        return {"providers": available_providers(ollama_url), "default": DEFAULT_PROVIDER}
+    except LlmError as e:
+        raise HTTPException(422, str(e))
 
 
 @router.post("/script/prompt")
@@ -502,10 +502,13 @@ def script_prompt_endpoint(req: ScriptGenerateRequest):
     qu'à tâtons."""
     from ..services.llm import preview_prompt
     return preview_prompt(req.description, n_underlyings=len(req.underlyings) or 1,
-                          maturity=req.T)
+                          maturity=req.T, refine=req.refine, current_script=req.current_script)
 
 
-class ProductAnalysisRequest(BaseModel):
+from ..core.ai_contract import AiOptions
+
+
+class ProductAnalysisRequest(AiOptions):
     """Un résumé de produit et ce qu'on veut en faire.
 
     Le résumé arrive REDIGE depuis l'écran, il n'est pas reconstruit ici : ce
@@ -514,8 +517,6 @@ class ProductAnalysisRequest(BaseModel):
     resume: str
     intention: str = "analyse"
     question: str = ""
-    provider: str = ""
-    model: str = ""
 
 
 @router.post("/product/analyse")
@@ -533,6 +534,7 @@ def product_analyse_endpoint(req: ProductAnalysisRequest):
             req.resume, req.intention, question=req.question,
             provider=req.provider or DEFAULT_PROVIDER,
             model=req.model or None,
+            options=req,
         )
     except LlmError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -592,6 +594,7 @@ def script_generate_endpoint(req: ScriptGenerateRequest):
             underlyings=uls, corr=corr, r=req.r, T=req.T,
             user_params=req.user_params,
             current_script=req.current_script, refine=req.refine,
+            prompt_override=req.prompt_override, api_key=req.api_key, ollama_url=req.ollama_url,
         )
     except LlmError as e:
         # 502 : c'est le fournisseur qui est en cause, pas la requête. Le

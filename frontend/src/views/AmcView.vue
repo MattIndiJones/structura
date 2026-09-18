@@ -1169,89 +1169,8 @@
                     </div>
                   </div>
 
-                  <!-- Provider selector -->
-                  <div class="flex gap-2">
-                    <button v-for="p in [{id:'ollama',label:'Ollama'},{id:'claude',label:'Claude'},{id:'openai',label:'OpenAI'}]"
-                      :key="p.id"
-                      @click="aiProvider = p.id; aiPersist()"
-                      class="px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors"
-                      :class="aiProvider === p.id
-                        ? 'bg-blue-600 border-blue-500 text-white'
-                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'">
-                      {{ p.label }}
-                      <span v-if="p.id !== 'ollama'" class="ml-1 text-[9px] opacity-60">premium</span>
-                    </button>
-                  </div>
-
-                  <!-- Ollama config -->
-                  <div v-if="aiProvider === 'ollama'" class="flex flex-col gap-2">
-                    <div class="flex gap-2">
-                      <input v-model="aiOllamaUrl" @blur="aiPersist"
-                        placeholder="http://localhost:11434"
-                        class="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500" />
-                      <button @click="fetchOllamaModels"
-                        class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded transition-colors shrink-0">
-                        Détecter modèles
-                      </button>
-                    </div>
-                    <div v-if="aiOllamaModelsError" class="text-red-400 text-xs">⚠ {{ aiOllamaModelsError }}</div>
-                    <div v-if="aiOllamaModels.length">
-                      <select v-model="aiOllamaModel" @change="aiPersist"
-                        class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500">
-                        <option v-for="m in aiOllamaModels" :key="m" :value="m">{{ m }}</option>
-                      </select>
-                    </div>
-                    <div v-else>
-                      <input v-model="aiOllamaModel" @blur="aiPersist"
-                        placeholder="ex: llama3.3:70b"
-                        class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500" />
-                    </div>
-                  </div>
-
-                  <!-- Claude config -->
-                  <div v-if="aiProvider === 'claude'" class="flex flex-col gap-2">
-                    <input v-model="aiClaudeKey" @blur="aiPersist" type="password"
-                      placeholder="sk-ant-api03-…"
-                      class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500" />
-                    <select v-model="aiClaudeModel" @change="aiPersist"
-                      class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500">
-                      <option value="claude-sonnet-4-6">claude-sonnet-4-6 (recommandé)</option>
-                      <option value="claude-opus-4-8">claude-opus-4-8</option>
-                      <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (rapide)</option>
-                    </select>
-                  </div>
-
-                  <!-- OpenAI config -->
-                  <div v-if="aiProvider === 'openai'" class="flex flex-col gap-2">
-                    <input v-model="aiOpenAiKey" @blur="aiPersist" type="password"
-                      placeholder="sk-…"
-                      class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500" />
-                    <select v-model="aiOpenAiModel" @change="aiPersist"
-                      class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500">
-                      <option value="gpt-4o">gpt-4o (recommandé)</option>
-                      <option value="gpt-4o-mini">gpt-4o-mini (rapide)</option>
-                    </select>
-                  </div>
-
-                  <!-- Actions -->
-                  <div class="flex gap-2">
-                    <button @click="generateSynthesisAI"
-                      :disabled="aiGenerating || !studyResult"
-                      class="flex-1 py-2 px-4 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
-                      :class="aiGenerating || !studyResult
-                        ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                        : 'bg-emerald-700 hover:bg-emerald-600 text-white'">
-                      <span v-if="aiGenerating" class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                      {{ aiGenerating ? 'Génération en cours…' : '✨ Générer la synthèse' }}
-                    </button>
-                    <button @click="activeStudyTab = 'payload_ai'; fetchAIPayload()"
-                      :disabled="!studyResult"
-                      class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors disabled:opacity-40">
-                      📋 Voir données envoyées
-                    </button>
-                  </div>
-
-                  <div v-if="aiError" class="text-red-400 text-xs bg-red-950/30 rounded p-2">⚠ {{ aiError }}</div>
+                  <AiWorkbench endpoint="/api/amc/synthesize" :payload="aiPayload" :disabled="!studyResult"
+                    action-label="Générer la synthèse" @result="receiveAiSynthesis" />
 
                   <!-- Generated text output -->
                   <div v-if="aiGeneratedText" class="flex flex-col gap-2">
@@ -4319,6 +4238,7 @@
 </template>
 
 <script setup>
+import AiWorkbench from '../components/AiWorkbench.vue'
 import BackLink from '../components/ui/BackLink.vue'
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
@@ -4913,81 +4833,14 @@ const blockMethodology = {
 const currentMethodology = computed(() => blockMethodology[activeStudyTab.value] || null)
 
 // ── AI Synthesis state ────────────────────────────────────────────────────
-const aiProvider     = ref(localStorage.getItem('ai_provider')     || 'ollama')
-const aiOllamaUrl    = ref(localStorage.getItem('ai_ollama_url')   || 'http://localhost:11434')
-const aiOllamaModel  = ref(localStorage.getItem('ai_ollama_model') || '')
-const aiClaudeKey    = ref(localStorage.getItem('ai_claude_key')   || '')
-const aiClaudeModel  = ref(localStorage.getItem('ai_claude_model') || 'claude-sonnet-4-6')
-const aiOpenAiKey    = ref(localStorage.getItem('ai_openai_key')   || '')
-const aiOpenAiModel  = ref(localStorage.getItem('ai_openai_model') || 'gpt-4o')
-const aiGenerating   = ref(false)
-const aiError        = ref('')
 const aiGeneratedText = ref('')
-const aiOllamaModels = ref([])
-const aiOllamaModelsError = ref('')
-const aiPayloadText  = ref('')
+const aiPayloadText = ref('')
 const aiPayloadLoading = ref(false)
-
-function aiPersist() {
-  localStorage.setItem('ai_provider',     aiProvider.value)
-  localStorage.setItem('ai_ollama_url',   aiOllamaUrl.value)
-  localStorage.setItem('ai_ollama_model', aiOllamaModel.value)
-  localStorage.setItem('ai_claude_key',   aiClaudeKey.value)
-  localStorage.setItem('ai_claude_model', aiClaudeModel.value)
-  localStorage.setItem('ai_openai_key',   aiOpenAiKey.value)
-  localStorage.setItem('ai_openai_model', aiOpenAiModel.value)
-}
-
-async function fetchOllamaModels() {
-  aiOllamaModelsError.value = ''
-  try {
-    const url = encodeURIComponent(aiOllamaUrl.value || 'http://localhost:11434')
-    const res  = await apiFetch(`/api/amc/synthesize/ollama-models?url=${url}`)
-    const data = await res.json()
-    if (data.error) { aiOllamaModelsError.value = data.error; return }
-    aiOllamaModels.value = data.models || []
-    if (aiOllamaModels.value.length && !aiOllamaModel.value) {
-      aiOllamaModel.value = aiOllamaModels.value[0]
-    }
-  } catch (e) {
-    aiOllamaModelsError.value = `Ollama inaccessible à ${aiOllamaUrl.value}`
-  }
-}
-
-async function generateSynthesisAI() {
-  if (!studyResult.value) return
-  aiPersist()
-  aiGenerating.value = true
-  aiError.value = ''
-  try {
-    const res = await apiFetch('/api/amc/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        study_result:       studyResult.value,
-        attribution_result: attrResult.value        || null,
-        brinson_result:     brinsonResult.value     || null,
-        provider:           aiProvider.value,
-        ollama_url:         aiOllamaUrl.value,
-        ollama_model:       aiOllamaModel.value,
-        claude_key:         aiClaudeKey.value,
-        claude_model:       aiClaudeModel.value,
-        openai_key:         aiOpenAiKey.value,
-        openai_model:       aiOpenAiModel.value,
-      }),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw new Error(err.detail || `Erreur ${res.status}`)
-    }
-    const data = await res.json()
-    aiGeneratedText.value = data.synthesis || ''
-    aiPayloadText.value   = data.payload   || ''
-  } catch (e) {
-    aiError.value = e.message || 'Erreur inconnue'
-  } finally {
-    aiGenerating.value = false
-  }
+const aiPayload = computed(() => ({ study_result: studyResult.value,
+  attribution_result: attrResult.value || null, brinson_result: brinsonResult.value || null }))
+function receiveAiSynthesis(data) {
+  aiGeneratedText.value = data.synthesis || ''
+  aiPayloadText.value = data.payload || ''
 }
 
 async function fetchAIPayload() {

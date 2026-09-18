@@ -86,9 +86,19 @@ async def upload_document(
         deal = session.get(Deal, deal_id)
         if deal is None or deal.user_id != current.id:
             raise HTTPException(404, "Deal introuvable")
-        if product_id is not None and deal.product_id not in {None, product_id}:
+        if deal.product_id is None:
+            raise HTTPException(409, detail={
+                "code": "DEAL_PRODUCT_MISSING",
+                "message": "Le deal ne possède pas de Product canonique.",
+            })
+        if product_id is not None and deal.product_id != product_id:
             raise HTTPException(422, "Le deal ne correspond pas au Product demandé.")
         product_id = product_id or deal.product_id
+    if product_id is None:
+        raise HTTPException(422, detail={
+            "code": "DOCUMENT_PRODUCT_REQUIRED",
+            "message": "Un document persistant doit être rattaché à un Product.",
+        })
     product = None
     if product_id is not None:
         try:

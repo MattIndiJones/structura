@@ -41,13 +41,8 @@ from datetime import date
 from ...valuation_context import run_valuation
 
 
-def price_var_scenario_job(payload: dict) -> dict:
-    if payload.get("settlement_claim"):
-        # A payoff already fixed and merely awaiting payment has no equity,
-        # volatility or correlation scenario left.  Keeping it in every book
-        # cell gives it a zero VaR contribution without excluding its exposure.
-        return {"price": float(payload["fixed_price"])}
-
+def residual_script_from_payload(payload: dict):
+    """Rebuild the archived residual script for replay, explain and Greeks."""
     from ...payscript.parser import parse_script, resolve_constats, CompiledScript
     from ...payscript.engine import run_mc, _shift_events_for_mtf
 
@@ -79,6 +74,14 @@ def price_var_scenario_job(payload: dict) -> dict:
         # La part déjà constatée des fenêtres à cheval, rejouée avec l'état.
         releves_realises=payload["state"].get("releves_realises") or None,
     )
+    return residual_script
+
+
+def price_var_scenario_job(payload: dict) -> dict:
+    if payload.get("settlement_claim"):
+        return {"price": float(payload["fixed_price"])}
+    from ...payscript.engine import run_mc
+    residual_script = residual_script_from_payload(payload)
 
     norm_spots = payload["norm_spots"]
     spot_shock = payload.get("spot_mult") or [1.0] * len(norm_spots)

@@ -11,16 +11,26 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 from sqlmodel import SQLModel, Session, create_engine
 
 from backend.app.db.models import ComputeBatch, ComputeJob, Deal, DealEvent
 from backend.app.core import deal_valuation
 from backend.app.core import var_engine as ve
 from backend.app.core.compute.pricers.var_scenario import price_var_scenario_job
+from backend.app.core.product.inputs import terms_from_input
+from backend.app.services.product_repository import stage_internal_product
 
 var_api = importlib.import_module("backend.app.api.var")
 
 USER = SimpleNamespace(id=1)
+
+
+def test_var_request_refuse_un_nombre_de_paths_inferieur_au_plancher_moteur():
+    """L'API ne doit pas accepter 500 puis exécuter silencieusement 1 000."""
+    with pytest.raises(ValidationError):
+        var_api.VarRequest(n_paths_per_scenario=500)
+    assert var_api.VarRequest(n_paths_per_scenario=1000).n_paths_per_scenario == 1000
 
 
 # ── Synthetic market data ─────────────────────────────────────────────
@@ -349,8 +359,29 @@ CALL_SCRIPT = "PARAM K = 1.0\n\nAT MATURITY\n  PAY MAX(0, S[1] - K)\n"
 
 
 def _add_active_deal(s: Session, value_date, maturity, script=CALL_SCRIPT) -> Deal:
+    product = stage_internal_product(
+        s,
+        user=SimpleNamespace(id=1, entity_id=None),
+        name="Call de test VAR",
+        terms=terms_from_input({
+            "script": script,
+            "underlyings": [{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}],
+            "user_params": {"K": 1.0},
+            "constats": {},
+            "T": 1.0,
+            "strike_date": value_date.isoformat(),
+            "value_date": value_date.isoformat(),
+            "maturity_date": maturity.isoformat(),
+            "payment_date": maturity.isoformat(),
+            "settlement_ccy": "EUR",
+        }),
+        reason="Fixture Product canonique pour le calcul VAR.",
+    )
     deal = Deal(
-        reference="VAR-1", user_id=1, script_snapshot=script,
+        reference="VAR-1", user_id=1,
+        product_id=product.product_id,
+        product_terms_version=product.terms_version,
+        script_snapshot=script,
         underlyings_json=json.dumps([{"name": "UL1", "ticker": "TK1", "s0_abs": 100.0}]),
         market_snapshot_json=json.dumps({
             "underlyings": [{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "sigma": 20.0, "q": 0.0}],
@@ -358,7 +389,8 @@ def _add_active_deal(s: Session, value_date, maturity, script=CALL_SCRIPT) -> De
             "antithetic": True, "user_params": {"K": 1.0},
         }),
         strike_date=value_date.isoformat(), value_date=value_date.isoformat(),
-        maturity_date=maturity.isoformat(), T=1.0, devise="EUR",
+        maturity_date=maturity.isoformat(), payment_date=maturity.isoformat(),
+        T=1.0, devise="EUR",
         nominal=1_000_000.0, price_traded=100.0, status="actif",
     )
     s.add(deal); s.commit(); s.refresh(deal)

@@ -49,12 +49,13 @@ def replay_context(deal: Deal, ctx: dict, mtm_payload: dict) -> dict:
     if ctx.get("settlement_claim"):
         return {"settlement_claim": True, "fixed_price": mtm_payload["mtm"]}
     valuation_context = deepcopy(ctx["valuation_context"])
+    product_terms = ctx["product_terms"]
     return {
-        "script_text": deal.script_snapshot,
+        "script_text": product_terms["script"],
         "constat_values": valuation_context.get("constats") or {},
-        "value_date": deal.value_date,
-        "strike_date": deal.strike_date,
-        "settlement_ccy": (deal.devise or "").strip().upper() or None,
+        "value_date": product_terms["value_date"],
+        "strike_date": product_terms["strike_date"],
+        "settlement_ccy": product_terms["settlement_ccy"],
         "T_elapsed": ctx["T_elapsed"],
         "passe_jusqu_a": ctx.get("passe_jusqu_a"),
         "state": deepcopy(ctx["state"]),
@@ -101,6 +102,10 @@ def stage_valuation_run(session: Session, deal: Deal, user_id: int,
     mtm_payload = (result.get("mtm") if isinstance(result.get("mtm"), dict)
                    else result)
     frozen_context = replay_context(deal, ctx, mtm_payload)
+    diagnostics = deepcopy(diagnostics or {})
+    if run_type in {"MTM", "REPORT"} and ctx.get("compiled") and not ctx.get("settlement_claim"):
+        from .valuation_notes import note_snapshot
+        diagnostics["note_snapshot"] = note_snapshot(session, deal, ctx, mtm_payload)
     engine_version, engine_fingerprint = engine_identity()
     row = ValuationRun(
         deal_id=deal.id, user_id=user_id, run_type=run_type,
@@ -111,7 +116,7 @@ def stage_valuation_run(session: Session, deal: Deal, user_id: int,
         data_versions_json=canonical_json(_data_versions(session, deal.id)),
         engine_version=engine_version, engine_fingerprint=engine_fingerprint,
         n_paths=int(ctx.get("N_used") or ctx.get("n_mc") or 0),
-        result_json="{}", diagnostics_json=canonical_json(diagnostics or {}),
+        result_json="{}", diagnostics_json=canonical_json(diagnostics),
     )
     session.add(row)
     session.flush()

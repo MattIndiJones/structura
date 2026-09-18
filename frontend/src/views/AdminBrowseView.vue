@@ -63,7 +63,7 @@
                 <th v-for="col in columns" :key="col"
                     class="py-1.5 pr-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-slate-300"
                     :title="`Trier par ${col}`" @click="sortBy(col)">
-                  {{ col }}<span v-if="sortCol === col" class="ml-1 text-blue-400">{{ sortDir === 'asc' ? '↑' : '↓' }}</span>
+                  {{ columnLabel(col) }}<span v-if="sortCol === col" class="ml-1 text-blue-400">{{ sortDir === 'asc' ? '↑' : '↓' }}</span>
                 </th>
                 <th class="py-1.5 pr-3 font-medium"></th>
               </tr>
@@ -165,8 +165,25 @@ const editableFields = computed(() => {
 // server-side when the table has a user_id column) — no separate schema call.
 const columns = computed(() => {
   if (!rows.value.length) return []
-  return Object.keys(rows.value[0])
+  const all = Object.keys(rows.value[0])
+  if (activeTable.value !== 'deals') return all
+  const preferred = [
+    'id', 'reference', 'owner', 'entity', 'contrepartie', 'product_type',
+    'devise', 'nominal', 'status', 'created_at', 'user_id', 'entity_id',
+  ]
+  return [...preferred.filter(c => all.includes(c)), ...all.filter(c => !preferred.includes(c))]
 })
+
+const COLUMN_LABELS = {
+  reference: 'Référence', owner: 'Compte', entity: 'Entité',
+  contrepartie: 'Contrepartie', product_type: 'Type de produit',
+  devise: 'Devise', nominal: 'Nominal', status: 'Statut',
+  created_at: 'Créé le', user_id: 'ID compte', entity_id: 'ID entité',
+}
+
+function columnLabel(col) {
+  return COLUMN_LABELS[col] || col
+}
 
 // ── Filtres (déduits de la table affichée) ──────────────────────────────
 // Cet écran sert sept tables aux colonnes différentes : rien ne peut être
@@ -180,6 +197,16 @@ const filterFields = computed(() => {
   const fields = [{ key: 'q', label: 'Recherche', kind: 'text', width: 'min-w-[220px]',
                     placeholder: 'Dans toutes les colonnes…',
                     get: row => columns.value.map(c => row[c]) }]
+  if (activeTable.value === 'deals') {
+    return fields.concat([
+      { key: 'owner', label: 'Compte', kind: 'select' },
+      { key: 'entity', label: 'Entité', kind: 'select' },
+      { key: 'status', label: 'Statut', kind: 'select' },
+      { key: 'contrepartie', label: 'Contrepartie', kind: 'select' },
+      { key: 'product_type', label: 'Type de produit', kind: 'select' },
+      { key: 'devise', label: 'Devise', kind: 'select' },
+    ])
+  }
   for (const col of columns.value) {
     if (_NO_SELECT.test(col)) continue
     const distinct = new Set(rows.value.map(r => r[col]).filter(v => v !== null && v !== ''))

@@ -88,7 +88,9 @@ export const useProductsStore = defineStore('products', () => {
     }
   }
 
-  async function retainPricing({ name, pricingInput, pricingReceipt, intent }) {
+  async function retainPricing({
+    name, pricingInput, pricingReceipt, intent, listed = true,
+  }) {
     saving.value = true
     error.value = ''
     try {
@@ -101,6 +103,7 @@ export const useProductsStore = defineStore('products', () => {
           pricing_input: pricingInput,
           pricing_receipt: pricingReceipt || null,
           intent,
+          listed,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -155,11 +158,39 @@ export const useProductsStore = defineStore('products', () => {
     }
   }
 
+  async function setListed(product, { listed = true, name = null } = {}) {
+    saving.value = true
+    error.value = ''
+    try {
+      const res = await apiFetch(`/api/products/${product.product_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expected_revision: product.revision,
+          listed,
+          ...(name ? { name } : {}),
+          reason: listed
+            ? 'Conservation volontaire dans Mes produits.'
+            : 'Retrait volontaire de Mes produits.',
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(message(data, 'La visibilité du produit n’a pas pu être modifiée.'))
+      current.value = data
+      return data
+    } catch (e) {
+      error.value = e.message
+      throw e
+    } finally {
+      saving.value = false
+    }
+  }
+
   function release() { current.value = null }
 
   return {
     items, current, loading, saving, error,
     fetchAll, fetchOne, fetchDetails, fetchCalculation,
-    retainPricing, retainCalculation, setArchived, release,
+    retainPricing, retainCalculation, setListed, setArchived, release,
   }
 })

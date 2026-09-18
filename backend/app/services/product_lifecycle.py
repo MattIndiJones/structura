@@ -92,10 +92,14 @@ def stage_product_lifecycle(
     actor_user_id: int | None,
     action: str,
     reason: str,
-) -> Product | None:
+) -> Product:
     """Append a Product revision in the caller's existing transaction."""
     if deal.product_id is None:
-        return None
+        raise ProductError(
+            "DEAL_PRODUCT_MISSING",
+            "Le deal ne possède pas de Product canonique.",
+            409,
+        )
     product = load_product(session, deal.product_id)
     if deal.product_terms_version != product.terms_version:
         raise ProductError(

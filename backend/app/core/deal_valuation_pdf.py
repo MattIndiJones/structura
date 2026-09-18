@@ -13,6 +13,8 @@ from __future__ import annotations
 import io
 import os
 import datetime
+import re
+from xml.sax.saxutils import escape
 
 import matplotlib
 matplotlib.use("Agg")
@@ -61,10 +63,12 @@ def _sty(name, **kw):
 S_TITLE   = _sty("v_title", fontName="Helvetica-Bold", fontSize=19, leading=24)
 S_SUB     = _sty("v_sub", fontSize=9, textColor=C_MUTED)
 S_SECTION = _sty("v_section", fontName="Helvetica-Bold", fontSize=11,
-                 textColor=C_BLUE, leading=15, spaceBefore=13, spaceAfter=5)
+                 textColor=C_BLUE, leading=15, spaceBefore=13, spaceAfter=5,
+                 keepWithNext=True)
 S_BODY    = _sty("v_body", fontSize=9, textColor=C_MUTED, leading=13.5,
                  alignment=TA_JUSTIFY)
 S_LABEL   = _sty("v_label", fontSize=7.5, textColor=C_FAINT)
+S_LABEL_R = _sty("v_labelr", fontSize=7.5, textColor=C_FAINT, alignment=TA_RIGHT)
 S_VAL     = _sty("v_val", fontName="Helvetica-Bold", fontSize=11)
 S_BIG     = _sty("v_big", fontName="Helvetica-Bold", fontSize=17, textColor=C_BLUE,
                  leading=20)
@@ -277,7 +281,7 @@ def _chart_history(data: dict) -> Image | None:
                 continue
             ax.axvline(idx, color="#cbd5e1", linewidth=0.7, alpha=0.6)
     ax.axvline(n - 1, color="#0f172a", linewidth=1.0)
-    ax.annotate("aujourd'hui", xy=(n - 1, 1.0), xycoords=("data", "axes fraction"),
+    ax.annotate(f"dernier cours : {dates[-1]}", xy=(n - 1, 1.0), xycoords=("data", "axes fraction"),
                 fontsize=6.5, color="#0f172a", ha="right", va="bottom")
 
     ax.tick_params(colors="#64748b", labelsize=7)
@@ -314,8 +318,8 @@ def _tbl(rows, col_widths, header=False):
 
 def _id_table(deal: dict, uls: list) -> Table:
     def row(l1, v1, l2, v2):
-        return [Paragraph(l1, S_LABEL), Paragraph(v1, S_CELL),
-                Paragraph(l2, S_LABEL), Paragraph(v2, S_CELL)]
+        return [Paragraph(l1, S_LABEL), Paragraph(escape(str(v1 or "—")), S_CELL),
+                Paragraph(l2, S_LABEL), Paragraph(escape(str(v2 or "—")), S_CELL)]
     ul_names = " / ".join(f"{u['name']} ({u.get('ticker', '')})" for u in uls)
     rows = [
         row("Référence", deal.get("reference", "—"),
@@ -381,6 +385,22 @@ def _headline(data: dict) -> Table:
     ])
 
 
+def _calendar_event_label(value: str) -> str:
+    """Keep event names business-readable; the adjacent column is the date.
+
+    Historic snapshots may contain a model tenor such as ``(0.50Y)`` or
+    ``(t 1.0)``.  It is useful for the engine but redundant and less precise
+    than the contractual date displayed in the schedule.
+    """
+    label = re.sub(
+        r"\s*\(\s*(?:t\s*)?\d+(?:[.,]\d+)?\s*Y?\s*\)\s*$",
+        "",
+        str(value or ""),
+        flags=re.IGNORECASE,
+    ).strip()
+    return re.sub(r"^Obs\.\s*", "Observation ", label, flags=re.IGNORECASE)
+
+
 def _events_table(data: dict) -> Table | None:
     evs = [e for e in (data.get("events") or []) if e.get("t_years", 0) > 0]
     if not evs:
@@ -388,8 +408,10 @@ def _events_table(data: dict) -> Table | None:
     cf_by_t: dict[float, float] = {}
     for cf in data["mtm"].get("realized_cash_flows") or []:
         cf_by_t[round(cf["t"], 3)] = cf_by_t.get(round(cf["t"], 3), 0.0) + cf["cf"]
-    hdr = [Paragraph(x, S_LABEL) for x in
-           ["Date", "Constatation", "Statut", "Flux payé"]]
+    hdr = [Paragraph("Date", S_LABEL),
+           Paragraph("Constatation", S_LABEL),
+           Paragraph("Statut", S_LABEL),
+           Paragraph("Flux payé", S_LABEL_R)]
     rows = [hdr]
     for e in evs:
         cf = cf_by_t.get(round(e.get("t_years", 0.0), 3))
@@ -401,7 +423,7 @@ def _events_table(data: dict) -> Table | None:
                         else C_FAINT)
         rows.append([
             Paragraph(e.get("date", ""), S_CELL),
-            Paragraph(e.get("label", ""), S_CELL),
+            Paragraph(_calendar_event_label(e.get("label", "")), S_CELL),
             Paragraph(st, st_style),
             Paragraph(f"{cf * 100:.2f}%" if cf is not None else "—", S_CELL_R),
         ])
@@ -409,9 +431,10 @@ def _events_table(data: dict) -> Table | None:
 
 
 def _greeks_table(greeks: list) -> Table:
-    hdr = [Paragraph(x, S_LABEL) for x in
-           ["Sous-jacent", "Delta (+1% de spot)", "Gamma (convexité)",
-            "Véga (+1 pt de vol)"]]
+    hdr = [Paragraph("Sous-jacent", S_LABEL),
+           Paragraph("Delta (+1% de spot)", S_LABEL_R),
+           Paragraph("Gamma (convexité)", S_LABEL_R),
+           Paragraph("Véga (+1 pt de vol)", S_LABEL_R)]
     rows = [hdr]
     for g in greeks:
         rows.append([
@@ -425,7 +448,9 @@ def _greeks_table(greeks: list) -> Table:
 
 
 def _annex_market_table(mu: dict, uls: list) -> Table:
-    hdr = [Paragraph(x, S_LABEL) for x in ["Sous-jacent", "Volatilité σ", "Dividende q"]]
+    hdr = [Paragraph("Sous-jacent", S_LABEL),
+           Paragraph("Volatilité σ", S_LABEL_R),
+           Paragraph("Dividende q", S_LABEL_R)]
     rows = [hdr]
     for u in uls:
         n = u["name"]
@@ -436,6 +461,60 @@ def _annex_market_table(mu: dict, uls: list) -> Table:
 
 
 # ── Document assembly ──────────────────────────────────────────────────
+
+def _editorial_section(story, data, key, label):
+    text = (data.get("editorial") or {}).get(key, "")
+    if text.strip():
+        story.append(Paragraph(label, S_SECTION))
+        for line in text.splitlines():
+            story.append(Paragraph(escape(line) or "&nbsp;", S_BODY))
+            story.append(Spacer(1, 2))
+
+
+def generate_frozen_comparison_pdf(data: dict) -> bytes:
+    """Comparison of archived runs. No invented P&L or unavailable attribution."""
+    res = data["comparison"]
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=MARGIN, rightMargin=MARGIN,
+                            topMargin=1.4 * cm, bottomMargin=1.4 * cm,
+                            title=data.get("note_title") or "Valo Explain")
+    story = []
+    _header(story, escape(data.get("note_title") or "Explication de valorisation"),
+            f"{escape(data['deal'].get('reference', ''))} — du {res['date1']} au {res['date2']}")
+    story.append(Paragraph("Calculs archivés : " + " / ".join(f"VR-{i}" for i in data["run_ids"]), S_SMALL))
+    story.append(Spacer(1, 8))
+    story.append(_id_table(data["deal"], data.get("underlyings") or []))
+    story.append(Spacer(1, 10))
+    story.append(_stat_tiles([
+        (f"MtM au {res['date1']}", Paragraph(f"{res['mtm1'] * 100:.2f}%", S_BIG)),
+        (f"MtM au {res['date2']}", Paragraph(f"{res['mtm2'] * 100:.2f}%", S_BIG)),
+        ("Variation du MtM", Paragraph(f"{res['delta_pts']:+.2f} pts", S_BIG)),
+    ]))
+    _editorial_section(story, data, "synthese", "Synthèse")
+    story.append(Paragraph("Attribution calculée" if res["available"] else "Écart observé", S_SECTION))
+    if res["available"]:
+        rows = [[Paragraph("Effet", S_LABEL), Paragraph("Contribution (points)", S_LABEL_R)]]
+        rows += [[Paragraph(escape(s["label"]), S_CELL), Paragraph(f"{s['delta_pts']:+.4f}", S_CELL_R)] for s in res["steps"]]
+        rows.append([Paragraph("Résidu non attribué", S_CELL), Paragraph(f"{res['residual_pts']:+.4f}", S_CELL_R)])
+        story.append(_tbl(rows, [INNER_W * .7, INNER_W * .3], header=True))
+    for warning in data.get("note_warnings") or []:
+        story.append(Paragraph(escape(warning), S_BODY))
+    for key, label in (("analyse", "Analyse"), ("contexte", "Contexte et limites"), ("conclusion", "Conclusion")):
+        _editorial_section(story, data, key, label)
+    story.append(PageBreak())
+    story.append(Paragraph("Méthode de calcul — données non éditables", S_SECTION))
+    story.append(Paragraph(escape(res["methodology"]), S_BODY))
+    if data.get("greeks"):
+        story.append(Paragraph(f"Sensibilités au {res['date2']}", S_SECTION))
+        story.append(Paragraph("Calculées à partir des paramètres archivés du calcul d'arrivée, avec le moteur de sensibilités du produit.", S_BODY))
+        story.append(Spacer(1, 5))
+        story.append(_greeks_table(data["greeks"]))
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("Valorisations indicatives ; ce document ne constitue pas un prix ferme. "
+                           "Les commentaires sont éditoriaux ; les chiffres calculés restent ceux des calculs archivés.", S_SMALL))
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    return buf.getvalue()
+
 
 def generate_valuation_pdf(data: dict) -> bytes:
     """data (plain dict, JSON-serializable except nothing exotic):
@@ -452,8 +531,8 @@ def generate_valuation_pdf(data: dict) -> bytes:
     )
     story = []
     today = datetime.date.today().isoformat()
-    _header(story, "Note de valorisation",
-            f"{deal.get('reference', '')} — valorisation indicative au {today}")
+    _header(story, escape(data.get("note_title") or "Note de valorisation"),
+            f"{escape(deal.get('reference', ''))} — valorisation indicative au {mtm.get('valuation_date') or today}")
     if data.get("valuation_run_id"):
         story.append(Paragraph(
             f"Référence de calcul immuable : VR-{data['valuation_run_id']}", S_SMALL))
@@ -463,6 +542,7 @@ def generate_valuation_pdf(data: dict) -> bytes:
     story.append(_id_table(deal, data.get("underlyings") or []))
     story.append(Spacer(1, 10))
     story.append(_headline(data))
+    _editorial_section(story, data, "synthese", "Synthèse")
 
     # Life of the product
     ev_tbl = _events_table(data)
@@ -472,9 +552,15 @@ def generate_valuation_pdf(data: dict) -> bytes:
 
     # Explanation
     story.append(Paragraph("Explication de la valorisation", S_SECTION))
-    for line in build_explanation(data):
-        story.append(Paragraph("•&nbsp;&nbsp;" + line, S_BODY))
+    lines = (data["editorial"].get("analyse", "").splitlines() if "editorial" in data
+             else build_explanation(data))
+    for line in lines:
+        story.append(Paragraph("•&nbsp;&nbsp;" + escape(line), S_BODY))
         story.append(Spacer(1, 2))
+    _editorial_section(story, data, "contexte", "Contexte et limites")
+    _editorial_section(story, data, "conclusion", "Conclusion")
+    for warning in data.get("note_warnings") or []:
+        story.append(Paragraph(escape(warning), S_SMALL))
 
     # Early-exit call-out — only for capped payoffs whose MtM already captures
     # nearly all of the best possible discounted outcome (deals.py:_EXIT_CAPTURE).
@@ -503,12 +589,15 @@ def generate_valuation_pdf(data: dict) -> bytes:
 
     # Chart
     img = _chart_history(data)
+    if "editorial" in data:
+        story.append(PageBreak())
     if img:
         story.append(Paragraph("Trajectoire des sous-jacents depuis le strike", S_SECTION))
         story.append(img)
 
     # ── Annex (separate page — can be withheld from the client) ───────
-    story.append(PageBreak())
+    if "editorial" not in data:
+        story.append(PageBreak())
     story.append(Paragraph("Annexe technique", S_SECTION))
     mu = mtm.get("market_used") or {}
     src = ("paramètres de marché figés au booking" if mu.get("source") == "booking"
@@ -623,8 +712,9 @@ def _chart_waterfall(res: dict) -> Image:
 
 
 def _explain_market_table(m1: dict, m2: dict, res: dict, uls: list) -> Table:
-    hdr = [Paragraph(x, S_LABEL) for x in
-           ["", f"Au {res['date1']}", f"Au {res['date2']}"]]
+    hdr = [Paragraph("", S_LABEL),
+           Paragraph(f"Au {res['date1']}", S_LABEL_R),
+           Paragraph(f"Au {res['date2']}", S_LABEL_R)]
     rows = [hdr]
     for u in uls:
         n = u["name"]
@@ -680,7 +770,7 @@ def generate_explain_pdf(data: dict) -> bytes:
     story.append(_chart_waterfall(res))
     story.append(Spacer(1, 4))
 
-    rows = [[Paragraph(x, S_LABEL) for x in ["Effet", "Contribution"]]]
+    rows = [[Paragraph("Effet", S_LABEL), Paragraph("Contribution", S_LABEL_R)]]
     for s in res["steps"]:
         col = C_GREEN if s["delta_pts"] >= 0 else C_RED
         rows.append([Paragraph(s["label"], S_CELL),

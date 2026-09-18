@@ -43,7 +43,8 @@ def _examples_version() -> str:
 def generate(description: str, *, provider: str = DEFAULT_PROVIDER,
              model: str | None = None, underlyings, corr, r: float, T: float,
              user_params: dict | None = None, current_script: str = "",
-             refine: bool = False) -> dict:
+             refine: bool = False, prompt_override=None, api_key: str = "",
+             ollama_url: str | None = None) -> dict:
     """Produit un script, sa reformulation en français et sa fiche de contrôle.
 
     `refine` reprend `current_script` au lieu de repartir de zéro : « non, la
@@ -51,17 +52,18 @@ def generate(description: str, *, provider: str = DEFAULT_PROVIDER,
     user_params = user_params or {}
     t0 = time.perf_counter()
 
-    system = build_system_prompt(description)
-    if refine and current_script.strip():
-        user = build_refine_prompt(current_script, description)
-    else:
-        user = build_user_prompt(description, n_underlyings=len(underlyings),
-                                 maturity=T)
+    from .workbench import resolve_prompt
+    provider = "anthropic" if provider == "claude" else provider
+    preview = preview_prompt(description, n_underlyings=len(underlyings), maturity=T,
+                             refine=refine, current_script=current_script)
+    prompt = resolve_prompt(preview, prompt_override)
+    system, user = prompt["system"], prompt["user"]
+    connection = {"api_key": api_key, "ollama_url": ollama_url} if api_key or ollama_url else {}
 
     from .prompt import select_examples
     attempts: list[dict] = []
     current_user_prompt = user
-    completion = complete_with_metadata(provider, model, system, current_user_prompt)
+    completion = complete_with_metadata(provider, model, system, current_user_prompt, **connection)
     raw = completion.text
     v = validate(raw, description=description, underlyings=underlyings, corr=corr,
                  r=r, T=T, user_params=user_params)
@@ -80,7 +82,7 @@ def generate(description: str, *, provider: str = DEFAULT_PROVIDER,
         repairs += 1
         current_user_prompt = build_repair_prompt(v.script, v.parse_error)
         completion = complete_with_metadata(
-            provider, model, system, current_user_prompt)
+            provider, model, system, current_user_prompt, **connection)
         raw = completion.text
         v = validate(raw, description=description, underlyings=underlyings,
                      corr=corr, r=r, T=T, user_params=user_params)
@@ -104,6 +106,8 @@ def generate(description: str, *, provider: str = DEFAULT_PROVIDER,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "script_sha256": hashlib.sha256(v.script.encode("utf-8")).hexdigest(),
         "prompt_version": PROMPT_VERSION,
+        "base_hash": preview["base_hash"],
+        "prompt_customized": prompt != {k: preview[k] for k in ("system", "user")},
         "examples_version": _examples_version(),
         "examples": select_examples(description),
         "repairs": repairs,
@@ -118,15 +122,16 @@ def generate(description: str, *, provider: str = DEFAULT_PROVIDER,
 
 
 def preview_prompt(description: str, *, n_underlyings: int = 1,
-                   maturity: float | None = None) -> dict:
+                   maturity: float | None = None, refine: bool = False,
+                   current_script: str = "") -> dict:
     """Le prompt tel qu'il partirait, sans rien dépenser ni attendre."""
     from .prompt import select_examples
     system = build_system_prompt(description)
-    user = build_user_prompt(description, n_underlyings=n_underlyings,
-                             maturity=maturity)
+    user = (build_refine_prompt(current_script, description) if refine and current_script.strip()
+            else build_user_prompt(description, n_underlyings=n_underlyings, maturity=maturity))
+    from .workbench import prompt_preview
     return {
-        "system": system,
-        "user": user,
+        **prompt_preview(system, user, PROMPT_VERSION),
         "examples": select_examples(description),
         "examples_version": _examples_version(),
         "chars": len(system) + len(user),

@@ -476,14 +476,27 @@ def save_kid(
         ind = session.get(Indicative, req.indicative_id)
         if not ind or ind.user_id != current.id:
             raise HTTPException(404, "Indicatif introuvable")
+        if linked_product_id is not None and ind.product_id != linked_product_id:
+            raise HTTPException(422, "L’indicatif ne correspond pas au Product demandé.")
         linked_product_id = linked_product_id or ind.product_id
     if req.deal_id:
         deal = session.get(Deal, req.deal_id)
         if not deal or deal.user_id != current.id:
             raise HTTPException(404, "Deal introuvable")
-        if linked_product_id is not None and deal.product_id not in {None, linked_product_id}:
+        if deal.product_id is None:
+            raise HTTPException(409, detail={
+                "code": "DEAL_PRODUCT_MISSING",
+                "message": "Le deal ne possède pas de Product canonique.",
+            })
+        if linked_product_id is not None and deal.product_id != linked_product_id:
             raise HTTPException(422, "Le deal ne correspond pas au Product demandé.")
         linked_product_id = linked_product_id or deal.product_id
+
+    if linked_product_id is None:
+        raise HTTPException(409, detail={
+            "code": "DOCUMENT_PRODUCT_MISSING",
+            "message": "Le KID doit être rattaché au Product canonique.",
+        })
 
     product = None
     if linked_product_id is not None:

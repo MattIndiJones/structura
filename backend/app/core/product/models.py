@@ -158,10 +158,15 @@ class Product(FrozenModel):
     terms_version: int = 0
     origin_product_id: int | None = None
     data_origin: Literal["native", "demo", "uat", "imported"] = "native"
+    # Persistence and library visibility are separate. Existing explicitly
+    # retained Products default to listed; workflow-created Products override
+    # this to False until the user chooses to expose them in "Mes produits".
+    listed: bool = True
     archived: bool = False
     terms: ProductTerms
     intent: TradeIntent = Field(default_factory=TradeIntent)
     commercial: CommercialContext = Field(default_factory=CommercialContext)
+    indicatives: tuple[FrozenObject, ...] = ()
     rfqs: tuple[FrozenObject, ...] = ()
     execution: FrozenObject | None = None
     lifecycle: FrozenObject | None = None

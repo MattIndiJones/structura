@@ -8,7 +8,9 @@ from sqlalchemy import update
 from sqlmodel import Session, select
 
 from ..core.audit import record_audit_event
-from ..core.product.models import Product, ProductTerms
+from ..core.product.models import (
+    CommercialContext, Product, ProductTerms, TradeIntent,
+)
 from ..core.product.models import CalculationRef
 from ..core.references import next_reference
 from ..core.valuation_context import canonical_fingerprint, canonical_json
@@ -63,7 +65,7 @@ def stage_revision(session: Session, product: Product, *, expected_revision: int
         ProductRecord.id == product.product_id,
         ProductRecord.revision == expected_revision,
     ).values(revision=revision, terms_version=product.terms_version, name=product.name,
-             archived=product.archived, updated_at=now)
+             listed=product.listed, archived=product.archived, updated_at=now)
       .execution_options(synchronize_session=False))
     if result.rowcount != 1:
         raise ProductError("PRODUCT_REVISION_STALE", "Le produit a changé. Rechargez le dossier avant de réessayer.")
@@ -86,13 +88,17 @@ def stage_revision(session: Session, product: Product, *, expected_revision: int
 
 
 def stage_new_product(session: Session, product: Product, *, user: User,
-                      reason: str = "Conservation volontaire du produit.") -> Product:
-    if product.product_id is not None or product.execution or product.rfqs:
+                      reason: str = "Conservation volontaire du produit.",
+                      uat_batch_id: int | None = None,
+                      action: str = "PRODUCT_SAVED") -> Product:
+    if (product.product_id is not None or product.execution
+            or product.indicatives or product.rfqs):
         raise ProductError("PRODUCT_CREATE_INVALID", "Un nouveau dossier ne peut pas hériter d’une exécution ou d’une RFQ.", 422)
     reference = next_reference(session, ProductRecord, f"PRD-{datetime.utcnow():%Y%m%d}-")
     row = ProductRecord(reference=reference, name=product.name, user_id=user.id,
                         entity_id=user.entity_id, data_origin=product.data_origin,
-                        origin_product_id=product.origin_product_id)
+                        origin_product_id=product.origin_product_id,
+                        uat_batch_id=uat_batch_id, listed=product.listed)
     session.add(row)
     session.flush()
     saved = product.model_copy(update={"product_id": row.id, "reference": reference,
@@ -102,7 +108,40 @@ def stage_new_product(session: Session, product: Product, *, user: User,
                                     terms_json=canonical_json(product.terms.model_dump(mode="json")),
                                     reason=reason))
     return stage_revision(session, saved, expected_revision=0, actor_id=user.id,
-                          action="PRODUCT_SAVED", reason=reason)
+                          action=action, reason=reason)
+
+
+def stage_internal_product(
+    session: Session,
+    *,
+    user: User,
+    name: str,
+    terms: ProductTerms,
+    intent: TradeIntent | None = None,
+    commercial: CommercialContext | None = None,
+    data_origin: str = "native",
+    uat_batch_id: int | None = None,
+    reason: str,
+) -> Product:
+    """Persist the canonical hidden Product behind a durable workflow.
+
+    RFQ and direct Booking call this before creating their own record. The
+    Product identity therefore exists first and remains the common input for
+    every downstream module; listing it in the library is a separate action.
+    """
+    product = Product(
+        name=name.strip() or "Produit structuré",
+        terms=terms,
+        intent=intent or TradeIntent(),
+        commercial=commercial or CommercialContext(),
+        data_origin=data_origin,
+        listed=False,
+    )
+    return stage_new_product(
+        session, product, user=user, reason=reason,
+        uat_batch_id=uat_batch_id,
+        action="PRODUCT_CREATED_INTERNAL",
+    )
 
 
 def stage_terms(session: Session, product: Product, terms: ProductTerms, *,

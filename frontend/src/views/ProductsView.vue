@@ -554,7 +554,9 @@ async function setArchive(product) {
 }
 
 function stageLabel(stage) {
-  return ({ SAVED: 'Conservé', RFQ: 'RFQ', BOOKED: 'Booké' })[stage] || stage
+  return ({
+    SAVED: 'Conservé', INDICATIVE: 'Indicatif', RFQ: 'RFQ', BOOKED: 'Booké',
+  })[stage] || stage
 }
 
 function stageClass(stage) {

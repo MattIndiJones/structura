@@ -3,6 +3,14 @@ import { ref, reactive, computed } from 'vue'
 import { apiFetch } from '../utils/api.js'
 import { useDealsStore } from './deals.js'
 
+async function apiError(res, fallback) {
+  const data = await res.json().catch(() => ({}))
+  const detail = data?.detail
+  if (typeof detail === 'string') return new Error(detail)
+  if (detail?.message) return new Error(detail.message)
+  return new Error(fallback)
+}
+
 // Shock presets are plain prefill data (spot%/vol pts/rate bp/corr pts) — no
 // backend catalog, easy to tweak here without touching the API. Shared by the
 // deal-level shock panel (Booking) and the portfolio Chocs tab (Risk Management).
@@ -65,49 +73,75 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
 
   const members = computed(() => {
     if (view.value === 'global') return dealsStore.deals.filter(d => d.status === 'actif')
-    return dealsStore.deals.filter(d => d.status === 'actif' && d.portfolio_id === view.value)
+    return dealsStore.deals.filter(d =>
+      d.status === 'actif' && (d.portfolio_ids || []).includes(view.value))
   })
 
   async function load() {
     const res = await apiFetch('/api/portfolios')
+    if (!res.ok) throw await apiError(res, 'Erreur de chargement des portefeuilles')
     portfolios.value = await res.json()
   }
 
-  async function create(name) {
-    await apiFetch('/api/portfolios', {
+  async function create(name, userId = null) {
+    const body = { name }
+    if (userId != null) body.user_id = Number(userId)
+    const res = await apiFetch('/api/portfolios', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(body),
     })
+    if (!res.ok) throw await apiError(res, 'Création du portefeuille impossible')
+    const created = await res.json()
     await load()
+    return created
   }
 
   async function rename(p, name) {
-    await apiFetch(`/api/portfolios/${p.id}`, {
+    const res = await apiFetch(`/api/portfolios/${p.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     })
+    if (!res.ok) throw await apiError(res, 'Renommage du portefeuille impossible')
     await load()
   }
 
   async function remove(p) {
-    await apiFetch(`/api/portfolios/${p.id}`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/portfolios/${p.id}`, { method: 'DELETE' })
+    if (!res.ok) throw await apiError(res, 'Suppression du portefeuille impossible')
     if (view.value === p.id) view.value = 'global'
     await dealsStore.loadDeals()
     await load()
     await loadRisk()
   }
 
-  async function assignDeal(dealId, rawValue) {
-    await apiFetch(`/api/deals/${dealId}/portfolio`, {
-      method: 'PATCH',
+  async function setDealPortfolios(dealId, rawIds) {
+    const portfolioIds = [...new Set(rawIds.map(Number))]
+    if (portfolioIds.some(id => !Number.isInteger(id) || id <= 0)) {
+      throw new Error('La sélection contient un portefeuille invalide')
+    }
+    const res = await apiFetch(`/api/deals/${dealId}/portfolios`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ portfolio_id: Number(rawValue) }),
+      body: JSON.stringify({ portfolio_ids: portfolioIds }),
     })
+    if (!res.ok) throw await apiError(res, "L'assignation du deal a échoué")
+    const assigned = await res.json()
     await dealsStore.loadDeals()
     await load()
     if (risk.value) await loadRisk()
+    if (exposure.value) await loadExposure()
+    barriers.value = null
+    return assigned
+  }
+
+  // Compatibility for callers outside the two portfolio selectors: adding a
+  // portfolio no longer removes the memberships already present.
+  async function assignDeal(dealId, rawValue) {
+    const deal = dealsStore.deals.find(d => d.id === dealId)
+    const portfolioId = Number(rawValue)
+    return setDealPortfolios(dealId, [...(deal?.portfolio_ids || []), portfolioId])
   }
 
   async function loadRisk() {
@@ -163,6 +197,8 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
     loadRisk()
     loadExposure()
     loadShockHistory(v === 'global' ? 'global' : 'portfolio', v === 'global' ? null : v)
+    loadShockHistory(v === 'global' ? 'smile_global' : 'smile_portfolio',
+      v === 'global' ? null : v)
     // Barrières is lazy (see loadBarriers) — just drop the stale scope's
     // result so the tab shows a fresh "à charger" state, not another
     // portfolio's rows, if it's already been opened once.
@@ -177,13 +213,24 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   }
 
   async function loadShockHistory(scope, id) {
-    const params = scope === 'deal' ? `deal_id=${id}` : (id ? `portfolio_id=${id}` : 'scope=global')
+    const params = scope === 'deal'
+      ? `scope=deal&deal_id=${id}`
+      : id
+        ? `scope=${encodeURIComponent(scope)}&portfolio_id=${id}`
+        : `scope=${encodeURIComponent(scope)}`
     const res = await apiFetch(`/api/shocks?${params}&limit=5`)
     shockHistory[historyKey(scope, id)] = await res.json()
   }
 
   const currentShockHistory = computed(() => {
     const key = view.value === 'global' ? 'global:' : `portfolio:${view.value}`
+    return shockHistory[key] || []
+  })
+
+  const currentSmileHistory = computed(() => {
+    const key = view.value === 'global'
+      ? 'smile_global:'
+      : `smile_portfolio:${view.value}`
     return shockHistory[key] || []
   })
 
@@ -200,6 +247,34 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
     if (!res.ok) throw new Error(data.detail || 'Erreur choc')
     await loadShockHistory(scope, id)
     return data
+  }
+
+  const smileResult = ref(null)
+  const smileLoading = ref(false)
+
+  async function runSmileRisk(form) {
+    smileLoading.value = true
+    smileResult.value = null
+    try {
+      const url = view.value === 'global'
+        ? '/api/portfolios/smile-risk-global'
+        : `/api/portfolios/${view.value}/smile-risk`
+      const res = await apiFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Erreur du scénario de smile')
+      smileResult.value = data
+      await loadShockHistory(
+        view.value === 'global' ? 'smile_global' : 'smile_portfolio',
+        view.value === 'global' ? null : view.value,
+      )
+      return data
+    } finally {
+      smileLoading.value = false
+    }
   }
 
   // P&L explain waterfall aggregated over the current selection (full
@@ -299,9 +374,10 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
     portfolios, view, risk, riskLoading, exposure, exposureLoading, shockHistory,
     barriers, barriersLoading,
     varStudy, varLaunching, varPolling, varHistory,
-    label, isDefaultView, activeDealsCount, members, currentShockHistory,
-    load, create, rename, remove, assignDeal,
+    label, isDefaultView, activeDealsCount, members, currentShockHistory, currentSmileHistory,
+    smileResult, smileLoading,
+    load, create, rename, remove, assignDeal, setDealPortfolios,
     loadRisk, loadExposure, loadBarriers, selectView, loadShockHistory, runShock, runPnlExplain,
-    launchVar, loadVarHistory, openVarBatch, stopVarPolling,
+    runSmileRisk, launchVar, loadVarHistory, openVarBatch, stopVarPolling,
   }
 })

@@ -18,6 +18,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.api import deals as deals_api, rfq as rfq_api
 from backend.app.core.rfq_controls import booking_gate_failures, pricing_input_hash
+from backend.app.core.product.inputs import terms_from_input
 from backend.app.core.workflow import (
     DataCategory, FixingPolicy, FixingStatus, LifecycleStatus,
 )
@@ -26,6 +27,7 @@ from backend.app.db.models import (
     RfqQuote, RfqRequest, TradeAmendmentRequest,
 )
 from backend.app.db import database as database_api
+from backend.app.services.product_repository import stage_internal_product
 
 
 USER = SimpleNamespace(id=1, entity_id=7, role="user")
@@ -172,14 +174,31 @@ def test_expired_selected_quote_is_visible_in_business_status():
 
 def _deal(session: Session) -> Deal:
     today = date.today()
+    strike = (today - timedelta(days=1)).isoformat()
+    maturity = today.isoformat()
+    tenor = 1 / 365.25
+    product = stage_internal_product(
+        session,
+        user=USER,
+        name="Produit lifecycle test",
+        terms=terms_from_input({
+            "script": "AT MATURITY\n  PAY 1",
+            "underlyings": [{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}],
+            "user_params": {}, "constats": {}, "T": tenor,
+            "strike_date": strike, "value_date": strike,
+            "maturity_date": maturity, "settlement_ccy": "EUR",
+        }),
+        reason="Fixture Product canonique pour le lifecycle.",
+    )
     deal = Deal(
         reference="DEAL-SAFE-001", entity_id=7, user_id=1,
+        product_id=product.product_id,
+        product_terms_version=product.terms_version,
         script_snapshot="AT MATURITY\n  PAY 1",
         sens="vente", contrepartie="Bank", devise="EUR", nominal=1_000_000,
         fair_value=99.0, price_traded=99.1, trade_date=today.isoformat(),
-        strike_date=(today - timedelta(days=1)).isoformat(),
-        value_date=(today - timedelta(days=1)).isoformat(),
-        maturity_date=today.isoformat(), T=1 / 365.25,
+        strike_date=strike, value_date=strike,
+        maturity_date=maturity, T=tenor,
         underlyings_json=json.dumps([{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}]),
         market_snapshot_json=json.dumps({"r": 3.0, "user_params": {}, "constats": {}}),
         fixing_policy=FixingPolicy.FOUR_EYES.value,

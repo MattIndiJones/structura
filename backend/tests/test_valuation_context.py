@@ -102,6 +102,34 @@ def test_un_scenario_ne_peut_pas_remplacer_le_calendrier_du_contexte():
         )
 
 
+def test_scenario_smile_changes_only_the_named_underlying(monkeypatch):
+    captured = {}
+
+    def fake_run_mc(**kwargs):
+        captured.update(kwargs)
+        return {"price": 1.0}
+
+    monkeypatch.setattr("backend.app.core.payscript.engine.run_mc", fake_run_mc)
+    underlyings = [
+        {"name": "LVMH", "ticker": "MC.PA", "sigma": 0.20, "skew": -0.10},
+        {"name": "Apple", "ticker": "AAPL", "sigma": 0.25, "skew": -0.08},
+    ]
+    context = ValuationContext(
+        underlyings=underlyings, corr_matrix=[[1.0, 0.2], [0.2, 1.0]],
+        r=0.03, T=1.0, N=2000, model="localvol",
+    )
+
+    run_valuation(
+        parse_script("AT MATURITY\n  PAY 1\n"), context,
+        underlying_overrides={"MC.PA": {"sigma": 0.22, "skew": -0.12}},
+    )
+
+    assert captured["underlyings"][0]["sigma"] == pytest.approx(0.22)
+    assert captured["underlyings"][0]["skew"] == pytest.approx(-0.12)
+    assert captured["underlyings"][1]["sigma"] == pytest.approx(0.25)
+    assert context.underlyings[0]["sigma"] == pytest.approx(0.20)
+
+
 def _deal_body(receipt, **over):
     base = dict(
         contrepartie="Banque", nominal=1_000_000, fair_value=97.5,

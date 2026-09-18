@@ -21,7 +21,7 @@ import json
 import math
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import Deal, Portfolio, ShockRun, User, position_sign
@@ -48,7 +48,41 @@ class ShockRequest(MtmRequest):
     vol_shock_pts: float = 0.0
     rate_shock_bp: float = 0.0
     corr_shock_pts: float = 0.0
-    shock_overrides: dict[str, ShockOverride] = {}
+    shock_overrides: dict[str, ShockOverride] = Field(default_factory=dict)
+    label: str = ""
+
+
+class SmileUnderlyingOverride(BaseModel):
+    """Optional model parameters for one named/ticker underlying.
+
+    Values are shifts in displayed percentage points. They map to parameters
+    with the same name; there is deliberately no hidden conversion from a
+    generic "skew" into a SABR or Heston calibration parameter.
+    """
+    atm_vol_pts: Optional[float] = None
+    skew_pts: Optional[float] = None
+    curvature_pts: Optional[float] = None
+    sabr_alpha_pts: Optional[float] = None
+    sabr_rho_pts: Optional[float] = None
+    sabr_nu_pts: Optional[float] = None
+    heston_v0_pts: Optional[float] = None
+    heston_theta_pts: Optional[float] = None
+    heston_rho_pts: Optional[float] = None
+    heston_xi_pts: Optional[float] = None
+
+
+class SmileRiskRequest(MtmRequest):
+    atm_vol_pts: float = 0.0
+    skew_pts: float = 0.0
+    curvature_pts: float = 0.0
+    sabr_alpha_pts: float = 0.0
+    sabr_rho_pts: float = 0.0
+    sabr_nu_pts: float = 0.0
+    heston_v0_pts: float = 0.0
+    heston_theta_pts: float = 0.0
+    heston_rho_pts: float = 0.0
+    heston_xi_pts: float = 0.0
+    underlying_overrides: dict[str, SmileUnderlyingOverride] = Field(default_factory=dict)
     label: str = ""
 
 
@@ -229,6 +263,237 @@ def _run_shock_on_book(deals: list[Deal], session: Session, n_paths: int, shock:
     }
 
 
+_SMILE_INPUT_TO_ENGINE = {
+    "atm_vol_pts": "sigma",
+    "skew_pts": "skew",
+    "curvature_pts": "curvature",
+    "sabr_alpha_pts": "alpha",
+    "sabr_rho_pts": "rho",
+    "sabr_nu_pts": "nu",
+    "heston_v0_pts": "v0",
+    "heston_theta_pts": "theta",
+    "heston_rho_pts": "rho_h",
+    "heston_xi_pts": "xi",
+}
+
+_SMILE_FIELDS_BY_MODEL = {
+    "constant": ("atm_vol_pts",),
+    "localvol": ("atm_vol_pts", "skew_pts", "curvature_pts"),
+    "lsv": (
+        "atm_vol_pts", "skew_pts", "curvature_pts",
+        "heston_v0_pts", "heston_theta_pts", "heston_rho_pts", "heston_xi_pts",
+    ),
+    "sabr": ("sabr_alpha_pts", "sabr_rho_pts", "sabr_nu_pts"),
+    "heston": (
+        "heston_v0_pts", "heston_theta_pts", "heston_rho_pts", "heston_xi_pts",
+    ),
+}
+
+
+def _smile_shift(body: SmileRiskRequest, underlying: dict, field_name: str) -> float:
+    key_candidates = [underlying.get("ticker"), underlying.get("name")]
+    override = next((body.underlying_overrides.get(str(key))
+                     for key in key_candidates
+                     if key and str(key) in body.underlying_overrides), None)
+    if override is not None:
+        value = getattr(override, field_name)
+        if value is not None:
+            return float(value)
+    return float(getattr(body, field_name))
+
+
+def _validate_smile_parameter(name: str, value: float, underlying_name: str) -> None:
+    if name in {"sigma", "v0", "theta", "xi", "alpha"} and value <= 0:
+        raise ValueError(
+            f"{underlying_name}: {name} doit rester strictement positif")
+    if name == "nu" and value < 0:
+        raise ValueError(f"{underlying_name}: nu doit rester positif ou nul")
+    if name in {"rho", "rho_h"} and not -1.0 <= value <= 1.0:
+        raise ValueError(f"{underlying_name}: {name} doit rester dans [-1, 1]")
+
+
+def _smile_underlying_overrides(
+    body: SmileRiskRequest,
+    model: str,
+    underlyings: list[dict],
+) -> tuple[dict, list[dict], list[str]]:
+    supported = set(_SMILE_FIELDS_BY_MODEL.get(model, ()))
+    overrides: dict[str, dict] = {}
+    changes: list[dict] = []
+    applied_fields: set[str] = set()
+
+    for index, underlying in enumerate(underlyings):
+        key = str(underlying.get("ticker") or underlying.get("name") or index)
+        name = str(underlying.get("name") or key)
+        engine_changes = {}
+        visible_changes = []
+        for input_name in supported:
+            shift_pts = _smile_shift(body, underlying, input_name)
+            if not shift_pts:
+                continue
+            engine_name = _SMILE_INPUT_TO_ENGINE[input_name]
+            before = float(underlying.get(engine_name, 0.0) or 0.0)
+            after = before + shift_pts / 100.0
+            _validate_smile_parameter(engine_name, after, name)
+            engine_changes[engine_name] = after
+            applied_fields.add(input_name)
+            visible_changes.append({
+                "parameter": engine_name,
+                "before_pct": round(before * 100.0, 6),
+                "after_pct": round(after * 100.0, 6),
+                "shift_pts": shift_pts,
+            })
+        if engine_changes:
+            overrides[key] = engine_changes
+            changes.append({
+                "name": name,
+                "ticker": underlying.get("ticker"),
+                "changes": visible_changes,
+            })
+
+    requested_fields = {
+        field_name for field_name in _SMILE_INPUT_TO_ENGINE
+        if float(getattr(body, field_name)) != 0.0
+    }
+    for override in body.underlying_overrides.values():
+        requested_fields.update(
+            field_name for field_name in _SMILE_INPUT_TO_ENGINE
+            if getattr(override, field_name) not in (None, 0, 0.0)
+        )
+    ignored = sorted(requested_fields - supported)
+    return overrides, changes, ignored
+
+
+def _run_smile_on_deal(
+    deal: Deal,
+    session: Session,
+    n_paths: int,
+    body: SmileRiskRequest,
+) -> dict:
+    mtm_payload, ctx = _mtm_core(deal, session, n_paths, body)
+    if ctx is None:
+        return {
+            "deal_id": deal.id, "reference": deal.reference, "skipped": True,
+            "reason": mtm_payload.get("message", "résolution en attente"),
+        }
+    if ctx.get("settlement_claim"):
+        return {
+            "deal_id": deal.id, "reference": deal.reference, "skipped": True,
+            "reason": "Flux contractuel déjà fixé : aucun risque de smile résiduel.",
+        }
+
+    model = str(ctx.get("model_used") or "constant")
+    valuation_context = ctx["valuation_context"]
+    underlyings = (valuation_context.underlyings
+                   if hasattr(valuation_context, "underlyings")
+                   else valuation_context.get("underlyings", []))
+    overrides, changes, ignored = _smile_underlying_overrides(body, model, underlyings)
+    if not overrides:
+        return {
+            "deal_id": deal.id, "reference": deal.reference, "model": model,
+            "skipped": True,
+            "reason": "Aucun paramètre demandé ne s'applique au modèle du deal.",
+            "ignored_fields": ignored,
+        }
+
+    result = run_valuation(
+        ctx["residual_script"], valuation_context,
+        underlying_overrides=overrides,
+    )
+    result["price"] += float(ctx.get("unsettled_pv", 0.0))
+    fx_rate = fx_rate_to(deal.devise, "EUR")
+    if fx_rate is None:
+        raise ValueError(
+            f"Taux de change {deal.devise}/EUR indisponible pour {deal.reference}")
+    delta_pts = float(result["price"]) - float(mtm_payload["mtm"])
+    return {
+        "deal_id": deal.id,
+        "reference": deal.reference,
+        "model": model,
+        "skipped": False,
+        "mtm_before": mtm_payload["mtm"],
+        "mtm_after": result["price"],
+        "delta_pts": round(delta_pts, 4),
+        "delta_eur": round(
+            delta_pts * position_sign(deal) * deal.nominal * fx_rate, 2),
+        "n_paths": result["n_paths"],
+        "parameter_changes": changes,
+        "ignored_fields": ignored,
+    }
+
+
+def _run_smile_on_book(
+    deals: list[Deal],
+    session: Session,
+    n_paths: int,
+    body: SmileRiskRequest,
+) -> dict:
+    contributions, skipped, errors = [], [], []
+    nominal_total_eur = 0.0
+    priced_nominal_eur = 0.0
+    total_delta_eur = 0.0
+    by_model: dict[str, int] = {}
+
+    for deal in deals:
+        fx_rate = fx_rate_to(deal.devise, "EUR")
+        if fx_rate is None:
+            errors.append({
+                "deal_id": deal.id, "reference": deal.reference,
+                "error": f"Taux de change {deal.devise}/EUR indisponible.",
+            })
+            continue
+        deal_nominal_eur = deal.nominal * fx_rate
+        nominal_total_eur += deal_nominal_eur
+        try:
+            row = _run_smile_on_deal(deal, session, n_paths, body)
+        except (HTTPException, ValueError) as exc:
+            errors.append({
+                "deal_id": deal.id,
+                "reference": deal.reference,
+                "error": exc.detail if isinstance(exc, HTTPException) else str(exc),
+            })
+            continue
+        if row.get("skipped"):
+            skipped.append(row)
+            continue
+        contributions.append(row)
+        total_delta_eur += row["delta_eur"]
+        priced_nominal_eur += deal_nominal_eur
+        by_model[row["model"]] = by_model.get(row["model"], 0) + 1
+
+    return {
+        "total_delta_eur": round(total_delta_eur, 2),
+        "nominal_total_eur": round(nominal_total_eur, 2),
+        "priced_nominal_eur": round(priced_nominal_eur, 2),
+        "coverage_pct": round(priced_nominal_eur / nominal_total_eur * 100.0, 2)
+        if nominal_total_eur else None,
+        "pct_impact": round(total_delta_eur / nominal_total_eur * 100.0, 4)
+        if nominal_total_eur else None,
+        "contributions": contributions,
+        "skipped": skipped,
+        "errors": errors,
+        "by_model": by_model,
+    }
+
+
+def _describe_smile(body: SmileRiskRequest) -> str:
+    if body.label.strip():
+        return body.label.strip()
+    parts = []
+    labels = {
+        "atm_vol_pts": "ATM", "skew_pts": "Skew", "curvature_pts": "Courbure",
+        "sabr_alpha_pts": "SABR α", "sabr_rho_pts": "SABR ρ",
+        "sabr_nu_pts": "SABR ν", "heston_v0_pts": "Heston v0",
+        "heston_theta_pts": "Heston θ", "heston_rho_pts": "Heston ρ",
+        "heston_xi_pts": "Heston ξ",
+    }
+    for field_name, label in labels.items():
+        value = float(getattr(body, field_name))
+        if value:
+            parts.append(f"{label} {value:+g}pt")
+    return " / ".join(parts) or "Scénario smile par sous-jacent"
+
+
 def _persist_shock(session: Session, user_id: int, scope: str, shock: ShockRequest,
                     result: dict, deal_id: int | None = None,
                     portfolio_id: int | None = None) -> ShockRun:
@@ -277,14 +542,10 @@ def shock_portfolio(
     n_paths: int = 20000,
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or p.user_id != current.id:
+    if not p or (getattr(current, "role", "user") != "admin" and p.user_id != current.id):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = session.exec(
-        select(Deal).where(
-            Deal.portfolio_id == portfolio_id,
-            Deal.status.in_(["actif", "en_reglement"]),
-        )
-    ).all()
+    from .portfolios import _portfolio_deals
+    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"))
     result = _run_shock_on_book(list(deals), session, n_paths, body)
     run = _persist_shock(session, current.id, "portfolio", body, result, portfolio_id=portfolio_id)
     return {**result, "run_id": run.id, "label": run.label}
@@ -297,14 +558,71 @@ def shock_global(
     session: Annotated[Session, Depends(get_session)],
     n_paths: int = 20000,
 ):
-    deals = session.exec(
-        select(Deal).where(
-            Deal.user_id == current.id,
-            Deal.status.in_(["actif", "en_reglement"]),
-        )
-    ).all()
+    statement = select(Deal).where(Deal.status.in_(["actif", "en_reglement"]))
+    if getattr(current, "role", "user") != "admin":
+        statement = statement.where(Deal.user_id == current.id)
+    deals = session.exec(statement).all()
     result = _run_shock_on_book(list(deals), session, n_paths, body)
     run = _persist_shock(session, current.id, "global", body, result)
+    return {**result, "run_id": run.id, "label": run.label}
+
+
+def _persist_smile(
+    session: Session,
+    user_id: int,
+    scope: str,
+    body: SmileRiskRequest,
+    result: dict,
+    portfolio_id: int | None = None,
+) -> ShockRun:
+    run = ShockRun(
+        user_id=user_id,
+        scope=scope,
+        portfolio_id=portfolio_id,
+        label=_describe_smile(body),
+        params_json=body.model_dump_json(),
+        result_json=json.dumps(result),
+    )
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+    return run
+
+
+@router.post("/api/portfolios/{portfolio_id}/smile-risk")
+def smile_risk_portfolio(
+    portfolio_id: int,
+    body: SmileRiskRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    n_paths: int = 20000,
+):
+    p = session.get(Portfolio, portfolio_id)
+    if not p or (getattr(current, "role", "user") != "admin" and p.user_id != current.id):
+        raise HTTPException(404, "Portefeuille introuvable")
+    from .portfolios import _portfolio_deals
+    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"))
+    result = _run_smile_on_book(deals, session, n_paths, body)
+    run = _persist_smile(
+        session, current.id, "smile_portfolio", body, result,
+        portfolio_id=portfolio_id,
+    )
+    return {**result, "run_id": run.id, "label": run.label}
+
+
+@router.post("/api/portfolios/smile-risk-global")
+def smile_risk_global(
+    body: SmileRiskRequest,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    n_paths: int = 20000,
+):
+    statement = select(Deal).where(Deal.status.in_(["actif", "en_reglement"]))
+    if getattr(current, "role", "user") != "admin":
+        statement = statement.where(Deal.user_id == current.id)
+    deals = session.exec(statement).all()
+    result = _run_smile_on_book(list(deals), session, n_paths, body)
+    run = _persist_smile(session, current.id, "smile_global", body, result)
     return {**result, "run_id": run.id, "label": run.label}
 
 

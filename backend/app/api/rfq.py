@@ -24,10 +24,12 @@ from ..core.rfq_controls import (
 )
 from ..core.schemas import validate_correlation_matrix
 from ..core.payscript.parser import parse_script
-from ..core.product.models import FrozenObject
+from ..core.product.inputs import terms_from_input
+from ..core.product.models import CommercialContext, FrozenObject, TradeIntent
 from ..core.workflow import RfqBusinessStatus, derive_rfq_status, rfq_business_status
 from ..services.product_repository import (
-    ProductError, load_product, owned_record, stage_revision,
+    ProductError, load_product, owned_record, stage_internal_product,
+    stage_revision, stage_terms,
 )
 from .auth import get_current_user
 
@@ -231,16 +233,52 @@ def _rfq_row(r: RfqRequest, quotes: list | None = None, cpty_map: dict | None = 
     return row
 
 
-def _sync_product_rfq(session: Session, rfq: RfqRequest, current: User, *, action: str):
-    """Replace this RFQ's projection in the Product's immutable revision."""
+def _sync_product_rfq(
+    session: Session,
+    rfq: RfqRequest,
+    current: User,
+    *,
+    action: str,
+    product=None,
+):
+    """Replace the RFQ projection and its business context in one revision."""
     if rfq.product_id is None:
-        return
-    product = load_product(session, rfq.product_id)
+        raise HTTPException(409, detail={
+            "code": "RFQ_PRODUCT_MISSING",
+            "message": "Cette RFQ ne possède pas de Product canonique.",
+        })
+    product = product or load_product(session, rfq.product_id)
     snapshot = FrozenObject(_rfq_row(
         rfq, _get_quotes(rfq.id, session), _counterparty_by_provider(session),
         _booked_deals_by_rfq(session, current.id)))
     rfqs = [item for item in product.rfqs if item.to_dict().get("id") != rfq.id]
-    product = product.model_copy(update={"rfqs": (*rfqs, snapshot)})
+    product = product.model_copy(update={
+        "name": rfq.name if not product.listed else product.name,
+        "commercial": CommercialContext(
+            client_id=rfq.client_id,
+            mandate_id=rfq.mandate_id,
+            opportunity_id=rfq.opportunity_id,
+            primary_affiliation_id=rfq.primary_affiliation_id,
+        ),
+        "intent": TradeIntent(**{
+            **product.intent.model_dump(mode="json"),
+            "nominal": (json.loads(rfq.params_json or "{}").get("notional")
+                        or product.intent.nominal),
+            "side": "BUY" if rfq.sens == "achat" else "SELL",
+            "product_type": rfq.template_type or product.intent.product_type,
+            "transaction_format": (
+                rfq.transaction_format or product.intent.transaction_format),
+            "instrument_family": (
+                rfq.instrument_family or product.intent.instrument_family),
+            "payoff_family": rfq.payoff_family or product.intent.payoff_family,
+            "payoff_description": (
+                rfq.payoff_description or product.intent.payoff_description),
+            "documentation_reference": (
+                rfq.documentation_reference
+                or product.intent.documentation_reference),
+        }),
+        "rfqs": (*rfqs, snapshot),
+    })
     stage_revision(
         session, product, expected_revision=product.revision,
         actor_id=current.id, action=action,
@@ -682,6 +720,29 @@ def _validate_rfq_correlation(params: dict) -> None:
         }) from exc
 
 
+def _product_terms_from_payload(script: str, params: dict, *, kind: str):
+    """Build canonical Product terms from validated RFQ fields."""
+    return terms_from_input({
+        "script": script,
+        "underlyings": params.get("underlyings") or [],
+        "user_params": params.get("user_params") or {},
+        "constats": params.get("constats") or {},
+        "T": params.get("T"),
+        "strike_date": params.get("strike_date"),
+        "value_date": params.get("value_date"),
+        "maturity_date": params.get("maturity_date") or maturity_iso(params),
+        "payment_date": params.get("payment_date"),
+        "anchor": params.get("anchor"),
+        "settlement_ccy": params.get("currency"),
+        "frozen_schedule": params.get("frozen_schedule"),
+    }, allow_unresolved=kind != "to_trade")
+
+
+def _product_terms_from_rfq(body: RfqCreate):
+    return _product_terms_from_payload(
+        body.script_snapshot, body.params or {}, kind=body.kind)
+
+
 def _create_rfq(
     body: RfqCreate,
     current: User,
@@ -773,6 +834,55 @@ def _create_rfq(
     payoff_description = (_clean_optional(body.payoff_description)
                           or (opportunity.payoff_description if opportunity else None))
 
+    commercial = CommercialContext(
+        client_id=context["client_id"],
+        mandate_id=context["mandate_id"],
+        opportunity_id=context["opportunity_id"],
+        primary_affiliation_id=context["primary_affiliation_id"],
+    )
+    intent_values = {
+        "nominal": (body.params or {}).get("notional"),
+        "side": "BUY" if body.sens == "achat" else "SELL",
+        "product_type": body.template_type,
+        "transaction_format": transaction_format or "",
+        "instrument_family": instrument_family or "",
+        "payoff_family": payoff_family or "",
+        "payoff_description": payoff_description or "",
+        "documentation_reference": _clean_optional(body.documentation_reference) or "",
+    }
+    if product is None:
+        try:
+            product = stage_internal_product(
+                session,
+                user=current,
+                name=body.name,
+                terms=_product_terms_from_rfq(body),
+                intent=TradeIntent(**intent_values),
+                commercial=commercial,
+                data_origin="uat" if uat_batch_id is not None else "native",
+                uat_batch_id=uat_batch_id,
+                reason="Création interne du Product à l'ouverture de la RFQ.",
+            )
+        except (ProductError, ValueError) as exc:
+            session.rollback()
+            detail = ({"code": exc.code, "message": str(exc)}
+                      if isinstance(exc, ProductError) else {
+                          "code": "PRODUCT_TERMS_INVALID", "message": str(exc)})
+            raise HTTPException(422, detail=detail) from exc
+        body = body.model_copy(update={
+            "product_id": product.product_id,
+            "product_terms_version": product.terms_version,
+        })
+    else:
+        product = product.model_copy(update={
+            "intent": TradeIntent(**{
+                **product.intent.model_dump(mode="json"),
+                **{key: value for key, value in intent_values.items()
+                   if value not in (None, "")},
+            }),
+            "commercial": commercial,
+        })
+
     reference = (next_reference(session, RfqRequest, reference_prefix)
                  if reference_prefix else _gen_ref(session))
     rfq = RfqRequest(
@@ -781,8 +891,8 @@ def _create_rfq(
         entity_id=current.entity_id,
         user_id=current.id,
         uat_batch_id=uat_batch_id,
-        product_id=body.product_id,
-        product_terms_version=body.product_terms_version,
+        product_id=product.product_id,
+        product_terms_version=product.terms_version,
         name=body.name.strip(),
         ao_date=body.ao_date or date.today().isoformat(),
         kind=body.kind,
@@ -810,13 +920,12 @@ def _create_rfq(
         after=_rfq_audit_state(rfq),
         reason="Création de la demande de prix.",
     )
-    if product is not None:
-        snapshot = FrozenObject(_rfq_row(rfq, []))
-        product = product.model_copy(update={"rfqs": (*product.rfqs, snapshot)})
-        stage_revision(
-            session, product, expected_revision=product.revision,
-            actor_id=current.id, action="PRODUCT_RFQ_CREATED",
-            reason=f"Création de {rfq.reference} depuis le produit.")
+    snapshot = FrozenObject(_rfq_row(rfq, []))
+    product = product.model_copy(update={"rfqs": (*product.rfqs, snapshot)})
+    stage_revision(
+        session, product, expected_revision=product.revision,
+        actor_id=current.id, action="PRODUCT_RFQ_CREATED",
+        reason=f"Création de {rfq.reference} depuis le produit.")
     session.commit()
     session.refresh(rfq)
     return _rfq_row(rfq, [])
@@ -927,6 +1036,12 @@ def update_rfq(
     session: Annotated[Session, Depends(get_session)],
 ):
     rfq = _get_owned(rfq_id, current, session)
+    if rfq.product_id is None:
+        raise HTTPException(409, detail={
+            "code": "RFQ_PRODUCT_MISSING",
+            "message": "Cette RFQ ne possède pas de Product canonique.",
+        })
+    product = load_product(session, rfq.product_id)
     before_audit = _rfq_audit_state(rfq)
     data = body.model_dump(exclude_unset=True)
     requested_fields = set(data)
@@ -988,6 +1103,18 @@ def update_rfq(
                 409, "Les termes contractuels d'une RFQ sont figés dès qu'un fournisseur "
                      "est sollicité. Créez une nouvelle RFQ pour modifier : "
                      + ", ".join(changed) + ".")
+        try:
+            canonical_terms = _product_terms_from_payload(
+                rfq.script_snapshot, new_params, kind=rfq.kind)
+            product = stage_terms(
+                session, product, canonical_terms, actor_id=current.id,
+                reason=f"Mise à jour des termes depuis {rfq.reference}.")
+        except (ProductError, ValueError) as exc:
+            detail = ({"code": exc.code, "message": str(exc)}
+                      if isinstance(exc, ProductError) else {
+                          "code": "PRODUCT_TERMS_INVALID", "message": str(exc)})
+            raise HTTPException(422, detail=detail) from exc
+        rfq.product_terms_version = product.terms_version
         # Non-contractual model inputs (rates, vols, model, path count) may be
         # refreshed while quotes are live; the product identity above may not.
         new_pricing_hash = pricing_input_hash(rfq.script_snapshot, new_params)
@@ -1108,7 +1235,8 @@ def update_rfq(
             after=_rfq_audit_state(rfq),
             reason="Transition RFQ explicite.",
         )
-    _sync_product_rfq(session, rfq, current, action="PRODUCT_RFQ_UPDATED")
+    _sync_product_rfq(
+        session, rfq, current, action="PRODUCT_RFQ_UPDATED", product=product)
     session.commit()
     return _rfq_row(rfq, _get_quotes(rfq_id, session), _counterparty_by_provider(session),
                     _booked_deals_by_rfq(session, current.id))
@@ -1131,13 +1259,20 @@ def delete_rfq(
         raise HTTPException(
             409, f"Suppression impossible : le deal {booked.reference} a été booké depuis "
                  f"cette RFQ, qui documente sa best execution.")
-    if rfq.product_id is not None:
-        raise HTTPException(
-            409, "Cette RFQ appartient à l’historique d’un Product conservé. "
-                 "Clôturez-la sans suite au lieu de la supprimer.")
+    product = load_product(session, rfq.product_id) if rfq.product_id else None
     for q in _get_quotes(rfq_id, session):
         session.delete(q)
     session.delete(rfq)
+    session.flush()
+    if product is not None:
+        remaining = tuple(
+            item for item in product.rfqs if item.to_dict().get("id") != rfq_id)
+        stage_revision(
+            session, product.model_copy(update={"rfqs": remaining}),
+            expected_revision=product.revision, actor_id=current.id,
+            action="PRODUCT_RFQ_REMOVED",
+            reason=f"Suppression de la RFQ {rfq.reference} non bookée.",
+        )
     session.commit()
 
 

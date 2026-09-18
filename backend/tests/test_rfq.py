@@ -23,12 +23,17 @@ from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.api import deals as deals_api
 from backend.app.api import rfq as rfq_api
+from backend.app.api.auth import receipt_signing_secret
+from backend.app.core.schemas import PricingRequest
+from backend.app.core.valuation_context import build_pricing_receipt
 from backend.app.db.models import (
     AuditEvent, Client, ClientMandate, Counterparty, Deal, Opportunity,
-    RfqProvider, RfqQuote, RfqRequest,
+    ProductRecord, RfqProvider, RfqQuote, RfqRequest,
 )
 from backend.app.core.references import next_reference
 from backend.app.core.rfq_controls import booking_terms_differences, pricing_input_hash
+from backend.app.services.product_receipts import signed_receipt
+from backend.app.services.product_repository import load_product
 
 USER = SimpleNamespace(id=1, entity_id=1)
 
@@ -39,13 +44,65 @@ def _make_session() -> Session:
     return Session(eng)
 
 
+def _rfq_params(**over):
+    strike = date.today()
+    maturity = strike + timedelta(days=1096)
+    params = {
+        "underlyings": [{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}],
+        "notional": 1_000_000.0,
+        "currency": "EUR",
+        "strike_date": strike.isoformat(),
+        "value_date": strike.isoformat(),
+        "maturity_date": maturity.isoformat(),
+        "payment_date": (strike + timedelta(days=1101)).isoformat(),
+        "T": 3.0,
+    }
+    params.update(over)
+    return params
+
+
 def _new_rfq(s: Session):
-    body = rfq_api.RfqCreate(name="Autocall test", script_snapshot="AT MATURITY\n  PAY 1")
+    body = rfq_api.RfqCreate(
+        name="Autocall test", script_snapshot="AT MATURITY\n  PAY 1",
+        params=_rfq_params())
     return rfq_api.create_rfq(body, USER, s)
 
 
 def _add_quote(s: Session, rfq_id: int, provider: str = "BNP Paribas"):
     return rfq_api.add_quote(rfq_id, rfq_api.QuoteCreate(provider=provider), USER, s)
+
+
+def test_rfq_creates_an_internal_product_before_its_own_record():
+    s = _make_session()
+
+    rfq = _new_rfq(s)
+
+    assert rfq["product_id"] is not None
+    record = s.get(ProductRecord, rfq["product_id"])
+    assert record.listed is False
+    product = load_product(s, record.id)
+    assert product.terms_version == rfq["product_terms_version"] == 1
+    assert [item.to_dict()["id"] for item in product.rfqs] == [rfq["id"]]
+
+
+def test_rfq_contract_change_creates_a_product_terms_version():
+    s = _make_session()
+    rfq = _new_rfq(s)
+    changed_params = dict(rfq["params"])
+    changed_params["T"] = 2.0
+    changed_params["maturity_date"] = (
+        date.today() + timedelta(days=730)).isoformat()
+    changed_params["payment_date"] = (
+        date.today() + timedelta(days=735)).isoformat()
+
+    updated = rfq_api.update_rfq(
+        rfq["id"], rfq_api.RfqUpdate(params=changed_params), USER, s)
+
+    product = load_product(s, rfq["product_id"])
+    assert updated["product_terms_version"] == 2
+    assert product.terms_version == 2
+    assert product.terms.T == 2.0
+    assert product.terms.maturity_date.isoformat() == changed_params["maturity_date"]
 
 
 def test_deleted_rfq_and_quote_ids_are_never_reused_by_sqlite():
@@ -131,6 +188,8 @@ def test_multi_underlying_repricing_cannot_replace_the_matrix_with_an_incomplete
             {"name": "DAX", "ticker": "^GDAXI", "ccy": "EUR"},
         ],
         "corr_matrix": [[1.0, 0.45], [0.45, 1.0]],
+        **{key: value for key, value in _rfq_params().items()
+           if key != "underlyings"},
     }
     rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
         name="Worst-of", script_snapshot="AT MATURITY\n  PAY WOF", params=params,
@@ -360,7 +419,7 @@ def test_to_trade_rfq_requires_an_expert_calendar_script():
     rfq = rfq_api.create_rfq(
         rfq_api.RfqCreate(name="Autocall précis", kind="to_trade",
                            script_snapshot="CONSTAT() Cal\nAT Cal:\n  PAY 0\nAT MATURITY\n  PAY 1",
-                           params={"constats": {"CAL": {
+                           params={**_rfq_params(T=1.0), "constats": {"CAL": {
                                "start_date": start.isoformat(),
                                "end_date": end.isoformat(),
                                "roll_date": end.isoformat(),
@@ -453,7 +512,9 @@ def test_multi_underlying_rfq_reaches_the_deal_without_losing_market_inputs():
     ), USER, s)
 
     assert [u["ticker"] for u in deal["underlyings"]] == ["MC.PA", "^GDAXI"]
-    assert deal["market_snapshot"]["underlyings"] == market_underlyings
+    assert [u["name"] for u in deal["market_snapshot"]["underlyings"]] == ["LVMH", "DAX"]
+    assert [u["sigma"] for u in deal["market_snapshot"]["underlyings"]] == [21.0, 27.0]
+    assert [u["q"] for u in deal["market_snapshot"]["underlyings"]] == pytest.approx([1.8, 3.1])
     assert deal["market_snapshot"]["corrMatrix"] == correlation
     assert deal["rfq_provenance"]["product_terms"]["underlyings"] == [
         {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR"},
@@ -495,6 +556,7 @@ def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority():
     rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
         name="AO Client", opportunity_id=opportunity.id,
         script_snapshot="AT MATURITY\n  PAY 1",
+        params=_rfq_params(),
     ), USER, s)
     quote = _add_quote(s, rfq["id"], "BNP Paribas")
     rfq_api.update_quote(
@@ -530,12 +592,65 @@ def _booking_body(**over):
     return deals_api.DealCreate(**base)
 
 
+def _pricing_receipt_for_booking(body):
+    """Issue the same signed evidence a successful /api/price call returns."""
+    market = body.market_snapshot or {}
+    if isinstance(market.get("pricing_input"), dict):
+        payload = dict(market["pricing_input"])
+    else:
+        display_underlyings = market.get("underlyings")
+        underlyings = []
+        for source in display_underlyings or body.underlyings:
+            item = {
+                "name": source.get("name") or "Underlying",
+                "ticker": source.get("ticker") or "",
+                "ccy": source.get("ccy") or body.devise,
+            }
+            if display_underlyings:
+                if source.get("sigma") is not None:
+                    item["sigma"] = float(source["sigma"]) / 100.0
+                if source.get("q") is not None:
+                    item["q"] = float(source["q"]) / 100.0
+            underlyings.append(item)
+        count = len(underlyings)
+        corr = market.get("corrMatrix") or market.get("corr_matrix")
+        if corr is None:
+            corr = [[1.0 if i == j else 0.0 for j in range(count)]
+                    for i in range(count)]
+        raw_rate = market.get("r", 3.0)
+        payload = {
+            "script": body.script_snapshot,
+            "underlyings": underlyings,
+            "corr_matrix": corr,
+            "r": float(raw_rate) / 100.0,
+            "T": body.T,
+            "N": 2000,
+            "model": market.get("model") or "constant",
+            "antithetic": market.get("antithetic", True),
+            "user_params": market.get("user_params") or {},
+            "constats": market.get("constats") or {},
+            "strike_date": body.strike_date,
+            "value_date": body.value_date,
+            "maturity_date": body.maturity_date,
+            "payment_date": body.payment_date or None,
+            "settlement_ccy": body.devise,
+        }
+    request = PricingRequest.model_validate(payload)
+    return signed_receipt(
+        build_pricing_receipt(request, body.fair_value / 100.0),
+        secret=receipt_signing_secret(),
+        result={"price": body.fair_value / 100.0},
+    )
+
+
 def _book_deal(body, current, s, fermete="FIRM"):
     """Upgrade legacy success fixtures to the now-explicit execution contract.
 
     Tests that exercise missing/foreign/unselected RFQs remain untouched: only
     a retained, owned quote is qualified here. Production code has no fallback.
     """
+    if body.pricing_receipt is None:
+        body.pricing_receipt = _pricing_receipt_for_booking(body)
     if body.rfq_id:
         rfq = s.get(RfqRequest, body.rfq_id)
         selected = s.get(RfqQuote, rfq.selected_quote_id) \
@@ -632,7 +747,9 @@ def test_booking_rejects_an_unknown_rfq_id():
 def test_booking_rejects_another_users_rfq():
     s = _make_session()
     other_rfq = rfq_api.create_rfq(
-        rfq_api.RfqCreate(name="RFQ d'un autre desk", script_snapshot="AT MATURITY\n  PAY 1"),
+        rfq_api.RfqCreate(
+            name="RFQ d'un autre desk", script_snapshot="AT MATURITY\n  PAY 1",
+            params=_rfq_params()),
         SimpleNamespace(id=99, entity_id=1), s)
 
     with pytest.raises(HTTPException) as exc:
@@ -1146,7 +1263,8 @@ def test_an_unresolvable_script_is_refused_even_with_client_times():
         _book_deal(
             _expert_booking(market_snapshot={}, observation_times=[1.0, 2.0]), USER, s)
     assert exc.value.status_code == 422
-    assert "calendrier contractuel" in exc.value.detail
+    assert exc.value.detail["code"] == "PRODUCT_TERMS_INVALID"
+    assert "OBSERVATIONS" in exc.value.detail["message"]
 
 
 # ── 15. Audit du 2026-07-30 — constats 1, 2 et 3 ────────────────────────
@@ -1211,8 +1329,9 @@ def test_a_deal_with_no_observation_at_all_is_refused():
         _book_deal(_expert_booking(
             market_snapshot={"constats": broken}, observation_times=[]), USER, s)
     assert exc.value.status_code == 422
-    assert "calendrier contractuel" in exc.value.detail
-    assert "end_date" in exc.value.detail        # la cause exacte est nommée
+    assert exc.value.detail["code"] == "PRODUCT_TERMS_INVALID"
+    assert "end_date" in exc.value.detail["message"]
+    assert "end_date" in exc.value.detail["message"]  # la cause exacte est nommée
 
 
 def test_a_broken_calendar_is_not_rescued_by_pricing_times():
@@ -1380,7 +1499,8 @@ def test_a_last_look_that_degrades_the_price_is_refused():
 def test_a_last_look_that_degrades_is_read_the_other_way_on_a_sell():
     s = _make_session()
     rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
-        name="AO vente", sens="vente", script_snapshot="AT MATURITY\n  PAY 1"), USER, s)
+        name="AO vente", sens="vente", script_snapshot="AT MATURITY\n  PAY 1",
+        params=_rfq_params()), USER, s)
     q = _add_quote(s, rfq["id"], "UBS")
     rfq_api.update_quote(rfq["id"], q["id"], rfq_api.QuoteUpdate(price=99.0), USER, s)
     rfq_api.update_quote(rfq["id"], q["id"], rfq_api.QuoteUpdate(last_look=True), USER, s)
@@ -1622,24 +1742,22 @@ def _rfq_a_echeancier(s):
         market_snapshot={
             "underlyings": params["underlyings"],
             "user_params": params["user_params"],
-            "constats": {"OBSERVATIONS": dict(
-                echeancier, window_length=None, window_frequency=None)},
+            "constats": params["constats"],
         },
         rfq_id=rfq["id"], strike_date=params["strike_date"],
         value_date=params["value_date"], maturity_date=fin.isoformat(),
         payment_date=params["payment_date"],
-        T=round(jours / 365.25, 6),               # pricing.js : syncTenorFromMaturity
+        # Le Pricer reprend le T canonique du Product créé par la RFQ.
+        T=params["T"],
         observation_times=[])
     return params, body
 
 
-def test_le_meme_contrat_ecrit_par_le_pricer_se_booke_depuis_la_rfq():
-    """Comparés tels qu'écrits, T et l'échéancier différaient : toute RFQ à
-    échéancier CONSTAT était refusée au booking (« termes contractuels figés :
-    T, constats »), sans rien que l'écran permette de corriger."""
+def test_le_pricer_reprend_le_contrat_canonique_du_product_de_la_rfq():
+    """Le Pricer ne recalcule pas T : il reprend la valeur portée par Product."""
     s = _make_session()
     params, body = _rfq_a_echeancier(s)
-    assert body.T != params["T"]                  # deux écritures de la même maturité
+    assert body.T == params["T"]
 
     deal = _book_deal(body, USER, s)
 

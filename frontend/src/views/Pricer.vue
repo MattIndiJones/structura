@@ -187,7 +187,19 @@ onMounted(async () => {
   const dealId = route.query.dealId
   if (dealId) {
     const deal = await dealsStore.selectDeal(Number(dealId))
-    if (deal) await store.loadFromDeal(deal)
+    if (deal) {
+      await store.loadFromDeal(deal)
+      if (!deal.product_id) {
+        store.error = 'Ce deal ne possède pas de Product canonique.'
+        return
+      }
+      const loaded = await productsStore.fetchOne(deal.product_id)
+      if (!loaded) {
+        store.error = 'Le Product canonique de ce deal ne peut pas être chargé.'
+        return
+      }
+      store.currentProduct = loaded.product
+    }
     if (route.query.tab === 'script') store.leftTab = 'script'
     else goToEvents(Number(dealId))
     return
@@ -202,10 +214,12 @@ onMounted(async () => {
     const rfqObj = await rfqStore.fetchOne(Number(fromRfq))
     if (rfqObj) {
       await store.loadFromRfq(rfqObj)
-      if (rfqObj.product_id) {
-        const loaded = await productsStore.fetchOne(rfqObj.product_id)
-        if (loaded) store.currentProduct = loaded.product
+      if (!rfqObj.product_id) {
+        store.error = 'Cette RFQ ne possède pas de Product canonique.'
+        return
       }
+      const loaded = await productsStore.fetchOne(rfqObj.product_id)
+      if (loaded) store.currentProduct = loaded.product
     }
     store.leftTab = 'deal'
     return

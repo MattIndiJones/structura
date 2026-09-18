@@ -13,10 +13,15 @@ class ProductRecord(SQLModel, table=True):
     name: str
     user_id: int = Field(foreign_key="users.id", index=True)
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
+    # Explicit ownership for synthetic Admin batches.  Product references are
+    # business labels, so cleanup must never infer UAT scope from their text.
+    uat_batch_id: Optional[int] = Field(
+        default=None, foreign_key="uat_generation_batches.id", index=True)
     origin_product_id: Optional[int] = Field(default=None, foreign_key="products.id")
     data_origin: str = Field(default="native")
     revision: int = Field(default=0)
     terms_version: int = Field(default=0)
+    listed: bool = Field(default=True, index=True)
     archived: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -175,17 +180,31 @@ class Folder(SQLModel, table=True):
 
 
 class Portfolio(SQLModel, table=True):
-    """A user-defined named bucket of deals, for aggregating risk (see
-    api/portfolios.py). A deal belongs to exactly one portfolio at all times
-    — no association table, just Deal.portfolio_id, never NULL: risk must
-    always be monitored somewhere. Each user gets one is_default=True
-    portfolio (auto-created, never deletable) that catches deals not
-    explicitly filed elsewhere."""
+    """A user-defined risk view over deals.
+
+    Membership is many-to-many through DealPortfolioMembership: the same
+    economic position may legitimately appear in several monitoring views.
+    Removing a portfolio therefore removes only its memberships, never the
+    deals or their valuation history.
+    """
     __tablename__ = "portfolios"
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     user_id: int = Field(foreign_key="users.id")
     is_default: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DealPortfolioMembership(SQLModel, table=True):
+    """Explicit, auditable membership of one deal in one portfolio."""
+    __tablename__ = "deal_portfolio_memberships"
+    __table_args__ = (
+        UniqueConstraint("deal_id", "portfolio_id", name="uq_deal_portfolio_membership"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    portfolio_id: int = Field(foreign_key="portfolios.id", index=True)
+    added_by_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -318,11 +337,9 @@ class Deal(SQLModel, table=True):
     # justifier.
     commercial_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
 
-    # Risk-aggregation grouping (api/portfolios.py) — one portfolio at a time,
-    # reassignable. Always set going forward (book_deal assigns the user's
-    # default portfolio at creation); column stays nullable only so a
-    # pre-existing db can be backfilled once at boot (see
-    # database.py:_backfill_default_portfolios).
+    # Legacy single-portfolio pointer. New code uses
+    # DealPortfolioMembership; this nullable column is retained only so an
+    # existing database can be migrated without rebuilding the deals table.
     portfolio_id: Optional[int] = Field(default=None, foreign_key="portfolios.id")
 
     # Script frozen at booking time
@@ -490,6 +507,7 @@ class Indicative(SQLModel, table=True):
     __tablename__ = "indicatives"
     id: Optional[int] = Field(default=None, primary_key=True)
     product_id: Optional[int] = Field(default=None, foreign_key="products.id", index=True)
+    product_terms_version: Optional[int] = Field(default=None)
     reference: str = Field(index=True, unique=True)   # see Deal.reference
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     user_id: int = Field(foreign_key="users.id")
@@ -1054,6 +1072,36 @@ class ValuationRun(SQLModel, table=True):
     result_json: str = Field(default="{}", sa_column=Column(Text))
     diagnostics_json: str = Field(default="{}", sa_column=Column(Text))
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class ValuationNote(SQLModel, table=True):
+    """Editable narrative over immutable valuation evidence."""
+    __tablename__ = "valuation_notes"
+    __table_args__ = (UniqueConstraint("user_id", "request_key"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    request_key: str
+    title: str
+    kind: str
+    evidence_json: str = Field(sa_column=Column(Text, nullable=False))
+    draft_json: str = Field(sa_column=Column(Text, nullable=False))
+    revision: int = Field(default=1)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ValuationNoteVersion(SQLModel, table=True):
+    __tablename__ = "valuation_note_versions"
+    __table_args__ = (UniqueConstraint("note_id", "revision"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    note_id: int = Field(foreign_key="valuation_notes.id", index=True)
+    user_id: int = Field(foreign_key="users.id")
+    revision: int
+    title: str
+    draft_json: str = Field(sa_column=Column(Text, nullable=False))
+    pdf_base64: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class SchedulerRun(SQLModel, table=True):

@@ -13,6 +13,8 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from backend.app.api import deals as deals_api
 from backend.app.api import shocks as shocks_api
 from backend.app.db.models import Deal, DealEvent, Portfolio, ShockRun
+from backend.app.core.product.inputs import terms_from_input
+from backend.app.services.product_repository import stage_internal_product
 
 TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=400)
@@ -26,8 +28,28 @@ def _add_deal(s: Session, script: str, reference: str, n_underlyings: int = 1,
     names = [f"UL{i+1}" for i in range(n_underlyings)]
     tickers = [f"TK{i+1}" for i in range(n_underlyings)]
     corr = [[1.0 if i == j else 0.3 for j in range(n_underlyings)] for i in range(n_underlyings)]
+    underlyings = [{"name": n, "ticker": t, "ccy": "EUR"}
+                   for n, t in zip(names, tickers)]
+    product = stage_internal_product(
+        s,
+        user=SimpleNamespace(id=1, entity_id=None),
+        name=f"Product {reference}",
+        terms=terms_from_input({
+            "script": script,
+            "underlyings": underlyings,
+            "user_params": {}, "constats": {}, "T": 3.0,
+            "strike_date": VALUE_D.isoformat(),
+            "value_date": VALUE_D.isoformat(),
+            "maturity_date": MATURITY.isoformat(),
+            "payment_date": MATURITY.isoformat(),
+            "settlement_ccy": "EUR",
+        }),
+        reason="Fixture Product canonique pour les chocs.",
+    )
     deal = Deal(
         reference=reference, user_id=1, script_snapshot=script,
+        product_id=product.product_id,
+        product_terms_version=product.terms_version,
         underlyings_json=json.dumps([{"name": n, "ticker": t, "s0_abs": 100.0}
                                        for n, t in zip(names, tickers)]),
         market_snapshot_json=json.dumps({
@@ -37,7 +59,8 @@ def _add_deal(s: Session, script: str, reference: str, n_underlyings: int = 1,
             "antithetic": True, "user_params": {},
         }),
         strike_date=VALUE_D.isoformat(), value_date=VALUE_D.isoformat(),
-        maturity_date=MATURITY.isoformat(), T=3.0, devise="EUR",
+        maturity_date=MATURITY.isoformat(), payment_date=MATURITY.isoformat(),
+        T=3.0, devise="EUR",
         nominal=nominal, price_traded=98.0, status="actif",
         portfolio_id=portfolio_id,
     )
@@ -235,3 +258,36 @@ def test_portfolio_shock_aggregates_and_persists_one_run(monkeypatch):
         assert runs[0].scope == "portfolio"
     finally:
         s.close()
+
+
+def test_smile_parameters_are_model_specific_and_explicit():
+    underlying = [{
+        "name": "LVMH", "ticker": "MC.PA", "sigma": 0.20,
+        "skew": -0.10, "curvature": 0.05,
+        "alpha": 0.20, "rho": -0.30, "nu": 0.40,
+    }]
+    body = shocks_api.SmileRiskRequest(
+        atm_vol_pts=2.0, skew_pts=-1.0, curvature_pts=0.5,
+        sabr_alpha_pts=3.0, sabr_rho_pts=4.0, sabr_nu_pts=5.0,
+    )
+
+    local_overrides, local_changes, local_ignored = (
+        shocks_api._smile_underlying_overrides(body, "localvol", underlying))
+    sabr_overrides, sabr_changes, sabr_ignored = (
+        shocks_api._smile_underlying_overrides(body, "sabr", underlying))
+
+    assert local_overrides["MC.PA"] == pytest.approx({
+        "sigma": 0.22, "skew": -0.11, "curvature": 0.055,
+    })
+    assert {c["parameter"] for c in local_changes[0]["changes"]} == {
+        "sigma", "skew", "curvature",
+    }
+    assert set(local_ignored) == {"sabr_alpha_pts", "sabr_rho_pts", "sabr_nu_pts"}
+
+    assert sabr_overrides["MC.PA"] == pytest.approx({
+        "alpha": 0.23, "rho": -0.26, "nu": 0.45,
+    })
+    assert {c["parameter"] for c in sabr_changes[0]["changes"]} == {
+        "alpha", "rho", "nu",
+    }
+    assert set(sabr_ignored) == {"atm_vol_pts", "skew_pts", "curvature_pts"}

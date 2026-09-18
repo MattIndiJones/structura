@@ -215,6 +215,10 @@
             <button class="btn-primary text-xs" :disabled="selectedRuns.length < 2" @click="showComparison">
               Comparer {{ selectedRuns.length >= 2 ? `(${selectedRuns.length})` : '' }}
             </button>
+            <RouterLink v-if="selectedRuns.length === 2" class="btn-secondary text-xs"
+              :to="{ path: '/valo-explain', query: { deal: dealId, run: selectedRuns[0].id, run2: selectedRuns[1].id, auto: '1' } }">
+              Rédiger l’explication
+            </RouterLink>
           </div>
         </div>
       </template>

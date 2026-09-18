@@ -2,9 +2,10 @@
 import json
 import hashlib
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from backend.app.api import deals as deals_api
 from backend.app.api.deals import (
@@ -12,7 +13,7 @@ from backend.app.api.deals import (
 )
 from backend.app.api.pricing import price_endpoint
 from backend.app.core.schemas import PricingRequest
-from backend.app.db.models import Deal, DealEvent
+from backend.app.db.models import Counterparty, Deal, DealEvent
 
 
 SCRIPT = "AT MATURITY\n  PAY 1\n"
@@ -60,26 +61,21 @@ def test_pricing_booking_mtm_au_strike_conservent_le_meme_produit(monkeypatch):
     )
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
-        deal = Deal(
-            reference="CHAIN-1", user_id=1, portfolio_id=1,
-            script_snapshot=body.script_snapshot, sens=body.sens,
-            contrepartie=body.contrepartie, devise=body.devise,
-            nominal=body.nominal, fair_value=body.fair_value,
-            price_traded=body.price_traded, trade_date=body.trade_date,
-            strike_date=body.strike_date, value_date=body.value_date,
-            maturity_date=body.maturity_date, payment_date=body.payment_date,
-            T=body.T, underlyings_json=json.dumps(body.underlyings),
-            market_snapshot_json=json.dumps(body.market_snapshot), status="actif",
-        )
-        session.add(deal)
-        session.flush()
-        session.add(DealEvent(
-            deal_id=deal.id, event_index=0, event_date=strike.isoformat(),
-            t_years=0.0, spots_json=json.dumps({"AAA": 100.0}),
-            source="manuel", status="observé", label="Strike",
-        ))
+        session.add(Counterparty(name="Banque", active=True))
         session.commit()
-        session.refresh(deal)
+        booked = deals_api.book_deal(
+            body, SimpleNamespace(id=1, entity_id=None), session)
+        deal = session.get(Deal, booked["id"])
+        assert deal.product_id is not None
+        strike_event = next(
+            event for event in session.exec(
+                select(DealEvent).where(DealEvent.deal_id == deal.id)).all()
+            if event.t_years == 0.0)
+        strike_event.spots_json = json.dumps({"AAA": 100.0})
+        strike_event.source = "fixture"
+        strike_event.status = "observé"
+        session.add(strike_event)
+        session.commit()
         monkeypatch.setattr(deals_api, "load_hist_prices", lambda *_args, **_kwargs: {
             "dates": [strike.isoformat()], "prices": {"AAA": [100.0]},
         })

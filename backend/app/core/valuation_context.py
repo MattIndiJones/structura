@@ -109,7 +109,7 @@ def run_valuation(script, context: ValuationContext | dict, **overrides):
 
     allowed_bumps = {
         "spot_mult", "spot_base", "vol_add", "dr", "ds", "corr_delta",
-        "corr_matrix", "wof0_init",
+        "corr_matrix", "wof0_init", "underlying_overrides",
     }
     unexpected = sorted(set(overrides) - allowed_bumps)
     if unexpected:
@@ -119,9 +119,38 @@ def run_valuation(script, context: ValuationContext | dict, **overrides):
 
     ctx = (context if isinstance(context, ValuationContext)
            else valuation_context_from_dict(context))
+    scenario_underlyings = deepcopy(ctx.underlyings)
+    underlying_overrides = overrides.pop("underlying_overrides", {})
+    allowed_underlying_fields = {
+        "sigma", "skew", "curvature",
+        "v0", "theta", "xi", "rho_h",
+        "alpha", "rho", "nu",
+    }
+    by_key = {
+        str(u.get("ticker") or u.get("name") or index): u
+        for index, u in enumerate(scenario_underlyings)
+    }
+    by_key.update({
+        str(u.get("name")): u for u in scenario_underlyings if u.get("name")
+    })
+    for key, changes in underlying_overrides.items():
+        underlying = by_key.get(str(key))
+        if underlying is None:
+            raise ValueError(f"Sous-jacent inconnu dans le scénario : {key}")
+        unexpected_fields = sorted(set(changes) - allowed_underlying_fields)
+        if unexpected_fields:
+            raise ValueError(
+                f"Paramètre de modèle non autorisé pour {key} : "
+                + ", ".join(unexpected_fields))
+        for field_name, value in changes.items():
+            numeric = float(value)
+            if not math.isfinite(numeric):
+                raise ValueError(f"Valeur non finie pour {key}.{field_name}")
+            underlying[field_name] = numeric
+
     kwargs = {
         "script": script,
-        "underlyings": deepcopy(ctx.underlyings),
+        "underlyings": scenario_underlyings,
         "corr_matrix": deepcopy(ctx.corr_matrix),
         "r": ctx.r,
         "T_max": ctx.T,

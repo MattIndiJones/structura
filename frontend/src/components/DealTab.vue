@@ -635,6 +635,14 @@ async function book() {
       commercial_reason: form.commercial_reason || null,
     })
     bookedDeal.value = deal
+    if (deal.product_id) {
+      const productResponse = await apiFetch(`/api/products/${deal.product_id}`)
+      if (!productResponse.ok) {
+        throw new Error(
+          'Le deal est booké, mais son Product canonique ne peut pas être relu.')
+      }
+      store.currentProduct = await productResponse.json()
+    }
   } catch (e) {
     bookingError.value = e.message
     bookingFailures.value = e.failures || []

@@ -26,7 +26,25 @@ from backend.app.db.models import Affiliation, Deal, Opportunity, RfqRequest, Us
 # Une RFQ « to trade » exige un script en mode Expert : un CONSTAT déclaré ET
 # référencé par un événement (api/rfq.py:_is_expert_script). Même forme que
 # celle des tests RFQ existants.
-SCRIPT_EXPERT = "CONSTAT() Cal\nAT Cal:\n  PAY 0\nAT MATURITY\n  PAY 1"
+SCRIPT_EXPERT = "CONSTAT() CAL\nAT CAL:\n  PAY 0\nAT MATURITY\n  PAY 1"
+
+RFQ_PARAMS = {
+    "underlyings": [{"name": "Euro Stoxx 50", "ticker": "^STOXX50E", "ccy": "EUR"}],
+    "notional": 2_000_000.0,
+    "currency": "EUR",
+    "T": 3.0,
+    "strike_date": "2026-09-15",
+    "value_date": "2026-09-17",
+    "payment_date": "2029-09-20",
+    "constats": {
+        "CAL": {
+            "start_date": "2026-09-15",
+            "end_date": "2029-09-15",
+            "roll_date": "2029-09-15",
+            "frequency": "1Y",
+        },
+    },
+}
 
 
 @pytest.fixture
@@ -103,7 +121,7 @@ def test_une_rfq_creee_depuis_une_opportunite_garde_le_lien(app_client):
 
     reponse = app_client.post("/api/rfq", json={
         "name": "AO Phoenix 3Y", "kind": "to_trade", "sens": "achat",
-        "script_snapshot": SCRIPT_EXPERT, "params": {},
+        "script_snapshot": SCRIPT_EXPERT, "params": RFQ_PARAMS,
         "transaction_format": "EMTN", "instrument_family": "Note",
         "payoff_family": "Phoenix",
         "opportunity_id": opportunite["id"]})
@@ -201,7 +219,7 @@ def test_la_chaine_se_remonte_du_trade_jusqu_a_la_personne(app_client):
     fiche, personne, affiliation, opportunite = _contexte(app_client)
     rfq = app_client.post("/api/rfq", json={
         "name": "AO", "kind": "to_trade", "sens": "achat",
-        "script_snapshot": SCRIPT_EXPERT, "params": {},
+        "script_snapshot": SCRIPT_EXPERT, "params": RFQ_PARAMS,
         "opportunity_id": opportunite["id"]}).json()
     deal = app_client.post("/api/deals", json=_corps_deal(
         client_id=fiche["id"], opportunity_id=opportunite["id"],

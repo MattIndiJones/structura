@@ -189,6 +189,10 @@ def test_la_fenetre_de_depart_a_ses_releves_bookes_sous_le_strike():
     import json
     from types import SimpleNamespace
     from backend.app.api import deals as deals_api
+    from backend.app.api.auth import receipt_signing_secret
+    from backend.app.core.schemas import PricingRequest
+    from backend.app.core.valuation_context import build_pricing_receipt
+    from backend.app.services.product_receipts import signed_receipt
 
     strike = date.today()
     maturite = strike + timedelta(days=364)
@@ -197,6 +201,26 @@ def test_la_fenetre_de_depart_a_ses_releves_bookes_sous_le_strike():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
     with Session(engine) as s:
+        constats = {
+            "STRIKE_FIX": {"date": strike.isoformat(), "window_length": "10D",
+                           "window_frequency": "1D"},
+            "MATURITE": maturite.isoformat(),
+        }
+        tenor = round((maturite - strike).days / 365.25, 4)
+        request = PricingRequest(
+            script=SCRIPT_DEPART,
+            underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}],
+            corr_matrix=[[1.0]], T=tenor, N=2000,
+            user_params={"STRIKE": 1.0}, constats=constats,
+            strike_date=strike,
+            value_date=strike + timedelta(days=4),
+            maturity_date=maturite,
+            payment_date=maturite + timedelta(days=5),
+            settlement_ccy="EUR",
+        )
+        receipt = signed_receipt(
+            build_pricing_receipt(request, 0.979),
+            secret=receipt_signing_secret(), result={"price": 0.979})
         deal = deals_api.book_deal(deals_api.DealCreate(
             contrepartie="BNP Paribas", nominal=1_000_000.0, fair_value=97.9,
             price_traded=98.0, trade_date=strike.isoformat(),
@@ -204,13 +228,11 @@ def test_la_fenetre_de_depart_a_ses_releves_bookes_sous_le_strike():
             value_date=(strike + timedelta(days=4)).isoformat(),
             maturity_date=maturite.isoformat(),
             payment_date=(maturite + timedelta(days=5)).isoformat(),
-            T=round((maturite - strike).days / 365.25, 4),
+            T=tenor,
             underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "s0_abs": 100.0}],
             observation_times=[], script_snapshot=SCRIPT_DEPART,
-            market_snapshot={"constats": {
-                "STRIKE_FIX": {"date": strike.isoformat(), "window_length": "10D",
-                               "window_frequency": "1D"},
-                "MATURITE": maturite.isoformat()}},
+            market_snapshot={"constats": constats},
+            pricing_receipt=receipt,
         ), SimpleNamespace(id=1, entity_id=1), s)
 
         depart = json.loads(s.get(Deal, deal["id"]).schedule_json)["depart"]

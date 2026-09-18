@@ -37,6 +37,15 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
+IA : [Socle commun aux cinq assistants](projects/platform/IA_COMMUNE_2026-09-17.md)
+— implémenté le 17/09/2026 ; catalogue, éditeur de prompt et suivi partagés ; activation après redémarrage du backend.
+
+Nouveau module Life Cycle : [Valo Explain — édition, comparaison et PDF figés](projects/lifecycle/VALO_EXPLAIN_2026-09-17.md)
+— implémenté le 17/09/2026 ; activation au prochain démarrage du backend local.
+
+Dernière correction Booking : [MtM quotidien et progression du calcul](projects/lifecycle/BOOKING_MTM_QUOTIDIEN_2026-09-17.md)
+— implémenté le 17/09/2026 ; activation serveur après redémarrage du backend local.
+
 ### Avant toute ouverture hors du poste local
 
 - 25 routes répondent sans authentification : `api/pricing.py` (18), `api/schedule.py`

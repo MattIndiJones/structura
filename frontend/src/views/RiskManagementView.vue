@@ -28,8 +28,13 @@
               class="flex items-center gap-2 text-left px-2.5 py-2 rounded-lg text-xs font-medium transition-colors min-w-0"
               :class="pf.view === p.id ? 'bg-blue-600/15 text-blue-300 ring-1 ring-blue-600/40' : 'text-slate-400 hover:bg-slate-800/60'"
               @click="pf.selectView(p.id)">
-              <span class="text-sm shrink-0">{{ p.is_default ? '⭐' : '📁' }}</span>
-              <span class="flex-1 truncate">{{ p.name }}</span>
+              <span class="text-sm shrink-0">📁</span>
+              <span class="flex-1 min-w-0">
+                <span class="block truncate">{{ p.name }}</span>
+                <span v-if="authStore.isAdmin" class="block truncate text-[9px] text-slate-600">
+                  {{ p.owner_username }}{{ p.owner_entity_name ? ` · ${p.owner_entity_name}` : '' }}
+                </span>
+              </span>
               <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 shrink-0">{{ p.deal_count }}</span>
             </button>
           </div>
@@ -38,7 +43,7 @@
           <div class="card kpi-tile flex-1 min-w-0 flex flex-col gap-3">
             <div class="flex items-center gap-3 flex-wrap">
               <div class="text-sm font-bold text-slate-100">
-                {{ pf.view === 'global' ? '📊 Tous portefeuilles' : `${pf.isDefaultView ? '⭐' : '📁'} ${pf.label}` }}
+                {{ pf.view === 'global' ? '📊 Tous portefeuilles' : `📁 ${pf.label}` }}
               </div>
               <button class="btn-secondary text-xs px-3 py-1.5 ml-auto" :disabled="recomputing || !pf.members.length"
                 @click="recomputePortfolio">
@@ -69,6 +74,11 @@
                 :class="activeTab === 'chocs' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
                 class="px-4 py-2 text-xs font-medium transition-colors">
                 ⚡ Chocs
+              </button>
+              <button @click="activeTab = 'smile'"
+                :class="activeTab === 'smile' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
+                class="px-4 py-2 text-xs font-medium transition-colors">
+                〰 Smile
               </button>
               <button @click="activeTab = 'var'"
                 :class="activeTab === 'var' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
@@ -562,10 +572,10 @@
                   </label>
                   <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Paths / scénario
                     <HelpTip text="Moins de précision par scénario qu'un choc unique (défaut du panneau Chocs : 20000) — le bruit se moyenne sur des centaines de scénarios, contrairement à un choc isolé où on veut la précision max." />
-                    <input v-model.number="varForm.n_paths_per_scenario" type="number" min="500" step="500" class="input text-xs py-1 w-28" />
+                    <input v-model.number="varForm.n_paths_per_scenario" type="number" min="1000" step="500" class="input text-xs py-1 w-28" />
                   </label>
                   <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Workers parallèles
-                    <input v-model.number="varForm.max_workers" type="number" min="1" max="16" class="input text-xs py-1 w-20" />
+                    <input v-model.number="varForm.max_workers" type="number" min="1" max="4" class="input text-xs py-1 w-20" />
                   </label>
                 </div>
 
@@ -824,6 +834,181 @@
               </template>
             </template>
 
+            <!-- ══ Onglet risque de smile ══════════════════════════ -->
+            <template v-else-if="activeTab === 'smile'">
+              <div class="flex flex-col gap-1">
+                <div class="text-sm font-bold text-slate-100">
+                  〰 Risque de smile — {{ pf.view === 'global' ? 'Tous les deals actifs' : pf.label }}
+                </div>
+                <div class="text-[10px] text-slate-500 max-w-4xl">
+                  Repricing complet avec les mêmes termes, la même date de valorisation et le même marché de base.
+                  Les paramètres restent propres au modèle : σ/skew/courbure pour Local Vol, α/ρ/ν pour SABR,
+                  v0/θ/ρ/ξ pour Heston. Aucun mapping implicite n’est appliqué entre ces modèles.
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <div class="rounded-lg border border-slate-800 p-3 flex flex-col gap-2">
+                  <div class="text-xs font-semibold text-slate-300">Surface locale</div>
+                  <div class="grid grid-cols-3 gap-2">
+                    <label class="text-[10px] text-slate-500">ATM (pts)
+                      <input v-model.number="smileForm.atm_vol_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                    <label class="text-[10px] text-slate-500">Skew (pts)
+                      <input v-model.number="smileForm.skew_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                    <label class="text-[10px] text-slate-500">Courbure (pts)
+                      <input v-model.number="smileForm.curvature_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                  </div>
+                  <div class="text-[9px] text-slate-600">ATM : modèles constants et Local Vol · skew/courbure : Local Vol et LSV.</div>
+                </div>
+
+                <div class="rounded-lg border border-slate-800 p-3 flex flex-col gap-2">
+                  <div class="text-xs font-semibold text-slate-300">SABR natif</div>
+                  <div class="grid grid-cols-3 gap-2">
+                    <label class="text-[10px] text-slate-500">α (pts)
+                      <input v-model.number="smileForm.sabr_alpha_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                    <label class="text-[10px] text-slate-500">ρ (pts)
+                      <input v-model.number="smileForm.sabr_rho_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                    <label class="text-[10px] text-slate-500">ν (pts)
+                      <input v-model.number="smileForm.sabr_nu_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                  </div>
+                </div>
+
+                <div class="rounded-lg border border-slate-800 p-3 flex flex-col gap-2">
+                  <div class="text-xs font-semibold text-slate-300">Heston / LSV natif</div>
+                  <div class="grid grid-cols-4 gap-2">
+                    <label class="text-[10px] text-slate-500">v0 (pts)
+                      <input v-model.number="smileForm.heston_v0_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                    <label class="text-[10px] text-slate-500">θ (pts)
+                      <input v-model.number="smileForm.heston_theta_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                    <label class="text-[10px] text-slate-500">ρ (pts)
+                      <input v-model.number="smileForm.heston_rho_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                    <label class="text-[10px] text-slate-500">ξ (pts)
+                      <input v-model.number="smileForm.heston_xi_pts" type="number" step="1" class="input mt-1 w-full text-xs" />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-3 flex-wrap">
+                <label class="text-[10px] text-slate-500">Sous-jacent ciblé
+                  <select v-model="smileTarget" class="select ml-2 text-xs min-w-48">
+                    <option value="all">Tous les sous-jacents</option>
+                    <option v-for="u in smileUnderlyings" :key="u.key" :value="u.key">
+                      {{ u.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="text-[10px] text-slate-500">Nom du scénario
+                  <input v-model="smileForm.label" type="text" placeholder="Ex. Stress skew actions" class="input ml-2 text-xs w-56" />
+                </label>
+                <button class="btn-primary text-xs px-4 py-1.5 ml-auto"
+                  :disabled="pf.smileLoading || !pf.members.length || !smileHasShock"
+                  @click="runSmile">
+                  <span v-if="pf.smileLoading"
+                    class="w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
+                  Repricer le smile
+                </button>
+              </div>
+
+              <AlertMessage v-if="smileError" kind="error" dismissible @dismiss="smileError = ''">
+                {{ smileError }}
+              </AlertMessage>
+
+              <template v-if="pf.smileResult">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div class="stat-box">
+                    <div class="text-xs text-slate-500 mb-1">Impact total</div>
+                    <div class="text-lg font-bold font-mono" :class="pf.smileResult.total_delta_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                      {{ formatNominal(pf.smileResult.total_delta_eur) }} EUR
+                    </div>
+                  </div>
+                  <div class="stat-box">
+                    <div class="text-xs text-slate-500 mb-1">Impact / nominal</div>
+                    <div class="text-lg font-bold font-mono text-slate-200">{{ pf.smileResult.pct_impact ?? '—' }}%</div>
+                  </div>
+                  <div class="stat-box">
+                    <div class="text-xs text-slate-500 mb-1">Couverture repricée</div>
+                    <div class="text-lg font-bold font-mono text-blue-300">{{ pf.smileResult.coverage_pct ?? '—' }}%</div>
+                  </div>
+                  <div class="stat-box">
+                    <div class="text-xs text-slate-500 mb-1">Deals repricés</div>
+                    <div class="text-lg font-bold font-mono text-slate-200">{{ pf.smileResult.contributions.length }}</div>
+                  </div>
+                </div>
+
+                <div v-if="pf.smileResult.skipped.length || pf.smileResult.errors.length"
+                  class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
+                  {{ pf.smileResult.skipped.length }} non applicable(s) · {{ pf.smileResult.errors.length }} erreur(s).
+                  <span v-for="row in pf.smileResult.skipped" :key="`skip-${row.deal_id}`" class="block mt-1">
+                    {{ row.reference }} — {{ row.reason }}
+                  </span>
+                  <span v-for="row in pf.smileResult.errors" :key="`err-${row.deal_id}`" class="block mt-1">
+                    {{ row.reference }} — {{ row.error }}
+                  </span>
+                </div>
+
+                <div v-if="pf.smileResult.contributions.length" class="overflow-x-auto table-shell" tabindex="0" role="region">
+                  <table class="w-full text-xs border-collapse">
+                    <thead>
+                      <tr class="border-b border-slate-700 text-slate-500">
+                        <th class="text-left py-1.5 pr-3 font-semibold">Deal</th>
+                        <th class="text-left py-1.5 pr-3 font-semibold">Modèle</th>
+                        <th class="text-left py-1.5 pr-3 font-semibold">Paramètres déplacés</th>
+                        <th class="text-right py-1.5 pr-3 font-semibold">Avant</th>
+                        <th class="text-right py-1.5 pr-3 font-semibold">Après</th>
+                        <th class="text-right py-1.5 font-semibold">Impact EUR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in pf.smileResult.contributions" :key="row.deal_id"
+                        class="border-b border-slate-800/50 hover:bg-slate-800/20 cursor-pointer"
+                        @click="openDealDetail(row.deal_id)">
+                        <td class="py-2 pr-3 font-mono font-semibold text-blue-400">{{ row.reference }}</td>
+                        <td class="py-2 pr-3 uppercase text-[10px] text-slate-400">{{ row.model }}</td>
+                        <td class="py-2 pr-3 text-[10px] text-slate-400">
+                          <span v-for="u in row.parameter_changes" :key="u.ticker || u.name" class="block">
+                            {{ u.ticker || u.name }} : {{ u.changes.map(c => `${c.parameter} ${c.shift_pts > 0 ? '+' : ''}${c.shift_pts}pt`).join(', ') }}
+                          </span>
+                        </td>
+                        <td class="py-2 pr-3 text-right font-mono text-slate-400">{{ Number(row.mtm_before).toFixed(3) }}</td>
+                        <td class="py-2 pr-3 text-right font-mono text-slate-300">{{ Number(row.mtm_after).toFixed(3) }}</td>
+                        <td class="py-2 text-right font-mono font-semibold" :class="row.delta_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                          {{ formatNominal(row.delta_eur) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+
+              <div v-if="pf.currentSmileHistory.length" class="pt-2 border-t border-slate-800">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Historique des scénarios</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div v-for="run in pf.currentSmileHistory" :key="run.id"
+                    class="rounded-lg border border-slate-800 px-3 py-2 flex items-center gap-3">
+                    <div class="min-w-0 flex-1">
+                      <div class="text-xs text-slate-300 truncate">{{ run.label }}</div>
+                      <div class="text-[9px] text-slate-600">{{ formatDateTime(run.created_at) }}</div>
+                    </div>
+                    <div class="font-mono text-xs font-semibold"
+                      :class="run.result.total_delta_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                      {{ formatNominal(run.result.total_delta_eur) }} EUR
+                    </div>
+                    <div class="font-mono text-[10px] text-slate-500">{{ run.result.coverage_pct ?? '—' }}%</div>
+                  </div>
+                </div>
+              </div>
+            </template>
+
             <!-- ══ Onglet Barrières : proximité aux barrières ═══════ -->
             <template v-else-if="activeTab === 'barrieres'">
               <div class="flex items-center gap-3 flex-wrap">
@@ -936,27 +1121,52 @@
             <!-- ══ Onglet Portefeuilles : création, gestion, composition ══ -->
             <template v-else>
 
+              <AlertMessage v-if="portfolioError" kind="error" dismissible
+                @dismiss="portfolioError = ''">{{ portfolioError }}</AlertMessage>
+              <AlertMessage v-if="portfolioNotice" kind="success" dismissible
+                @dismiss="portfolioNotice = ''">{{ portfolioNotice }}</AlertMessage>
+
               <!-- Création & gestion -->
               <div class="flex flex-col gap-2">
                 <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Création & gestion</div>
-                <div class="flex gap-1.5 max-w-md">
-                  <input v-model="newPortfolioName" type="text" placeholder="Nom du nouveau portefeuille…"
-                    class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 flex-1 min-w-0 focus:outline-none focus:border-blue-600"
-                    @keyup.enter="createPortfolio" />
-                  <button class="btn-primary text-xs px-3 py-1.5 shrink-0" :disabled="!newPortfolioName.trim()" @click="createPortfolio">＋ Créer</button>
+                <div class="max-w-md">
+                  <label v-if="authStore.isAdmin" for="new-portfolio-owner" class="label">Compte propriétaire</label>
+                  <select v-if="authStore.isAdmin" id="new-portfolio-owner" v-model.number="newPortfolioUserId"
+                    class="select text-xs py-1.5 w-full mt-1 mb-2" :disabled="creatingPortfolio">
+                    <option v-for="owner in portfolioOwners" :key="owner.id" :value="owner.id">
+                      {{ owner.username }}{{ owner.entity ? ` · ${owner.entity}` : '' }}
+                    </option>
+                  </select>
+                  <label for="new-portfolio-name" class="label">Nom du portefeuille</label>
+                  <div class="flex gap-1.5 mt-1">
+                    <input id="new-portfolio-name" v-model="newPortfolioName" type="text"
+                      placeholder="Ex. Produits structurés EUR" class="input text-xs py-1.5 flex-1 min-w-0"
+                      :disabled="creatingPortfolio" autocomplete="off" @keyup.enter="createPortfolio" />
+                    <button class="btn-primary text-xs px-3 py-1.5 shrink-0"
+                      :disabled="creatingPortfolio || !newPortfolioName.trim()" @click="createPortfolio">
+                      {{ creatingPortfolio ? 'Création…' : '＋ Créer' }}
+                    </button>
+                  </div>
+                  <p class="text-[10px] mt-1" style="color: var(--subtle);">
+                    Saisissez un nom : le bouton Créer s’active dès que le champ n’est plus vide.
+                  </p>
                 </div>
                 <div class="flex flex-col gap-1 max-w-md">
                   <div v-for="p in pf.portfolios" :key="p.id"
                     class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-800 group">
-                    <span class="text-sm shrink-0">{{ p.is_default ? '⭐' : '📁' }}</span>
-                    <span class="flex-1 truncate text-xs text-slate-300">{{ p.name }}</span>
+                    <span class="text-sm shrink-0">📁</span>
+                    <span class="flex-1 min-w-0 text-xs text-slate-300">
+                      <span class="block truncate">{{ p.name }}</span>
+                      <span v-if="authStore.isAdmin" class="block truncate text-[9px] text-slate-600">
+                        {{ p.owner_username }}{{ p.owner_entity_name ? ` · ${p.owner_entity_name}` : '' }}
+                      </span>
+                    </span>
                     <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 shrink-0">{{ p.deal_count }} deal(s)</span>
                     <button class="text-slate-600 hover:text-slate-300 text-xs px-1 shrink-0"
                       title="Renommer" aria-label="Renommer le portefeuille" @click="renamePortfolio(p)">✎</button>
-                    <button v-if="!p.is_default" class="text-slate-600 hover:text-red-400 text-xs px-1 shrink-0"
-                      title="Supprimer (les deals sont déplacés vers le portefeuille par défaut)"
+                    <button class="text-slate-600 hover:text-red-400 text-xs px-1 shrink-0"
+                      title="Supprimer le portefeuille (les deals et leurs calculs sont conservés)"
                       aria-label="Supprimer le portefeuille" @click="deletePortfolio(p)">✕</button>
-                    <span v-else class="text-slate-700 text-xs px-1 shrink-0" title="Portefeuille par défaut — ne peut pas être supprimé, chaque deal doit toujours être surveillé">🔒</span>
                   </div>
                 </div>
               </div>
@@ -976,8 +1186,8 @@
                       <th class="text-left py-1.5 pr-3 font-semibold">Contrepartie</th>
                       <th class="text-left py-1.5 pr-3 font-semibold">Type</th>
                       <th class="text-right py-1.5 pr-3 font-semibold num">Nominal</th>
-                      <th class="text-left py-1.5 pr-3 font-semibold">Portefeuille
-                        <HelpTip text="Changez le portefeuille d'un deal directement ici — la ré-affectation met à jour les agrégats Risque/P&L à la volée." /></th>
+                      <th class="text-left py-1.5 pr-3 font-semibold">Portefeuilles
+                        <HelpTip text="Un deal peut appartenir à plusieurs portefeuilles. Cochez toutes les vues de risque qui doivent le contenir." /></th>
                       <th class="text-left py-1.5 font-semibold">Greeks calculés le
                         <HelpTip text="Date du dernier calcul de Greeks de ce deal (POST .../greeks) — c'est ce qui nourrit l'agrégat du sous-onglet Greeks. Cliquez la ligne pour ouvrir la fiche dans Booking." /></th>
                     </tr>
@@ -991,12 +1201,18 @@
                       <td class="py-1.5 pr-3 text-slate-500 text-[10px]">{{ d.product_type || '—' }}</td>
                       <td class="py-1.5 pr-3 text-right font-mono num text-slate-300">{{ formatNominal(d.nominal) }} {{ d.devise }}</td>
                       <td class="py-1.5 pr-3" @click.stop>
-                        <select class="select text-[10px] py-0.5" :value="d.portfolio_id ? String(d.portfolio_id) : ''"
-                          @change="pf.assignDeal(d.id, $event.target.value)">
-                          <option v-for="p in pf.portfolios" :key="p.id" :value="String(p.id)">
-                            {{ p.is_default ? '⭐ ' : '' }}{{ p.name }}
-                          </option>
-                        </select>
+                        <ActionMenu :label="dealPortfolioLabel(d)" :title="dealPortfolioLabel(d)" class="max-w-sm">
+                            <label v-for="p in portfoliosForDeal(d)" :key="p.id"
+                              class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-800 text-[10px] text-slate-300 cursor-pointer">
+                              <input type="checkbox" :checked="dealHasPortfolio(d, p.id)"
+                                :disabled="portfolioAssigning[d.id]"
+                                @change="togglePortfolioMembership(d, p.id, $event.target.checked)" />
+                              <span>{{ p.name }}</span>
+                            </label>
+                            <div v-if="!portfoliosForDeal(d).length" class="px-2 py-1 text-[10px] text-slate-500">
+                              Aucun portefeuille pour ce compte.
+                            </div>
+                        </ActionMenu>
                       </td>
                       <td class="py-1.5 text-slate-500">
                         <span v-if="d.greeks_computed_at">{{ new Date(d.greeks_computed_at).toLocaleDateString('fr-FR') }}</span>
@@ -1017,26 +1233,30 @@
 </template>
 
 <script setup>
+import ActionMenu from '../components/ui/ActionMenu.vue'
 import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
 import { usePortfoliosStore, shockPresets, blankShockForm, blankVarForm } from '../stores/portfolios.js'
+import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
 import { formatInt, formatDateTime, formatPercent } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
 import HelpTip from '../components/HelpTip.vue'
+import AlertMessage from '../components/ui/AlertMessage.vue'
 import { confirmer } from '../composables/useConfirm.js'
 
 const route = useRoute()
 const router = useRouter()
 const dealsStore = useDealsStore()
 const pf = usePortfoliosStore()
+const authStore = useAuthStore()
 
 // Le sous-menu Risk Management de l'accueil route vers /risk?tab=... — chaque
 // entrée (Création de portefeuille / Chocs / Explication de P&L) atterrit
 // directement sur sa section.
-const VALID_TABS = ['portfolios', 'greeks', 'contreparties', 'chocs', 'var', 'pnl', 'barrieres']
+const VALID_TABS = ['portfolios', 'greeks', 'contreparties', 'chocs', 'smile', 'var', 'pnl', 'barrieres']
 const activeTab = ref(VALID_TABS.includes(route.query.tab) ? route.query.tab : 'portfolios')
 watch(() => route.query.tab, (t) => {
   if (VALID_TABS.includes(t)) activeTab.value = t
@@ -1051,8 +1271,50 @@ const expandedUnderlying = ref(null)
 const expandedCorrPair = ref(null)
 const expandedCounterparty = ref(null)
 const newPortfolioName = ref('')
+const newPortfolioUserId = ref(authStore.user?.id || null)
+const creatingPortfolio = ref(false)
+const portfolioAssigning = reactive({})
+const portfolioError = ref('')
+const portfolioNotice = ref('')
 
 const formatNominal = formatInt
+
+const portfolioOwners = computed(() => {
+  const owners = new Map()
+  if (authStore.user?.id) owners.set(authStore.user.id, {
+    id: authStore.user.id,
+    username: authStore.user.username,
+    entity: null,
+  })
+  for (const p of pf.portfolios) {
+    owners.set(p.user_id, {
+      id: p.user_id,
+      username: p.owner_username || `Compte #${p.user_id}`,
+      entity: p.owner_entity_name || null,
+    })
+  }
+  return [...owners.values()].sort((a, b) => a.username.localeCompare(b.username, 'fr'))
+})
+
+watch(portfolioOwners, owners => {
+  if (!owners.length) return
+  if (!owners.some(owner => owner.id === newPortfolioUserId.value)) {
+    newPortfolioUserId.value = authStore.user?.id || owners[0].id
+  }
+}, { immediate: true })
+
+function portfoliosForDeal(deal) {
+  return pf.portfolios.filter(p => p.user_id === deal.user_id)
+}
+
+function dealHasPortfolio(deal, portfolioId) {
+  return (deal.portfolio_ids || []).includes(portfolioId)
+}
+
+function dealPortfolioLabel(deal) {
+  const count = (deal.portfolio_ids || []).length
+  return count ? `${count} portefeuille${count > 1 ? 's' : ''}` : 'Non classé'
+}
 
 const hasMixedVegaScopes = computed(() =>
   Object.values(pf.risk?.per_underlying || {}).some(bucket => bucket.vega_scope_mixed)
@@ -1092,23 +1354,114 @@ function openDealDetail(id) {
 // ── Gestion des portefeuilles ────────────────────────────────────────
 async function createPortfolio() {
   const name = newPortfolioName.value.trim()
-  if (!name) return
-  await pf.create(name)
-  newPortfolioName.value = ''
+  if (!name || creatingPortfolio.value) return
+  creatingPortfolio.value = true
+  portfolioError.value = ''
+  portfolioNotice.value = ''
+  try {
+    const created = await pf.create(name, authStore.isAdmin ? newPortfolioUserId.value : null)
+    newPortfolioName.value = ''
+    portfolioNotice.value = `Portefeuille « ${created.name} » créé. Vous pouvez maintenant y affecter des deals.`
+  } catch (e) {
+    portfolioError.value = e.message
+  } finally {
+    creatingPortfolio.value = false
+  }
 }
 
 async function renamePortfolio(p) {
   const name = prompt('Nouveau nom du portefeuille :', p.name)
   if (!name || !name.trim() || name.trim() === p.name) return
-  await pf.rename(p, name.trim())
+  portfolioError.value = ''
+  portfolioNotice.value = ''
+  try {
+    await pf.rename(p, name.trim())
+    portfolioNotice.value = `Portefeuille renommé « ${name.trim()} ».`
+  } catch (e) {
+    portfolioError.value = e.message
+  }
 }
 
 async function deletePortfolio(p) {
   if (!await confirmer({ titre: `Supprimer « ${p.name} » ?`,
-                       message: "Les deals qu'il contient seront déplacés vers le "
-                              + 'portefeuille par défaut.',
+                       message: "Seules les appartenances à ce portefeuille seront supprimées. "
+                              + 'Les deals et tous leurs calculs seront conservés.',
                        confirmer: 'Supprimer', danger: true })) return
-  await pf.remove(p)
+  portfolioError.value = ''
+  portfolioNotice.value = ''
+  try {
+    await pf.remove(p)
+    portfolioNotice.value = `Portefeuille « ${p.name} » supprimé. Les deals et leurs calculs sont conservés.`
+  } catch (e) {
+    portfolioError.value = e.message
+  }
+}
+
+async function togglePortfolioMembership(deal, portfolioId, checked) {
+  if (portfolioAssigning[deal.id]) return
+  const target = pf.portfolios.find(p => p.id === portfolioId)
+  const currentIds = deal.portfolio_ids || []
+  const nextIds = checked
+    ? [...new Set([...currentIds, portfolioId])]
+    : currentIds.filter(id => id !== portfolioId)
+  portfolioAssigning[deal.id] = true
+  portfolioError.value = ''
+  portfolioNotice.value = ''
+  try {
+    await pf.setDealPortfolios(deal.id, nextIds)
+    portfolioNotice.value = checked
+      ? `${deal.reference} ajouté à « ${target?.name || 'portefeuille sélectionné'} ».`
+      : `${deal.reference} retiré de « ${target?.name || 'portefeuille sélectionné'} ».`
+  } catch (e) {
+    portfolioError.value = `${deal.reference} : ${e.message}`
+  } finally {
+    portfolioAssigning[deal.id] = false
+  }
+}
+
+// ── Risque de smile, paramètres explicites par modèle ───────────────
+const smileForm = reactive({
+  atm_vol_pts: 0, skew_pts: 0, curvature_pts: 0,
+  sabr_alpha_pts: 0, sabr_rho_pts: 0, sabr_nu_pts: 0,
+  heston_v0_pts: 0, heston_theta_pts: 0, heston_rho_pts: 0, heston_xi_pts: 0,
+  label: '', recalibrate: 'none',
+})
+const smileError = ref('')
+const smileTarget = ref('all')
+const smileUnderlyings = computed(() => {
+  const seen = new Map()
+  for (const deal of pf.members) {
+    for (const underlying of deal.underlyings || []) {
+      const key = underlying.ticker || underlying.name
+      if (key && !seen.has(key)) {
+        seen.set(key, { key, label: underlying.ticker
+          ? `${underlying.name || underlying.ticker} · ${underlying.ticker}`
+          : underlying.name })
+      }
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, 'fr'))
+})
+const smileHasShock = computed(() => Object.entries(smileForm).some(([key, value]) =>
+  key.endsWith('_pts') && Number(value) !== 0))
+
+async function runSmile() {
+  smileError.value = ''
+  try {
+    const fields = Object.fromEntries(Object.entries(smileForm)
+      .filter(([key]) => key.endsWith('_pts')))
+    const payload = smileTarget.value === 'all'
+      ? { ...smileForm }
+      : {
+          ...Object.fromEntries(Object.keys(fields).map(key => [key, 0])),
+          label: smileForm.label,
+          recalibrate: smileForm.recalibrate,
+          underlying_overrides: { [smileTarget.value]: fields },
+        }
+    await pf.runSmileRisk(payload)
+  } catch (e) {
+    smileError.value = e.message
+  }
 }
 
 // ── Recalcul des Greeks par deal (batch) ─────────────────────────────
@@ -1261,12 +1614,19 @@ async function runPnl() {
 }
 
 onMounted(() => {
+  const rememberedVarBatchId = pf.varStudy?.batch_id
   dealsStore.loadDeals()
   pf.load()
   pf.loadRisk()
   pf.loadExposure()
   pf.loadVarHistory()
+  // The view deliberately stops its timer while unmounted. Refresh the
+  // remembered batch on return so a study completed in the meantime cannot
+  // remain displayed with an old "En cours" counter.
+  if (rememberedVarBatchId) pf.openVarBatch(rememberedVarBatchId)
   pf.loadShockHistory(pf.view === 'global' ? 'global' : 'portfolio',
+                      pf.view === 'global' ? null : pf.view)
+  pf.loadShockHistory(pf.view === 'global' ? 'smile_global' : 'smile_portfolio',
                       pf.view === 'global' ? null : pf.view)
 })
 

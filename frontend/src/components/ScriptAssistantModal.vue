@@ -32,101 +32,11 @@
         </div>
       </div>
 
-      <div class="flex items-end gap-2 flex-wrap">
-        <div>
-          <label class="label">Moteur</label>
-          <select v-model="provider" class="select !w-auto text-xs">
-            <option v-for="p in providers" :key="p.key" :value="p.key">
-              {{ p.label }}{{ p.ready ? '' : ' — indisponible' }}
-            </option>
-          </select>
-        </div>
-        <div>
-          <label class="label">Modèle
-            <HelpTip v-if="provider === 'ollama'"
-                     text="Liste des modèles réellement installés sur cette machine, relevée auprès d'Ollama. Après un `ollama pull`, cliquez sur ↻ pour rafraîchir." />
-          </label>
-          <div class="flex items-center gap-1">
-            <select v-model="model" class="select !w-auto text-xs" :disabled="!currentModels.length">
-              <option v-for="m in currentModels" :key="m" :value="m">{{ m }}</option>
-              <option v-if="!currentModels.length" value="">aucun modèle</option>
-            </select>
-            <button class="icon-btn icon-btn-neutral" title="Re-sonder les modèles installés"
-                    @click="refreshProviders">↻</button>
-          </div>
-        </div>
-        <button class="btn-primary text-xs px-4 py-2 ml-auto"
-                :disabled="loading || description.trim().length < 3 || !currentProvider?.ready"
-                @click="run">
-          <span v-if="loading"
-                class="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
-          {{ loading ? 'Génération…' : '▶ Générer le script' }}
-        </button>
-      </div>
-
-      <div v-if="recommendedMissing" class="text-[11px] text-slate-500">
-        Modèle recommandé pour cet usage : <code>{{ currentProvider.recommended }}</code>
-        — non installé. <code>ollama pull {{ currentProvider.recommended }}</code>, puis ↻.
-      </div>
-
-      <div v-if="privacyWarning" class="text-[11px] rounded-lg px-3 py-2"
-           style="background: var(--gold-light); border-left: 3px solid var(--gold);">
-        ⚠ La description part chez un tiers ({{ currentProvider?.label }}). Une idée
-        de structuration quitte alors le desk. <strong>Ollama</strong> tourne en
-        local et ne fait sortir aucune donnée.
-      </div>
-      <div v-if="currentProvider && !currentProvider.ready" class="text-[11px] text-amber-600">
-        {{ currentProvider.hint }}
-      </div>
+      <AiWorkbench v-if="modelValue" ref="aiPanel" endpoint="/api/script/generate" preview-endpoint="/api/script/prompt"
+        :payload="aiPayload" :disabled="aiPayload.description.trim().length < 3"
+        :action-label="refinement.trim() && gen?.script ? 'Affiner le script' : 'Générer le script'"
+        @busy="store.scriptGenLoading = $event" @result="store.scriptGen = $event" />
     </div>
-
-    <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
-
-    <!-- Prompt intégral -->
-    <details class="card !p-3 text-xs" @toggle="onPromptToggle">
-      <summary class="font-bold cursor-pointer text-slate-500 select-none">
-        ▸ Voir le prompt envoyé au modèle
-        <span v-if="promptInfo" class="font-normal text-slate-400 ml-1">
-          — {{ promptInfo.chars.toLocaleString('fr-FR') }} caractères,
-          ~{{ promptInfo.approx_tokens.toLocaleString('fr-FR') }} jetons
-        </span>
-      </summary>
-      <div v-if="promptLoading" class="text-slate-500 mt-2">Construction du prompt…</div>
-      <div v-else-if="promptInfo" class="mt-3 flex flex-col gap-3">
-        <div class="text-[11px] text-slate-500">
-          Le prompt dépend de votre description : les exemples joints sont choisis
-          selon la famille de produit détectée. Modifiez la description puis
-          rouvrez ce panneau pour voir le prompt correspondant.
-        </div>
-        <div>
-          <div class="text-[10px] uppercase tracking-wider text-slate-500 mb-1">
-            Exemples joints ({{ promptInfo.examples.length }})
-          </div>
-          <div class="flex flex-wrap gap-1">
-            <span v-for="e in promptInfo.examples" :key="e" class="badge badge-muted">{{ e }}</span>
-          </div>
-        </div>
-        <div>
-          <div class="flex items-center gap-2 mb-1">
-            <span class="text-[10px] uppercase tracking-wider text-slate-500">Message système</span>
-            <button class="btn-secondary text-[10px] px-2 py-0.5 ml-auto"
-                    @click="copy(promptInfo.system)">Copier</button>
-          </div>
-          <pre class="code-editor !min-h-0 overflow-auto text-[11px] whitespace-pre-wrap"
-               style="max-height: 300px;">{{ promptInfo.system }}</pre>
-        </div>
-        <div>
-          <div class="flex items-center gap-2 mb-1">
-            <span class="text-[10px] uppercase tracking-wider text-slate-500">Message utilisateur</span>
-            <button class="btn-secondary text-[10px] px-2 py-0.5 ml-auto"
-                    @click="copy(promptInfo.user)">Copier</button>
-          </div>
-          <pre class="code-editor !min-h-0 overflow-auto text-[11px] whitespace-pre-wrap"
-               style="max-height: 160px;">{{ promptInfo.user }}</pre>
-        </div>
-      </div>
-      <div v-else class="text-slate-500 mt-2">Prompt indisponible.</div>
-    </details>
 
     <!-- Résultat -->
     <div v-if="gen" class="grid lg:grid-cols-2 gap-4">
@@ -243,7 +153,7 @@
       <button class="btn-secondary text-xs" @click="$emit('update:modelValue', false)">
         Fermer
       </button>
-      <button class="btn-primary text-xs" :disabled="!canAdopt" @click="adopt">
+      <button class="btn-primary text-xs" :disabled="loading || !canAdopt" @click="adopt">
         Adopter dans l'éditeur
       </button>
     </template>
@@ -254,7 +164,7 @@
 import { ref, computed, watch } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import BaseModal from './ui/BaseModal.vue'
-import AlertMessage from './ui/AlertMessage.vue'
+import AiWorkbench from './AiWorkbench.vue'
 import HelpTip from './HelpTip.vue'
 import MicDictation from './MicDictation.vue'
 import { formatPercent, formatNumber } from '../utils/format.js'
@@ -269,8 +179,7 @@ const refinement = ref('')
 // donc besoin de l'élément, pas seulement de sa valeur.
 const descriptionEl = ref(null)
 const refinementEl = ref(null)
-const provider = ref('ollama')
-const model = ref('')
+const aiPanel = ref(null)
 const warningsAcknowledged = ref(false)
 
 const placeholder =
@@ -280,47 +189,12 @@ const placeholder =
 
 const gen = computed(() => store.scriptGen)
 const loading = computed(() => store.scriptGenLoading)
-const error = computed(() => store.scriptGenError)
-const providers = computed(() => store.scriptProviders?.providers || [
-  { key: 'ollama', label: 'Ollama (local)', ready: true, models: [], default_model: '' },
-])
-const currentProvider = computed(() => providers.value.find(p => p.key === provider.value))
-const currentModels = computed(() => currentProvider.value?.models || [])
-const privacyWarning = computed(() => provider.value !== 'ollama')
 const canAdopt = computed(() => !!gen.value?.script && !gen.value?.parse_error
   && (!gen.value?.adoption_requires_acknowledgement || warningsAcknowledged.value))
-const recommendedMissing = computed(() => {
-  const p = currentProvider.value
-  return !!(p && p.key === 'ollama' && p.ready && p.recommended
-            && !p.models.includes(p.recommended))
-})
-
-// ── Prompt intégral ────────────────────────────────────────────────
-const promptInfo = ref(null)
-const promptLoading = ref(false)
-let promptFor = null            // description pour laquelle promptInfo est valide
-
-async function onPromptToggle(e) {
-  if (!e.target.open) return
-  // Le prompt dépend de la description : le recharger si elle a changé depuis
-  // la dernière ouverture, sinon on afficherait le prompt d'une autre demande.
-  const d = description.value.trim()
-  if (promptInfo.value && promptFor === d) return
-  promptLoading.value = true
-  promptInfo.value = await store.previewScriptPrompt(d)
-  promptFor = d
-  promptLoading.value = false
-}
-
-async function copy(text) {
-  try { await navigator.clipboard.writeText(text) } catch { /* navigateur restrictif */ }
-}
-
-async function refreshProviders() {
-  const data = await store.loadScriptProviders(true)
-  const p = data?.providers?.find(x => x.key === provider.value)
-  if (p) model.value = p.default_model || ''
-}
+const aiPayload = computed(() => store.scriptAssistantPayload({
+  description: refinement.value.trim() && gen.value?.script ? refinement.value : description.value,
+  refine: !!(refinement.value.trim() && gen.value?.script), currentScript: gen.value?.script || '',
+}))
 
 const icon = l => ({ ok: '✅', attention: '⚠️', info: 'ℹ️' }[l] || '•')
 const cls = l => ({
@@ -348,40 +222,8 @@ const probaTiles = computed(() => {
   ]
 })
 
-watch(() => props.modelValue, async (open) => {
-  if (!open) return
-  // Re-sondé à chaque ouverture, pas mis en cache : un `ollama pull` entre deux
-  // ouvertures doit se voir, et la sonde est instantanée quand Ollama tourne
-  // (le délai de 2,5 s ne joue que s'il est éteint).
-  const data = await store.loadScriptProviders(true)
-  if (data?.default) provider.value = data.default
-  // Le watcher sur `provider` ne se déclenche pas si le moteur n'a pas changé :
-  // sans cette ligne, le modèle resterait vide au premier affichage.
-  model.value = currentProvider.value?.default_model || ''
-  promptInfo.value = null                 // le prompt suit la description
-})
-
-// Changer de moteur remet le modèle sur celui par défaut : un nom de modèle
-// Ollama envoyé à OpenAI produirait une erreur incompréhensible.
-watch(provider, () => { model.value = currentProvider.value?.default_model || '' })
-watch(() => gen.value?.generation_id, () => { warningsAcknowledged.value = false })
-
-function run() {
-  if (!description.value.trim() || loading.value) return
-  store.generateScript({ description: description.value, provider: provider.value,
-                         model: model.value })
-}
-
-function runRefine() {
-  if (!refinement.value.trim() || loading.value) return
-  // L'affinage porte sur le script PROPOSÉ, pas sur celui de l'éditeur : rien
-  // n'a encore été adopté à ce stade.
-  store.generateScript({
-    description: refinement.value, provider: provider.value, model: model.value,
-    refine: true, currentScript: gen.value?.script || '',
-  })
-  refinement.value = ''
-}
+watch(() => gen.value?.generation_id, () => { warningsAcknowledged.value = false; refinement.value = '' })
+function runRefine() { if (refinement.value.trim()) aiPanel.value?.run() }
 
 function adopt() {
   store.adoptGeneratedScript({ warningsAcknowledged: warningsAcknowledged.value })

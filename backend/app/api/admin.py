@@ -20,9 +20,9 @@ from ..services.uat_generation import (
     list_batches as list_uat_batches, preview_generation,
     configure_uat_workflows,
 )
-from . import deals as deals_api, rfq as rfq_api
+from . import deals as deals_api, products as products_api, rfq as rfq_api
 
-configure_uat_workflows(deals_api, rfq_api)
+configure_uat_workflows(deals_api, rfq_api, products_api)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 

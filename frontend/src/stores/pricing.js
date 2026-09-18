@@ -443,14 +443,21 @@ export const usePricingStore = defineStore('pricing', () => {
 
   async function ensureIndicative() {
     if (currentIndicativeId.value) return currentIndicativeId.value
+    const pricingInput = await _authoritativeProductRequest(_pricingBody())
     const res = await apiFetch('/api/indicatives', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        product_id: currentProduct.value?.product_id || null,
+        product_terms_version: currentProduct.value?.terms_version || null,
+        product_name: productTitle.value,
+        pricing_input: pricingInput,
         contrepartie: '',
         devise: globalParams.deal_ccy || 'EUR',
         nominal: 0,
-        underlyings: underlyings.value.map(u => ({ name: u.name, ticker: u.ticker })),
+        underlyings: underlyings.value.map(u => ({
+          name: u.name, ticker: u.ticker, ccy: u.ccy,
+        })),
         script_snapshot: script.value,
         script_id: currentScriptId.value || null,
         market_snapshot: { r: globalParams.r, T: globalParams.T, model: globalParams.model },
@@ -458,10 +465,17 @@ export const usePricingStore = defineStore('pricing', () => {
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      throw new Error(err.detail || 'Erreur création fiche indicative')
+      throw new Error(err.detail?.message || err.detail || 'Erreur création fiche indicative')
     }
     const ind = await res.json()
     currentIndicativeId.value = ind.id
+    if (!currentProduct.value && ind.product_id) {
+      const productResponse = await apiFetch(`/api/products/${ind.product_id}`)
+      if (!productResponse.ok) {
+        throw new Error('Le Product créé pour la fiche indicative ne peut pas être relu.')
+      }
+      currentProduct.value = await productResponse.json()
+    }
     return ind.id
   }
 
@@ -477,8 +491,6 @@ export const usePricingStore = defineStore('pricing', () => {
   // automatiquement : c'est l'utilisateur qui adopte.
   const scriptGen        = ref(null)
   const scriptGenLoading = ref(false)
-  const scriptGenError   = ref(null)
-  const scriptProviders  = ref(null)
   const scriptGenerationProvenance = ref(null)
   const adoptedGeneratedScriptText = ref('')
   // Dictée : état du moteur local (installé ? poids téléchargés ?). Sondé une
@@ -1606,73 +1618,11 @@ export const usePricingStore = defineStore('pricing', () => {
     corrMatrix.value = corrMat.map(row => [...row])
   }
 
-  // ── Assistant de scripting IA ──────────────────────────────────────
-  // `force` : re-sonde Ollama. La liste des modèles installés change dès qu'on
-  // fait un `ollama pull`, et rien ne le signale à une page déjà ouverte.
-  async function loadScriptProviders(force = false) {
-    if (scriptProviders.value && !force) return scriptProviders.value
-    try {
-      const res = await fetch('/api/script/providers')
-      if (res.ok) scriptProviders.value = await res.json()
-    } catch { /* le sélecteur retombera sur Ollama */ }
-    return scriptProviders.value
-  }
-
-  // Le prompt exact qui partirait, sans rien dépenser. Les exemples envoyés
-  // dépendent de la description : les voir, c'est pouvoir ajuster sa demande
-  // autrement qu'à tâtons.
-  async function previewScriptPrompt(description) {
-    try {
-      const res = await fetch('/api/script/prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          description: description || 'produit structuré',
-          underlyings: _buildUls(),
-          corr_matrix: _buildCorr(),
-          T: globalParams.T,
-        }),
-      })
-      return res.ok ? await res.json() : null
-    } catch { return null }
-  }
-
-  // `refine` repart de `currentScript` : « non, la barrière doit être observée
-  // en continu » doit affiner, pas tout réécrire. Le script de départ est passé
-  // explicitement — c'est celui que l'assistant vient de proposer, pas celui de
-  // l'éditeur, qui n'a pas encore été adopté.
-  async function generateScript({ description, provider, model, refine = false,
-                                  currentScript = '' }) {
-    scriptGenLoading.value = true
-    scriptGenError.value = null
-    try {
-      const res = await fetch('/api/script/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          description,
-          provider,
-          model: model || null,
-          underlyings: _buildUls(),
-          corr_matrix: _buildCorr(),
-          r: globalParams.r / 100,
-          T: globalParams.T,
-          user_params: _buildUserParams(),
-          current_script: refine ? currentScript : '',
-          refine,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        scriptGenError.value = data.detail || 'Erreur serveur'
-        scriptGen.value = null
-      } else {
-        scriptGen.value = data
-      }
-    } catch (e) {
-      scriptGenError.value = e.message
-      scriptGen.value = null
-    } finally { scriptGenLoading.value = false }
+  // Business context and adoption stay here; the shared workbench owns AI calls.
+  function scriptAssistantPayload({ description, refine = false, currentScript = '' }) {
+    return { description, underlyings: _buildUls(), corr_matrix: _buildCorr(),
+      r: globalParams.r / 100, T: globalParams.T, user_params: _buildUserParams(),
+      current_script: refine ? currentScript : '', refine }
   }
 
   // ── Dictée ─────────────────────────────────────────────────────────
@@ -1737,6 +1687,8 @@ export const usePricingStore = defineStore('pricing', () => {
       requested_model: scriptGen.value.requested_model,
       effective_model: scriptGen.value.effective_model || scriptGen.value.model,
       prompt_version: scriptGen.value.prompt_version,
+      prompt_customized: scriptGen.value.prompt_customized,
+      base_hash: scriptGen.value.base_hash,
       examples_version: scriptGen.value.examples_version,
       examples: scriptGen.value.examples || [],
       attempts: scriptGen.value.attempts || [],
@@ -2575,6 +2527,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // same defensive merge-over-defaults as loadFromDeal handles that fine.
   async function loadFromRfq(rfqObj) {
     relacherVariante()
+    currentProduct.value = null
     scriptGenerationProvenance.value = null
     adoptedGeneratedScriptText.value = ''
     const p = rfqObj.params || {}
@@ -3026,9 +2979,9 @@ export const usePricingStore = defineStore('pricing', () => {
     pricingEstimate, greeksEstimate, calculationLimits: CALCULATION_LIMITS,
     result, resultIsStale, profile, paths, proba, backtest, mtf, solver, grid, scenarios, kid,
     mtfDrill, mtfDrillLoading, mtfDrillError, runMtfDrilldown,
-    scriptGen, scriptGenLoading, scriptGenError, scriptProviders,
+    scriptGen, scriptGenLoading,
     scriptGenerationProvenance,
-    loadScriptProviders, generateScript, adoptGeneratedScript, previewScriptPrompt,
+    scriptAssistantPayload, adoptGeneratedScript,
     transcribeEngines, loadTranscribeEngines, transcribeAudio, prepareTranscribe,
     comparator, comparatorError, comparatorLoading, runBacktestCompare, adoptBasket,
     loading, error, progress, yfStatus, marketDataLoading, marketDataAsOf, marketDataEffectiveDate,

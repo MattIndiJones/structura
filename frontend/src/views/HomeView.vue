@@ -224,6 +224,15 @@
             </RouterLink>
 
             <!-- Réinvestissement -->
+            <RouterLink to="/valo-explain" class="card flex flex-col gap-3 hover:border-blue-700 transition-all duration-200 group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-blue-900/50 flex items-center justify-center text-xl">📄</div>
+                <div><div class="font-bold text-slate-100 group-hover:text-blue-300">Valo Explain</div>
+                  <div class="text-xs text-slate-500">Notes et explication des valorisations</div></div>
+              </div>
+              <p class="text-xs text-slate-600">Comparez deux calculs, rédigez le commentaire avec l’aide de l’IA et conservez la note PDF.</p>
+            </RouterLink>
+
             <RouterLink to="/reinvest"
               class="card flex flex-col gap-3
                      hover:border-orange-700 hover:bg-orange-950/20 hover:shadow-xl hover:shadow-black/30

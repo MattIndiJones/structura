@@ -33,6 +33,7 @@ class ProductCreate(BaseModel):
     name: str = Field(default="", max_length=200)
     pricing_input: dict
     pricing_receipt: dict | None = None
+    listed: bool = True
     intent: TradeIntent = Field(default_factory=TradeIntent)
     commercial: CommercialContext = Field(default_factory=CommercialContext)
 
@@ -42,11 +43,13 @@ class ProductUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     intent: TradeIntent | None = None
     commercial: CommercialContext | None = None
+    listed: bool | None = None
     reason: str = Field(min_length=3, max_length=1000)
 
     @model_validator(mode="after")
     def has_change(self):
-        if self.name is None and self.intent is None and self.commercial is None:
+        if (self.name is None and self.intent is None and self.commercial is None
+                and self.listed is None):
             raise ValueError("Aucune modification demandée.")
         return self
 
@@ -95,7 +98,12 @@ def _default_name(pricing_payload: dict) -> str:
 
 
 def _row_summary(row: ProductRecord, product: Product) -> dict:
-    stage = "BOOKED" if product.execution else ("RFQ" if product.rfqs else "SAVED")
+    stage = (
+        "BOOKED" if product.execution else
+        "RFQ" if product.rfqs else
+        "INDICATIVE" if product.indicatives else
+        "SAVED"
+    )
     return {
         "id": row.id,
         "reference": row.reference,
@@ -103,6 +111,7 @@ def _row_summary(row: ProductRecord, product: Product) -> dict:
         "revision": row.revision,
         "terms_version": row.terms_version,
         "archived": row.archived,
+        "listed": row.listed,
         "data_origin": row.data_origin,
         "stage": stage,
         "underlyings": [u.model_dump(mode="json") for u in product.terms.underlyings],
@@ -120,6 +129,18 @@ def create_product(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    return _create_product(body, current, session)
+
+
+def _create_product(
+    body: ProductCreate,
+    current: User,
+    session: Session,
+    *,
+    data_origin: Literal["native", "demo", "uat", "imported"] = "native",
+    uat_batch_id: int | None = None,
+):
+    """Shared creation path used by the Pricer and explicit UAT batches."""
     command_payload = body.model_dump(mode="json", exclude={"command_key"})
     try:
         prior = previous_command(session, current, body.command_key, command_payload)
@@ -132,8 +153,16 @@ def create_product(
             terms=terms_from_input(validated, allow_unresolved=True),
             intent=body.intent,
             commercial=body.commercial,
+            data_origin=data_origin,
+            listed=body.listed,
         )
-        product = stage_new_product(session, product, user=current)
+        product = stage_new_product(
+            session, product, user=current, uat_batch_id=uat_batch_id,
+            reason=("Conservation volontaire du produit." if body.listed else
+                    "Création interne avant transfert vers un module."),
+            action=("PRODUCT_SAVED" if body.listed else
+                    "PRODUCT_CREATED_INTERNAL"),
+        )
 
         if body.pricing_receipt is not None:
             receipt = verify_server_receipt(
@@ -167,7 +196,10 @@ def list_products(
     session: Annotated[Session, Depends(get_session)],
     archived: bool = Query(default=False),
 ):
-    query = select(ProductRecord).where(ProductRecord.archived == archived)
+    query = select(ProductRecord).where(
+        ProductRecord.archived == archived,
+        ProductRecord.listed == True,  # noqa: E712
+    )
     if current.role != "admin":
         query = query.where(ProductRecord.user_id == current.id)
     rows = session.exec(query.order_by(ProductRecord.updated_at.desc())).all()
@@ -208,10 +240,15 @@ def update_product(
             changes["intent"] = body.intent
         if body.commercial is not None:
             changes["commercial"] = body.commercial
+        if body.listed is not None:
+            changes["listed"] = body.listed
+        action = "PRODUCT_CONTEXT_UPDATED"
+        if body.listed is not None and body.listed != product.listed:
+            action = "PRODUCT_LISTED" if body.listed else "PRODUCT_UNLISTED"
         product = stage_revision(
             session, product.model_copy(update=changes),
             expected_revision=body.expected_revision, actor_id=current.id,
-            action="PRODUCT_CONTEXT_UPDATED", reason=body.reason)
+            action=action, reason=body.reason)
         session.commit()
         return product.to_dict()
     except ProductError as exc:

@@ -30,6 +30,7 @@ from .api.constraint_definitions import router as constraint_definitions_router
 from .api.scripts_db import router as scripts_db_router
 from .api.variants import router as variants_router
 from .api.deals import router as deals_router
+from .api.valuation_notes import router as valuation_notes_router
 from .api.portfolios import router as portfolios_router
 from .api.shocks import router as shocks_router
 from .api.indicatives import router as indicatives_router
@@ -111,6 +112,7 @@ app.include_router(constraint_definitions_router)
 app.include_router(scripts_db_router)
 app.include_router(variants_router)
 app.include_router(deals_router)
+app.include_router(valuation_notes_router)
 app.include_router(portfolios_router)
 app.include_router(shocks_router)
 app.include_router(indicatives_router)

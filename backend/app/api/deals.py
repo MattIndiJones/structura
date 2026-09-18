@@ -16,10 +16,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent,
-                          Entity, User, Counterparty, Portfolio, LifecycleProposal,
-                          OfficialFixingVersion, Opportunity, RfqQuote, RfqRequest, Script,
+                          DealPortfolioMembership, Entity, User, Counterparty,
+                          Portfolio, LifecycleProposal,
+                          Indicative, OfficialFixingVersion, Opportunity,
+                          RfqQuote, RfqRequest, Script,
                           TradeAmendmentRequest, ValuationRun)
 from .auth import get_current_user, receipt_signing_secret
+from .valuation_progress import valuation_progress_response
 from ..services.market_data import (
     DEFAULT_MARKET_DATA_PROVIDER, dividend_profile, load_hist_prices,
     load_yahoo_reference_closes, market_data_provider_for_deal,
@@ -63,7 +66,8 @@ from ..core.valuation_runs import stage_valuation_run, replay_valuation_run
 from ..core.product.inputs import terms_from_input
 from ..core.product.models import CommercialContext, FrozenObject, TradeIntent
 from ..services.product_repository import (
-    ProductError, load_product, owned_record, stage_revision,
+    ProductError, load_product, owned_record, stage_calculation,
+    stage_internal_product, stage_revision,
 )
 from ..services.product_lifecycle import lifecycle_snapshot, stage_product_lifecycle
 from ..services.product_receipts import verify_server_receipt
@@ -95,9 +99,9 @@ class DealCreate(BaseModel):
     script_snapshot: str
     script_id: Optional[int] = None
     market_snapshot: dict = {}
-    # Returned by /api/price. Optional for legacy/manual bookings and RFQ
-    # imports; when present it is authoritative for the pricing assumptions
-    # and fair value stored on the deal.
+    # Returned by /api/price. Kept nullable at schema level so a missing proof
+    # reaches the audited booking refusal boundary; every accepted booking
+    # requires it.
     pricing_receipt: Optional[dict] = None
     # Pre-trade opportunity this deal converts from, if any — see
     # db/models.py:Deal.indicative_id.
@@ -624,6 +628,16 @@ def _gen_ref(entity_name: str | None, session: Session) -> str:
 
 
 def _deal_row(d: Deal, events: list | None = None, session: Session | None = None) -> dict:
+    portfolio_ids = []
+    if session is not None:
+        portfolio_ids = list(session.exec(
+            select(DealPortfolioMembership.portfolio_id).where(
+                DealPortfolioMembership.deal_id == d.id)
+        ).all())
+        # Compatibility while a database has not yet run the membership
+        # migration. New bookings never write the legacy pointer.
+        if not portfolio_ids and d.portfolio_id is not None:
+            portfolio_ids = [d.portfolio_id]
     row = {
         "id": d.id,
         "product_id": d.product_id,
@@ -661,7 +675,8 @@ def _deal_row(d: Deal, events: list | None = None, session: Session | None = Non
         "payoff_description": d.payoff_description,
         "documentation_reference": d.documentation_reference,
         "commercial_reason": d.commercial_reason,
-        "portfolio_id": d.portfolio_id,
+        "portfolio_ids": portfolio_ids,
+        "portfolio_id": portfolio_ids[0] if len(portfolio_ids) == 1 else None,
         "sens": d.sens,
         "contrepartie": d.contrepartie,
         "devise": d.devise,
@@ -1495,13 +1510,7 @@ def _ai_script_provenance(body: DealCreate) -> Optional[dict]:
 
 def _apply_pricing_receipt(body: DealCreate,
                            ai_provenance: Optional[dict] = None) -> None:
-    """Validate a pricing result and make its server snapshot authoritative.
-
-    Manual and RFQ bookings may legitimately have no receipt.  Once a receipt
-    is supplied, however, every field that identifies the priced product must
-    still match: accepting only part of it would recreate the stale-price bug
-    at the API boundary.
-    """
+    """Validate a pricing result and make its server snapshot authoritative."""
     if not body.pricing_receipt:
         return
     try:
@@ -1618,8 +1627,6 @@ def _book_deal(
     reference_prefix: str | None = None,
     uat_batch_id: int | None = None,
 ):
-    from .portfolios import get_or_create_default_portfolio
-
     try:
         _validate_economics(body)
         ai_provenance = _ai_script_provenance(body)
@@ -1776,13 +1783,81 @@ def _book_deal(
             firmness_affirmee_au_booking=qualifiee_au_booking)
 
     source_product = None
-    source_product_id = source_rfq.product_id if source_rfq is not None else body.product_id
+    pending_product_terms = None
+    source_indicative = None
+    if body.indicative_id is not None:
+        source_indicative = session.get(Indicative, body.indicative_id)
+        if source_indicative is None or source_indicative.user_id != current.id:
+            _reject_booking(session, current, body, 404, {
+                "code": "INDICATIVE_NOT_FOUND",
+                "message": "Fiche indicative introuvable.",
+            })
+        if source_indicative.product_id is None:
+            _reject_booking(session, current, body, 409, {
+                "code": "INDICATIVE_PRODUCT_MISSING",
+                "message": "La fiche indicative ne possède pas de Product canonique.",
+            })
+
+    workflow_product_ids = {
+        product_id for product_id in (
+            source_rfq.product_id if source_rfq is not None else None,
+            source_indicative.product_id if source_indicative is not None else None,
+            body.product_id,
+        ) if product_id is not None
+    }
+    if len(workflow_product_ids) > 1:
+        _reject_booking(session, current, body, 422, {
+            "code": "WORKFLOW_PRODUCT_MISMATCH",
+            "message": "Le RFQ, l’indicatif et le Pricer ne désignent pas le même Product.",
+        })
+    source_product_id = next(iter(workflow_product_ids), None)
     if source_rfq is not None and body.product_id is not None \
             and body.product_id != source_rfq.product_id:
         _reject_booking(session, current, body, 422, {
             "code": "RFQ_PRODUCT_MISMATCH",
             "message": "Le Product demandé ne correspond pas à celui de la RFQ.",
         })
+    if source_rfq is not None and source_product_id is None:
+        _reject_booking(session, current, body, 409, {
+            "code": "RFQ_PRODUCT_MISSING",
+            "message": "La RFQ ne possède pas de Product canonique.",
+        })
+    if not body.pricing_receipt:
+        _reject_booking(session, current, body, 422, {
+            "code": "PRODUCT_REPRICE_REQUIRED",
+            "message": "Lancez le Pricer avant le booking afin de produire un calcul vérifiable.",
+        })
+    try:
+        verified_product_receipt = verify_server_receipt(
+            body.pricing_receipt, secret=receipt_signing_secret())
+    except (KeyError, TypeError, ValueError) as exc:
+        _reject_booking(session, current, body, 422, {
+            "code": "PRODUCT_PRICING_RECEIPT_INVALID",
+            "message": f"Le reçu serveur du pricing est invalide : {exc}",
+        })
+    try:
+        priced_terms = terms_from_input(
+            verified_product_receipt["pricing_input"], allow_unresolved=False)
+    except (KeyError, TypeError, ValueError) as exc:
+        _reject_booking(session, current, body, 422, {
+            "code": "PRODUCT_TERMS_INVALID",
+            "message": f"Les termes portés par le pricing sont invalides : {exc}",
+        })
+    missing_product_terms = [
+        field for field in (
+            "strike_date", "value_date", "maturity_date", "payment_date",
+            "settlement_ccy",
+        ) if getattr(priced_terms, field) in (None, "")
+    ]
+    if missing_product_terms:
+        _reject_booking(session, current, body, 422, {
+            "code": "PRODUCT_TERMS_INCOMPLETE",
+            "message": (
+                "Le pricing ne porte pas tous les termes nécessaires au booking : "
+                + ", ".join(missing_product_terms) + "."),
+            "fields": missing_product_terms,
+        })
+
     if source_product_id is not None:
         try:
             owned_record(session, source_product_id, current)
@@ -1791,8 +1866,10 @@ def _book_deal(
             _reject_booking(session, current, body, exc.status, {
                 "code": exc.code, "message": str(exc),
             })
-        expected_terms = (source_rfq.product_terms_version
-                          if source_rfq is not None else body.product_terms_version)
+        expected_terms = (
+            source_rfq.product_terms_version if source_rfq is not None
+            else source_indicative.product_terms_version
+            if source_indicative is not None else body.product_terms_version)
         if expected_terms is not None and expected_terms != source_product.terms_version:
             _reject_booking(session, current, body, 409, {
                 "code": "PRODUCT_TERMS_STALE",
@@ -1803,29 +1880,15 @@ def _book_deal(
                 "code": "PRODUCT_ALREADY_BOOKED",
                 "message": "Ce Product est déjà rattaché à une exécution.",
             })
-        if source_rfq is None:
-            if not body.pricing_receipt:
-                _reject_booking(session, current, body, 422, {
-                    "code": "PRODUCT_REPRICE_REQUIRED",
-                    "message": "Repricez le Product avant un booking direct.",
-                })
-            try:
-                verified_product_receipt = verify_server_receipt(
-                    body.pricing_receipt, secret=receipt_signing_secret())
-                priced_terms = terms_from_input(
-                    verified_product_receipt["pricing_input"], allow_unresolved=False)
-            except (KeyError, TypeError, ValueError) as exc:
-                _reject_booking(session, current, body, 422, {
-                    "code": "PRODUCT_PRICING_RECEIPT_INVALID",
-                    "message": f"Le reçu serveur du pricing est invalide : {exc}",
-                })
-            if priced_terms.fingerprint != source_product.terms_fingerprint:
-                _reject_booking(session, current, body, 422, {
-                    "code": "PRODUCT_TERMS_MISMATCH",
-                    "message": "Le pricing courant ne porte plus les termes du Product ouvert.",
-                })
+        if priced_terms.fingerprint != source_product.terms_fingerprint:
+            _reject_booking(session, current, body, 422, {
+                "code": "PRODUCT_TERMS_MISMATCH",
+                "message": "Le pricing courant ne porte plus les termes du Product ouvert.",
+            })
         body.product_id = source_product_id
         body.product_terms_version = source_product.terms_version
+    else:
+        pending_product_terms = priced_terms
 
     # A new deal's script and frozen CONSTAT values are the contract.  Client
     # Monte-Carlo grid points are never a safe booking fallback.
@@ -1898,14 +1961,56 @@ def _book_deal(
         affiliation_id=primary_affiliation_id,
         opportunity_id=opportunity_id)
 
+    if pending_product_terms is not None:
+        source_product = stage_internal_product(
+            session,
+            user=current,
+            name=body.product_type or "Produit structuré",
+            terms=pending_product_terms,
+            intent=TradeIntent(
+                nominal=body.nominal,
+                side="BUY" if body.sens == "vente" else "SELL",
+                product_type=body.product_type,
+                transaction_format=legal_context["transaction_format"] or "",
+                instrument_family=legal_context["instrument_family"] or "",
+                payoff_family=legal_context["payoff_family"] or "",
+                payoff_description=legal_context["payoff_description"] or "",
+                documentation_reference=legal_context["documentation_reference"] or "",
+            ),
+            commercial=CommercialContext(
+                client_id=client_id,
+                mandate_id=mandate_id,
+                opportunity_id=opportunity_id,
+                primary_affiliation_id=primary_affiliation_id,
+            ),
+            data_origin="uat" if uat_batch_id is not None else "native",
+            uat_batch_id=uat_batch_id,
+            reason="Création interne du Product avant booking direct.",
+        )
+        body.product_id = source_product.product_id
+        body.product_terms_version = source_product.terms_version
+
+    # The Pricer result completes the same Product, whether it originated in
+    # the Pricer itself or behind an RFQ. Reopening and booking must never
+    # leave the calculation stranded only in Deal.market_snapshot_json.
+    if not any(calculation.calculated_at == verified_product_receipt["calculated_at"]
+               for calculation in source_product.calculations):
+        enriched = stage_calculation(
+            session, source_product, user=current,
+            receipt=verified_product_receipt,
+        )
+        source_product = stage_revision(
+            session, enriched, expected_revision=source_product.revision,
+            actor_id=current.id, action="PRODUCT_CALCULATION_RETAINED",
+            reason="Calcul du Pricer retenu lors du booking.",
+        )
+
     # Allocate persistent objects only after every rejection-prone validation.
     # A rejected booking can then commit its audit row without also consuming a
     # reference or creating a default portfolio as a side effect.
     entity = session.get(Entity, current.entity_id) if current.entity_id else None
     reference = (next_reference(session, Deal, reference_prefix)
                  if reference_prefix else _gen_ref(entity.name if entity else None, session))
-    default_portfolio = get_or_create_default_portfolio(session, current.id)
-
     deal = Deal(
         # AuditEvent keeps numeric object identities forever.  Letting SQLite
         # recycle a deleted Deal id would splice the previous trade's history
@@ -1915,7 +2020,7 @@ def _book_deal(
         entity_id=current.entity_id,
         user_id=current.id,
         uat_batch_id=uat_batch_id,
-        portfolio_id=default_portfolio.id,
+        portfolio_id=None,
         product_id=body.product_id,
         product_terms_version=body.product_terms_version,
         indicative_id=body.indicative_id,
@@ -2009,13 +2114,10 @@ def _book_deal(
             metadata={"rfq_id": body.rfq_id},
         )
 
-    if body.indicative_id:
-        from ..db.models import Indicative
-        ind = session.get(Indicative, body.indicative_id)
-        if ind and ind.user_id == current.id:
-            ind.status = "converti"
-            ind.updated_at = datetime.utcnow()
-            session.add(ind)
+    if source_indicative is not None:
+        source_indicative.status = "converti"
+        source_indicative.updated_at = datetime.utcnow()
+        session.add(source_indicative)
 
     if source_rfq:
         source_rfq.status = "clos"
@@ -2120,6 +2222,14 @@ def _book_deal(
             ))
 
     if source_product is not None:
+        product_indicatives = source_product.indicatives
+        if source_indicative is not None:
+            from .indicatives import _indicative_snapshot
+            current_indicative = _indicative_snapshot(source_indicative)
+            product_indicatives = tuple(
+                item for item in product_indicatives
+                if item.to_dict().get("id") != source_indicative.id
+            ) + (current_indicative,)
         product_rfqs = source_product.rfqs
         if source_rfq is not None:
             from .rfq import (_booked_deals_by_rfq, _counterparty_by_provider,
@@ -2155,6 +2265,7 @@ def _book_deal(
         source_product = source_product.model_copy(update={
             "intent": intent,
             "commercial": commercial,
+            "indicatives": product_indicatives,
             "rfqs": product_rfqs,
             "execution": FrozenObject(_contract_snapshot(deal)),
             "lifecycle": lifecycle_snapshot(session, deal),
@@ -2210,9 +2321,74 @@ def book_deal(
 
 
 class DealPortfolioAssign(BaseModel):
-    # Required — a deal always belongs to a portfolio (at minimum the user's
-    # default one); there is no "unassign", only "move to another portfolio".
     portfolio_id: int
+
+
+class DealPortfoliosSet(BaseModel):
+    portfolio_ids: list[int] = Field(default_factory=list)
+
+
+def _deal_for_portfolio_change(deal_id: int, current: User, session: Session) -> Deal:
+    deal = session.get(Deal, deal_id)
+    is_admin = getattr(current, "role", "user") == "admin"
+    if not deal or (not is_admin and deal.user_id != current.id):
+        raise HTTPException(404, "Deal introuvable")
+    return deal
+
+
+def _validated_portfolios(
+    portfolio_ids: list[int], deal: Deal, session: Session
+) -> list[Portfolio]:
+    unique_ids = list(dict.fromkeys(portfolio_ids))
+    portfolios = [session.get(Portfolio, pid) for pid in unique_ids]
+    if any(p is None for p in portfolios):
+        raise HTTPException(404, "Portefeuille introuvable")
+    if any(p.user_id != deal.user_id for p in portfolios):
+        raise HTTPException(
+            422,
+            "Chaque portefeuille doit appartenir au propriétaire du deal.",
+        )
+    return portfolios
+
+
+@router.put("/{deal_id}/portfolios")
+def set_deal_portfolios(
+    deal_id: int,
+    body: DealPortfoliosSet,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Replace the deal's portfolio memberships atomically.
+
+    An empty list is valid and means that the position is explicitly
+    unclassified. Portfolios are organizational views owned by the same
+    account as the deal; administrators can perform the change for any
+    account without crossing those ownership boundaries.
+    """
+    deal = _deal_for_portfolio_change(deal_id, current, session)
+    portfolios = _validated_portfolios(body.portfolio_ids, deal, session)
+    target_ids = {p.id for p in portfolios}
+    current_memberships = session.exec(select(DealPortfolioMembership).where(
+        DealPortfolioMembership.deal_id == deal.id)).all()
+    current_ids = {m.portfolio_id for m in current_memberships}
+
+    for membership in current_memberships:
+        if membership.portfolio_id not in target_ids:
+            session.delete(membership)
+    for portfolio_id in target_ids - current_ids:
+        session.add(DealPortfolioMembership(
+            deal_id=deal.id,
+            portfolio_id=portfolio_id,
+            added_by_user_id=current.id,
+        ))
+
+    # The many-to-many table is authoritative. Clearing the old pointer also
+    # removes the foreign-key dependency which used to block deletion.
+    deal.portfolio_id = None
+    deal.updated_at = datetime.utcnow()
+    session.add(deal)
+    session.commit()
+    return {"id": deal.id, "portfolio_ids": sorted(target_ids)}
 
 
 @router.patch("/{deal_id}/portfolio")
@@ -2222,17 +2398,25 @@ def assign_deal_portfolio(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
-        raise HTTPException(404, "Deal introuvable")
-    portfolio = session.get(Portfolio, body.portfolio_id)
-    if not portfolio or portfolio.user_id != current.id:
-        raise HTTPException(404, "Portefeuille introuvable")
-    deal.portfolio_id = body.portfolio_id
-    deal.updated_at = datetime.utcnow()
+    """Backward-compatible endpoint: add one membership without removing any."""
+    deal = _deal_for_portfolio_change(deal_id, current, session)
+    portfolio = _validated_portfolios([body.portfolio_id], deal, session)[0]
+    existing = session.exec(select(DealPortfolioMembership).where(
+        DealPortfolioMembership.deal_id == deal.id,
+        DealPortfolioMembership.portfolio_id == portfolio.id,
+    )).first()
+    if not existing:
+        session.add(DealPortfolioMembership(
+            deal_id=deal.id,
+            portfolio_id=portfolio.id,
+            added_by_user_id=current.id,
+        ))
+    deal.portfolio_id = None
     session.add(deal)
     session.commit()
-    return {"id": deal.id, "portfolio_id": deal.portfolio_id}
+    portfolio_ids = session.exec(select(DealPortfolioMembership.portfolio_id).where(
+        DealPortfolioMembership.deal_id == deal.id)).all()
+    return {"id": deal.id, "portfolio_ids": sorted(portfolio_ids)}
 
 
 @router.get("")
@@ -6468,7 +6652,7 @@ def reinvest_proposal_pdf_endpoint(
 # Residual MtM schemas and implementation live in core/deal_valuation.py.
 def _mtm_core(deal: Deal, session: Session, n_paths: int = 20000,
               body: Optional[MtmRequest] = None,
-              asof: Optional[date] = None):
+              asof: Optional[date] = None, *, progress=None):
     """Compatibility boundary for routes and existing callers.
 
     Dependencies are passed explicitly so the core remains usable by workers
@@ -6479,6 +6663,7 @@ def _mtm_core(deal: Deal, session: Session, n_paths: int = 20000,
         load_prices=load_hist_prices,
         dividend_loader=dividend_profile,
         realized_loader=realized_market,
+        progress=progress,
     )
 
 
@@ -6489,11 +6674,36 @@ def deal_mtm(
     session: Annotated[Session, Depends(get_session)],
     n_paths: int = 20000,
     body: Optional[MtmRequest] = None,
+    stream: bool = False,
 ):
     """Residual MtM endpoint — see _mtm_core."""
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
+    if stream:
+        bind = session.get_bind()
+        user_id = current.id
+
+        def compute(progress):
+            # Never share the request's SQLAlchemy session across threads.
+            with Session(bind) as worker_session:
+                worker_user = worker_session.get(User, user_id)
+                worker_deal = worker_session.get(Deal, deal_id)
+                if not worker_user or not worker_deal or not _can_access_deal(
+                        worker_deal, worker_user, worker_session):
+                    raise HTTPException(404, "Deal introuvable")
+                payload, ctx = _mtm_core(
+                    worker_deal, worker_session, n_paths, body, progress=progress)
+                if ctx is not None:
+                    progress("saving")
+                    _run, payload = stage_valuation_run(
+                        worker_session, worker_deal, user_id, "MTM", ctx, payload,
+                        diagnostics={"request": (body.model_dump(mode="json") if body else {})},
+                    )
+                    worker_session.commit()
+                return payload
+
+        return valuation_progress_response(compute)
     payload, ctx = _mtm_core(deal, session, n_paths, body)
     if ctx is None:
         return payload
@@ -7137,13 +7347,20 @@ def latest_mtm_runs(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
     deal_ids: str = "",
+    created_from: Optional[datetime] = None,
+    created_before: Optional[datetime] = None,
+    valuation_date: Optional[date] = None,
+    recalibrate: Optional[Literal["none", "realized"]] = None,
 ):
     """Latest persisted MtM for each requested accessible deal.
 
     Booking shows several deals at once. Returning the immutable run payloads
     in one call avoids two HTTP requests per row when the user comes back to
     the page. The complete history remains available through the existing
-    per-deal endpoint.
+    per-deal endpoint. Optional creation bounds describe the browser's local
+    day in UTC; valuation date and market mode are independent filters applied
+    before picking a winner, so a newer booking-mode run cannot hide today's
+    latest current-market valuation.
     """
     try:
         requested_ids = {
@@ -7156,12 +7373,18 @@ def latest_mtm_runs(
     if len(requested_ids) > 200:
         raise HTTPException(422, "200 deals maximum par requête")
 
-    runs = session.exec(
+    statement = (
         select(ValuationRun)
         .where(ValuationRun.run_type == "MTM")
         .where(ValuationRun.deal_id.in_(requested_ids))
         .order_by(ValuationRun.created_at.desc(), ValuationRun.id.desc())
-    ).all()
+    )
+    for boundary, lower in ((created_from, True), (created_before, False)):
+        if boundary is not None:
+            # Browser supplies its local midnight as an offset-aware instant.
+            utc = boundary.astimezone(timezone.utc).replace(tzinfo=None) if boundary.tzinfo else boundary
+            statement = statement.where(ValuationRun.created_at >= utc if lower else ValuationRun.created_at < utc)
+    runs = session.exec(statement).all()
     latest = []
     seen = set()
     for run in runs:
@@ -7170,8 +7393,22 @@ def latest_mtm_runs(
         deal = session.get(Deal, run.deal_id)
         if not deal or not _can_access_deal(deal, current, session):
             continue
+        if run.contract_version != deal.contract_version:
+            continue
+        row = _valuation_run_row(run, include_payload=True)
+        request = row.get("diagnostics", {}).get("request", {})
+        if valuation_date is not None:
+            saved_date = row["result"].get("valuation_date") or request.get("valuation_date")
+            if saved_date != valuation_date.isoformat():
+                continue
+        if recalibrate is not None:
+            if request.get("recalibrate", "none") != recalibrate:
+                continue
+            # The Booking form has no overrides or alternative calibration window.
+            if request.get("r") is not None or request.get("overrides") or request.get("window_days", 252) != 252:
+                continue
         seen.add(run.deal_id)
-        latest.append(_valuation_run_row(run, include_payload=True))
+        latest.append(row)
     return latest
 
 

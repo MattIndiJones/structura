@@ -140,18 +140,21 @@ def export_pdf(
 
 # ── AI Synthesis ──────────────────────────────────────────────────────────
 
-class SynthesizeRequest(BaseModel):
+from ..core.ai_contract import AiOptions
+from ..services.llm.workbench import prompt_preview, generate_text
+from ..services.llm.providers import LlmError
+
+
+class SynthesizeRequest(AiOptions):
     study_result:       dict
     vag_result:         Optional[dict] = None
     attribution_result: Optional[dict] = None
     brinson_result:     Optional[dict] = None
-    provider:           str = "ollama"
-    ollama_url:         str = "http://localhost:11434"
-    ollama_model:       str = "llama3.3:70b"
+    ollama_model: str | None = None
     claude_key:         str = ""
-    claude_model:       str = "claude-sonnet-4-6"
+    claude_model: str | None = None
     openai_key:         str = ""
-    openai_model:       str = "gpt-4o"
+    openai_model: str | None = None
 
 
 @router.post("/synthesize/payload")
@@ -170,44 +173,26 @@ def get_synthesis_payload(
     return {"payload": payload}
 
 
-@router.post("/synthesize")
-def synthesize_study(
-    req: SynthesizeRequest,
-    current: Annotated[User, Depends(get_current_user)],
-):
-    """Generate an AI synthesis using the configured LLM provider."""
-    from ..core.amc_synthesize import (
-        build_synthesis_payload, _get_system_prompt,
-        call_ollama, call_claude, call_openai,
-    )
-    meta     = req.study_result.get("meta") or {}
-    audience = meta.get("audience", "committee")
+def synthesis_prompt(req):
+    from ..core.amc_synthesize import build_synthesis_payload, _get_system_prompt
+    payload = build_synthesis_payload(req.study_result, req.vag_result, req.attribution_result, req.brinson_result)
+    audience = (req.study_result.get("meta") or {}).get("audience", "committee")
     language = (req.study_result.get("output") or {}).get("language", "fr")
+    return prompt_preview(_get_system_prompt(audience, language), payload, "amc-synthesis-v1")
 
-    payload       = build_synthesis_payload(
-        req.study_result, req.vag_result, req.attribution_result, req.brinson_result,
-    )
-    system_prompt = _get_system_prompt(audience, language)
 
+@router.post("/synthesize/prompt")
+def preview_synthesis(req: SynthesizeRequest, current: Annotated[User, Depends(get_current_user)]):
+    return synthesis_prompt(req)
+
+
+@router.post("/synthesize")
+def synthesize_study(req: SynthesizeRequest, current: Annotated[User, Depends(get_current_user)]):
     try:
-        if req.provider == "ollama":
-            text = call_ollama(payload, system_prompt, req.ollama_url, req.ollama_model)
-        elif req.provider == "claude":
-            if not req.claude_key:
-                raise ValueError("Clé API Claude requise.")
-            text = call_claude(payload, system_prompt, req.claude_key, req.claude_model)
-        elif req.provider == "openai":
-            if not req.openai_key:
-                raise ValueError("Clé API OpenAI requise.")
-            text = call_openai(payload, system_prompt, req.openai_key, req.openai_model)
-        else:
-            raise ValueError(f"Provider inconnu : {req.provider}")
-    except ValueError as e:
+        result = generate_text(synthesis_prompt(req), req)
+        return {**result, "synthesis": result["text"], "payload": result["prompt"]["user"]}
+    except LlmError as e:
         raise HTTPException(422, str(e))
-    except Exception as e:
-        raise HTTPException(500, f"Erreur LLM ({req.provider}) : {e}")
-
-    return {"synthesis": text, "payload": payload}
 
 
 @router.get("/synthesize/ollama-models")

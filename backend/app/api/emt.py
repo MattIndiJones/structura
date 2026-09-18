@@ -212,18 +212,21 @@ def emt_compute(
 
 # ── AI-assisted payoff description ────────────────────────────────────────
 
-class EmtSynthesizeRequest(BaseModel):
+from ..core.ai_contract import AiOptions
+from ..services.llm.workbench import prompt_preview, generate_text
+from ..services.llm.providers import LlmError
+
+
+class EmtSynthesizeRequest(AiOptions):
     product_title: str
     emt_result: dict
     script_params: list = []
     underlyings: list = []
-    provider: str = "ollama"
-    ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.3:70b"
+    ollama_model: str | None = None
     claude_key: str = ""
-    claude_model: str = "claude-sonnet-4-6"
+    claude_model: str | None = None
     openai_key: str = ""
-    openai_model: str = "gpt-4o"
+    openai_model: str | None = None
 
 
 @router.post("/synthesize/payload")
@@ -237,37 +240,27 @@ def get_emt_synthesis_payload(
     return {"payload": payload, "copy_block": build_copy_block(payload)}
 
 
-@router.post("/synthesize")
-def synthesize_emt(
-    req: EmtSynthesizeRequest,
-    current: Annotated[User, Depends(get_current_user)],
-):
-    """Generate an AI payoff description using the configured LLM provider."""
-    from ..core.emt_synthesize import (
-        build_emt_payload, build_copy_block, EMT_SYSTEM_PROMPT_FR,
-        call_ollama, call_claude, call_openai,
-    )
+def synthesis_prompt(req):
+    from ..core.emt_synthesize import build_emt_payload, EMT_SYSTEM_PROMPT_FR
     payload = build_emt_payload(req.product_title, req.emt_result, req.script_params, req.underlyings)
+    return prompt_preview(EMT_SYSTEM_PROMPT_FR, payload, "emt-description-v1")
 
+
+@router.post("/synthesize/prompt")
+def preview_synthesis(req: EmtSynthesizeRequest, current: Annotated[User, Depends(get_current_user)]):
+    return synthesis_prompt(req)
+
+
+@router.post("/synthesize")
+def synthesize_emt(req: EmtSynthesizeRequest, current: Annotated[User, Depends(get_current_user)]):
+    from ..core.emt_synthesize import build_copy_block
     try:
-        if req.provider == "ollama":
-            text = call_ollama(payload, EMT_SYSTEM_PROMPT_FR, req.ollama_url, req.ollama_model)
-        elif req.provider == "claude":
-            if not req.claude_key:
-                raise ValueError("Clé API Claude requise.")
-            text = call_claude(payload, EMT_SYSTEM_PROMPT_FR, req.claude_key, req.claude_model)
-        elif req.provider == "openai":
-            if not req.openai_key:
-                raise ValueError("Clé API OpenAI requise.")
-            text = call_openai(payload, EMT_SYSTEM_PROMPT_FR, req.openai_key, req.openai_model)
-        else:
-            raise ValueError(f"Provider inconnu : {req.provider}")
-    except ValueError as e:
+        result = generate_text(synthesis_prompt(req), req)
+        prompt = result["prompt"]
+        return {**result, "synthesis": result["text"], "payload": prompt["user"],
+                "copy_block": build_copy_block(prompt["user"], prompt["system"])}
+    except LlmError as e:
         raise HTTPException(422, str(e))
-    except Exception as e:
-        raise HTTPException(500, f"Erreur LLM ({req.provider}) : {e}")
-
-    return {"synthesis": text, "payload": payload, "copy_block": build_copy_block(payload)}
 
 
 # ── Persistence — append-only, one row per generation ────────────────────
@@ -328,14 +321,27 @@ def save_emt(
         ind = session.get(Indicative, req.indicative_id)
         if not ind or ind.user_id != current.id:
             raise HTTPException(404, "Indicatif introuvable")
+        if linked_product_id is not None and ind.product_id != linked_product_id:
+            raise HTTPException(422, "L’indicatif ne correspond pas au Product demandé.")
         linked_product_id = linked_product_id or ind.product_id
     if req.deal_id:
         deal = session.get(Deal, req.deal_id)
         if not deal or deal.user_id != current.id:
             raise HTTPException(404, "Deal introuvable")
-        if linked_product_id is not None and deal.product_id not in {None, linked_product_id}:
+        if deal.product_id is None:
+            raise HTTPException(409, detail={
+                "code": "DEAL_PRODUCT_MISSING",
+                "message": "Le deal ne possède pas de Product canonique.",
+            })
+        if linked_product_id is not None and deal.product_id != linked_product_id:
             raise HTTPException(422, "Le deal ne correspond pas au Product demandé.")
         linked_product_id = linked_product_id or deal.product_id
+
+    if linked_product_id is None:
+        raise HTTPException(409, detail={
+            "code": "DOCUMENT_PRODUCT_MISSING",
+            "message": "L’EMT doit être rattaché au Product canonique.",
+        })
 
     product = None
     if linked_product_id is not None:

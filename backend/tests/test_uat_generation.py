@@ -9,19 +9,21 @@ from fastapi import HTTPException
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.core.rfq_controls import booking_gate_failures
-from backend.app.api import deals as deals_api, rfq as rfq_api
+from backend.app.api import deals as deals_api, products as products_api, rfq as rfq_api
 from backend.app.db.models import (
     Alert, AuditEvent, Counterparty, Deal, DealEvent, Entity, LifecycleProposal,
-    OfficialFixingVersion, RfqProvider, RfqQuote, RfqRequest,
+    OfficialFixingVersion, ProductCalculationRun, ProductRecord, ProductRevision,
+    RfqProvider, RfqQuote, RfqRequest,
     UatGenerationBatch, User, ValuationRun,
 )
 from backend.app.services.uat_generation import (
     UatGenerationRequest, configure_uat_workflows, delete_batch,
     generate_batch, preview_generation,
 )
+from backend.app.services.product_repository import load_product
 
 
-configure_uat_workflows(deals_api, rfq_api)
+configure_uat_workflows(deals_api, rfq_api, products_api)
 
 
 def _session_and_users() -> tuple[Session, User, User]:
@@ -72,14 +74,28 @@ def test_preview_is_deterministic_and_read_only():
     assert first == second
     assert first["rfq_count"] == 2
     assert first["deal_count"] == 2
+    assert first["product_count"] == 2
     assert not session.exec(select(RfqRequest)).first()
     assert not session.exec(select(Deal)).first()
+    assert not session.exec(select(ProductRecord)).first()
     assert not session.exec(select(UatGenerationBatch)).first()
 
 
 def test_full_chain_uses_uat_references_and_batch_cleanup_is_isolated():
+    from backend.app.db.product_migrations import migrate_product_links
+
     session, admin, target = _session_and_users()
+    migrate_product_links(session.connection())
+    session.commit()
+    ordinary_product = ProductRecord(
+        reference="PRD-LIVE-DO-NOT-DELETE", name="Produit hors lot",
+        user_id=target.id, entity_id=target.entity_id, data_origin="native",
+        listed=True,
+    )
+    session.add(ordinary_product)
+    session.flush()
     ordinary = Deal(
+        product_id=ordinary_product.id, product_terms_version=1,
         reference="LIVE-DO-NOT-DELETE", user_id=target.id,
         script_snapshot="AT MATURITY\n  PAY 1", sens="vente",
         contrepartie="UBS", devise="EUR", nominal=100_000,
@@ -94,8 +110,14 @@ def test_full_chain_uses_uat_references_and_batch_cleanup_is_isolated():
     rfqs = session.exec(select(RfqRequest).where(
         RfqRequest.uat_batch_id == batch["id"])).all()
     deals = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).all()
+    products = session.exec(select(ProductRecord).where(
+        ProductRecord.uat_batch_id == batch["id"])).all()
     assert batch["status"] == "COMPLETED"
-    assert len(rfqs) == len(deals) == 2
+    assert len(products) == len(rfqs) == len(deals) == 2
+    assert all(product.data_origin == "uat" for product in products)
+    assert all(product.listed is False for product in products)
+    assert all(rfq.product_id for rfq in rfqs)
+    assert all(deal.product_id for deal in deals)
     assert all(rfq.reference.startswith("UAT-RFQ-") for rfq in rfqs)
     assert all(deal.reference.startswith("UAT-DEAL-") for deal in deals)
     assert all(deal.rfq_id for deal in deals)
@@ -114,13 +136,182 @@ def test_full_chain_uses_uat_references_and_batch_cleanup_is_isolated():
     deleted = delete_batch(batch["id"], admin, session)
     assert deleted == {
         "id": batch["id"], "status": "DELETED",
+        "deleted_products": 2,
         "deleted_rfqs": 2, "deleted_deals": 2,
     }
     assert session.exec(select(Deal).where(
         Deal.reference == "LIVE-DO-NOT-DELETE")).one()
     assert not session.exec(select(RfqRequest).where(
         RfqRequest.uat_batch_id == batch["id"])).first()
+    assert not session.exec(select(ProductRecord).where(
+        ProductRecord.uat_batch_id == batch["id"])).first()
     assert session.get(UatGenerationBatch, batch["id"]).status == "DELETED"
+
+
+def test_full_chain_retains_product_history_basket_and_provider_competition():
+    session, admin, target = _session_and_users()
+    batch = generate_batch(_request(
+        target,
+        count=1,
+        product_calculations=3,
+        underlying_tickers=["^STOXX50E", "^GSPC", "AAPL"],
+        min_underlyings=2,
+        max_underlyings=2,
+        quotes_per_rfq=2,
+        lifecycle_profile="FORWARD_START",
+    ), admin, session)
+
+    record = session.exec(select(ProductRecord).where(
+        ProductRecord.uat_batch_id == batch["id"])).one()
+    rfq = session.exec(select(RfqRequest).where(
+        RfqRequest.uat_batch_id == batch["id"])).one()
+    deal = session.exec(select(Deal).where(
+        Deal.uat_batch_id == batch["id"])).one()
+    quotes = session.exec(select(RfqQuote).where(RfqQuote.rfq_id == rfq.id)).all()
+    product = load_product(session, record.id)
+
+    assert batch["product_count"] == 1
+    assert len(product.calculations) == 3
+    calculations = session.exec(select(ProductCalculationRun).where(
+        ProductCalculationRun.product_id == record.id)
+        .order_by(ProductCalculationRun.id)).all()
+    assert len(calculations) == 3
+    assert len({calculation.input_hash for calculation in calculations}) == 3
+    assert rfq.product_id == deal.product_id == record.id
+    assert rfq.product_terms_version == deal.product_terms_version == product.terms_version
+    assert len(product.terms.underlyings) == 2
+    assert len(json.loads(rfq.params_json)["underlyings"]) == 2
+    assert len(json.loads(deal.underlyings_json)) == 2
+    assert len({quote.provider for quote in quotes}) == 2
+    assert rfq.model_price == pytest.approx(
+        json.loads(calculations[0].result_json)["price"] * 100)
+    assert deal.fair_value == pytest.approx(
+        json.loads(calculations[-1].result_json)["price"] * 100)
+    assert product.execution is not None
+    assert len(product.rfqs) == 1
+    actions = [revision.action for revision in session.exec(
+        select(ProductRevision).where(ProductRevision.product_id == record.id)
+        .order_by(ProductRevision.revision)).all()]
+    assert actions.index("PRODUCT_RFQ_UPDATED") < max(
+        index for index, action in enumerate(actions)
+        if action == "PRODUCT_CALCULATION_RETAINED")
+    assert actions[-1] == "PRODUCT_BOOKED"
+
+
+@pytest.mark.parametrize(("mode", "listed", "has_rfq", "has_deal"), [
+    ("RFQ_ONLY", False, True, False),
+    ("FULL_CHAIN", False, True, True),
+    ("PRICER_RFQ_CHAIN", False, True, True),
+    ("SAVED_PRODUCT_RFQ_CHAIN", True, True, True),
+    ("BOOKED_ONLY", False, False, True),
+])
+def test_each_uat_entry_path_preserves_one_product_identity(
+    mode, listed, has_rfq, has_deal,
+):
+    session, admin, target = _session_and_users()
+    batch = generate_batch(_request(
+        target,
+        mode=mode,
+        count=1,
+        product_types=["ATHENA"],
+        product_calculations=1,
+        lifecycle_profile="FORWARD_START",
+    ), admin, session)
+
+    product = session.exec(select(ProductRecord).where(
+        ProductRecord.uat_batch_id == batch["id"])).one()
+    rfqs = session.exec(select(RfqRequest).where(
+        RfqRequest.uat_batch_id == batch["id"])).all()
+    deals = session.exec(select(Deal).where(
+        Deal.uat_batch_id == batch["id"])).all()
+    assert product.data_origin == "uat"
+    assert product.listed is listed
+    assert bool(rfqs) is has_rfq
+    assert bool(deals) is has_deal
+    assert all(rfq.product_id == product.id for rfq in rfqs)
+    assert all(deal.product_id == product.id for deal in deals)
+
+    loaded = load_product(session, product.id)
+    assert len(loaded.calculations) == (0 if mode == "RFQ_ONLY" else 1)
+    assert bool(loaded.execution) is has_deal
+    scenario = batch["result"]["scenarios"][0]
+    assert scenario["product_id"] == product.id
+    assert scenario["product_listed"] is listed
+
+    actions = [row.action for row in session.exec(
+        select(ProductRevision).where(ProductRevision.product_id == product.id)
+        .order_by(ProductRevision.revision)).all()]
+    if mode == "FULL_CHAIN":
+        assert actions.index("PRODUCT_RFQ_CREATED") < actions.index(
+            "PRODUCT_CALCULATION_RETAINED")
+    elif mode in {"PRICER_RFQ_CHAIN", "SAVED_PRODUCT_RFQ_CHAIN"}:
+        assert actions.index("PRODUCT_CALCULATION_RETAINED") < actions.index(
+            "PRODUCT_RFQ_CREATED")
+    elif mode == "BOOKED_ONLY":
+        assert "PRODUCT_RFQ_CREATED" not in actions
+
+
+def test_post_booking_options_create_mtm_history_and_risk_runs(monkeypatch):
+    session, admin, target = _session_and_users()
+    monkeypatch.setattr(
+        deals_api,
+        "_refresh_deal_core",
+        lambda *_args, **_kwargs: {
+            "officialized": 0, "exceptions": [], "evaluation": {"outcome": "en_cours"},
+        },
+    )
+
+    def retain_run(deal_id, current, session, n_paths, body, *, run_type):
+        run = ValuationRun(
+            deal_id=deal_id,
+            user_id=current.id,
+            run_type=run_type,
+            context_hash=f"uat-{run_type.lower()}-{body.valuation_date}",
+        )
+        session.add(run)
+        session.flush()
+        return {
+            "valuation_run_id": run.id,
+            "valuation_date": body.valuation_date.isoformat(),
+            "mtm": 0.99,
+        }
+
+    monkeypatch.setattr(
+        deals_api,
+        "deal_mtm",
+        lambda deal_id, current, session, n_paths, body: retain_run(
+            deal_id, current, session, n_paths, body, run_type="MTM"),
+    )
+    monkeypatch.setattr(
+        deals_api,
+        "deal_greeks",
+        lambda deal_id, current, session, n_paths, body: retain_run(
+            deal_id, current, session, n_paths, body, run_type="GREEKS"),
+    )
+
+    batch = generate_batch(_request(
+        target,
+        mode="BOOKED_ONLY",
+        count=1,
+        product_types=["ATHENA"],
+        lifecycle_profile="ACTIVE_1Y_PENDING",
+        mtm_history_count=3,
+        compute_greeks=True,
+    ), admin, session)
+
+    assert batch["valuation_count"] == 3
+    assert batch["risk_count"] == 1
+    assert not batch["result"]["calculation_errors"]
+    assert len({run["valuation_date"] for run in batch["result"]["valuation_runs"]}) == 3
+    assert len(session.exec(select(ValuationRun).where(
+        ValuationRun.run_type == "MTM")).all()) == 3
+    assert len(session.exec(select(ValuationRun).where(
+        ValuationRun.run_type == "GREEKS")).all()) == 1
+
+    deleted = delete_batch(batch["id"], admin, session)
+    assert deleted["deleted_products"] == 1
+    assert not session.exec(select(ValuationRun)).first()
+    assert not session.exec(select(ProductRecord)).first()
 
 
 def test_rfq_control_mix_builds_expected_non_bookable_cases():
@@ -327,8 +518,12 @@ def test_complete_mix_covers_all_eight_profiles_and_cleans_terminal_dependencies
     assert any(date.fromisoformat(rfq.ao_date) < date.today() for rfq in rfqs)
 
     deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).first()
-    session.add(ValuationRun(
-        deal_id=deal.id, user_id=target.id, context_hash="uat-cleanup-regression"))
+    valuation = ValuationRun(
+        deal_id=deal.id, user_id=target.id, context_hash="uat-cleanup-regression")
+    session.add(valuation)
+    session.flush()
+    deal.latest_valuation_run_id = valuation.id
+    session.add(deal)
     session.commit()
 
     delete_batch(batch["id"], admin, session)

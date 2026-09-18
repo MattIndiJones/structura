@@ -398,7 +398,10 @@ class MtfRequest(AnalysisBase):
     n_dates: int = Field(default=5, ge=2, le=12)
 
 
-class ScriptGenerateRequest(BaseModel):
+from .ai_contract import AiOptions
+
+
+class ScriptGenerateRequest(AiOptions):
     """Assistant de scripting : une description en français -> un script PayScript.
 
     Le modèle écrit une STRUCTURE. Il ne price pas et ne fixe aucun niveau que
@@ -406,8 +409,6 @@ class ScriptGenerateRequest(BaseModel):
     `underlyings` / `r` / `T` ne servent qu'au contexte du prompt et au pricing
     de contrôle qui vérifie que le script produit tourne vraiment."""
     description: str = Field(min_length=3, max_length=4000)
-    provider: str = "ollama"
-    model: Optional[str] = None
     model_config = ConfigDict(allow_inf_nan=False)
 
     underlyings: List[UnderlyingParams] = Field(default_factory=list, max_length=MAX_UNDERLYINGS)
