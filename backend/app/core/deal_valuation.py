@@ -27,6 +27,7 @@ from .valuation_context import (
     ValuationContext, deterministic_cashflow_pv,
     funding_from_market_snapshot, run_valuation,
 )
+from .risk_lifecycle import deal_risk_state, terminal_dates_by_deal
 from ..services.product_repository import ProductError, load_product
 
 
@@ -108,6 +109,8 @@ def mtm_core(
                 422,
                 "La date de valorisation ne peut pas précéder la date de trade",
             )
+    terminal_date = terminal_dates_by_deal(session, [deal_id]).get(deal_id)
+    active_at_date, inactive_reason = deal_risk_state(deal, today, terminal_date)
     market_provider = market_data_provider_for_deal(deal, session)
     if getattr(deal, "product_id", None) is None:
         raise HTTPException(409, {
@@ -128,7 +131,7 @@ def mtm_core(
     # Once the contractual payoff is known, there is no path left to simulate.
     # The receivable nevertheless remains a live credit exposure until cash
     # settlement, so it has a deterministic MtM during this short window.
-    if deal.status == "en_reglement":
+    if deal.status == "en_reglement" and today >= (terminal_date or today):
         if terms.payment_date is None or terms.strike_date is None:
             raise HTTPException(409, {
                 "code": "PRODUCT_TERMS_INCOMPLETE",
@@ -191,9 +194,11 @@ def mtm_core(
             "settlement_amount": amount, "time_to_payment": remaining,
         }
 
-    if deal.status != "actif":
-        raise HTTPException(422, f"Deal {deal.status} — plus d'optionnalité à valoriser "
-                                 f"(remboursement réalisé: {deal.realized_payout})")
+    if not active_at_date:
+        raise HTTPException(422, inactive_reason or (
+            f"Deal {deal.status} — plus d'optionnalité à valoriser "
+            f"(remboursement réalisé: {deal.realized_payout})"
+        ))
 
     if any(value is None for value in (
             terms.strike_date, terms.value_date, terms.maturity_date,

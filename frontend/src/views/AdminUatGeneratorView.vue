@@ -215,14 +215,20 @@
                 <button class="btn-secondary text-xs px-3 py-2" :disabled="previewing || generating" @click="previewBatch">
                   {{ previewing ? 'Calcul…' : 'Prévisualiser' }}
                 </button>
-                <button class="btn-primary text-xs px-3 py-2" :disabled="!preview || generating" @click="generateBatch">
-                  {{ generating ? 'Génération…' : 'Générer le lot UAT' }}
+                <button class="btn-primary text-xs px-3 py-2"
+                        :disabled="!preview || generating || runningBatches.length > 0"
+                        @click="generateBatch">
+                  {{ generating ? 'Génération…' : runningBatches.length ? 'Un lot est déjà en cours' : 'Générer le lot UAT' }}
                 </button>
               </div>
             </div>
           </section>
 
-          <aside class="card flex flex-col gap-4 xl:sticky xl:top-4">
+          <aside
+            class="card flex flex-col gap-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:overscroll-contain"
+            tabindex="0"
+            aria-label="Prévisualisation du lot UAT"
+          >
             <div>
               <h2 class="font-bold text-sm">2. Prévisualisation</h2>
               <p class="text-xs mt-1" style="color: var(--subtle);">
@@ -347,11 +353,28 @@
         </section>
       </template>
     </main>
+
+    <div
+      v-if="generationStatusVisible"
+      class="fixed right-5 bottom-5 z-40 w-[min(26rem,calc(100vw-2.5rem))] rounded-xl border p-4 shadow-xl"
+      style="border-color: var(--accent); background: var(--surface);"
+      role="status"
+      aria-live="polite"
+    >
+      <LoadingSpinner
+        inline
+        :label="generationStatusLabel"
+      />
+      <p class="mt-2 text-xs leading-relaxed" style="color: var(--subtle);">
+        Le serveur calcule les pricings, crée les RFQ et booke les deals. Un lot complet
+        peut prendre plusieurs minutes. Son statut est actualisé automatiquement.
+      </p>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
 import { confirmer } from '../composables/useConfirm.js'
@@ -367,7 +390,10 @@ const generating = ref(false)
 const error = ref('')
 const notice = ref('')
 const preview = ref(null)
+const generationElapsedSeconds = ref(0)
 let initializing = true
+let generationTimer = null
+let batchPollTimer = null
 
 const form = reactive({
   target_user_id: null,
@@ -438,6 +464,50 @@ function payload() {
   return JSON.parse(JSON.stringify(form))
 }
 
+const generationElapsedLabel = computed(() => {
+  const minutes = Math.floor(generationElapsedSeconds.value / 60)
+  const seconds = generationElapsedSeconds.value % 60
+  return minutes ? `${minutes} min ${String(seconds).padStart(2, '0')} s` : `${seconds} s`
+})
+
+const runningBatches = computed(() => batches.value.filter(batch => batch.status === 'RUNNING'))
+const generationStatusVisible = computed(() => generating.value || runningBatches.value.length > 0)
+const generationStatusLabel = computed(() => {
+  if (generating.value) return `Génération UAT en cours · ${generationElapsedLabel.value}`
+  const batch = runningBatches.value[0]
+  if (!batch) return ''
+  const suffix = runningBatches.value.length > 1 ? ` · ${runningBatches.value.length} lots actifs` : ''
+  return `Lot ${batch.batch_key} en cours · ${batch.requested_count} objets${suffix}`
+})
+
+function startGenerationTimer() {
+  generationElapsedSeconds.value = 0
+  generationTimer = window.setInterval(() => {
+    generationElapsedSeconds.value += 1
+  }, 1000)
+}
+
+function stopGenerationTimer() {
+  if (generationTimer !== null) window.clearInterval(generationTimer)
+  generationTimer = null
+}
+
+function upsertBatch(batch) {
+  const index = batches.value.findIndex(item => item.id === batch.id)
+  if (index === -1) batches.value.unshift({ ...batch, busy: false })
+  else batches.value[index] = { ...batch, busy: batches.value[index].busy || false }
+}
+
+function startBatchPolling() {
+  if (batchPollTimer !== null) return
+  batchPollTimer = window.setInterval(refreshBatches, 4000)
+}
+
+function stopBatchPolling() {
+  if (batchPollTimer !== null) window.clearInterval(batchPollTimer)
+  batchPollTimer = null
+}
+
 async function previewBatch() {
   previewing.value = true
   error.value = ''
@@ -465,6 +535,7 @@ async function generateBatch() {
                               + `${dealCountLabel(preview.value.deal_count)} seront créés sur ce compte.`,
                        confirmer: 'Générer' })) return
   generating.value = true
+  startGenerationTimer()
   error.value = ''
   notice.value = ''
   try {
@@ -475,7 +546,7 @@ async function generateBatch() {
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(detailText(data, 'Génération impossible'))
-    batches.value.unshift({ ...data, busy: false })
+    upsertBatch(data)
     notice.value = `Lot ${data.batch_key} créé : ${data.product_count} Products, ${data.rfq_count} RFQ et ${dealCountLabel(data.deal_count)}.`
     preview.value = null
   } catch (e) {
@@ -483,12 +554,17 @@ async function generateBatch() {
     await refreshBatches()
   } finally {
     generating.value = false
+    stopGenerationTimer()
   }
 }
 
 async function refreshBatches() {
-  const res = await apiFetch('/api/admin/uat-generator/batches')
-  if (res.ok) batches.value = (await res.json()).map(batch => ({ ...batch, busy: false }))
+  try {
+    const res = await apiFetch('/api/admin/uat-generator/batches')
+    if (res.ok) batches.value = (await res.json()).map(batch => ({ ...batch, busy: false }))
+  } catch {
+    // La requête de génération reste prioritaire ; le prochain polling retentera.
+  }
 }
 
 async function deleteBatch(batch) {
@@ -530,5 +606,14 @@ const modeLabel = value => ({
 const batchStatusLabel = value => ({ RUNNING: 'En cours', COMPLETED: 'Terminé', FAILED: 'Échec', DELETED: 'Supprimé' }[value] || value)
 const batchStatusClass = value => ({ RUNNING: 'badge-accent', COMPLETED: 'badge-positive', FAILED: 'badge-negative', DELETED: 'badge-muted' }[value] || 'badge-muted')
 
+watch(() => runningBatches.value.length, count => {
+  if (count) startBatchPolling()
+  else stopBatchPolling()
+})
+
 onMounted(loadAll)
+onUnmounted(() => {
+  stopGenerationTimer()
+  stopBatchPolling()
+})
 </script>

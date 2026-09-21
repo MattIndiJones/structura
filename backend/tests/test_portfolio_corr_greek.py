@@ -4,7 +4,7 @@ greeks_json, same as the pre-existing per_underlying/scalar aggregation, so
 no monkeypatching is needed: EUR-denominated deals make get_fx_series a
 no-op (from_ccy == to_ccy short-circuits before any network call)."""
 import json
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -34,7 +34,8 @@ def _add_deal(s: Session, reference: str, names_tickers: list[tuple[str, str]],
         maturity_date="2030-01-01", T=3.0, devise="EUR",
         nominal=nominal, price_traded=98.0, status="actif",
         portfolio_id=portfolio_id,
-        greeks_json=json.dumps({"per_underlying": per_underlying or {}, "scalar": {},
+        greeks_json=json.dumps({"valuation_date": date.today().isoformat(),
+                                "per_underlying": per_underlying or {}, "scalar": {},
                                 "corr_pairs": corr_pairs, "vega_scope": vega_scope}),
         greeks_computed_at=datetime.utcnow(),
     )

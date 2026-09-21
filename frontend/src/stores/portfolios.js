@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, reactive, computed } from 'vue'
 import { apiFetch } from '../utils/api.js'
 import { useDealsStore } from './deals.js'
+import { dealRiskState, localTodayIso } from '../utils/riskDates.js'
 
 async function apiError(res, fallback) {
   const data = await res.json().catch(() => ({}))
@@ -52,6 +53,7 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
 
   const portfolios = ref([])
   const view = ref('global')            // 'global' | portfolio id
+  const valuationDate = ref(localTodayIso())
   const risk = ref(null)
   const riskLoading = ref(false)
   const exposure = ref(null)
@@ -68,8 +70,16 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
     return !!(p && p.is_default)
   })
 
-  const activeDealsCount = computed(() =>
-    dealsStore.deals.filter(d => d.status === 'actif').length)
+  const allMembers = computed(() => {
+    if (view.value === 'global') return dealsStore.deals
+    return dealsStore.deals.filter(d => (d.portfolio_ids || []).includes(view.value))
+  })
+
+  const riskMembers = computed(() => allMembers.value.filter(
+    deal => dealRiskState(deal, valuationDate.value).active))
+
+  const activeDealsCount = computed(() => dealsStore.deals.filter(
+    deal => dealRiskState(deal, valuationDate.value).active).length)
 
   const members = computed(() => {
     if (view.value === 'global') return dealsStore.deals.filter(d => d.status === 'actif')
@@ -148,8 +158,8 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
     riskLoading.value = true
     try {
       const url = view.value === 'global'
-        ? '/api/portfolios/risk-global'
-        : `/api/portfolios/${view.value}/risk`
+        ? `/api/portfolios/risk-global?valuation_date=${encodeURIComponent(valuationDate.value)}`
+        : `/api/portfolios/${view.value}/risk?valuation_date=${encodeURIComponent(valuationDate.value)}`
       const res = await apiFetch(url)
       risk.value = await res.json()
     } finally {
@@ -371,10 +381,11 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   }
 
   return {
-    portfolios, view, risk, riskLoading, exposure, exposureLoading, shockHistory,
+    portfolios, view, valuationDate, risk, riskLoading, exposure, exposureLoading, shockHistory,
     barriers, barriersLoading,
     varStudy, varLaunching, varPolling, varHistory,
-    label, isDefaultView, activeDealsCount, members, currentShockHistory, currentSmileHistory,
+    label, isDefaultView, activeDealsCount, members, allMembers, riskMembers,
+    currentShockHistory, currentSmileHistory,
     smileResult, smileLoading,
     load, create, rename, remove, assignDeal, setDealPortfolios,
     loadRisk, loadExposure, loadBarriers, selectView, loadShockHistory, runShock, runPnlExplain,

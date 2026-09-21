@@ -2,14 +2,13 @@
 across the deals they contain. See PLAN squishy-baking-sedgewick.
 
 CRUD mirrors folders.py (user-scoped organizational bucket). The aggregation
-itself is pure arithmetic over each deal's already-persisted greeks_json
+itself is pure arithmetic over immutable, date-matched GREEKS valuation runs
 (api/deals.py POST /{id}/greeks) — no Monte Carlo here, cheap enough to run
-on every screen load. What can be expensive is keeping the underlying
-per-deal Greeks fresh, which stays an explicit action (see the frontend's
-"Recalculer" loop over the existing per-deal endpoint)."""
+on every screen load. What can be expensive is producing those per-deal
+Greeks, which stays an explicit action in the frontend."""
 from __future__ import annotations
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,12 +16,13 @@ from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import (
     Portfolio, Deal, DealPortfolioMembership, ShockRun, User, Entity,
-    Counterparty, position_sign,
+    Counterparty, ValuationRun, position_sign,
 )
 from .auth import get_current_user
 from .admin import _CATALOG
 from .deals import MtmExplainRequest
 from ..core.amc_prices import fx_rate_to
+from ..core.risk_lifecycle import deal_risk_state, terminal_dates_by_deal
 
 router = APIRouter(prefix="/api/portfolios", tags=["portfolios"])
 
@@ -78,6 +78,13 @@ def _is_admin(user: User) -> bool:
 
 def _active_deals_statement(current: User):
     statement = select(Deal).where(Deal.status == "actif")
+    if not _is_admin(current):
+        statement = statement.where(Deal.user_id == current.id)
+    return statement
+
+
+def _all_deals_statement(current: User):
+    statement = select(Deal)
     if not _is_admin(current):
         statement = statement.where(Deal.user_id == current.id)
     return statement
@@ -231,7 +238,92 @@ def _canonical_pair(name_to_ticker: dict, n1: str, n2: str) -> tuple[str, str]:
     return f"{k2}|{k1}", f"{l2} / {l1}"
 
 
-def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
+def _greeks_valuation_date(payload: dict) -> str | None:
+    """Read the explicit date, with a safe bridge for pre-migration runs."""
+    if payload.get("valuation_date"):
+        return str(payload["valuation_date"])
+    data = (payload.get("market_used") or {}).get("data") or {}
+    history = data.get("contractual_history") or {}
+    return history.get("requested_end") or data.get("requested_asof")
+
+
+def _parsed_computed_at(payload: dict, fallback: datetime | None) -> datetime | None:
+    raw = payload.get("computed_at")
+    if raw:
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            pass
+    return fallback
+
+
+def _greeks_snapshots(
+    deals: list[Deal], session: Session, valuation_date: date,
+) -> dict[int, tuple[dict, datetime | None]]:
+    """Latest immutable Greek snapshot matching the selected valuation date."""
+    target = valuation_date.isoformat()
+    snapshots: dict[int, tuple[dict, datetime | None]] = {}
+    timestamps: dict[int, datetime] = {}
+
+    for deal in deals:
+        if not deal.greeks_json:
+            continue
+        try:
+            payload = json.loads(deal.greeks_json)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if _greeks_valuation_date(payload) != target:
+            continue
+        computed_at = _parsed_computed_at(payload, deal.greeks_computed_at)
+        snapshots[deal.id] = (payload, computed_at)
+        timestamps[deal.id] = computed_at or datetime.min
+
+    deal_ids = [deal.id for deal in deals if deal.id is not None]
+    if not deal_ids:
+        return snapshots
+    runs = session.exec(
+        select(ValuationRun).where(
+            ValuationRun.deal_id.in_(deal_ids),
+            ValuationRun.run_type == "GREEKS",
+        ).order_by(ValuationRun.created_at.desc())
+    ).all()
+    for run in runs:
+        if run.deal_id in snapshots and timestamps[run.deal_id] >= run.created_at:
+            continue
+        try:
+            payload = json.loads(run.result_json)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if _greeks_valuation_date(payload) != target:
+            continue
+        computed_at = _parsed_computed_at(payload, run.created_at)
+        snapshots[run.deal_id] = (payload, computed_at)
+        timestamps[run.deal_id] = computed_at or run.created_at
+    return snapshots
+
+
+def _aggregate_risk(
+    deals: list[Deal], session: Session, valuation_date: date | None = None,
+) -> dict:
+    valuation_date = valuation_date or date.today()
+    if valuation_date > date.today():
+        raise HTTPException(422, "La date d’analyse ne peut pas être future")
+    terminal_dates = terminal_dates_by_deal(
+        session, [deal.id for deal in deals if deal.id is not None])
+    scoped_deals: list[Deal] = []
+    deals_outside_scope: list[dict] = []
+    for deal in deals:
+        active, reason = deal_risk_state(
+            deal, valuation_date, terminal_dates.get(deal.id))
+        if active:
+            scoped_deals.append(deal)
+        else:
+            deals_outside_scope.append({
+                "id": deal.id,
+                "reference": deal.reference,
+                "reason": reason,
+            })
+    snapshots = _greeks_snapshots(scoped_deals, session, valuation_date)
     per_underlying: dict[str, dict] = {}
     corr_pairs: dict[str, dict] = {}
     scalar = {"theta": 0.0, "rho": 0.0}
@@ -242,7 +334,7 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
     nominal_total_eur = 0.0
     now = datetime.utcnow()
 
-    for d in deals:
+    for d in scoped_deals:
         # Nominal is known regardless of whether Greeks were ever computed —
         # unlike the sensitivities below, it must not wait on deals_missing_greeks.
         fx_rate = _fx_to_reporting(d.devise)
@@ -256,15 +348,20 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
         # two positions to fund, not zero.
         nominal_total_eur += d.nominal * fx_rate
 
-        if not d.greeks_computed_at:
-            deals_missing_greeks.append({"id": d.id, "reference": d.reference})
+        snapshot = snapshots.get(d.id)
+        if snapshot is None:
+            deals_missing_greeks.append({
+                "id": d.id,
+                "reference": d.reference,
+                "reason": f"Aucun calcul au {valuation_date.isoformat()}",
+            })
             continue
 
         # Signed exposure factor: a sold product carries the opposite risk of
         # the same product held. Without it a hedge adds to what it hedges.
         w = position_sign(d) * d.nominal * fx_rate
 
-        greeks = json.loads(d.greeks_json)
+        greeks, computed_at = snapshot
         vega_scope = (greeks.get("vega_scope") or {}).get("type") or "non_documente"
         if vega_scope not in {"total", "leg_independante"}:
             vega_scope = "non_documente"
@@ -348,12 +445,16 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
                 "reason": (greeks.get("theta_event") or {}).get("reason"),
             })
 
-        deals_included.append({"id": d.id, "reference": d.reference})
-        if oldest_computed_at is None or d.greeks_computed_at < oldest_computed_at:
-            oldest_computed_at = d.greeks_computed_at
-        if (now - d.greeks_computed_at) > timedelta(days=_STALE_DAYS):
+        deals_included.append({
+            "id": d.id,
+            "reference": d.reference,
+            "greeks_computed_at": computed_at.isoformat() if computed_at else None,
+        })
+        if computed_at and (oldest_computed_at is None or computed_at < oldest_computed_at):
+            oldest_computed_at = computed_at
+        if computed_at and (now - computed_at) > timedelta(days=_STALE_DAYS):
             deals_stale.append({"id": d.id, "reference": d.reference,
-                                 "greeks_computed_at": d.greeks_computed_at.isoformat()})
+                                 "greeks_computed_at": computed_at.isoformat()})
 
     for bucket in per_underlying.values():
         scopes = bucket.pop("_vega_scopes")
@@ -369,6 +470,7 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
     return {
         "deals_included": deals_included,
         "deals_missing_greeks": deals_missing_greeks,
+        "deals_outside_scope": deals_outside_scope,
         "deals_missing_theta": deals_missing_theta,
         "deals_stale": deals_stale,
         # Positions left out because their currency could not be converted.
@@ -380,6 +482,7 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
         "scalar": scalar,
         "oldest_computed_at": oldest_computed_at.isoformat() if oldest_computed_at else None,
         "reporting_ccy": "EUR",
+        "valuation_date": valuation_date.isoformat(),
     }
 
 
@@ -387,12 +490,11 @@ def _aggregate_risk(deals: list[Deal], session: Session) -> dict:
 def risk_global(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    valuation_date: date | None = None,
 ):
-    """Risk aggregated across every active deal of the user, across all of
-    their portfolios (every deal always belongs to one, at minimum the
-    default portfolio) — the total book is always the true total."""
-    deals = session.exec(_active_deals_statement(current)).all()
-    payload = _aggregate_risk(list(deals), session)
+    """Risk aggregated over deals whose optional exposure existed as of date."""
+    deals = session.exec(_all_deals_statement(current)).all()
+    payload = _aggregate_risk(list(deals), session, valuation_date)
     payload["scope"] = "global"
     return payload
 
@@ -541,12 +643,13 @@ def portfolio_risk(
     portfolio_id: int,
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    valuation_date: date | None = None,
 ):
     p = session.get(Portfolio, portfolio_id)
     if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = _portfolio_deals(session, portfolio_id, ("actif",))
-    payload = _aggregate_risk(list(deals), session)
+    deals = _portfolio_deals(session, portfolio_id)
+    payload = _aggregate_risk(list(deals), session, valuation_date)
     payload["scope"] = "portfolio"
     payload["portfolio_id"] = portfolio_id
     payload["name"] = p.name

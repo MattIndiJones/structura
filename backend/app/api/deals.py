@@ -627,7 +627,12 @@ def _gen_ref(entity_name: str | None, session: Session) -> str:
     return next_reference(session, Deal, f"{prefix}-{date.today().strftime('%Y%m%d')}-")
 
 
-def _deal_row(d: Deal, events: list | None = None, session: Session | None = None) -> dict:
+def _deal_row(
+    d: Deal,
+    events: list | None = None,
+    session: Session | None = None,
+    risk_terminal_date: date | None = None,
+) -> dict:
     portfolio_ids = []
     if session is not None:
         portfolio_ids = list(session.exec(
@@ -698,6 +703,9 @@ def _deal_row(d: Deal, events: list | None = None, session: Session | None = Non
         "value_date": d.value_date,
         "maturity_date": d.maturity_date,
         "payment_date": d.payment_date,
+        "risk_terminal_date": (
+            risk_terminal_date.isoformat() if risk_terminal_date else None
+        ),
         "T": d.T,
         "realized_payout": d.realized_payout,
         "settlement_amount": d.settlement_amount,
@@ -2431,7 +2439,17 @@ def list_deals(
     deals = session.exec(statement).all()
     if current_role in {"ops_maker", "checker"}:
         deals = [deal for deal in deals if _can_access_deal(deal, current, session)]
-    return [_deal_row(d, session=session) for d in deals]
+    from ..core.risk_lifecycle import terminal_dates_by_deal
+    terminal_dates = terminal_dates_by_deal(
+        session, [deal.id for deal in deals if deal.id is not None])
+    return [
+        _deal_row(
+            d,
+            session=session,
+            risk_terminal_date=terminal_dates.get(d.id),
+        )
+        for d in deals
+    ]
 
 
 # Eligible counterparties for the booking form — any authenticated user (the
@@ -6803,6 +6821,7 @@ def deal_greeks(
     payload = {
         "deal_id": deal_id,
         "reference": deal.reference,
+        "valuation_date": mtm_payload["valuation_date"],
         "computed_at": datetime.utcnow().isoformat(),
         "mtm_reference": mtm_payload["mtm"],
         "per_underlying": per_underlying,
@@ -6818,7 +6837,10 @@ def deal_greeks(
 
     _run, payload = stage_valuation_run(
         session, deal, current.id, "GREEKS", ctx, payload,
-        diagnostics={"selected": selected},
+        diagnostics={
+            "selected": selected,
+            "request": body.model_dump(mode="json"),
+        },
     )
     deal.greeks_json = json.dumps(payload)
     deal.greeks_computed_at = datetime.utcnow()

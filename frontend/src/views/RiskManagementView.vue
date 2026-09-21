@@ -16,8 +16,9 @@
           <!-- ── Sélection du portefeuille actif (partagée par tous les onglets) ── -->
           <div class="card flex flex-col gap-1 w-full sm:w-64 shrink-0">
             <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 px-0.5">Portefeuille actif</div>
-            <button class="flex items-center gap-2 text-left px-2.5 py-2 rounded-lg text-xs font-medium transition-colors"
+            <button class="flex items-center gap-2 text-left px-2.5 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               :class="pf.view === 'global' ? 'bg-blue-600/15 text-blue-300 ring-1 ring-blue-600/40' : 'text-slate-400 hover:bg-slate-800/60'"
+              :disabled="calculationActive"
               @click="pf.selectView('global')">
               <span class="text-sm">📊</span>
               <span class="flex-1">Tous portefeuilles</span>
@@ -25,8 +26,9 @@
             </button>
             <div class="border-t border-slate-800 my-1"></div>
             <button v-for="p in pf.portfolios" :key="p.id"
-              class="flex items-center gap-2 text-left px-2.5 py-2 rounded-lg text-xs font-medium transition-colors min-w-0"
+              class="flex items-center gap-2 text-left px-2.5 py-2 rounded-lg text-xs font-medium transition-colors min-w-0 disabled:opacity-50 disabled:cursor-not-allowed"
               :class="pf.view === p.id ? 'bg-blue-600/15 text-blue-300 ring-1 ring-blue-600/40' : 'text-slate-400 hover:bg-slate-800/60'"
+              :disabled="calculationActive"
               @click="pf.selectView(p.id)">
               <span class="text-sm shrink-0">📁</span>
               <span class="flex-1 min-w-0">
@@ -45,7 +47,12 @@
               <div class="text-sm font-bold text-slate-100">
                 {{ pf.view === 'global' ? '📊 Tous portefeuilles' : `📁 ${pf.label}` }}
               </div>
-              <button class="btn-secondary text-xs px-3 py-1.5 ml-auto" :disabled="recomputing || !pf.members.length"
+              <label class="ml-auto flex items-center gap-2 text-[10px] text-slate-400">
+                Date des Greeks
+                <input v-model="pf.valuationDate" type="date" :max="todayIso"
+                  :disabled="calculationActive" class="input text-xs py-1 w-36" />
+              </label>
+              <button class="btn-secondary text-xs px-3 py-1.5" :disabled="calculationActive || !pf.riskMembers.length"
                 @click="recomputePortfolio">
                 <span v-if="recomputing"
                   class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -53,12 +60,34 @@
               </button>
             </div>
 
+            <div v-if="calculationProgress"
+              class="rounded-lg border border-blue-900/60 bg-blue-950/20 px-3 py-2">
+              <div class="flex items-center gap-2 text-[10px] text-slate-400 mb-1.5">
+                <span class="font-semibold text-blue-300">{{ calculationProgress.label }}</span>
+                <span v-if="calculationProgress.total" class="font-mono">
+                  {{ calculationProgress.completed }}/{{ calculationProgress.total }}
+                </span>
+                <span v-else>calcul en cours</span>
+                <span class="ml-auto font-mono">{{ formatElapsed(calculationElapsed) }}</span>
+              </div>
+              <div class="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                <div class="h-full rounded-full bg-blue-500 transition-all duration-300"
+                  :class="calculationProgress.total ? '' : 'animate-pulse'"
+                  :style="{ width: calculationProgress.total ? `${calculationProgress.percent}%` : '45%' }"></div>
+              </div>
+            </div>
+
+            <AlertMessage v-if="recomputeNotice" :kind="recomputeFailures.length ? 'warning' : 'success'"
+              dismissible @dismiss="recomputeNotice = ''">
+              {{ recomputeNotice }}
+            </AlertMessage>
+
             <!-- Menu du module : gestion / analyses (d'autres viendront) -->
             <div class="flex border-b border-slate-800 -mb-1">
               <button @click="activeTab = 'portfolios'"
                 :class="activeTab === 'portfolios' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
                 class="px-4 py-2 text-xs font-medium transition-colors">
-                Portefeuilles ({{ pf.members.length }})
+                Portefeuilles ({{ pf.allMembers.length }})
               </button>
               <button @click="activeTab = 'greeks'"
                 :class="activeTab === 'greeks' ? 'border-b-2 border-blue-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'"
@@ -100,8 +129,8 @@
             <!-- ══ Onglet Greeks agrégés ═════════════════════════ -->
             <template v-if="activeTab === 'greeks'">
                 <div class="text-[10px] text-slate-500 -mt-1">
-                  Somme des Greeks déjà calculés par deal (nominal × sensibilité % × taux de change vers EUR), regroupés par sous-jacent — lecture pure, aucun recalcul Monte Carlo ici.
-                  <HelpTip text="Utilisez le bouton Recalculer pour rafraîchir les Greeks des deals sous-jacents avant de lire cet écran." />
+                  Somme des Greeks calculés à la date d’analyse (nominal × sensibilité % × taux de change vers EUR), regroupés par sous-jacent. Créer un portefeuille ne lance aucun calcul ; le générateur UAT peut en revanche calculer les Greeks au booking lorsque l’option « Calculer les Greeks pour Risk » est cochée.
+                  <HelpTip text="La lecture de cet onglet ne lance aucun Monte Carlo. Recalculer produit et conserve un calcul daté pour chaque deal actif à la date choisie." />
                 </div>
 
                 <div v-if="pf.riskLoading" class="text-xs text-slate-500">Chargement…</div>
@@ -423,7 +452,7 @@
                   <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Corr (pts)
                     <input v-model.number="shockForm.corr_shock_pts" type="number" step="5" class="input text-xs py-1 w-24" />
                   </label>
-                  <button class="btn-primary text-xs px-4 py-1.5 self-end" :disabled="shockLoading"
+                  <button class="btn-primary text-xs px-4 py-1.5 self-end" :disabled="calculationActive"
                     @click="runPortfolioShock">
                     <span v-if="shockLoading"
                       class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -554,7 +583,7 @@
                     @click="varAdvancedOpen = !varAdvancedOpen">
                     {{ varAdvancedOpen ? 'masquer' : 'options avancées' }}
                   </button>
-                  <button class="btn-primary text-xs px-4 py-1.5 self-end" :disabled="pf.varLaunching || pf.varPolling"
+                  <button class="btn-primary text-xs px-4 py-1.5 self-end" :disabled="calculationActive"
                     @click="launchVarStudy">
                     <span v-if="pf.varLaunching || pf.varPolling"
                       class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -714,7 +743,7 @@
                 <label class="flex flex-col gap-0.5 text-[10px] text-slate-500">Date 2
                   <input v-model="pnlD2" type="date" class="input text-xs py-1" />
                 </label>
-                <button class="btn-primary text-xs px-4 py-1.5" :disabled="pnlLoading || !pf.members.length"
+                <button class="btn-primary text-xs px-4 py-1.5" :disabled="calculationActive || !pf.members.length"
                   @click="runPnl">
                   <span v-if="pnlLoading"
                     class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -911,7 +940,7 @@
                   <input v-model="smileForm.label" type="text" placeholder="Ex. Stress skew actions" class="input ml-2 text-xs w-56" />
                 </label>
                 <button class="btn-primary text-xs px-4 py-1.5 ml-auto"
-                  :disabled="pf.smileLoading || !pf.members.length || !smileHasShock"
+                  :disabled="calculationActive || !pf.members.length || !smileHasShock"
                   @click="runSmile">
                   <span v-if="pf.smileLoading"
                     class="w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -1016,7 +1045,7 @@
                   📍 Proximité aux barrières — {{ pf.view === 'global' ? 'Tous portefeuilles' : pf.label }}
                   <HelpTip width="w-80" text="Classe tous les deals actifs de la sélection par écart entre le worst-of actuel et leur prochaine barrière (autocall, KI) détectée dans le script — pour repérer en un coup d'œil ce qui mérite un suivi cette semaine. Réutilise la même détection que la Surveillance de Booking (convention PARAM M_)." />
                 </div>
-                <button class="btn-secondary text-xs px-3 py-1.5 ml-auto" :disabled="pf.barriersLoading || !pf.members.length"
+                <button class="btn-secondary text-xs px-3 py-1.5 ml-auto" :disabled="calculationActive || !pf.members.length"
                   @click="pf.loadBarriers">
                   <span v-if="pf.barriersLoading"
                     class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -1025,7 +1054,7 @@
               </div>
 
               <div v-if="!pf.barriers && !pf.barriersLoading" class="text-xs text-slate-500 text-center py-8">
-                <button class="btn-primary text-xs px-4 py-1.5" :disabled="!pf.members.length" @click="pf.loadBarriers">
+                <button class="btn-primary text-xs px-4 py-1.5" :disabled="calculationActive || !pf.members.length" @click="pf.loadBarriers">
                   ▶ Charger la proximité aux barrières
                 </button>
                 <div v-if="!pf.members.length" class="mt-2 text-slate-600">Aucun deal actif dans cette sélection.</div>
@@ -1174,9 +1203,12 @@
               <!-- Composition de la sélection -->
               <div class="text-xs font-bold text-slate-400 uppercase tracking-wider pt-2 border-t border-slate-800">
                 Composition — {{ pf.view === 'global' ? 'Tous portefeuilles' : pf.label }}
+                <span class="ml-2 font-normal normal-case text-slate-500">
+                  {{ pf.riskMembers.length }} actif(s) à la date sur {{ pf.allMembers.length }} deal(s)
+                </span>
               </div>
-              <div v-if="!pf.members.length" class="text-xs text-slate-500">
-                Aucun deal actif dans cette sélection.
+              <div v-if="!pf.allMembers.length" class="text-xs text-slate-500">
+                Aucun deal dans cette sélection.
               </div>
               <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
                 <table class="w-full text-xs border-collapse">
@@ -1185,20 +1217,26 @@
                       <th class="text-left py-1.5 pr-3 font-semibold">Réf</th>
                       <th class="text-left py-1.5 pr-3 font-semibold">Contrepartie</th>
                       <th class="text-left py-1.5 pr-3 font-semibold">Type</th>
+                      <th class="text-left py-1.5 pr-3 font-semibold">État au {{ pf.valuationDate }}</th>
                       <th class="text-right py-1.5 pr-3 font-semibold num">Nominal</th>
                       <th class="text-left py-1.5 pr-3 font-semibold">Portefeuilles
                         <HelpTip text="Un deal peut appartenir à plusieurs portefeuilles. Cochez toutes les vues de risque qui doivent le contenir." /></th>
-                      <th class="text-left py-1.5 font-semibold">Greeks calculés le
-                        <HelpTip text="Date du dernier calcul de Greeks de ce deal (POST .../greeks) — c'est ce qui nourrit l'agrégat du sous-onglet Greeks. Cliquez la ligne pour ouvrir la fiche dans Booking." /></th>
+                      <th class="text-left py-1.5 font-semibold">Greeks à la date
+                        <HelpTip text="Disponibilité d'un calcul dont la date de valorisation correspond exactement à la date d’analyse. La date d’exécution technique peut être postérieure. Cliquez la ligne pour ouvrir la fiche dans Booking." /></th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="d in pf.members" :key="d.id"
+                    <tr v-for="d in pf.allMembers" :key="d.id"
                       class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
+                      :class="riskState(d).active ? '' : 'opacity-45 grayscale bg-slate-900/40'"
                       @click="openDealDetail(d.id)">
                       <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400">{{ d.reference }}</td>
                       <td class="py-1.5 pr-3 text-slate-300">{{ d.contrepartie }}</td>
                       <td class="py-1.5 pr-3 text-slate-500 text-[10px]">{{ d.product_type || '—' }}</td>
+                      <td class="py-1.5 pr-3 text-[10px]"
+                        :class="riskState(d).active ? 'text-emerald-400' : 'text-slate-500'">
+                        {{ riskState(d).reason }}
+                      </td>
                       <td class="py-1.5 pr-3 text-right font-mono num text-slate-300">{{ formatNominal(d.nominal) }} {{ d.devise }}</td>
                       <td class="py-1.5 pr-3" @click.stop>
                         <ActionMenu :label="dealPortfolioLabel(d)" :title="dealPortfolioLabel(d)" class="max-w-sm">
@@ -1215,8 +1253,12 @@
                         </ActionMenu>
                       </td>
                       <td class="py-1.5 text-slate-500">
-                        <span v-if="d.greeks_computed_at">{{ new Date(d.greeks_computed_at).toLocaleDateString('fr-FR') }}</span>
-                        <span v-else class="text-amber-400">jamais calculé</span>
+                        <span v-if="greeksMatchSelectedDate(d)" class="text-emerald-400"
+                          :title="greekExecutionTitle(d)">
+                          disponibles
+                        </span>
+                        <span v-else-if="riskState(d).active" class="text-amber-400">absents à cette date</span>
+                        <span v-else>hors périmètre</span>
                       </td>
                     </tr>
                   </tbody>
@@ -1243,6 +1285,8 @@ import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
 import { formatInt, formatDateTime, formatPercent } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel } from '../utils/barriers.js'
+import { dealRiskState, localTodayIso } from '../utils/riskDates.js'
+import { runConcurrentPool } from '../utils/concurrentPool.js'
 import HelpTip from '../components/HelpTip.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
 import { confirmer } from '../composables/useConfirm.js'
@@ -1276,8 +1320,36 @@ const creatingPortfolio = ref(false)
 const portfolioAssigning = reactive({})
 const portfolioError = ref('')
 const portfolioNotice = ref('')
+const todayIso = localTodayIso()
 
 const formatNominal = formatInt
+
+function riskState(deal) {
+  return dealRiskState(deal, pf.valuationDate)
+}
+
+function greekValuationDate(deal) {
+  const data = deal.greeks?.market_used?.data || {}
+  return deal.greeks?.valuation_date
+    || data.contractual_history?.requested_end
+    || data.requested_asof
+    || null
+}
+
+function greeksMatchSelectedDate(deal) {
+  if (pf.risk?.valuation_date === pf.valuationDate) {
+    return pf.risk.deals_included?.some(row => row.id === deal.id) || false
+  }
+  return !!deal.greeks_computed_at && greekValuationDate(deal) === pf.valuationDate
+}
+
+function greekExecutionTitle(deal) {
+  const included = pf.risk?.deals_included?.find(row => row.id === deal.id)
+  const computedAt = included?.greeks_computed_at || deal.greeks_computed_at
+  return computedAt
+    ? `Calcul exécuté le ${new Date(computedAt).toLocaleString('fr-FR')}`
+    : 'Calcul daté disponible'
+}
 
 const portfolioOwners = computed(() => {
   const owners = new Map()
@@ -1468,29 +1540,52 @@ async function runSmile() {
 const recomputing = ref(false)
 const recomputeDone = ref(0)
 const recomputeTotal = ref(0)
+const recomputeFailures = ref([])
+const recomputeNotice = ref('')
+const PORTFOLIO_GREEK_CONCURRENCY = 2
 
 async function recomputePortfolio() {
-  const memberIds = pf.members.map(d => d.id)
+  const memberIds = pf.riskMembers.map(d => d.id)
   if (!memberIds.length) return
   recomputing.value = true
   recomputeDone.value = 0
   recomputeTotal.value = memberIds.length
+  recomputeFailures.value = []
+  recomputeNotice.value = ''
   try {
-    for (const id of memberIds) {
-      try {
-        await apiFetch(`/api/deals/${id}/greeks`, {
+    const results = await runConcurrentPool(memberIds, async id => {
+      const response = await apiFetch(`/api/deals/${id}/greeks`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recalibrate: 'none' }),
-        })
-      } catch { /* one deal's failure shouldn't stop the batch */ }
-      recomputeDone.value++
-      await new Promise(r => setTimeout(r, 400))   // same pacing as Admin market-data's batch fetch
-    }
+          body: JSON.stringify({
+            recalibrate: 'none',
+            valuation_date: pf.valuationDate,
+          }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        const detail = payload.detail
+        throw new Error(typeof detail === 'string' ? detail : detail?.message || 'Calcul refusé')
+      }
+      return id
+    }, {
+      concurrency: PORTFOLIO_GREEK_CONCURRENCY,
+      onSettled: () => { recomputeDone.value += 1 },
+    })
+    recomputeFailures.value = results.flatMap((result, index) => result.status === 'rejected'
+      ? [{ id: memberIds[index], reason: result.reason?.message || 'Erreur de calcul' }]
+      : [])
+    const succeeded = memberIds.length - recomputeFailures.value.length
+    recomputeNotice.value = recomputeFailures.value.length
+      ? `${succeeded}/${memberIds.length} calcul(s) terminés. ${recomputeFailures.value.length} deal(s) en erreur.`
+      : `${succeeded} calcul(s) de Greeks terminés à la date sélectionnée.`
   } finally {
-    recomputing.value = false
-    await dealsStore.loadDeals()
-    await pf.loadRisk()
+    try {
+      await dealsStore.loadDeals()
+      await pf.loadRisk()
+    } finally {
+      recomputing.value = false
+    }
   }
 }
 
@@ -1588,7 +1683,6 @@ async function launchVarStudy() {
 }
 
 // ── P&L explain (portefeuille / global) ──────────────────────────────
-const todayIso = new Date().toISOString().slice(0, 10)
 const pnlD1 = ref('')                  // vide = origine de chaque deal
 const pnlD2 = ref(todayIso)
 const pnlLoading = ref(false)
@@ -1613,6 +1707,55 @@ async function runPnl() {
   }
 }
 
+// ── Progression unifiée des calculs de portefeuille ────────────────
+// Greeks et VaR exposent un compteur exact. Les endpoints synchrones
+// (choc, smile, P&L, barrières) n'exposent pas encore leurs étapes internes :
+// la barre reste alors indéterminée mais le temps écoulé reste visible.
+const calculationProgress = computed(() => {
+  if (recomputing.value) {
+    const total = recomputeTotal.value
+    const completed = recomputeDone.value
+    return {
+      key: 'greeks', label: 'Calcul des Greeks du portefeuille', completed, total,
+      percent: total ? Math.round(completed / total * 100) : 0,
+    }
+  }
+  if (shockLoading.value) return { key: 'shock', label: 'Repricing du choc portefeuille' }
+  if (pf.smileLoading) return { key: 'smile', label: 'Repricing du smile portefeuille' }
+  if (pf.varLaunching || pf.varPolling) {
+    const total = Number(pf.varStudy?.total_jobs || 0)
+    const completed = Number(pf.varStudy?.completed_jobs || 0) + Number(pf.varStudy?.failed_jobs || 0)
+    return {
+      key: 'var', label: pf.varLaunching ? 'Préparation de la VaR' : 'Calcul de la VaR',
+      completed, total, percent: total ? Math.round(completed / total * 100) : 0,
+    }
+  }
+  if (pnlLoading.value) return { key: 'pnl', label: 'Explication du P&L portefeuille' }
+  if (pf.barriersLoading) return { key: 'barriers', label: 'Analyse des barrières du portefeuille' }
+  return null
+})
+const calculationActive = computed(() => calculationProgress.value !== null)
+const calculationElapsed = ref(0)
+let calculationTimer = null
+
+function formatElapsed(seconds) {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return mins ? `${mins} min ${String(secs).padStart(2, '0')} s` : `${secs} s`
+}
+
+watch(() => calculationProgress.value?.key || null, key => {
+  if (calculationTimer) clearInterval(calculationTimer)
+  calculationTimer = null
+  calculationElapsed.value = 0
+  if (key) {
+    const startedAt = Date.now()
+    calculationTimer = setInterval(() => {
+      calculationElapsed.value = Math.floor((Date.now() - startedAt) / 1000)
+    }, 1000)
+  }
+}, { immediate: true })
+
 onMounted(() => {
   const rememberedVarBatchId = pf.varStudy?.batch_id
   dealsStore.loadDeals()
@@ -1630,10 +1773,16 @@ onMounted(() => {
                       pf.view === 'global' ? null : pf.view)
 })
 
+watch(() => pf.valuationDate, (value) => {
+  if (!value || value > todayIso) return
+  pf.loadRisk()
+})
+
 // A VaR study's poll loop uses setTimeout, not a Vue-managed watcher — must
 // be stopped explicitly on unmount or it keeps polling (and holds a
 // reference to this closed-over component) after the user navigates away.
 onUnmounted(() => {
   pf.stopVarPolling()
+  if (calculationTimer) clearInterval(calculationTimer)
 })
 </script>
