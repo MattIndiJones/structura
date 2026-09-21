@@ -40,7 +40,7 @@ def get_marks_shares(
 ) -> dict[str, float]:
     """Delegate to existing amc_prices.build_marks — no duplication."""
     from ..amc_prices import build_marks
-    return build_marks(components, as_of_date=as_of_date, prod_ccy=prod_ccy)
+    return build_marks(components, as_of_date=as_of_date, prod_ccy=prod_ccy, price_basis="execution")
 
 
 def get_marks_cert_units(
@@ -59,7 +59,7 @@ def get_marks_cert_units(
     from ..amc_prices import build_marks, get_fx_series
 
     # Get raw stock prices (in prod_ccy) via the existing price store
-    raw_marks = build_marks(components, as_of_date=as_of_date, prod_ccy=prod_ccy)
+    raw_marks = build_marks(components, as_of_date=as_of_date, prod_ccy=prod_ccy, price_basis="execution")
 
     cert_marks: dict[str, float] = {}
     for c in components:

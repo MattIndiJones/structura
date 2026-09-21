@@ -126,6 +126,12 @@ def run_fifo_recon(
     prod_ccy: str = "USD",
     order_files: Optional[list[str]] = None,
     termsheet_path: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+    termsheet_positions: Optional[list[dict]] = None,
+    nav_path: Optional[str] = None,
+    supplied_marks: Optional[dict[str, float]] = None,
+    additional_orders: Optional[list[Order]] = None,
+    orders_split_adjusted: bool = False,
 ) -> tuple[ReconResult, list[Order], dict]:
     """Run the full FIFO pipeline and return (ReconResult, carnet_orders, meta).
 
@@ -135,7 +141,7 @@ def run_fifo_recon(
     meta: informational dict (fixing_date, n_certs, aliases, etc.).
     """
     # ── Order files ───────────────────────────────────────────────────
-    file_paths = order_files or detect_order_files(folder)
+    file_paths = detect_order_files(folder) if order_files is None else order_files
     if not file_paths:
         raise ValueError(f"Aucun fichier carnet trouvé dans {folder}")
     full_paths = [
@@ -143,15 +149,17 @@ def run_fifo_recon(
         for f in file_paths
     ]
 
-    carnet_orders = load_orders(full_paths)
+    carnet_orders = load_orders(full_paths, prod_ccy)
+    if as_of_date:
+        carnet_orders = [o for o in carnet_orders if o.date.isoformat() <= as_of_date]
     if not carnet_orders:
         raise ValueError("Aucun ordre valide chargé")
 
     # ── Termsheet ─────────────────────────────────────────────────────
-    termsheet = load_termsheet(folder, termsheet_path)
+    termsheet = load_termsheet(folder, termsheet_path) if termsheet_positions is None else termsheet_positions
 
     # ── NAV CSV ───────────────────────────────────────────────────────
-    nav_csv_path = detect_nav_csv(folder)
+    nav_csv_path = detect_nav_csv(folder) if nav_path is None else nav_path
     nav_info: dict = {}
     initial_orders: list[Order] = []
     fixing_date = carnet_orders[0].date
@@ -172,12 +180,19 @@ def run_fifo_recon(
     # as-of that same date. Done up front (before growth top-ups below) since
     # those need real, split-corrected share counts to size proportional
     # top-ups correctly.
-    as_of = max(o.date for o in carnet_orders)
-    carnet_orders = fix_carnet_splits(carnet_orders, carnet_name_to_all_isins, as_of)
+    as_of = datetime.date.fromisoformat(as_of_date) if as_of_date else max(o.date for o in carnet_orders)
+    if not orders_split_adjusted:
+        carnet_orders = fix_carnet_splits(carnet_orders, carnet_name_to_all_isins, as_of)
+
+    if additional_orders:
+        known_ids = {o.id for o in carnet_orders}
+        if any(o.id in known_ids for o in additional_orders):
+            raise ValueError("Ordre de réinvestissement dupliqué")
+        carnet_orders = sorted(carnet_orders + [o for o in additional_orders if o.date <= as_of], key=lambda o: o.date)
 
     if nav_csv_path and termsheet:
         try:
-            nav_rows = load_nav_csv(nav_csv_path)
+            nav_rows = [r for r in load_nav_csv(nav_csv_path) if r[0] <= as_of]
             fixing_date, n_certs, nav_initial = get_fixing_info(nav_rows)
 
             isin_aliases: dict[str, str] = {}
@@ -228,8 +243,8 @@ def run_fifo_recon(
                 "isin_aliases": alias_log,
             }
         except Exception as exc:
-            import traceback; traceback.print_exc()
-            nav_info = {"nav_csv_error": str(exc)}
+            raise ValueError(f"Reconstruction initiale impossible : {exc}") from exc
+        initial_orders = fix_carnet_splits(initial_orders, {}, as_of)
 
     # ── Combine orders ────────────────────────────────────────────────
     all_orders = sorted(initial_orders + carnet_orders, key=lambda o: o.date)
@@ -272,9 +287,9 @@ def run_fifo_recon(
             isin: lot for isin, lot in result_p1.earliest_lots.items()
             if isin not in ts_isins
         }
-        if non_ts_lots:
+        if non_ts_lots and recon_mode == "t0_synthetic":
             t0_prices_prod.update(fetch_t0_prices_from_earliest_lots(non_ts_lots, prod_ccy))
-        marks = get_marks_shares(components, as_of.isoformat(), prod_ccy)
+        marks = supplied_marks if supplied_marks is not None else get_marks_shares(components, as_of.isoformat(), prod_ccy)
 
     # ── Pass 1.5 — detect deficit dates for accurate synthetic pricing ──
     # A shortfall almost always means a real BUY leg is missing from the
@@ -287,7 +302,7 @@ def run_fifo_recon(
     # t0_prices_prod finds exactly the same (isin, date) events the final
     # pass below will need — just fetch a real price for each first.
     deficit_prices_prod: dict[tuple, float] = {}
-    if qty_mode == "shares":
+    if qty_mode == "shares" and recon_mode == "t0_synthetic":
         result_detect = reconstruct(
             all_orders, {}, as_of, prod_ccy,
             qty_mode=qty_mode,

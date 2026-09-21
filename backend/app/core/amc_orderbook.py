@@ -110,7 +110,7 @@ def load_nav(path: str) -> list[dict]:
                 except ValueError:
                     continue
             if dt is None or price is None:
-                continue
+                raise ValueError(f"Ligne NAV invalide : {d}")
             rows.append({
                 "date": dt.strftime("%Y-%m-%d"),
                 "nav": price,
@@ -120,53 +120,42 @@ def load_nav(path: str) -> list[dict]:
     return rows
 
 
-def load_orders(paths: list[str]) -> list[dict]:
-    """Parse order-book JSON files → normalised, de-duplicated order list.
-
-    Each normalised order (product ccy):
-      id, date(datetime), state, name, isin, ccy,
-      ordered_qty, executed_qty (signed), side ('BUY'/'SELL'),
-      price_local, fx, price_prod, notional_prod (abs)
-    """
-    seen: set[str] = set()
-    out: List[dict] = []
-    for p in paths:
-        try:
-            with open(p, encoding="utf-8") as fh:
-                d = json.load(fh)
-        except (OSError, json.JSONDecodeError):
-            continue
-        items = (((d.get("data") or {}).get("orders") or {}).get("items")) or []
-        for o in items:
-            oid = o.get("id", "")
-            if oid and oid in seen:
+def load_orders(paths: list[str], prod_ccy: str | None = None) -> list[dict]:
+    """Normalize executions through the same contract as the FIFO loader."""
+    from .fifo.loader import _order_from_item
+    seen, out = {}, []
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        for raw in ((data.get("data") or {}).get("orders") or {}).get("items", []):
+            oid = str(raw.get("id") or "")
+            if oid in seen:
+                if raw != seen[oid]:
+                    raise ValueError(f"Versions contradictoires de l’ordre {oid}")
                 continue
             if oid:
-                seen.add(oid)
-            u = o.get("underlying") or {}
-            ep = o.get("executionPrice") or {}
-            executed = _f(o.get("executedQuantity")) or 0.0
-            ordered = _f(o.get("orderedQuantity")) or 0.0
-            price_local = _f(ep.get("amount"))
-            fx = _f(o.get("usedFxRate"))
-            price_prod = (price_local * fx) if (price_local is not None and fx is not None) else None
-            out.append({
-                "id": oid,
-                "date": _parse_dt(o.get("creationDateTime", "")),
-                "state": o.get("state", ""),
-                "name": u.get("name", ""),
-                "isin": u.get("isin", ""),
-                "ccy": u.get("currency", ""),
-                "ordered_qty": ordered,
-                "executed_qty": executed,
-                "side": "BUY" if ordered >= 0 else "SELL",
-                "price_local": price_local,
-                "fx": fx,
-                "price_prod": price_prod,
-                "notional_prod": abs(executed * price_prod) if price_prod is not None else 0.0,
-            })
-    out.sort(key=lambda r: (r["date"] or _dt.datetime.min))
-    return out
+                seen[oid] = raw
+            order = _order_from_item(raw, prod_ccy)
+            u = raw.get("underlying") or {}
+            state = str(raw.get("state") or "")
+            if order:
+                date = _dt.datetime.combine(order.date, _dt.time())
+                out.append({"id": order.id, "date": date, "state": "Done", "name": order.name,
+                            "isin": order.isin, "ccy": order.price_ccy,
+                            "ordered_qty": _f(raw.get("orderedQuantity")) or order.qty,
+                            "executed_qty": order.qty, "side": "BUY" if order.qty > 0 else "SELL",
+                            "price_local": order.price_local, "fx": order.fx,
+                            "price_prod": order.price_prod, "notional_prod": abs(order.qty * order.price_prod)})
+            else:
+                date = _parse_dt(raw.get("tradeDate") or raw.get("creationDateTime", ""))
+                if date:
+                    date = date.replace(tzinfo=None)
+                out.append({"id": oid, "date": date, "state": state if state.lower() not in ("done", "filled", "executed", "completed") else "Unexecuted",
+                            "name": u.get("name", ""), "isin": u.get("isin", ""), "ccy": u.get("currency", ""),
+                            "ordered_qty": _f(raw.get("orderedQuantity")) or 0, "executed_qty": 0,
+                            "side": "BUY" if (_f(raw.get("orderedQuantity")) or 0) >= 0 else "SELL",
+                            "price_local": None, "fx": None, "price_prod": None, "notional_prod": 0})
+    return sorted(out, key=lambda row: row["date"] or _dt.datetime.min)
 
 
 def apply_split_corrections(orders: list[dict], as_of: Optional[_dt.datetime]) -> list[dict]:
@@ -612,50 +601,66 @@ def _quarter(dt: Optional[_dt.datetime]) -> Optional[str]:
 
 # ── Convenience loader from a manifest ─────────────────────────────────
 
-def load_study_data(folder: str, files: Dict) -> dict:
+def load_study_data(folder: str, files: Dict, *, as_of: str | None = None, require_orders: bool = True, require_composition: bool = True, product_currency: str = "USD", valuation_source: str = "market", orders_split_adjusted: bool = False) -> dict:
     """Resolve manifest file roles against the study folder and load everything."""
     from .amc_prices import build_marks, auto_populate_store   # local import avoids circular dependency
 
     base = Path(folder)
 
+    from .amc_controls import resolve_file, validate_nav, date_key, price_at
     def _resolve(name: str) -> str:
-        if not name:
-            return ""
-        p = base / name
-        if p.exists():
-            return str(p)
-        hits = glob.glob(str(base / name))
-        return hits[0] if hits else ""
+        return resolve_file(folder, name)
 
     comp_path = _resolve(files.get("composition", ""))
     nav_path = _resolve(files.get("nav_timeseries", ""))
     order_paths = [pp for pp in (_resolve(o) for o in files.get("orders", [])) if pp]
 
-    if not comp_path:
+    if not comp_path and require_composition:
         raise ValueError("Fichier de composition (Def.txt) introuvable dans le dossier.")
-    if not order_paths:
+    if not order_paths and require_orders:
         raise ValueError("Carnet d'ordres introuvable dans le dossier.")
 
-    composition = load_composition(comp_path)
-    nav = load_nav(nav_path) if nav_path else []
-    orders = load_orders(order_paths)
-    as_of = composition.get("nav_date") or (orders[-1]["date"] if orders else None)
-    orders = apply_split_corrections(orders, as_of)
+    composition = load_composition(comp_path) if comp_path else {"currency": product_currency, "components": [], "marks": {}}
+    nav = validate_nav(load_nav(nav_path)) if nav_path else []
+    orders = load_orders(order_paths, composition.get("currency") or product_currency)
+    if as_of:
+        nav = [r for r in nav if r["date"] <= as_of]
+    if not nav:
+        raise ValueError("Une NAV est requise à la date d'arrêté")
+    as_of = _dt.datetime.fromisoformat(nav[-1]["date"])
+    orders = [o for o in orders if o.get("date") and o["date"] <= as_of.replace(hour=23, minute=59, second=59)]
+    if not orders_split_adjusted:
+        orders = apply_split_corrections(orders, as_of)
 
     # Auto-populate the price store for any component not yet cached.
     # This ensures Blocks H and I have price history on the very first study run.
     # Components already in the store are skipped (no re-download).
-    auto_populate_store(composition["components"])
+    universe = {c.get("isin"): c for c in composition["components"] if c.get("isin")}
+    for o in orders:
+        if o.get("isin"):
+            universe.setdefault(o["isin"], {"isin": o["isin"], "name": o["name"], "currency": o["ccy"]})
+    if valuation_source == "market":
+        auto_populate_store(list(universe.values()))
 
     # Populate marks from the centralised price store (parquet) + yfinance fallback.
     # The Def.txt has no individual stock prices — only weights and quantities.
     as_of_str = (as_of.strftime("%Y-%m-%d") if as_of else
                  _dt.date.today().isoformat())
-    composition["marks"] = build_marks(
-        composition["components"],
-        as_of_str,
-        composition.get("currency", "USD"),
-    )
+    if valuation_source == "composition":
+        if not composition.get("nav_date") or composition["nav_date"].date() != as_of.date():
+            raise ValueError("La valorisation sur relevé exige la même date que l'arrêté")
+        composition["marks"] = {}
+        for c in composition["components"]:
+            if c.get("isin") and c["position"]:
+                mark = c["value_prod"] / c["position"]
+                if not math.isfinite(mark) or mark <= 0:
+                    raise ValueError("Valorisation du relevé non positive ou non finie")
+                composition["marks"][c["isin"]] = mark
+    else:
+        composition["marks"] = build_marks(
+            composition["components"], as_of_str,
+            composition.get("currency", "USD"), price_basis="execution",
+        )
 
     # Def.txt's own `weight`/`value_prod` fields are unreliable — cross-checked
     # against the issuer's own published factsheet on CH1352587724 and found stale
@@ -679,7 +684,7 @@ def load_study_data(folder: str, files: Dict) -> dict:
             if c_ccy and c_ccy != prod_ccy:
                 from .amc_prices import get_fx_series
                 fx_s = get_fx_series(c_ccy, prod_ccy)
-                mark = float(fx_s.iloc[-1]) if not fx_s.empty else 1.0
+                mark = price_at(fx_s, as_of)
             else:
                 mark = 1.0
         else:

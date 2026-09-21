@@ -317,6 +317,12 @@ def ff_refresh(series_key: str) -> dict:
 
 def _load_ff_data(series_key: str) -> pd.DataFrame:
     """Load FF data from permanent store. Raises ValueError if not yet imported."""
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        if series_key != bundle.factor_key:
+            raise ValueError(f"Facteurs absents du dossier : {series_key}")
+        return bundle.factors.copy()
     p = _ff_parquet(series_key)
     if not p.exists():
         raise ValueError(
@@ -410,6 +416,10 @@ def _download_raw_ticker(ticker: str, start: str, end: str) -> pd.Series:
 
 def _download_benchmark(ticker: str, start: str, end: str) -> pd.Series:
     """Download benchmark returns. Handles single ETF tickers and composite IDs."""
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        return bundle.benchmark_series(ticker).pct_change().dropna()
     from .amc_benchmarks import get_composite
 
     composite = get_composite(ticker)
@@ -439,6 +449,7 @@ def run_analysis(
     selected_factors: list[str],
     benchmark_ticker: str,
     rolling_window: int = 60,
+    nav_currency: str = "USD",
 ) -> dict:
     """Full Fama-French analysis pipeline."""
     warnings: list[str] = []
@@ -447,15 +458,31 @@ def run_analysis(
     if not nav_records:
         raise ValueError("Aucune donnée NAV trouvée dans le fichier. "
                          "Vérifiez que le fichier contient un onglet avec des colonnes Date et NAV/Price.")
+    from .amc_controls import validate_nav, price_at
+    nav_records = validate_nav(nav_records)
     nav_df = pd.DataFrame(nav_records)
     nav_df["date"] = pd.to_datetime(nav_df["date"])
     nav_df = nav_df.sort_values("date").set_index("date")
     nav_series = nav_df["nav"].astype(float)
-    # Accept pre-computed 'return' column or recompute from NAV
+    if not 20 <= rolling_window <= 2520:
+        raise ValueError("Fenêtre glissante hors limites")
+    gaps = nav_df.index.to_series().diff().dropna().dt.days
+    if gaps.median() > 1 or gaps.max() > 7:
+        raise ValueError("La régression quotidienne exige une NAV quotidienne")
+    # Check provided returns before any currency conversion.
     if "return" in nav_df.columns:
-        ret_series = nav_df["return"].astype(float)
-    else:
-        ret_series = nav_series.pct_change()
+        provided = pd.to_numeric(nav_df["return"], errors="coerce")
+        common = provided.notna() & nav_series.pct_change().notna()
+        if not np.allclose(provided[common], nav_series.pct_change()[common], atol=1e-4, rtol=1e-6):
+            raise ValueError("Les rendements fournis contredisent les niveaux de NAV (tolérance 1 bp)")
+    if nav_currency.upper() != "USD":
+        from .amc_prices import get_fx_series
+        fx = get_fx_series(nav_currency.upper(), "USD")
+        nav_series = nav_series * pd.Series([price_at(fx, d) for d in nav_series.index], index=nav_series.index)
+        nav_df["nav"] = nav_series
+        nav_df["return"] = nav_series.pct_change()
+        warnings.append(f"NAV {nav_currency} convertie en USD pour comparaison aux facteurs et benchmark USD.")
+    ret_series = nav_series.pct_change()
 
     date_start = nav_df.index.min().strftime("%Y-%m-%d")
     date_end   = nav_df.index.max().strftime("%Y-%m-%d")
@@ -478,6 +505,8 @@ def run_analysis(
     except Exception as e:
         raise ValueError(f"Erreur lecture facteurs FF : {e}")
 
+    from .amc_controls import record_market
+    record_market(f"factors:{ff_series}", ff_df)
     info = FF_SERIES[ff_series]
     rf_col = info.get("rf_col", "RF")
 
@@ -494,6 +523,8 @@ def run_analysis(
             f"Essayez une autre série FF (ex. US_3F ou EU_3F qui couvrent jusqu'en 2026)."
         )
 
+    if (pd.Timestamp(date_end) - pd.Timestamp(ff_end)).days > 7:
+        warnings.append(f"Facteurs arrêtés au {ff_end} : analyse partielle de la période NAV.")
     ff_df = ff_df.loc[overlap_start:overlap_end]
 
     # Validate requested factors
@@ -510,6 +541,7 @@ def run_analysis(
     bm_cum: list = []
     try:
         bm_returns = _download_benchmark(benchmark_ticker, overlap_start, overlap_end)
+        record_market(f"benchmark:{benchmark_ticker}", bm_returns)
     except Exception as e:
         warnings.append(f"Benchmark {benchmark_ticker} non disponible : {e}. "
                         "Les métriques relatives seront omises.")
@@ -521,7 +553,7 @@ def run_analysis(
     if bm_returns is not None:
         merged = merged.join(bm_returns.rename("bm_ret"), how="left")
 
-    merged = merged.dropna(subset=["amc_ret"] + available)
+    merged = merged.dropna(subset=["amc_ret", rf_col] + available)
     n_obs = len(merged)
 
     if n_obs < 5:
@@ -534,12 +566,16 @@ def run_analysis(
 
     merged["excess_ret"] = merged["amc_ret"] - merged[rf_col]
     if "bm_ret" in merged.columns:
-        merged["bm_excess"] = merged["bm_ret"].fillna(0) - merged[rf_col]
+        merged["bm_excess"] = merged["bm_ret"] - merged[rf_col]
 
     # ── 5. OLS regression ─────────────────────────────────────────────
     Y = merged["excess_ret"]
+    if not np.isfinite(Y).all() or Y.std() <= 1e-12:
+        raise ValueError("Rendements constants ou non finis : inférence factorielle indisponible")
     X = sm.add_constant(merged[available])
-    ols = sm.OLS(Y, X).fit()
+    if len(Y) < max(20, len(available) + 5) or np.linalg.matrix_rank(X) < X.shape[1]:
+        raise ValueError("Observations ou rang insuffisants pour cette régression")
+    ols = sm.OLS(Y, X).fit(cov_type="HAC", cov_kwds={"maxlags": min(5, len(Y) // 4)}, use_t=True)
 
     alpha_daily = float(ols.params.get("const", 0))
     alpha_ann   = alpha_daily * 252
@@ -572,6 +608,11 @@ def run_analysis(
 
     alpha_tstat_val = float(ols.tvalues.get("const", 0))
     regression = {
+        "covariance": "HAC (Newey-West), 5 retards maximum",
+        "analysis_currency": "USD",
+        "calculation": {"betas": {f: float(ols.params[f]) for f in available},
+                        "r2": float(ols.rsquared), "alpha_daily": alpha_daily,
+                        "alpha_tstat": alpha_tstat_val},
         "alpha_daily":    round(alpha_daily, 6),
         "alpha_ann_pct":  round(alpha_ann * 100, 2),
         "alpha_tstat":    round(alpha_tstat_val, 3),
@@ -592,7 +633,7 @@ def run_analysis(
             df_bm_valid = merged[["excess_ret", "bm_excess"]].dropna()
             Y_bm = df_bm_valid["excess_ret"]
             X_bm = sm.add_constant(df_bm_valid["bm_excess"])
-            ols_bm = sm.OLS(Y_bm, X_bm).fit()
+            ols_bm = sm.OLS(Y_bm, X_bm).fit(cov_type="HAC", cov_kwds={"maxlags": min(5, len(Y_bm) // 4)}, use_t=True)
             df_bm_resid = int(ols_bm.df_resid)
             def _pval_bm(t): return float(2 * _scipy_stats.t.sf(abs(t), df_bm_resid))
             alpha_bm_daily = float(ols_bm.params.get("const", 0))
@@ -623,7 +664,7 @@ def run_analysis(
             Yw = window_df["excess_ret"]
             Xw = sm.add_constant(window_df[available])
             try:
-                res_w = sm.OLS(Yw, Xw).fit()
+                res_w = sm.OLS(Yw, Xw).fit(cov_type="HAC", cov_kwds={"maxlags": min(5, len(Yw) // 4)}, use_t=True)
                 row: dict = {
                     "date": merged.index[end - 1].strftime("%Y-%m-%d"),
                     "r2":   round(float(res_w.rsquared), 4),
@@ -643,16 +684,16 @@ def run_analysis(
     full_nav   = nav_series.dropna()
     full_ret   = float(full_nav.iloc[-1] / full_nav.iloc[0] - 1)
     full_days  = len(full_nav)
-    full_ann   = float((1 + full_ret) ** (252 / full_days) - 1) if full_days > 1 else 0.0
+    full_ann   = float((1 + full_ret) ** (252 / (full_days - 1)) - 1) if full_days > 1 else 0.0
     full_vol   = float(nav_series.pct_change().dropna().std() * math.sqrt(252))
     full_dates = [d.strftime("%Y-%m-%d") for d in full_nav.index]
     full_base  = float(full_nav.iloc[0])
     full_cum   = [round(float(v) / full_base - 1, 6) for v in full_nav]
     full_peak  = 0.0
     full_dd: list[float] = []
-    for r in full_cum:
+    for r in (full_nav / full_base - 1):
         full_peak = max(full_peak, r)
-        full_dd.append(round(r - full_peak, 6))
+        full_dd.append(round((1 + r) / (1 + full_peak) - 1, 6))
 
     # 7b. Overlap period (used for regression)
     ret_clean = merged["amc_ret"].dropna()
@@ -664,13 +705,13 @@ def run_analysis(
     sharpe   = (ann_ret - rf_mean) / ann_vol if ann_vol > 0 else 0.0
 
     nav_aligned = nav_series.reindex(merged.index).dropna()
-    nav_base    = float(nav_aligned.iloc[0])
-    cum_amc     = [round(float(v) / nav_base - 1, 6) for v in nav_aligned]
+    aligned_growth = (1 + ret_clean).cumprod() - 1
+    cum_amc = [round(float(v), 6) for v in aligned_growth]
     running_peak = 0.0
     drawdown: list[float] = []
-    for r in cum_amc:
+    for r in aligned_growth:
         running_peak = max(running_peak, r)
-        drawdown.append(round(r - running_peak, 6))
+        drawdown.append(round((1 + r) / (1 + running_peak) - 1, 6))
     max_dd = min(drawdown) if drawdown else 0.0
 
     cum_bm: list[float] = []
@@ -718,10 +759,7 @@ def run_analysis(
     data_used_df.index.name = "date"
     data_used_df = data_used_df.reset_index()
     data_used_df["date"] = data_used_df["date"].dt.strftime("%Y-%m-%d")
-    # Round for display
-    for c in data_used_df.columns:
-        if c != "date":
-            data_used_df[c] = data_used_df[c].round(6)
+    # Keep full precision for downstream calculations; renderers format the values.
     data_used_records = _safe_records(data_used_df)
 
     # ── 8. Activity metrics ────────────────────────────────────────────

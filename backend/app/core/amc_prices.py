@@ -146,11 +146,17 @@ def fetch_prices(key: str, ticker: str,
     except Exception:
         pass
 
+    raw_prices = tkr.history(start=_start, end=_end, auto_adjust=False)
     df = df[["Close"]].rename(columns={"Close": "close"})
+    if not raw_prices.empty:
+        df["price_close"] = raw_prices["Close"]
+    df.attrs["adjustment_date"] = datetime.date.today().isoformat()
     df.index = pd.to_datetime(df.index).tz_localize(None)
     df.index.name = "date"
     if is_gbx_ticker(ticker.strip(), currency):
         df["close"] = df["close"] / 100
+        if "price_close" in df:
+            df["price_close"] /= 100
     df.attrs["source"]   = f"yahoo:{ticker.strip()}"
     df.attrs["currency"] = currency.upper()
     df.to_parquet(_parquet_path(key))
@@ -253,6 +259,10 @@ def get_fx_series(from_ccy: str, to_ccy: str,
     Returns a Series indexed by date with the exchange rate.
     If from_ccy == to_ccy, returns a constant Series of 1.0 (no conversion needed).
     """
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        return bundle.fx(from_ccy.upper().strip(), to_ccy.upper().strip())
     from_ccy = from_ccy.upper().strip()
     to_ccy   = to_ccy.upper().strip()
 
@@ -265,7 +275,9 @@ def get_fx_series(from_ccy: str, to_ccy: str,
     _start = start or "2000-01-01"
     _end   = end   or datetime.date.today().isoformat()
 
-    # Use cached data if fresh enough (updated today)
+    from .amc_controls import record_market
+    cached_series = None
+    # A historical request can use a cache that already covers its endpoint.
     if cache_path.exists():
         try:
             cached = pd.read_parquet(cache_path)
@@ -273,10 +285,10 @@ def get_fx_series(from_ccy: str, to_ccy: str,
                 last_cached = cached.index.max().date()
                 today = datetime.date.today()
                 # Refresh only if more than 1 day old and market was open
-                if (today - last_cached).days <= 1:
-                    s = cached["rate"].dropna()
-                    s.index = pd.to_datetime(s.index).tz_localize(None)
-                    return s
+                cached_series = cached["rate"].dropna()
+                cached_series.index = pd.to_datetime(cached_series.index).tz_localize(None)
+                if (today - last_cached).days <= 1 or (end and last_cached >= datetime.date.fromisoformat(end)):
+                    return record_market(f"fx:{cache_key}", cached_series)
         except Exception:
             pass
 
@@ -296,11 +308,11 @@ def get_fx_series(from_ccy: str, to_ccy: str,
                 out = s.to_frame()
                 out.attrs["pair"] = f"{from_ccy}/{to_ccy}"
                 out.to_parquet(cache_path)
-                return s
+                return record_market(f"fx:{cache_key}", s)
         except Exception:
             continue
 
-    return pd.Series(dtype=float)   # not found — caller skips conversion
+    return record_market(f"fx:{cache_key}", cached_series) if cached_series is not None else pd.Series(dtype=float)
 
 
 def fx_rate_to(from_ccy: str | None, to_ccy: str = "EUR") -> float | None:
@@ -337,6 +349,10 @@ def fx_rate_to(from_ccy: str | None, to_ccy: str = "EUR") -> float | None:
 
 def get_currency(key: str) -> str:
     """Return the stored currency for a price series, or empty string."""
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        return bundle.load(key).attrs["currency"]
     p = _parquet_path(key)
     if not p.exists():
         return ""
@@ -375,10 +391,15 @@ def resolve_ticker(query: str) -> tuple[str, str]:
 
 def load_prices(key: str) -> pd.DataFrame:
     """Load a stored price series. Raises ValueError if not found."""
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        return bundle.load(key)
     p = _parquet_path(key)
     if not p.exists():
         raise ValueError(f"Prix non disponibles pour '{key}'. Importez d'abord la série.")
-    return pd.read_parquet(p)
+    from .amc_controls import record_market
+    return record_market(f"prices:{key}", pd.read_parquet(p))
 
 
 def spot_on_date(key: str, date_str: str) -> dict | None:
@@ -406,6 +427,10 @@ def yf_symbol(isin: str, name: str = "") -> str:
       2. yfinance ISIN checksum validation
       3. Name-based Yahoo Finance search as fallback
     """
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        raise ValueError(f"Source locale obligatoire : {isin}")
     # Check explicit ticker map first (e.g. IL0011334468 → CYBR)
     tm = _load_ticker_map()
     mapped = tm.get(_slug(isin))
@@ -437,6 +462,7 @@ def yf_symbol(isin: str, name: str = "") -> str:
 
 
 _split_calendar_cache: dict[str, dict] = {}
+_split_calendar_times: dict[str, float] = {}
 
 
 def get_split_calendar(isin: str, name: str = "") -> dict:
@@ -451,8 +477,15 @@ def get_split_calendar(isin: str, name: str = "") -> dict:
     so the split calendar and ticker resolution are fetched once, not
     duplicated per caller.
     """
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        if isin not in bundle.aliases:
+            raise ValueError(f"Splits absents du dossier : {isin}")
+        return bundle.splits[bundle.aliases[isin]]
     symbol = yf_symbol(isin, name)
-    if symbol not in _split_calendar_cache:
+    import time
+    if symbol not in _split_calendar_cache or time.monotonic() - _split_calendar_times.get(symbol, 0) > 3600:
         try:
             actions = yf.Ticker(symbol).actions
             if actions is None or actions.empty or "Stock Splits" not in actions.columns:
@@ -460,8 +493,9 @@ def get_split_calendar(isin: str, name: str = "") -> dict:
             else:
                 s = actions["Stock Splits"]
                 _split_calendar_cache[symbol] = {d.date(): float(r) for d, r in s[s != 0].items()}
-        except Exception:
-            _split_calendar_cache[symbol] = {}
+        except Exception as exc:
+            raise ValueError(f"Calendrier des splits indisponible : {symbol}") from exc
+        _split_calendar_times[symbol] = time.monotonic()
     return _split_calendar_cache[symbol]
 
 
@@ -479,7 +513,7 @@ def split_factor_between(isin: str, name: str,
     return factor
 
 
-def build_marks(components: list[dict], as_of_date: str, prod_ccy: str) -> dict[str, float]:
+def build_marks(components: list[dict], as_of_date: str, prod_ccy: str, *, price_basis: str = "total_return") -> dict[str, float]:
     """Return {isin: mark_in_prod_ccy} for open-position valuation (Block B).
 
     Source priority:
@@ -512,7 +546,11 @@ def build_marks(components: list[dict], as_of_date: str, prod_ccy: str) -> dict[
                 df = pd.read_parquet(p)
                 before = df[df.index <= as_of_ts]
                 if not before.empty:
-                    price_local = float(before["close"].iloc[-1])
+                    from .amc_controls import price_at
+                    if price_basis == "execution":
+                        price_local = price_at(execution_series(isin, name, as_of_date), as_of_ts)
+                    else:
+                        price_local = price_at(before["close"], as_of_ts)
                     stored_ccy = df.attrs.get("currency", "")
                     if stored_ccy:
                         price_ccy = stored_ccy.upper()
@@ -534,10 +572,13 @@ def build_marks(components: list[dict], as_of_date: str, prod_ccy: str) -> dict[
                     pass
             try:
                 hist = yf.Ticker(sym).history(
-                    start=start_str, end=end_str, auto_adjust=True
+                    start=start_str, end=end_str, auto_adjust=price_basis != "execution"
                 )
                 if not hist.empty:
-                    price_local = float(hist["Close"].iloc[-1])
+                    from .amc_controls import price_at
+                    price_local = price_at(hist["Close"], as_of_ts)
+                    if price_basis == "execution":
+                        price_local *= split_factor_between(isin, name, as_of_ts.date(), pd.Timestamp.today().date())
                     if is_gbx_ticker(sym, price_ccy):
                         price_local /= 100
             except Exception:
@@ -547,15 +588,14 @@ def build_marks(components: list[dict], as_of_date: str, prod_ccy: str) -> dict[
             continue
 
         # ── FX conversion to product currency ────────────────────────
-        if price_ccy == prod_ccy.upper() or not price_ccy or not prod_ccy:
+        if not price_ccy or not prod_ccy:
+            raise ValueError(f"Devise inconnue pour {isin}")
+        if price_ccy == prod_ccy.upper():
             marks[isin] = price_local
         else:
+            from .amc_controls import price_at
             fx_series = get_fx_series(price_ccy, prod_ccy.upper())
-            if not fx_series.empty:
-                before_fx = fx_series[fx_series.index <= as_of_ts]
-                fx = float(before_fx.iloc[-1]) if not before_fx.empty else 1.0
-            else:
-                fx = 1.0
+            fx = price_at(fx_series, as_of_ts)
             marks[isin] = price_local * fx
 
     return marks
@@ -571,6 +611,10 @@ def auto_populate_store(components: list[dict],
 
     Returns {isin: "existing" | "fetched" | "failed"}.
     """
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        return {}
     _end = datetime.date.today().isoformat()
     results: dict[str, str] = {}
 
@@ -617,3 +661,32 @@ def auto_populate_store(components: list[dict],
             results[isin] = "failed"
 
     return results
+
+
+def execution_series(isin: str, name: str, as_of: str) -> pd.Series:
+    """Price-only history in as-of share units; never use dividend-adjusted prices for lots."""
+    from .amc_controls import price_at
+    try:
+        df = load_prices(isin)
+    except ValueError:
+        df = pd.DataFrame()
+    if "price_close" in df.columns:
+        series = df["price_close"].copy()
+        adjustment_date = pd.Timestamp(df.attrs.get("adjustment_date", as_of)).date()
+    else:
+        ticker = yf_symbol(isin, name)
+        raw = yf.Ticker(ticker).history(start="2000-01-01", end=(pd.Timestamp(as_of) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"), auto_adjust=False)
+        if raw.empty:
+            raise ValueError(f"Cours hors dividendes indisponible pour {isin}")
+        series = raw["Close"].copy()
+        ccy = (df.attrs.get("currency") or get_currency(isin) or "").upper()
+        if is_gbx_ticker(ticker, ccy):
+            series /= 100
+        adjustment_date = pd.Timestamp.today().date()
+    series.index = pd.to_datetime(series.index).tz_localize(None).normalize()
+    series = series.loc[:as_of]
+    factor = split_factor_between(isin, name, pd.Timestamp(as_of).date(), adjustment_date)
+    series = series * factor
+    price_at(series, as_of)
+    from .amc_controls import record_market
+    return record_market(f"execution:{isin}:{as_of}", series)

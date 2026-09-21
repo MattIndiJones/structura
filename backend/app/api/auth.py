@@ -236,6 +236,8 @@ class RegisterRequest(BaseModel):
 
 @router.post("/register", status_code=201)
 def register(body: RegisterRequest, session: Annotated[Session, Depends(get_session)]):
+    if os.environ.get("STRUCTURA_ALLOW_REGISTRATION", "").lower() not in ("1", "true", "yes"):
+        raise HTTPException(403, "Inscription publique désactivée. Contactez un administrateur.")
     if len(body.username) < 3:
         raise HTTPException(status_code=400, detail="L'identifiant doit faire au moins 3 caractères")
     if len(body.password) < 6:

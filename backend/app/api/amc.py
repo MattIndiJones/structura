@@ -10,11 +10,12 @@ except ImportError:
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Any
 import io
 
-from .auth import get_current_user
+from .auth import get_current_user, get_current_admin
+from .amc_access import study_folder, study_slot
 from ..db.models import User
 from ..core.amc_engine import (
     parse_amc_excel,
@@ -48,11 +49,13 @@ def get_ff_status(current: Annotated[User, Depends(get_current_user)]):
 @router.post("/ff-refresh")
 def refresh_ff(
     series_key: str,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_admin)],
 ):
     """Download from Ken French library and persist locally. Call once per series."""
     try:
         return ff_refresh(series_key)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(422, str(e))
     except Exception as e:
@@ -70,7 +73,9 @@ async def upload_amc(
     current: Annotated[User, Depends(get_current_user)] = None,
 ):
     """Parse the AMC diagnostic Excel and return structured data."""
-    content = await file.read()
+    content = await file.read(20 * 1024 * 1024 + 1)
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Fichier trop volumineux (20 Mo maximum).")
     try:
         result = parse_amc_excel(io.BytesIO(content))
         return result
@@ -79,14 +84,15 @@ async def upload_amc(
 
 
 class AnalyzeRequest(BaseModel):
-    nav: list
+    nav: list = Field(max_length=20000)
     transactions: list = []
     composition: list = []
     exposures: dict = {}
     ff_series: str = "Global_3F"
     selected_factors: List[str] = ["Mkt-RF", "SMB", "HML"]
     benchmark_ticker: str = "IGF"
-    rolling_window: int = 60
+    rolling_window: int = Field(60, ge=20, le=2520)
+    nav_currency: str = "USD"
 
 
 class ExportPdfRequest(BaseModel):
@@ -110,7 +116,10 @@ def analyze(
             selected_factors=req.selected_factors,
             benchmark_ticker=req.benchmark_ticker,
             rolling_window=req.rolling_window,
+            nav_currency=req.nav_currency,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(422, str(e))
     except Exception as e:
@@ -190,7 +199,8 @@ def preview_synthesis(req: SynthesizeRequest, current: Annotated[User, Depends(g
 def synthesize_study(req: SynthesizeRequest, current: Annotated[User, Depends(get_current_user)]):
     try:
         result = generate_text(synthesis_prompt(req), req)
-        return {**result, "synthesis": result["text"], "payload": result["prompt"]["user"]}
+        return {**result, "synthesis": result["text"], "payload": result["prompt"]["user"],
+                "study_hash": req.study_result.get("provenance", {}).get("result_hash")}
     except LlmError as e:
         raise HTTPException(422, str(e))
 
@@ -223,7 +233,7 @@ class StudyExportRequest(BaseModel):
     attribution_result: Optional[dict] = None
     brinson_result:      Optional[dict] = None
     market_shocks_result: Optional[dict] = None
-    company_name:       str = "TP Advisory Services"
+    company_name:       str = ""
     client_name:        str = ""
     include_annexes:    bool = True
     include_brinson:    bool = False
@@ -255,7 +265,9 @@ def study_detect(
     if not folder:
         raise HTTPException(422, "Champ 'folder' requis.")
     try:
-        return detect_study_folder(folder)
+        return detect_study_folder(study_folder(folder, current))
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(422, str(e))
     except Exception as e:
@@ -299,27 +311,13 @@ def compute_market_shocks_endpoint(
     manifest.blocks.K_marketshocks was pre-selected — otherwise computed here,
     from its own tab, on an already-completed study.
     """
-    import glob
-    from pathlib import Path
-    from ..core.amc_orderbook import load_orders, apply_split_corrections
+    from ..core.amc_controls import source_orders
     from ..core.amc_marketshocks import compute_market_shocks
-
-    base = Path(req.folder)
-    paths: list[str] = []
-    seen: set[str] = set()
-    for p in (list(base.glob("* Data*.json")) + list(base.glob("*Data*.json"))
-              + list(base.glob("merged-*.json"))):
-        rp = str(p.resolve())
-        if rp not in seen:
-            seen.add(rp)
-            paths.append(str(p))
-    if not paths:
-        raise HTTPException(422, f"Aucun fichier d'ordres JSON trouvé dans {req.folder}")
-
     meta = req.study_result.get("meta") or {}
-    orders = load_orders(paths)
-    as_of = orders[-1]["date"] if orders else None
-    orders = apply_split_corrections(orders, as_of)
+    try:
+        orders = source_orders(req.study_result)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
     try:
         result = compute_market_shocks(orders, meta, block_h=req.study_result.get("block_h"))
@@ -340,7 +338,11 @@ def study_run(
     Returns a rich result dict covering the enabled blocks A/B/C/D + confidence.
     """
     try:
-        return run_study(req.manifest, req.folder)
+        folder = study_folder(req.folder, current)
+        with study_slot():
+            return run_study(req.manifest, folder)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(422, str(e))
     except Exception as e:

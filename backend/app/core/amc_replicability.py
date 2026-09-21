@@ -48,7 +48,8 @@ def compute_replicability(block_a: dict) -> dict:
 
     # ── 1. Bêtas et paramètres de régression ─────────────────────────
     factor_rows = regression.get("factors") or []
-    betas: dict[str, float] = {f["name"]: float(f["beta"]) for f in factor_rows}
+    calculation = regression.get("calculation") or {}
+    betas: dict[str, float] = calculation.get("betas") or {f["name"]: float(f["beta"]) for f in factor_rows}
 
     if not betas:
         return {
@@ -56,9 +57,9 @@ def compute_replicability(block_a: dict) -> dict:
             "error": "Aucun bêta factoriel dans la régression Bloc A.",
         }
 
-    r2 = float(regression.get("r2") or 0.0)
+    r2 = float(calculation.get("r2", regression.get("r2")) or 0.0)
     alpha_daily = float(regression.get("alpha_daily") or 0.0)
-    alpha_tstat = float(regression.get("alpha_tstat") or 0.0)
+    alpha_tstat = float(calculation.get("alpha_tstat", regression.get("alpha_tstat")) or 0.0)
     alpha_ann_pct = float(regression.get("alpha_ann_pct") or 0.0)
 
     # ── 2. Reconstruction des séries réplicant et AMC ─────────────────
@@ -94,14 +95,14 @@ def compute_replicability(block_a: dict) -> dict:
 
     replicant_total_pct = round((p_rep / 100.0 - 1.0) * 100.0, 2)
     amc_total_pct = round((p_amc / 100.0 - 1.0) * 100.0, 2)
-    alpha_gap_pct = round(amc_total_pct - replicant_total_pct, 2)
+    alpha_gap_pct = round((p_amc - p_rep), 2)
 
     # ── 3. Décomposition par facteur ──────────────────────────────────
     factor_contributions = _factor_contributions(data_used, betas)
 
     # ── 4. Score de réplicabilité + IC 95% ───────────────────────────
     n_obs = len(data_used)
-    score, score_components = _score(r2, replicant_total_pct, amc_total_pct, alpha_tstat)
+    score, score_components = _score(r2, p_rep - 100, p_amc - 100, alpha_tstat)
 
     # Intervalle de confiance basé sur l'erreur d'échantillonnage du R²
     # se(R²) ≈ 2 × √(R²) × (1 − R²) / √n  (méthode delta)
@@ -122,6 +123,8 @@ def compute_replicability(block_a: dict) -> dict:
         "available": True,
         # Score synthétique
         "score": score,
+        "score_ci_kind": "sensitivity_r2_only",
+        "score_ci_note": "Sensibilité approximative au seul R² ; pas un intervalle de confiance du score global.",
         "score_ci_low":  score_ci_low,
         "score_ci_high": score_ci_high,
         "r2_se_pct": round(r2_se * 100.0, 1),
@@ -141,13 +144,15 @@ def compute_replicability(block_a: dict) -> dict:
         "amc_nav": amc_nav,
         # Décomposition factorielle
         "factor_contributions": factor_contributions,
+        "factor_contributions_note": "Performances de chaque exposition capitalisée isolément, non additives (interactions de capitalisation et taux sans risque exclus).",
         "factors_used": list(betas.keys()),
         # Période
         "period_start": dates[0] if dates else None,
         "period_end": dates[-1] if dates else None,
         "n_obs": n_obs,
         # Texte
-        "interpretation": interpretation,
+        "interpretation": "Explication factorielle rétrospective ajustée sur le même échantillon. Aucun portefeuille négociable ni performance hors échantillon n’est démontré. Les contributions factorielles capitalisées isolément ne sont pas additives. " + interpretation,
+        "investable": False, "evaluation": "in_sample",
     }
 
 
@@ -196,14 +201,11 @@ def _score(r2: float, rep_total: float, amc_total: float,
     elif amc_total < 0 and rep_total < 0:
         ratio = rep_total / amc_total  # positif car même signe
         c2 = min(ratio, 1.0 / ratio) * 100.0
-    elif rep_total <= 0 < amc_total:
-        # Réplicant négatif, AMC positif → alpha compense les facteurs → peu réplicable
-        c2 = 0.0
-    elif amc_total <= 0 < rep_total:
-        # Réplicant positif, AMC négatif → facteurs ont sur-performé → très réplicable
+    elif amc_total == 0 and rep_total == 0:
         c2 = 100.0
     else:
-        c2 = 50.0
+        # Opposite signs or one zero cannot represent performance replication.
+        c2 = 0.0
     c2 = max(0.0, min(100.0, c2))
 
     # C3 — alpha non-significatif → score élevé (stratégie réplicable)
@@ -221,14 +223,14 @@ def _score(r2: float, rep_total: float, amc_total: float,
 
 def _profile(score: int) -> tuple[str, str]:
     if score >= 80:
-        return "Quasi-systématique", "blue"
+        return "Explication factorielle très élevée", "blue"
     if score >= 60:
-        return "Principalement systématique", "blue"
+        return "Explication factorielle élevée", "blue"
     if score >= 40:
-        return "Mixte", "amber"
+        return "Explication factorielle intermédiaire", "amber"
     if score >= 20:
-        return "Principalement discrétionnaire", "amber"
-    return "Pur discrétionnaire", "emerald"
+        return "Explication factorielle faible", "amber"
+    return "Explication factorielle très faible", "emerald"
 
 
 def _interpretation(
@@ -253,8 +255,8 @@ def _interpretation(
     if gap > 0.5 and alpha_sig:
         parts.append(
             f"L'alpha annualisé de {alpha_ann_pct:+.2f}% est statistiquement significatif "
-            f"(t = {alpha_tstat:.2f}) : le gérant génère une valeur ajoutée réelle au-delà "
-            f"des primes factorielles."
+            f"(t = {alpha_tstat:.2f}) sous les hypothèses de cette régression, au-delà "
+            f"des primes factorielles. Cela ne démontre pas un talent durable."
         )
     elif gap > 0.5 and not alpha_sig:
         parts.append(
@@ -269,13 +271,13 @@ def _interpretation(
 
     if score >= 60:
         parts.append(
-            "Implication pratique : un panier d'ETFs factoriels couvre l'essentiel du profil "
+            "Lecture descriptive : les facteurs expliquent une part importante du profil "
             "risque/rendement de cette stratégie."
         )
     elif score < 40:
         parts.append(
-            "Implication pratique : la stratégie présente un fort caractère discrétionnaire — "
-            "le gérant s'écarte significativement des primes factorielles documentées."
+            "Lecture descriptive : la stratégie est peu expliquée par ces facteurs — "
+            "ce constat ne démontre pas une compétence du gérant."
         )
 
     return " ".join(parts)

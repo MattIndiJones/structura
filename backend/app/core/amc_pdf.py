@@ -1151,7 +1151,7 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
                         attribution_result: dict | None = None,
                         brinson_result: dict | None = None,
                         market_shocks_result: dict | None = None,
-                        company_name: str = "TP Advisory Services",
+                        company_name: str = "",
                         client_name: str = "",
                         include_annexes: bool = True) -> bytes:
     """Generate the extended report from a run_study() result.
@@ -1202,6 +1202,11 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
         story.append(PageBreak())
 
     story.append(space(6))
+    from xml.sax.saxutils import escape
+    provenance = study_result.get("provenance") or {}
+    story.append(Paragraph(escape(f"Arrêté : {meta.get('as_of', '—')} · Méthode : {provenance.get('method_version', 'ancienne')} · Empreinte : {provenance.get('result_hash', 'non disponible')}"), S_SMALL))
+    for issue in (study_result.get("data_quality") or {}).get("issues", []):
+        story.append(Paragraph(escape("Revue requise : " + str(issue)), S_SMALL))
 
     # Performance totale depuis la NAV de départ
     nav_s = meta.get("nav_start_value")
@@ -1307,7 +1312,7 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
         "qu'en mode inventaire clampé, mais restent dépendantes des hypothèses de "
         "reconstruction du stock initial."
     )
-    if block_b:
+    if block_b and block_b.get("available") is not False:
         story.append(PageBreak())
         section("B — Attribution de Performance par Sous-jacent")
         if meta.get("recon_mode") == "t0_synthetic":
@@ -1316,7 +1321,7 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
         _append_block_b(story, block_b, ccy, space, meta)
 
     # ── BLOC C — Trading / Turnover ─────────────────────────────────────
-    if block_c:
+    if block_c and block_c.get("available") is not False:
         story.append(PageBreak())
         section("C — Qualité des Décisions de Trading & Turnover")
         if meta.get("recon_mode") == "t0_synthetic":
@@ -1325,7 +1330,7 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
         _append_block_c(story, block_c, ccy, space, meta)
 
     # ── BLOC D — Comportement ───────────────────────────────────────────
-    if block_d:
+    if block_d and block_d.get("available") is not False:
         story.append(PageBreak())
         section("D — Comportement du Gérant : Conviction vs Incertitude")
         _append_block_d(story, block_d, space, meta)
@@ -1403,20 +1408,6 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
     # ── CONFIANCE & LIMITES ─────────────────────────────────────────────
     if confidence:
         story.append(PageBreak())
-        # Rebuild confidence with all available data
-        from .amc_confidence import build_confidence
-        blocks_run = set(meta.get("blocks_run", []))
-        block_a_r  = study_result.get("block_a")
-        n_orders   = meta.get("n_orders", 0)
-        confidence = build_confidence(
-            blocks_run, block_a_r, n_orders,
-            block_e_result=study_result.get("block_e"),
-            attribution_result=attribution_result,
-            block_f_result=block_f,
-            block_h_result=study_result.get("block_h"),
-            block_i_result=study_result.get("block_i"),
-            block_j_result=study_result.get("block_j"),
-        )
         _append_confidence(story, confidence, space)
 
     # ── DISCLAIMER ──────────────────────────────────────────────────────
@@ -1482,11 +1473,11 @@ def _append_block_a_sections(story, net, gross, fee_drag, meta, space):
     if gross and gross.get("regression"):
         g_reg = gross["regression"]
         n_reg = reg
-        story.append(Paragraph("Alpha brut vs net (ajout des frais en accrual quotidien)", S_SECTION))
+        story.append(Paragraph("Alpha net et ajusté des seuls frais de gestion (taux annuel / 252)", S_SECTION))
         story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
         story.append(space(6))
         gn_data = [
-            [_p("Métrique", S_HDR), _p("Net (client)", S_HDR), _p("Brut (gérant)", S_HDR),
+            [_p("Métrique", S_HDR), _p("Net (client)", S_HDR), _p("Ajusté gestion", S_HDR),
              _p("Delta (frais)", S_HDR)],
             [_p("Alpha ann.", S_BODY),
              _pn(_pct(n_reg.get("alpha_ann_pct"), 2)),
@@ -1645,7 +1636,7 @@ def _append_block_b(story, b, ccy, space, meta=None):
          "#10b981" if (totals.get("unreal_pnl") or 0) >= 0 else "#ef4444"),
         (f"P&L total{ccy_lbl}",  _fmt_prod(totals.get("total_pnl")),
          "#10b981" if (totals.get("total_pnl") or 0) >= 0 else "#ef4444"),
-        ("Part FX réalisé", f"{fx_share:.1f}%" if fx_share is not None else "—", "#f59e0b"),
+        ("FX / P&L réalisé signé", f"{fx_share:+.2f}%" if fx_share is not None else "—", "#f59e0b"),
     ]))
     story.append(space(10))
 
@@ -1828,11 +1819,11 @@ def _append_block_d(story, d, space, meta=None):
 
     # ── Intro conceptuel ────────────────────────────────────────────────
     story.append(Paragraph(
-        f"<b>Lecture de la matrice :</b> Chaque position clôturée est classée sur deux axes — "
-        f"la <b>conviction</b> (poids &gt; {conv_pct}% du portefeuille ET durée &gt; {lt_days} jours) "
+        f"<b>Lecture de la matrice :</b> Chaque titre est classé sur deux axes — "
+        f"la <b>conviction</b> (poids courant ≥ {conv_pct}% OU durée maximale observée ≥ {lt_days} jours) "
         f"et le <b>résultat</b> (P&amp;L positif ou négatif). "
-        f"Un gérant discipliné maximise les quadrants gauche (forte conviction) "
-        f"et positifs (haut), et minimise les positions en bas à droite (incertitude + perte).",
+        f"Ce classement descriptif ne mesure ni les intentions du gérant, "
+        f"ni un alpha attribuable à la conviction. Le résultat agrège réalisé et latent.",
         _sty("d_intro", fontSize=7.5, textColor=colors.HexColor("#94a3b8"),
              leading=10, spaceAfter=8)))
 
@@ -1931,16 +1922,16 @@ def _append_block_d(story, d, space, meta=None):
         win_pct = round(winners / total * 100)
         unc_pct = round(counts.get("uncertainty",0) / total * 100)
         conv_win_pct = round(counts.get("conviction_winners",0) / total * 100)
-        parts = [f"Sur {total} positions clôturées : {winners} gagnantes ({win_pct}%)."]
+        parts = [f"Sur {total} titres classés : {winners} gagnants ({win_pct}%)."]
         if conv_win_pct >= 25:
-            parts.append(f"Le gérant génère de la valeur avec conviction ({conv_win_pct}% de paris gagnants assumés).")
+            parts.append(f"{conv_win_pct}% des titres combinent le critère descriptif de conviction et un résultat positif.")
         if unc_pct > 35:
-            parts.append(f"⚠ {unc_pct}% des positions sont en zone d'incertitude (faible conviction + perte) — signal de décisions non structurées.")
+            parts.append(f"⚠ {unc_pct}% des positions sont en zone d'incertitude (faible conviction + perte) — classement descriptif, sans conclusion sur les intentions.")
         elif unc_pct < 20:
-            parts.append(f"Le taux d'incertitude ({unc_pct}%) est faible — processus de décision discipliné.")
+            parts.append(f"{unc_pct}% des titres combinent faible conviction et perte ; aucune conclusion sur les intentions.")
         stub_pnl = pnl.get("stubborn_losers") or 0
         if counts.get("stubborn_losers",0) > 0 and stub_pnl < -50000:
-            parts.append(f"Les entêtements coûteux représentent {_fmt_prod(stub_pnl)} — biais comportemental à surveiller.")
+            parts.append(f"Les entêtements coûteux représentent {_fmt_prod(stub_pnl)} — résultat à examiner avec les décisions documentées du gérant.")
         story.append(space(6))
         story.append(Paragraph(" ".join(parts),
                                _sty("d_interp", fontSize=7.5, textColor=colors.HexColor("#94a3b8"),
@@ -2026,8 +2017,7 @@ def _append_block_g_brinson(story, bg, space):
             f"est calculé sur {n_avail}/{n_total} titres disponibles dans le Price Store. "
             f"NAV réelle sur la même période : <b>{nav_r:+.2f}%</b>. "
             f"Écart de réconciliation : <font color='{gap_col}'><b>{recon:+.2f}%</b></font>. "
-            f"Causes : titres absents du Price Store, différences de pondération, "
-            f"FX, dividendes et frais non capturés par les séries de prix."
+            f"Le panier statique brut et la NAV nette gérée suivent des allocations, des frais et des politiques de dividendes différents. Cet écart ne constitue pas une erreur de rapprochement comptable."
         )
         story.append(Paragraph(recon_txt,
             _sty("recon", fontSize=7.5, textColor=colors.HexColor("#94a3b8"),
@@ -2247,7 +2237,7 @@ def _append_block_f_replicability(story, block_f, space):
     score_color = "#10b981" if score < 40 else "#f59e0b" if score < 70 else "#60a5fa"
     story.append(_kpi_row([
         ("Score réplicabilité", f"{score}/100", score_color),
-        ("IC 95% score",        f"[{ci_low} – {ci_high}]", "#64748b"),
+        ("Sensibilité au R²",        f"[{ci_low} – {ci_high}]", "#64748b"),
         ("R² factoriel",        f"{r2_pct:.1f}%", "#60a5fa"),
         ("Écart AMC vs réplicant", f"{gap:+.2f}%", "#10b981" if gap >= 0 else "#ef4444"),
     ]))
@@ -2368,7 +2358,7 @@ def _append_block_f_replicability(story, block_f, space):
     story.append(space(3))
     story.append(Paragraph(
         "Score = 40% × R² + 35% × min(Perf_réplicant / Perf_AMC, 1) + 25% × (1 − min(|t_alpha|/3, 1))  "
-        f"  →  {score}/100   IC 95% : [{ci_low} – {ci_high}]  "
+        f"  →  {score}/100   Sensibilité au R² : [{ci_low} – {ci_high}]  "
         "(IC basé sur l'erreur d'échantillonnage du R² par méthode delta.)",
         _sty("sc_form", fontSize=7.5, textColor=C_FAINT, leading=11)))
     story.append(space(3))
@@ -2526,7 +2516,7 @@ def _append_block_e_vag(story, tva, attribution, meta, space):
     # ── Attribution si disponible ──────────────────────────────────────
     if attribution and not attribution.get("error"):
         story.append(space(14))
-        story.append(Paragraph("Attribution — Timing des achats & Sélection des sorties", S_SECTION))
+        story.append(Paragraph("Contributions rétrospectives des achats et ventes", S_SECTION))
         story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
         story.append(space(6))
 
@@ -2536,11 +2526,11 @@ def _append_block_e_vag(story, tva, attribution, meta, space):
         vag_pct = attribution.get("vag_pct", 0) or 0
 
         story.append(_kpi_row([
-            ("Timing achats",     f"{t_pct:+.2f}%",
+            ("Contribution achats",     f"{t_pct:+.2f}%",
              "#10b981" if t_pct >= 0 else "#ef4444"),
-            ("Sélection sorties", f"{e_pct:+.2f}%",
+            ("Contribution ventes", f"{e_pct:+.2f}%",
              "#10b981" if e_pct >= 0 else "#ef4444"),
-            ("Val. Ajoutée Gest.", f"{vag_pct:+.2f}%",
+            ("Total prix / AUM", f"{vag_pct:+.2f}%",
              "#f59e0b"),
             ("AUM référence",     _fmt_prod(aum_attr, ccy), "#94a3b8"),
         ]))
@@ -2557,8 +2547,8 @@ def _append_block_e_vag(story, tva, attribution, meta, space):
             story.append(Paragraph("Contribution par sous-jacent (% AUM)", S_SECTION))
             story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
             story.append(space(4))
-            ua_hdr = [_p("Titre", S_HDR), _p("Timing achats", S_HDR),
-                      _p("Sél. sorties", S_HDR), _p("Total", S_HDR)]
+            ua_hdr = [_p("Titre", S_HDR), _p("Contribution achats", S_HDR),
+                      _p("Contrib. ventes", S_HDR), _p("Total", S_HDR)]
             ua_data = [ua_hdr]
             for r in per_u[:25]:
                 def _vc(v):
@@ -2608,7 +2598,7 @@ def _append_block_e_vag(story, tva, attribution, meta, space):
 
 
 def _append_confidence(story, confidence, space):
-    story.append(Paragraph("Confiance dans les Résultats & Limites des Données", S_SECTION))
+    story.append(Paragraph("Couverture documentaire & Limites des Données", S_SECTION))
     story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
     story.append(space(6))
 
@@ -2643,7 +2633,7 @@ def _append_confidence(story, confidence, space):
     story.append(badge)
     story.append(space(8))
     # Label below the badge
-    story.append(Paragraph("Confiance globale estimée",
+    story.append(Paragraph("Couverture documentaire estimée",
                             _sty("ov_lbl", fontSize=7, textColor=C_FAINT,
                                  alignment=TA_LEFT)))
     story.append(space(10))
@@ -2653,7 +2643,7 @@ def _append_confidence(story, confidence, space):
         story.append(Paragraph("Tableau de confiance par dimension", S_SECTION))
         story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
         story.append(space(6))
-        hdr = [_p("Dimension", S_HDR), _p("✓", S_HDR), _p("Confiance", S_HDR),
+        hdr = [_p("Dimension", S_HDR), _p("✓", S_HDR), _p("Couverture", S_HDR),
                _p("Données manquantes / limites", S_HDR)]
         tbl_data = [hdr]
         for r in rows_conf:
@@ -2665,13 +2655,13 @@ def _append_confidence(story, confidence, space):
                 _p(r.get("dimension", ""), S_BODY),
                 Paragraph(feas, _sty("fe", alignment=TA_CENTER, fontName="Helvetica-Bold",
                           textColor=colors.HexColor("#10b981") if r.get("feasible") else C_FAINT)),
-                Paragraph(f"{conf_v:.0f}%" if conf_v else "N/A",
+                Paragraph(f"{conf_v:.0f}%" if r.get("feasible") else "N/A",
                           _sty("cv", alignment=TA_RIGHT, fontName="Helvetica-Bold",
                                fontSize=8, textColor=ccol)),
-                _p(miss[:90] + ("…" if len(miss) > 90 else ""), S_SMALL),
+                _p(miss, S_SMALL),
             ])
         story.append(_tbl(tbl_data,
-            col_widths=[5.8*cm, 1.2*cm, 1.9*cm, 8.5*cm]))
+            col_widths=[5.8*cm, 1.0*cm, 2.3*cm, 8.3*cm]))
         story.append(space(6))
         story.append(Paragraph(confidence.get("coverage_note", ""), S_SMALL))
 
@@ -3286,7 +3276,7 @@ _DIM_FRIENDLY = {
     "vag":           "Référentiel Inertiel / VAG (Bloc E)",
     "risk_mgmt":     "Gestion du risque (Bloc J)",
     "timing":        "Timing des ordres (Bloc H)",
-    "conviction":    "Discipline de conviction (Bloc D)",
+    "conviction":    "Taux de titres gagnants (Bloc D)",
 }
 _DIM_COLORS_HEX = {
     "alpha":         "#60a5fa",
@@ -3538,7 +3528,7 @@ def _append_block_j_rms(story, bj: dict, space, meta=None):
         ("Score global /100",  str(score),    _sc_col(score)),
         ("Score brut /100",    str(score_raw), "#64748b"),
         ("Cap fiabilité",      f"{cap}/100",   "#64748b"),
-        ("Benchmark",          "✓" if bm_ok else "N/D", "#10b981" if bm_ok else "#64748b"),
+        ("Benchmark",          "Disponible" if bm_ok else "N/D", "#10b981" if bm_ok else "#64748b"),
     ], n_cols=4))
     story.append(space(10))
 
@@ -4011,9 +4001,8 @@ def _append_disclaimer(story, space):
         "Fallback yfinance si le titre n'est pas encore dans le store. "
         "Un seul mark courant par titre — pas de décomposition prix/FX pour les positions ouvertes.",
         "",
-        "<b>Brut vs net :</b> la série brute est obtenue par gross add-back en accrual "
-        "quotidien du taux de frais annuel fourni dans le manifeste (terme sheet). "
-        "Le delta brut−net est déterministe.",
+        "<b>Ajout des seuls frais de gestion :</b> taux annuel / 252 ajouté aux rendements. "
+        "Frais de performance et de transaction non réintégrés : il ne s’agit pas d’une NAV brute comptable.",
         "",
         "<b>Matrice conviction × résultat :</b> le classement d'une position dans un "
         "quadrant dépend des seuils renseignés dans le manifeste (jours long terme, poids "

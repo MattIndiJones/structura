@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Optional
 
 from typing import List, Optional as Opt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import Literal
 
 # ── Manifest schema ────────────────────────────────────────────────────
 
@@ -31,15 +32,18 @@ TODO = "<À COMPLÉTER>"
 class ProductInfo(BaseModel):
     isin: str
     name: str = ""
-    currency: str = "CHF"          # product (NAV) currency
+    currency: str = Field(default="CHF", pattern=r"^[A-Z]{3}$")          # product (NAV) currency
     theme: str = ""                # e.g. "New Financials", "Infrastructures"
 
 
 class FileRoles(BaseModel):
     """Paths are relative to the study folder (manifest lives there)."""
+    market_data: str = ""
+    dividends: str = ""
+    cash_events: str = ""
     composition: str = ""          # the "* Def.txt" snapshot
     nav_timeseries: str = ""       # the "* timeseries *.csv" NAV history
-    orders: List[str] = Field(default_factory=list)  # order-book JSON files
+    orders: List[str] = Field(default_factory=list, max_length=100)  # order-book JSON files
 
 
 class TermsheetPosition(BaseModel):
@@ -52,33 +56,82 @@ class TermsheetPosition(BaseModel):
     ccy: str = "USD"                 # position currency (ISO 3-letter code)
 
 
+from .amc_dividends import DividendPolicy
+
+
+class ReferencePortfolio(BaseModel):
+    """Passive comparison basket, never seeded into the actual FIFO portfolio."""
+    start_date: str
+    positions: List[TermsheetPosition] = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_reference(self):
+        from datetime import date
+        import math
+        date.fromisoformat(self.start_date)
+        if len({p.isin for p in self.positions}) != len(self.positions):
+            raise ValueError("ISIN dupliqué dans le panier de référence")
+        if sum(p.weight_pct for p in self.positions) > 100.01:
+            raise ValueError("Poids du panier de référence supérieurs à 100 %")
+        for p in self.positions:
+            if not all(math.isfinite(x) for x in (p.weight_pct, p.qty_per_cert, p.fixing_price)) or not 0 < p.weight_pct <= 100 or p.qty_per_cert <= 0 or p.fixing_price < 0:
+                raise ValueError("Position de référence invalide")
+        return self
+
+
 class ManualParams(BaseModel):
     """Inputs that are NOT present in the raw exports — must be supplied."""
-    management_fee_pct: Optional[float] = None   # term sheet; p.a. %, for gross add-back
-    perf_fee_pct: Optional[float] = None         # term sheet; % of gains above high-water-mark,
+    model_config = ConfigDict(allow_inf_nan=False)
+    reference_portfolio: Optional[ReferencePortfolio] = None
+    dividends: DividendPolicy = Field(default_factory=DividendPolicy)
+    as_of: Optional[str] = None
+    management_fee_basis: Literal["nav_252", "previous_nav_act365", "current_nav_act365", "previous_nav_act360", "current_nav_act360"] = "nav_252"
+    performance_crystallization: Literal["daily", "monthly", "quarterly", "annual"] = "daily"
+    valuation_source: Literal["market", "composition"] = "market"
+    orders_split_adjusted: bool = False
+    management_fee_pct: Optional[float] = Field(default=None, ge=0, lt=100)   # term sheet; p.a. %, for gross add-back
+    perf_fee_pct: Optional[float] = Field(default=None, ge=0, lt=100)         # term sheet; % of gains above high-water-mark,
                                                   # crystallised daily on new highs (NAV reconciliation)
-    txn_cost_pct: Optional[float] = None         # term sheet; % of notional per rebalancing trade
+    txn_cost_pct: Optional[float] = Field(default=None, ge=0, lt=100)         # term sheet; % of notional per rebalancing trade
                                                   # (NAV reconciliation)
     benchmark_ticker: str = "ACWI"               # thematic benchmark (2nd regression)
-    factor_model: str = "FF5+MOM"                # FF3 | FF5 | FF5+MOM
+    factor_model: Literal["FF3", "FF5", "FF5+MOM"] = "FF5+MOM"                # FF3 | FF5 | FF5+MOM
     ff_series: str = "Developed_5F"              # key into amc_engine.FF_SERIES
     selected_factors: Optional[List[str]] = None # override factor_model with an explicit list
-    rolling_window: int = 60                     # rolling regression window (days)
+    rolling_window: int = Field(default=60, ge=20, le=2520)                     # rolling regression window (days)
     risk_free: str = "auto"                      # "auto" = use FF RF column
-    long_term_holding_days: int = 180            # conviction vs tactical cutoff (Bloc D)
-    conviction_weight_pct: float = 4.0           # weight above which a name = high conviction
+    long_term_holding_days: int = Field(default=180, ge=1, le=36500)            # conviction vs tactical cutoff (Bloc D)
+    conviction_weight_pct: float = Field(default=4.0, ge=0, le=100)           # weight above which a name = high conviction
     # FIFO reconstruction mode:
     #   "t0_synthetic" — default: inject synthetic BUY orders at NAV inception date using yfinance
     #                    prices; gives a more realistic P&L at the cost of estimated entries
     #   "strict"       — clamp excess sells (P&L = 0 for pre-carnet positions), fully auditable
-    recon_mode: str = "t0_synthetic"
+    recon_mode: Literal["strict", "t0_synthetic"] = "strict"
     # Référentiel Inertiel (Bloc E) — sourced from the term sheet PDF
-    n_certs: int = 75_000                                               # certificats à l'émission
-    termsheet_positions: List[TermsheetPosition] = Field(default_factory=list)  # compositions TS
+    n_certs: int = Field(default=75_000, gt=0)                                               # certificats à l'émission
+    termsheet_positions: List[TermsheetPosition] = Field(default_factory=list, max_length=500)  # compositions TS
+
+
+    @model_validator(mode="after")
+    def validate_economics(self):
+        import math
+        if self.as_of:
+            from datetime import date
+            date.fromisoformat(self.as_of)
+        for p in self.termsheet_positions:
+            if not all(math.isfinite(x) for x in (p.weight_pct, p.qty_per_cert, p.fixing_price)) or not 0 <= p.weight_pct <= 100 or p.qty_per_cert <= 0 or p.fixing_price < 0:
+                raise ValueError("Position de term sheet invalide")
+        if sum(p.weight_pct for p in self.termsheet_positions) > 100.01:
+            raise ValueError("Les poids initiaux dépassent 100 %")
+        if len({p.isin for p in self.termsheet_positions}) != len(self.termsheet_positions):
+            raise ValueError("ISIN dupliqué dans le panier initial")
+        return self
 
 
 class BlockToggles(BaseModel):
     """Run the complete study or any subset. B/C/D share the order-book parser."""
+    E_bh: bool = True
+    G_brinson: bool = False
     A_factor: bool = True          # Fama-French / style regression
     B_attribution: bool = True     # P&L by underlying (realised + latent)
     C_trading: bool = True         # turnover / round-trips / decision quality
@@ -292,6 +345,16 @@ def detect_study_folder(folder: str) -> dict:  # noqa: C901
     if not p.is_dir():
         raise ValueError(f"Dossier introuvable : {folder}")
 
+    saved = p / "manifest.json"
+    if saved.is_file():
+        from .amc_controls import resolve_file
+        with open(resolve_file(folder, "manifest.json"), encoding="utf-8") as fh:
+            manifest = StudyManifest.model_validate(json.load(fh))
+        for role, value in manifest.files.model_dump().items():
+            for name in value if isinstance(value, list) else [value]:
+                if name:
+                    resolve_file(folder, name)
+        return {"manifest": manifest.model_dump(), "missing_manual_fields": [], "folder": str(p)}
     isin = p.name  # folders are named by ISIN
 
     def _rel(path: str) -> str:

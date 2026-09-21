@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 from pathlib import Path
 from typing import Union
 
@@ -52,23 +53,29 @@ def _parse_date(raw: str | None) -> datetime.date | None:
         return None
 
 
-def _order_from_item(item: dict) -> Order | None:
+def _order_from_item(item: dict, prod_ccy: str | None = None) -> Order | None:
     """Parse one order dict into an Order.  Returns None if data is incomplete."""
     state = (item.get("state") or "").strip()
-    if state and state.lower() not in ("done", "executed", "filled", "completed"):
+    if state.lower() not in ("done", "executed", "filled", "completed"):
         return None  # skip pending / cancelled
 
-    qty = _f(item.get("executedQuantity")) or _f(item.get("orderedQuantity"))
+    qty = _f(item.get("executedQuantity"))
     if qty is None or qty == 0:
         return None
 
+    if not math.isfinite(qty):
+        raise ValueError("Quantité exécutée non finie")
     ep = item.get("executionPrice") or {}
     price_local = _f(ep.get("amount"))
-    if price_local is None or price_local <= 0:
-        return None
+    if price_local is None or not math.isfinite(price_local) or price_local <= 0:
+        raise ValueError("Prix exécuté absent ou invalide")
 
     price_ccy = (ep.get("currency") or "").upper().strip()
-    fx = _f(item.get("usedFxRate")) or 1.0
+    fx = _f(item.get("usedFxRate"))
+    if fx is None and prod_ccy and price_ccy == prod_ccy.upper():
+        fx = 1.0
+    if fx is None or not math.isfinite(fx) or fx <= 0:
+        raise ValueError(f"Change absent/invalide pour ordre {item.get('id', '?')}")
     price_prod = price_local * fx
 
     underlying = item.get("underlying") or {}
@@ -79,7 +86,7 @@ def _order_from_item(item: dict) -> Order | None:
     raw_date = item.get("tradeDate") or item.get("creationDateTime") or item.get("settlementDate")
     date = _parse_date(raw_date)
     if date is None:
-        return None
+        raise ValueError("Date exécutée absente ou invalide")
 
     order_id = str(item.get("id") or f"{isin}_{date}_{qty}")
 
@@ -96,31 +103,33 @@ def _order_from_item(item: dict) -> Order | None:
     )
 
 
-def load_orders(paths: list[Union[str, Path]]) -> list[Order]:
+def load_orders(paths: list[Union[str, Path]], prod_ccy: str | None = None) -> list[Order]:
     """Load one or more UTI JSON carnet files and return a sorted list of Orders.
 
     Duplicate order IDs are deduplicated (same order appearing in two files).
     """
-    seen_ids: set[str] = set()
+    seen_ids: dict[str, Order] = {}
     orders: list[Order] = []
 
     for p in paths:
         try:
             with open(p, encoding="utf-8") as fh:
                 d = json.load(fh)
-        except (OSError, json.JSONDecodeError):
-            continue
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Carnet illisible : {p}") from exc
 
         items = (((d.get("data") or {}).get("orders") or {}).get("items")) or []
         for item in items:
             if not isinstance(item, dict):
                 continue
-            order = _order_from_item(item)
+            order = _order_from_item(item, prod_ccy)
             if order is None:
                 continue
             if order.id in seen_ids:
+                if order != seen_ids[order.id]:
+                    raise ValueError(f"Versions contradictoires de l’ordre {order.id}")
                 continue
-            seen_ids.add(order.id)
+            seen_ids[order.id] = order
             orders.append(order)
 
     orders.sort(key=lambda o: o.date)

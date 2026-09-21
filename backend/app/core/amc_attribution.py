@@ -33,7 +33,7 @@ from .amc_prices import load_prices, get_fx_series, _slug
 # ── prix terminal en devise AMC ───────────────────────────────────────
 
 def _terminal_price(isin: str, name: str, amc_currency: str,
-                    hint_ccy: str = "") -> float | None:
+                    hint_ccy: str = "", as_of: str | None = None) -> float | None:
     """Retourne le dernier prix connu en devise AMC.
 
     hint_ccy : devise de l'actif tirée des ordres (fallback si absente du parquet).
@@ -46,13 +46,17 @@ def _terminal_price(isin: str, name: str, amc_currency: str,
         s = df["close"].dropna()
         if s.empty:
             return None
-        price_local = float(s.iloc[-1])
+        from .amc_controls import price_at
+        if not as_of:
+            return None
+        from .amc_prices import execution_series
+        price_local = price_at(execution_series(isin, name, as_of), as_of)
         # Priorité: attribut du parquet, puis hint depuis les ordres
         asset_ccy = (df.attrs.get("currency") or hint_ccy or "").upper()
-        if asset_ccy and asset_ccy != amc_currency:
-            fx = get_fx_series(asset_ccy, amc_currency)
-            if not fx.empty:
-                return price_local * float(fx.iloc[-1])
+        if not asset_ccy:
+            return None
+        if asset_ccy != amc_currency:
+            return price_local * price_at(get_fx_series(asset_ccy, amc_currency), as_of)
         return price_local
     except Exception:
         return None
@@ -86,23 +90,8 @@ def compute_attribution(
     amc_currency = (amc_currency or "CHF").upper()
 
     # ── 1. Charger les ordres depuis le dossier ───────────────────────
-    base = Path(folder)
-    paths: list[str] = []
-    seen: set[str] = set()
-    for p in list(base.glob("* Data*.json")) + list(base.glob("*Data*.json")) + list(base.glob("merged-*.json")):
-        rp = str(p.resolve())
-        if rp not in seen:
-            seen.add(rp)
-            paths.append(str(p))
-
-    if not paths:
-        return {"error": f"Aucun fichier d'ordres JSON trouvé dans {folder}"}
-
-    all_orders = load_orders(paths)
-    orders = [o for o in all_orders if o.get("state") == "Done"]
-    if orders:
-        as_of = max(o["date"] for o in orders if o.get("date") is not None)
-        orders = apply_split_corrections(orders, as_of)
+    from .amc_controls import source_orders
+    orders = [o for o in source_orders(study_result) if o.get("state") == "Done"]
     if not orders:
         return {"error": "Aucun ordre exécuté trouvé."}
 
@@ -115,13 +104,6 @@ def compute_attribution(
         outstanding = float(meta.get("outstanding") or 0)
         if nav_val > 0 and outstanding > 0:
             aum = nav_val * outstanding
-    if aum <= 0:
-        # Fallback : somme brute des notionals BUY
-        aum = sum(
-            float(o.get("notional_prod") or 0)
-            for o in orders
-            if (o.get("side") or "BUY") == "BUY"
-        )
     if aum <= 0:
         return {"error": "Impossible de déterminer l'AUM du portefeuille."}
 
@@ -169,7 +151,7 @@ def compute_attribution(
         isin      = trades[0]["isin"]
         name      = trades[0]["name"]
         hint_ccy  = trades[0].get("asset_ccy", "")
-        pt        = _terminal_price(isin, name, amc_currency, hint_ccy=hint_ccy)
+        pt        = _terminal_price(isin, name, amc_currency, hint_ccy=hint_ccy, as_of=meta.get("as_of"))
         has_price = pt is not None
 
         timing_val = 0.0
@@ -228,20 +210,20 @@ def compute_attribution(
     # ── 5. Waterfall ──────────────────────────────────────────────────
     waterfall = [
         {
-            "label": "Timing achats",
-            "description": "Valeur ajoutée par le moment choisi pour acheter",
+            "label": "Contribution achats",
+            "description": "Contribution rétrospective des achats, hors dividendes et frais",
             "value": round(timing_pct_total, 4),
             "type": "timing",
         },
         {
-            "label": "Sélection sorties",
-            "description": "Valeur ajoutée par le moment choisi pour vendre",
+            "label": "Contribution ventes",
+            "description": "Contribution rétrospective des ventes, hors dividendes et frais",
             "value": round(exits_pct_total, 4),
             "type": "exits",
         },
         {
-            "label": "Valeur Ajoutée de Gestion (VAG)",
-            "description": "Somme des deux effets (timing achats + sélection sorties)",
+            "label": "Total des contributions de prix",
+            "description": "Somme des contributions achats et ventes ; distincte du VAG du bloc E",
             "value": vag_pct_total,
             "type": "total",
         },
@@ -251,7 +233,13 @@ def compute_attribution(
     t_min = min(dates) if dates else ""
     t_max = max(dates) if dates else ""
 
+    missing = [r for r in per_underlying if not r.get("has_price", True)]
+    if missing:
+        return {"available": False, "error": "Cours/changes manquants : attribution globale non publiée.", "per_underlying": per_underlying}
     return {
+        "available": True,
+        "as_of": meta.get("as_of"),
+        "methodology": "Contributions rétrospectives de prix hors dividendes, normalisées par l’AUM déclaré ; distinctes du VAG du bloc E et ne mesurant pas isolément le timing ou la sélection. Ne constitue pas une attribution complète de la NAV.",
         "amc_currency":    amc_currency,
         "aum":             round(aum, 0),
         "period_start":    t_min,

@@ -10,6 +10,7 @@ they need only the raw order book + composition snapshot.
 from __future__ import annotations
 
 import math
+import datetime as dt
 import statistics
 from typing import Dict, List, Optional
 
@@ -37,6 +38,8 @@ def _performance_fee_drag(rows: List[dict], filled_outstanding: List[Optional[fl
     units. Days where the NAV is below its historical HWM incur no fee — this
     is what distinguishes it from the flat daily management-fee accrual.
     """
+    if perf_fee_pct is not None and not 0 <= perf_fee_pct < 100:
+        raise ValueError("Frais de performance hors limites")
     if not perf_fee_pct or not rows:
         return 0.0, {}
     frac = (perf_fee_pct / 100.0) / (1.0 - perf_fee_pct / 100.0)
@@ -64,7 +67,10 @@ def _nav_reconciliation(nav: List[dict], management_fee_pct: Optional[float],
                         as_of: Optional[str],
                         perf_fee_pct: Optional[float] = None,
                         txn_cost_pct: Optional[float] = None,
-                        carnet_orders: Optional[list] = None) -> Optional[dict]:
+                        carnet_orders: Optional[list] = None,
+                        management_fee_basis: str = "nav_252",
+                        performance_crystallization: str = "daily",
+                        cash_income: Optional[float] = None) -> Optional[dict]:
     """Compute the exact NAV-implied fund P&L and estimated fee drag, as of
     the same date the FIFO reconstruction used (not "today").
 
@@ -91,13 +97,13 @@ def _nav_reconciliation(nav: List[dict], management_fee_pct: Optional[float],
     filled: List[Optional[float]] = []
     cur: Optional[float] = None
     for r in rows:
-        if r.get("outstanding"):
+        if r.get("outstanding") is not None:
             cur = r["outstanding"]
         filled.append(cur)
-    first_known = next((x for x in filled if x), None)
-    if first_known is None:
+    first_known = next((x for x in filled if x is not None), None)
+    if first_known is None or filled[0] is None:
         return None
-    filled = [x if x else first_known for x in filled]
+    filled = [x if x is not None else first_known for x in filled]
 
     management_fee_drag = 0.0
     if management_fee_pct:
@@ -106,6 +112,35 @@ def _nav_reconciliation(nav: List[dict], management_fee_pct: Optional[float],
             management_fee_drag += r["nav"] * out * fee_daily
 
     performance_fee_drag, perf_meta = _performance_fee_drag(rows, filled, perf_fee_pct)
+    if management_fee_basis != "nav_252":
+        denominator = 360 if management_fee_basis.endswith("360") else 365
+        previous_basis = management_fee_basis.startswith("previous")
+        management_fee_drag = sum((a["nav"] * out_a if previous_basis else b["nav"] * out_b) *
+            (management_fee_pct or 0) / 100 *
+            (dt.date.fromisoformat(b["date"]) - dt.date.fromisoformat(a["date"])).days / denominator
+            for a, b, out_a, out_b in zip(rows, rows[1:], filled, filled[1:]))
+    if performance_crystallization != "daily":
+        if len(set(filled)) != 1:
+            raise ValueError("Frais périodiques avec flux investisseurs : convention d'égalisation requise")
+        hwm, performance_fee_drag, events = rows[0]["nav"], 0.0, 0
+        fraction = (perf_fee_pct or 0) / (100 - (perf_fee_pct or 0))
+        def period(day):
+            d = dt.date.fromisoformat(day)
+            return (d.year, d.month if performance_crystallization == "monthly" else
+                    (d.month-1)//3 if performance_crystallization == "quarterly" else 0)
+        for i, r in enumerate(rows):
+            # A cutoff includes the remaining provision; no forced crystallization.
+            year_end = i + 1 < len(rows) and period(rows[i+1]["date"]) != period(r["date"])
+            if year_end or i == len(rows)-1:
+                fee = max(0, r["nav"] - hwm) * fraction * filled[i]
+                performance_fee_drag += fee
+                events += int(fee > 0)
+                next_session = dt.date.fromisoformat(r["date"]) + dt.timedelta(days=1)
+                while next_session.weekday() >= 5:
+                    next_session += dt.timedelta(days=1)
+                if year_end or period(next_session.isoformat()) != period(r["date"]):
+                    hwm = max(hwm, r["nav"])
+        perf_meta = {"n_events": events, "hwm_final": round(hwm, 4)}
     transaction_cost_drag = _transaction_cost_drag(carnet_orders, txn_cost_pct)
 
     total_fee_drag = management_fee_drag + performance_fee_drag + transaction_cost_drag
@@ -126,19 +161,23 @@ def _nav_reconciliation(nav: List[dict], management_fee_pct: Optional[float],
 
     return {
         "as_of": last_row["date"],
+        "cash_income_prod": cash_income,
+        "management_fee_basis": management_fee_basis,
+        "performance_crystallization": performance_crystallization,
         "nav_value_prod": round(nav_value_prod, 2),
+        "reference_aum_prod": nav_value_prod if nav_value_prod > 0 else max(r["nav"] * out for r, out in zip(rows, filled)),
         "net_subscriptions_prod": round(net_flow_prod, 2),
         "nav_implied_pnl_prod": round(nav_implied_pnl_prod, 2),
         "fee_drag_prod": round(-total_fee_drag, 2) if total_fee_drag else None,
         "fee_breakdown": {
             "management_fee_pct": management_fee_pct,
-            "management_fee_prod": round(-management_fee_drag, 2) if management_fee_pct else None,
+            "management_fee_prod": round(-management_fee_drag, 2) if management_fee_pct is not None else None,
             "performance_fee_pct": perf_fee_pct,
-            "performance_fee_prod": round(-performance_fee_drag, 2) if perf_fee_pct else None,
+            "performance_fee_prod": round(-performance_fee_drag, 2) if perf_fee_pct is not None else None,
             "performance_fee_events": perf_meta.get("n_events"),
             "performance_fee_hwm_final": perf_meta.get("hwm_final"),
             "transaction_cost_pct": txn_cost_pct,
-            "transaction_cost_prod": round(-transaction_cost_drag, 2) if txn_cost_pct else None,
+            "transaction_cost_prod": round(-transaction_cost_drag, 2) if txn_cost_pct is not None else None,
         },
     }
 
@@ -151,7 +190,10 @@ def block_b_attribution(recon: ReconResult, composition: dict,
                         fifo_as_of: Optional[str] = None,
                         perf_fee_pct: Optional[float] = None,
                         txn_cost_pct: Optional[float] = None,
-                        carnet_orders: Optional[list] = None) -> dict:
+                        carnet_orders: Optional[list] = None,
+                        management_fee_basis: str = "nav_252",
+                        performance_crystallization: str = "daily",
+                        cash_income: Optional[float] = None, dividend_ledger: Optional[dict] = None) -> dict:
     """P&L contribution per underlying (realised + latent), price vs FX split,
     and a temporal (quarterly) breakdown of realised P&L."""
     weight_by_isin = {c["isin"]: c["weight"] for c in composition.get("components", [])}
@@ -177,17 +219,25 @@ def block_b_attribution(recon: ReconResult, composition: dict,
 
     for op in recon.open_positions:
         s = _slot(op["isin"], op["name"], op["ccy"])
-        if op["unreal_pnl_prod"] is not None:
+        if op["unreal_pnl_prod"] is None:
+            s["unreal_pnl"] = None
+        elif s["unreal_pnl"] is not None:
             s["unreal_pnl"] += op["unreal_pnl_prod"]
 
+    dividend_assets = (dividend_ledger or {}).get("by_asset", {})
+    for isin in dividend_assets:
+        if isin:
+            _slot(isin, isin, composition.get("currency", ""))
     rows = []
     for s in per_name.values():
-        total = s["realized_pnl"] + s["unreal_pnl"]
+        total = s["realized_pnl"] + s["unreal_pnl"] if s["unreal_pnl"] is not None else None
         rows.append({
-            **{k: (round(v, 2) if isinstance(v, float) else v) for k, v in s.items()},
-            "total_pnl": round(total, 2),
+            **{k: (round(v, 2) if isinstance(v, float) and k != "weight" else v) for k, v in s.items()},
+            "total_pnl": round(total, 2) if total is not None else None,
+            "dividends_net": round(dividend_assets.get(s["isin"], {}).get("net_income_prod", 0), 2) if cash_income is not None else None,
+            "total_with_dividends": round(total + dividend_assets.get(s["isin"], {}).get("net_income_prod", 0), 2) if total is not None and cash_income is not None else None,
         })
-    rows.sort(key=lambda r: r["total_pnl"], reverse=True)
+    rows.sort(key=lambda r: (r["total_pnl"] is not None, r["total_pnl"] or 0), reverse=True)
 
     # Temporal: realised P&L by exit quarter
     by_quarter: dict[str, float] = {}
@@ -199,19 +249,20 @@ def block_b_attribution(recon: ReconResult, composition: dict,
                  for q, v in sorted(by_quarter.items())]
 
     tot_real = sum(s["realized_pnl"] for s in per_name.values())
-    tot_unreal = sum(s["unreal_pnl"] for s in per_name.values())
+    tot_unreal = sum(s["unreal_pnl"] for s in per_name.values()) if all(s["unreal_pnl"] is not None for s in per_name.values()) else None
     tot_price = sum(s["price_pnl"] for s in per_name.values())
     tot_fx = sum(s["fx_pnl"] for s in per_name.values())
-    total_pnl_gross = tot_real + tot_unreal
+    total_pnl_gross = tot_real + tot_unreal if tot_unreal is not None else None
 
     totals = {
         "realized_pnl": round(tot_real, 2),
-        "unreal_pnl": round(tot_unreal, 2),
-        "total_pnl": round(total_pnl_gross, 2),
+        "unreal_pnl": round(tot_unreal, 2) if tot_unreal is not None else None,
+        "total_pnl": round(total_pnl_gross, 2) if total_pnl_gross is not None else None,
         "realized_price_pnl": round(tot_price, 2),
         "realized_fx_pnl": round(tot_fx, 2),
-        "fx_share_of_realized_pct": round(_safe_div(abs(tot_fx), abs(tot_price) + abs(tot_fx)) * 100, 1)
-                                    if (abs(tot_price) + abs(tot_fx)) else None,
+        "fx_share_of_realized_pct": round(tot_fx / tot_real * 100, 2) if abs(tot_real) > 1e-8 else None,
+        "fx_ratio_basis": "P&L FX réalisé / P&L réalisé net signé ; hors latent et dividendes"
+        # Ratio undefined when realized P&L is zero. A negative denominator reverses its sign.
     }
 
     # ── NAV reconciliation — validates the FIFO gross P&L against the ──
@@ -219,10 +270,19 @@ def block_b_attribution(recon: ReconResult, composition: dict,
     nav_recon = _nav_reconciliation(
         nav, management_fee_pct, fifo_as_of,
         perf_fee_pct=perf_fee_pct, txn_cost_pct=txn_cost_pct, carnet_orders=carnet_orders,
+        management_fee_basis=management_fee_basis, performance_crystallization=performance_crystallization, cash_income=cash_income,
     ) if nav else None
-    if nav_recon:
+    if nav_recon and dividend_ledger:
+        fee_adjustment = dividend_ledger.get("transaction_fee_adjustment", 0)
+        nav_recon["fee_drag_prod"] = (nav_recon["fee_drag_prod"] or 0) - fee_adjustment
+        nav_recon["fee_breakdown"]["transaction_cost_prod"] = (nav_recon["fee_breakdown"]["transaction_cost_prod"] or 0) - fee_adjustment
+        nav_recon["dividends_paid_prod"] = dividend_ledger["totals"]["paid_prod"]
+        nav_recon["dividends_receivable_prod"] = dividend_ledger["totals"]["receivable_prod"]
+        nav_recon["dividends_reinvested_prod"] = dividend_ledger["totals"]["reinvested_prod"]
+        nav_recon["dividends_fx_pnl_prod"] = dividend_ledger["totals"]["fx_pnl_prod"]
+    if nav_recon and total_pnl_gross is not None:
         fee_drag = nav_recon["fee_drag_prod"] or 0.0
-        total_pnl_net = total_pnl_gross + fee_drag
+        total_pnl_net = total_pnl_gross + fee_drag + (cash_income or 0.0)
         nav_pnl = nav_recon["nav_implied_pnl_prod"]
         gap = total_pnl_net - nav_pnl
         totals["fee_drag_prod"] = round(fee_drag, 2)
@@ -232,6 +292,7 @@ def block_b_attribution(recon: ReconResult, composition: dict,
             "total_pnl_net_of_fees": round(total_pnl_net, 2),
             "gap_prod": round(gap, 2),
             "gap_pct": round(gap / nav_pnl * 100, 1) if nav_pnl else None,
+            "gap_aum_bps": round(gap / nav_recon["reference_aum_prod"] * 10000, 2) if nav_recon["reference_aum_prod"] else None,
         }
 
     return {
@@ -290,7 +351,7 @@ def block_c_trading(recon: ReconResult, orders: list[dict], nav: list[dict],
                             "sell_vs_buy_pct": spread})
 
     realized_total = sum(pnls)
-    unreal_total = sum(op["unreal_pnl_prod"] or 0.0 for op in recon.open_positions)
+    unreal_total = sum(op["unreal_pnl_prod"] for op in recon.open_positions) if all(op["unreal_pnl_prod"] is not None for op in recon.open_positions) else None
 
     return {
         "round_trips": {
@@ -312,7 +373,7 @@ def block_c_trading(recon: ReconResult, orders: list[dict], nav: list[dict],
         },
         "trading_vs_hold": {
             "realized_pnl_closed": round(realized_total, 2),
-            "unreal_pnl_open": round(unreal_total, 2),
+            "unreal_pnl_open": round(unreal_total, 2) if unreal_total is not None else None,
             "note": "Décomposition complète trading-vs-portage (buy-&-hold de la compo "
                     "initiale) nécessite l'historique de prix par constituant — non "
                     "disponible. On rapporte ici P&L clôturé vs P&L latent comme proxy.",
@@ -358,7 +419,7 @@ def block_d_behaviour(recon: ReconResult, orders: list[dict], composition: dict,
     # Holding-period distribution (closed round-trips + open positions)
     closed_holds = [rt["holding_days"] for rt in recon.round_trips if rt["holding_days"] is not None]
     open_holds = [op["holding_days"] for op in recon.open_positions if op["holding_days"] is not None]
-    all_holds = closed_holds + open_holds
+    all_holds = closed_holds
     long_term = sum(1 for h in all_holds if h >= long_term_days)
     tactical = sum(1 for h in all_holds if h < long_term_days)
 
@@ -408,8 +469,12 @@ def block_d_behaviour(recon: ReconResult, orders: list[dict], composition: dict,
               "tactical_winners": [], "uncertainty": []}
     quadrant_pnl = {k: 0.0 for k in matrix}
 
+    unclassified = []
     for isin in all_isins:
-        if isin is None:  # skip cash/fx positions (no ISIN)
+        if not isin:  # skip cash/fx positions (no ISIN)
+            continue
+        if any(p["isin"] == isin and p["unreal_pnl_prod"] is None for p in recon.open_positions):
+            unclassified.append(isin)
             continue
         weight_pct = (weight_by_isin.get(isin, 0.0)) * 100
         max_hold = max_hold_by_isin.get(isin, 0)
@@ -420,6 +485,9 @@ def block_d_behaviour(recon: ReconResult, orders: list[dict], composition: dict,
         # position — gating it on the CURRENT weight_pct wrongly disqualifies every
         # fully closed position (weight_pct=0 by construction once fully sold).
         high_conviction = (weight_pct >= conviction_weight_pct) or (max_hold >= long_term_days)
+        if total_pnl == 0:
+            unclassified.append(isin)
+            continue
         positive = total_pnl > 0
         rec = {
             "isin": isin,
@@ -465,6 +533,8 @@ def block_d_behaviour(recon: ReconResult, orders: list[dict], composition: dict,
             "names_multiple_round_trips": reentry_names,
         },
         "conviction_matrix": {
+            "unclassified": unclassified,
+            "rule": "current_weight_or_max_holding_period",
             "quadrants": matrix,
             "counts": {k: len(v) for k, v in matrix.items()},
             "pnl": {k: round(v, 2) for k, v in quadrant_pnl.items()},

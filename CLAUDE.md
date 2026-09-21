@@ -111,8 +111,11 @@ le forward et se saisit aujourd'hui dans `q`.
 - **Un fixing est un cours NU.** `load_hist_prices(adjusted=False)` par défaut. Le cours
   ajusté est déflaté de tous les dividendes versés depuis, et la déformation croît avec le
   rendement : sur le panier Marex au 14/06/2024, −9,5 % sur UniCredit (4,47 %/an) contre
-  −2,9 % sur STMicro (0,63 %/an). Le magasin de prix AMC (`core/amc_prices.py`) est ajusté
-  **exprès** pour le FIFO et l'attribution — ne jamais y lire un fixing.
+  −2,9 % sur STMicro (0,63 %/an). Dans le magasin AMC (`core/amc_prices.py`), `close`
+  reste ajusté pour les rendements totaux. Depuis `studies-2.0`, le FIFO et le timing
+  utilisent les cours hors dividendes via `execution_series`, exprimés dans les unités
+  de l’arrêté ; `price_close` les conserve lors des téléchargements explicites.
+  Ne jamais lire un fixing de produit structuré dans la colonne ajustée `close`.
 - **`trailingAnnualDividendYield` est un instantané du jour** : muet sur une date passée,
   et à zéro sur un titre qui a suspendu son dividende sans distinguer « ne verse pas » de
   « donnée absente ». Utiliser `dividend_profile(ticker, asof)`, qui calcule le rendement

@@ -37,6 +37,11 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
+Studies : [Audit métier et technique du 20/09/2026](audits/AUDIT_STUDIES_2026-09-20.md)
+— constats initiaux ; corrections et contrôles décrits dans le [processus Studies](projects/studies/STUDIES_PROCESS_ET_CORRECTIONS_2026-09-20.md), avec limites de données et extensions restantes.
+[Pitch de partenariat consulting](projects/studies/STUDIES_CONSULTING_PITCH_2026-09-20.md)
+— préparation du rendez-vous du 23/09 : argumentaire, démonstration et pilote accompagné.
+
 IA : [Socle commun aux cinq assistants](projects/platform/IA_COMMUNE_2026-09-17.md)
 — implémenté le 17/09/2026 ; catalogue, éditeur de prompt et suivi partagés ; activation après redémarrage du backend.
 
@@ -203,6 +208,13 @@ Le backend doit être redémarré pour que ces changements soient actifs.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [STUDIES_DIVIDENDS_2026-09-21.md](projects/studies/STUDIES_DIVIDENDS_2026-09-21.md) | 21/09 | Studies 2.2 : dividendes par titre, créances, fiscalité, réinvestissement et contrôles | Livré ; 79 tests backend ciblés, 194 frontend et build réussis | Recette UI ; distributions investisseurs et calendriers contractuels étendus ultérieurs |
+| [STUDIES_INTERFACE_2026-09-21.md](projects/studies/STUDIES_INTERFACE_2026-09-21.md) | 21/09 | Configuration en pleine largeur, tableaux et indicateurs harmonisés | 194 tests frontend ; build réussi | Recette visuelle dans le navigateur utilisateur |
+| [STUDIES_EXISTING_FIXES_2026-09-21.md](projects/studies/STUDIES_EXISTING_FIXES_2026-09-21.md) | 21/09 | Méthode 2.4 : calculs, sources et restitution des blocs existants | Tests ciblés et recette indépendante | Guide des corrections et résultats attendus |
+| [STUDIES_SETUP_COMPLET_2026-09-21.md](projects/studies/STUDIES_SETUP_COMPLET_2026-09-21.md) | 21/09 | Un dossier autonome : scan et lancement A à K, référence E/G séparée | Blocs calculés hors réseau ; 85 comparaisons | Recette utilisateur ; 85/85 comparaisons conformes en méthode 2.4 |
+| [STUDIES_EXTENDED_REFERENCE_2026-09-21.md](projects/studies/STUDIES_EXTENDED_REFERENCE_2026-09-21.md) | 21/09 | Référence indépendante A–K, TS et import isolé E, benchmark synthétique | Banc isolé : 82/85 contrôles conformes | Recette E dans l’UI ; trois écarts F/J ; import de marchés complet |
+| [STUDIES_RECONCILIATION_AND_FEES_2026-09-21.md](projects/studies/STUDIES_RECONCILIATION_AND_FEES_2026-09-21.md) | 21/09 | Studies 2.1 : frais paramétrables, dividendes, valorisation sur relevé, FIFO et recette indépendante | Corrigé ; 55 tests backend ciblés, 194 frontend et build réussis | Redémarrage utilisateur et nouvelle recette UI ; frais complexes/égalisation ultérieurs |
+| [INDEPENDENT_LONG_ONLY_DATASET_2026-09-21.md](projects/studies/INDEPENDENT_LONG_ONLY_DATASET_2026-09-21.md) | 21/09 | Fonds fictif 2020–2025, CSV, FX BCE et comptabilité indépendante | Données générées et contrôlées | Test Studies par Philippe, comparaison puis diagnostic ; flux investisseurs et long/short ultérieurs |
 | `DECISION_ANALYSIS_ENGINE.md` | 26/06 | Qualité des décisions d'un gérant AMC | À faire | Idée validée ; fichier non versionné (`.gitignore`) |
 | `MANAGER_DNA_ENGINE.md` | 26/06 | Empreinte quantitative du style de gestion | À faire | Idée validée ; fichier non versionné |
 | `SKILL_VS_LUCK_ENGINE.md` | 16/07 | Talent ou hasard, par bootstrap et Monte Carlo | À faire | Idée validée ; fichier non versionné |

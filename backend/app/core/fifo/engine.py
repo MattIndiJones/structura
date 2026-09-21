@@ -100,6 +100,9 @@ def reconstruct(
         by_isin[o.isin].append(o)
 
     for isin, isin_orders in by_isin.items():
+        # Tolerance follows floating-point precision, not a minimum economic trade size.
+        nonzero_qty = [abs(o.qty) for o in isin_orders if o.qty]
+        qty_eps = min(64 * math.ulp(max(nonzero_qty)), min(nonzero_qty) / 2) if nonzero_qty else 0.0
         name = isin_orders[0].name
         queue: collections.deque[Lot] = lot_queues[isin]
 
@@ -132,7 +135,7 @@ def reconstruct(
 
                 # Check excess before consuming
                 available = sum(l.qty for l in queue)
-                if available < sell_qty and recon_mode == "t0_synthetic":
+                if available < sell_qty - qty_eps and recon_mode == "t0_synthetic":
                     excess = sell_qty - available
                     # Date the synthetic lot at the sell that revealed the
                     # shortfall, not the isin's earliest order — a missing BUY
@@ -156,8 +159,13 @@ def reconstruct(
 
                 # Consume lots (FIFO)
                 remaining = sell_qty
-                while remaining > 0 and queue:
+                while remaining > qty_eps and queue:
                     lot = queue[0]
+                    if abs(lot.qty) <= qty_eps:
+                        queue.popleft()
+                        continue
+                    if lot.qty < 0:
+                        break  # Preserve a genuine unmatched short; never create negative matches.
                     matched = min(lot.qty, remaining)
                     round_trips.append(RoundTrip(
                         isin=isin,
@@ -177,10 +185,10 @@ def reconstruct(
                     ))
                     lot.qty -= matched
                     remaining -= matched
-                    if lot.qty == 0:
+                    if abs(lot.qty) <= qty_eps:
                         queue.popleft()
 
-                if remaining > 0 and recon_mode == "strict":
+                if remaining > qty_eps and recon_mode == "strict":
                     # Log unmatched sell as negative open lot (data quality issue)
                     queue.appendleft(Lot(
                         order_id=order.id,
@@ -224,7 +232,7 @@ def reconstruct(
     # ── Totals ─────────────────────────────────────────────────────────
     total_realized = sum(rt.pnl_prod for rt in round_trips)
     latent_values = [p.unreal_pnl_prod for p in open_positions if p.unreal_pnl_prod is not None]
-    total_latent = sum(latent_values) if latent_values else None
+    total_latent = sum(latent_values) if len(latent_values) == len(open_positions) else None
     total_pnl = (total_realized + total_latent) if total_latent is not None else None
 
     return ReconResult(

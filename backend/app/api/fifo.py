@@ -9,12 +9,14 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import os
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..api.auth import get_current_user
+from .amc_access import study_folder
+from ..core.amc_controls import resolve_file
 from ..db.models import User
 from ..core.fifo.loader import load_orders
 from ..core.fifo.engine import reconstruct
@@ -31,8 +33,8 @@ router = APIRouter(prefix="/api/fifo", tags=["fifo"])
 
 class FifoRunRequest(BaseModel):
     folder: str                                 # absolute path on server
-    qty_mode: str = "auto"                      # "shares" | "cert_units" | "auto"
-    recon_mode: str = "t0_synthetic"            # "strict" | "t0_synthetic"
+    qty_mode: Literal["auto", "shares", "cert_units"] = "auto"                      # "shares" | "cert_units" | "auto"
+    recon_mode: Literal["strict", "t0_synthetic"] = "t0_synthetic"            # "strict" | "t0_synthetic"
     prod_ccy: str = "USD"
     order_files: Optional[list[str]] = None     # explicit file list; None = auto-detect
     termsheet_path: Optional[str] = None        # path to termsheet_positions.json; None = auto-detect in folder
@@ -106,6 +108,11 @@ def fifo_run(
 
     Returns open positions, round trips, synthetic injections and P&L summary.
     """
+    req.folder = study_folder(req.folder, current)
+    if req.order_files is not None:
+        req.order_files = [resolve_file(req.folder, name) for name in req.order_files]
+    if req.termsheet_path:
+        req.termsheet_path = resolve_file(req.folder, req.termsheet_path)
     if not os.path.isdir(req.folder):
         raise HTTPException(422, f"Dossier introuvable : {req.folder}")
     try:
@@ -137,6 +144,7 @@ def fifo_detect(
     if not folder or not os.path.isdir(folder):
         raise HTTPException(422, "Dossier introuvable")
 
+    folder = study_folder(folder, current)
     files = detect_order_files(folder)
     if not files:
         return {"files": [], "suggested_mode": "shares", "order_count": 0}

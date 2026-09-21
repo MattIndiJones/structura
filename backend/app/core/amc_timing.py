@@ -119,63 +119,17 @@ def _distribution(scores: list[float], n_bins: int = 10) -> dict:
 
 
 def _interpret(entry_mean: float, exit_mean: float, global_mean: float,
-               tstat: float, n: int, coverage_pct: float) -> str:
-    parts = []
-    if coverage_pct < 30:
-        parts.append(
-            f"Couverture faible ({coverage_pct:.0f}% des ordres analysés) — "
-            "configurez les prix dans le module VAG pour améliorer la précision."
-        )
-    if n < 15:
-        parts.append(
-            f"Échantillon limité ({n} trades) : les scores sont indicatifs, "
-            "la significativité statistique est insuffisante."
-        )
-
-    if abs(tstat) >= 1.96:
-        direction = "supérieur" if global_mean > 0.5 else "inférieur"
-        parts.append(
-            f"Score global de {global_mean:.2f} statistiquement {direction} "
-            f"au hasard (t = {tstat:+.2f}, p < 0.05)."
-        )
-    elif abs(tstat) >= 1.28:
-        parts.append(
-            f"Score global de {global_mean:.2f} légèrement {'au-dessus' if global_mean > 0.5 else 'en-dessous'} "
-            f"du hasard (t = {tstat:+.2f}, tendance non significative)."
-        )
-    else:
-        parts.append(
-            f"Score global de {global_mean:.2f} indiscernable du hasard (t = {tstat:+.2f}) — "
-            "aucune compétence ni biais systématique de timing détecté."
-        )
-
-    # Entry vs exit split
-    if abs(entry_mean - exit_mean) >= 0.1:
-        better  = "entrées" if entry_mean >= exit_mean else "sorties"
-        weaker  = "sorties" if entry_mean >= exit_mean else "entrées"
-        better_v = entry_mean if entry_mean >= exit_mean else exit_mean
-        weaker_v = exit_mean  if entry_mean >= exit_mean else entry_mean
-        parts.append(
-            f"Les {better} sont mieux timées ({better_v:.2f}) que les {weaker} ({weaker_v:.2f}) — "
-            "suggère un déséquilibre entre la qualité d'achat et de vente."
-        )
-
-    if global_mean >= 0.65 and tstat >= 1.28:
-        parts.append("Conclusion : compétence de timing réelle, avantage comportemental documenté.")
-    elif global_mean <= 0.35 and tstat <= -1.28:
-        parts.append(
-            "Conclusion : biais négatif documenté — le gérant tend à acheter haut et/ou vendre bas. "
-            "Point de due diligence à approfondir."
-        )
-    else:
-        parts.append("Conclusion : timing proche de l'aléatoire, cohérent avec un processus fondamental.")
-
-    return "  ".join(parts)
+               tstat: float, n: int, coverage_pct: float, pvalue: float = 1.0) -> str:
+    detail = (f"Écart au repère géométrique 0,5 : t={tstat:+.2f}, p={pvalue:.3f}. "
+              if pvalue < 1 else "Échantillon insuffisant pour une inférence par titre. ")
+    return (f"Score rétrospectif {global_mean:.2f} sur {n} ordres, couverture {coverage_pct:.0f} %. "
+            f"Entrées : {entry_mean:.2f} ; sorties : {exit_mean:.2f}. " + detail +
+            "Le repère 0,5 n’est pas une stratégie aléatoire simulée. Ce positionnement dans la fenêtre observée ne démontre ni talent durable ni pouvoir prédictif.")
 
 
 # ── public entry point ─────────────────────────────────────────────────────
 
-def compute_timing_score(orders: list[dict]) -> dict:
+def compute_timing_score(orders: list[dict], as_of: str | None = None) -> dict:
     """Compute Block H — Timing Score from executed orders.
 
     Args:
@@ -198,7 +152,11 @@ def compute_timing_score(orders: list[dict]) -> dict:
         name = o.get("name", "")
         key  = isin or name
         if key not in series_cache:
-            series_cache[key] = _load_series(isin, name)
+            try:
+                from .amc_prices import execution_series
+                series_cache[key] = execution_series(isin, name, as_of) if as_of else _load_series(isin, name)
+            except (ValueError, OSError):
+                series_cache[key] = None
 
     trades = []
     entry_scores: list[float] = []
@@ -225,6 +183,11 @@ def compute_timing_score(orders: list[dict]) -> dict:
             trades.append({**base, "available": False, "reason": "Prix non disponibles"})
             continue
 
+        if as_of:
+            series = series.loc[:as_of]
+        if as_of and pd.Timestamp(date).normalize() + pd.Timedelta(days=_WINDOW_DAYS) > pd.Timestamp(as_of):
+            trades.append({**base, "available": False, "reason": "Fenêtre future non entièrement observée à l’arrêté"})
+            continue
         info = _score_trade(series, date, price_local)
         if info is None:
             trades.append({**base, "available": False, "reason": "Fenêtre de prix insuffisante"})
@@ -285,9 +248,17 @@ def compute_timing_score(orders: list[dict]) -> dict:
     exit_mean   = _safe_mean(exit_scores)
     global_mean = _safe_mean(all_scores)
 
-    t_entry, p_entry   = _tstat_pvalue(entry_scores)  if entry_scores  else (0.0, 1.0)
-    t_exit,  p_exit    = _tstat_pvalue(exit_scores)   if exit_scores   else (0.0, 1.0)
-    t_global, p_global = _tstat_pvalue(all_scores)
+    from .amc_controls import clustered_mean_test
+    def side_test(side):
+        sample = [t for t in trades if t.get("available") and t["side"] == side]
+        test = clustered_mean_test([t["score"] for t in sample], [t["isin"] or t["name"] for t in sample], null=0.5)
+        return test["tstat"], test["pvalue"]
+    t_entry, p_entry = side_test("BUY")
+    t_exit, p_exit = side_test("SELL")
+    from .amc_controls import clustered_mean_test
+    scored = [t for t in trades if t.get("available")]
+    inference = clustered_mean_test([t["score"] for t in scored], [t["isin"] or t["name"] for t in scored], null=0.5)
+    t_global, p_global = inference["tstat"], inference["pvalue"]
 
     # top/worst for each side
     def _top(lst, side_filter, n=3, reverse=True):
@@ -304,8 +275,8 @@ def compute_timing_score(orders: list[dict]) -> dict:
     early_sells      = [t for t in trades if t.get("available") and t["side"] == "SELL" and t["score"] <= 0.30]
 
     interpretation = _interpret(
-        entry_mean or 0.5, exit_mean or 0.5, global_mean or 0.5,
-        t_global, n_analyzed, coverage,
+        entry_mean if entry_mean is not None else 0.5, exit_mean if exit_mean is not None else 0.5, global_mean if global_mean is not None else 0.5,
+        t_global, n_analyzed, coverage, p_global,
     )
 
     return {
@@ -322,6 +293,9 @@ def compute_timing_score(orders: list[dict]) -> dict:
         "tstat_exit":         t_exit,
         "tstat_global":       t_global,
         "pvalue_global":      p_global,
+        "inference": inference,
+        "as_of": as_of,
+        "methodology_note": "Diagnostic rétrospectif ; 0,5 est une référence descriptive, pas une preuve de hasard. Groupes par titre.",
         "interpretation":     interpretation,
         # distributions
         "dist_entry":    _distribution(entry_scores),

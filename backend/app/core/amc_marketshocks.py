@@ -90,24 +90,24 @@ def _as_date(v) -> Optional[datetime.date]:
 def _label(activity_ratio: Optional[float], net_flow: float, n_trades: int,
           timing_delta: Optional[float]) -> str:
     if n_trades == 0:
-        return "Aucune réaction — aucun ordre pendant la période"
+        return "Aucun ordre observé pendant la période"
     if activity_ratio is None:
         base = "Activité présente mais non quantifiable (historique de référence insuffisant)"
     elif activity_ratio < 0.4:
-        base = "Sous-réaction — activité nettement inférieure à la normale"
+        base = "Activité nettement inférieure à la référence historique"
     elif activity_ratio > 1.8:
         if net_flow < 0:
-            base = "Sur-réaction — désengagement marqué, au-delà de l'activité habituelle"
+            base = "Désengagement marqué, au-delà de l’activité habituelle"
         else:
-            base = "Réaction opportuniste — renforcement marqué pendant l'épisode"
+            base = "Renforcement marqué pendant l’épisode"
     else:
-        base = "Réaction proportionnée — activité proche de la normale du fonds"
+        base = "Activité proche de la référence historique du fonds"
 
     if timing_delta is not None and abs(timing_delta) >= 0.15:
         if timing_delta <= -0.15:
-            base += " ; trades mal placés dans le range de prix local (timing sous l'aléatoire)"
+            base += " ; trades mal placés dans le range de prix local (score descriptif inférieur à 0,5)"
         else:
-            base += " ; trades bien placés dans le range de prix local (timing au-dessus de l'aléatoire)"
+            base += " ; trades bien placés dans le range de prix local (score descriptif supérieur à 0,5)"
     return base
 
 
@@ -144,6 +144,7 @@ def compute_market_shocks(
         if e["start_d"] <= fund_end and e["end_d"] >= fund_start
     ]
     n_skipped = len(MARKET_EVENTS) - len(applicable)
+    applicable = [{**e, "start_d": max(e["start_d"], fund_start), "end_d": min(e["end_d"], fund_end)} for e in applicable]
 
     if not applicable:
         return {
@@ -177,20 +178,20 @@ def compute_market_shocks(
         per_order.append((d, notional, signed))
 
     baseline_orders = [p for p in per_order if not _in_any_event(p[0])]
-    baseline_days = max((fund_end - fund_start).days -
-                        sum((e - s).days + 1 for s, e in event_ranges), 1)
+    covered_days = {s + datetime.timedelta(days=i) for s, e in event_ranges for i in range((e - s).days + 1)}
+    baseline_days = max((fund_end - fund_start).days + 1 - len(covered_days), 1)
     baseline_gross = sum(p[1] for p in baseline_orders)
     baseline_daily_notional = baseline_gross / baseline_days if baseline_days > 0 else 0.0
 
     # per-trade timing scores (Bloc H), indexé par (isin ou nom, date) pour recoupement
-    h_by_key: dict[tuple, float] = {}
+    h_scores: list[tuple] = []
     h_global_mean = None
     if block_h and block_h.get("available"):
         h_global_mean = block_h.get("global_score_mean")
         for t in block_h.get("trades") or []:
             if t.get("available") and t.get("score") is not None:
                 key = (t.get("isin") or t.get("name"), t.get("date"))
-                h_by_key[key] = t["score"]
+                h_scores.append((key, t["score"]))
 
     events_out = []
     for e in applicable:
@@ -206,7 +207,7 @@ def compute_market_shocks(
         # timing quality of trades executed inside the window (needs isin+date match to Bloc H)
         window_dates = {p[0].isoformat() for p in window_orders}
         matched_scores = [
-            score for (isin_or_name, date_str), score in h_by_key.items()
+            score for (isin_or_name, date_str), score in h_scores
             if date_str in window_dates
         ]
         avg_timing = round(float(np.mean(matched_scores)), 3) if matched_scores else None
@@ -216,8 +217,8 @@ def compute_market_shocks(
             "id": e["id"],
             "label": e["label"],
             "category": e["category"],
-            "start": e["start"],
-            "end": e["end"],
+            "start": s.isoformat(),
+            "end": en.isoformat(),
             "window_days": window_days,
             "n_trades": n_trades,
             "gross_notional": round(gross, 0),

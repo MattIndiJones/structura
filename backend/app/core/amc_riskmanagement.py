@@ -64,36 +64,15 @@ def _blend_composite(components: list[dict]) -> Optional[pd.Series]:
 
 
 def _get_benchmark_series(benchmark_ticker: str) -> Optional[pd.Series]:
-    if benchmark_ticker in _bench_cache:
-        return _bench_cache[benchmark_ticker]
-    try:
-        from .amc_benchmarks import COMPOSITE_BENCHMARKS
-        comps = {b["id"]: b for b in COMPOSITE_BENCHMARKS}
-        if benchmark_ticker in comps:
-            series = _blend_composite(comps[benchmark_ticker]["components"])
-            if series is not None:
-                _bench_cache[benchmark_ticker] = series
-            return series
-    except ImportError:
-        pass
-    try:
-        import yfinance as yf
-        raw = yf.download(benchmark_ticker, period="5y", auto_adjust=True, progress=False)
-        if raw.empty:
-            return None
-        close = raw["Close"]
-        if hasattr(close, "squeeze"):
-            close = close.squeeze()
-        close.index = pd.to_datetime(close.index).tz_localize(None)
-        _bench_cache[benchmark_ticker] = close
-        return close
-    except Exception:
-        return None
+    from .amc_stockpicking import _get_benchmark_series as shared_benchmark
+    return shared_benchmark(benchmark_ticker)
 
 
 # ── NAV → returns ───────────────────────────────────────────────────────────
 
 def _nav_to_returns(nav: list[dict]) -> pd.Series:
+    from .amc_controls import validate_nav
+    nav = validate_nav(nav)
     if not nav:
         return pd.Series(dtype=float)
     dates = []
@@ -111,6 +90,9 @@ def _nav_to_returns(nav: list[dict]) -> pd.Series:
     if len(vals) < 2:
         return pd.Series(dtype=float)
     s = pd.Series(vals, index=pd.DatetimeIndex(dates)).sort_index()
+    gaps = s.index.to_series().diff().dropna().dt.days
+    if not gaps.empty and (gaps.median() > 1 or gaps.max() > 7):
+        raise ValueError("Les métriques annualisées exigent une NAV quotidienne sans interruption supérieure à 7 jours.")
     return s.pct_change().dropna()
 
 
@@ -118,36 +100,32 @@ def _nav_to_returns(nav: list[dict]) -> pd.Series:
 
 def _drawdown_series(returns: pd.Series) -> pd.Series:
     cum = (1 + returns).cumprod()
-    peak = cum.cummax()
+    peak = cum.cummax().clip(lower=1.0)
     return cum / peak - 1
 
 
 def _compute_drawdown_episodes(dd: pd.Series) -> list[dict]:
-    episodes = []
-    in_dd = False
-    start_idx = 0
-    peak_dd = 0.0
-    for i, v in enumerate(dd.values):
-        if v < 0 and not in_dd:
-            in_dd = True
-            start_idx = i
-            peak_dd = v
-        elif v < 0 and in_dd:
-            if v < peak_dd:
-                peak_dd = v
-        elif v >= -0.001 and in_dd:
-            episodes.append({
-                "depth_pct": round(peak_dd * 100, 2),
-                "duration_days": i - start_idx,
-            })
-            in_dd = False
-            peak_dd = 0.0
-    if in_dd:
-        episodes.append({
-            "depth_pct": round(peak_dd * 100, 2),
-            "duration_days": len(dd) - start_idx,
-        })
-    return sorted(episodes, key=lambda e: e["depth_pct"])[:5]
+    """All episodes; durations run from first underwater observation to recovery/cutoff."""
+    episodes, start = [], None
+    for i, value in enumerate(dd.values):
+        if value < -1e-12:
+            if start is None:
+                start = i
+        elif start is not None:
+            episodes.append(_drawdown_episode(dd, start, i, recovered=True))
+            start = None
+    if start is not None:
+        episodes.append(_drawdown_episode(dd, start, len(dd) - 1, recovered=False))
+    return sorted(episodes, key=lambda e: e["depth_pct"])
+
+
+def _drawdown_episode(dd, start, end, *, recovered):
+    stop = end if recovered else end + 1
+    return {"depth_pct": round(float(dd.iloc[start:stop].min()) * 100, 2),
+            "start_date": dd.index[start].strftime("%Y-%m-%d"),
+            "end_date": dd.index[end].strftime("%Y-%m-%d"),
+            "duration_days": int((dd.index[end] - dd.index[start]).days),
+            "duration_observations": stop - start, "recovered": recovered}
 
 
 def _score_drawdown(returns: pd.Series, bench_series: Optional[pd.Series],
@@ -162,13 +140,15 @@ def _score_drawdown(returns: pd.Series, bench_series: Optional[pd.Series],
     n_ep = len(episodes)
     avg_dur = (sum(e["duration_days"] for e in episodes) / n_ep) if n_ep > 0 else 0
 
+    avg_observations = sum(e["duration_observations"] for e in episodes) / n_ep if n_ep else 0
+
     # bench max DD
     bench_max_dd_pct = None
     if bench_available and bench_series is not None:
         try:
             idx0 = bench_series.index.searchsorted(returns.index[0])
             idx1 = bench_series.index.searchsorted(returns.index[-1], side="right")
-            b_sub = bench_series.iloc[max(0, idx0): idx1]
+            b_sub = bench_series.iloc[max(0, idx0 - 1): idx1]
             if len(b_sub) > 2:
                 b_ret = b_sub.pct_change().dropna()
                 b_dd = _drawdown_series(b_ret)
@@ -179,7 +159,7 @@ def _score_drawdown(returns: pd.Series, bench_series: Optional[pd.Series],
     # scoring
     max_dd_score = _clamp(100 - abs(max_dd_pct) * 1.6)
     ulcer_score  = _clamp(100 - ulcer_pct * 3.0)
-    ep_score     = 0.6 * _clamp(100 - avg_dur * 0.8) + 0.4 * _clamp(100 - n_ep * 8)
+    ep_score     = 0.6 * _clamp(100 - avg_observations * 0.8) + 0.4 * _clamp(100 - n_ep * 8)
     if bench_max_dd_pct is not None:
         # Both figures are negative (e.g. -10%). A shallower (less negative)
         # drawdown than the benchmark means max_dd_pct - bench_max_dd_pct > 0
@@ -197,7 +177,9 @@ def _score_drawdown(returns: pd.Series, bench_series: Optional[pd.Series],
         "n_drawdown_episodes":     n_ep,
         "avg_episode_duration_days": round(avg_dur, 1),
         "bench_max_drawdown_pct":  bench_max_dd_pct,
-        "worst_episodes":          episodes,
+        "worst_episodes":          episodes[:5],
+        "avg_episode_duration_observations": round(avg_observations, 1),
+        "duration_convention": "Jours calendaires du premier point sous le plus-haut au rétablissement ou à l’arrêté ; score basé sur toutes les durées en observations.",
     }
 
 
@@ -206,10 +188,11 @@ def _score_drawdown(returns: pd.Series, bench_series: Optional[pd.Series],
 def _score_downside_risk(returns: pd.Series) -> dict:
     arr = returns.values.astype(float)
     neg = arr[arr < 0]
-    semi_dev_ann = (neg.std(ddof=1) * math.sqrt(252) * 100) if len(neg) > 1 else 0.0
+    downside = float(np.sqrt(np.mean(np.minimum(arr, 0.0) ** 2)))
+    semi_dev_ann = downside * math.sqrt(252) * 100
 
     mean_r = arr.mean()
-    sortino = (mean_r * 252) / (neg.std(ddof=1) * math.sqrt(252)) if len(neg) > 1 and neg.std() > 0 else 0.0
+    sortino = mean_r * math.sqrt(252) / downside if downside > 1e-12 else 0.0
 
     var_95 = round(float(np.percentile(arr, 5)) * 100, 2)
     tail   = arr[arr <= np.percentile(arr, 5)]
@@ -217,10 +200,10 @@ def _score_downside_risk(returns: pd.Series) -> dict:
 
     worst_day = round(float(arr.min()) * 100, 2)
 
-    rolling5 = pd.Series(arr).rolling(5).sum()
+    rolling5 = pd.Series(1 + arr).rolling(5).apply(np.prod, raw=True) - 1
     worst_week = round(float(rolling5.min()) * 100, 2) if len(rolling5.dropna()) > 0 else 0.0
 
-    rolling21 = pd.Series(arr).rolling(21).sum()
+    rolling21 = pd.Series(1 + arr).rolling(21).apply(np.prod, raw=True) - 1
     worst_month = round(float(rolling21.min()) * 100, 2) if len(rolling21.dropna()) > 0 else 0.0
 
     n_neg = int((arr < 0).sum())
@@ -254,7 +237,8 @@ def _score_risk_adjusted(returns: pd.Series, bench_series: Optional[pd.Series],
     ann_ret = arr.mean() * 252
     ann_vol = arr.std(ddof=1) * math.sqrt(252)
     sharpe  = ann_ret / ann_vol if ann_vol > 0 else 0.0
-    calmar  = ann_ret / abs(max_dd_pct / 100) if max_dd_pct < 0 else 0.0
+    cagr = float(np.prod(1 + arr) ** (252 / len(arr)) - 1)
+    calmar = cagr / abs(max_dd_pct / 100) if max_dd_pct < 0 else 0.0
 
     up_capture = down_capture = None
     ir = tracking_error = None
@@ -262,7 +246,7 @@ def _score_risk_adjusted(returns: pd.Series, bench_series: Optional[pd.Series],
     if bench_available and bench_series is not None:
         try:
             # align returns
-            b_sub = bench_series.reindex(returns.index, method="ffill").pct_change().dropna()
+            b_sub = bench_series.pct_change(fill_method=None).reindex(returns.index).dropna()
             aligned = returns.reindex(b_sub.index).dropna()
             b_aligned = b_sub.reindex(aligned.index).dropna()
             aligned = aligned.reindex(b_aligned.index)
@@ -299,6 +283,7 @@ def _score_risk_adjusted(returns: pd.Series, bench_series: Optional[pd.Series],
 
     return {
         "score":              score,
+        "risk_free_convention": "Taux sans risque nul ; ratio descriptif",
         "sharpe_ratio":       round(sharpe, 3),
         "sortino_ratio":      round(sortino, 3),
         "calmar_ratio":       round(calmar, 3),
@@ -400,7 +385,7 @@ def _score_factor_risk(block_a: Optional[dict]) -> dict:
             break
 
     sig_factors = [f["name"] for f in factors
-                   if abs(f.get("tstat") or 0) >= 1.96]
+                   if f.get("pvalue", 1) < 0.05]
 
     # r2 scoring
     if r2_pct < 20:
@@ -558,7 +543,18 @@ def compute_risk_management_score(
         }
 
     bench_series   = _get_benchmark_series(benchmark_ticker)
-    bench_available = bench_series is not None
+    if bench_series is not None:
+        bench_series = bench_series.loc[str(nav[0]["date"])[:10]:str(nav[-1]["date"])[:10]]
+        ccy = composition.get("currency", "USD").upper()
+        if ccy != "USD":
+            from .amc_prices import get_fx_series
+            from .amc_controls import price_at
+            try:
+                fx = get_fx_series("USD", ccy)
+                bench_series = bench_series * pd.Series([price_at(fx, d) for d in bench_series.index], index=bench_series.index)
+            except ValueError:
+                bench_series = None
+    bench_available = bench_series is not None and not bench_series.empty
 
     # Sub-scores
     sub_dd   = _score_drawdown(returns, bench_series, bench_available)

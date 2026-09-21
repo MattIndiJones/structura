@@ -202,12 +202,17 @@ def compute_brinson(
             continue
         s = df["close"].dropna()
         s.index = pd.to_datetime(s.index).tz_localize(None)
+        s = s.loc[meta.get("nav_start_date"):meta.get("as_of") or meta.get("nav_current_date")]
         asset_ccy = (df.attrs.get("currency") or get_currency(key) or "").upper()
-        if asset_ccy and asset_ccy != _amc_ccy:
-            fx = get_fx_series(asset_ccy, _amc_ccy)
-            if not fx.empty:
-                fx = fx.reindex(s.index).ffill().bfill()
-                s  = s * fx
+        from .amc_controls import price_at
+        if not asset_ccy:
+            return {"available": False, "error": f"Devise inconnue : {name}"}
+        if asset_ccy != _amc_ccy:
+            try:
+                fx = get_fx_series(asset_ccy, _amc_ccy)
+                s = s * pd.Series([price_at(fx, d) for d in s.index], index=s.index)
+            except ValueError as exc:
+                return {"available": False, "error": str(exc)}
         price_frames[name] = s
 
     if len(price_frames) < 2:
@@ -215,15 +220,12 @@ def compute_brinson(
                 "error": "Moins de 2 séries de prix disponibles pour le Brinson."}
 
     _nav_start = meta.get("nav_start_date")
-    price_df = pd.DataFrame(price_frames).sort_index().ffill().dropna(how="all")
-    if _nav_start:
-        try:
-            price_df = price_df[price_df.index >= pd.Timestamp(_nav_start)]
-        except Exception:
-            pass
-    thresh = max(1, int(len(price_df) * 0.8))
-    price_df = price_df.dropna(thresh=thresh, axis=1).ffill().bfill()
-
+    _nav_end = meta.get("as_of") or meta.get("nav_current_date")
+    if not _nav_start or not _nav_end:
+        return {"available": False, "error": "Dates NAV requises."}
+    price_df = pd.DataFrame(price_frames).sort_index().loc[_nav_start:_nav_end].dropna()
+    if price_df.empty or (price_df.index[0] - pd.Timestamp(_nav_start)).days > 7 or (pd.Timestamp(_nav_end) - price_df.index[-1]).days > 7:
+        return {"available": False, "error": "Prix incomplets aux bornes de la période NAV."}
     if len(price_df) < 20:
         return {"available": False,
                 "error": f"Période trop courte ({len(price_df)} observations)."}
@@ -236,8 +238,14 @@ def compute_brinson(
     # ── 2. Inception weights ──────────────────────────────────────────
     termsheet_positions = study_result.get("termsheet_basket") or []
     weights, weights_method = _build_inception_weights(
-        available_names, per_name, folder, termsheet_positions
+        available_names, per_name, "", termsheet_positions
     )
+
+    cash_weight = 1.0 - float(weights.sum())
+    if cash_weight > 1e-6:
+        price_df["Liquidités"] = 1.0
+        available_names.append("Liquidités")
+        weights["Liquidités"] = cash_weight
 
     # ── 3. Per-holding returns (full period) ──────────────────────────
     first_px = price_df.iloc[0]
@@ -247,7 +255,13 @@ def compute_brinson(
 
     # ── 4. Sector classification ──────────────────────────────────────
     from .amc_prices import _load_ticker_map
-    ticker_map = _load_ticker_map()
+    from .amc_market_bundle import active_bundle
+    local_bundle = active_bundle()
+    ticker_map = {} if local_bundle is not None else _load_ticker_map()
+    if local_bundle is not None:
+        cached_sectors = local_bundle.sectors
+        if any(n not in cached_sectors for n in available_names):
+            raise ValueError("Classification sectorielle locale incomplète")
     if cached_sectors and len(cached_sectors) >= len(available_names) // 2:
         sector_map = dict(cached_sectors)
         # Fill missing names that may have been added since last cache
@@ -258,34 +272,40 @@ def compute_brinson(
     else:
         sector_map = _fetch_sectors(available_names, per_name, ticker_map)
 
+    if cash_weight > 1e-6:
+        sector_map["Liquidités"] = "Liquidités"
+
     # ── 5. Benchmark total return + sector data ───────────────────────
-    bench_return_raw = _series_total_return(
-        benchmark_ticker, period_start, period_end
-    )
-    bench_weights, bench_weight_method = _get_benchmark_sector_weights(
-        benchmark_ticker
-    )
-    bench_sector_returns = _get_sector_etf_returns(period_start, period_end)
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        if benchmark_ticker != bundle.benchmark_key:
+            raise ValueError("Benchmark absent du dossier de marché")
+        sector_inputs = bundle.sector_data(period_start, period_end)
+        bench_weights = dict(sector_inputs["weights"])
+        bench_sector_returns = dict(sector_inputs["returns"])
+        bench_return_raw = sum(bench_weights[s] * bench_sector_returns[s] for s in bench_weights)
+        bench_weight_method = "Dossier local — poids au début de la période de référence"
+    else:
+        bench_return_raw = _series_total_return(benchmark_ticker, period_start, period_end)
+        bench_weights, bench_weight_method = _get_benchmark_sector_weights(benchmark_ticker)
+        bench_sector_returns = _get_sector_etf_returns(period_start, period_end)
 
-    # If benchmark return is unavailable, estimate from sector ETF returns
-    # weighted by benchmark sector weights — best available proxy. Only
-    # sectors with BOTH a weight and an available ETF return are summed;
-    # the weights are renormalized over that subset so a missing/failed
-    # sector ETF download is excluded rather than silently scored as 0%.
-    _bench_return_estimated = False
-    if bench_return_raw is None:
-        covered = {s: w for s, w in bench_weights.items() if s in bench_sector_returns}
-        w_sum = sum(covered.values())
-        if covered and w_sum > 1e-9:
-            bench_return_raw = sum(
-                w * bench_sector_returns[s] for s, w in covered.items()
-            ) / w_sum
-            _bench_return_estimated = True
-        else:
-            bench_return_raw = 0.0
-            _bench_return_estimated = True
-    bench_return_total = bench_return_raw
-
+    missing_sectors = [s for s, w in bench_weights.items() if w > 0 and s not in bench_sector_returns]
+    if missing_sectors:
+        return {"available": False, "error": "Proxies sectoriels manquants : " + ", ".join(missing_sectors)}
+    if _amc_ccy != "USD":
+        try:
+            fx = get_fx_series("USD", _amc_ccy)
+            change = price_at(fx, period_end) / price_at(fx, period_start)
+            bench_sector_returns = {s: (1 + r) * change - 1 for s, r in bench_sector_returns.items()}
+            if bench_return_raw is not None:
+                bench_return_raw = (1 + bench_return_raw) * change - 1
+        except ValueError as exc:
+            return {"available": False, "error": str(exc)}
+    # The sector benchmark must reconcile exactly with its own weighted returns.
+    bench_return_total = sum(w * bench_sector_returns[s] for s, w in bench_weights.items() if w)
+    _bench_return_estimated = bundle is None
     # ── 6. Aggregate portfolio by sector ─────────────────────────────
     all_sectors = set(sector_map.values()) | set(bench_weights.keys())
     sector_data: Dict[str, dict] = {
@@ -314,7 +334,7 @@ def compute_brinson(
         w_p = d["w_p"]
         r_p = d["r_p"]
         w_b = bench_weights.get(s, 0.0)
-        r_b = bench_sector_returns.get(s, R_b)  # fallback to total bench return
+        r_b = 0.0 if s == "Liquidités" else bench_sector_returns.get(s, R_b)  # fallback to total bench return
 
         # Brinson-Fachler formulas
         allocation  = (w_p - w_b) * (r_b - R_b)
@@ -404,7 +424,11 @@ def compute_brinson(
         "weights_method":             weights_method,
         "sector_map":                 sector_map,
         "bench_return_estimated":     _bench_return_estimated,
-        "methodology_note": (
+        "actual_benchmark_return_pct": None if bench_return_raw is None else round(100 * bench_return_raw, 4),
+        "benchmark_proxy_gap_pct": None if bench_return_raw is None else round(100 * (R_b - bench_return_raw), 4),
+        "analysis_type": "static_proxy",
+        "methodology_note": ("Attribution statique du panier de référence ; rendements totaux, change et secteurs du dossier local. Benchmark équipondéré au début de cette période puis conservé. Cette comparaison brute ne mesure pas l’attribution dynamique du fonds géré." if bundle is not None else (
+            "Simulation statique sur proxies ; elle ne mesure pas l’attribution du portefeuille réellement géré. Le benchmark affiché est reconstruit à partir des secteurs ; son écart au benchmark coté est conservé séparément. "
             "Brinson-Fachler single-période. "
             + (
                 "Poids portefeuille : term sheet (poids exacts au fixing). "
@@ -420,7 +444,8 @@ def compute_brinson(
             + (" ⚠ Retour total benchmark non disponible via yfinance (benchmark composite ou "
                "ticker non coté) — estimé à partir des retours sectoriels ETF pondérés."
                if _bench_return_estimated else "")
-        ),
+        )),
+
     }
 
 
@@ -432,100 +457,33 @@ def _build_inception_weights(
     folder: str,
     termsheet_positions: Optional[List[dict]] = None,
 ) -> tuple:
-    """Reconstruct inception-window weights.
-
-    Priority order:
-      1. termsheet_positions (exact fixing weights — most accurate)
-      2. inception-window BUY orders (first 60 days)
-      3. current composition (fallback)
-    """
-    # ── Priority 1: Term sheet weights (exact fixing) ─────────────────
+    """Use documented initial weights, otherwise disclose current-weight approximation."""
+    isin_to_name = {r.get("isin"): r.get("name") for r in per_name}
     if termsheet_positions:
-        isin_to_avail_name: Dict[str, str] = {
-            row.get("isin", ""): row.get("name", "")
-            for row in per_name if row.get("isin")
-        }
-        ts_weights: Dict[str, float] = {}
-        for ts in termsheet_positions:
-            isin = ts.get("isin", "")
-            name = isin_to_avail_name.get(isin) or ts.get("name", "")
-            if name in available_names:
-                ts_weights[name] = float(ts.get("weight_pct", 0)) / 100.0
-        if ts_weights:
-            total_ts = sum(ts_weights.values())
-            if total_ts > 1e-9:
-                ts_weights = {n: ts_weights.get(n, 0.0) / total_ts
-                              for n in available_names}
-                return pd.Series(ts_weights), "termsheet"
-
-    # ── Priority 2: inception BUY orders (first 60 days) ─────────────
-    initial_notionals: Dict[str, float] = {}
-    method = "current_composition"
-
-    if folder:
-        try:
-            base = Path(folder)
-            paths: List[str] = []
-            seen: set = set()
-            for p in (list(base.glob("* Data*.json"))
-                      + list(base.glob("*Data*.json"))
-                      + list(base.glob("merged-*.json"))):
-                rp = str(p.resolve())
-                if rp not in seen:
-                    seen.add(rp)
-                    paths.append(str(p))
-
-            if paths:
-                from .amc_orderbook import load_orders as _lo
-                all_orders = _lo(paths)
-                done = sorted(
-                    [o for o in all_orders if o.get("state") == "Done"],
-                    key=lambda x: str(x.get("date") or ""),
-                )
-                if done:
-                    first_ts = pd.Timestamp(str(done[0].get("date") or "")[:10])
-                    cutoff   = first_ts + pd.Timedelta(days=60)
-                    buys = [
-                        o for o in done
-                        if pd.Timestamp(str(o.get("date") or "")[:10]) < cutoff
-                        and float(o.get("executed_qty") or 0) > 0
-                    ]
-                    for o in buys:
-                        notional = float(o.get("notional_prod") or 0)
-                        if notional <= 0:
-                            notional = (float(o.get("executed_qty") or 0) *
-                                        float(o.get("price_prod") or 0))
-                        name = o.get("name") or o.get("isin") or ""
-                        if name and notional > 0:
-                            initial_notionals[name] = (
-                                initial_notionals.get(name, 0.0) + notional
-                            )
-                    if initial_notionals:
-                        method = "inception_orders"
-        except Exception:
-            pass
-
-    weight_map: Dict[str, float] = {}
-    if initial_notionals:
-        total = sum(v for k, v in initial_notionals.items() if k in available_names)
-        if total > 0:
-            for n in available_names:
-                weight_map[n] = initial_notionals.get(n, 0.0) / total
-
-    if not weight_map:
-        for row in per_name:
-            n = row.get("name", "")
-            if n in available_names:
-                weight_map[n] = float(row.get("weight") or 0.0)
-        method = "current_composition"
-
-    total_w = sum(weight_map.values())
-    if total_w <= 1e-9:
-        weight_map = {n: 1.0 / len(available_names) for n in available_names}
+        weight_map = {}
+        for row in termsheet_positions:
+            name = isin_to_name.get(row.get("isin")) or row.get("name", "")
+            weight = float(row.get("weight_pct", 0)) / 100
+            if weight < 0 or (weight > 0 and name not in available_names):
+                raise ValueError("Panier initial incomplet ou poids invalides pour Brinson")
+            weight_map[name] = weight_map.get(name, 0) + weight
+        method = "termsheet"
     else:
-        weight_map = {n: weight_map.get(n, 0.0) / total_w for n in available_names}
-
-    return pd.Series(weight_map), method
+        weight_map = {}
+        for row in per_name:
+            name = row.get("name", "")
+            weight = float(row.get("weight") or 0)
+            if name.upper() in {"CASH", "USD", "EUR", "CHF", "GBP", "JPY"}:
+                continue
+            if weight < 0 or (weight > 0 and name not in available_names):
+                raise ValueError("Composition incomplète pour Brinson")
+            weight_map[name] = weight_map.get(name, 0) + weight
+        method = "current_composition"
+    total = sum(weight_map.values())
+    if not 0 < total <= 1.0001:
+        raise ValueError("Poids documentés requis pour Brinson (somme comprise entre 0 et 100 %)")
+    # Keep the residual cash allocation; do not inflate securities to 100%.
+    return pd.Series({n: weight_map.get(n, 0.0) for n in available_names}), method
 
 
 def _fetch_sectors(
@@ -581,15 +539,16 @@ def _series_total_return(ticker: str, start: str, end: str) -> Optional[float]:
             w_sum = 0.0
             for c in comps[ticker]["components"]:
                 r = _series_total_return(c["ticker"], start, end)
-                if r is not None:
-                    total += c["weight"] * r
-                    w_sum += c["weight"]
+                if r is None:
+                    return None
+                total += c["weight"] * r
+                w_sum += c["weight"]
             return total / w_sum if w_sum > 0 else None
     except ImportError:
         pass
 
     try:
-        raw = yf.download(ticker, start=start, end=end,
+        raw = yf.download(ticker, start=start, end=(pd.Timestamp(end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
                           auto_adjust=True, progress=False)
         if raw.empty or len(raw) < 2:
             return None
@@ -650,7 +609,7 @@ def _get_sector_etf_returns(start: str, end: str) -> Dict[str, float]:
 
     try:
         df = yf.download(
-            etf_list, start=start, end=end,
+            etf_list, start=start, end=(pd.Timestamp(end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
             auto_adjust=True, progress=False, group_by="ticker",
         )
         if df.empty:

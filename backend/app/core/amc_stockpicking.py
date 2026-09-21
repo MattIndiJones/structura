@@ -31,6 +31,7 @@ _HORIZON_WEIGHTS: dict[str, float] = {"1M": 0.15, "3M": 0.25, "6M": 0.30, "12M":
 _MIN_TRADING_DAYS = 15   # minimum days available for a horizon to be considered valid
 
 _bench_cache: dict[str, pd.Series] = {}
+_bench_cache_times: dict[str, float] = {}
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ def _blend_composite(components: list[dict]) -> Optional[pd.Series]:
         for c in components:
             raw = yf.download(c["ticker"], period="5y", auto_adjust=True, progress=False)
             if raw.empty:
-                continue
+                return None
             close = raw["Close"]
             if hasattr(close, "squeeze"):
                 close = close.squeeze()
@@ -99,8 +100,16 @@ def _blend_composite(components: list[dict]) -> Optional[pd.Series]:
 
 def _get_benchmark_series(benchmark_ticker: str) -> Optional[pd.Series]:
     """Return benchmark price series, using an in-memory cache."""
-    if benchmark_ticker in _bench_cache:
+    from .amc_market_bundle import active_bundle
+    bundle = active_bundle()
+    if bundle is not None:
+        return bundle.benchmark_series(benchmark_ticker)
+    import time
+    cached_at = _bench_cache_times.get(benchmark_ticker, 0)
+    if benchmark_ticker in _bench_cache and time.monotonic() - cached_at < 3600:
         return _bench_cache[benchmark_ticker]
+    _bench_cache.pop(benchmark_ticker, None)
+    _bench_cache_times[benchmark_ticker] = time.monotonic()
 
     # Composite UTI benchmark?
     try:
@@ -188,8 +197,8 @@ def _compute_score_100(alpha_mean: float, success_rate: float,
 
 
 def _score_label(score: int) -> str:
-    if score >= 75: return "Excellent"
-    if score >= 60: return "Bon"
+    if score >= 75: return "Élevé (descriptif)"
+    if score >= 60: return "Favorable (descriptif)"
     if score >= 45: return "Neutre"
     if score >= 30: return "Faible"
     return "Très faible"
@@ -217,7 +226,7 @@ def _interpret(score: int, alpha_means: dict[str, float],
         parts.append(
             f"Score de stock picking de {score}/100 ({label}) — "
             f"la sélection de titres génère un alpha positif vs {benchmark_ticker} "
-            "de façon consistante."
+            "sur les observations disponibles ; résultat descriptif."
         )
     elif score >= 45:
         parts.append(
@@ -241,10 +250,10 @@ def _interpret(score: int, alpha_means: dict[str, float],
                 f"minimal à {worst_h} ({alpha_means[worst_h]*100:+.1f}%)."
             )
 
-    if abs(tstat) >= 1.96:
+    if pvalue < 0.05:
         direction = "positive" if tstat > 0 else "négative"
         parts.append(
-            f"Compétence de sélection statistiquement significative "
+            f"Écart post-achat au benchmark statistiquement significatif sous les hypothèses du test "
             f"(t={tstat:+.2f}, p={pvalue:.3f}) — alpha {direction}."
         )
     elif abs(tstat) >= 1.28:
@@ -254,7 +263,7 @@ def _interpret(score: int, alpha_means: dict[str, float],
         )
     else:
         parts.append(
-            f"Aucune compétence de sélection statistiquement détectable "
+            f"Aucun écart post-achat au benchmark statistiquement détectable "
             f"(t={tstat:+.2f}, p={pvalue:.3f})."
         )
 
@@ -276,7 +285,7 @@ def _interpret(score: int, alpha_means: dict[str, float],
 # ── public entry point ─────────────────────────────────────────────────────
 
 def compute_stockpicking_score(orders: list[dict],
-                               benchmark_ticker: str = "ACWI") -> dict:
+                               benchmark_ticker: str = "ACWI", as_of: str | None = None, prod_ccy: str = "USD") -> dict:
     """Compute Block I — Stock Picking Score from executed BUY orders.
 
     Args:
@@ -297,7 +306,13 @@ def compute_stockpicking_score(orders: list[dict],
         return {"available": False, "error": "Aucun ordre d'achat exécuté disponible."}
 
     bench_series = _get_benchmark_series(benchmark_ticker)
+    from .amc_controls import record_market
+    record_market(f"benchmark:{benchmark_ticker}", bench_series)
     bench_available = bench_series is not None
+    if not bench_available:
+        return {"available": False, "benchmark_available": False, "error": "Benchmark indisponible : aucun score relatif calculé."}
+    if as_of:
+        bench_series = bench_series.loc[:as_of]
 
     # pre-load unique underlying series
     series_cache: dict[str, Optional[pd.Series]] = {}
@@ -327,6 +342,8 @@ def compute_stockpicking_score(orders: list[dict],
         }
 
         series = series_cache.get(key)
+        if series is not None and as_of:
+            series = series.loc[:as_of]
         if series is None:
             all_trades.append({**base, "available": False,
                                 "reason": "Prix non disponibles dans le Price Store"})
@@ -336,7 +353,26 @@ def compute_stockpicking_score(orders: list[dict],
         any_horizon = False
 
         for h, n_days in _HORIZONS.items():
-            ret_title = _forward_return(series, t, n_days)
+            # Compare total returns in USD on exactly the same dates.
+            from .amc_prices import get_currency, get_fx_series
+            from .amc_controls import price_at
+            local_series = series
+            currency = (o.get("ccy") or get_currency(isin or name) or "").upper()
+            if not currency:
+                horizon_data[h] = {"available": False, "reason": "Devise du titre inconnue"}
+                continue
+            try:
+                if currency != "USD":
+                    fx = get_fx_series(currency, "USD")
+                    local_series = series * pd.Series([price_at(fx, d) for d in series.index], index=series.index)
+                aligned = pd.concat([local_series.rename("title"), bench_series.rename("bench")], axis=1).dropna()
+                aligned = aligned.loc[aligned.index >= t]
+                if aligned.empty or (aligned.index[0] - t).days > 7:
+                    raise ValueError("Date initiale non couverte")
+                ret_title = _forward_return(aligned["title"], t, n_days)
+            except ValueError:
+                horizon_data[h] = {"available": False}
+                continue
             if ret_title is None:
                 horizon_data[h] = {"available": False}
                 continue
@@ -344,12 +380,15 @@ def compute_stockpicking_score(orders: list[dict],
             ret_bench = None
             alpha = None
             if bench_available:
-                ret_bench = _forward_return(bench_series, t, n_days)
+                ret_bench = _forward_return(aligned["bench"], t, n_days)
                 if ret_bench is not None:
                     alpha = ret_title - ret_bench
 
             # if no benchmark, use raw return (less meaningful but not None)
-            effective_alpha = alpha if alpha is not None else ret_title
+            if alpha is None:
+                horizon_data[h] = {"available": False}
+                continue
+            effective_alpha = alpha
 
             horizon_data[h] = {
                 "available":    True,
@@ -431,7 +470,10 @@ def compute_stockpicking_score(orders: list[dict],
             ir = float(arr.mean() / std)
 
     score  = _compute_score_100(global_alpha, global_sr, ir)
-    tstat, pvalue = _tstat_pvalue(all_alphas_flat)
+    from .amc_controls import clustered_mean_test
+    independent = [t for t in all_trades if t.get("available") and t.get("alpha_weighted") is not None]
+    inference = clustered_mean_test([t["alpha_weighted"] for t in independent], [t["isin"] or t["name"] for t in independent])
+    tstat, pvalue = inference["tstat"], inference["pvalue"]
 
     available_trades = [t for t in all_trades
                         if t.get("available") and t.get("alpha_weighted") is not None]
@@ -453,6 +495,9 @@ def compute_stockpicking_score(orders: list[dict],
         "global_success_rate": round(global_sr, 4),
         "information_ratio":   round(ir, 3),
         "tstat_alpha":         tstat,
+        "inference": inference,
+        "as_of": as_of,
+        "analysis_currency": "USD",
         "pvalue_alpha":        pvalue,
         "stats_by_horizon":    stats_by_horizon,
         "interpretation":      _interpret(score, alpha_means, global_sr, n_analyzed,

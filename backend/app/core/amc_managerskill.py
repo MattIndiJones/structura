@@ -28,11 +28,11 @@ BASE_WEIGHTS: dict[str, float] = {
 }
 
 _LABELS = [
-    (80, "Gérant exceptionnel", "#10b981"),
-    (60, "Bon gérant",          "#22c55e"),
+    (80, "Profil descriptif très favorable", "#10b981"),
+    (60, "Profil descriptif favorable",          "#22c55e"),
     (40, "Neutre",              "#f59e0b"),
     (20, "Faible valeur ajoutée", "#f97316"),
-    (0,  "Destructeur de valeur", "#ef4444"),
+    (0,  "Profil descriptif défavorable", "#ef4444"),
 ]
 
 _DIM_LABELS = {
@@ -41,7 +41,7 @@ _DIM_LABELS = {
     "vag":           "Référentiel Inertiel / VAG (E)",
     "risk_mgmt":     "Risk Management (J)",
     "timing":        "Timing Score (H)",
-    "conviction":    "Conviction (D)",
+    "conviction":    "Taux de titres gagnants (D)",
 }
 
 
@@ -56,6 +56,8 @@ def _alpha_score(block_a: Optional[dict]) -> Optional[float]:
         return None
     net = (block_a.get("net") or {})
     reg = net.get("regression") or {}
+    if reg.get("n_obs", 0) < 120:
+        return None
     alpha_ann  = reg.get("alpha_ann_pct") or 0.0
     alpha_t    = abs(reg.get("alpha_tstat") or 0.0)
     base = _clamp(50 + 50 * math.tanh(alpha_ann / 8))
@@ -73,6 +75,8 @@ def _alpha_score(block_a: Optional[dict]) -> Optional[float]:
 def _stockpicking_score(block_i: Optional[dict]) -> Optional[float]:
     if not block_i or not block_i.get("available"):
         return None
+    if block_i.get("coverage_pct", 0) < 60 or not block_i.get("inference", {}).get("inference_available"):
+        return None
     return float(block_i.get("score", 50))
 
 
@@ -86,24 +90,26 @@ def _vag_score(study_result: dict, vag_result: Optional[dict] = None) -> tuple[O
 
     # Primary: block_e embedded in study_result
     block_e = (study_result or {}).get("block_e") or {}
-    if block_e.get("available"):
+    if block_e.get("available") and (block_e.get("comparable_costs", False) or block_e.get("comparison_basis")):
         total_pct = block_e.get("value_added_pct")
         if total_pct is not None:
             meta  = (study_result or {}).get("meta") or {}
-            start = meta.get("nav_start_date")
-            end   = meta.get("nav_current_date")
+            start = block_e.get("period_start") or meta.get("nav_start_date")
+            end   = block_e.get("period_end") or meta.get("nav_current_date")
             try:
                 d0   = _dt.datetime.strptime(str(start)[:10], "%Y-%m-%d")
                 d1   = _dt.datetime.strptime(str(end)[:10], "%Y-%m-%d")
-                yrs  = max((d1 - d0).days / 365.25, 0.1)
+                yrs  = (d1 - d0).days / 365.25
+                if yrs <= 0 or not math.isfinite(float(total_pct)):
+                    return None, None
                 vag_ann = float(total_pct) / yrs
-            except Exception:
-                vag_ann = float(total_pct)
+            except (ValueError, TypeError):
+                return None, None
             score = _clamp(50 + 50 * math.tanh(vag_ann / 20))
             return score, float(vag_ann)
 
     # Legacy fallback (external vag_result, deprecated)
-    if not vag_result or vag_result.get("error"):
+    if not vag_result or vag_result.get("error") or not vag_result.get("comparable_costs", False):
         return None, None
     vag_ann = None
     if "vag_ann_pct" in vag_result:
@@ -126,13 +132,15 @@ def _vag_score(study_result: dict, vag_result: Optional[dict] = None) -> tuple[O
 
 
 def _riskmanagement_score(block_j: Optional[dict]) -> Optional[float]:
-    if not block_j or not block_j.get("available"):
+    if not block_j or not block_j.get("available") or block_j.get("n_obs", 0) < 120:
         return None
     return float(block_j.get("score", 50))
 
 
 def _timing_score(block_h: Optional[dict]) -> Optional[float]:
     if not block_h or not block_h.get("available"):
+        return None
+    if block_h.get("coverage_pct", 0) < 60 or not block_h.get("inference", {}).get("inference_available"):
         return None
     g = block_h.get("global_score_mean")
     if g is None:
@@ -141,7 +149,7 @@ def _timing_score(block_h: Optional[dict]) -> Optional[float]:
 
 
 def _conviction_score(block_d: Optional[dict]) -> Optional[float]:
-    if not block_d:
+    if not block_d or block_d.get("available") is False:
         return None
     matrix = block_d.get("conviction_matrix") or {}
     counts = matrix.get("counts") or {}
@@ -173,7 +181,7 @@ def _interpret(score: int, label: str, dims: list[dict],
 
     parts.append(
         f"Manager Skill Score de {score}/100 ({label}) — "
-        "évaluation composite basée sur les blocs disponibles."
+        "indicateur exploratoire, non calibré comme probabilité de talent."
     )
 
     # best and worst
@@ -190,12 +198,12 @@ def _interpret(score: int, label: str, dims: list[dict],
     if scores.get("alpha") is not None and scores["alpha"] < 40:
         parts.append(
             "⚠ L'alpha Fama-French est faible ou non significatif — "
-            "la surperformance, si elle existe, n'est pas attribuable à la sélection active."
+            "cela ne permet pas de conclure à une capacité de sélection active."
         )
     if scores.get("timing") is not None and scores["timing"] < 40:
         parts.append(
-            "⚠ Le timing des ordres est systématiquement inférieur à l'aléatoire — "
-            "biais comportemental documenté."
+            "⚠ Le timing descriptif est inférieur au point neutre ; "
+            "consulter le test statistique avant toute conclusion."
         )
     if scores.get("risk_mgmt") is not None and scores["risk_mgmt"] < 40:
         parts.append(
@@ -247,6 +255,10 @@ def compute_manager_skill_score(
         }
 
     total_w = sum(BASE_WEIGHTS[k] for k in available_keys)
+    if len(available_keys) < 4 or total_w < 0.75 or study_result.get("data_quality", {}).get("status") == "review_required":
+        return {"available": False, "score": None, "score_label": "Données insuffisantes",
+                "n_dimensions_available": len(available_keys), "dimension_scores": raw_scores,
+                "error": "Score global non publié : couverture ou qualité insuffisante (4 dimensions et 75 % des poids requis)."}
     norm_weights = {k: BASE_WEIGHTS[k] / total_w for k in available_keys}
 
     composite = sum(norm_weights[k] * raw_scores[k] for k in available_keys)
@@ -269,9 +281,19 @@ def compute_manager_skill_score(
         }
         if k == "vag":
             dim["vag_ann_pct"] = round(vag_ann_raw, 2) if vag_ann_raw is not None else None
+            e = study_result.get("block_e") or {}
+            dim["value_added_pct"] = e.get("value_added_pct")
+            dim["comparison_basis"] = e.get("comparison_basis", "Coûts comparables")
+            dim["annualization_method"] = "Écart cumulé en points / durée en années (linéaire, pas un CAGR)"
+            dim["limitation"] = ("Comparaison fonds net / panier passif brut : frais et politique de dividendes inclus dans l’écart ; contribution descriptive, pas une mesure isolée du talent."
+                if s is not None and not e.get("comparable_costs", False) else "")
         dimensions.append(dim)
 
     interp = _interpret(score, label, dimensions, raw_scores)
+    interp += " Score composite descriptif : ce score ne démontre pas une compétence statistiquement significative. Consulter séparément les p-values et les limites des blocs A, H et I. Le taux de titres gagnants ne mesure pas l’alpha des positions de forte conviction."
+    vag_dimension = next(d for d in dimensions if d["key"] == "vag")
+    if vag_dimension.get("limitation"):
+        interp += " " + vag_dimension["limitation"]
 
     return {
         "available":            True,

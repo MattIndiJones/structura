@@ -24,34 +24,10 @@ def load_nav_csv(path: str) -> list[tuple[datetime.date, float, Optional[int]]]:
     Expected columns: Date (DD.MM.YYYY), Price (float), Outstanding quantity (int, optional)
     Returns list of (date, nav_per_cert, outstanding_qty) sorted ascending by date.
     """
-    rows: list[tuple[datetime.date, float, Optional[int]]] = []
-
-    with open(path, encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            date_str = (row.get("Date") or "").strip()
-            price_str = (row.get("Price") or "").strip()
-            qty_str = (row.get("Outstanding quantity") or "").strip()
-
-            if not date_str or not price_str:
-                continue
-            try:
-                date = datetime.datetime.strptime(date_str, "%d.%m.%Y").date()
-                price = float(price_str)
-            except ValueError:
-                continue
-
-            qty: Optional[int] = None
-            if qty_str:
-                try:
-                    qty = int(float(qty_str))
-                except ValueError:
-                    pass
-
-            rows.append((date, price, qty))
-
-    rows.sort(key=lambda r: r[0])
-    return rows
+    from ..amc_orderbook import load_nav
+    from ..amc_controls import validate_nav
+    return [(datetime.date.fromisoformat(r["date"]), r["nav"], r.get("outstanding"))
+            for r in validate_nav(load_nav(path))]
 
 
 def get_fixing_info(nav_rows: list[tuple]) -> tuple[datetime.date, int, float]:
@@ -69,12 +45,7 @@ def get_fixing_info(nav_rows: list[tuple]) -> tuple[datetime.date, int, float]:
     if n_certs_first is not None:
         return fixing_date, n_certs_first, nav_initial
 
-    # Outstanding qty sometimes appears only on subscription dates, not daily
-    for _date, _price, qty in nav_rows:
-        if qty is not None:
-            return fixing_date, qty, nav_initial
-
-    raise ValueError("Outstanding quantity not found in NAV CSV")
+    raise ValueError("Encours initial absent : impossible de reconstruire le panier initial depuis un encours futur")
 
 
 def detect_nav_csv(folder: str) -> Optional[str]:
@@ -170,56 +141,24 @@ def build_initial_orders(
         orders.sort(key=lambda o: o.isin)
         return orders
 
-    split_factors, yf_prices = _compute_split_factors(
-        termsheet, fixing_date, nav_initial, prod_ccy, isin_aliases)
-
-    orders: list[Order] = []
+    from ..amc_prices import build_marks, get_fx_series
+    from ..amc_controls import price_at
+    marks = build_marks([{"isin": isin_aliases.get(e["isin"], e["isin"]), "name": e["name"], "currency": e.get("ccy", "")} for e in termsheet], fixing_date.isoformat(), prod_ccy, price_basis="execution")
+    orders = []
     for e in termsheet:
-        ts_isin = e["isin"]
-        fifo_isin = isin_aliases.get(ts_isin, ts_isin)   # carnet ISIN (may equal ts_isin)
-        name = e["name"]
-        qty_per_cert: float = e["qty_per_cert"]
-        weight_pct: float = e["weight_pct"]
-
-        if qty_per_cert <= 0:
-            continue
-
-        split_factor = split_factors.get(fifo_isin)
-        if split_factor is None:
-            continue
-        yf_price = yf_prices.get(fifo_isin)
-
-        if yf_price is None:
-            # yfinance unavailable (e.g. delisted/IL ISIN): trust termsheet-implied price.
-            expected_price_usd = (weight_pct / 100.0 * nav_initial) / qty_per_cert
-            orders.append(Order(
-                id=f"T0_INIT_{fifo_isin}",
-                date=fixing_date,
-                isin=fifo_isin,
-                name=name,
-                qty=n_certs * qty_per_cert,
-                price_local=expected_price_usd,
-                price_ccy=prod_ccy,
-                fx=1.0,
-                price_prod=expected_price_usd,
-            ))
-            continue
-
-        orders.append(Order(
-            id=f"T0_INIT_{fifo_isin}",
-            date=fixing_date,
-            isin=fifo_isin,
-            name=name,
-            qty=n_certs * qty_per_cert * split_factor,        # positive = BUY
-            price_local=yf_price,
-            price_ccy=prod_ccy,
-            fx=1.0,
-            price_prod=yf_price,
-        ))
-
-    # Sort by ISIN for determinism
-    orders.sort(key=lambda o: o.isin)
-    return orders
+        isin = isin_aliases.get(e["isin"], e["isin"])
+        if isin not in marks:
+            raise ValueError(f"Cours initial manquant : {isin}")
+        ccy = e.get("ccy", "").upper()
+        if not ccy:
+            raise ValueError(f"Devise initiale manquante : {isin}")
+        fx = 1.0 if ccy == prod_ccy.upper() else price_at(get_fx_series(ccy, prod_ccy), fixing_date)
+        product_price = marks[isin]
+        allocation = n_certs * float(e["weight_pct"]) / 100 * nav_initial
+        orders.append(Order(id=f"T0_INIT_{isin}", date=fixing_date, isin=isin, name=e["name"],
+                            qty=allocation / product_price, price_local=product_price / fx,
+                            price_ccy=ccy, fx=fx, price_prod=product_price))
+    return sorted(orders, key=lambda o: o.isin)
 
 
 def _compute_split_factors(

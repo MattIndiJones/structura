@@ -351,7 +351,14 @@ Target length: 1,200 to 1,500 words. Write in English only.\
 def _get_system_prompt(audience: str, language: str) -> str:
     aud  = audience if audience in _SYSTEM_PROMPTS else "committee"
     lang = language if language in ("fr", "en") else "fr"
-    return _SYSTEM_PROMPTS[aud][lang]
+    return ("Rédige une synthèse d’aide à la revue humaine en français. Distingue faits observés, hypothèses et données manquantes. "
+            "Ne conclus pas à un talent durable, une intention de gestion, une causalité ou une recommandation d’investissement à partir d’un score descriptif. "
+            "Mentionne la date d’arrêté, la devise, les limites de couverture, les frais non comparables et le rapprochement NAV. "
+            "Ne traite pas la couverture documentaire comme une probabilité statistique. Un bloc indisponible ne vaut jamais zéro performance. "
+            "Le timing est rétrospectif ; Brinson utilise des proxies ; la réplication factorielle est ajustée sur le même échantillon. "
+            "Ne fabrique pas de ratio recalculé ni de fait externe. Si les données sont insuffisantes, conclus à une analyse non concluante. "
+            f"Public visé : {aud}. Structure : constats chiffrés, limites, points à vérifier, conclusion conditionnelle.")
+
 
 
 # ── Formatting helpers ─────────────────────────────────────────────────────
@@ -481,6 +488,7 @@ def build_synthesis_payload(
     add("=" * 66)
     add("BLOC B — ATTRIBUTION PAR SOUS-JACENT")
     add("=" * 66)
+    brinson_result = brinson_result or study_result.get("block_g")
     bb = study_result.get("block_b") or {}
     totals = bb.get("totals") or {}
     if totals:
@@ -490,7 +498,7 @@ def build_synthesis_payload(
         fx_pnl   = totals.get("realized_fx_pnl")
         fx_share = totals.get("fx_share_of_realized_pct")
         if fx_pnl is not None:
-            add(f"Impact FX réalisé : {_money(fx_pnl, ccy)} ({_pct(fx_share)} du réalisé)")
+            add(f"Impact FX réalisé : {_money(fx_pnl, ccy)} ({_pct(fx_share)} du P&L réalisé net signé, hors latent et dividendes)")
         add("")
 
     quarterly = bb.get("quarterly_realized") or []
@@ -690,6 +698,7 @@ def build_synthesis_payload(
     add("BLOC G — ATTRIBUTION BRINSON-FACHLER")
     add("=" * 66)
     if brinson_result and brinson_result.get("available"):
+        add("Attribution indicative sur proxies, non intégrée au scoring : panier statique, pas une attribution de la gestion effective.")
         add(f"Retour actif total   : {_pct(brinson_result.get('active_return_pct'))}")
         add(f"  Effet Allocation   : {_pct(brinson_result.get('allocation_pct'))}")
         add(f"  Effet Sélection    : {_pct(brinson_result.get('selection_pct'))}")
@@ -942,6 +951,7 @@ def build_synthesis_payload(
     add(f"Audience cible : {audience}  |  Langue de rédaction : {language}")
     add("=" * 66)
 
+    lines.append("\nCONTRÔLES ET TRAÇABILITÉ : " + __import__("json").dumps({"quality": study_result.get("data_quality"), "provenance": study_result.get("provenance")}, ensure_ascii=False))
     return "\n".join(lines)
 
 

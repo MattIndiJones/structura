@@ -24,11 +24,47 @@
       </div>
     </div>
 
+    <nav v-if="mainTab === 'study'" class="study-workspace-nav" aria-label="Espaces de l’étude">
+      <button :aria-pressed="studyWorkspace === 'configuration'" @click="studyWorkspace = 'configuration'">Configuration &amp; données</button>
+      <button :aria-pressed="studyWorkspace === 'results'" :disabled="!studyResult" @click="studyWorkspace = 'results'">Résultats</button>
+      <button v-if="studyResult" @click="studyWorkspace = 'results'; activeStudyTab = 'synthese'">{{ synthesisBusy ? 'Synthèse IA en cours…' : 'Synthèse / IA' }}</button>
+      <span v-if="studyResult" class="text-xs" role="status">{{ studyConfigChanged ? 'Paramètres modifiés — résultats à recalculer' : 'Résultats du dernier calcul' }}</span>
+    </nav>
+
+        <section v-if="mainTab === 'study' && studyResult" class="px-5 py-2 border-b border-slate-800 shrink-0" aria-label="Rapports PDF"><h2 class="text-xs font-semibold">Rapports PDF</h2>          <div v-if="studyResult" class="flex flex-wrap items-center gap-3 mt-2">
+            <label class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none px-0.5">
+              <input type="checkbox" v-model="includeBrinsonInPdf" class="w-3.5 h-3.5 accent-blue-500" />
+              Inclure Brinson dans le PDF
+            </label>
+            <label class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none px-0.5">
+              <input type="checkbox" v-model="includeMarketShocksInPdf" class="w-3.5 h-3.5 accent-blue-500" />
+              Inclure Chocs de Marché (K) dans le PDF
+            </label>
+            <button
+              class="text-xs px-3 py-2 rounded-lg border border-slate-600 text-slate-300 hover:border-blue-500 hover:text-blue-300 flex items-center justify-center gap-2 transition-colors"
+              :disabled="studyPdfLoading || studyPdfSimpleLoading"
+              @click="exportStudyPdf(true)">
+              <span v-if="studyPdfLoading" class="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+              <span v-else>📄</span>
+              {{ studyPdfLoading ? 'Génération…' : 'PDF complet (avec annexes)' }}
+            </button>
+            <button
+              class="text-xs px-3 py-2 rounded-lg border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-300 flex items-center justify-center gap-2 transition-colors"
+              :disabled="studyPdfLoading || studyPdfSimpleLoading"
+              @click="exportStudyPdf(false)">
+              <span v-if="studyPdfSimpleLoading" class="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+              <span v-else>📋</span>
+              {{ studyPdfSimpleLoading ? 'Génération…' : 'PDF simplifié (sans annexes)' }}
+            </button>
+          </div>
+<p class="text-xs text-slate-500 mt-2">Le PDF est téléchargé par le navigateur. La synthèse intégrée est celle de l’onglet Synthèse.</p>
+</section>
+
     <!-- Main 2-col -->
-    <main class="flex-1 grid grid-cols-[380px_1fr] min-h-0">
+    <main class="flex-1 grid min-h-0" :class="mainTab === 'study' ? 'study-workspace' : 'grid-cols-[380px_1fr]'">
 
       <!-- ── LEFT: Config ──────────────────────────────────────────── -->
-      <aside class="border-r border-slate-800 flex flex-col overflow-y-auto p-5 gap-5">
+      <aside v-show="mainTab === 'classic' || studyWorkspace === 'configuration'" class="border-r border-slate-800 flex flex-col overflow-y-auto p-5 gap-5" :class="{ 'study-configuration': mainTab === 'study' }">
 
         <!-- ══════════════════════════════════════════════════════════ -->
         <!-- MODE CLASSIQUE                                             -->
@@ -216,6 +252,25 @@
         <!-- ══════════════════════════════════════════════════════════ -->
         <template v-if="mainTab === 'study'">
 
+
+        <div class="study-config-heading">
+          <div><h1>Configuration &amp; données</h1><p>Préparez les sources et les conventions, puis lancez l’analyse.</p></div>
+          <button class="btn-primary" :disabled="!manifestData || studyLoading || !studyConfig.selected_factors.length" @click="runStudy">{{ studyLoading ? 'Analyse en cours…' : 'Lancer l’analyse' }}</button>
+        </div>
+        <nav class="study-section-nav" aria-label="Sections de configuration">
+          <button @click="scrollStudySection('study-files')">1. Sources</button><button :disabled="!manifestData" @click="scrollStudySection('study-identity')">2. Identification</button><button :disabled="!manifestData" @click="scrollStudySection('study-fees')">3. Frais</button><button :disabled="!manifestData" @click="scrollStudySection('study-dividends')">4. Dividendes</button><button @click="scrollStudySection('study-analysis')">5. Analyse</button>
+        </nav>
+        <div v-if="studyError" class="study-notice text-red-500" role="alert">{{ studyError }}</div>
+        <div v-if="studyLoading" class="study-notice" role="status">Traitement en cours. Les résultats s’afficheront à la fin du calcul.</div>
+        <div v-if="studyConfigChanged" class="study-notice text-amber-600" role="status">La configuration a changé. Relancez l’analyse pour actualiser les résultats.</div>
+        <div v-if="manifestData" class="study-notice study-source-summary">
+          <span><strong>{{ configuredSourceCount }}</strong> fichiers référencés</span>
+          <span>Gestion : {{ manifestData.manifest.params.management_fee_pct ?? 'À renseigner' }} % p.a.</span>
+          <span>Performance : {{ manifestData.manifest.params.perf_fee_pct ?? 'À renseigner' }} %</span>
+          <span>Dividendes : {{ dividendStatusLabel(manifestData.manifest.params.dividends?.status || 'unknown') }}</span>
+          <p v-if="missingStudyInputs.length" class="text-amber-600 study-wide">À compléter : {{ missingStudyInputs.join(' · ') }}. Les fichiers référencés seront contrôlés lors du lancement.</p>
+        </div>
+        <details v-if="savedStudies.length || savedStudiesLoading" class="study-saved"><summary>Ouvrir une étude sauvegardée</summary>
         <!-- Études sauvegardées -->
         <div class="card" v-if="savedStudies.length || savedStudiesLoading">
           <div class="flex items-center justify-between mb-2">
@@ -244,7 +299,184 @@
           </ul>
         </div>
 
-        <!-- FF Series étude -->
+</details>
+        <section id="study-files" class="card study-form-section">
+          <h2>1. Sources de données</h2><p class="section-help">Scannez le dossier, puis vérifiez les fichiers associés à chaque rôle. Les chemins sont relatifs au dossier de l’étude.</p>
+          <!-- Client selector -->
+          <div class="flex flex-col gap-2 mb-3">
+            <div>
+              <label for="study-field-0" class="text-xs text-slate-400 mb-1 block">Client</label>
+              <select id="study-field-0" v-model="selectedClient" class="select text-xs w-full"
+                @change="selectedUtiIsin = ''">
+                <option value="">— Sélectionner —</option>
+                <option value="UTI">UTI</option>
+                <option value="manual">Chemin manuel</option>
+              </select>
+            </div>
+
+            <!-- UTI ISIN selector (visible only when UTI is selected) -->
+            <div v-if="selectedClient === 'UTI'">
+              <label for="study-field-1" class="text-xs text-slate-400 mb-1 block">AMC UTI</label>
+              <select id="study-field-1" v-model="selectedUtiIsin" class="select text-xs w-full">
+                <option value="">— Sélectionner un AMC —</option>
+                <option v-for="p in UTI_ISINS" :key="p.isin" :value="p.isin">
+                  {{ p.label }} · {{ p.isin }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div v-if="selectedClient !== 'UTI' || !selectedUtiIsin">
+            <label for="study-field-2" class="text-xs text-slate-400 mb-1 block">Chemin du dossier ISIN</label>
+            <input id="study-field-2" v-model="studyFolder" class="input text-xs w-full font-mono"
+              placeholder="C:\Users\...\Data\CH1352587708" />
+          </div>
+          <div v-else class="text-[10px] text-slate-500 font-mono truncate mb-1 px-1">{{ studyFolder }}</div>
+
+          <button class="btn-primary text-xs py-2 flex items-center justify-center gap-2 mt-2 w-full"
+            :disabled="!studyFolder.trim() || studyLoading"
+            @click="detectFolder">
+            <span v-if="studyLoading && !manifestData" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+            {{ (studyLoading && !manifestData) ? 'Scan…' : '🔍 Scanner le dossier' }}
+          </button>
+
+
+          <div v-if="manifestData" class="study-fields mt-4">
+            <label>Historique des NAV<input v-model="manifestData.manifest.files.nav_timeseries" class="input" /><small>Série de NAV utilisée pour les rendements et le rapprochement.</small></label>
+            <label>Composition à l’arrêté<input v-model="manifestData.manifest.files.composition" class="input" /><small>Positions, poids et valorisations du relevé de composition.</small></label>
+            <label class="study-wide">Carnets de transactions<textarea :value="(manifestData.manifest.files.orders || []).join('\n')" @input="manifestData.manifest.files.orders = $event.target.value.split('\n').map(x => x.trim()).filter(Boolean)" class="input" rows="3"></textarea><small>Un chemin de fichier par ligne ; tous les carnets listés seront transmis à l’analyse.</small></label>
+            <label class="study-wide">Données de marché du dossier<input v-model="manifestData.manifest.files.market_data" class="input" placeholder="Facultatif — fichier de marché autonome" /><small>Cours, change, benchmark, facteurs et secteurs fournis avec l’étude. Aucune alimentation du cache partagé.</small></label>
+            <div v-if="manifestData.manifest.params.reference_portfolio" class="study-wide text-xs text-blue-400">
+              Panier de référence E / G : {{ manifestData.manifest.params.reference_portfolio.positions.length }} titres au {{ formatDate(manifestData.manifest.params.reference_portfolio.start_date) }}.
+              Ce panier sert à la comparaison passive ; les transactions du fonds restent celles du carnet.
+            </div>
+            <label>Flux de trésorerie<input v-model="manifestData.manifest.files.cash_events" class="input" placeholder="cash_events.csv" /><small>Facultatif : registre des flux cash, notamment les paiements de dividendes.</small></label>
+                            <label>Valorisation des positions à l'arrêté
+                  <select v-model="manifestData.manifest.params.valuation_source" class="select w-full text-xs">
+                    <option value="market">Cours de marché</option>
+                    <option value="composition">Relevé de composition à la même date</option>
+                  </select>
+                </label>
+          </div>
+          <label v-if="manifestData" class="study-check"><input type="checkbox" v-model="manifestData.manifest.params.orders_split_adjusted" />Carnet déjà ajusté des splits dans les unités de cet arrêté</label>
+        </section>
+        <template v-if="manifestData">
+          <section id="study-identity" class="card study-form-section">
+            <h2>2. Identification et arrêté</h2><p class="section-help">La période commence à la première NAV disponible. L’arrêté limite les données analysées.</p>
+            <div class="study-fields">
+              <label>Nom du fonds / AMC<input v-model="manifestData.manifest.product.name" class="input" /><small>Libellé repris dans les résultats et les rapports.</small></label>
+              <label>Identifiant<input v-model="manifestData.manifest.product.isin" class="input" /><small>ISIN ou identifiant du jeu de données.</small></label>
+              <label>Devise du fonds<input v-model="manifestData.manifest.product.currency" maxlength="3" class="input" /><small>Code ISO à trois lettres, par exemple USD, EUR ou CHF.</small></label>
+              <label>Thème<input v-model="manifestData.manifest.product.theme" class="input" /><small>Facultatif : thème d’investissement du portefeuille.</small></label>
+              <label>Date d’arrêté<input type="date" :value="manifestData.manifest.params.as_of || ''" @input="manifestData.manifest.params.as_of = $event.target.value || null" class="input" /><small>Vide : date déterminée à partir des données disponibles.</small></label>
+              <label>Parts / certificats à l’émission<input type="number" min="1" v-model.number="manifestData.manifest.params.n_certs" class="input" /><small>Quantité initiale utilisée par les calculs qui requièrent le capital à l’émission.</small></label>
+            </div>
+          </section>
+          <section id="study-fees" class="card study-form-section"><h2>3. Frais et high-water mark</h2><p class="section-help">Les taux et conventions doivent correspondre à la note du fonds.</p>
+              <div class="grid grid-cols-3 gap-2">
+                <div>
+                  <label for="study-field-3" class="text-slate-500 block mb-0.5">Frais gestion (% p.a.)</label>
+                  <input id="study-field-3" type="number" step="0.1" min="0" max="5"
+                    :value="manifestData.manifest?.params?.management_fee_pct ?? ''"
+                    @input="manifestData.manifest.params.management_fee_pct = $event.target.value === '' ? null : Number($event.target.value)"
+                    class="input text-xs w-full" placeholder="ex: 0.75" /><small class="block mt-2">Taux annuel appliqué à l’assiette choisie ci-dessous.</small>
+                </div>
+                <div>
+                  <label for="study-field-4" class="text-slate-500 block mb-0.5">Frais perf. (% HWM)</label>
+                  <input id="study-field-4" type="number" step="0.1" min="0" max="30"
+                    :value="manifestData.manifest?.params?.perf_fee_pct ?? ''"
+                    @input="manifestData.manifest.params.perf_fee_pct = $event.target.value === '' ? null : Number($event.target.value)"
+                    class="input text-xs w-full" placeholder="ex: 10" /><small class="block mt-2">Part des gains au-dessus du high-water mark permanent, sans hurdle.</small>
+                </div>
+                <div>
+                  <label for="study-field-5" class="text-slate-500 block mb-0.5">Coût transac. (%)</label>
+                  <input id="study-field-5" type="number" step="0.01" min="0" max="2"
+                    :value="manifestData.manifest?.params?.txn_cost_pct ?? ''"
+                    @input="manifestData.manifest.params.txn_cost_pct = $event.target.value === '' ? null : Number($event.target.value)"
+                    class="input text-xs w-full" placeholder="ex: 0.10" /><small class="block mt-2">Taux appliqué au notionnel de chaque achat et vente.</small>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <label>Assiette et base des frais de gestion
+                  <select v-model="manifestData.manifest.params.management_fee_basis" class="select w-full text-xs">
+                    <option value="nav_252">Actif net courant / 252 observations (historique)</option>
+                    <option value="previous_nav_act365">Actif net précédent — ACT/365</option>
+                    <option value="current_nav_act365">Actif net courant — ACT/365</option>
+                    <option value="previous_nav_act360">Actif net précédent — ACT/360</option>
+                    <option value="current_nav_act360">Actif net courant — ACT/360</option>
+                  </select>
+                </label>
+                <label>Cristallisation de la commission de performance
+                  <select v-model="manifestData.manifest.params.performance_crystallization" class="select w-full text-xs">
+                    <option value="daily">Quotidienne — nouveaux plus-hauts</option>
+                    <option value="monthly">Mensuelle</option>
+                    <option value="quarterly">Trimestrielle</option>
+                    <option value="annual">Annuelle</option>
+                  </select>
+                </label>
+
+              </div>
+              <div class="text-[10px] text-slate-500 leading-relaxed">
+                Frais estimés à partir des NAV nettes. HWM permanent, sans hurdle ; les périodes mensuelles,
+                trimestrielles et annuelles suivent le calendrier civil et la dernière séance de semaine.
+                Les provisions de performance restent réversibles jusqu'à la cristallisation.
+                Les flux investisseurs avec frais périodiques exigent une convention d'égalisation non encore prise en charge.
+                Les frais de transaction s'appliquent au notionnel de chaque achat et vente.
+              </div>
+
+</section>
+              <section v-if="manifestData.manifest.params.dividends" id="study-dividends" class="card study-form-section">
+                <h2>4. Dividendes</h2><p class="section-help">Renseignez la convention prévue dans la note du fonds et les événements correspondants.</p>
+                <div class="grid grid-cols-2 gap-2 mt-2">
+                  <label>Informations disponibles
+                    <select v-model="manifestData.manifest.params.dividends.status" class="select w-full text-xs">
+                      <option value="unknown">Non renseignées</option><option value="none">Aucun dividende confirmé</option>
+                      <option value="provided">Événements renseignés</option>
+                    </select>
+                  </label>
+                  <label v-if="manifestData.manifest.params.dividends.status === 'provided'">Fichier des événements datés
+                    <input v-model="manifestData.manifest.files.dividends" class="input w-full text-xs" placeholder="dividends.json" />
+                  </label>
+                  <label v-if="manifestData.manifest.params.dividends.status !== 'none'">Traitement contractuel
+                    <select v-model="manifestData.manifest.params.dividends.treatment" @change="resetDividendTreatment" class="select w-full text-xs">
+                      <option value="cash">Conservation en cash</option><option value="automatic">Réinvestissement automatique</option>
+                      <option value="discretionary">Décision du gérant — achats du carnet</option>
+                    </select>
+                  </label>
+                  <label>Source documentaire / clause
+                    <input v-model="manifestData.manifest.params.dividends.documentation" class="input w-full text-xs" placeholder="Note du fonds, page et clause" />
+                  </label>
+                </div>
+                <div v-if="manifestData.manifest.params.dividends.status !== 'none' && manifestData.manifest.params.dividends.treatment === 'automatic'" class="grid grid-cols-2 gap-2 mt-2">
+                  <label>Destination
+                    <select v-model="manifestData.manifest.params.dividends.destination" class="select w-full text-xs">
+                      <option value="same_asset">Même titre</option><option value="basket">Panier défini</option>
+                    </select>
+                  </label>
+                  <label>Achats de réinvestissement
+                    <select v-model="manifestData.manifest.params.dividends.execution_source" class="select w-full text-xs">
+                      <option value="orders">Déjà dans le carnet — identifiants liés</option>
+                      <option value="reconstruct">À reconstruire — prix et changes fournis</option>
+                    </select>
+                  </label>
+                  <label>Délai après paiement (jours de semaine)
+                    <input type="number" min="0" max="365" v-model.number="manifestData.manifest.params.dividends.delay_weekdays" class="input w-full text-xs" />
+                  </label>
+                  <label>Frais de réinvestissement (%) — vide : frais du carnet
+                    <input type="number" min="0" max="99" step="0.01" :value="manifestData.manifest.params.dividends.reinvestment_fee_pct ?? ''"
+                      @input="manifestData.manifest.params.dividends.reinvestment_fee_pct = $event.target.value === '' ? null : Number($event.target.value)" class="input w-full text-xs" />
+                  </label>
+                  <label class="flex gap-2"><input type="checkbox" v-model="manifestData.manifest.params.dividends.fractional_shares" />Actions fractionnaires autorisées</label>
+                  <label v-if="manifestData.manifest.params.dividends.destination === 'basket'">Allocations : identifiant → fraction, total 1
+                    <textarea :value="JSON.stringify(manifestData.manifest.params.dividends.allocations)" @change="setDividendAllocations($event.target.value)" class="input w-full text-xs" placeholder='{"TITRE_A":0.6,"TITRE_B":0.4}'></textarea>
+                  </label>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-2">Les changes sont fournis dans les événements et les exécutions, en devise du fonds par unité locale. Le calendrier de réinvestissement exclut les week-ends, sans jours fériés. Les distributions aux investisseurs ne sont pas des dividendes de titres.</p>
+              </section>
+
+        </template>
+        <section id="study-analysis" class="card study-form-section"><h2>5. Paramètres de l’analyse</h2><p class="section-help">Sélectionnez le référentiel, les blocs et les conventions de reconstruction.</p>
+          <div class="study-analysis-grid">        <!-- FF Series étude -->
         <div class="card">
           <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">1. Série Fama-French</h3>
           <select v-model="studyConfig.ff_series" class="select text-xs w-full" @change="onStudySeriesChange">
@@ -282,7 +514,7 @@
         <div class="card">
           <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">3. Fenêtre rolling</h3>
           <div class="flex items-center gap-3">
-            <input v-model.number="studyConfig.rolling_window" type="number" min="20" max="120" class="input text-xs w-24" />
+            <input v-model.number="studyConfig.rolling_window" type="number" min="20" max="2520" class="input text-xs w-24" />
             <span class="text-xs text-slate-500">jours de fenêtre glissante</span>
           </div>
         </div>
@@ -310,107 +542,19 @@
           <div v-if="refreshError" class="text-red-400 text-[10px] mt-1">⚠ {{ refreshError }}</div>
         </div>
 
-        <!-- Source de données -->
-        <div class="card border border-blue-900/40">
-          <h3 class="text-xs font-bold text-blue-400 uppercase tracking-wider mb-3">4. Source de données</h3>
-
-          <!-- Client selector -->
-          <div class="flex flex-col gap-2 mb-3">
-            <div>
-              <label class="text-xs text-slate-400 mb-1 block">Client</label>
-              <select v-model="selectedClient" class="select text-xs w-full"
-                @change="selectedUtiIsin = ''">
-                <option value="">— Sélectionner —</option>
-                <option value="UTI">UTI</option>
-                <option value="manual">Chemin manuel</option>
-              </select>
-            </div>
-
-            <!-- UTI ISIN selector (visible only when UTI is selected) -->
-            <div v-if="selectedClient === 'UTI'">
-              <label class="text-xs text-slate-400 mb-1 block">AMC UTI</label>
-              <select v-model="selectedUtiIsin" class="select text-xs w-full">
-                <option value="">— Sélectionner un AMC —</option>
-                <option v-for="p in UTI_ISINS" :key="p.isin" :value="p.isin">
-                  {{ p.label }} · {{ p.isin }}
-                </option>
-              </select>
-            </div>
+</div>
+          <div v-if="manifestData" class="study-fields">
+            <label>Seuil de détention longue (jours)<input v-model.number="manifestData.manifest.params.long_term_holding_days" type="number" min="1" class="input" /><small>Seuil descriptif utilisé dans le bloc Comportement.</small></label>
+            <label>Seuil de conviction (%)<input v-model.number="manifestData.manifest.params.conviction_weight_pct" type="number" min="0" max="100" class="input" /><small>Poids de référence pour la classification des positions.</small></label>
           </div>
-
-          <div v-if="selectedClient !== 'UTI' || !selectedUtiIsin">
-            <label class="text-xs text-slate-400 mb-1 block">Chemin du dossier ISIN</label>
-            <input v-model="studyFolder" class="input text-xs w-full font-mono"
-              placeholder="C:\Users\...\Data\CH1352587708" />
-          </div>
-          <div v-else class="text-[10px] text-slate-500 font-mono truncate mb-1 px-1">{{ studyFolder }}</div>
-
-          <button class="btn-primary text-xs py-2 flex items-center justify-center gap-2 mt-2 w-full"
-            :disabled="!studyFolder.trim() || studyLoading"
-            @click="detectFolder">
-            <span v-if="studyLoading && !manifestData" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-            {{ (studyLoading && !manifestData) ? 'Scan…' : '🔍 Scanner le dossier' }}
-          </button>
-
-          <!-- Manifest -->
-          <div v-if="manifestData" class="flex flex-col gap-2 mt-3">
-            <div class="text-xs font-bold text-slate-300">Manifeste détecté</div>
-            <div class="bg-slate-900 rounded p-2 text-xs space-y-1">
-              <div class="flex justify-between">
-                <span class="text-slate-500">ISIN</span>
-                <span class="text-slate-300 font-mono">{{ manifestData.manifest?.product?.isin }}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-slate-500">Devise</span>
-                <span class="text-slate-300">{{ manifestData.manifest?.product?.currency }}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-slate-500">Thème</span>
-                <span class="text-slate-300">{{ manifestData.manifest?.product?.theme || '—' }}</span>
-              </div>
-            </div>
-
-            <div v-if="manifestData.missing_manual_fields?.length" class="bg-amber-950/30 border border-amber-800 rounded p-2 text-xs">
-              <div class="font-bold text-amber-400 mb-1">⚠ Champs manuels requis</div>
-              <div v-for="f in manifestData.missing_manual_fields" :key="f" class="text-amber-300/80 text-[10px] py-0.5">• {{ f }}</div>
-            </div>
-
-            <div class="bg-slate-900 rounded p-2 text-xs space-y-2">
-              <div class="grid grid-cols-3 gap-2">
-                <div>
-                  <label class="text-slate-500 block mb-0.5">Frais gestion (% p.a.)</label>
-                  <input type="number" step="0.1" min="0" max="5"
-                    :value="manifestData.manifest?.params?.management_fee_pct || ''"
-                    @input="manifestData.manifest.params.management_fee_pct = parseFloat($event.target.value) || null"
-                    class="input text-xs w-full" placeholder="ex: 0.75" />
-                </div>
-                <div>
-                  <label class="text-slate-500 block mb-0.5">Frais perf. (% HWM)</label>
-                  <input type="number" step="0.1" min="0" max="30"
-                    :value="manifestData.manifest?.params?.perf_fee_pct || ''"
-                    @input="manifestData.manifest.params.perf_fee_pct = parseFloat($event.target.value) || null"
-                    class="input text-xs w-full" placeholder="ex: 10" />
-                </div>
-                <div>
-                  <label class="text-slate-500 block mb-0.5">Coût transac. (%)</label>
-                  <input type="number" step="0.01" min="0" max="2"
-                    :value="manifestData.manifest?.params?.txn_cost_pct || ''"
-                    @input="manifestData.manifest.params.txn_cost_pct = parseFloat($event.target.value) || null"
-                    class="input text-xs w-full" placeholder="ex: 0.10" />
-                </div>
-              </div>
-              <div class="text-[10px] text-slate-600 leading-relaxed">
-                Frais de performance : prélevés quotidiennement sur chaque nouveau plus-haut historique de la NAV (High Water Mark), pas annuellement. Coût de transaction : % du notionnel à chaque rebalancement (achat/vente carnet).
-              </div>
-
-              <!-- FIFO mode selector -->
+          <div v-if="manifestData" class="study-analysis-options">              <!-- FIFO mode selector -->
               <div>
                 <label class="text-slate-500 block mb-1.5">Mode reconstruction FIFO</label>
                 <div class="flex flex-col gap-1.5">
                   <label class="flex items-start gap-2 cursor-pointer group">
                     <input type="radio" name="recon_mode"
                       value="strict"
-                      :checked="(manifestData.manifest?.params?.recon_mode ?? 't0_synthetic') === 'strict'"
+                      :checked="(manifestData.manifest?.params?.recon_mode ?? 'strict') === 'strict'"
                       @change="manifestData.manifest.params.recon_mode = 'strict'"
                       class="mt-0.5 shrink-0" />
                     <div>
@@ -423,18 +567,18 @@
                   <label class="flex items-start gap-2 cursor-pointer group">
                     <input type="radio" name="recon_mode"
                       value="t0_synthetic"
-                      :checked="(manifestData.manifest?.params?.recon_mode ?? 't0_synthetic') === 't0_synthetic'"
+                      :checked="(manifestData.manifest?.params?.recon_mode ?? 'strict') === 't0_synthetic'"
                       @change="manifestData.manifest.params.recon_mode = 't0_synthetic'"
                       class="mt-0.5 shrink-0" />
                     <div>
-                      <div class="text-slate-300 font-medium">Reconstitution T0 <span class="text-emerald-400 font-normal">(défaut)</span> <span class="text-amber-400 font-normal">estimé</span></div>
+                      <div class="text-slate-300 font-medium">Reconstitution T0 <span class="text-amber-400 font-normal">estimé</span></div>
                       <div class="text-[10px] text-slate-600 leading-relaxed">
                         BUY synthétiques injectés à la date de 1ère NAV au prix yfinance. Plus précis, mais estimé — usage analyse interne.
                       </div>
                     </div>
                   </label>
                 </div>
-                <div v-if="(manifestData.manifest?.params?.recon_mode ?? 't0_synthetic') === 't0_synthetic'"
+                <div v-if="(manifestData.manifest?.params?.recon_mode ?? 'strict') === 't0_synthetic'"
                   class="mt-2 px-2 py-1.5 bg-amber-950/40 border border-amber-800/60 rounded text-[10px] text-amber-300 leading-relaxed">
                   ⚠ Les entrées synthétiques sont estimées (yfinance close price à T0). Non auditoriables par le gérant. Les round-trips concernés sont flaggés <code class="font-mono">synthetic_entry=true</code> dans les données.
                 </div>
@@ -442,12 +586,12 @@
 
               <div class="flex gap-3 flex-wrap">
                 <label class="text-slate-500 text-[10px] mt-0.5">Blocs :</label>
-                <label v-for="bl in ['A_factor','B_attribution','C_trading','D_behaviour','F_replicability','K_marketshocks']" :key="bl"
+                <label v-for="bl in ['A_factor','B_attribution','C_trading','D_behaviour','E_bh','F_replicability','G_brinson','H_timing','I_stockpicking','J_riskmanagement','K_marketshocks']" :key="bl"
                   class="flex items-center gap-1 cursor-pointer text-[10px] text-slate-400">
                   <input type="checkbox"
                     :checked="manifestData.manifest?.blocks?.[bl]"
                     @change="manifestData.manifest.blocks[bl] = $event.target.checked" />
-                  {{ bl.split('_')[0] }}
+                  {{ studyBlockLabels[bl] }}
                 </label>
               </div>
 
@@ -487,47 +631,8 @@
                   </div>
                 </div>
               </div>
-            </div>
-
-            <button class="btn-primary text-xs py-2.5 flex items-center justify-center gap-2 w-full mt-1"
-              :disabled="studyLoading || studyConfig.selected_factors.length === 0"
-              @click="runStudy">
-              <span v-if="studyLoading" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-              {{ studyLoading ? 'Étude en cours…' : '▶ Lancer l\'étude complète' }}
-            </button>
-          </div>
-
-          <div v-if="studyError" class="text-red-400 text-xs p-2 bg-red-950/30 rounded border border-red-900 mt-2">
-            ⚠ {{ studyError }}
-          </div>
-
-          <div v-if="studyResult" class="flex flex-col gap-1.5 mt-2">
-            <label class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none px-0.5">
-              <input type="checkbox" v-model="includeBrinsonInPdf" class="w-3.5 h-3.5 accent-blue-500" />
-              Inclure Brinson dans le PDF
-            </label>
-            <label class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none px-0.5">
-              <input type="checkbox" v-model="includeMarketShocksInPdf" class="w-3.5 h-3.5 accent-blue-500" />
-              Inclure Chocs de Marché (K) dans le PDF
-            </label>
-            <button
-              class="w-full text-xs py-2 rounded-lg border border-slate-600 text-slate-300 hover:border-blue-500 hover:text-blue-300 flex items-center justify-center gap-2 transition-colors"
-              :disabled="studyPdfLoading || studyPdfSimpleLoading"
-              @click="exportStudyPdf(true)">
-              <span v-if="studyPdfLoading" class="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-              <span v-else>📄</span>
-              {{ studyPdfLoading ? 'Génération…' : 'PDF complet (avec annexes)' }}
-            </button>
-            <button
-              class="w-full text-xs py-2 rounded-lg border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-300 flex items-center justify-center gap-2 transition-colors"
-              :disabled="studyPdfLoading || studyPdfSimpleLoading"
-              @click="exportStudyPdf(false)">
-              <span v-if="studyPdfSimpleLoading" class="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-              <span v-else>📋</span>
-              {{ studyPdfSimpleLoading ? 'Génération…' : 'PDF simplifié (sans annexes)' }}
-            </button>
-          </div>
-        </div>
+</div>
+        </section>
 
         </template><!-- /MODE ÉTUDE -->
 
@@ -535,7 +640,7 @@
       </aside>
 
       <!-- ── RIGHT: Results ─────────────────────────────────────────── -->
-      <section class="flex flex-col overflow-hidden">
+      <section v-show="mainTab === 'classic' || studyWorkspace === 'results'" class="flex flex-col overflow-hidden min-w-0" :class="{ 'study-results': mainTab === 'study' }">
 
         <!-- ══ CLASSIC MODE panel ══ -->
         <template v-if="mainTab === 'classic'">
@@ -1080,6 +1185,12 @@
 
         <!-- Study: results -->
         <template v-if="studyResult">
+          <div class="p-3 border border-slate-700 rounded-lg text-xs text-slate-300">
+            Arrêté : {{ studyResult.meta?.as_of }} · Devise : {{ studyResult.meta?.currency }} · Méthode : {{ studyResult.provenance?.method_version || 'Version ancienne à recalculer' }}
+            <div v-if="studyResult.data_quality?.status === 'review_required'" class="text-amber-400 mt-1">
+              Revue requise : {{ studyResult.data_quality.issues.join(' · ') }}
+            </div>
+          </div>
           <div class="flex flex-col flex-1 overflow-hidden">
             <!-- Study tabs -->
             <div class="flex gap-0.5 px-5 pt-3 border-b border-slate-800 bg-slate-950/80 flex-wrap">
@@ -1093,7 +1204,7 @@
               </button>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-5">
+            <div class="study-results-content flex-1 overflow-y-auto p-5">
 
               <!-- ── MÉTHODOLOGIE & BUT (en tête de chaque bloc analytique) ── -->
               <div v-if="activeStudyTab !== 'synthese' && activeStudyTab !== 'payload_ai' && activeStudyTab !== 'meta'"
@@ -1132,12 +1243,20 @@
               </div>
 
               <!-- SYNTHÈSE -->
-              <div v-if="activeStudyTab === 'synthese'" class="flex flex-col gap-5">
+              <div v-show="activeStudyTab === 'synthese'" class="flex flex-col gap-5">
                 <div class="card flex flex-col gap-4">
                   <div>
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Synthèse</div>
                     <div class="text-xs text-slate-600">Texte libre — apparaîtra en tête du rapport PDF, avant les tableaux de données.</div>
                   </div>
+                  <div class="grid grid-cols-2 gap-3 mb-3">
+                    <label class="text-xs text-slate-400">Cabinet émetteur<input v-model="reportCompany" class="input w-full" placeholder="Nom du cabinet" /></label>
+                    <label class="text-xs text-slate-400">Client du rapport<input v-model="reportClient" class="input w-full" placeholder="Nom du client" /></label>
+                  </div>
+                  <button v-if="reportArchive" @click="downloadArchivedPdf" class="btn-secondary text-xs mb-2">Télécharger le PDF archivé</button>
+                  <p v-if="reportArchive" class="text-xs text-emerald-400 mb-2">PDF exporté conservé en mémoire. Sauvegardez cette version pour archiver ses octets et son empreinte.</p>
+                  <p v-if="synthesisNotice" role="status" class="text-xs text-amber-500">{{ synthesisNotice }}</p>
+                  <p v-if="!syntheseText && !synthesisBusy" class="text-xs text-slate-500">Aucune synthèse intégrée. Choisissez un fournisseur et un modèle ci-dessous, puis cliquez sur « Générer la synthèse ». Le calcul de l’étude ne lance pas l’IA.</p>
                   <textarea v-model="syntheseText" rows="18"
                     placeholder="Rédigez ici votre synthèse sur la gestion, le positionnement, les points clés de l'analyse…"
                     class="w-full bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm text-slate-200 placeholder-slate-600 resize-y focus:outline-none focus:border-blue-500 leading-relaxed font-sans"></textarea>
@@ -1169,8 +1288,8 @@
                     </div>
                   </div>
 
-                  <AiWorkbench endpoint="/api/amc/synthesize" :payload="aiPayload" :disabled="!studyResult"
-                    action-label="Générer la synthèse" @result="receiveAiSynthesis" />
+                  <AiWorkbench :key="studyResult?.provenance?.result_hash" endpoint="/api/amc/synthesize" :payload="aiPayload" :disabled="!studyResult"
+                    action-label="Générer la synthèse" @busy="synthesisBusy = $event" @result="receiveAiSynthesis" />
 
                   <!-- Generated text output -->
                   <div v-if="aiGeneratedText" class="flex flex-col gap-2">
@@ -1253,7 +1372,7 @@
                     <div class="bg-slate-900 rounded p-3">
                       <div class="flex items-center gap-1 text-slate-500 mb-1">
                         Commission de gestion
-                        <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700 text-slate-400 text-[9px] cursor-help ml-0.5" title="Frais de gestion annuels (% p.a.) issus de la term sheet. Utilisés pour le calcul de la NAV brute dans l'analyse factorielle.">?</span>
+                        <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700 text-slate-400 text-[9px] cursor-help ml-0.5" title="Frais de gestion annuels (% p.a.) issus de la term sheet. Réintégration forfaitaire des seuls frais de gestion (taux annuel / 252), sans reconstitution de la NAV brute comptable.">?</span>
                       </div>
                       <div class="font-bold" :class="studyResult.meta?.management_fee_pct != null ? 'text-slate-200' : 'text-amber-400'">
                         {{ studyResult.meta?.management_fee_pct != null ? studyResult.meta.management_fee_pct + '% p.a.' : '⚠ Non renseigné' }}
@@ -1407,20 +1526,21 @@
                 <!-- ── Baskets T0 et actuel ─────────────────────────── -->
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
 
-                  <!-- Basket T0 — Term Sheet -->
+                  <!-- Panier de référence — Term Sheet -->
                   <div class="card border border-slate-700/50">
                     <div class="flex items-center gap-2 mb-3">
                       <span class="text-emerald-400 text-sm">📋</span>
-                      <div class="text-xs font-bold text-slate-300 uppercase tracking-wider">Basket T0 — Term Sheet</div>
+                      <div class="text-xs font-bold text-slate-300 uppercase tracking-wider">Panier de référence — Term Sheet</div>
                       <span class="ml-auto text-[10px] px-2 py-0.5 rounded bg-emerald-950/40 border border-emerald-800/40 text-emerald-400">
-                        {{ formatDate(studyResult.meta?.nav_start_date) }}
+                        {{ formatDate(studyResult.reference_portfolio?.start_date || studyResult.meta?.nav_start_date) }}
                       </span>
                     </div>
-                    <div v-if="!studyResult.termsheet_basket?.length" class="text-xs text-slate-500 italic py-4 text-center">
+                    <p v-if="studyResult.reference_portfolio" class="text-xs text-slate-500 mb-3">Panier passif utilisé pour E et G à cette date. Les achats du fonds sont déjà dans le carnet.</p>
+                    <div v-if="!displayReferenceBasket?.length" class="text-xs text-slate-500 italic py-4 text-center">
                       Aucune position TS configurée — renseignez <code>termsheet_positions</code> dans le manifest.
                     </div>
                     <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
-                      <table class="w-full text-[10px]">
+                      <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-[10px]">
                         <thead>
                           <tr class="text-slate-600 border-b border-slate-800">
                             <th class="text-left pb-1.5 pr-2">Titre</th>
@@ -1431,7 +1551,7 @@
                           </tr>
                         </thead>
                         <tbody>
-                          <tr v-for="p in studyResult.termsheet_basket" :key="p.isin"
+                          <tr v-for="p in displayReferenceBasket" :key="p.isin"
                             class="border-b border-slate-900 hover:bg-slate-800/30">
                             <td class="py-1 pr-2 text-slate-300"><SensitiveValue mode="blur">{{ p.name }}</SensitiveValue></td>
                             <td class="py-1 pr-2 text-right font-mono text-emerald-400">{{ formatPercent(p.weight_pct, 2) }}</td>
@@ -1444,14 +1564,14 @@
                         </tbody>
                         <tfoot>
                           <tr class="border-t border-slate-700">
-                            <td class="pt-1.5 text-slate-500 text-[10px]">{{ studyResult.termsheet_basket.length }} titres</td>
+                            <td class="pt-1.5 text-slate-500 text-[10px]">{{ displayReferenceBasket.length }} titres</td>
                             <td class="pt-1.5 text-right font-mono font-bold text-emerald-400">
-                              {{ formatPercent(studyResult.termsheet_basket.reduce((s, p) => s + (p.weight_pct || 0), 0), 2) }}
+                              {{ formatPercent(displayReferenceBasket.reduce((s, p) => s + (p.weight_pct || 0), 0), 2) }}
                             </td>
                             <td colspan="3"></td>
                           </tr>
                         </tfoot>
-                      </table>
+                      </table></div>
                     </div>
                   </div>
 
@@ -1468,7 +1588,7 @@
                       Composition non disponible.
                     </div>
                     <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
-                      <table class="w-full text-[10px]">
+                      <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-[10px]">
                         <thead>
                           <tr class="text-slate-600 border-b border-slate-800">
                             <th class="text-left pb-1.5 pr-2">Titre</th>
@@ -1503,7 +1623,7 @@
                             <td colspan="3"></td>
                           </tr>
                         </tfoot>
-                      </table>
+                      </table></div>
                     </div>
                   </div>
                 </div>
@@ -1523,7 +1643,7 @@
                     BUY synthétiques injectés à T0 = {{ formatDate(studyResult.meta.nav_start_date) }}. Prix source : yfinance close ou proxy ordre. Non auditoriables — à titre de diagnostic uniquement.
                   </div>
                   <div class="overflow-x-auto table-shell" tabindex="0" role="region">
-                    <table class="w-full text-[10px]">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-[10px]">
                       <thead>
                         <tr class="text-slate-600 border-b border-slate-800">
                           <th class="text-left pb-1.5 pr-2">Titre</th>
@@ -1556,7 +1676,7 @@
                           </td>
                         </tr>
                       </tbody>
-                    </table>
+                    </table></div>
                   </div>
                 </details>
 
@@ -1636,7 +1756,7 @@
                   </div>
 
                   <!-- KPIs performance -->
-                  <div class="grid grid-cols-4 gap-3">
+                  <div class="study-metric-grid grid grid-cols-4 gap-3">
                     <div v-for="([label, val, cls, tip]) in [
                       ['Rendement ann.', formatPercent(studyResult.block_a.net?.performance?.ann_ret_pct ?? 0, 1),
                         (studyResult.block_a.net?.performance?.ann_ret_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400',
@@ -1659,9 +1779,9 @@
                   <!-- Brut vs Net (si frais fournis) -->
                   <div v-if="studyResult.block_a.gross?.regression" class="card">
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-                      Alpha brut (gérant) vs net (client)
+                      Alpha net et ajusté des seuls frais de gestion
                     </div>
-                    <table class="w-full text-xs">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                       <thead>
                         <tr class="text-slate-500 border-b border-slate-700">
                           <th class="text-left py-2 px-2">Métrique</th>
@@ -1671,8 +1791,8 @@
                             </span>
                           </th>
                           <th class="text-right py-2 px-2">
-                            <span class="inline-flex items-center gap-1 justify-end">Brut
-                              <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help">?<span class="pointer-events-none absolute bottom-full right-0 mb-1.5 w-56 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">NAV re-grossie des frais (accrual quotidien = frais p.a. / 252). Représente la performance du gérant avant imputation des coûts.</span></span>
+                            <span class="inline-flex items-center gap-1 justify-end">Ajusté gestion
+                              <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help">?<span class="pointer-events-none absolute bottom-full right-0 mb-1.5 w-56 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Ajout forfaitaire des seuls frais de gestion (taux annuel / 252). Les autres frais restent déduits : ce n’est pas une NAV brute comptable.</span></span>
                             </span>
                           </th>
                           <th class="text-right py-2 px-2">
@@ -1710,7 +1830,7 @@
                           <td class="py-1.5 px-2 text-right font-mono text-slate-500">—</td>
                         </tr>
                       </tbody>
-                    </table>
+                    </table></div>
                   </div>
 
                   <!-- Résumé régression -->
@@ -1747,7 +1867,7 @@
                     </div>
 
                     <!-- Table des facteurs -->
-                    <table class="w-full text-xs" v-if="studyResult.block_a.net.regression.factors?.length">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs" v-if="studyResult.block_a.net.regression.factors?.length">
                       <thead>
                         <tr class="text-slate-500 border-b border-slate-700">
                           <th class="text-left py-2 px-2">Facteur</th>
@@ -1792,7 +1912,7 @@
                           <td class="py-1.5 px-2 text-center font-bold" :class="pvalClass(f.pvalue)">{{ sigStars(f.pvalue) }}</td>
                         </tr>
                       </tbody>
-                    </table>
+                    </table></div>
                     <div class="text-[10px] text-slate-600 mt-2">*** p&lt;0.001 · ** p&lt;0.01 · * p&lt;0.05 · · p&lt;0.10</div>
                   </div>
 
@@ -1903,7 +2023,7 @@
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1">Score de dépendance au gérant
                       <span class="group relative inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700/80 text-[8px] cursor-help ml-0.5 shrink-0">?<span class="pointer-events-none absolute bottom-full left-0 mb-2 w-64 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2.5 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Score composite 0-10 : risque idiosyncratique (40pts) + turnover (30pts) + concentration HHI (20pts) + significativité alpha (10pts) / 10. Élevé = gestion très active.</span></span>
                     </div>
-                    <div class="grid grid-cols-4 gap-3">
+                    <div class="study-metric-grid grid grid-cols-4 gap-3">
                       <div v-for="([label, val, cls, tip]) in [
                         ['Score global', studyResult.block_a.net.dependency_score.score + '/10',
                           studyResult.block_a.net.dependency_score.score >= 7 ? 'text-emerald-400' : studyResult.block_a.net.dependency_score.score >= 4 ? 'text-amber-400' : 'text-red-400',
@@ -1976,7 +2096,7 @@
               <!-- /FACTORIEL -->
 
               <!-- ATTRIBUTION (B) -->
-              <div v-if="activeStudyTab === 'attribution' && studyResult.block_b" class="flex flex-col gap-5">
+              <div v-if="activeStudyTab === 'attribution' && studyResult.block_b && studyResult.block_b.available !== false" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
                   Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
@@ -1986,16 +2106,16 @@
                   <span class="text-amber-400 text-base leading-none mt-0.5 shrink-0">⚠</span>
                   <span>Les positions initiales ont été reconstruites par BUY synthétiques à T0. Les métriques de P&amp;L réalisé et de round trips sont donc plus cohérentes qu'en mode inventaire clampé, mais restent dépendantes des hypothèses de reconstruction du stock initial.</span>
                 </div>
-                <div class="grid grid-cols-4 gap-3">
+                <div class="study-metric-grid grid grid-cols-4 gap-3">
                   <div v-for="([label, val, cls, tip]) in [
                     ['P&L réalisé', fmtPnl(studyResult.block_b.totals?.realized_pnl, studyResult.meta?.currency), studyResult.block_b.totals?.realized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400',
                       'P&L effectivement encaissé sur les positions clôturées (aller-retours complets). Calculé par reconstruction FIFO des ordres exécutés.'],
                     ['P&L latent', fmtPnl(studyResult.block_b.totals?.unreal_pnl, studyResult.meta?.currency), studyResult.block_b.totals?.unreal_pnl >= 0 ? 'text-emerald-400' : 'text-red-400',
                       'Plus/moins-value non réalisée sur les positions encore ouvertes. Valorisée au prix du snapshot (Def.txt). Ne tient pas compte de l\'évolution du prix depuis le snapshot.'],
-                    ['P&L total', fmtPnl(studyResult.block_b.totals?.total_pnl, studyResult.meta?.currency), studyResult.block_b.totals?.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400',
+                    ['Total hors dividendes', fmtPnl(studyResult.block_b.totals?.total_pnl, studyResult.meta?.currency), studyResult.block_b.totals?.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400',
                       'P&L réalisé + P&L latent. Couvre l\'intégralité du carnet d\'ordres (pas uniquement la période FF). Exprimé dans la devise du produit.'],
-                    ['Part FX', studyResult.block_b.totals?.fx_share_of_realized_pct != null ? formatPercent(studyResult.block_b.totals.fx_share_of_realized_pct, 1) : '—', 'text-amber-400',
-                      'Fraction du P&L réalisé attribuable à la variation des taux de change (effet FX), calculée sur les aller-retours clôturés avec conversion de devise.'],
+                    ['FX / P&L réalisé signé', studyResult.block_b.totals?.fx_share_of_realized_pct != null ? formatPercent(studyResult.block_b.totals.fx_share_of_realized_pct, 2) : '—', 'text-amber-400',
+                      'P&L FX réalisé divisé par le P&L réalisé signé, hors latent et dividendes. Non défini si le réalisé est nul ; un dénominateur négatif inverse le signe du ratio.'],
                   ]" :key="label" class="bg-slate-800/60 rounded-lg p-3 text-center">
                     <div class="text-xs text-slate-500 mb-1 flex items-center justify-center gap-1">{{ label }}
                       <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help shrink-0">?<span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-60 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">{{ tip }}</span></span>
@@ -2007,12 +2127,52 @@
                   </div>
                 </div>
 
+                <div class="card">
+                  <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">P&amp;L par sous-jacent — {{ studyResult.meta?.currency }}</div>
+                  <p class="text-xs text-slate-500 mb-2">Le résultat avec dividendes inclut les revenus nets acquis et leur change, avant frais du fonds. Le réinvestissement ne crée pas un second revenu.</p>
+                  <div class="overflow-x-auto table-shell" tabindex="0" role="region">
+                  <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs min-w-[600px]">
+                    <thead>
+                      <tr class="text-slate-500 border-b border-slate-700">
+                        <th class="text-left py-2 px-2">Titre</th>
+                        <th class="text-right py-2 px-2" title="P&L encaissé sur les aller-retours clôturés pour ce titre (FIFO). Inclut l'effet prix et l'effet FX.">P&L réalisé</th>
+                        <th class="text-right py-2 px-2" title="Composante de change du P&L réalisé : q × Prix_entrée × (FX_sortie − FX_entrée). Isole l'effet devise de l'effet prix.">Dont FX réalisé<br><span class="font-normal">déjà inclus</span></th>
+                        <th class="text-right py-2 px-2" title="Plus/moins-value sur la position encore ouverte, valorisée au prix courant du snapshot (Def.txt).">P&L latent</th>
+                        <th class="text-right py-2 px-2">Total hors dividendes</th>
+                        <th class="text-right py-2 px-2">Dividendes nets (FX inclus)</th>
+                        <th class="text-right py-2 px-2">Résultat avec dividendes</th>
+                        <th class="text-right py-2 px-2" title="Poids du titre dans le portefeuille au snapshot (Def.txt). Fraction de l'AUM total.">Poids %</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="r in studyResult.block_b.per_name" :key="r.isin"
+                        class="border-b border-slate-800/50 hover:bg-slate-800/30">
+                        <td class="py-1.5 px-2 text-slate-300"><SensitiveValue mode="blur">{{ r.name }}</SensitiveValue></td>
+                        <td class="py-1.5 px-2 text-right font-mono"
+                          :class="(r.realized_pnl||0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                          <SensitiveValue>{{ fmtPnl(r.realized_pnl) }}</SensitiveValue>
+                        </td>
+                        <td class="py-1.5 px-2 text-right font-mono text-amber-300/70"><SensitiveValue>{{ fmtPnl(r.fx_pnl) }}</SensitiveValue></td>
+                        <td class="py-1.5 px-2 text-right font-mono text-slate-400"><SensitiveValue>{{ fmtPnl(r.unreal_pnl) }}</SensitiveValue></td>
+                        <td class="py-1.5 px-2 text-right font-mono font-bold"
+                          :class="(r.total_pnl||0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                          <SensitiveValue>{{ fmtPnl(r.total_pnl) }}</SensitiveValue>
+                        </td>
+                        <td class="py-1.5 px-2 text-right font-mono"><SensitiveValue>{{ fmtPnl(r.dividends_net) }}</SensitiveValue></td>
+                        <td class="py-1.5 px-2 text-right font-mono font-bold"><SensitiveValue>{{ fmtPnl(r.total_with_dividends) }}</SensitiveValue></td>
+                        <td class="py-1.5 px-2 text-right text-slate-400">{{ formatPercent((r.weight||0)*100, 2) }}</td>
+                      </tr>
+                    </tbody>
+                  </table></div>
+                  </div>
+                </div>
+
                 <div v-if="studyResult.block_b.totals?.reconciliation" class="card">
                   <div class="flex items-center justify-between mb-3">
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Réconciliation NAV</div>
                     <div class="text-[10px] text-slate-600 font-mono">as of {{ formatDate(studyResult.block_b.totals.reconciliation.as_of) }}</div>
                   </div>
-                  <div class="grid grid-cols-5 gap-2">
+                  <div class="study-metric-grid grid grid-cols-5 gap-2">
                     <div v-for="([label, val, cls, tip]) in [
                       ['P&L FIFO (brut)', fmtPnl(studyResult.block_b.totals?.total_pnl, studyResult.meta?.currency), 'text-slate-200',
                         'P&L total reconstruit par le FIFO, brut de frais de gestion.'],
@@ -2034,20 +2194,24 @@
                       </div>
                     </div>
                   </div>
-                  <div v-if="!studyResult.block_b.totals?.fee_drag_prod" class="text-[10px] text-amber-500/80 mt-3">
+                  <div v-if="studyResult.block_b.totals?.reconciliation?.fee_breakdown && Object.values(studyResult.block_b.totals.reconciliation.fee_breakdown).every(v => v == null)" class="text-[10px] text-amber-500/80 mt-3">
                     ⚠ Aucun frais renseigné (params.management_fee_pct / perf_fee_pct / txn_cost_pct dans le manifest) — le P&L net estimé n'inclut aucun add-back de frais, l'écart résiduel affiché est donc probablement surestimé.
                   </div>
 
+                  <div v-if="studyResult.block_b.totals?.reconciliation" class="text-xs text-slate-400 mt-3">
+                    Dividendes intégrés : {{ studyResult.block_b.totals.reconciliation.cash_income_prod == null ? 'non renseignés' : fmtPnl(studyResult.block_b.totals.reconciliation.cash_income_prod, studyResult.meta?.currency) }}.
+                    Le P&amp;L FIFO ci-dessus est hors dividendes ; le P&amp;L net estimé inclut les revenus acquis, encaissés ou encore à recevoir. Le réinvestissement est une utilisation du cash.
+                  </div>
                   <div v-if="studyResult.block_b.totals?.reconciliation?.fee_breakdown" class="mt-3 pt-3 border-t border-slate-800">
                     <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Décomposition des frais</div>
                     <div class="grid grid-cols-3 gap-2">
                       <div v-for="([label, val, tip]) in [
                         ['Gestion (' + (studyResult.block_b.totals.reconciliation.fee_breakdown.management_fee_pct ?? '—') + '% p.a.)',
                           studyResult.block_b.totals.reconciliation.fee_breakdown.management_fee_prod,
-                          'Accrual quotidien sur l\'AUM (taux annuel ÷ 252), cumulé sur toute la période.'],
-                        ['Performance (' + (studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_pct ?? '—') + '% HWM' + (studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_events != null ? ', ' + studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_events + ' plus-hauts' : '') + ')',
+                          'Convention : ' + feeConventionLabel(studyResult.block_b.totals.reconciliation.management_fee_basis || 'nav_252')],
+                        ['Performance (' + (studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_pct ?? '—') + '% HWM' + (studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_events != null ? ', ' + studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_events + ' périodes positives' : '') + ')',
                           studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_prod,
-                          'Prélevé uniquement les jours où la NAV atteint un nouveau plus haut historique — 10% du gain brut ce jour-là, pas un accrual continu. Plus haut final atteint : ' + (studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_hwm_final ?? '—') + '.'],
+                          'Cristallisation : ' + feeConventionLabel(studyResult.block_b.totals.reconciliation.performance_crystallization || 'daily') + '. HWM cristallisé : ' + (studyResult.block_b.totals.reconciliation.fee_breakdown.performance_fee_hwm_final ?? '—') + '.'],
                         ['Transaction (' + (studyResult.block_b.totals.reconciliation.fee_breakdown.transaction_cost_pct ?? '—') + '% notionnel)',
                           studyResult.block_b.totals.reconciliation.fee_breakdown.transaction_cost_prod,
                           'Coût appliqué au notionnel de chaque ordre du carnet (achat et vente), à chaque rebalancement.'],
@@ -2056,48 +2220,38 @@
                           <span class="group relative inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/80 text-[8px] cursor-help shrink-0">?<span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-60 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">{{ tip }}</span></span>
                         </div>
                         <div class="text-xs font-bold" :class="val ? 'text-red-300' : 'text-slate-600'">
-                          <SensitiveValue>{{ val ? fmtPnl(val, studyResult.meta?.currency) : 'non renseigné' }}</SensitiveValue>
+                          <SensitiveValue>{{ val != null ? fmtPnl(val, studyResult.meta?.currency) : 'non renseigné' }}</SensitiveValue>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div class="card">
-                  <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">P&L par sous-jacent</div>
-                  <div class="overflow-x-auto table-shell" tabindex="0" role="region">
-                  <table class="w-full text-xs min-w-[600px]">
-                    <thead>
-                      <tr class="text-slate-500 border-b border-slate-700">
-                        <th class="text-left py-2 px-2">Titre</th>
-                        <th class="text-right py-2 px-2" title="P&L encaissé sur les aller-retours clôturés pour ce titre (FIFO). Inclut l'effet prix et l'effet FX.">P&L réalisé</th>
-                        <th class="text-right py-2 px-2" title="Composante de change du P&L réalisé : q × Prix_entrée × (FX_sortie − FX_entrée). Isole l'effet devise de l'effet prix.">Dont FX</th>
-                        <th class="text-right py-2 px-2" title="Plus/moins-value sur la position encore ouverte, valorisée au prix courant du snapshot (Def.txt).">P&L latent</th>
-                        <th class="text-right py-2 px-2">Total</th>
-                        <th class="text-right py-2 px-2" title="Poids du titre dans le portefeuille au snapshot (Def.txt). Fraction de l'AUM total.">Poids %</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="r in studyResult.block_b.per_name" :key="r.isin"
-                        class="border-b border-slate-800/50 hover:bg-slate-800/30">
-                        <td class="py-1.5 px-2 text-slate-300"><SensitiveValue mode="blur">{{ r.name }}</SensitiveValue></td>
-                        <td class="py-1.5 px-2 text-right font-mono"
-                          :class="(r.realized_pnl||0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                          <SensitiveValue>{{ fmtPnl(r.realized_pnl) }}</SensitiveValue>
-                        </td>
-                        <td class="py-1.5 px-2 text-right font-mono text-amber-300/70"><SensitiveValue>{{ fmtPnl(r.fx_pnl) }}</SensitiveValue></td>
-                        <td class="py-1.5 px-2 text-right font-mono text-slate-400"><SensitiveValue>{{ fmtPnl(r.unreal_pnl) }}</SensitiveValue></td>
-                        <td class="py-1.5 px-2 text-right font-mono font-bold"
-                          :class="(r.total_pnl||0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                          <SensitiveValue>{{ fmtPnl(r.total_pnl) }}</SensitiveValue>
-                        </td>
-                        <td class="py-1.5 px-2 text-right text-slate-400">{{ formatPercent((r.weight||0)*100, 2) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                <div v-if="studyResult.dividends" class="card">
+                  <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Dividendes — {{ dividendStatusLabel(studyResult.dividends.status) }}</div>
+                  <div class="study-metric-grid grid grid-cols-3 gap-3 mb-3">
+                    <div v-for="[label, key] in [['Revenus nets acquis (FX inclus)', 'net_income_prod'], ['Encaissés', 'paid_prod'], ['Créances à recevoir', 'receivable_prod'], ['Dont effet change', 'fx_pnl_prod'], ['Réinvestis — montant des achats', 'reinvested_prod'], ['Frais de réinvestissement', 'reinvestment_cost_prod']]" :key="key">
+                      <div class="text-xs text-slate-500">{{ label }}</div>
+                      <SensitiveValue>{{ fmtPnl(studyResult.dividends.totals?.[key], studyResult.meta?.currency) }}</SensitiveValue>
+                    </div>
+                  </div>
+                  <div v-for="issue in studyResult.dividends.issues" :key="issue" class="text-xs text-amber-500">{{ issue }}</div>
+                  <p v-if="studyResult.reconstructed_dividend_orders?.length" class="text-xs text-amber-500">{{ studyResult.reconstructed_dividend_orders.length }} achats reconstruits selon la convention et les prix fournis ; à valider.</p>
+                  <div v-if="studyResult.dividends.events?.length" class="overflow-auto max-h-80 mt-3" tabindex="0" role="region" aria-label="Détail des dividendes">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
+                      <thead><tr><th>Titre / événement</th><th>Détachement</th><th>Paiement</th><th>Devise</th><th class="text-right">Brut local</th><th class="text-right">Retenue locale</th><th class="text-right">Net local</th><th class="text-right">Revenu devise fonds</th><th class="text-right">À recevoir</th><th class="text-right">Réinvesti</th><th class="text-right">Reliquat cash</th></tr></thead>
+                      <tbody><tr v-for="e in studyResult.dividends.events" :key="e.id" class="border-t border-slate-800">
+                        <td><SensitiveValue mode="blur">{{ e.asset_id }}</SensitiveValue><div class="text-slate-500">{{ e.id }}</div></td><td>{{ e.ex_date || 'Non renseigné' }}</td><td>{{ e.payment_date }}</td><td>{{ e.currency }}</td>
+                        <td class="text-right"><SensitiveValue>{{ e.gross_local == null ? '—' : formatNumber(e.gross_local, 2) }}</SensitiveValue></td>
+                        <td class="text-right"><SensitiveValue>{{ e.withholding_local == null ? '—' : formatNumber(e.withholding_local, 2) }}</SensitiveValue></td>
+                        <td class="text-right"><SensitiveValue>{{ formatNumber(e.net_local, 2) }}</SensitiveValue></td>
+                        <td class="text-right"><SensitiveValue>{{ formatNumber(e.net_income_prod, 2) }}</SensitiveValue></td><td class="text-right"><SensitiveValue>{{ formatNumber(e.receivable_prod, 2) }}</SensitiveValue></td>
+                        <td class="text-right"><SensitiveValue>{{ formatNumber(e.reinvested_prod, 2) }}</SensitiveValue><div class="text-slate-500">{{ e.order_ids?.join(', ') }}</div></td>
+                        <td class="text-right"><SensitiveValue>{{ e.cash_after_reinvestment_prod == null ? '—' : formatNumber(e.cash_after_reinvestment_prod, 2) }}</SensitiveValue></td>
+                      </tr></tbody>
+                    </table></div>
                   </div>
                 </div>
-
                 <div v-if="studyResult.block_b.quarterly_realized?.length" class="card">
                   <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">P&L réalisé par trimestre</div>
                   <div class="flex items-end gap-1 h-20">
@@ -2136,7 +2290,7 @@
               </div>
 
               <!-- TRADING (C) -->
-              <div v-if="activeStudyTab === 'trading' && studyResult.block_c" class="flex flex-col gap-5">
+              <div v-if="activeStudyTab === 'trading' && studyResult.block_c && studyResult.block_c.available !== false" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
                   Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
@@ -2147,7 +2301,7 @@
                   <span class="text-amber-400 text-base leading-none mt-0.5 shrink-0">⚠</span>
                   <span>Les positions initiales ont été reconstruites par BUY synthétiques à T0. Les métriques de P&amp;L réalisé et de round trips sont donc plus cohérentes qu'en mode inventaire clampé, mais restent dépendantes des hypothèses de reconstruction du stock initial.</span>
                 </div>
-                <div class="grid grid-cols-4 gap-3">
+                <div class="study-metric-grid grid grid-cols-4 gap-3">
                   <div v-for="([label, val, cls, tip]) in [
                     ['Round-trips', studyResult.block_c.round_trips?.count ?? '—', 'text-slate-300',
                       'Nombre d\'aller-retours complets (achat + vente) identifiés par appariement FIFO. Chaque round-trip clôturé génère un P&L réalisé.'],
@@ -2167,7 +2321,7 @@
                 <div class="grid grid-cols-2 gap-5">
                   <div class="card">
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Statistiques de trading</div>
-                    <table class="w-full text-xs">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                       <tr v-for="([k,v,tip]) in [
                         ['P&L moyen (gain)', fmtPnl(studyResult.block_c.round_trips?.avg_win, studyResult.meta?.currency), 'P&L réalisé moyen des round-trips gagnants (P&L > 0). Indicateur de l\'ampleur typique des gains.'],
                         ['P&L moyen (perte)', fmtPnl(studyResult.block_c.round_trips?.avg_loss, studyResult.meta?.currency), 'P&L réalisé moyen des round-trips perdants (en valeur absolue). Indicateur de l\'ampleur typique des pertes.'],
@@ -2184,11 +2338,11 @@
                           <template v-else>{{ v }}</template>
                         </td>
                       </tr>
-                    </table>
+                    </table></div>
                   </div>
                   <div class="card">
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Turnover</div>
-                    <table class="w-full text-xs">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                       <tr v-for="([k,v,tip]) in [
                         ['Gross traded', fmtPnl(studyResult.block_c.turnover?.gross_traded_prod, studyResult.meta?.currency), 'Notionnel brut total échangé (achats + ventes) sur toute la période du carnet d\'ordres, dans la devise du produit.'],
                         ['AUM moyen', fmtPnl(studyResult.block_c.turnover?.avg_aum_prod, studyResult.meta?.currency), 'AUM moyen estimé sur la période : NAV × certificats en circulation, moyenné sur les observations disponibles.'],
@@ -2206,7 +2360,7 @@
                           <template v-else>{{ v }}</template>
                         </td>
                       </tr>
-                    </table>
+                    </table></div>
                   </div>
                 </div>
                 <div v-if="studyResult.block_c.trading_vs_hold?.note" class="text-xs text-slate-600 italic">
@@ -2215,7 +2369,7 @@
               </div>
 
               <!-- BEHAVIOUR (D) -->
-              <div v-if="activeStudyTab === 'behaviour' && studyResult.block_d" class="flex flex-col gap-5">
+              <div v-if="activeStudyTab === 'behaviour' && studyResult.block_d && studyResult.block_d.available !== false" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
                   Période d'étude : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
@@ -2227,13 +2381,13 @@
                   <div class="font-semibold text-slate-300 mb-1">💡 Lecture du Bloc D</div>
                   Ce bloc classe chaque position clôturée selon <strong class="text-slate-200">deux axes</strong> :
                   <span class="text-violet-300">la conviction</span> (poids &gt; {{ formatPercentRaw(studyResult.block_d.conviction_matrix?.params?.conviction_weight_pct) }} du portefeuille
-                  ET durée &gt; {{ studyResult.block_d.conviction_matrix?.params?.long_term_days }}j) et
+                  OU durée maximale &gt;= {{ studyResult.block_d.conviction_matrix?.params?.long_term_days }}j) et
                   <span class="text-violet-300">le résultat</span> (P&L positif ou négatif).
                   Un bon gérant a un maximum de positions en haut à gauche (conviction → profit) et un minimum en bas à droite (incertitude → pertes).
                 </div>
 
                 <!-- KPI row — libellés contextualisés -->
-                <div class="grid grid-cols-4 gap-3 items-stretch">
+                <div class="study-metric-grid grid grid-cols-4 gap-3 items-stretch">
                   <div v-for="([val, label, sub, cls, tip]) in [
                     [studyResult.block_d.holding_distribution?.long_term_count ?? '—',
                       'Long terme', `> ${studyResult.block_d.conviction_matrix?.params?.long_term_days ?? 180}j`,
@@ -2270,7 +2424,7 @@
                     </span>
                   </div>
                   <div class="text-[10px] text-slate-600 mb-4">
-                    Chaque position clôturée est placée dans un des 4 quadrants selon sa conviction (poids ET durée) et son résultat (P&L +/−).
+                    Chaque titre au résultat calculable et non nul est placé dans un des 4 quadrants selon sa conviction (poids actuel OU durée maximale) et son résultat (P&L +/−).
                   </div>
 
                   <!-- Axes labels + 2×2 grid -->
@@ -2292,7 +2446,7 @@
                         <!-- Top-left: conviction_winners -->
                         <div class="p-3 border-r border-b border-slate-700 bg-emerald-950/40">
                           <div class="text-[10px] font-bold text-emerald-400 mb-1">✓ Paris gagnants assumés</div>
-                          <div class="text-[9px] text-slate-600 mb-2">Forte conviction · gain réalisé</div>
+                          <div class="text-[9px] text-slate-600 mb-2">Forte conviction · P&L total positif</div>
                           <div class="text-2xl font-black text-emerald-400 leading-none">
                             {{ studyResult.block_d.conviction_matrix.counts?.conviction_winners ?? 0 }}
                           </div>
@@ -2310,7 +2464,7 @@
                         <!-- Top-right: tactical_winners -->
                         <div class="p-3 border-b border-slate-700 bg-blue-950/30">
                           <div class="text-[10px] font-bold text-blue-400 mb-1">✓ Coups tactiques réussis</div>
-                          <div class="text-[9px] text-slate-600 mb-2">Faible conviction · gain réalisé</div>
+                          <div class="text-[9px] text-slate-600 mb-2">Faible conviction · P&L total positif</div>
                           <div class="text-2xl font-black text-blue-400 leading-none">
                             {{ studyResult.block_d.conviction_matrix.counts?.tactical_winners ?? 0 }}
                           </div>
@@ -2328,7 +2482,7 @@
                         <!-- Bottom-left: stubborn_losers -->
                         <div class="p-3 border-r border-slate-700 bg-red-950/30">
                           <div class="text-[10px] font-bold text-red-400 mb-1">✗ Entêtements coûteux</div>
-                          <div class="text-[9px] text-slate-600 mb-2">Forte conviction · perte réalisée</div>
+                          <div class="text-[9px] text-slate-600 mb-2">Forte conviction · P&L total négatif</div>
                           <div class="text-2xl font-black text-red-400 leading-none">
                             {{ studyResult.block_d.conviction_matrix.counts?.stubborn_losers ?? 0 }}
                           </div>
@@ -2346,7 +2500,7 @@
                         <!-- Bottom-right: uncertainty -->
                         <div class="p-3 bg-amber-950/20">
                           <div class="text-[10px] font-bold text-amber-400 mb-1">⚠ Positions d'incertitude</div>
-                          <div class="text-[9px] text-slate-600 mb-2">Faible conviction · perte réalisée</div>
+                          <div class="text-[9px] text-slate-600 mb-2">Faible conviction · P&L total négatif</div>
                           <div class="text-2xl font-black text-amber-400 leading-none">
                             {{ studyResult.block_d.conviction_matrix.counts?.uncertainty ?? 0 }}
                           </div>
@@ -2377,11 +2531,10 @@
                           const losers  = (c.stubborn_losers||0)  + (c.uncertainty||0)
                           const pctUncert = total > 0 ? Math.round((c.uncertainty||0)/total*100) : 0
                           const pctConvWin = total > 0 ? Math.round((c.conviction_winners||0)/total*100) : 0
-                          let msg = `Sur ${total} positions clôturées : ${winners} gagnantes (${Math.round(winners/Math.max(total,1)*100)}%), ${losers} perdantes. `
-                          if (pctConvWin >= 30) msg += `Bon signal : ${pctConvWin}% des positions sont des paris gagnants avec forte conviction. `
-                          if (pctUncert > 40) msg += `⚠ Attention : ${pctUncert}% des positions sont en zone d'incertitude (faible conviction + perte) — signal de prises de décision non structurées. `
-                          else if (pctUncert < 20) msg += `Le taux d'incertitude (${pctUncert}%) est faible — signe d'un processus de décision discipliné. `
-                          if ((c.stubborn_losers||0) > 0 && (p?.stubborn_losers||0) < -50000) msg += `Les entêtements coûteux (forte conviction malgré pertes) représentent ${fmtPnl(p?.stubborn_losers)} — biais comportemental à surveiller. `
+                          let msg = `Sur ${total} titres classés : ${winners} gagnantes (${Math.round(winners/Math.max(total,1)*100)}%), ${losers} perdantes. `
+                          if (pctConvWin >= 30) msg += `${pctConvWin}% des titres classés combinent un résultat positif et le critère de conviction. `
+                          msg += `${pctUncert}% des titres classés combinent faible conviction et perte. Cette répartition descriptive ne démontre pas les intentions du gérant. `
+                          if ((c.stubborn_losers||0) > 0 && (p?.stubborn_losers||0) < -50000) msg += `Les entêtements coûteux (forte conviction malgré pertes) représentent ${fmtPnl(p?.stubborn_losers)} — résultat à examiner avec les décisions documentées du gérant. `
                           return msg
                         })()
                       }}
@@ -2393,7 +2546,7 @@
                 <div class="grid grid-cols-2 gap-5">
                   <div class="card">
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Hygiène des ordres</div>
-                    <table class="w-full text-xs">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                       <tr v-for="([k,v,tip]) in [
                         ['Done', studyResult.block_d.order_hygiene?.n_done ?? '—', 'Ordres avec état Done (exécutés). Seuls ceux-ci entrent dans les calculs de P&L et de turnover.'],
                         ['Discarded', studyResult.block_d.order_hygiene?.n_discarded ?? '—', 'Ordres annulés ou rejetés. Ils ne génèrent pas de P&L mais signalent de l\'hésitation ou des difficultés d\'exécution.'],
@@ -2407,7 +2560,7 @@
                         </td>
                         <td class="py-1.5 text-right text-slate-300 font-mono">{{ v }}</td>
                       </tr>
-                    </table>
+                    </table></div>
                   </div>
                   <div v-if="studyResult.block_d.order_hygiene?.discarded_top?.length" class="card">
                     <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Top annulations</div>
@@ -2457,9 +2610,9 @@
                       </span>
                     </div>
                     Ce bloc répond à la question :
-                    <strong class="text-slate-200">« Si le gérant n'avait rien fait depuis l'émission, quelle serait la performance aujourd'hui ? »</strong>
+                    <strong class="text-slate-200">« Si le panier de référence avait été conservé sans transaction, quelle serait sa performance aujourd’hui ? »</strong>
                     <br/><br/>
-                    Le portefeuille initial de la term sheet est maintenu sans aucun trade depuis le lancement.
+                    Le panier de référence est maintenu sans transaction depuis le {{ formatDate(studyResult.block_e?.period_start || studyResult.meta?.nav_start_date) }}.
                     <strong>VAG = NAV réelle − Référentiel Inertiel.</strong>
                     <br/><br/>
                     <span :class="studyResult.block_e.value_added_pct >= 0 ? 'text-emerald-400' : 'text-amber-400'">
@@ -2510,7 +2663,7 @@
                       Référentiel Inertiel — composition initiale ({{ studyResult.block_e.n_positions }} sous-jacents)
                     </div>
                     <div class="overflow-x-auto table-shell" tabindex="0" role="region">
-                      <table class="w-full text-xs">
+                      <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                         <thead>
                           <tr class="text-[10px] text-slate-500 uppercase tracking-wider border-b border-slate-700">
                             <th class="text-left py-2 pr-3">Sous-jacent</th>
@@ -2547,7 +2700,7 @@
                             <td class="text-right pl-2 text-slate-600 text-[10px]">{{ pos.initial_price_source }}</td>
                           </tr>
                         </tbody>
-                      </table>
+                      </table></div>
                     </div>
                   </div>
 
@@ -2594,7 +2747,7 @@
                     </div>
 
                     <!-- KPI row -->
-                    <div class="grid grid-cols-4 gap-3">
+                    <div class="grid grid-cols-4 gap-3 study-metric-grid">
                       <div v-for="kpi in [
                         { label: 'Score Entrées', value: studyResult.block_h.entry_score_mean, sub: studyResult.block_h.n_buy + ' BUY',
                           tip: 'Entry Score (achats). 1.0 = acheté exactement au plus bas local sur ±30 j. 0.5 = trader aléatoire. Formule : (max_local − prix_achat) / (max_local − min_local).' },
@@ -2623,7 +2776,7 @@
                     <!-- Stats table -->
                     <div class="card">
                       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Statistiques</div>
-                      <table class="w-full text-xs">
+                      <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                         <thead>
                           <tr class="text-slate-600 text-[10px] border-b border-slate-800">
                             <th class="text-left pb-2">Métrique</th>
@@ -2667,7 +2820,7 @@
                             <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.pvalue_global, 4) }}</td>
                           </tr>
                         </tbody>
-                      </table>
+                      </table></div>
                     </div>
 
                     <!-- Interpretation -->
@@ -2714,7 +2867,7 @@
                         </span>
                       </div>
                       <div class="overflow-x-auto table-shell" tabindex="0" role="region">
-                        <table class="w-full text-[10px]">
+                        <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-[10px]">
                           <thead>
                             <tr class="text-slate-600 border-b border-slate-800">
                               <th class="text-left pb-1.5 pr-2">Date</th>
@@ -2759,7 +2912,7 @@
                               <td colspan="5" class="py-1 text-right text-slate-700 italic">{{ t.reason }}</td>
                             </tr>
                           </tbody>
-                        </table>
+                        </table></div>
                       </div>
                     </div>
                   </template>
@@ -2804,7 +2957,7 @@
                     </div>
 
                     <!-- Score + KPI row -->
-                    <div class="grid grid-cols-4 gap-3">
+                    <div class="grid grid-cols-4 gap-3 study-metric-grid">
                       <div class="card text-center py-4 col-span-1">
                         <div class="text-4xl font-black mb-1"
                           :class="studyResult.block_i.score >= 60 ? 'text-emerald-400'
@@ -2842,7 +2995,7 @@
                     <div class="card">
                       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Alpha par horizon</div>
                       <div class="overflow-x-auto table-shell" tabindex="0" role="region">
-                        <table class="w-full text-xs">
+                        <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                           <thead>
                             <tr class="text-slate-600 text-[10px] border-b border-slate-800">
                               <th class="text-left pb-2">Horizon</th>
@@ -2908,7 +3061,7 @@
                               </td>
                             </tr>
                           </tbody>
-                        </table>
+                        </table></div>
                       </div>
                     </div>
 
@@ -2955,7 +3108,7 @@
                         </span>
                       </div>
                       <div class="overflow-x-auto table-shell" tabindex="0" role="region">
-                        <table class="w-full text-[10px]">
+                        <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-[10px]">
                           <thead>
                             <tr class="text-slate-600 border-b border-slate-800">
                               <th class="text-left pb-1.5 pr-2">Date</th>
@@ -2997,7 +3150,7 @@
                               <td colspan="5" class="py-1 text-right text-slate-700 italic">{{ t.reason }}</td>
                             </tr>
                           </tbody>
-                        </table>
+                        </table></div>
                       </div>
                     </div>
                   </template>
@@ -3026,7 +3179,7 @@
                   </div>
 
                   <!-- Global score row -->
-                  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 study-metric-grid">
                     <div class="card text-center col-span-2 md:col-span-1">
                       <div class="text-5xl font-black mb-1"
                         :class="studyResult.block_j.score >= 65 ? 'text-emerald-400' : studyResult.block_j.score >= 50 ? 'text-amber-400' : 'text-red-400'">
@@ -3053,7 +3206,7 @@
                   </div>
 
                   <!-- Sub-score cards -->
-                  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 study-metric-grid">
                     <div v-for="(label, key) in {
                         risk_adjusted: 'Perf. ajustée',
                         drawdown:      'Drawdown',
@@ -3080,7 +3233,7 @@
                       Performance Ajustée du Risque
                       <span class="text-emerald-400 ml-2">score {{ studyResult.block_j.sub_scores.risk_adjusted.score }}</span>
                     </div>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                    <div class="study-metric-grid grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
                       <div>
                         <div class="text-lg font-bold text-slate-200">
                           {{ formatNumber(studyResult.block_j.sub_scores.risk_adjusted.sharpe_ratio, 3) }}
@@ -3122,7 +3275,7 @@
                         <div class="text-xs text-slate-400">Information Ratio</div>
                       </div>
                     </div>
-                    <div class="grid grid-cols-2 md:grid-cols-3 gap-3 text-center mt-3"
+                    <div class="study-metric-grid grid grid-cols-2 md:grid-cols-3 gap-3 text-center mt-3"
                          v-if="studyResult.block_j.sub_scores.risk_adjusted.upside_capture_pct != null">
                       <div>
                         <div class="text-lg font-bold text-emerald-400">
@@ -3162,7 +3315,7 @@
                         score {{ studyResult.block_j.sub_scores.drawdown.score }}
                       </span>
                     </div>
-                    <div class="grid grid-cols-3 md:grid-cols-5 gap-3 text-center">
+                    <div class="study-metric-grid grid grid-cols-3 md:grid-cols-5 gap-3 text-center">
                       <div>
                         <div class="text-lg font-bold text-red-400">
                           {{ formatPercent(studyResult.block_j.sub_scores.drawdown.max_drawdown_pct, 2) }}
@@ -3205,7 +3358,7 @@
                     <!-- Worst episodes table -->
                     <div v-if="studyResult.block_j.sub_scores.drawdown.worst_episodes?.length" class="mt-4">
                       <div class="text-xs text-slate-500 mb-2">Pires épisodes de drawdown</div>
-                      <table class="w-full text-xs">
+                      <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                         <thead>
                           <tr class="text-slate-500 border-b border-slate-700">
                             <th class="text-left py-1">Rang</th>
@@ -3221,7 +3374,7 @@
                             <td class="py-1 text-right text-slate-300">{{ ep.duration_days ?? '—' }}</td>
                           </tr>
                         </tbody>
-                      </table>
+                      </table></div>
                     </div>
                   </div>
 
@@ -3234,7 +3387,7 @@
                         score {{ studyResult.block_j.sub_scores.downside_risk.score }}
                       </span>
                     </div>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                    <div class="study-metric-grid grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
                       <div>
                         <div class="text-lg font-bold text-red-400">
                           {{ formatPercent(studyResult.block_j.sub_scores.downside_risk.var_95_pct, 2) }}
@@ -3276,7 +3429,7 @@
                         <div class="text-xs text-slate-400">Sortino</div>
                       </div>
                     </div>
-                    <div class="grid grid-cols-3 gap-3 text-center mt-3"
+                    <div class="study-metric-grid grid grid-cols-3 gap-3 text-center mt-3"
                          v-if="studyResult.block_j.sub_scores.downside_risk.worst_day_pct != null">
                       <div>
                         <div class="text-lg font-bold text-red-400">
@@ -3308,7 +3461,7 @@
                         score {{ studyResult.block_j.sub_scores.concentration.score }}
                       </span>
                     </div>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                    <div class="study-metric-grid grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
                       <div>
                         <div class="text-lg font-bold text-slate-200">
                           {{ studyResult.block_j.sub_scores.concentration.n_holdings }}
@@ -3345,7 +3498,7 @@
                     <!-- Top-5 holdings table -->
                     <div v-if="studyResult.block_j.sub_scores.concentration.top5_holdings?.length" class="mt-4">
                       <div class="text-xs text-slate-500 mb-2">Top 5 positions</div>
-                      <table class="w-full text-xs">
+                      <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                         <thead>
                           <tr class="text-slate-500 border-b border-slate-700">
                             <th class="text-left py-1">Titre</th>
@@ -3359,7 +3512,7 @@
                             <td class="py-1 text-right text-amber-400">{{ formatPercent(pos.weight_pct, 2) }}</td>
                           </tr>
                         </tbody>
-                      </table>
+                      </table></div>
                     </div>
                   </div>
 
@@ -3372,7 +3525,7 @@
                         score {{ studyResult.block_j.sub_scores.factor_risk.score }}
                       </span>
                     </div>
-                    <div v-if="studyResult.block_j.sub_scores.factor_risk.available" class="grid grid-cols-3 gap-3 text-center">
+                    <div v-if="studyResult.block_j.sub_scores.factor_risk.available" class="study-metric-grid grid grid-cols-3 gap-3 text-center">
                       <div>
                         <div class="text-lg font-bold text-slate-200">
                           {{ formatPercent(studyResult.block_j.sub_scores.factor_risk.r2_pct, 1) }}
@@ -3468,7 +3621,7 @@
                   </div>
 
                   <div v-else class="card overflow-x-auto table-shell" tabindex="0" role="region">
-                    <table class="w-full text-xs">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                       <thead>
                         <tr class="border-b border-slate-800 text-slate-500">
                           <th class="text-left py-2 px-2">Événement</th>
@@ -3505,7 +3658,7 @@
                           <td class="py-2 px-2 text-slate-300">{{ e.reaction_label }}</td>
                         </tr>
                       </tbody>
-                    </table>
+                    </table></div>
                   </div>
 
                 </template>
@@ -3545,7 +3698,7 @@
                   <!-- Dimension contribution table -->
                   <div class="card">
                     <div class="text-xs font-semibold text-slate-400 mb-3">Décomposition par Dimension</div>
-                    <table class="w-full text-xs">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                       <thead>
                         <tr class="text-slate-500 border-b border-slate-700">
                           <th class="text-left py-1.5">Dimension</th>
@@ -3560,9 +3713,10 @@
                           <td class="py-1.5"
                               :class="dim.available ? 'text-slate-300' : 'text-slate-600'">
                             {{ dim.label }}
+                            <span v-if="dim.limitation" class="block text-[10px] text-amber-500">{{ dim.limitation }}</span>
                             <span v-if="dim.key === 'vag' && dim.vag_ann_pct != null"
                                   class="block text-[10px] text-slate-500">
-                              VAG {{ dim.vag_ann_pct > 0 ? '+' : '' }}{{ formatNumber(dim.vag_ann_pct, 1) }}%/an vs B&H passif
+                              VAG {{ dim.value_added_pct }} points cumulés ; {{ dim.vag_ann_pct > 0 ? '+' : '' }}{{ formatNumber(dim.vag_ann_pct, 1) }} points/an (annualisation linéaire)
                             </span>
                           </td>
                           <td class="py-1.5 text-right text-slate-400">{{ formatPercent(dim.weight_effective_pct, 0) }}</td>
@@ -3588,7 +3742,7 @@
                           <td class="py-1.5 text-right text-slate-400">—</td>
                         </tr>
                       </tbody>
-                    </table>
+                    </table></div>
                   </div>
 
                   <!-- Progress bars (avec VAG) -->
@@ -3636,7 +3790,7 @@
                     :class="studyResult.confidence.overall_pct >= 80 ? 'text-emerald-400' : studyResult.confidence.overall_pct >= 60 ? 'text-amber-400' : 'text-red-400'">
                     {{ formatPercent(studyResult.confidence.overall_pct, 0) }}
                   </div>
-                  <div class="text-xs text-slate-400">Confiance globale dans les résultats</div>
+                  <div class="text-xs text-slate-400">Couverture documentaire dans les résultats</div>
                   <p class="text-xs text-slate-500 mt-3 max-w-lg mx-auto leading-5">
                     {{ studyResult.confidence.narrative }}
                   </p>
@@ -3645,13 +3799,13 @@
                 <div class="card">
                   <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Tableau de confiance par dimension</div>
                   <div class="overflow-x-auto table-shell" tabindex="0" role="region">
-                  <table class="w-full text-xs min-w-[700px]">
+                  <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs min-w-[700px]">
                     <thead>
                       <tr class="text-slate-500 border-b border-slate-700">
                         <th class="text-left py-2 px-2">Dimension</th>
                         <th class="text-center py-2 px-2" title="✓ = l'analyse a pu être réalisée avec les données disponibles. — = donnée source manquante, bloc non exécuté.">Faisable</th>
-                        <th class="text-right py-2 px-2" title="Score de confiance (%) dans les résultats de cette dimension. Tient compte du volume de données, de la qualité des données source et de la robustesse de la méthode.">Confiance</th>
-                        <th class="text-left py-2 px-2" title="Information non disponible dans les fichiers source actuels (LUKB) et qui limiterait la qualité ou la portée de cette dimension d'analyse.">Donnée manquante</th>
+                        <th class="text-right py-2 px-2" title="Couverture documentaire ; ce pourcentage ne constitue pas une confiance statistique.">Couverture</th>
+                        <th class="text-left py-2 px-2" title="Information non disponible dans les fichiers source actuels (LUKB) et qui limiterait la qualité ou la portée de cette dimension d'analyse.">Données manquantes / limites</th>
                         <th class="text-left py-2 px-2" title="Analyse ou métriques supplémentaires qui deviendraient possibles si la donnée manquante était disponible.">Ce que ça débloquerait</th>
                       </tr>
                     </thead>
@@ -3673,7 +3827,7 @@
                       </tr>
 
                       <!-- G — Brinson : ligne dynamique selon brinsonResult -->
-                      <tr v-if="!brinsonResult" class="border-b border-slate-800/50 bg-blue-950/10">
+                      <tr v-if="!brinsonResult && !studyResult.confidence.rows.some(r => r.dimension.endsWith('(Bloc G)'))" class="border-b border-slate-800/50 bg-blue-950/10">
                         <td class="py-1.5 px-2 text-slate-400">Attribution Brinson-Fachler (Bloc G)</td>
                         <td class="py-1.5 px-2 text-center text-slate-600">—</td>
                         <td class="py-1.5 px-2 text-right font-mono text-slate-600">N/C</td>
@@ -3683,14 +3837,14 @@
                             class="underline hover:text-blue-400">→ Aller à l'onglet H</button>
                         </td>
                       </tr>
-                      <tr v-else-if="brinsonResult.available" class="border-b border-slate-800/50 bg-blue-950/10">
+                      <tr v-else-if="brinsonResult?.available && !studyResult.confidence.rows.some(r => r.dimension.endsWith('(Bloc G)'))" class="border-b border-slate-800/50 bg-blue-950/10">
                         <td class="py-1.5 px-2 text-slate-300">Attribution Brinson-Fachler par secteur (Bloc G)</td>
                         <td class="py-1.5 px-2 text-center text-emerald-400">✓</td>
                         <td class="py-1.5 px-2 text-right font-mono font-bold"
                           :class="brinsonResult.bench_return_estimated ? 'text-amber-400' : 'text-emerald-400'">
-                          {{ brinsonResult.bench_return_estimated ? '60%' : '70%' }}
+                          Simulation statique
                         </td>
-                        <td class="py-1.5 px-2 text-slate-600 text-[10px]">Biais ETFs SPDR US · benchmark snapshot actuel{{ brinsonResult.bench_return_estimated ? ' · retour benchmark estimé' : '' }}</td>
+                        <td class="py-1.5 px-2 text-slate-600 text-[10px]">{{ studyResult.manifest?.files?.market_data ? "Benchmark sectoriel fourni dans le dossier" : "Biais ETFs SPDR US · benchmark snapshot actuel" }}{{ brinsonResult.bench_return_estimated ? ' · retour benchmark estimé' : '' }}</td>
                         <td class="py-1.5 px-2 text-slate-500 text-[10px]">
                           Retour actif =
                           <span :class="(brinsonResult.active_return_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'">
@@ -3700,7 +3854,7 @@
                         </td>
                       </tr>
                     </tbody>
-                  </table>
+                  </table></div>
                   </div>
                 </div>
 
@@ -3718,8 +3872,11 @@
 
               <!-- ── SOUS-JACENTS — Price Store ─────────────────────── -->
               <div v-if="activeStudyTab === 'prices'" class="flex flex-col gap-5">
-
-                <div class="card">
+                <div v-if="studyResult.manifest?.files?.market_data" class="card text-sm">
+                  Les séries de cette étude proviennent du dossier : <strong>{{ studyResult.manifest.files.market_data }}</strong>.
+                  Cours, change, facteurs et benchmark sont chargés automatiquement à chaque lancement. Aucun téléchargement ni import manuel n’est nécessaire.
+                </div>
+                <div v-else class="card">
                   <div class="flex items-center justify-between mb-3">
                     <div>
                       <div class="text-sm font-semibold text-slate-200">📦 Price Store — Séries de prix par sous-jacent</div>
@@ -3749,7 +3906,7 @@
                   <div v-else-if="!priceStatusList.length" class="text-slate-600 text-xs py-4 text-center">
                     Lancez d'abord l'étude pour charger la liste des sous-jacents.
                   </div>
-                  <table v-else class="w-full text-xs">
+                  <div v-else class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs">
                     <thead>
                       <tr class="border-b border-slate-800 text-slate-500">
                         <th class="text-left py-2 pr-3 font-normal">Sous-jacent</th>
@@ -3805,7 +3962,7 @@
                         </td>
                       </tr>
                     </tbody>
-                  </table>
+                  </table></div>
 
                   <!-- Coverage summary -->
                   <div v-if="priceStatusList.length" class="mt-3 pt-3 border-t border-slate-800 flex items-center gap-4 text-xs text-slate-500">
@@ -3845,7 +4002,7 @@
                   </div>
 
                   <!-- Score + profil -->
-                  <div class="grid grid-cols-2 gap-4">
+                  <div class="grid grid-cols-2 gap-4 study-metric-grid">
                     <div class="card text-center py-6"
                       :class="{
                         'border border-emerald-700/50 bg-emerald-950/10': studyResult.block_f.score < 40,
@@ -3866,7 +4023,7 @@
                       <div class="text-slate-500 text-xs mb-1">/ 100 — Score de réplicabilité</div>
                       <!-- Intervalle de confiance -->
                       <div class="text-[10px] text-slate-600 mb-2 font-mono">
-                        IC 95% : [{{ studyResult.block_f.score_ci_low }} — {{ studyResult.block_f.score_ci_high }}]
+                        Sensibilité au R² : [{{ studyResult.block_f.score_ci_low }} — {{ studyResult.block_f.score_ci_high }}]
                       </div>
                       <div class="font-bold text-sm"
                         :class="{
@@ -3898,13 +4055,13 @@
                       <!-- Formule -->
                       <div class="mt-2 text-[9px] text-slate-700 font-mono border-t border-slate-800 pt-2 leading-relaxed">
                         Score = 40% × R² + 35% × cov_perf + 25% × (1 − |t|/3)<br>
-                        IC 95% calculé sur se(R²) = 2√R²×(1−R²)/√n
+                        Sensibilité à la seule incertitude du R² ; pas un intervalle de confiance du score global
                       </div>
                     </div>
                   </div>
 
                   <!-- KPI row -->
-                  <div class="grid grid-cols-4 gap-3">
+                  <div class="study-metric-grid grid grid-cols-4 gap-3">
                     <div v-for="(item, idx) in [
                       { label: 'AMC réel', value: (studyResult.block_f.amc_total_pct >= 0 ? '+' : '') + studyResult.block_f.amc_total_pct + '%', color: studyResult.block_f.amc_total_pct >= 0 ? 'text-emerald-400' : 'text-red-400', tip: 'Performance cumulée de la NAV réelle de l\'AMC sur la période d\'overlap avec les facteurs FF.' },
                       { label: 'Réplicant factoriel', value: (studyResult.block_f.replicant_total_pct >= 0 ? '+' : '') + studyResult.block_f.replicant_total_pct + '%', color: 'text-violet-400', tip: 'Performance cumulée théorique du portefeuille réplicant RF + Σβi×Fi. Construit ex-post — non investissable tel quel (les facteurs FF sont long-short dollar-neutres).' },
@@ -3973,7 +4130,7 @@
                   <!-- Grille de lecture -->
                   <div class="card">
                     <div class="text-[9px] text-slate-500 uppercase tracking-wider font-bold mb-3">Grille de lecture du score</div>
-                    <div class="grid grid-cols-5 gap-1 text-center text-[9px]">
+                    <div class="study-metric-grid grid grid-cols-5 gap-1 text-center text-[9px]">
                       <div v-for="band in [
                         { range: '0–20', label: 'Pur discrétionnaire', color: 'text-emerald-400', bg: 'bg-emerald-950/30 border-emerald-800/40' },
                         { range: '20–40', label: 'Principalement discrétionnaire', color: 'text-emerald-400', bg: 'bg-emerald-950/20 border-emerald-800/30' },
@@ -4024,6 +4181,7 @@
 
               <!-- ── BLOC G — Brinson-Fachler Attribution ───────────── -->
               <div v-if="activeStudyTab === 'brinson'" class="flex flex-col gap-5">
+                <div v-if="brinsonResult?.available === false" class="card text-red-400">{{ brinsonResult.error }}</div>
 
                 <!-- No result yet -->
                 <div v-if="!brinsonResult && !brinsonLoading" class="card text-center py-12">
@@ -4052,6 +4210,7 @@
                 </div>
 
                 <template v-if="brinsonResult && brinsonResult.available">
+                  <div class="card text-xs text-amber-500">Attribution indicative calculée sur proxies — non intégrée au scoring : elle décrit un panier statique et ne mesure pas l’attribution du portefeuille effectivement géré.</div>
 
                   <!-- Benchmark estimation warning -->
                   <div v-if="brinsonResult.bench_return_estimated"
@@ -4068,12 +4227,13 @@
                     </div>
                     <button
                       class="text-[10px] border border-slate-700 text-slate-500 hover:text-blue-300 hover:border-blue-700 px-2 py-1 rounded transition-colors"
+                      v-if="!studyResult.manifest?.files?.market_data"
                       :disabled="brinsonLoading"
                       @click="computeBrinson">↻ Recalculer</button>
                   </div>
 
                   <!-- KPIs -->
-                  <div class="grid grid-cols-4 gap-3">
+                  <div class="study-metric-grid grid grid-cols-4 gap-3">
                     <div v-for="([label, val, cls, tip]) in [
                       ['Portefeuille', (brinsonResult.port_return_pct >= 0 ? '+' : '') + brinsonResult.port_return_pct + '%', brinsonResult.port_return_pct >= 0 ? 'text-emerald-400' : 'text-red-400', 'Performance totale de la composition initiale du portefeuille sur la période'],
                       ['Benchmark', (brinsonResult.bench_return_pct >= 0 ? '+' : '') + brinsonResult.bench_return_pct + '%', 'text-blue-400', 'Performance totale du benchmark sur la même période'],
@@ -4127,7 +4287,7 @@
                       Détail par secteur GICS
                       <span title="w_p = poids portefeuille, w_b = poids benchmark, Δw = poids actif (excès). r_p = rendement portefeuille dans ce secteur, r_b = rendement benchmark dans ce secteur (proxy ETF SPDR)." class="cursor-help text-[8px] text-slate-600 hover:text-slate-400 border border-slate-700 rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">?</span>
                     </div>
-                    <table class="w-full text-xs min-w-[800px]">
+                    <div class="study-table-scroll" tabindex="0" role="region" aria-label="Tableau de résultats"><table class="w-full text-xs min-w-[800px]">
                       <thead>
                         <tr class="text-slate-500 border-b border-slate-700">
                           <th class="text-left py-2 px-2">Secteur</th>
@@ -4173,7 +4333,7 @@
                             {{ row.total > 0 ? '+' : '' }}{{ formatPercentRaw(row.total) }}</td>
                         </tr>
                       </tbody>
-                    </table>
+                    </table></div>
                   </div>
 
                   <!-- Top / Bottom 5 -->
@@ -4217,7 +4377,7 @@
                       <div><span class="text-slate-600">Poids benchmark :</span> <span class="text-slate-400">{{ brinsonResult.bench_weight_method }}</span></div>
                     </div>
                     <div class="mt-2 pt-2 border-t border-slate-800 text-[10px] text-amber-700/70 space-y-0.5">
-                      <div>⚠ Rendements sectoriels benchmark = ETFs SPDR (XLK/XLF/XLV…) — biais US. Pour AMC international, l'effet Sélection est plus fiable que l'effet Allocation.</div>
+                      <div>⚠ Rendements sectoriels benchmark = ETFs SPDR (XLK/XLF/XLV…) — biais US. Pour un AMC international, allocation et sélection sont toutes deux sensibles au choix des proxies.</div>
                       <div>⚠ Benchmark snapshot actuel supposé stable sur la période (raccourci méthodologique noté dans le rapport).</div>
                     </div>
                   </div>
@@ -4238,6 +4398,9 @@
 </template>
 
 <script setup>
+import { createStudyEpoch, snapshotStudy, restoreStudyArtifacts } from '../utils/studySnapshot'
+import { configurationFromManifest } from '../utils/studySetup'
+import { acceptStudySynthesis } from '../utils/studySynthesis'
 import AiWorkbench from '../components/AiWorkbench.vue'
 import BackLink from '../components/ui/BackLink.vue'
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
@@ -4256,7 +4419,7 @@ const demo = useDemoModeStore()
 
 // Labels of absolute monetary amounts that must be masked in confidential mode
 const SENSITIVE_AMT_LABELS = new Set([
-  'P&L réalisé', 'P&L latent', 'P&L total',
+  'P&L réalisé', 'P&L latent', 'P&L total', 'Total hors dividendes',
   'Gross traded', 'AUM moyen',
   'P&L moyen (gain)', 'P&L moyen (perte)', 'P&L réalisé total',
 ])
@@ -4694,16 +4857,60 @@ watch(selectedUtiIsin, (isin) => {
   if (isin) studyFolder.value = UTI_BASE_PATH + isin
 })
 
-// Auto-select UTI benchmark when an ISIN is detected
+// Restore explicit setup inputs; use ISIN suggestions only for missing benchmarks.
 watch(manifestData, (data) => {
   if (!data) return
-  const isin = data.manifest?.product?.isin
-  if (isin && isinBenchmarkMap.value[isin]) {
-    studyConfig.value.benchmark_ticker = isinBenchmarkMap.value[isin]
+  dividendAllocationError.value = ''
+  if (data.manifest?.params && !data.manifest.params.dividends) {
+    data.manifest.params.dividends = { status: 'unknown', treatment: 'cash', destination: 'same_asset', allocations: {}, execution_source: 'orders', delay_weekdays: 0, fractional_shares: true, reinvestment_fee_pct: null, documentation: '' }
+  }
+  const setup = configurationFromManifest(data.manifest, Object.values(benchmarkGroups.value).flat(), isinBenchmarkMap.value)
+  studyConfig.value = setup.config
+  studyCustomTicker.value = setup.customTicker
+})
+const displayReferenceBasket = computed(() => studyResult.value?.reference_portfolio?.positions || studyResult.value?.termsheet_basket || [])
+const studyWorkspace = ref('configuration')
+function scrollStudySection(id) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+const completedStudyInputs = ref('')
+const studyBlockLabels = {
+  A_factor: 'A — Factoriel', B_attribution: 'B — Attribution', C_trading: 'C — Trading',
+  D_behaviour: 'D — Comportement', E_bh: 'E — Référentiel inertiel', F_replicability: 'F — Réplicabilité',
+  G_brinson: 'G — Brinson', H_timing: 'H — Timing', I_stockpicking: 'I — Stock picking', J_riskmanagement: 'J — Risque', K_marketshocks: 'K — Chocs de marché',
+}
+const configuredSourceCount = computed(() => {
+  const files = manifestData.value?.manifest?.files || {}
+  return Object.values(files).reduce((count, value) => count + (Array.isArray(value) ? value.filter(Boolean).length : (value ? 1 : 0)), 0)
+})
+const missingStudyInputs = computed(() => {
+  const m = manifestData.value?.manifest
+  if (!m) return []
+  const missing = []
+  if (!m.files?.nav_timeseries) missing.push('historique NAV')
+  if (!m.files?.composition) missing.push('composition')
+  if (['B_attribution', 'C_trading', 'D_behaviour', 'H_timing', 'I_stockpicking', 'K_marketshocks'].some(key => m.blocks?.[key]) && !m.files?.orders?.length) missing.push('carnet de transactions')
+  for (const [key, label] of [['management_fee_pct', 'frais de gestion'], ['perf_fee_pct', 'frais de performance'], ['txn_cost_pct', 'frais de transaction']]) {
+    if (m.params?.[key] == null) missing.push(label)
+  }
+  if (m.params?.dividends?.status === 'provided' && !m.files?.dividends) missing.push('événements de dividendes')
+  return missing
+})
+const studyInputSignature = computed(() => JSON.stringify({
+  folder: studyFolder.value, manifest: manifestData.value?.manifest,
+  analysis: studyConfig.value, customBenchmark: studyCustomTicker.value,
+}))
+const studyConfigChanged = computed(() => Boolean(studyResult.value && completedStudyInputs.value && completedStudyInputs.value !== studyInputSignature.value))
+watch(studyWorkspace, async (workspace) => {
+  if (workspace === 'results') {
+    await nextTick()
+    // Charts mounted while their panel was hidden need the visible dimensions.
+    window.dispatchEvent(new Event('resize'))
   }
 })
 const studyLoading    = ref(false)
 const studyError      = ref('')
+const dividendAllocationError = ref('')
 const studyPdfLoading       = ref(false)
 const studyPdfSimpleLoading = ref(false)
 const includeBrinsonInPdf   = ref(false)
@@ -4727,10 +4934,28 @@ const studyTabs = [
   { id: 'riskmanagement',label: '🛡 J — Risk Mgmt' },
   { id: 'marketshocks',  label: '🌍 K — Chocs de Marché' },
   { id: 'managerskill',  label: '⭐ Manager Skill' },
-  { id: 'confidence',    label: '📊 Confiance & Limites' },
+  { id: 'confidence',    label: '📊 Couverture & Limites' },
 ]
 
 const syntheseText = ref('')
+const studyEpoch = createStudyEpoch()
+const reportCompany = ref('')
+const reportClient = ref('')
+const aiProvenance = ref(null)
+const reportArchive = ref(null)
+function clearStudyArtifacts() {
+  synthesisNotice.value = ''
+  syntheseText.value = ''
+  reportArchive.value = null
+  attrResult.value = null
+  brinsonResult.value = null
+  aiGeneratedText.value = ''
+  aiPayloadText.value = ''
+  aiProvenance.value = null
+  attrError.value = ''
+  brinsonError.value = ''
+  priceStatusList.value = []
+}
 
 // ── Methodology box ───────────────────────────────────────────────────────
 const showMethodology = ref(false)
@@ -4760,8 +4985,8 @@ const blockMethodology = {
   },
   behaviour: {
     label: 'D — Matrice comportementale conviction / résultat',
-    but: 'Diagnostiquer les biais comportementaux du gérant : loss aversion (garder trop longtemps les perdants), overconfidence (trop de conviction sur des positions qui perdent), ou inversement une gestion disciplinée.',
-    methode: 'Chaque position terminée est placée dans une matrice 2×2 : axe X = P&L réalisé, axe Y = score de conviction (poids × durée de détention normalisés). Quatre quadrants : Stars (bon P&L + haute conviction), Traps (bon P&L + faible conviction), Losers (mauvais P&L + haute conviction = loss aversion), Duds (mauvais P&L + faible conviction).',
+    but: 'Décrire les résultats des titres selon leur poids courant et leur durée maximale de détention. Cette classification ne démontre ni les intentions, ni les biais psychologiques, ni un alpha de conviction.',
+    methode: 'Classement par titre selon le P&L réalisé + latent hors dividendes, et un critère descriptif de conviction : poids actuel au-dessus du seuil OU durée maximale au-dessus du seuil. Cash, résultats nuls et titres non valorisés sont exclus.',
     limites: 'Les seuils de conviction et de P&L sont configurables dans le manifeste AMC. Un quadrant "Losers" élevé peut refléter une stratégie long-term value plutôt que du loss aversion.',
     sources: 'Round-trips reconstruits (Bloc B). Paramètres de seuils dans le manifeste AMC.',
   },
@@ -4822,10 +5047,10 @@ const blockMethodology = {
     sources: 'Blocs H, I, J, E (optionnel).',
   },
   confidence: {
-    label: 'Confiance & Limites de l\'étude',
-    but: 'Évaluer la fiabilité statistique globale de l\'étude, identifier les points de fragilité (peu de données, fenêtre FF courte, ordres manquants) et guider l\'interprétation avec les précautions appropriées.',
-    methode: 'Score de confiance composite pondéré sur : nombre d\'observations NAV, nombre de trades réels, complétude du carnet d\'ordres, disponibilité des prix yfinance, overlap avec les données Ken French.',
-    limites: 'Un score de confiance élevé garantit la robustesse des calculs, pas la qualité de la gestion. Un score faible ne signifie pas que les résultats sont faux — ils peuvent rester indicatifs.',
+    label: 'Couverture & Limites de l\'étude',
+    but: 'Décrire la couverture documentaire de l\'étude, identifier les points de fragilité (peu de données, fenêtre FF courte, ordres manquants) et guider l\'interprétation avec les précautions appropriées.',
+    methode: 'Contrôles de disponibilité et couverture : nombre d\'observations NAV, nombre de trades réels, complétude du carnet d\'ordres, disponibilité des prix yfinance, overlap avec les données Ken French.',
+    limites: 'La couverture des données ne garantit ni robustesse statistique ni qualité de gestion. Un score faible ne signifie pas que les résultats sont faux — ils peuvent rester indicatifs.',
     sources: 'Tous les blocs exécutés.',
   },
 }
@@ -4833,30 +5058,44 @@ const blockMethodology = {
 const currentMethodology = computed(() => blockMethodology[activeStudyTab.value] || null)
 
 // ── AI Synthesis state ────────────────────────────────────────────────────
+const synthesisBusy = ref(false)
+const synthesisNotice = ref('')
 const aiGeneratedText = ref('')
 const aiPayloadText = ref('')
 const aiPayloadLoading = ref(false)
 const aiPayload = computed(() => ({ study_result: studyResult.value,
   attribution_result: attrResult.value || null, brinson_result: brinsonResult.value || null }))
 function receiveAiSynthesis(data) {
-  aiGeneratedText.value = data.synthesis || ''
-  aiPayloadText.value = data.payload || ''
+  try {
+    const accepted = acceptStudySynthesis(data, studyResult.value?.provenance?.result_hash, syntheseText.value)
+    aiProvenance.value = { ...data, synthesis: undefined, payload: undefined }
+    aiGeneratedText.value = accepted.generated
+    syntheseText.value = accepted.synthesis
+    aiPayloadText.value = data.payload || ''
+    synthesisNotice.value = accepted.inserted
+      ? 'Synthèse IA intégrée au rapport. Vous pouvez la relire et la modifier avant l’export PDF.'
+      : 'Texte IA reçu ci-dessous. Votre synthèse existante est conservée ; cliquez sur « Insérer dans la synthèse » pour la remplacer.'
+  } catch (e) { synthesisNotice.value = e.message }
 }
 
 async function fetchAIPayload() {
   if (!studyResult.value) return
   aiPayloadLoading.value = true
+  const epoch = studyEpoch.current()
   try {
     const res = await apiFetch('/api/amc/synthesize/payload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        study_result:       studyResult.value,
+        study_result:       snapshotStudy(studyResult.value, { attribution: attrResult.value,
+          brinson: brinsonResult.value, synthesis: syntheseText.value, ai: aiProvenance.value,
+          company: reportCompany.value, client: reportClient.value, report: reportArchive.value }),
         attribution_result: attrResult.value        || null,
         brinson_result:     brinsonResult.value     || null,
       }),
     })
     const data = await res.json()
+    if (!studyEpoch.accepts(epoch)) return
     aiPayloadText.value = data.payload || ''
   } catch (e) {
     aiPayloadText.value = `Erreur : ${e.message}`
@@ -4870,6 +5109,7 @@ function copyAiText(text) {
 }
 
 function insertGeneratedSynthesis() {
+  synthesisNotice.value = 'Synthèse IA intégrée au rapport.'
   syntheseText.value = aiGeneratedText.value
 }
 
@@ -4924,9 +5164,11 @@ async function saveStudy() {
         isin:         studyResult.value?.meta?.isin || '',
         product_name: studyResult.value?.meta?.product_name || '',
         label:        saveLabel.value.trim(),
-        folder:       studyFolder.value,
+        folder:       studyResult.value?.meta?.folder || studyFolder.value,
         manifest:     lastRunManifest.value || manifestData.value?.manifest || {},
-        result:       studyResult.value,
+        result:       snapshotStudy(studyResult.value, { attribution: attrResult.value,
+          brinson: brinsonResult.value, synthesis: syntheseText.value, ai: aiProvenance.value,
+          company: reportCompany.value, client: reportClient.value, report: reportArchive.value }),
         synthese:     syntheseText.value,
       }),
     })
@@ -4944,10 +5186,14 @@ async function loadStudyById(id) {
   if (!id) return
   loadStudyLoadingId.value = id
   studyError.value = ''
+  const epoch = studyEpoch.next()
+  clearStudyArtifacts()
+  studyResult.value = null
   try {
     const res = await apiFetch(`/api/amc/studies/${id}`)
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || `Erreur ${res.status}`) }
     const data = await res.json()
+    if (!studyEpoch.accepts(epoch)) return
     mainTab.value          = 'study'
     studyFolder.value      = data.folder || ''
     manifestData.value     = { manifest: data.manifest }
@@ -4956,20 +5202,20 @@ async function loadStudyById(id) {
     syntheseText.value     = data.synthese || ''
     activeStudyTab.value   = 'meta'
     studyRollingVisible.value = data.result?.block_a?.net?.factors_used?.slice(0, 3) || []
-    brinsonResult.value    = null
-    attrResult.value       = null
+    const artifacts = restoreStudyArtifacts(data.result)
+    brinsonResult.value = artifacts.brinson
+    attrResult.value = artifacts.attribution
+    aiProvenance.value = artifacts.ai
+    reportArchive.value = artifacts.report || null
+    reportCompany.value = artifacts.company
+    reportClient.value = artifacts.client
     priceStatusList.value  = []
-    const p = data.manifest?.params
-    if (p) {
-      studyConfig.value = {
-        ff_series:        p.ff_series        ?? studyConfig.value.ff_series,
-        selected_factors: p.selected_factors ?? studyConfig.value.selected_factors,
-        benchmark_ticker: p.benchmark_ticker ?? studyConfig.value.benchmark_ticker,
-        rolling_window:   p.rolling_window   ?? studyConfig.value.rolling_window,
-      }
-    }
+    await nextTick()
+    completedStudyInputs.value = studyInputSignature.value
+    studyWorkspace.value = 'results'
     loadPriceStatus()
   } catch (e) {
+    if (!studyEpoch.accepts(epoch)) return
     studyError.value = `Chargement étude : ${e.message}`
   } finally {
     loadStudyLoadingId.value = null
@@ -4987,7 +5233,12 @@ async function deleteStudy(id) {
 
 async function loadPriceStatus() {
   if (!studyResult.value) return
+  if (studyResult.value.manifest?.files?.market_data) {
+    priceStatusList.value = []
+    return
+  }
   priceStatusLoading.value = true
+  const epoch = studyEpoch.current()
   try {
     const underlyings = (studyResult.value.block_b?.per_name || []).map(r => ({
       isin: r.isin, name: r.name,
@@ -4999,6 +5250,7 @@ async function loadPriceStatus() {
     })
     if (res.ok) {
       const data = await res.json()
+      if (!studyEpoch.accepts(epoch)) return
       // Merge ticker from existing list to preserve edits
       const existing = Object.fromEntries(priceStatusList.value.map(u => [u.key, u.ticker]))
       priceStatusList.value = data.map(u => ({
@@ -5015,6 +5267,7 @@ async function computeAttribution() {
   if (!studyResult.value || !studyFolder.value) return
   attrLoading.value = true
   attrError.value   = ''
+  const epoch = studyEpoch.current()
   try {
     const res = await apiFetch('/api/amc/prices/attribution', {
       method: 'POST',
@@ -5026,8 +5279,11 @@ async function computeAttribution() {
       }),
     })
     if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `Erreur ${res.status}`) }
-    attrResult.value = await res.json()
+    const data = await res.json()
+    if (!studyEpoch.accepts(epoch)) return
+    attrResult.value = data
   } catch(e) {
+    if (!studyEpoch.accepts(epoch)) return
     attrError.value = e.message
   } finally {
     attrLoading.value = false
@@ -5115,9 +5371,10 @@ async function computeBrinson() {
   if (!studyResult.value) return
   brinsonLoading.value = true
   brinsonError.value   = ''
+  const epoch = studyEpoch.current()
   try {
     const priceKeys = priceStatusList.value.filter(u => u.available).map(u => u.key)
-    if (!priceKeys.length) throw new Error('Aucun prix disponible — importez les séries dans l\'onglet F d\'abord.')
+    if (!priceKeys.length && !studyResult.value.manifest?.files?.market_data) throw new Error('Aucun prix disponible — importez les séries dans l\'onglet F d\'abord.')
     const benchTicker = studyResult.value?.meta?.benchmark_ticker || 'ACWI'
     const res = await apiFetch('/api/amc/prices/brinson', {
       method: 'POST',
@@ -5131,9 +5388,19 @@ async function computeBrinson() {
       }),
     })
     if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `Erreur ${res.status}`) }
-    brinsonResult.value = await res.json()
+    const data = await res.json()
+    if (!studyEpoch.accepts(epoch)) return
+    const { study_result: updatedStudy, ...brinson } = data
+    brinsonResult.value = brinson
+    if (updatedStudy) {
+      studyResult.value = updatedStudy
+      aiGeneratedText.value = ''
+      aiPayloadText.value = ''
+      synthesisNotice.value = 'Brinson recalculé : relisez la synthèse existante ou régénérez-la avant export.'
+    }
     activeStudyTab.value = 'brinson'
   } catch(e) {
+    if (!studyEpoch.accepts(epoch)) return
     brinsonError.value = e.message
   } finally {
     brinsonLoading.value = false
@@ -5144,6 +5411,7 @@ async function computeMarketShocks() {
   if (!studyResult.value) return
   marketShocksLoading.value = true
   marketShocksError.value   = ''
+  const epoch = studyEpoch.current()
   try {
     const res = await apiFetch('/api/amc/marketshocks', {
       method: 'POST',
@@ -5154,9 +5422,12 @@ async function computeMarketShocks() {
       }),
     })
     if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `Erreur ${res.status}`) }
-    studyResult.value.block_k = await res.json()
+    const data = await res.json()
+    if (!studyEpoch.accepts(epoch)) return
+    studyResult.value.block_k = data
     activeStudyTab.value = 'marketshocks'
   } catch(e) {
+    if (!studyEpoch.accepts(epoch)) return
     marketShocksError.value = e.message
   } finally {
     marketShocksLoading.value = false
@@ -5172,8 +5443,12 @@ async function loadStudyDoc() {
 
 async function detectFolder() {
   if (!studyFolder.value.trim()) return
+  studyWorkspace.value = 'configuration'
   studyError.value = ''
   studyLoading.value = true
+  const epoch = studyEpoch.next()
+  clearStudyArtifacts()
+  studyResult.value = null
   try {
     const res = await apiFetch('/api/amc/study/detect', {
       method: 'POST',
@@ -5185,19 +5460,27 @@ async function detectFolder() {
       throw new Error(err.detail || `Erreur ${res.status}`)
     }
     const data = await res.json()
+    if (!studyEpoch.accepts(epoch)) return
     manifestData.value = data
   } catch (e) {
+    if (!studyEpoch.accepts(epoch)) return
     studyError.value = `Scan : ${e.message}`
   } finally {
-    studyLoading.value = false
+    if (studyEpoch.accepts(epoch)) studyLoading.value = false
   }
 }
 
 async function runStudy() {
   if (!manifestData.value?.manifest || !studyFolder.value.trim()) return
+  if (dividendAllocationError.value && manifestData.value.manifest.params.dividends?.destination === 'basket') {
+    studyError.value = dividendAllocationError.value
+    return
+  }
   studyError.value = ''
   studyLoading.value = true
   studyResult.value = null
+  const epoch = studyEpoch.next()
+  clearStudyArtifacts()
   try {
     // Inject studyConfig FF params into manifest params
     const bm = studyConfig.value.benchmark_ticker === 'CUSTOM'
@@ -5213,6 +5496,7 @@ async function runStudy() {
         rolling_window:   studyConfig.value.rolling_window,
       },
     }
+    const submittedInputs = studyInputSignature.value
     lastRunManifest.value = manifestToSend
     const res = await apiFetch('/api/amc/study/run', {
       method: 'POST',
@@ -5226,15 +5510,20 @@ async function runStudy() {
       const err = await res.json().catch(() => ({}))
       throw new Error(err.detail || `Erreur ${res.status}`)
     }
-    studyResult.value = await res.json()
+    const data = await res.json()
+    if (!studyEpoch.accepts(epoch)) return
+    studyResult.value = data
+    completedStudyInputs.value = submittedInputs
+    studyWorkspace.value = 'results'
     activeStudyTab.value = 'meta'
     studyRollingVisible.value = studyResult.value?.block_a?.net?.factors_used?.slice(0, 3) || []
-    brinsonResult.value = null
+    brinsonResult.value = data.block_g || null
     loadPriceStatus()
   } catch (e) {
+    if (!studyEpoch.accepts(epoch)) return
     studyError.value = `Étude : ${e.message}`
   } finally {
-    studyLoading.value = false
+    if (studyEpoch.accepts(epoch)) studyLoading.value = false
   }
 }
 
@@ -5313,10 +5602,22 @@ function renderStudyPerf() {
   })
 }
 
+function downloadArchivedPdf() {
+  if (!reportArchive.value?.content_base64) return
+  const bytes = Uint8Array.from(atob(reportArchive.value.content_base64), c => c.charCodeAt(0))
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `Etude_${studyResult.value?.meta?.isin || 'archive'}_archive.pdf`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 async function exportStudyPdf(includeAnnexes = true) {
   if (!studyResult.value) return
   if (includeAnnexes) studyPdfLoading.value = true
   else studyPdfSimpleLoading.value = true
+  const epoch = studyEpoch.current()
   try {
     const res = await apiFetch('/api/amc/study/export-pdf', {
       method: 'POST',
@@ -5324,14 +5625,14 @@ async function exportStudyPdf(includeAnnexes = true) {
       body: JSON.stringify({
         study_result:       {
           ...studyResult.value,
-          meta: { ...(studyResult.value?.meta || {}), client_name: 'UTI' },
+          meta: { ...(studyResult.value?.meta || {}), client_name: reportClient.value },
         },
         synthese_text:      syntheseText.value,
         attribution_result: attrResult.value    || null,
         brinson_result:     brinsonResult.value || null,
         market_shocks_result: studyResult.value?.block_k || null,
-        company_name:       'TP Advisory Services',
-        client_name:        'UTI',
+        company_name:       reportCompany.value,
+        client_name:        reportClient.value,
         include_annexes:    includeAnnexes,
         include_brinson:    includeBrinsonInPdf.value,
         include_marketshocks: includeMarketShocksInPdf.value,
@@ -5342,6 +5643,17 @@ async function exportStudyPdf(includeAnnexes = true) {
       throw new Error(err.detail || `Erreur ${res.status}`)
     }
     const blob = await res.blob()
+    if (!studyEpoch.accepts(epoch)) return
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    const digest = await crypto.subtle.digest('SHA-256', bytes)
+    if (!studyEpoch.accepts(epoch)) return
+    let binary = ''
+    for (const byte of bytes) binary += String.fromCharCode(byte)
+    reportArchive.value = { content_base64: btoa(binary),
+      sha256: Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join(''),
+      generated_at: new Date().toISOString(), include_annexes: includeAnnexes,
+      study_hash: studyResult.value?.provenance?.result_hash }
+
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     const isin = studyResult.value?.meta?.isin || 'study'
@@ -5356,6 +5668,32 @@ async function exportStudyPdf(includeAnnexes = true) {
     studyPdfLoading.value       = false
     studyPdfSimpleLoading.value = false
   }
+}
+
+function resetDividendTreatment() {
+  const p = manifestData.value.manifest.params.dividends
+  if (p.treatment !== 'automatic') { p.execution_source = 'orders'; p.destination = 'same_asset' }
+}
+
+function setDividendAllocations(value) {
+  try {
+    const allocations = JSON.parse(value)
+    if (!allocations || Array.isArray(allocations) || typeof allocations !== 'object' || Object.values(allocations).some(v => typeof v !== 'number' || !Number.isFinite(v) || v <= 0) || Math.abs(Object.values(allocations).reduce((a,b) => a+b, 0) - 1) > 1e-9) throw new Error('Total attendu : 1, avec des fractions positives')
+    manifestData.value.manifest.params.dividends.allocations = allocations
+    dividendAllocationError.value = ''
+    studyError.value = ''
+  } catch (error) { dividendAllocationError.value = 'Allocations de dividendes invalides : ' + error.message; studyError.value = dividendAllocationError.value }
+}
+
+function dividendStatusLabel(status) {
+  return ({ unknown: 'Non renseignés', none: 'Aucun dividende confirmé', provided: 'Événements datés fournis', payments_only: 'Paiements seuls — créances non documentées' })[status] || status
+}
+
+function feeConventionLabel(value) {
+  return ({ nav_252: 'actif net courant / 252 observations', previous_nav_act365: 'actif net précédent ACT/365',
+    current_nav_act365: 'actif net courant ACT/365', previous_nav_act360: 'actif net précédent ACT/360',
+    current_nav_act360: 'actif net courant ACT/360', daily: 'quotidienne', monthly: 'mensuelle',
+    quarterly: 'trimestrielle', annual: 'annuelle' })[value] || value
 }
 
 function fmtPnl(v, ccy) {
@@ -5505,3 +5843,56 @@ function fmtCompValue(key, val) {
   return val
 }
 </script>
+
+<style scoped>
+.study-workspace { grid-template-columns: minmax(0, 1fr); }
+.study-workspace-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.study-workspace-nav button { padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; border: 1px solid var(--border); }
+.study-workspace-nav button[aria-pressed="true"] { background: var(--surface2); color: var(--accent); border-color: var(--accent); }
+.study-workspace-nav button:disabled { opacity: .4; cursor: not-allowed; }
+.study-configuration { padding: 28px clamp(16px, 4vw, 72px); border: 0; scroll-behavior: smooth; }
+.study-config-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; }
+.study-config-heading h1 { font-size: 23px; font-weight: 700; }
+.study-config-heading p, .section-help { color: var(--muted); font-size: 13px; margin: 6px 0 20px; line-height: 1.6; }
+.study-section-nav { display: flex; flex-wrap: wrap; gap: 8px; }
+.study-section-nav button { padding: 8px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+.study-section-nav button:disabled { opacity: .45; cursor: not-allowed; }
+.study-notice { padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 13px; }
+.study-saved summary { cursor: pointer; font-size: 13px; margin-bottom: 12px; }
+.study-form-section { padding: 24px; scroll-margin-top: 16px; min-width: 0; }
+.study-form-section h2 { font-size: 17px; font-weight: 700; margin-bottom: 12px; }
+.study-fields, .study-form-section > .grid, .study-analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.study-form-section label:has(> .input), .study-form-section label:has(> .select) { display: grid; grid-template-rows: minmax(36px, auto) auto auto; align-content: start; gap: 6px; font-size: 13px; line-height: 1.4; min-width: 0; }
+.study-form-section .grid > div > label { min-height: 36px; font-size: 13px; line-height: 1.4; }
+.study-form-section :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) { width: 100%; min-width: 0; min-height: 42px; font-size: 13px; }
+.study-form-section small { color: var(--muted); font-size: 12px; line-height: 1.5; font-weight: 400; }
+.study-form-section .grid { gap: 20px 24px; }
+.study-form-section .text-\[10px\], .study-form-section .text-\[9px\] { font-size: 12px; line-height: 1.5; }
+.study-source-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.study-form-section > .grid + .grid { margin-top: 24px; }
+.study-wide { grid-column: 1 / -1; }
+.study-check { display: flex; align-items: center; gap: 10px; margin-top: 20px; font-size: 13px; }
+.study-analysis-options { border-top: 1px solid var(--border); margin-top: 24px; padding-top: 24px; display: grid; gap: 24px; }
+.study-analysis-grid { margin-bottom: 24px; }
+.study-results-content { container-type: inline-size; }
+.study-table-scroll { overflow: auto; max-width: 100%; max-height: 65vh; border: 1px solid var(--border); border-radius: 8px; }
+.study-results .max-h-80 .study-table-scroll { max-height: 19rem; }
+.study-results table { width: 100%; border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
+.study-results :is(th, td) { padding: 10px 12px; vertical-align: middle; }
+.study-results th { background: var(--surface2); color: var(--muted); font-size: 11px; line-height: 1.4; font-weight: 600; text-align: left; position: sticky; top: 0; z-index: 1; }
+.study-results :is(th, td).text-right { text-align: right; }
+.study-results :is(th, td).text-center { text-align: center; }
+.study-results td.text-right { white-space: nowrap; }
+.study-results tbody tr + tr td { border-top: 1px solid var(--border); }
+.study-results tbody tr:hover { background: var(--surface2); }
+.study-metric-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; text-align: left; }
+.study-metric-grid > div { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); text-align: left; font-variant-numeric: tabular-nums; }
+.study-metric-grid > div > .flex { justify-content: flex-start; }
+.study-metric-grid > div { grid-column: auto; }
+.study-metric-grid .card { margin: 0; }
+@media (max-width: 900px) {
+  .study-fields, .study-form-section > .grid, .study-analysis-grid { grid-template-columns: minmax(0, 1fr); }
+  .study-form-section { padding: 18px; }
+  .study-workspace-nav { padding: 10px 16px; }
+}
+</style>
