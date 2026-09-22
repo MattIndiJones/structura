@@ -198,6 +198,7 @@ def test_avant_le_strike_le_pricer_et_booking_donnent_le_meme_prix(monkeypatch):
     from sqlmodel import Session, SQLModel, create_engine
     from backend.app.core.deal_valuation import MtmRequest, mtm_core
     from backend.app.db.models import Deal
+    from backend.tests.product_helpers import attach_product_to_deal
 
     valorisation = STRIKE - timedelta(days=90)
     _marche_jusqu_a(monkeypatch)
@@ -219,6 +220,7 @@ def test_avant_le_strike_le_pricer_et_booking_donnent_le_meme_prix(monkeypatch):
         }),
         status="actif",
     )
+    attach_product_to_deal(session, deal)
     session.add(deal)
     session.commit()
     session.refresh(deal)

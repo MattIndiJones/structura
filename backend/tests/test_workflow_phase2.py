@@ -17,10 +17,15 @@ from backend.app.core.lifecycle_controls import (
     replay_official_fixings, semantic_maturity_outcome,
 )
 from backend.app.core.payscript.parser import parse_script
+from backend.app.core.product.models import FrozenObject, ProductTerms, UnderlyingIdentity
 from backend.app.core.workflow import DataCategory, FixingStatus
 from backend.app.db.models import (
     Alert, AuditEvent, Client, ClientMandate, Deal, DealContractVersion,
     DealEvent, LifecycleProposal, OfficialFixingVersion, TradeAmendmentRequest,
+)
+from backend.app.services.product_lifecycle import lifecycle_snapshot
+from backend.app.services.product_repository import (
+    load_product, stage_internal_product, stage_revision,
 )
 
 
@@ -37,6 +42,24 @@ def _session() -> Session:
 
 def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
     today = date.today()
+    terms = ProductTerms(
+        script=script,
+        underlyings=(UnderlyingIdentity(name="UL1", ticker="TK1", ccy="EUR"),),
+        constats=FrozenObject({}),
+        T=1 / 252,
+        strike_date=today - timedelta(days=1),
+        value_date=today - timedelta(days=1),
+        maturity_date=today,
+        payment_date=today + timedelta(days=2),
+        settlement_ccy="EUR",
+    )
+    product = stage_internal_product(
+        session,
+        user=MAKER,
+        name="Produit phase 2",
+        terms=terms,
+        reason="Fixture de workflow avec Product canonique.",
+    )
     deal = Deal(
         reference="DEAL-PHASE2-001",
         entity_id=7,
@@ -58,6 +81,8 @@ def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
         market_snapshot_json=json.dumps({"r": 3.0, "user_params": {}, "constats": {}}),
         status="actif",
         contract_version=1,
+        product_id=product.product_id,
+        product_terms_version=product.terms_version,
     )
     session.add(deal)
     session.flush()
@@ -124,6 +149,18 @@ def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
         session.flush()
         event.current_fixing_version_id = version.id
         session.add(event)
+    product = load_product(session, product.product_id)
+    stage_revision(
+        session,
+        product.model_copy(update={
+            "execution": FrozenObject(deals_api._contract_snapshot(deal)),
+            "lifecycle": lifecycle_snapshot(session, deal),
+        }),
+        expected_revision=product.revision,
+        actor_id=MAKER.id,
+        action="PRODUCT_BOOKED",
+        reason="Fixture de workflow avec exécution gouvernée.",
+    )
     session.commit()
     session.refresh(deal)
     return deal
@@ -566,6 +603,43 @@ def test_amendment_requires_four_eyes_and_applies_exactly_once(four_eyes_armed):
             deals_api.AmendmentDecisionRequest(reason="Deuxième application interdite"),
             CHECKER, session)
     assert duplicate.value.detail["code"] == "AMENDMENT_STATUS_INVALID"
+
+
+def test_payment_amendment_versions_the_product_terms_and_execution():
+    session = _session()
+    deal = _deal(session)
+    new_payment = (date.today() + timedelta(days=4)).isoformat()
+    requested = deals_api.request_amendment(
+        deal.id,
+        deals_api.AmendmentRequestCreate(
+            field_name="payment_date",
+            new_value=new_payment,
+            reason="Correction de la date de règlement documentée",
+        ),
+        MAKER,
+        session,
+    )
+    deals_api.approve_amendment(
+        deal.id,
+        requested["id"],
+        deals_api.AmendmentDecisionRequest(reason="Contrôle de la date corrigée"),
+        MAKER,
+        session,
+    )
+    result = deals_api.apply_amendment(
+        deal.id,
+        requested["id"],
+        deals_api.AmendmentDecisionRequest(reason="Application de la date corrigée"),
+        MAKER,
+        session,
+    )
+
+    product = load_product(session, deal.product_id)
+    assert result["deal"]["payment_date"] == new_payment
+    assert result["deal"]["product_terms_version"] == 2
+    assert product.terms_version == 2
+    assert product.terms.payment_date.isoformat() == new_payment
+    assert product.execution.to_dict()["payment_date"] == new_payment
 
 
 def test_commercial_attribution_always_requires_four_eyes(monkeypatch):

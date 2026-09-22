@@ -14,7 +14,9 @@ from backend.app.core.payscript.engine import eval_script_on_history
 from backend.app.core.payscript.parser import parse_script
 from backend.app.core.var_engine import build_deal_scenario_base
 from backend.app.db.models import Deal, DealEvent
-from backend.app.services.lifecycle_alerts import refresh_book
+from backend.app.services.lifecycle_alerts import configure_lifecycle_handlers, refresh_book
+from backend.app.services.product_repository import load_product
+from backend.tests.product_helpers import attach_product_to_deal
 
 
 def _session() -> Session:
@@ -23,17 +25,19 @@ def _session() -> Session:
     return Session(engine)
 
 
-def _deal(session: Session, *, status: str = "actif") -> Deal:
+def _deal(session: Session, *, status: str = "actif",
+          maturity: date | None = None, payment: date | None = None) -> Deal:
     today = date.today()
     strike = today - timedelta(days=40)
-    maturity = today + timedelta(days=40)
+    maturity = maturity or today + timedelta(days=40)
+    payment = payment or maturity + timedelta(days=5)
     deal = Deal(
         reference=f"LOT4-{status}", user_id=1, entity_id=1,
         script_snapshot="AT MATURITY\n  PAY 1\n", sens="vente",
         contrepartie="Bank", devise="EUR", nominal=1_000_000,
         strike_date=strike.isoformat(), value_date=strike.isoformat(),
         maturity_date=maturity.isoformat(),
-        payment_date=(maturity + timedelta(days=5)).isoformat(),
+        payment_date=payment.isoformat(),
         T=(maturity - strike).days / 365.25,
         underlyings_json=json.dumps([{"name": "UL1", "ticker": "TK1"}]),
         market_snapshot_json=json.dumps({
@@ -42,6 +46,7 @@ def _deal(session: Session, *, status: str = "actif") -> Deal:
         }),
         status=status,
     )
+    attach_product_to_deal(session, deal)
     session.add(deal)
     session.flush()
     session.add(DealEvent(
@@ -103,10 +108,11 @@ def test_replay_uses_the_booked_s0_as_its_unit():
 
 def test_known_maturity_cashflow_is_valued_until_payment_and_kept_in_var():
     session = _session()
-    deal = _deal(session, status="en_reglement")
     today = date.today()
-    deal.maturity_date = (today - timedelta(days=1)).isoformat()
-    deal.payment_date = (today + timedelta(days=5)).isoformat()
+    deal = _deal(
+        session, status="en_reglement",
+        maturity=today - timedelta(days=1), payment=today + timedelta(days=5),
+    )
     deal.settlement_amount = 0.8
     deal.realized_payout = 0.9
     session.add(deal)
@@ -140,15 +146,19 @@ def test_known_maturity_cashflow_is_valued_until_payment_and_kept_in_var():
 
 def test_settlement_window_closes_on_the_payment_date():
     session = _session()
-    deal = _deal(session, status="en_reglement")
-    deal.maturity_date = (date.today() - timedelta(days=2)).isoformat()
-    deal.payment_date = date.today().isoformat()
+    deal = _deal(
+        session, status="en_reglement",
+        maturity=date.today() - timedelta(days=2), payment=date.today(),
+    )
     deal.settlement_amount = 1.0
     session.add(deal)
     session.commit()
 
+    configure_lifecycle_handlers(lambda *_: {}, lambda *_: {})
     summary = refresh_book(session, user_id=deal.user_id)
     session.refresh(deal)
 
     assert summary["settled"] == 1
     assert deal.status == "échu"
+    product = load_product(session, deal.product_id)
+    assert product.lifecycle.to_dict()["deal_status"] == "échu"

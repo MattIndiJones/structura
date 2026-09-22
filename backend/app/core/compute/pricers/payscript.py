@@ -44,24 +44,28 @@ def price_payscript_job(payload: dict) -> dict:
     from ...payscript.engine import run_mc
 
     compiled = parse_script(payload["script_text"])
+    from datetime import date
     maturity_payment_t = None
     value_date_t = 0.0
+    # The contractual time axis exists even for scripts without CONSTAT().
+    # Workers must therefore keep settlement timing independently from the
+    # optional schedule-resolution step below.
+    origin_raw = payload.get("strike_date") or payload.get("value_date")
+    origin = date.fromisoformat(origin_raw) if origin_raw else None
+    if origin is not None:
+        if payload.get("payment_date"):
+            maturity_payment_t = round(
+                (date.fromisoformat(payload["payment_date"]) - origin).days / 365.25, 6)
+        if payload.get("value_date"):
+            value_date_t = round(
+                (date.fromisoformat(payload["value_date"]) - origin).days / 365.25, 6)
+
     if payload.get("constat_values"):
-        from datetime import date
         # L axe du temps s ancre sur la constatation initiale ; a defaut, sur la
         # value date comme avant que les deux dates soient distinguees.
-        origin_raw = payload.get("strike_date") or payload.get("value_date")
-        origin = date.fromisoformat(origin_raw) if origin_raw else None
         compiled = resolve_constats(
             compiled, payload["constat_values"], anchor=origin,
             currency=payload.get("settlement_ccy"))
-        if origin is not None:
-            if payload.get("payment_date"):
-                maturity_payment_t = round(
-                    (date.fromisoformat(payload["payment_date"]) - origin).days / 365.25, 6)
-            if payload.get("value_date"):
-                value_date_t = round(
-                    (date.fromisoformat(payload["value_date"]) - origin).days / 365.25, 6)
 
     corr = payload.get("corr_shocked") or payload["corr"]
     result = run_mc(

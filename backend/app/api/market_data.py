@@ -7,7 +7,10 @@ from ..db.models import Underlying, User
 from ..services.market_data import dividend_profile, load_hist_vol, load_hist_prices
 from .auth import get_current_user
 
-router = APIRouter(prefix="/api/finance", tags=["market-data"])
+router = APIRouter(
+    prefix="/api/finance", tags=["market-data"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("/hist_vol")

@@ -4,7 +4,7 @@ Both endpoints share the same validation shape: parse the script, check the
 requested PARAM name(s) actually exist in it, check the correlation matrix
 dimensions, then delegate to core/payscript/simulation.py for the math.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from ..core.schemas import SolverRequest, GridRequest
 from ..core.payscript.parser import parse_script, resolve_analysis_constats, resolve_constats, effective_T_max
 from ..core.payscript.simulation import solve_for_param, compute_price_grid
@@ -15,7 +15,12 @@ from ..core.compute_budget import (
     validate_compiled_dates,
 )
 
-router = APIRouter(prefix="/api", tags=["simulation"])
+from .auth import get_current_user
+
+router = APIRouter(
+    prefix="/api", tags=["simulation"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _parse_and_validate(req) -> tuple:

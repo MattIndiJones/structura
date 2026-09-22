@@ -12,7 +12,7 @@ Convention, établie par le reste du code (DealTab.vue, RfqRequest.sens) :
 donc nous détenons le produit, position longue.
 """
 import json
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -24,6 +24,7 @@ from backend.app.db.models import Deal, Portfolio, position_sign
 USER = SimpleNamespace(id=1)
 
 GREEKS = {
+    "valuation_date": date.today().isoformat(),
     "per_underlying": {"Amazon": {"delta": 0.55, "gamma": 1.90, "vega": 0.38}},
     "scalar": {"theta": -0.02, "rho": 0.45},
     "corr_pairs": {},

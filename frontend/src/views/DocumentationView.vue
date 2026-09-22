@@ -77,10 +77,10 @@
                 </div>
               </div>
               <div class="flex items-center gap-2 shrink-0">
-                <a :href="`/api/documents/${doc.id}/download`"
-                  target="_blank" class="btn-secondary text-xs px-2.5 py-1">
+                <button type="button" class="btn-secondary text-xs px-2.5 py-1"
+                  @click="downloadDocument(doc)">
                   ↓ Télécharger
-                </a>
+                </button>
                 <button class="text-slate-600 hover:text-red-400 transition-colors text-xs px-2 py-1"
                   @click="deleteDoc(doc.id)">✕</button>
               </div>
@@ -247,6 +247,19 @@ async function deleteDoc(id) {
                        confirmer: 'Supprimer', danger: true })) return
   await apiFetch(`/api/documents/${id}`, { method: 'DELETE' })
   docs.value = docs.value.filter(d => d.id !== id)
+}
+
+async function downloadDocument(doc) {
+  const res = await apiFetch(`/api/documents/${doc.id}/download`)
+  if (!res.ok) return
+  const url = URL.createObjectURL(await res.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = doc.filename || 'document'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 function openTermSheetFinal() {

@@ -770,6 +770,22 @@ describe('la validation est un geste, pas un effet de la frappe', () => {
     expect(store.buildUserParams().COUPON).toBeCloseTo(0.08, 12)
   })
 
+  it('refuse un PARAM scalaire vide au lieu de le convertir en zéro', async () => {
+    const store = await storeQuiLit()
+    store.paramOverrides.COUPON = ''
+
+    expect(() => store.buildUserParams()).toThrow('Le paramètre COUPON est requis.')
+  })
+
+  it('refuse une ligne vide sans décaler les PARAM par observation', async () => {
+    const script = 'PARAM() M_AC_BAR = 100%\nAT 1, 2, 3:\n  PAY 1\n'
+    const store = await storeQuiLit(script)
+    store.paramOverrides.M_AC_BAR = [100, '', 90]
+
+    expect(() => store.buildUserParams()).toThrow(
+      'Le paramètre M_AC_BAR, ligne 2, est requis.')
+  })
+
   it('PARAM() : seules les lignes restées à l’ancienne valeur suivent le script (M11)', async () => {
     const DEGRESSIF = 'PARAM() M_AC_BAR = 100%\nCONSTAT() OBS\n\nAT OBS:\n  PAY 1\n'
     const store = await storeQuiLit(DEGRESSIF)

@@ -29,8 +29,9 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_JUSTIFY
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    Image, HRFlowable, PageBreak,
+    CondPageBreak, Image, HRFlowable, PageBreak,
 )
+from .payoff_terms import classify_param_barrier
 
 _LOGO_PATH = os.path.join(os.path.dirname(__file__), "..", "static",
                           "tp_logo_blue_transparent.png")
@@ -135,10 +136,13 @@ def _fig_to_image(fig, width_cm=17.0, height_cm=7.0) -> Image:
 # ── Rule-based explanation ─────────────────────────────────────────────
 
 def _monitor_label(m: dict) -> str:
-    """Human name of an M_ barrier from its direction (usage-derived)."""
-    if m.get("direction") == "up":
+    """Human name of a monitored level from its economic function."""
+    kind = classify_param_barrier(m.get("name", ""), m.get("level", 0.0))
+    if kind == "coupon":
+        return "barrière de coupon"
+    if kind == "autocall":
         return "barrière de rappel"
-    if m.get("direction") == "down":
+    if kind == "ki":
         return "barrière de protection"
     return "niveau surveillé"
 
@@ -262,14 +266,20 @@ def _chart_history(data: dict) -> Image | None:
                 color=SERIES_COLORS[i % len(SERIES_COLORS)], label=name)
 
     ax.axhline(100.0, color="#94a3b8", linewidth=0.8, linestyle=":")
+    labels_at_level: dict[float, int] = {}
     for m in data.get("monitors") or []:
         lvl = m.get("level")
         if lvl is None:
             continue
         col = "#059669" if m.get("direction") == "up" else "#dc2626"
         ax.axhline(lvl * 100.0, color=col, linewidth=1.0, linestyle="--", alpha=0.8)
+        level_key = round(float(lvl), 6)
+        label_index = labels_at_level.get(level_key, 0)
+        labels_at_level[level_key] = label_index + 1
+        offset = 2 + 9 * label_index
         ax.annotate(f"{_monitor_label(m)} {lvl * 100:.0f}%",
                     xy=(0.01, lvl * 100.0), xycoords=("axes fraction", "data"),
+                    xytext=(0, offset), textcoords="offset points",
                     fontsize=6.5, color=col, va="bottom")
 
     # Past observation dates + today
@@ -589,9 +599,10 @@ def generate_valuation_pdf(data: dict) -> bytes:
 
     # Chart
     img = _chart_history(data)
-    if "editorial" in data:
-        story.append(PageBreak())
     if img:
+        # Keep the title and chart together without manufacturing an almost
+        # empty page when the preceding callout has already flowed over.
+        story.append(CondPageBreak(9 * cm))
         story.append(Paragraph("Trajectoire des sous-jacents depuis le strike", S_SECTION))
         story.append(img)
 

@@ -5,15 +5,15 @@ import math
 
 from .valuation_runs import engine_identity
 from .compute.pricers.var_scenario import price_var_scenario_job, residual_script_from_payload
+from .deal_valuation import _get_events
+from .valuation_note_support import events_for_note, monitor_levels, residual_greeks
 
 SECTIONS = ("synthese", "analyse", "contexte", "conclusion")
 LABELS = dict(zip(SECTIONS, ("Synthèse", "Analyse", "Contexte et limites", "Conclusion")))
 
 
 def note_snapshot(session, deal, ctx, mtm):
-    # Import locally: the API stages runs only after its module is initialized.
-    from ..api.deals import _evenements_pour_la_note, _get_events, _monitor_levels
-    events, _ = _evenements_pour_la_note(_get_events(deal.id, session), deal.schedule_json)
+    events, _ = events_for_note(_get_events(deal.id, session), deal.schedule_json)
     for event in events:
         if event["date"] > mtm["valuation_date"]:
             event["status"] = "futur"
@@ -34,7 +34,7 @@ def note_snapshot(session, deal, ctx, mtm):
                         for u, s in zip(ctx.get("underlyings_json") or [], ctx.get("norm_spots") or [])],
         "events": events,
         "next_obs_date": min((e["date"] for e in events if e["date"] > mtm["valuation_date"]), default=None),
-        "monitors": _monitor_levels(ctx["compiled"], ctx["user_params"], ctx["state"]["index"]),
+        "monitors": monitor_levels(ctx["compiled"], ctx["user_params"], ctx["state"]["index"]),
         "history": {"dates": ctx.get("dates", [])[start:], "series": series},
     }
 
@@ -81,7 +81,6 @@ def frozen_greeks(run, evidence, progress):
     if abs(price_var_scenario_job(p)["price"] - evidence["data"]["mtm"]["mtm"]) > 1e-10:
         evidence["warnings"].append("Sensibilités omises : le calcul de référence ne se reproduit pas à la précision attendue.")
         return
-    from ..api.deals import _residual_greeks
     ctx = dict(residual_script=residual_script_from_payload(p), engine_uls=c["underlyings"],
                corr=p["corr"], r_frac=c["r"], T_remaining=c["T"], N_used=c["N"],
                model_used=c["model"], seed=c["seed"], user_params=c["user_params"],
@@ -90,7 +89,7 @@ def frozen_greeks(run, evidence, progress):
                barrier_monitoring=c["barrier_monitoring"], antithetic=c["antithetic"],
                state=p["state"], norm_spots=p["norm_spots"], strike_set_t=c["strike_set_t"],
                residual_payment_t=c["maturity_payment_t"], underlyings_json=c["underlyings"])
-    evidence["data"]["greeks"] = _residual_greeks(ctx, c["N"])
+    evidence["data"]["greeks"] = residual_greeks(ctx, c["N"])
 
 
 def compare_runs(first, second, progress=lambda phase: None):

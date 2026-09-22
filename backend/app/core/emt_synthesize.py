@@ -69,9 +69,10 @@ def build_emt_payload(
     add("")
 
     add("── Paramètres du produit ──")
-    if script_params:
-        for p in script_params:
-            val = p.get("raw_default")
+    effective_params = emt_result.get("effective_parameters") or script_params
+    if effective_params:
+        for p in effective_params:
+            val = p.get("value", p.get("raw_default"))
             unit = "%" if p.get("is_pct") else ""
             desc = p.get("desc") or p.get("name")
             add(f"  {p.get('name')} = {val}{unit}  ({desc})")

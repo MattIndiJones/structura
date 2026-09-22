@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
+from backend.app.api.auth import get_current_user
 import backend.app.services.transcription.engines as E
 from backend.app.services.transcription import (DEFAULT_ENGINE, ENGINES,
                                                 TranscriptionError,
@@ -28,7 +29,10 @@ from backend.app.services.transcription.vocabulary import VOCABULAIRE_FR
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    app.dependency_overrides[get_current_user] = lambda: object()
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── Registre ────────────────────────────────────────────────────────

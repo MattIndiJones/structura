@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
+from backend.app.api.auth import get_current_user
 from backend.app.services.llm import LlmError
 from backend.app.services.llm.providers import Completion
 from backend.app.services.llm.analysis import (
@@ -35,7 +36,10 @@ PARAM AC_BAR = 100 %
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    app.dependency_overrides[get_current_user] = lambda: object()
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── L'aperçu ne peut pas mentir sur l'envoi ─────────────────────────

@@ -68,10 +68,19 @@ def _script_without_comments(script_text: str) -> str:
     return "\n".join(lines)
 
 
-def _detect_features(compiled, n_underlyings: int, script_text: str = "") -> dict:
+def _detect_features(compiled, n_underlyings: int, script_text: str = "",
+                     user_params: dict | None = None) -> dict:
     source = _script_without_comments(script_text).upper()
+    effective = user_params or {}
+
+    def values(param):
+        value = effective.get(param.name, param.stored_val)
+        return value if isinstance(value, list) else [value]
+
     has_leverage = any(
-        p.name in _LEVERAGE_NAMES and p.is_pct and p.stored_val > 1.0
+        p.name in _LEVERAGE_NAMES and p.is_pct
+        and any(isinstance(value, (int, float)) and value > 1.0
+                for value in values(p))
         for p in compiled.params
     )
     has_barrier = any(
@@ -178,7 +187,7 @@ def emt_compute(
     if len(req.corr_matrix) != n or any(len(row) != n for row in req.corr_matrix):
         raise HTTPException(422, "Matrice de corrélation invalide.")
 
-    features = _detect_features(compiled, n, req.script)
+    features = _detect_features(compiled, n, req.script, req.user_params)
     cap = _capital_tier(
         req.capital_protection_level_pct,
         req.capital_protection_condition,
@@ -193,12 +202,28 @@ def emt_compute(
     }
     knowledge = _knowledge_tier(features["complexity_score"], cap["tier"])
 
+    effective_parameters = []
+    for param in compiled.params:
+        stored = req.user_params.get(param.name, param.stored_val)
+        if param.is_pct:
+            display = ([value * 100 for value in stored]
+                       if isinstance(stored, list) else stored * 100)
+        else:
+            display = stored
+        effective_parameters.append({
+            "name": param.name,
+            "value": display,
+            "is_pct": param.is_pct,
+            "desc": param.desc,
+        })
+
     return {
         "sri": req.sri,
         "mrm": req.mrm,
         "crm": req.crm,
         "T_rhp": round(req.T, 4),
         "features": features,
+        "effective_parameters": effective_parameters,
         "capital_protection": cap,
         "knowledge_experience": knowledge,
         "risk_tolerance": _risk_tolerance(req.sri),

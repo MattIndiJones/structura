@@ -191,6 +191,22 @@ def test_price_mark_missing_fx_is_not_one(tmp_path, monkeypatch):
         amc_prices.build_marks([{"isin": "TEST_JP", "currency": "JPY"}], "2025-01-02", "USD")
 
 
+def test_fx_rate_to_respects_historical_asof(monkeypatch):
+    series = pd.Series(
+        [0.80, 0.95],
+        index=pd.to_datetime(["2024-01-02", "2026-01-02"]),
+    )
+    calls = []
+
+    def fake_series(*args, **kwargs):
+        calls.append(kwargs)
+        return series
+
+    monkeypatch.setattr(amc_prices, "get_fx_series", fake_series)
+    assert amc_prices.fx_rate_to("USD", "EUR", asof=dt.date(2024, 12, 31)) == 0.80
+    assert calls[0]["end"] == "2025-01-01"
+
+
 def test_t0_allocations_and_fx_decomposition(monkeypatch):
     from backend.app.core.fifo.nav import build_initial_orders
     monkeypatch.setattr(amc_prices, "build_marks", lambda *a, **k: {"JP": 2.})

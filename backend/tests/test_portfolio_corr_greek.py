@@ -11,7 +11,7 @@ import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
 from backend.app.api import portfolios as portfolios_api
-from backend.app.db.models import Deal, Portfolio
+from backend.app.db.models import Deal, Portfolio, ValuationRun
 
 USER = SimpleNamespace(id=1)
 
@@ -141,5 +141,45 @@ def test_vegas_de_perimetres_differents_ne_sont_pas_additionnes(monkeypatch):
         assert bucket["vega_scope_mixed"] is True
         assert {c["vega_scope"] for c in bucket["contributions"]} \
             == {"total", "leg_independante"}
+    finally:
+        s.close()
+
+
+def test_un_run_greeks_d_une_ancienne_version_est_exclu():
+    s = _make_session()
+    deal = _add_deal(s, "VERSION-2", [("Action", "ACT")], {})
+    deal.contract_version = 2
+    deal.greeks_json = "{}"
+    s.add(deal)
+    s.flush()
+    s.add(ValuationRun(
+        deal_id=deal.id, user_id=1, run_type="GREEKS", contract_version=1,
+        context_hash="ancienne-version",
+        result_json=json.dumps({
+            "valuation_date": date.today().isoformat(),
+            "per_underlying": {"Action": {"delta": 1.0}},
+            "scalar": {}, "corr_pairs": {},
+        }),
+    ))
+    s.commit()
+    try:
+        assert portfolios_api._greeks_snapshots(
+            [deal], s, date.today()) == {}
+    finally:
+        s.close()
+
+
+def test_un_cache_legacy_sans_version_est_exclu_apres_amendement():
+    s = _make_session()
+    deal = _add_deal(
+        s, "CACHE-LEGACY", [("Action", "ACT")], {},
+        per_underlying={"Action": {"delta": 1.0}},
+    )
+    deal.contract_version = 2
+    s.add(deal)
+    s.commit()
+    try:
+        assert portfolios_api._greeks_snapshots(
+            [deal], s, date.today()) == {}
     finally:
         s.close()

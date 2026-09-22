@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.api.pricing import router
+from backend.app.api.auth import get_current_user
 from backend.app.core.schemas import PricingRequest
 
 
@@ -21,7 +22,15 @@ BASE = {
 def client():
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[get_current_user] = lambda: object()
     return TestClient(app)
+
+
+def test_pricing_route_refuses_anonymous_access():
+    app = FastAPI()
+    app.include_router(router)
+    response = TestClient(app).post("/api/price", json=BASE)
+    assert response.status_code == 401
 
 
 def test_noeud_de_courbe_malforme_retourne_422(client):
@@ -57,4 +66,4 @@ def test_reparation_correlation_et_approximation_barriere_traversent_api(client)
     assert body["corr_repair"]["max_shift"] > 0
     assert body["corr_repair"]["matrix_used"]
     assert body["barrier_monitoring"] == "continuous"
-    assert "benchmark" in body["barrier_monitoring_note"]
+    assert "pont brownien" in body["barrier_monitoring_note"]

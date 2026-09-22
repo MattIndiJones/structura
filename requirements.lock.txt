@@ -1,6 +1,7 @@
 # Versions directes validées sur Windows avec Python 3.11 le 12/09/2026.
 # requirements.txt reste la source des plages compatibles.
-fastapi==0.115.14
+fastapi==0.141.1
+starlette==1.6.0
 uvicorn[standard]==0.31.1
 numpy==1.26.4
 scipy==1.11.4

@@ -26,6 +26,7 @@ from sqlmodel import Session, select
 from ..db.database import engine
 from ..db.models import Deal, Alert, SchedulerRun
 from ..core.audit import record_audit_event
+from .product_lifecycle import stage_product_lifecycle
 
 log = logging.getLogger("structura.lifecycle")
 
@@ -101,6 +102,12 @@ def refresh_book(session: Session, user_id: int | None = None) -> dict:
                     reason=f"Date de règlement atteinte ({deal.payment_date}).",
                     metadata={"payment_date": deal.payment_date},
                 )
+                if deal.product_id is not None:
+                    stage_product_lifecycle(
+                        session, deal, actor_user_id=None,
+                        action="PRODUCT_DEAL_SETTLED",
+                        reason=f"Date de règlement atteinte ({deal.payment_date}).",
+                    )
                 session.commit()
                 summary["settled"] += 1
             continue

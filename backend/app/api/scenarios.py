@@ -1,5 +1,5 @@
 """Scenario API endpoint — stress grid: price under combined spot x vol shocks."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from ..core.schemas import ScenarioRequest
 from ..core.payscript.parser import analysis_origin, parse_script, resolve_analysis_constats, effective_T_max
 from ..core.payscript.scenarios import compute_scenario_grid
@@ -10,7 +10,12 @@ from ..core.compute_budget import (
     validate_compiled_dates,
 )
 
-router = APIRouter(prefix="/api", tags=["scenarios"])
+from .auth import get_current_user
+
+router = APIRouter(
+    prefix="/api", tags=["scenarios"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.post("/scenarios")

@@ -161,6 +161,35 @@ def stage_terms(session: Session, product: Product, terms: ProductTerms, *,
     return product.model_copy(update={"terms": terms, "terms_version": version})
 
 
+def stage_booked_terms_amendment(session: Session, product: Product,
+                                 terms: ProductTerms, *, reason: str) -> Product:
+    """Append terms for a governed amendment of an already booked Product.
+
+    Ordinary term editing remains forbidden after booking.  This narrow path
+    is called only from the Deal amendment workflow, inside the same database
+    transaction as the new Deal contract version.
+    """
+    if not product.execution:
+        raise ProductError(
+            "PRODUCT_NOT_BOOKED",
+            "L’amendement contractuel exige un Product déjà booké.",
+        )
+    if terms.fingerprint == product.terms_fingerprint:
+        return product
+    versions = session.exec(select(ProductTermsVersion.version).where(
+        ProductTermsVersion.product_id == product.product_id)).all()
+    version = max(versions) + 1
+    session.add(ProductTermsVersion(
+        product_id=product.product_id,
+        version=version,
+        parent_version=product.terms_version,
+        fingerprint=terms.fingerprint,
+        terms_json=canonical_json(terms.model_dump(mode="json")),
+        reason=reason,
+    ))
+    return product.model_copy(update={"terms": terms, "terms_version": version})
+
+
 def previous_command(session: Session, user: User, key: str, payload: dict) -> Product | None:
     command = session.exec(select(ProductCommand).where(
         ProductCommand.user_id == user.id, ProductCommand.command_key == key)).first()

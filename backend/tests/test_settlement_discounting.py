@@ -8,6 +8,8 @@ nominal, systématiquement dans le même sens.
 import math
 from datetime import date
 
+import pytest
+
 from backend.app.core.payscript import engine
 from backend.app.core.payscript.engine import run_mc
 from backend.app.core.payscript.parser import parse_script, resolve_constats
@@ -129,3 +131,40 @@ def test_les_greeks_reutilisent_les_dates_completes(monkeypatch):
     assert calls
     assert all(c["maturity_payment_t"] == 1.02 for c in calls)
     assert all(c["value_date_t"] == 0.01 for c in calls)
+
+
+def test_theta_fait_vieillir_la_date_de_paiement_explicite():
+    greeks = engine.compute_greeks(
+        parse_script(ZERO_COUPON), UL, CORR, R, 1.0, 4000, "constant", 42,
+        {}, selected=["theta"], maturity_payment_t=1.02,
+    )
+    expected = math.exp(-R * 1.02) * R / 365.25
+    assert greeks["theta"] == pytest.approx(expected, abs=2e-7)
+
+
+def test_le_paiement_global_gouverne_un_constat_terminal_date():
+    script = parse_script("AT 1:\n  PAY 1 \"remboursement\"\n")
+    result = _price(script, 1.0, maturity_payment_t=1.02)
+    assert result["price"] == pytest.approx(math.exp(-R * 1.02), abs=1e-6)
+    line = next(iter(result["flux_table"].values()))
+    assert line["t"] == pytest.approx(1.0)
+    assert line["t_pay"] == pytest.approx(1.02)
+
+
+def test_le_worker_conserve_le_paiement_sans_constat():
+    from backend.app.core.compute.pricers.payscript import price_payscript_job
+
+    result = price_payscript_job({
+        "script_text": ZERO_COUPON,
+        "underlyings": UL,
+        "corr": CORR,
+        "r": R,
+        "T": 1.0,
+        "n_paths": 1000,
+        "model": "constant",
+        "strike_date": "2026-09-21",
+        "value_date": "2026-09-21",
+        "payment_date": "2027-12-31",
+    })
+    payment_t = (date(2027, 12, 31) - date(2026, 9, 21)).days / 365.25
+    assert result["price"] == pytest.approx(math.exp(-R * payment_t), abs=1e-6)

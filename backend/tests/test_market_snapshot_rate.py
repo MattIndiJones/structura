@@ -26,6 +26,7 @@ from backend.app.core.market_snapshot import (
     DEFAULT_RATE_PCT, snapshot_rate, snapshot_rate_is_default,
 )
 from backend.app.db.models import Deal, DealEvent, Portfolio, User
+from backend.tests.product_helpers import attach_product_to_deal
 
 USER = SimpleNamespace(id=1, entity_id=None, role="user")
 
@@ -111,6 +112,7 @@ def _zero_coupon_deal(session: Session, r_pct: float) -> Deal:
         market_snapshot_json=json.dumps(market),
         status="actif",
     )
+    attach_product_to_deal(session, deal)
     session.add(deal)
     session.flush()
     session.add(DealEvent(deal_id=deal.id, event_index=0,

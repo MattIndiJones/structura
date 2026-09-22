@@ -12,6 +12,7 @@ from sqlmodel import SQLModel, Session, create_engine
 
 from backend.app.api import deals as deals_api
 from backend.app.db.models import Deal, DealEvent
+from backend.tests.product_helpers import attach_product_to_deal
 
 SCRIPT = """
 PARAM AC_BAR = 105%
@@ -49,7 +50,9 @@ def _make_session():
         strike_date=VALUE_D.isoformat(), value_date=VALUE_D.isoformat(),
         maturity_date=MATURITY.isoformat(), T=3.0,
         nominal=1_000_000.0, price_traded=98.0, status="actif",
+        payment_date=MATURITY.isoformat(), devise="USD",
     )
+    attach_product_to_deal(s, deal)
     s.add(deal)
     s.commit()
     s.refresh(deal)

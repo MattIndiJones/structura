@@ -34,10 +34,11 @@ _TICKER_TO_LABEL = {c["ticker"]: c["label"] for c in _CATALOG}
 _REPORTING_CCY = "EUR"
 
 
-def _fx_to_reporting(devise: str | None) -> float | None:
+def _fx_to_reporting(devise: str | None,
+                     asof: date | str | None = None) -> float | None:
     """Rate towards the reporting currency — None when genuinely unknown.
     See core/amc_prices.fx_rate_to for why 1.0 and None must stay distinct."""
-    return fx_rate_to(devise, _REPORTING_CCY)
+    return fx_rate_to(devise, _REPORTING_CCY, asof=asof)
 
 
 def _fx_missing_row(d: Deal) -> dict:
@@ -274,6 +275,11 @@ def _greeks_snapshots(
             continue
         if _greeks_valuation_date(payload) != target:
             continue
+        payload_version = payload.get("contract_version")
+        if ((payload_version is None and deal.contract_version != 1)
+                or (payload_version is not None
+                    and payload_version != deal.contract_version)):
+            continue
         computed_at = _parsed_computed_at(payload, deal.greeks_computed_at)
         snapshots[deal.id] = (payload, computed_at)
         timestamps[deal.id] = computed_at or datetime.min
@@ -281,6 +287,7 @@ def _greeks_snapshots(
     deal_ids = [deal.id for deal in deals if deal.id is not None]
     if not deal_ids:
         return snapshots
+    deal_versions = {deal.id: deal.contract_version for deal in deals}
     runs = session.exec(
         select(ValuationRun).where(
             ValuationRun.deal_id.in_(deal_ids),
@@ -288,6 +295,8 @@ def _greeks_snapshots(
         ).order_by(ValuationRun.created_at.desc())
     ).all()
     for run in runs:
+        if run.contract_version != deal_versions.get(run.deal_id):
+            continue
         if run.deal_id in snapshots and timestamps[run.deal_id] >= run.created_at:
             continue
         try:
@@ -337,7 +346,7 @@ def _aggregate_risk(
     for d in scoped_deals:
         # Nominal is known regardless of whether Greeks were ever computed —
         # unlike the sensitivities below, it must not wait on deals_missing_greeks.
-        fx_rate = _fx_to_reporting(d.devise)
+        fx_rate = _fx_to_reporting(d.devise, valuation_date)
         if fx_rate is None:
             # Excluded from every total, not converted at parity: this deal's
             # size in EUR is unknown, and an unknown size must not be added.
@@ -768,6 +777,10 @@ def _barrier_severity(b: dict) -> str:
             return "attention"
         return "ok"
     if b["kind"] == "autocall":
+        if -5 <= g < 0:
+            return "attention"
+        return "ok"
+    if b["kind"] == "coupon":
         if -5 <= g < 0:
             return "attention"
         return "ok"

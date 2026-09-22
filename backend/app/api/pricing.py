@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import numpy as np
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from ..core.schemas import (
     PricingRequest, PricingResponse, ParseRequest, ParseResponse,
@@ -33,9 +33,12 @@ from ..core.valuation_context import (
     ValuationContext, build_pricing_receipt, run_valuation,
 )
 from ..services.product_receipts import signed_receipt
-from .auth import receipt_signing_secret
+from .auth import get_current_user, receipt_signing_secret
 
-router = APIRouter(prefix="/api", tags=["pricing"])
+router = APIRouter(
+    prefix="/api", tags=["pricing"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _clean_flux(flux_map: dict) -> dict:

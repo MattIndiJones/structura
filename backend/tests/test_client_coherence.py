@@ -27,6 +27,7 @@ from backend.app.db.database import get_session
 from backend.app.db.models import (
     Affiliation, Client, ClientTradeHistory, Interaction, Person, User,
 )
+from backend.tests.product_helpers import add_pricing_receipt
 
 
 @pytest.fixture
@@ -97,13 +98,14 @@ def _corps_deal(**extra):
         "trade_date": "2026-01-15", "strike_date": "2026-01-15",
         "value_date": "2026-01-19", "maturity_date": "2027-01-15",
         "payment_date": "2027-01-20", "T": 1.0,
-        "underlyings": [{"name": "GLE.PA", "ticker": "GLE.PA", "s0_abs": 22.15}],
+        "underlyings": [{"name": "GLE.PA", "ticker": "GLE.PA", "ccy": "EUR",
+                         "s0_abs": 22.15}],
         "observation_times": [1.0],
         "script_snapshot": "AT MATURITY\n  PAY 1\n",
         "market_snapshot": {"r": 2.5},
     }
     corps.update(extra)
-    return corps
+    return add_pricing_receipt(corps)
 
 
 # ── 1. Deux écrans, un seul portefeuille ─────────────────────────────

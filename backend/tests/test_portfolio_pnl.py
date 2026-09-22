@@ -13,6 +13,7 @@ from sqlmodel import SQLModel, Session, create_engine
 from backend.app.api import deals as deals_api
 from backend.app.api import portfolios as portfolios_api
 from backend.app.db.models import Deal, DealEvent, Portfolio
+from backend.tests.product_helpers import attach_product_to_deal
 
 TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=400)
@@ -36,9 +37,11 @@ def _add_deal(s: Session, script: str, reference: str,
         }),
         strike_date=value_date.isoformat(), value_date=value_date.isoformat(),
         maturity_date=MATURITY.isoformat(), T=3.0, devise="EUR",
+        payment_date=MATURITY.isoformat(),
         nominal=nominal, price_traded=98.0, status="actif",
         portfolio_id=portfolio_id,
     )
+    attach_product_to_deal(s, deal)
     s.add(deal)
     s.commit()
     s.refresh(deal)

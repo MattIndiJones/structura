@@ -2154,8 +2154,15 @@ def run_mc(script: CompiledScript,
                 step = max(1, round(d / dt))
                 step_map.setdefault(step, []).append(ev)
                 pays = ev.payment_dates
+                payment_t = pays[i] if pays and i < len(pays) else None
+                # A terminal dated CONSTAT is economically the same final
+                # redemption as an AT MATURITY block.  The product-level
+                # payment date is authoritative for that last cash flow.
+                if (maturity_payment_t is not None
+                        and abs(d - T) <= 1e-6):
+                    payment_t = maturity_payment_t
                 pay_map.setdefault(step, []).append(
-                    pays[i] if pays and i < len(pays) else None)
+                    payment_t)
 
     # Drop steps beyond the simulation horizon — happens when T_max is capped
     # below the script's event dates (e.g. PRIIPs intermediate-horizon MC).
@@ -2517,18 +2524,16 @@ def run_mc(script: CompiledScript,
         # nearest PSD one. Small moves are numerical noise, but the caller is
         # entitled to know the price used a matrix it did not supply.
         "corr_repair": corr_repair or None,
-        # The bridge is an approximation of continuous monitoring, and a biased
-        # one: measured against Merton's closed form on a down-and-out call
-        # struck at the money with a 95% barrier, it prices 14.3% low, while
-        # the weekly path matches an independent simulation to 1.5bp. It kills
-        # too many paths, so every knock-out is undervalued and every knock-in
-        # overvalued. Flagged rather than silently trusted.
+        # Continuous monitoring is reconstructed between weekly simulation
+        # nodes with a Brownian bridge.  This is the standard conditional
+        # crossing construction under a lognormal diffusion; callers still
+        # need to know that it is a model approximation outside that setting.
         "barrier_monitoring": barrier_monitoring,
         "barrier_monitoring_note": (
-            "Monitoring continu approché par pont brownien — biais de prix "
-            "d'environ -14% mesuré sur un benchmark down-and-out proche de la "
-            "monnaie face à la formule de Merton. Le mode hebdomadaire évalue "
-            "exactement le contrat échantillonné sur ses points hebdomadaires."
+            "Monitoring continu reconstruit entre les pas de simulation par "
+            "pont brownien. Cette interpolation est exacte conditionnellement "
+            "aux extrémités sous diffusion lognormale à volatilité constante ; "
+            "elle reste une approximation sous les autres modèles."
         ) if use_bridge else None,
         # Ce qu'une fenêtre de constatation a RÉELLEMENT pesé. Publié pour
         # toutes les fenêtres, pas seulement les courtes : « attention, fenêtre
@@ -2636,7 +2641,8 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
     st = state or {}
     base_spots = list(st.get("spot_base") or [1.0] * n)
 
-    def reprice(spot_vec=None, script_=None, T_=None, index_=None, **bumps) -> dict:
+    def reprice(spot_vec=None, script_=None, T_=None, index_=None,
+                maturity_payment_t_=None, **bumps) -> dict:
         sv = list(spot_vec) if spot_vec is not None else base_spots
         return run_mc(
             script if script_ is None else script_,
@@ -2645,7 +2651,8 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
             yield_curve=yield_curve or [], barrier_monitoring=barrier_monitoring,
             funding_curve=funding_curve or [], funding_spread=funding_spread,
             strike_set_t=strike_set_t,
-            maturity_payment_t=maturity_payment_t,
+            maturity_payment_t=(maturity_payment_t if maturity_payment_t_ is None
+                                else maturity_payment_t_),
             value_date_t=value_date_t,
             spot_mult=sv, spot_base=base_spots,
             wof_min_init=st.get("wof_min"), bof_max_init=st.get("bof_max"),
@@ -2704,7 +2711,8 @@ def compute_greeks(script: CompiledScript, underlyings, corr_matrix,
 
     if "theta" in sel:
         theta, theta_event = _theta_and_event(
-            script, T, st, base_g, base_res, reprice)
+            script, T, st, base_g, base_res, reprice,
+            maturity_payment_t=maturity_payment_t)
         greeks["theta"] = theta
         greeks["theta_event"] = theta_event
 
@@ -2773,7 +2781,9 @@ def _age_compiled_script(script: CompiledScript, shift: float) -> CompiledScript
 
 def _theta_and_event(script: CompiledScript, T: float, st: dict,
                      base_g: float | None, base_res: dict | None,
-                     reprice) -> tuple[float | None, dict | None]:
+                     reprice, *,
+                     maturity_payment_t: float | None = None
+                     ) -> tuple[float | None, dict | None]:
     """Time decay over one grid step when no contractual event is crossed.
 
     Aging the product by a week is the finest decay this weekly grid can
@@ -2832,8 +2842,11 @@ def _theta_and_event(script: CompiledScript, T: float, st: dict,
             "terminates": bool(script.has_stop),
         }
 
+    aged_payment_t = (None if maturity_payment_t is None
+                      else max(0.0, maturity_payment_t - dt_step))
     aged = reprice(script_=_age_compiled_script(script, dt_step),
-                   T_=T - dt_step)["price"]
+                   T_=T - dt_step,
+                   maturity_payment_t_=aged_payment_t)["price"]
     # Per calendar day: the product was aged by dt_step YEARS, which is
     # 365.25*dt_step days on the engine's own day-count — 7.02 on the weekly
     # grid, not 7. Hard-coding 7 was right only by coincidence of SY=52, and

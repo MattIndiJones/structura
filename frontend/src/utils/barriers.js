@@ -28,6 +28,11 @@ export function barrierChipClass(b) {
     if (g >= -5) return 'bg-amber-900/40 text-amber-400'
     return 'bg-slate-800 text-slate-500'
   }
+  if (b.kind === 'coupon') {
+    if (g >= 0) return 'bg-emerald-900/40 text-emerald-400'
+    if (g >= -5) return 'bg-amber-900/40 text-amber-400'
+    return 'bg-slate-800 text-slate-500'
+  }
   // 'neutral' — M_ param whose usage in the script is ambiguous: the gap is
   // shown but not color-read, we don't know which way the barrier bites.
   return 'bg-slate-800 text-slate-400 border border-slate-600'
@@ -37,7 +42,7 @@ export function barrierGapLabel(b) {
   const g = b.gap_pts
   if (barrierPending(b)) return 'en attente du strike'
   if (b.kind === 'ki' && g <= 0) return `franchie (${g.toFixed(1)} pts)`
-  if (b.kind === 'autocall' && g >= 0) return `≥ barrière (+${g.toFixed(1)} pts)`
+  if ((b.kind === 'autocall' || b.kind === 'coupon') && g >= 0) return `≥ barrière (+${g.toFixed(1)} pts)`
   return `${g >= 0 ? '+' : ''}${g.toFixed(1)} pts`
 }
 
@@ -62,7 +67,7 @@ const MIN_LABEL_GAP_PCT = 10
 export function barrierGauges(barriers) {
   const groups = new Map()
   for (const b of barriers || []) {
-    if ((b.kind !== 'ki' && b.kind !== 'autocall') || barrierPending(b)) continue
+    if (!['ki', 'autocall', 'coupon'].includes(b.kind) || barrierPending(b)) continue
     const level = Number(b.level) * 100
     const current = level + Number(b.gap_pts)
     if (!Number.isFinite(level) || !Number.isFinite(current)) continue
@@ -90,7 +95,7 @@ export function barrierGauges(barriers) {
         return { ...m, labelled }
       })
     const loss = marks.filter(m => m.kind === 'ki').map(m => m.level)
-    const gain = marks.filter(m => m.kind === 'autocall').map(m => m.level)
+    const gain = marks.filter(m => m.kind === 'autocall' || m.kind === 'coupon').map(m => m.level)
     return {
       observable,
       current,
@@ -117,6 +122,10 @@ export function barrierSeverity(b) {
     return 'ok'
   }
   if (b.kind === 'autocall') {
+    if (g >= -5 && g < 0) return 'attention'
+    return 'ok'
+  }
+  if (b.kind === 'coupon') {
     if (g >= -5 && g < 0) return 'attention'
     return 'ok'
   }

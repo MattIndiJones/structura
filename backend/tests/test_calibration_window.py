@@ -24,6 +24,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from backend.app.core.calibration import calibration_history_start, realized_market
 from backend.app.core.deal_valuation import MtmRequest, mtm_core
 from backend.app.db.models import Deal, DealEvent
+from backend.tests.product_helpers import attach_product_to_deal
 
 TODAY = date.today()
 
@@ -52,6 +53,7 @@ def _deal(session: Session, strike: date, maturity: date, *, with_strike_event: 
         }),
         status="actif",
     )
+    attach_product_to_deal(session, deal)
     session.add(deal)
     session.flush()
     if with_strike_event:

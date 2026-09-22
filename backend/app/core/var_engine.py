@@ -256,7 +256,10 @@ def generate_historical_scenarios(
         mat = np.array([returns[tk][:n_ret] for tk in usable])
         corr_roll = _rolling_avg_corr(mat, vol_window)
 
-    lookback_n = min(n_ret, round(lookback_years * 252 / horizon_days))
+    # Overlapping h-day returns still produce one observation per trading
+    # day.  Dividing the requested calendar lookback by the horizon silently
+    # reduced a five-year 10-day VaR history to roughly six months.
+    lookback_n = min(n_ret, round(lookback_years * 252))
     start = max(vol_window - 1, n_ret - lookback_n)
     baseline_corr = corr_roll[-1] if corr_roll is not None and not np.isnan(corr_roll[-1]) else None
 

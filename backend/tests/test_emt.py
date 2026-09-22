@@ -41,3 +41,11 @@ def test_seule_une_protection_contractuelle_complete_et_inconditionnelle_est_gar
     assert _capital_tier(100.0, "conditional")["tier"] == "indetermine"
     assert _capital_tier(98.0, "unconditional")["tier"] == "indetermine"
     assert _capital_tier(None, "unknown")["tier"] == "indetermine"
+
+
+def test_le_levier_emt_lit_la_valeur_economique_saisie():
+    script = "PARAM GEARING = 50%\nAT MATURITY\n  PAY GEARING * WOF\n"
+    compiled = parse_script(script)
+    assert _detect_features(compiled, 1, script)["has_leverage"] is False
+    assert _detect_features(
+        compiled, 1, script, {"GEARING": 2.0})["has_leverage"] is True

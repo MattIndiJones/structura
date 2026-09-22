@@ -89,6 +89,19 @@ def test_historical_scenarios_single_ticker_has_no_corr_shock():
     assert all(s.corr_delta == 0.0 for s in scenarios)
 
 
+def test_historical_lookback_does_not_shrink_with_return_horizon():
+    prices, dates = _synthetic_two_ticker_history(
+        n_calm=1300, n_crisis=20, n_calm_after=30)
+    counts = {
+        horizon: len(ve.generate_historical_scenarios(
+            prices, dates, ["TKA"], lookback_years=5.0,
+            horizon_days=horizon))
+        for horizon in (1, 5, 20)
+    }
+    assert max(counts.values()) - min(counts.values()) <= 19
+    assert min(counts.values()) >= 1240
+
+
 # ── calibrate_comovement sign convention ──────────────────────────────
 
 def test_calibrate_comovement_signs_match_crisis_dynamics():

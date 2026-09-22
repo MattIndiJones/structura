@@ -58,6 +58,33 @@ MODELES = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def historique_synthetique(monkeypatch):
+    """Les analytiques de recette restent déterministes et sans dépendance Yahoo."""
+    from backend.app.api import inlife as api_inlife
+    from backend.app.api import pricing as api_pricing
+
+    def charger(tickers, debut, fin=None, adjusted=False):
+        start = dt.date.fromisoformat(debut)
+        end = dt.date.fromisoformat(fin) if fin else dt.date(2026, 6, 14)
+        dates, values = [], []
+        day = start
+        while day <= end:
+            if day.weekday() < 5:
+                dates.append(day.isoformat())
+                values.append(100.0 if day <= dt.date(2024, 6, 14) else 40.0)
+            day += dt.timedelta(days=1)
+        return {
+            "dates": dates,
+            "prices": {ticker: list(values) for ticker in tickers},
+            "provider": "SYNTHETIC_TEST",
+            "adjusted": adjusted,
+        }
+
+    monkeypatch.setattr(api_inlife, "load_hist_prices", charger)
+    monkeypatch.setattr(api_pricing, "load_hist_prices", charger)
+
+
 def _champs_communs():
     return dict(
         script=SCRIPT,

@@ -463,6 +463,8 @@ def _rfq_session():
     from sqlalchemy import event as _event
     from sqlmodel import SQLModel as _SQLModel, create_engine as _ce, Session as _S
     from backend.app.db.models import Entity, User, RfqRequest, RfqQuote
+    from backend.app.api import rfq as rfq_api
+    from backend.app.services.product_repository import stage_internal_product
     engine = _ce("sqlite://", connect_args={"check_same_thread": False})
 
     @_event.listens_for(engine, "connect")
@@ -485,10 +487,19 @@ def _rfq_session():
         "notional": 1_060_000.0, "currency": "EUR",
         "strike_date": "2026-10-31", "value_date": "2026-10-31",
     }
+    script = "PARAM CPN = 8%\nAT MATURITY\n  PAY 1\n"
+    product = stage_internal_product(
+        s,
+        user=_me(),
+        name="Produit RFQ de recette",
+        terms=rfq_api._product_terms_from_payload(script, params, kind="indicatif"),
+        reason="Fixture RFQ reliée au Product canonique.",
+    )
     rfq = RfqRequest(reference="RFQ-T-001", name="T", user_id=1, status="retenue",
-                     script_snapshot="AT MATURITY\n  PAY 1\n",
+                     script_snapshot=script,
                      params_json=_json.dumps(params), model_price=98.12,
-                     model_input_hash="stale")
+                     model_input_hash="stale", product_id=product.product_id,
+                     product_terms_version=product.terms_version)
     s.add(rfq); s.commit(); s.refresh(rfq)
     s.add(RfqQuote(rfq_id=rfq.id, provider="UBS", price=98.5)); s.commit()
     return s, rfq, params

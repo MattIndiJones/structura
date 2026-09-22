@@ -1,6 +1,7 @@
 """Document library — store, list, download generated documents (KID PDF, term sheets, etc.)."""
 from __future__ import annotations
 import json
+from uuid import uuid4
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -121,7 +122,7 @@ async def upload_document(
     # Sanitize filename
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     original_name = Path(file.filename or "document").name
-    safe_name = f"{ts}_{original_name}"
+    safe_name = f"{ts}_{uuid4().hex}_{original_name}"
     dest = user_dir / safe_name
     dest.write_bytes(await file.read())
 

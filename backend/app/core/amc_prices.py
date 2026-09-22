@@ -315,8 +315,9 @@ def get_fx_series(from_ccy: str, to_ccy: str,
     return record_market(f"fx:{cache_key}", cached_series) if cached_series is not None else pd.Series(dtype=float)
 
 
-def fx_rate_to(from_ccy: str | None, to_ccy: str = "EUR") -> float | None:
-    """Latest conversion rate, or None when it is genuinely unknown.
+def fx_rate_to(from_ccy: str | None, to_ccy: str = "EUR",
+               asof: datetime.date | str | None = None) -> float | None:
+    """Conversion rate at *asof* (latest by default), or None if unknown.
 
     `get_fx_series` answers with an empty Series in two unrelated situations:
     the conversion is a no-op (same currency, or none recorded), and the pair
@@ -335,7 +336,17 @@ def fx_rate_to(from_ccy: str | None, to_ccy: str = "EUR") -> float | None:
     dst = (to_ccy or "EUR").upper().strip()
     if not src or src == dst:
         return 1.0
-    series = get_fx_series(src, dst)
+    asof_date = (datetime.date.fromisoformat(asof) if isinstance(asof, str)
+                 else asof)
+    # Yahoo's `end` is exclusive. Ask through the following calendar day, then
+    # filter locally as caches may contain newer quotes than the requested
+    # historical valuation date.
+    provider_end = ((asof_date + datetime.timedelta(days=1)).isoformat()
+                    if asof_date else None)
+    series = get_fx_series(src, dst, end=provider_end)
+    if asof_date is not None and not series.empty:
+        index = pd.to_datetime(series.index).tz_localize(None)
+        series = series[index <= pd.Timestamp(asof_date)]
     if series.empty:
         return None
     try:

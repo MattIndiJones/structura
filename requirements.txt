@@ -1,4 +1,6 @@
-fastapi>=0.100.0,<0.116.0
+fastapi>=0.141.1,<0.142.0
+# StaticFiles path validation, multipart range handling and Windows UNC fixes.
+starlette>=1.3.1,<1.7.0
 uvicorn[standard]>=0.22.0,<0.32.0
 numpy>=1.21.0,<2.0.0
 scipy>=1.9.0,<1.12.0

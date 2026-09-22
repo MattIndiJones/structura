@@ -26,7 +26,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    Image, HRFlowable, PageBreak, KeepTogether,
+    Image, HRFlowable, PageBreak, CondPageBreak, KeepTogether,
 )
 from reportlab.platypus.flowables import Flowable
 
@@ -1199,7 +1199,7 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
     # ── PAGE 2: EXECUTIVE SUMMARY — Score Global ────────────────────────
     if mss_early and mss_early.get("available"):
         _append_executive_summary(story, mss_early, mss_no_vag, meta, space)
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
 
     story.append(space(6))
     from xml.sax.saxutils import escape
@@ -1285,7 +1285,8 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
                 story.append(space(4))
             else:
                 story.append(space(8))
-        story.append(PageBreak())
+        # Analysis blocks below already open on a fresh page.  Adding a second
+        # break here produced an empty page between the synthesis and Bloc A.
 
     # Warnings at the top (before analysis blocks)
     if warns:
@@ -1295,13 +1296,13 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
 
     # ── BLOC A ─────────────────────────────────────────────────────────
     if block_a and block_a.get("available"):
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         net_result = block_a.get("net", {})
         gross_result = block_a.get("gross", {})
         fee_drag = block_a.get("fee_drag_pct")
         _append_block_a_sections(story, net_result, gross_result, fee_drag, meta, space)
     elif block_a and not block_a.get("available"):
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("A — Analyse Factorielle (non disponible)")
         story.append(Paragraph(f"⚠  {block_a.get('error', 'Données indisponibles.')}", S_WARN))
 
@@ -1313,7 +1314,7 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
         "reconstruction du stock initial."
     )
     if block_b and block_b.get("available") is not False:
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("B — Attribution de Performance par Sous-jacent")
         if meta.get("recon_mode") == "t0_synthetic":
             story.append(Paragraph(_t0_disclaimer, S_WARN))
@@ -1322,7 +1323,7 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
 
     # ── BLOC C — Trading / Turnover ─────────────────────────────────────
     if block_c and block_c.get("available") is not False:
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("C — Qualité des Décisions de Trading & Turnover")
         if meta.get("recon_mode") == "t0_synthetic":
             story.append(Paragraph(_t0_disclaimer, S_WARN))
@@ -1331,47 +1332,47 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
 
     # ── BLOC D — Comportement ───────────────────────────────────────────
     if block_d and block_d.get("available") is not False:
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("D — Comportement du Gérant : Conviction vs Incertitude")
         _append_block_d(story, block_d, space, meta)
 
     # ── BLOC E — Référentiel Inertiel (B&H) ─────────────────────────────
     block_e = study_result.get("block_e")
     if block_e:
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("E — Référentiel Inertiel : Valeur Ajoutée par la Gestion Active (B&amp;H passif)")
         _append_block_bh(story, block_e, ccy, space, meta)
 
     # ── BLOC F — Réplicabilité ───────────────────────────────────────────
     if block_f:
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("F — Réplicabilité de la Stratégie")
         _append_block_f_replicability(story, block_f, space)
 
     # ── BLOC H — Brinson-Fachler Attribution ────────────────────────────
     if brinson_result and brinson_result.get("available"):
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("G — Attribution Brinson-Fachler")
         _append_block_g_brinson(story, brinson_result, space)
 
     # ── BLOC I — Timing Score ─────────────────────────────────────────────
     block_h = study_result.get("block_h")
     if block_h:
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("H — Timing Score : Qualité des Points d'Entrée et de Sortie")
         _append_block_h_timing(story, block_h, space, meta)
 
     # ── BLOC J — Stock Picking Score ─────────────────────────────────────
     block_i = study_result.get("block_i")
     if block_i:
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("I — Stock Picking Score : Qualité de la Sélection de Titres")
         _append_block_i_stockpicking(story, block_i, space, meta)
 
     # ── BLOC K — Risk Management Score ───────────────────────────────────
     block_j = study_result.get("block_j")
     if block_j:
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("J — Risk Management Score : Évaluation de la Gestion du Risque")
         _append_block_j_rms(story, block_j, space, meta)
 
@@ -1380,7 +1381,7 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
     # explicitly selected upfront (manifest.blocks.K_marketshocks) or run on
     # demand from its own tab, then explicitly opted into the PDF export.
     if market_shocks_result and market_shocks_result.get("available"):
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("K — Réactivité aux Chocs de Marché")
         _append_block_k_marketshocks(story, market_shocks_result, space)
 
@@ -1388,12 +1389,12 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
     # mss_early already computed at top (with VAG) — reuse it here
     mss = mss_early
     if mss and mss.get("available"):
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         section("Manager Skill Score — Évaluation Globale du Gérant")
         _append_manager_skill(story, mss, space)
 
     # ── CATALOGUE DES BLOCS (méthodologie — en fin de document) ─────────
-    story.append(PageBreak())
+    story.append(CondPageBreak(25 * cm))
     section("Blocs d'analyse — Contenu et méthodes")
     for bl in catalog:
         story.append(KeepTogether([
@@ -1407,11 +1408,11 @@ def generate_study_pdf(study_result: dict, synthese_text: str = "",
 
     # ── CONFIANCE & LIMITES ─────────────────────────────────────────────
     if confidence:
-        story.append(PageBreak())
+        story.append(CondPageBreak(25 * cm))
         _append_confidence(story, confidence, space)
 
     # ── DISCLAIMER ──────────────────────────────────────────────────────
-    story.append(PageBreak())
+    story.append(CondPageBreak(25 * cm))
     _append_disclaimer(story, space)
 
     if include_annexes:
@@ -2899,7 +2900,7 @@ def _append_block_i_appendix(story, bi: dict, space):
     if not all_trades:
         return
 
-    story.append(PageBreak())
+    story.append(CondPageBreak(25 * cm))
     story.append(space(10))
     story.append(Paragraph(
         "Annexe — Bloc I : Détail Complet des Achats (Stock Picking Score)",
@@ -3113,7 +3114,7 @@ def _append_block_h_appendix(story, h: dict, space):
     if not all_trades:
         return
 
-    story.append(PageBreak())
+    story.append(CondPageBreak(25 * cm))
     story.append(space(10))
     story.append(Paragraph(
         "Annexe — Bloc H : Détail Complet des Trades (Timing Score)",

@@ -21,6 +21,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from backend.app.api.auth import get_current_user
 from backend.app.db.database import get_session
 from backend.app.db.models import Affiliation, Deal, Opportunity, RfqRequest, User
+from backend.tests.product_helpers import add_pricing_receipt
 
 
 # Une RFQ « to trade » exige un script en mode Expert : un CONSTAT déclaré ET
@@ -105,13 +106,14 @@ def _corps_deal(**extra):
         "trade_date": "2026-01-15", "strike_date": "2026-01-15",
         "value_date": "2026-01-19", "maturity_date": "2027-01-15",
         "payment_date": "2027-01-20", "T": 1.0,
-        "underlyings": [{"name": "GLE.PA", "ticker": "GLE.PA", "s0_abs": 22.15}],
+        "underlyings": [{"name": "GLE.PA", "ticker": "GLE.PA", "ccy": "EUR",
+                         "s0_abs": 22.15}],
         "observation_times": [1.0],
         "script_snapshot": "AT MATURITY\n  PAY 1\n",
         "market_snapshot": {"r": 2.5},
     }
     corps.update(extra)
-    return corps
+    return add_pricing_receipt(corps)
 
 
 # ── §78 — la RFQ créée depuis une opportunité ────────────────────────
@@ -282,7 +284,7 @@ def test_une_rfq_sans_opportunite_fonctionne_comme_avant(app_client):
     """Le cas courant, et celui de tout l'existant : rien ne doit être exigé."""
     reponse = app_client.post("/api/rfq", json={
         "name": "AO indépendant", "kind": "indicatif", "sens": "achat",
-        "script_snapshot": "AT MATURITY\n  PAY 1\n", "params": {}})
+        "script_snapshot": "AT MATURITY\n  PAY 1\n", "params": RFQ_PARAMS})
     assert reponse.status_code in (200, 201), reponse.text
     assert reponse.json()["opportunity_id"] is None
 
@@ -291,7 +293,7 @@ def test_une_rfq_directe_peut_etre_rattachee_au_client_et_au_mandat(app_client):
     fiche, _, affiliation, opportunite = _contexte(app_client)
     reponse = app_client.post("/api/rfq", json={
         "name": "AO direct Client", "kind": "indicatif", "sens": "achat",
-        "script_snapshot": "AT MATURITY\n  PAY 1\n", "params": {},
+        "script_snapshot": "AT MATURITY\n  PAY 1\n", "params": RFQ_PARAMS,
         "client_id": fiche["id"], "mandate_id": opportunite["mandate_id"],
         "primary_affiliation_id": affiliation,
     })

@@ -67,7 +67,7 @@ from ..core.product.inputs import terms_from_input
 from ..core.product.models import CommercialContext, FrozenObject, TradeIntent
 from ..services.product_repository import (
     ProductError, load_product, owned_record, stage_calculation,
-    stage_internal_product, stage_revision,
+    stage_booked_terms_amendment, stage_internal_product, stage_revision,
 )
 from ..services.product_lifecycle import lifecycle_snapshot, stage_product_lifecycle
 from ..services.product_receipts import verify_server_receipt
@@ -895,6 +895,8 @@ def _contract_snapshot(deal: Deal) -> dict:
     return {
         "deal_id": deal.id,
         "reference": deal.reference,
+        "product_id": deal.product_id,
+        "product_terms_version": deal.product_terms_version,
         "contract_version": deal.contract_version,
         "sens": deal.sens,
         "contrepartie": deal.contrepartie,
@@ -2661,7 +2663,11 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
                 if level is None:
                     continue
                 obs_val = _observable_value(mon["observable"])
-                kind = {"up": "autocall", "down": "ki"}.get(mon["direction"], "neutral")
+                # Direction says how the observable crosses the level, not
+                # what business event follows.  A coupon barrier and a recall
+                # barrier are both crossed upwards, but only the latter can
+                # trigger a lifecycle alert.
+                kind = classify_param_barrier(mon["name"], level) or "neutral"
                 barriers.append({
                     "name": mon["name"],
                     "kind": kind,
@@ -3188,6 +3194,27 @@ def apply_amendment(
     normalized = _validated_amendment_value(deal, request, session)
     before_contract = _contract_snapshot(deal)
     current_version = deal.contract_version
+    product = None
+    if deal.product_id is not None:
+        try:
+            product = load_product(session, deal.product_id)
+            if deal.product_terms_version != product.terms_version:
+                raise ProductError(
+                    "PRODUCT_DEAL_TERMS_MISMATCH",
+                    "Le deal et le Product ne désignent pas la même version des termes.",
+                )
+            if request.field_name == "payment_date":
+                amended_terms = product.terms.model_copy(update={
+                    "payment_date": date.fromisoformat(normalized),
+                })
+                product = stage_booked_terms_amendment(
+                    session, product, amended_terms,
+                    reason=f"Amendement {request.id} du deal {deal.reference}.",
+                )
+        except ProductError as exc:
+            session.rollback()
+            raise HTTPException(
+                exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
     if not session.exec(select(DealContractVersion).where(
         DealContractVersion.dedup_key == f"{deal.id}:{current_version}")) .first():
         session.add(DealContractVersion(
@@ -3203,7 +3230,14 @@ def apply_amendment(
     update_values = {
         "contract_version": current_version + 1,
         "updated_at": applied_at,
+        # Every persisted sensitivity belongs to the previous contract
+        # version.  Keep immutable runs for audit, clear only current pointers.
+        "greeks_json": "{}",
+        "greeks_computed_at": None,
+        "latest_valuation_run_id": None,
     }
+    if product is not None:
+        update_values["product_terms_version"] = product.terms_version
     if request.field_name == "commercial_attribution":
         current_attribution = client_provenance_snapshot(
             session,
@@ -3254,6 +3288,34 @@ def apply_amendment(
     session.expire_all()
     deal = session.get(Deal, deal_id)
     request = session.get(TradeAmendmentRequest, request_id)
+    if product is not None:
+        product = product.model_copy(update={
+            "intent": TradeIntent(
+                **{
+                    **product.intent.model_dump(mode="json"),
+                    "nominal": deal.nominal,
+                    "counterparty_id": deal.counterparty_id,
+                    "counterparty_name": deal.contrepartie,
+                }
+            ),
+            "commercial": CommercialContext(
+                client_id=deal.client_id,
+                mandate_id=deal.mandate_id,
+                opportunity_id=deal.opportunity_id,
+                primary_affiliation_id=deal.primary_affiliation_id,
+            ),
+            "execution": FrozenObject(_contract_snapshot(deal)),
+        })
+        try:
+            stage_revision(
+                session, product, expected_revision=product.revision,
+                actor_id=current.id, action="PRODUCT_CONTRACT_AMENDED",
+                reason=body.reason,
+            )
+        except ProductError as exc:
+            session.rollback()
+            raise HTTPException(
+                exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
     after_contract = _contract_snapshot(deal)
     session.add(DealContractVersion(
         deal_id=deal.id,
@@ -6821,6 +6883,7 @@ def deal_greeks(
     payload = {
         "deal_id": deal_id,
         "reference": deal.reference,
+        "contract_version": deal.contract_version,
         "valuation_date": mtm_payload["valuation_date"],
         "computed_at": datetime.utcnow().isoformat(),
         "mtm_reference": mtm_payload["mtm"],

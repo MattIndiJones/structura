@@ -534,13 +534,26 @@ export const usePricingStore = defineStore('pricing', () => {
     for (const p of scriptParams.value) {
       const v = paramOverrides[p.name] ?? p.raw_default
       if (Array.isArray(v)) {
-        // PARAM() rows, display → stored units per row; blank rows dropped.
-        // Empty table → fall back to the seed so pricing stays possible.
-        const rows = v.filter(x => x !== '' && x != null && !isNaN(x))
-          .map(x => p.is_pct ? x / 100 : x)
-        up[p.name] = rows.length ? rows : [p.is_pct ? p.raw_default / 100 : p.raw_default]
+        if (!v.length) throw new Error(`Le paramètre ${p.name} doit contenir au moins une valeur.`)
+        up[p.name] = v.map((x, index) => {
+          if (x == null || (typeof x === 'string' && x.trim() === '')) {
+            throw new Error(`Le paramètre ${p.name}, ligne ${index + 1}, est requis.`)
+          }
+          const number = Number(x)
+          if (!Number.isFinite(number)) {
+            throw new Error(`Le paramètre ${p.name}, ligne ${index + 1}, doit être numérique.`)
+          }
+          return p.is_pct ? number / 100 : number
+        })
       } else {
-        up[p.name] = p.is_pct ? v / 100 : v
+        if (v == null || (typeof v === 'string' && v.trim() === '')) {
+          throw new Error(`Le paramètre ${p.name} est requis.`)
+        }
+        const number = Number(v)
+        if (!Number.isFinite(number)) {
+          throw new Error(`Le paramètre ${p.name} doit être numérique.`)
+        }
+        up[p.name] = p.is_pct ? number / 100 : number
       }
     }
     return up

@@ -6,8 +6,14 @@ def classify_param_barrier(name: str, value: float) -> str | None:
     if not 0.2 <= value <= 3.0:
         return None
     normalized = name.upper()
+    if "COUP" in normalized or "CPN" in normalized:
+        return "coupon"
     if "KI" in normalized or "KNOCK" in normalized:
         return "ki"
-    if "AC" in normalized or "CALL" in normalized or "BAR" in normalized:
+    if "PROTECT" in normalized:
+        return "ki"
+    if "AC" in normalized or "CALL" in normalized or "RECALL" in normalized:
         return "autocall"
+    if "BAR" in normalized:
+        return "neutral"
     return None

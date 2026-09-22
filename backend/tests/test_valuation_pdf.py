@@ -3,7 +3,7 @@ data, no network. The builders are pure functions of plain dicts."""
 import pytest
 
 from backend.app.core.deal_valuation_pdf import (
-    _calendar_event_label, generate_valuation_pdf, generate_explain_pdf,
+    _calendar_event_label, _monitor_label, generate_valuation_pdf, generate_explain_pdf,
     build_explanation,
 )
 
@@ -128,6 +128,12 @@ def test_pdf_with_exit_signal_callout():
                                   "upside_annualized_pct": 1.0, "exit_signal": True})
     pdf = generate_valuation_pdf(d)
     assert pdf.startswith(b"%PDF")
+
+
+def test_coupon_barrier_is_not_labelled_as_a_recall():
+    assert _monitor_label({
+        "name": "M_CPN_BAR", "direction": "up", "level": 0.6,
+    }) == "barrière de coupon"
 
 
 def _explain_data(n_uls=1):
