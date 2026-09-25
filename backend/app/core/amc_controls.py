@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-METHOD_VERSION = "studies-2.4"
+METHOD_VERSION = "studies-2.5"
 
 def date_key(value) -> str:
     return pd.Timestamp(value).strftime("%Y-%m-%d")

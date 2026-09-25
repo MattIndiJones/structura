@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Finegan — expertise pour développer et piloter une offre d’investissement.">
+  <title>Finegan — Plaquette Patrimonia 2026</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="screen-toolbar" aria-label="Contrôles de prévisualisation">
+    <div class="toolbar-brand"><span class="toolbar-dot"></span> Finegan <span>Patrimonia 2026</span></div>
+    <div class="view-controls" role="group" aria-label="Mode d’affichage">
+      <button class="view-button is-active" type="button" data-view="reading" aria-pressed="true">Lecture 1–4</button>
+      <button class="view-button" type="button" data-view="booklet" aria-pressed="false">Carnet plié</button>
+      <button class="view-button" type="button" data-view="imposition" aria-pressed="false">Imposition print</button>
+      <button class="print-button" type="button" id="printButton">Print / Export PDF</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="readingView" class="reading-view" aria-label="Prévisualisation des quatre pages en ordre de lecture"></section>
+    <section id="bookletView" class="booklet-view" aria-label="Simulation du carnet plié" hidden></section>
+    <section id="impositionView" class="imposition-view" aria-label="Prévisualisation du document imposé" hidden></section>
+    <section id="printSheets" class="print-sheets" aria-label="Document imposé pour impression"></section>
+  </main>
+
+  <template id="page1">
+    <article class="page cover page-one" aria-label="Page 1 — Couverture">
+      <div class="page-inner">
+        <header class="brand brand-light">
+          <img src="assets/finegan-mark.png" alt="" class="brand-mark">
+          <span>FINEGAN</span>
+        </header>
+        <div class="cover-copy reveal-group">
+          <p class="eyebrow">EXPERTISE INVESTISSEMENT</p>
+          <h1>DÉVELOPPEZ<br>VOTRE OFFRE<br>D’INVESTISSEMENT.</h1>
+          <p class="promise">Nous apportons l’expertise.</p>
+        </div>
+        <figure class="cover-visual" aria-label="Des trajectoires d’investissement convergent vers une solution structurée">
+          <svg viewBox="0 0 600 560" role="img" aria-hidden="true">
+            <defs>
+              <linearGradient id="coverGlow" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#ff725e" stop-opacity=".12"/>
+                <stop offset="1" stop-color="#ff725e" stop-opacity=".55"/>
+              </linearGradient>
+            </defs>
+            <g class="visual-grid">
+              <path d="M30 75H570M30 185H570M30 295H570M30 405H570M30 515H570"/>
+              <path d="M95 30V535M220 30V535M345 30V535M470 30V535"/>
+            </g>
+            <path class="source-path path-a" d="M10 92 C100 82 130 238 236 230 S348 104 440 174 S508 278 586 246"/>
+            <path class="source-path path-b" d="M8 208 C116 264 137 118 240 164 S356 330 444 278 S518 212 586 246"/>
+            <path class="source-path path-c" d="M10 362 C113 316 150 400 244 322 S345 188 436 221 S525 270 586 246"/>
+            <path class="source-path path-d" d="M10 482 C117 500 150 328 248 365 S350 254 444 250 S525 246 586 246"/>
+            <circle class="convergence-halo" cx="586" cy="246" r="38"/>
+            <circle class="convergence-point" cx="586" cy="246" r="7"/>
+            <path class="controlled-line" d="M586 246 H598 V430 H425"/>
+            <rect class="solution-frame" x="355" y="391" width="140" height="78" rx="2"/>
+            <path class="solution-line" d="M375 445 L403 445 L420 416 L446 416 L460 445 L478 445"/>
+          </svg>
+          <figcaption>De l’intuition à une solution lisible et maîtrisée.</figcaption>
+        </figure>
+        <footer class="cover-footer">
+          <span>Fonds &amp; solutions d’investissement</span><i></i><span>Produits structurés</span>
+        </footer>
+      </div>
+    </article>
+  </template>
+
+  <template id="page2">
+    <article class="page inside-left page-two" aria-label="Page 2 — Fonds et solutions d’investissement">
+      <div class="page-inner">
+        <header class="page-header">
+          <span class="section-label">FONDS &amp; SOLUTIONS D’INVESTISSEMENT</span>
+        </header>
+        <div class="section-title reveal-group">
+          <h2>LA PERFORMANCE<br>NE SUFFIT PAS.<br><em>COMPRENEZ CE QUI LA PRODUIT.</em></h2>
+          <p>Finegan va au-delà du track record pour éclairer les moteurs de performance, les risques pris et la robustesse du processus d’investissement.</p>
+        </div>
+        <div class="analysis-layout">
+          <ol class="questions" aria-label="Questions d’analyse">
+            <li><span>01</span><strong>Qu’est-ce qui explique réellement la performance&nbsp;?</strong></li>
+            <li><span>02</span><strong>Où la valeur est-elle créée&nbsp;?</strong></li>
+            <li><span>03</span><strong>Quels risques sont réellement pris&nbsp;?</strong></li>
+            <li><span>04</span><strong>Les résultats observés sont-ils reproductibles&nbsp;?</strong></li>
+          </ol>
+          <figure class="decomposition" aria-label="Décomposition illustrative d’une performance en moteurs d’investissement">
+            <svg viewBox="0 0 470 390" role="img" aria-hidden="true">
+              <path class="observed" d="M22 75 C75 34 104 111 161 78 S251 39 300 82 S381 115 447 45"/>
+              <path class="connector" d="M255 95V143 M255 143H87 M255 143H423"/>
+              <path class="branch" d="M87 143V191 M171 143V245 M255 143V203 M339 143V264 M423 143V218"/>
+              <circle cx="87" cy="191" r="4"/><circle cx="171" cy="245" r="4"/><circle cx="255" cy="203" r="4"/><circle cx="339" cy="264" r="4"/><circle cx="423" cy="218" r="4"/>
+            </svg>
+            <span class="observed-label">PERFORMANCE OBSERVÉE</span>
+            <div class="factor f1"><i></i><b>Market</b></div>
+            <div class="factor f2"><i></i><b>Factors</b></div>
+            <div class="factor f3"><i></i><b>Portfolio</b></div>
+            <div class="factor f4"><i></i><b>Decisions</b></div>
+            <div class="factor f5"><i></i><b>Risk</b></div>
+            <figcaption>Représentation conceptuelle</figcaption>
+          </figure>
+        </div>
+        <footer class="capability-strip">Analyse de fonds <i></i> Due diligence <i></i> Construction de portefeuille <i></i> Monitoring <i></i> Aide à la décision <i></i> Analyse indépendante</footer>
+      </div>
+    </article>
+  </template>
+
+  <template id="page3">
+    <article class="page inside-right page-three" aria-label="Page 3 — Produits structurés">
+      <div class="page-inner">
+        <header class="page-header page-header-dark">
+          <span class="section-label">PRODUITS STRUCTURÉS</span>
+        </header>
+        <div class="structured-title reveal-group">
+          <h2>LANCEZ OU DÉVELOPPEZ<br>VOTRE ACTIVITÉ<br><em>PRODUITS STRUCTURÉS.</em></h2>
+          <p>Finegan accompagne le lancement ou le développement de votre activité, de la définition de l’offre au suivi dans la durée. Nous intervenons sur l’ensemble de la chaîne ou sur les étapes où vous avez besoin d’expertise.</p>
+        </div>
+        <div class="structured-body">
+          <ol class="journey" aria-label="Parcours de création et de pilotage">
+            <li><span>01</span><b>Besoin client</b></li>
+            <li><span>02</span><b>Idée d’investissement</b></li>
+            <li><span>03</span><b>Structuration</b></li>
+            <li><span>04</span><b>Analyse &amp; challenge</b></li>
+            <li><span>05</span><b>Mise en œuvre</b></li>
+            <li><span>06</span><b>Suivi</b></li>
+          </ol>
+          <aside class="structured-aside">
+            <p>Une intervention calibrée à votre organisation et à votre maturité.</p>
+            <div class="capability-cloud" aria-label="Capacités mobilisables">
+              <span>Product design</span><span>Payoff analysis</span><span>Pricing challenge</span><span>Issuer comparison</span><span>Risk &amp; scenarios</span><span>Lifecycle monitoring</span><span>Portfolio review</span><span>Knowledge transfer</span>
+            </div>
+            <div class="intervention-models"><span>LANCEMENT COMPLET</span><span>RENFORT CIBLÉ</span><span>EXPERTISE RÉCURRENTE</span><small>De bout en bout ou sur une étape précise.</small></div>
+          </aside>
+        </div>
+        <footer class="structured-cta">Construisez une véritable capacité,<br><strong>pas seulement un premier produit.</strong></footer>
+      </div>
+    </article>
+  </template>
+
+  <template id="page4">
+    <article class="page back-cover page-four" aria-label="Page 4 — Contact">
+      <div class="page-inner">
+        <header class="brand brand-dark">
+          <img src="assets/finegan-mark.png" alt="" class="brand-mark">
+          <span>FINEGAN</span>
+        </header>
+        <div class="cta-copy reveal-group">
+          <p class="eyebrow">VOTRE PROCHAINE OFFRE</p>
+          <h2>ET SI NOUS<br>EN PARLIONS&nbsp;?</h2>
+          <p class="cta-lead">Vous souhaitez développer une activité, challenger vos solutions ou renforcer votre expertise&nbsp;?</p>
+          <ul>
+            <li>Structurer une nouvelle offre</li>
+            <li>Évaluer vos solutions d’investissement</li>
+            <li>Renforcer une équipe existante</li>
+            <li>Disposer d’un regard indépendant</li>
+          </ul>
+          <p class="talk">Parlons-en.</p>
+        </div>
+        <div class="contact-zone">
+          <div class="contact-details" data-contact-details></div>
+          <a class="contact-prompt" data-contact-url><span>ÉCHANGEONS SUR VOTRE PROJET</span><b>finegan.fr&nbsp;&nbsp;→</b></a>
+        </div>
+        <div class="back-visual" aria-hidden="true"><span></span><span></span><span></span></div>
+      </div>
+    </article>
+  </template>
+
+  <script src="js/main.js"></script>
+</body>
+</html>

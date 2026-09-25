@@ -474,15 +474,19 @@
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div v-for="entry in greekEntries" :key="entry.name" class="stat-box min-w-0">
-            <div class="text-xs text-slate-500 mb-1 font-mono">{{ gLabel(entry.name) }}
-              <HelpTip :text="gDesc(entry.name)" />
+            <div class="text-xs text-slate-500 mb-1 font-mono">{{ gEntryLabel(entry) }}
+              <HelpTip :text="gEntryDesc(entry)" />
             </div>
             <div class="text-base font-bold font-mono"
                  :class="entry.displayValue > 0 ? 'text-green-400' : entry.displayValue < 0 ? 'text-red-400' : 'text-slate-400'">
               <SensitiveValue>{{ fmtG(entry.displayValue) }}</SensitiveValue>
             </div>
-            <div class="text-[11px] text-slate-600 mt-0.5">{{ gUnit(entry.name) }}</div>
+            <div class="text-[11px] text-slate-600 mt-0.5">{{ gEntryUnit(entry) }}</div>
           </div>
+        </div>
+        <div v-if="store.result?._greekPreStrike && greekEntries.some(entry => /^delta_\d+$/.test(entry.name))"
+             class="text-[11px] text-amber-600 mt-3">
+          Delta sur base initiale indisponible avant la constatation du niveau initial.
         </div>
         <div v-if="vegaScopeNote || thetaEventNote" class="flex flex-col gap-2 mt-3">
           <div v-if="vegaScopeNote" class="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 text-[11px] text-slate-500">
@@ -506,12 +510,12 @@
           <tbody>
             <tr v-for="entry in greekEntries" :key="entry.name"
                 class="border-b border-slate-800/50">
-              <td class="py-1.5 pr-4 font-mono font-semibold text-slate-300">{{ gLabel(entry.name) }}</td>
+              <td class="py-1.5 pr-4 font-mono font-semibold text-slate-300">{{ gEntryLabel(entry) }}</td>
               <td class="py-1.5 pr-4 font-mono num text-right"
                   :class="entry.displayValue > 0 ? 'text-green-400' : entry.displayValue < 0 ? 'text-red-400' : 'text-slate-400'">
                 <SensitiveValue>{{ fmtG(entry.displayValue) }}</SensitiveValue>
               </td>
-              <td class="py-1.5 text-slate-500"><SensitiveValue>{{ gInterp(entry.name, entry.rawValue) }}</SensitiveValue></td>
+              <td class="py-1.5 text-slate-500"><SensitiveValue>{{ gEntryInterp(entry) }}</SensitiveValue></td>
             </tr>
           </tbody>
         </table>
@@ -547,6 +551,7 @@ import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
 import FluxDecomposition from './FluxDecomposition.vue'
 import { formatDate, formatGreek, formatInt, formatNumber, formatPercent } from '../utils/format.js'
+import { withIndicativeDeltas } from '../utils/greekDisplay.js'
 
 Chart.register(BarElement, BarController, CategoryScale, LinearScale, Tooltip)
 applyChartTheme(Chart)
@@ -823,9 +828,14 @@ const gDisplayValue = (name, value) => {
   return value
 }
 
-const greekEntries = computed(() => Object.entries(store.result?.greeks || {})
-  .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
-  .map(([name, rawValue]) => ({ name, rawValue, displayValue: gDisplayValue(name, rawValue) })))
+const greekEntries = computed(() => withIndicativeDeltas(
+  Object.entries(store.result?.greeks || {})
+    .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
+    .map(([name, rawValue]) => ({ name, rawValue, displayValue: gDisplayValue(name, rawValue) })),
+  store.underlyings,
+  { dated: store.result?._greekDated, spotRatios: store.result?._greekSpotRatios,
+    preStrike: store.result?._greekPreStrike },
+))
 
 const thetaEvent = computed(() => store.result?.greeks?.theta_event || null)
 const vegaScope = computed(() => store.result?.greeks?.vega_scope || null)
@@ -855,7 +865,7 @@ const gLabel = name => {
 }
 
 const GREEK_DESC = {
-  delta: "Δ — sensibilité du prix à une hausse de 1% du spot de ce sous-jacent. Couverture = vendre/acheter Δ×nominal du sous-jacent pour neutraliser ce risque au premier ordre.",
+  delta: "Δ — variation du prix pour une hausse de 1 % du spot actuel de ce sous-jacent. C'est ce delta qui alimente le module Risk.",
   gamma: "Γ — sensibilité du delta lui-même à une variation du spot (convexité). Un gamma élevé signifie que la couverture delta doit être réajustée fréquemment.",
   vega:  "ν — sensibilité du prix à une hausse de 1% de la volatilité implicite de ce sous-jacent.",
   theta: "Θ — décroissance du prix due au seul passage d'un jour, marché inchangé (portage temporel).",
@@ -870,7 +880,7 @@ const gDesc = name => {
 
 const gUnit = name => {
   const type = gType(name)
-  if (type === 'delta') return 'pt de prix / +1 % spot'
+  if (type === 'delta') return 'pt de prix / +1 % spot actuel'
   if (type === 'gamma') return 'pt de delta / +1 % spot'
   if (type === 'vega')  return 'pt de prix / +1 pt vol'
   if (type === 'theta') return 'pt de prix / jour'
@@ -886,7 +896,7 @@ const gInterp = (name, val) => {
   const type = gType(name)
   const display = gDisplayValue(name, val)
   const formatted = `${display >= 0 ? '+' : ''}${formatNumber(display, type === 'gamma' ? 3 : 2)} pt`
-  if (type === 'delta') return `+1 % spot → prix ${formatted}`
+  if (type === 'delta') return `+1 % spot actuel → prix ${formatted}`
   if (type === 'gamma') return `+1 % spot → delta ${formatted}`
   if (type === 'vega')  return `+1 pt vol → prix ${formatted}`
   if (type === 'theta') return `1 jour → prix ${formatted}`
@@ -899,6 +909,19 @@ const gInterp = (name, val) => {
   }
   return ''
 }
+
+const gEntryLabel = entry => entry.indicative
+  ? `${gLabel(entry.sourceName)} · base initiale (indicatif)`
+  : gLabel(entry.name)
+const gEntryDesc = entry => entry.indicative
+  ? 'Delta courant divisé par le rapport spot actuel / niveau initial. Mesure indicative pour un choc égal à 1 % du fixing initial ; elle n’alimente pas le module Risk.'
+  : gDesc(entry.name)
+const gEntryUnit = entry => entry.indicative
+  ? 'pt de prix / +1 % du niveau initial'
+  : gUnit(entry.name)
+const gEntryInterp = entry => entry.indicative
+  ? `+1 % du niveau initial → prix ${entry.displayValue >= 0 ? '+' : ''}${formatNumber(entry.displayValue, 2)} pt · indicatif`
+  : gInterp(entry.name, entry.rawValue)
 
 const vegaScopeNote = computed(() => {
   const scope = vegaScope.value

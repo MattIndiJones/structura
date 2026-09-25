@@ -67,6 +67,22 @@ def _trade(session, client, affiliation, trade_date, *, ref=None,
     return d
 
 
+def test_historical_payoff_labels_are_grouped_without_rewriting_the_deals():
+    session = _session()
+    client = _client(session, "Client A")
+    old = _trade(session, client, None, "2025-01-01", ref="OLD")
+    new = _trade(session, client, None, "2025-02-01", ref="NEW")
+    old.payoff_family = "ATHENA"
+    new.payoff_family = "Autocall"
+    session.add(old)
+    session.add(new)
+    session.commit()
+
+    observed = observed_behaviour(deals_of_client(session, client.id))
+    assert observed["payoff_families"] == [("Autocall", 2)]
+    assert session.get(Deal, old.id).payoff_family == "ATHENA"
+
+
 # ── §85 — les quatre lectures d'une même personne ────────────────────
 
 def test_les_trois_niveaux_se_lisent_separement():

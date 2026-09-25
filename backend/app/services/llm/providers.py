@@ -41,6 +41,7 @@ class ProviderInfo:
 class Completion:
     text: str
     effective_model: str
+    finish_reason: str | None = None
 
 
 PROVIDERS = {
@@ -174,15 +175,15 @@ def _post(url: str, payload: dict, headers: dict | None = None) -> dict:
 
 
 def _complete_ollama(model: str, system: str, user: str, temperature: float,
-                     max_tokens: int, *, api_key: str = "", ollama_url: str | None = None) -> Completion:
+                     max_tokens: int, *, api_key: str = "", ollama_url: str | None = None, context_tokens: int | None = None) -> Completion:
     data = _post(f"{validate_ollama_url(ollama_url or OLLAMA_URL)}/api/chat", {
         "model": model,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
         "stream": False,
-        "options": {"temperature": temperature, "num_predict": max_tokens},
+        "options": {"temperature": temperature, "num_predict": max_tokens, **({"num_ctx": context_tokens} if context_tokens else {})},
     })
-    return Completion((data.get("message") or {}).get("content", ""), data.get("model") or model)
+    return Completion((data.get("message") or {}).get("content", ""), data.get("model") or model, data.get("done_reason"))
 
 
 def _complete_openai(model: str, system: str, user: str, temperature: float,
@@ -198,7 +199,7 @@ def _complete_openai(model: str, system: str, user: str, temperature: float,
         "max_tokens": max_tokens,
     }, {"Authorization": f"Bearer {key}"})
     choices = data.get("choices") or []
-    return Completion(choices[0]["message"]["content"] if choices else "", data.get("model") or model)
+    return Completion(choices[0]["message"]["content"] if choices else "", data.get("model") or model, choices[0].get("finish_reason") if choices else None)
 
 
 def _complete_anthropic(model: str, system: str, user: str, temperature: float,
@@ -214,7 +215,7 @@ def _complete_anthropic(model: str, system: str, user: str, temperature: float,
         "max_tokens": max_tokens,
     }, {"x-api-key": key, "anthropic-version": "2023-06-01"})
     blocks = data.get("content") or []
-    return Completion("".join(b.get("text", "") for b in blocks if b.get("type") == "text"), data.get("model") or model)
+    return Completion("".join(b.get("text", "") for b in blocks if b.get("type") == "text"), data.get("model") or model, data.get("stop_reason"))
 
 
 _DISPATCH = {
@@ -250,7 +251,7 @@ def _modele_effectif(info: ProviderInfo, model: str | None, ollama_url: str | No
 def complete_with_metadata(provider: str, model: str | None, system: str,
                            user: str, *, temperature: float = 0.1,
                            max_tokens: int = 2000, api_key: str = "",
-                           ollama_url: str | None = None) -> Completion:
+                           ollama_url: str | None = None, context_tokens: int | None = None) -> Completion:
     """Response and resolved model, without replacing an explicit user selection."""
     provider = "anthropic" if provider == "claude" else provider
     info = PROVIDERS.get(provider)
@@ -262,6 +263,8 @@ def complete_with_metadata(provider: str, model: str | None, system: str,
         validate_ollama_url(ollama_url)
     effective_model = _modele_effectif(info, model, ollama_url)
     connection = {"api_key": api_key, "ollama_url": ollama_url} if api_key or ollama_url else {}
+    if provider == "ollama" and context_tokens:
+        connection["context_tokens"] = context_tokens
     out = _DISPATCH[provider](effective_model, system, user,
                               temperature, max_tokens, **connection)
     if not (out.text or "").strip():

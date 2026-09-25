@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import (
-    Deal, Opportunity, RfqRequest, RfqQuote, RfqProvider,
+    Deal, Opportunity, RfqRequest, RfqQuote, RfqProvider, RfqProviderContact,
     Counterparty, User,
 )
 from ..core.client_controls import (
@@ -17,6 +17,7 @@ from ..core.client_controls import (
     require_deal_attribution_coherent, require_opportunity_rfq_ready,
 )
 from ..core.references import next_audited_id, next_reference
+from ..core.payoff_families import canonical_payoff_family, normalize_new_payoff_family
 from ..core.audit import record_audit_event
 from ..core.rfq_controls import (
     contract_calendar_failures, maturity_iso, pricing_input_hash, product_terms, product_terms_hash,
@@ -85,7 +86,7 @@ class RfqUpdate(BaseModel):
     selected_quote_id: Optional[int] = None
     selection_reason_code: Optional[str] = Field(
         default=None,
-        pattern="^(client_request|documentation|credit|concentration|relationship|execution_quality|other)$")
+        pattern="^(price|client_request|documentation|credit|concentration|relationship|execution_quality|other)$")
     selection_reason_note: Optional[str] = None
     opportunity_id: Optional[int] = None
     client_id: Optional[int] = None
@@ -571,7 +572,12 @@ def list_providers(
         select(RfqProvider).where(RfqProvider.active == True)  # noqa: E712
         .order_by(RfqProvider.label)
     ).all()
-    return [{"id": p.id, "label": p.label, "mode": p.mode} for p in providers]
+    contacts = session.exec(select(RfqProviderContact).where(
+        RfqProviderContact.active == True)).all()  # noqa: E712
+    return [{"id": p.id, "label": p.label, "mode": p.mode,
+             "contacts": [{"id": c.id, "name": c.name, "email": c.email}
+                          for c in contacts if c.provider_id == p.id]}
+            for p in providers]
 
 
 def _is_expert_script(script_text: str) -> bool:
@@ -830,9 +836,14 @@ def _create_rfq(
                          or (opportunity.instrument_family if opportunity else None))
     payoff_family = (_clean_optional(body.payoff_family)
                      or (opportunity.payoff_family if opportunity else None)
-                     or _clean_optional(body.template_type))
+                     or canonical_payoff_family(body.template_type))
     payoff_description = (_clean_optional(body.payoff_description)
                           or (opportunity.payoff_description if opportunity else None))
+    try:
+        payoff_family = normalize_new_payoff_family(
+            payoff_family, payoff_description)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
     commercial = CommercialContext(
         client_id=context["client_id"],
@@ -1076,6 +1087,19 @@ def update_rfq(
             raise HTTPException(
                 409, "La structure juridique et produit est figée dès qu'un "
                      "fournisseur est sollicité. Créez une nouvelle RFQ pour la modifier.")
+        if "payoff_family" in data or (
+            "payoff_description" in data
+            and canonical_payoff_family(rfq.payoff_family) == "Autre"
+        ):
+            try:
+                candidate_family = normalize_new_payoff_family(
+                    data.get("payoff_family", rfq.payoff_family),
+                    data.get("payoff_description", rfq.payoff_description),
+                )
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            if "payoff_family" in data:
+                data["payoff_family"] = candidate_family
         for field in _LEGAL_CONTEXT_FIELDS:
             if field in data:
                 setattr(rfq, field, _clean_optional(data.pop(field)))

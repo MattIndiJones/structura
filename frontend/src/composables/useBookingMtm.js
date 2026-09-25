@@ -69,7 +69,9 @@ export function useBookingMtm() {
     restored.clear()
   }
 
-  const mtmModeFor = id => mtmMode[id] || 'realized'
+  // Reopen a deal on its booked model and calibration. Realized volatility is
+  // an explicit alternative: it deliberately switches the engine to GBM.
+  const mtmModeFor = id => mtmMode[id] || 'booking'
   const mtmDateFor = id => mtmDate[id] || todayIso.value
   function invalidate(id) {
     revisions[id] = (revisions[id] || 0) + 1
@@ -103,7 +105,7 @@ export function useBookingMtm() {
     end.setDate(end.getDate() + 1)
     const query = new URLSearchParams({
       deal_ids: pending.join(','), created_from: start.toISOString(),
-      created_before: end.toISOString(), valuation_date: day, recalibrate: 'realized',
+      created_before: end.toISOString(), valuation_date: day, recalibrate: 'none',
     })
     try {
       const response = await apiFetch(`/api/deals/valuation-runs/latest-mtm?${query}`)
@@ -119,8 +121,8 @@ export function useBookingMtm() {
         const valuationDate = result.valuation_date || request.valuation_date
         if (!(id in versions) || versions[id] !== (revisions[id] || 0) || mtmLoading[id] || mtmResults[id]) continue
         if (!timestamp || localDay(timestamp) !== day || valuationDate !== day) continue
-        if (request.recalibrate !== 'realized' || request.r != null || Object.keys(request.overrides || {}).length || (request.window_days ?? 252) !== 252) continue
-        if (mtmModeFor(id) !== 'realized' || mtmDateFor(id) !== day) continue
+        if (request.recalibrate !== 'none' || request.r != null || Object.keys(request.overrides || {}).length || (request.window_days ?? 252) !== 252) continue
+        if (mtmModeFor(id) !== 'booking' || mtmDateFor(id) !== day) continue
         if (result.mtm == null && !result.resolved_pending) continue
         mtmResults[id] = { ...result, _runCreatedAt: timestamp.toISOString(), _restored: true }
       }

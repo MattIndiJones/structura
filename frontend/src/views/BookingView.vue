@@ -70,6 +70,14 @@
                   </span>
                 </div>
               </div>
+              <div v-if="stats.byPayoffFamily.length">
+                <div class="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Par famille de payoff</div>
+                <div class="flex gap-1.5 flex-wrap">
+                  <span v-for="[family, count] in stats.byPayoffFamily" :key="family" class="badge badge-muted">
+                    {{ family }} {{ count }} ({{ pct(count, stats.total) }})
+                  </span>
+                </div>
+              </div>
               <div v-if="stats.resolved">
                 <div class="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">
                   Hit ratio — {{ stats.resolved }} deal(s) résolu(s)
@@ -278,6 +286,13 @@
               </select>
             </div>
             <div class="flex flex-col gap-1">
+              <label class="text-[10px] text-slate-500 uppercase tracking-wider">Famille de payoff</label>
+              <select v-model="filters.payoffFamily" class="select text-xs py-1.5 min-w-[140px]">
+                <option value="">Toutes</option>
+                <option v-for="family in payoffFamilyOptions" :key="family" :value="family">{{ family }}</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1">
               <label class="text-[10px] text-slate-500 uppercase tracking-wider">Statut</label>
               <select v-model="filters.status" class="select text-xs py-1.5">
                 <option value="">Tous</option>
@@ -327,7 +342,10 @@
               <div class="deal-card__identity">
                 <div class="flex items-center gap-2 min-w-0">
                   <span class="text-slate-500 text-xs shrink-0">{{ expanded[d.id] ? '▾' : '▸' }}</span>
-                  <span class="font-mono font-semibold text-slate-200 whitespace-nowrap">{{ d.reference }}</span>
+                  <button type="button"
+                    class="font-mono font-semibold text-blue-400 hover:underline whitespace-nowrap"
+                    :title="`Ouvrir le booking du deal ${d.reference}`"
+                    @click.stop="openDealDetail(d.id)">{{ d.reference }}</button>
                   <button type="button"
                     class="text-slate-500 hover:text-blue-300 shrink-0 transition-colors"
                     :class="copiedReference === d.reference ? 'text-emerald-400' : ''"
@@ -342,6 +360,10 @@
                     {{ productTypeLabel(d.product_type) }}
                   </span>
                   <span v-if="d.product_type && d.contrepartie" class="text-slate-600">·</span>
+                  <span v-if="dealPayoffFamily(d)" class="text-[10px] border rounded px-1.5 py-0.5"
+                    style="border-color: var(--border); color: var(--muted);">
+                    {{ dealPayoffFamily(d) }}
+                  </span>
                   <span class="text-slate-300">{{ d.contrepartie }}</span>
                   <span class="text-[10px] border rounded px-1.5 py-0.5"
                     style="border-color: var(--border); background: var(--surface2); color: var(--accent);">
@@ -564,7 +586,7 @@
                 </label>
                 <p class="deal-basis-note">
                   {{ mtmModeFor(d.id) === 'realized'
-                    ? 'Données Yahoo actualisées. Le taux et le funding restent ceux du booking.'
+                    ? 'Volatilité réalisée du marché actuel : calcul en GBM. Le taux et le funding restent ceux du booking.'
                     : 'Paramètres de modèle, volatilités et corrélations du booking, avec les cours disponibles à la date du calcul.' }}
                 </p>
                 <div class="deal-well deal-figures">
@@ -1004,7 +1026,7 @@
                 <div v-if="d.status === 'actif'">
                   <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
                     Explication de valo
-                    <HelpTip text="Décompose la variation de MtM entre deux dates en effets de risque (temps, spot, volatilité, corrélation) par réévaluations successives à seed identique. Date 1 = booking par défaut (σ du booking) ; les flux détachés sur la période sont affichés à part." />
+                    <HelpTip text="Décompose la variation de MtM entre deux dates avec la base de calcul sélectionnée plus haut (paramètres du booking ou marché actuel), par réévaluations successives à seed identique. Les flux détachés sur la période sont affichés à part." />
                   </div>
                   <div class="flex items-center gap-2 flex-wrap text-xs">
                     <label class="text-slate-500">du</label>
@@ -1113,6 +1135,7 @@ import { useDealsStore } from '../stores/deals.js'
 import { usePortfoliosStore, shockPresets, blankShockForm } from '../stores/portfolios.js'
 import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
+import { canonicalPayoffFamily } from '../utils/payoffFamilies.js'
 import HelpTip from '../components/HelpTip.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -1593,6 +1616,7 @@ function modelBusinessLabel(model) {
     heston: 'Heston',
     sabr: 'SABR',
     local_vol: 'Vol locale',
+    localvol: 'Vol locale',
     lsv: 'LSV',
   }
   return labels[String(model || '').toLowerCase()] || model || 'Non renseigné'
@@ -1732,7 +1756,7 @@ async function runExplain(d) {
       body: JSON.stringify({
         date1: explainD1[d.id] || defaultExplainStart(d),
         date2: explainD2[d.id] || todayIso.value,
-        recalibrate: 'realized',
+        recalibrate: mtmModeFor(d.id) === 'realized' ? 'realized' : 'none',
       }),
     })
     const data = await res.json()
@@ -1756,7 +1780,7 @@ async function downloadExplainNote(d) {
       body: JSON.stringify({
         date1: explainD1[d.id] || defaultExplainStart(d),
         date2: explainD2[d.id] || todayIso.value,
-        recalibrate: 'realized',
+        recalibrate: mtmModeFor(d.id) === 'realized' ? 'realized' : 'none',
       }),
     })
     if (!res.ok) {
@@ -1961,12 +1985,19 @@ const sortedWatchlist = computed(() => wlFilter.filtered.value)
 // Deals tab (expanded + scrolled into view), as an alternative to opening it
 // in the Pricer (the ⇥ icon next to it).
 async function openDealDetail(id) {
+  if (!filteredDeals.value.some(deal => deal.id === id)) resetFilters()
   activeTab.value = 'deals'
   expanded[id] = true
   if (!details[id]) await loadDetail(id)
   await loadSavedMtm(id)
   await focusDealCard(id)
 }
+
+// Vue Router keeps Booking mounted when only ?deal= changes.
+watch(() => route.query.deal, value => {
+  const id = Number(value)
+  if (Number.isSafeInteger(id) && id > 0) openDealDetail(id)
+})
 
 // barrierChipClass/barrierGapLabel now live in utils/barriers.js — shared
 // with Risk Management's Barrières tab so the color/label convention can't
@@ -1984,18 +2015,20 @@ const filters = reactive({
   contrepartie: '',
   ticker: '',
   productType: '',
+  payoffFamily: '',
   status: '',
   portfolioId: '',
 })
 
 const hasActiveFilters = computed(() =>
-  !!(filters.contrepartie || filters.ticker || filters.productType || filters.status || filters.portfolioId)
+  !!(filters.contrepartie || filters.ticker || filters.productType || filters.payoffFamily || filters.status || filters.portfolioId)
 )
 
 function resetFilters() {
   filters.contrepartie = ''
   filters.ticker = ''
   filters.productType = ''
+  filters.payoffFamily = ''
   filters.status = ''
   filters.portfolioId = ''
 }
@@ -2018,10 +2051,21 @@ const productTypeOptions = computed(() => {
   return [...set].sort()
 })
 
+function dealPayoffFamily(deal) {
+  return canonicalPayoffFamily(deal.payoff_family || deal.product_type)
+    || deal.payoff_family || ''
+}
+
+const payoffFamilyOptions = computed(() => {
+  const labels = new Set(dealsStore.deals.map(dealPayoffFamily).filter(Boolean))
+  return [...labels].sort((a, b) => a.localeCompare(b, 'fr'))
+})
+
 const filteredDeals = computed(() => {
   const list = dealsStore.deals.filter(d => {
     if (filters.status && d.status !== filters.status) return false
     if (filters.productType && d.product_type !== filters.productType) return false
+    if (filters.payoffFamily && dealPayoffFamily(d) !== filters.payoffFamily) return false
     if (filters.contrepartie && !d.contrepartie.toLowerCase().includes(filters.contrepartie.toLowerCase())) return false
     if (filters.ticker && !(d.underlyings || []).some(u => u.ticker === filters.ticker)) return false
     if (filters.portfolioId && !(d.portfolio_ids || []).map(String).includes(filters.portfolioId)) return false
@@ -2048,12 +2092,15 @@ const stats = computed(() => {
   const deals = filteredDeals.value
   const byStatus = {}
   const byOutcome = {}
+  const byPayoffFamily = {}
   let nominalTotal = 0
   let payoutSum = 0
   let payoutCount = 0
 
   for (const d of deals) {
     byStatus[d.status] = (byStatus[d.status] || 0) + 1
+    const family = dealPayoffFamily(d)
+    if (family) byPayoffFamily[family] = (byPayoffFamily[family] || 0) + 1
     nominalTotal += d.nominal || 0
     if (d.resolution_outcome) {
       byOutcome[d.resolution_outcome] = (byOutcome[d.resolution_outcome] || 0) + 1
@@ -2071,6 +2118,7 @@ const stats = computed(() => {
     nominalTotal,
     byStatus,
     byOutcome,
+    byPayoffFamily: Object.entries(byPayoffFamily).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr')),
     resolved,
     avgRealizedPayout: payoutCount ? payoutSum / payoutCount : null,
   }
@@ -2145,7 +2193,7 @@ onMounted(async () => {
   // Deep link from Risk Management ("/booking?deal=<id>") — open the deal's
   // detail card directly instead of landing on the watchlist.
   const dealId = Number(route.query.deal)
-  if (dealId) openDealDetail(dealId)
+  if (Number.isSafeInteger(dealId) && dealId > 0) openDealDetail(dealId)
 })
 onUnmounted(() => {
   clearTimeout(dayTimer)

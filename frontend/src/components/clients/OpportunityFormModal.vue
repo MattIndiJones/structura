@@ -142,11 +142,16 @@
         </div>
         <div>
           <label class="label">Famille de payoff</label>
-          <input v-model="formulaire.payoff_family" class="input" list="familles-payoff"
-                 placeholder="Phoenix, Autocall…" />
-          <datalist id="familles-payoff">
-            <option v-for="v in FAMILLES_PAYOFF" :key="v" :value="v" />
-          </datalist>
+          <select v-model="formulaire.payoff_family" class="select">
+            <option value="">— Choisir une famille —</option>
+            <option v-if="legacyPayoffFamily" :value="legacyPayoffFamily">
+              Ancien libellé : {{ legacyPayoffFamily }} — à classer
+            </option>
+            <option v-for="v in FAMILLES_PAYOFF" :key="v" :value="v">{{ v }}</option>
+          </select>
+          <p v-if="formulaire.payoff_family === 'Autre'" class="text-xs text-slate-500 mt-1">
+            Précisez le payoff dans la description ci-dessous.
+          </p>
         </div>
         <div>
           <label class="label">Nature des données</label>
@@ -190,6 +195,7 @@ import {
   FAMILLES_PAYOFF, PROVENANCES_DONNEES, libelleTypeMandat,
 } from '../../stores/clients.js'
 import { apiFetch } from '../../utils/api.js'
+import { canonicalPayoffFamily } from '../../utils/payoffFamilies.js'
 import BaseModal from '../ui/BaseModal.vue'
 import AlertMessage from '../ui/AlertMessage.vue'
 
@@ -228,10 +234,14 @@ const formulaire = reactive({
   source: props.opportunite?.source || '',
   transaction_format: props.opportunite?.transaction_format || '',
   instrument_family: props.opportunite?.instrument_family || '',
-  payoff_family: props.opportunite?.payoff_family || '',
+  payoff_family: canonicalPayoffFamily(props.opportunite?.payoff_family)
+    || props.opportunite?.payoff_family || '',
   payoff_description: props.opportunite?.payoff_description || '',
   data_origin: props.opportunite?.data_origin || 'demo',
 })
+
+const legacyPayoffFamily = computed(() => formulaire.payoff_family
+  && !canonicalPayoffFamily(formulaire.payoff_family) ? formulaire.payoff_family : '')
 
 const autresContacts = computed(
   () => contactsDisponibles.value.filter(
@@ -277,8 +287,16 @@ if (props.opportunite) {
 }
 
 async function enregistrer() {
-  enCours.value = true
   erreur.value = ''
+  if (legacyPayoffFamily.value) {
+    erreur.value = 'Choisissez une famille de payoff du catalogue pour remplacer l’ancien libellé.'
+    return
+  }
+  if (formulaire.payoff_family === 'Autre' && !formulaire.payoff_description?.trim()) {
+    erreur.value = 'Décrivez le payoff lorsque la famille « Autre » est choisie.'
+    return
+  }
+  enCours.value = true
   try {
     const corps = {
       client_id: formulaire.client_id,

@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import SQLModel, Session, create_engine, select
 
+from backend.app.api import admin as admin_api
 from backend.app.api import deals as deals_api
 from backend.app.api import rfq as rfq_api
 from backend.app.api.auth import receipt_signing_secret
@@ -28,7 +29,7 @@ from backend.app.core.schemas import PricingRequest
 from backend.app.core.valuation_context import build_pricing_receipt
 from backend.app.db.models import (
     AuditEvent, Client, ClientMandate, Counterparty, Deal, Opportunity,
-    ProductRecord, RfqProvider, RfqQuote, RfqRequest,
+    ProductRecord, RfqProvider, RfqProviderContact, RfqQuote, RfqRequest,
 )
 from backend.app.core.references import next_reference
 from backend.app.core.rfq_controls import booking_terms_differences, pricing_input_hash
@@ -70,6 +71,28 @@ def _new_rfq(s: Session):
 
 def _add_quote(s: Session, rfq_id: int, provider: str = "BNP Paribas"):
     return rfq_api.add_quote(rfq_id, rfq_api.QuoteCreate(provider=provider), USER, s)
+
+
+def test_rfq_provider_contacts_are_admin_managed_and_offered_on_rfq():
+    s = _make_session()
+    provider = admin_api.create_rfq_provider(
+        admin_api.RfqProviderCreate(label="BNP Paribas"), USER, s)
+    first = admin_api.create_rfq_provider_contact(
+        provider["id"], admin_api.RfqContactCreate(
+            name="Virginie", email="virginie@example.com"), USER, s)
+    assert [c["name"] for c in rfq_api.list_providers(USER, s)[0]["contacts"]] == ["Virginie"]
+    with pytest.raises(HTTPException) as duplicate:
+        admin_api.create_rfq_provider_contact(
+            provider["id"], admin_api.RfqContactCreate(name="virginie"), USER, s)
+    assert duplicate.value.status_code == 409
+    admin_api.update_rfq_provider_contact(
+        provider["id"], first["id"], admin_api.RfqContactUpdate(active=False), USER, s)
+    assert rfq_api.list_providers(USER, s)[0]["contacts"] == []
+    assert s.get(RfqProviderContact, first["id"]).name == "Virginie"
+
+
+def test_price_is_a_valid_selection_reason():
+    assert rfq_api.RfqUpdate(selection_reason_code="price").selection_reason_code == "price"
 
 
 def test_rfq_creates_an_internal_product_before_its_own_record():
@@ -535,7 +558,13 @@ def test_booking_never_reuses_a_deal_id_retained_by_the_audit_trail():
     assert deal["id"] > 80
 
 
-def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority():
+@pytest.mark.parametrize("family, requested_family", [
+    ("Phoenix", None),
+    ("Autocall", "Autocall"),
+])
+def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority(
+    family, requested_family,
+):
     s = _make_session()
     client = Client(name="Banque privée A", entity_id=1, data_origin="native")
     s.add(client); s.flush()
@@ -549,7 +578,7 @@ def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority():
         reference="OPP-20260901-001", entity_id=1, owner_user_id=USER.id,
         client_id=client.id, mandate_id=mandate.id, title="Phoenix 3Y",
         transaction_format="EMTN", instrument_family="Note",
-        payoff_family="Phoenix", data_origin="native",
+        payoff_family=family, data_origin="native",
     )
     s.add(opportunity); s.commit(); s.refresh(opportunity)
 
@@ -564,13 +593,22 @@ def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority():
     rfq_api.update_rfq(
         rfq["id"], rfq_api.RfqUpdate(selected_quote_id=quote["id"]), USER, s)
 
-    deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    if family == "Autocall":
+        # Pre-catalogue rows used Athena as the family; the new booking form
+        # proposes Autocall. Both describe the same payoff family.
+        source = s.get(RfqRequest, rfq["id"])
+        source.payoff_family = "ATHENA"
+        s.add(source)
+        s.commit()
+
+    deal = _book_deal(_booking_body(
+        rfq_id=rfq["id"], payoff_family=requested_family), USER, s)
     assert deal["client_id"] == client.id
     assert deal["mandate_id"] == mandate.id
     assert deal["opportunity_id"] == opportunity.id
     assert deal["transaction_format"] == "EMTN"
     assert deal["instrument_family"] == "Note"
-    assert deal["payoff_family"] == "Phoenix"
+    assert deal["payoff_family"] == family
     assert deal["client_provenance"]["mandate"]["name"] == "Fonds Rendement"
     assert s.get(Opportunity, opportunity.id).status == "partially_won"
 

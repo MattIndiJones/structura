@@ -79,7 +79,7 @@ describe('le pricing daté d’une RFQ', () => {
 
     expect(calls[0].url).toBe('/api/price/in-life')
     expect(calls[0].body).toMatchObject({
-      valuation_date: '2026-09-15',
+      valuation_date: new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10),
       strike_date: '2025-09-15',
       maturity_date: '2028-09-15',
     })
@@ -126,7 +126,7 @@ describe('le pricing daté d’une RFQ', () => {
       ao_date: '2026-09-15',
       script_snapshot: 'AT MATURITY:\n  PAY WOF',
       params: {
-        strike_date: '2026-09-15', value_date: '2026-09-17',
+        valuation_date: '2026-09-15', strike_date: '2026-09-15', value_date: '2026-09-17',
         maturity_date: '2029-09-15', payment_date: '2029-09-18', T: 3,
         underlyings: basket, corr_matrix: [[1, 0.45], [0.45, 1]],
       },

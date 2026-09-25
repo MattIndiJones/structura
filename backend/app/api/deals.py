@@ -44,6 +44,7 @@ from ..core.lifecycle_controls import (
     semantic_maturity_outcome,
 )
 from ..core.market_snapshot import snapshot_rate, snapshot_rate_is_default
+from ..core.payoff_families import canonical_payoff_family, normalize_new_payoff_family
 from ..core.payoff_terms import classify_param_barrier
 from ..core.agregats_officiels import calculer as calculer_agregat
 from ..core.rfq_controls import (
@@ -1763,7 +1764,13 @@ def _book_deal(
             rfq_value = str(getattr(source_rfq, field, None) or "").strip() or None
             requested_value = legal_context[field]
             if rfq_value is not None:
-                if requested_value is not None and requested_value != rfq_value:
+                comparable_rfq = rfq_value
+                comparable_requested = requested_value
+                if field == "payoff_family":
+                    comparable_rfq = canonical_payoff_family(rfq_value) or rfq_value
+                    comparable_requested = (
+                        canonical_payoff_family(requested_value) or requested_value)
+                if requested_value is not None and comparable_requested != comparable_rfq:
                     _reject_booking(session, current, body, 422, {
                         "code": "RFQ_LEGAL_CONTEXT_MISMATCH",
                         "message": (
@@ -1773,7 +1780,7 @@ def _book_deal(
                         "expected": rfq_value,
                         "received": requested_value,
                     })
-                legal_context[field] = rfq_value
+                legal_context[field] = comparable_rfq
 
         # Le booking qualifie la cotation retenue. Une quote encore « à
         # qualifier » qui vient d'être tradée EST ferme — c'est le trade qui le
@@ -1791,6 +1798,18 @@ def _book_deal(
             source_rfq, body.price_traded, session,
             fermete_avant=fermete_avant,
             firmness_affirmee_au_booking=qualifiee_au_booking)
+
+    if legal_context["payoff_family"]:
+        try:
+            legal_context["payoff_family"] = normalize_new_payoff_family(
+                legal_context["payoff_family"], legal_context["payoff_description"])
+        except ValueError as exc:
+            # Existing RFQs may carry an unclassified free-text value.
+            # Preserve it only when the booking keeps that value unchanged.
+            if (source_rfq is None
+                    or canonical_payoff_family(source_rfq.payoff_family)
+                    or legal_context["payoff_family"] != source_rfq.payoff_family):
+                _reject_booking(session, current, body, 422, str(exc))
 
     source_product = None
     pending_product_terms = None

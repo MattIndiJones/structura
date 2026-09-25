@@ -30,6 +30,7 @@ from ..core.client_controls import (
     validate_status_transition,
 )
 from ..core.references import next_reference
+from ..core.payoff_families import normalize_new_payoff_family, canonical_payoff_family
 from ..db.database import get_session
 from ..db.models import (
     Affiliation, Client, ClientMandate, Deal, Interaction, Opportunity,
@@ -325,6 +326,12 @@ def create_opportunity(
     except ClientRuleError as erreur:
         raise HTTPException(422, detail=erreur.as_dict())
 
+    try:
+        payoff_family = normalize_new_payoff_family(
+            body.payoff_family, body.payoff_description)
+    except ValueError as erreur:
+        raise HTTPException(422, str(erreur)) from erreur
+
     reference = next_reference(
         session, Opportunity, f"OPP-{date.today().strftime('%Y%m%d')}-")
     opportunite = Opportunity(
@@ -340,7 +347,7 @@ def create_opportunity(
         priority=body.priority, source=body.source,
         transaction_format=(body.transaction_format or None),
         instrument_family=(body.instrument_family or None),
-        payoff_family=(body.payoff_family or None),
+        payoff_family=payoff_family,
         payoff_description=(body.payoff_description or None),
         data_origin=data_origin, status=body.status,
         notes=body.notes, next_action=body.next_action,
@@ -381,6 +388,20 @@ def update_opportunity(
     client, en le disant.
     """
     opportunite = _scoped(session, opportunity_id, current)
+    payoff_family = None
+    if body.payoff_family is not None or (
+        body.payoff_description is not None
+        and canonical_payoff_family(opportunite.payoff_family) == "Autre"
+    ):
+        try:
+            payoff_family = normalize_new_payoff_family(
+                body.payoff_family if body.payoff_family is not None
+                else opportunite.payoff_family,
+                body.payoff_description if body.payoff_description is not None
+                else opportunite.payoff_description,
+            )
+        except ValueError as erreur:
+            raise HTTPException(422, str(erreur)) from erreur
     avant = {"client_id": opportunite.client_id,
              "mandate_id": opportunite.mandate_id,
              "status": opportunite.status,
@@ -450,7 +471,8 @@ def update_opportunity(
                   "next_action_date"):
         valeur = getattr(body, champ)
         if valeur is not None:
-            setattr(opportunite, champ, valeur)
+            setattr(opportunite, champ,
+                    payoff_family if champ == "payoff_family" else valeur)
 
     if body.data_origin is not None:
         try:

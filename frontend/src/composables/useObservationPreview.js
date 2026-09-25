@@ -22,6 +22,7 @@
  *     `past.realized_flows`, compté depuis le strike.
  */
 import { computed, ref, watch } from 'vue'
+import { apiFetch } from '../utils/api.js'
 
 export function addDaysStr(isoDate, days) {
   const d = new Date(isoDate)
@@ -55,7 +56,7 @@ export function useObservationPreview(store, strikeDate, devise) {
       const v = store.constatOverrides[c.name] || {}
       if (!v.start_date || !v.end_date) continue
       try {
-        const res = await fetch('/api/schedule/generate', {
+        const res = await apiFetch('/api/schedule/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -110,7 +111,7 @@ export function useObservationPreview(store, strikeDate, devise) {
     try {
       const debut = addDaysStr(passees[0], -10)
       const q = new URLSearchParams({ tickers: tickers.join(','), start: debut, end: aujourdhui })
-      const res = await fetch(`/api/finance/hist_prices?${q}`)
+      const res = await apiFetch(`/api/finance/hist_prices?${q}`)
       if (!res.ok) return
       const data = await res.json()
       const dates = data.dates || []

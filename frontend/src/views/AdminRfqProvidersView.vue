@@ -60,11 +60,31 @@
                        @change="updateProvider(p, { active: $event.target.checked })" />
               </td>
               <td class="py-1.5 pr-3 text-right">
+                <button class="btn-secondary btn-sm mr-2" @click="selectProvider(p)">Contacts</button>
                 <button class="icon-btn-danger" title="Supprimer" aria-label="Supprimer le fournisseur" @click="deleteProvider(p)">🗑</button>
               </td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div v-if="selectedProvider" class="card flex flex-col gap-3">
+        <h2 class="text-sm font-semibold">Contacts · {{ selectedProvider.label }}</h2>
+        <p class="text-xs text-slate-500">Ces contacts sont proposés lors de la saisie d'une réponse RFQ. Les réponses déjà enregistrées conservent le nom saisi à l'époque.</p>
+        <div v-for="contact in contacts" :key="contact.id" class="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-center">
+          <input class="input" :value="contact.name" aria-label="Nom du contact"
+                 @change="updateContact(contact, { name: $event.target.value })" />
+          <input class="input" type="email" :value="contact.email" aria-label="E-mail du contact"
+                 @change="updateContact(contact, { email: $event.target.value })" />
+          <label class="text-xs whitespace-nowrap"><input type="checkbox" :checked="contact.active"
+                    @change="updateContact(contact, { active: $event.target.checked })" /> Actif</label>
+        </div>
+        <div v-if="!contacts.length" class="text-xs text-slate-500">Aucun contact enregistré.</div>
+        <div class="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
+          <div><label class="label">Nom du contact</label><input v-model="newContactName" class="input" /></div>
+          <div><label class="label">E-mail (facultatif)</label><input v-model="newContactEmail" type="email" class="input" /></div>
+          <button class="btn-primary btn-sm" :disabled="!newContactName.trim()" @click="createContact">Ajouter</button>
+        </div>
       </div>
 
       <div class="card flex items-end gap-2">
@@ -92,6 +112,7 @@ import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
 import HelpTip from '../components/HelpTip.vue'
+import { confirmer } from '../composables/useConfirm.js'
 
 const providers = ref([])
 const counterparties = ref([])
@@ -101,6 +122,50 @@ const notice    = ref('')
 const creating  = ref(false)
 const newLabel  = ref('')
 const newMode   = ref('manual')
+const selectedProvider = ref(null)
+const contacts = ref([])
+const newContactName = ref('')
+const newContactEmail = ref('')
+
+async function selectProvider(provider) {
+  selectedProvider.value = provider
+  contacts.value = []
+  error.value = ''
+  try {
+    const res = await apiFetch(`/api/admin/rfq-providers/${provider.id}/contacts`)
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur chargement contacts')
+    contacts.value = await res.json()
+  } catch (e) { error.value = e.message }
+}
+
+async function createContact() {
+  if (!selectedProvider.value || !newContactName.value.trim()) return
+  error.value = ''
+  try {
+    const res = await apiFetch(`/api/admin/rfq-providers/${selectedProvider.value.id}/contacts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newContactName.value.trim(), email: newContactEmail.value.trim() }),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur création contact')
+    contacts.value.push(await res.json())
+    contacts.value.sort((a, b) => a.name.localeCompare(b.name))
+    newContactName.value = ''
+    newContactEmail.value = ''
+    notice.value = 'Contact ajouté'
+  } catch (e) { error.value = e.message }
+}
+
+async function updateContact(contact, payload) {
+  if (!selectedProvider.value) return
+  error.value = ''
+  try {
+    const res = await apiFetch(`/api/admin/rfq-providers/${selectedProvider.value.id}/contacts/${contact.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur mise à jour contact')
+    Object.assign(contact, await res.json())
+  } catch (e) { error.value = e.message }
+}
 
 async function fetchProviders() {
   loading.value = true
@@ -181,6 +246,7 @@ async function deleteProvider(p) {
     const res = await apiFetch(`/api/admin/rfq-providers/${p.id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')
     providers.value = providers.value.filter(x => x.id !== p.id)
+    if (selectedProvider.value?.id === p.id) { selectedProvider.value = null; contacts.value = [] }
   } catch (e) {
     error.value = e.message
   }

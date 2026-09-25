@@ -167,8 +167,17 @@
                 </div>
                 <div class="flex flex-col gap-1">
                   <label class="label">Famille de payoff</label>
-                  <input v-model="form.payoff_family" class="input"
-                         placeholder="Phoenix, Autocall…" />
+                  <select v-model="form.payoff_family" class="select">
+                    <option value="">— Choisir une famille —</option>
+                    <option v-if="legacyPayoffFamily" :value="legacyPayoffFamily">
+                      Ancien libellé : {{ legacyPayoffFamily }} — à classer
+                    </option>
+                    <option v-for="family in PAYOFF_FAMILIES" :key="family.code"
+                            :value="family.label">{{ family.label }}</option>
+                  </select>
+                  <p v-if="form.payoff_family === 'Autre'" class="text-[10px] text-slate-500">
+                    Décrivez le payoff ci-dessous.
+                  </p>
                 </div>
                 <div class="flex flex-col gap-1">
                   <label class="label">Référence documentaire</label>
@@ -293,6 +302,7 @@
                                 createActiveUnderlyingIdx === index ? 'border-blue-500 bg-blue-950/10' : 'border-slate-800']"
                        @click="createActiveUnderlyingIdx = index">
                     <div class="col-span-4">
+                      <label class="label">Sous-jacent</label>
                       <select class="select" :value="underlying.ticker"
                               :disabled="!!sourceProduct"
                               @change="onUnderlyingSelect(index, $event.target.value)">
@@ -302,22 +312,33 @@
                         </optgroup>
                       </select>
                     </div>
-                    <input v-model="underlying.ticker" :readonly="!!sourceProduct"
-                           class="input col-span-3 font-mono text-xs" placeholder="Ticker" />
-                    <input v-model.number="underlying.sigma" type="number" step="0.1"
-                           class="input col-span-2" title="Volatilité en %" placeholder="Vol %" />
-                    <input v-model.number="underlying.q" type="number" step="0.1"
-                           class="input col-span-2" title="Dividende en %" placeholder="Div. %" />
+                    <div class="col-span-3"><label class="label">Ticker</label>
+                      <input v-model="underlying.ticker" :readonly="!!sourceProduct"
+                             class="input font-mono text-xs" placeholder="Ticker"
+                             @blur="onUnderlyingSelect(index, underlying.ticker)" />
+                    </div>
+                    <div class="col-span-2"><label class="label">Vol. (%)</label>
+                      <input v-model.number="underlying.sigma" type="number" step="0.1"
+                             class="input" title="Volatilité en %" />
+                    </div>
+                    <div class="col-span-2"><label class="label">Div. (%)</label>
+                      <input v-model.number="underlying.q" type="number" step="0.1"
+                             class="input" title="Rendement du dividende en %" />
+                    </div>
                     <button type="button" class="icon-btn-danger col-span-1"
                             :disabled="createBasket.length === 1 || !!sourceProduct"
                             :aria-label="`Retirer ${underlying.name || underlying.ticker}`"
                             @click.stop="removeCreateUnderlying(index)">×</button>
-                    <input v-model="underlying.name" :readonly="!!sourceProduct"
-                           class="input col-span-9 text-xs" placeholder="Nom du sous-jacent" />
-                    <select v-model="underlying.ccy" class="select col-span-3" :disabled="!!sourceProduct">
+                    <div class="col-span-9"><label class="label">Nom du sous-jacent</label>
+                      <input v-model="underlying.name" :readonly="!!sourceProduct"
+                             class="input text-xs" placeholder="Nom du sous-jacent" />
+                    </div>
+                    <div class="col-span-3"><label class="label">Devise du sous-jacent</label>
+                    <select v-model="underlying.ccy" class="select" :disabled="!!sourceProduct">
                       <option>EUR</option><option>USD</option><option>GBP</option>
                       <option>JPY</option><option>CHF</option><option>SGD</option>
                     </select>
+                    </div>
                   </div>
                 </div>
                 <div class="flex flex-col gap-1">
@@ -415,12 +436,12 @@
                 </div>
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
                   <div class="flex flex-col gap-1">
-                    <label class="label">Taux sans risque (%)</label>
-                    <input v-model.number="advanced.r" type="number" step="0.1" class="input" />
+                    <label class="label">Date de pricing</label>
+                    <input v-model="form.pricing_date" type="date" class="input" />
                   </div>
                   <div class="flex flex-col gap-1">
-                    <label class="label">Trajectoires (N)</label>
-                    <input v-model.number="advanced.N" type="number" step="1000" class="input" />
+                    <label class="label">Taux sans risque (%)</label>
+                    <input v-model.number="advanced.r" type="number" step="0.1" class="input" />
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="label">Modèle</label>
@@ -432,6 +453,16 @@
                       <option value="lsv">Local-Stochastic Vol</option>
                     </select>
                   </div>
+                  <div class="flex flex-col gap-1">
+                    <label class="label">Trajectoires (N)</label>
+                    <input v-model.number="advanced.N" type="number" step="1000" class="input" />
+                  </div>
+                </div>
+
+                <div v-if="createBasket[createActiveUnderlyingIdx]" class="mt-3 border-t border-slate-800 pt-3">
+                  <div class="label">Volatilité · {{ createBasket[createActiveUnderlyingIdx].ticker || 'sous-jacent' }}</div>
+                  <UnderlyingVolFields :au="createBasket[createActiveUnderlyingIdx]"
+                                       :model="advanced.model" :horizon="form.T" />
                 </div>
 
                 <div v-if="createBasket.length > 1" class="mt-3 overflow-x-auto">
@@ -503,7 +534,7 @@
               {{ rfq.current.instrument_family }}
             </span>
             <span v-if="rfq.current.payoff_family" class="badge badge-muted">
-              {{ rfq.current.payoff_family }}
+              {{ payoffFamilyForDisplay(rfq.current.payoff_family) }}
             </span>
           </div>
 
@@ -645,7 +676,7 @@
                        bouton se dimensionne sur le plus long et ne bouge plus en
                        passant à « Calcul… ». Une largeur en dur serait à refaire à
                        chaque changement de libellé ou de police. -->
-                  <button class="btn-secondary text-xs grid shrink-0" :disabled="computing || !!rfq.current.booked_deal" @click="computeModelPrice">
+                  <button class="btn-price-model grid shrink-0" :disabled="computing || !!rfq.current.booked_deal" @click="computeModelPrice">
                     <span class="col-start-1 row-start-1" :class="computing ? 'invisible' : ''">Calculer prix modèle</span>
                     <span class="col-start-1 row-start-1" :class="computing ? '' : 'invisible'">Calcul…</span>
                   </button>
@@ -703,20 +734,12 @@
                     </div>
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <div class="flex flex-col gap-1">
-                        <label class="label">Vol implicite (%)</label>
-                        <input v-model.number="detailBasket[detailActiveUnderlyingIdx].sigma" type="number" class="input" />
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <label class="label">Dividende (%)</label>
-                        <input v-model.number="detailBasket[detailActiveUnderlyingIdx].q" type="number" step="0.1" class="input" />
+                        <label class="label">Date de pricing</label>
+                        <input v-model="detailAdvanced.valuation_date" type="date" class="input" />
                       </div>
                       <div class="flex flex-col gap-1">
                         <label class="label">Taux sans risque (%)</label>
                         <input v-model.number="detailAdvanced.r" type="number" step="0.1" class="input" />
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <label class="label">Trajectoires (N)</label>
-                        <input v-model.number="detailAdvanced.N" type="number" step="1000" class="input" />
                       </div>
                       <div class="flex flex-col gap-1">
                         <label class="label">Modèle</label>
@@ -727,6 +750,10 @@
                           <option value="localvol">Dupire (Local Vol)</option>
                           <option value="lsv">Local-Stochastic Vol</option>
                         </select>
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <label class="label">Trajectoires (N)</label>
+                        <input v-model.number="detailAdvanced.N" type="number" step="1000" class="input" />
                       </div>
                       <div class="flex flex-col gap-1">
                         <label class="label">Date de strike</label>
@@ -749,6 +776,11 @@
                         <input v-model="detailAdvanced.payment_date" type="date" class="input"
                                :disabled="!!rfq.current.quotes?.length" />
                       </div>
+                    </div>
+                    <div v-if="detailBasket[detailActiveUnderlyingIdx]" class="mt-3 border-t border-slate-800 pt-3">
+                      <div class="label">Volatilité · {{ detailBasket[detailActiveUnderlyingIdx].ticker || 'sous-jacent' }}</div>
+                      <UnderlyingVolFields :au="detailBasket[detailActiveUnderlyingIdx]"
+                                           :model="detailAdvanced.model" :horizon="detailHorizon" />
                     </div>
 
                     <div v-if="detailBasket.length > 1" class="mt-3 overflow-x-auto border-t border-slate-800 pt-3">
@@ -812,7 +844,10 @@
                 <div v-if="rfq.current.booked_deal"
                      class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
                   <span class="text-xs text-slate-300">
-                    📋 AO exécuté — deal <span class="font-mono text-slate-200">{{ rfq.current.booked_deal.reference }}</span>.
+                    📋 AO exécuté — deal <DealReferenceLink
+                      :deal-id="rfq.current.booked_deal.id"
+                      :reference="rfq.current.booked_deal.reference"
+                      class="font-mono text-slate-200" />.
                   </span>
                   <button class="btn-secondary text-xs px-3 py-1.5 shrink-0"
                           @click="openBookedDeal">→ Voir le booking</button>
@@ -850,7 +885,7 @@
                   <div class="flex items-center gap-2 shrink-0">
                     <button v-if="rfq.current.kind === 'indicatif'" class="btn-secondary text-xs px-3 py-1.5"
                             @click="convertToTrade(rfq.current)">📐 Convertir en RFQ to trade</button>
-                    <button v-if="!modelPriceRecorded" class="btn-secondary text-xs px-3 py-1.5"
+                    <button v-if="!modelPriceRecorded" class="btn-price-model"
                             :disabled="computing" @click="computeModelPrice">
                       {{ computing ? 'Calcul…' : 'Calculer prix modèle' }}
                     </button>
@@ -997,7 +1032,14 @@
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="label">Contact</label>
-                    <input v-model="quoteForm.contact" type="text" class="input" placeholder="Nom / email (optionnel)" />
+                    <select v-if="availableQuoteContacts.length" v-model="quoteForm.contact" class="select">
+                      <option value="">— Choisir un contact —</option>
+                      <option v-for="contact in availableQuoteContacts" :key="contact.id" :value="contact.name">
+                        {{ contact.name }}{{ contact.email ? ` · ${contact.email}` : '' }}
+                      </option>
+                    </select>
+                    <input v-else v-model="quoteForm.contact" type="text" class="input"
+                           placeholder="Nom / email (optionnel)" />
                   </div>
                   <button class="btn-primary text-xs px-3 py-2" @click="submitAddQuote">Ajouter</button>
                   <button class="btn-secondary text-xs px-3 py-2" @click="addingQuote = false">Annuler</button>
@@ -1031,14 +1073,21 @@
 
 <script setup>
 import BackLink from '../components/ui/BackLink.vue'
+import DealReferenceLink from '../components/DealReferenceLink.vue'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useRfqStore } from '../stores/rfq.js'
 import { useProductsStore } from '../stores/products.js'
 import { useMarketAssumptions } from '../composables/useMarketAssumptions.js'
+import { fractionToPercent } from '../utils/underlyingDefaults.js'
+import {
+  PAYOFF_FAMILIES, canonicalPayoffFamily, payoffFamilyForDisplay,
+  payoffFamilyForModel,
+} from '../utils/payoffFamilies.js'
 import YieldCurveCard from '../components/YieldCurveCard.vue'
 import FundingCurveCard from '../components/FundingCurveCard.vue'
 import DividendCurveCard from '../components/DividendCurveCard.vue'
+import UnderlyingVolFields from '../components/UnderlyingVolFields.vue'
 import { apiFetch } from '../utils/api.js'
 import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
 import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
@@ -1183,7 +1232,8 @@ const groupedTemplates = computed(() => {
 })
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
 }
 
 // addBizDays a disparu avec les dates devinees : il ne comptait que les jours
@@ -1210,6 +1260,7 @@ function fmtTenor(t) {
 const form = reactive({
   name: '',
   ao_date: todayIso(),
+  pricing_date: todayIso(),
   kind: 'indicatif',
   sens: 'achat',
   source: 'template',
@@ -1238,6 +1289,10 @@ const form = reactive({
   value_date_convention: 'none',
   payment_date_convention: 'none',
 })
+const legacyPayoffFamily = computed(() => form.payoff_family
+  && !canonicalPayoffFamily(form.payoff_family) ? form.payoff_family : '')
+const normalizedFamily = value => canonicalPayoffFamily(value) || value || ''
+let lastSuggestedFamily = ''
 const dateNotices = reactive({ strike_date: '', value_date: '', payment_date: '' })
 
 // Vrai dès que l'utilisateur saisit la date de paiement lui-même.
@@ -1346,8 +1401,11 @@ function onUnderlyingSelect(index, ticker) {
   const row = createBasket[index]
   if (!row) return
   row.ticker = ticker
-  const label = underlyingGroups.flatMap(g => g.items).find(it => it.ticker === ticker)?.label
-  if (label) row.name = label
+  const instrument = underlyingGroups.flatMap(g => g.items).find(it => it.ticker === ticker)
+  if (instrument) {
+    row.name = instrument.label
+    row.ccy = instrument.ccy || row.ccy
+  }
 }
 
 // ── Termes du produit + calendrier(s) CONSTAT (dynamiques, extraits du script) ──
@@ -1374,7 +1432,7 @@ async function refreshParsedParams(overrideValues = null, overrideConstats = nul
   Object.keys(paramOverrides).forEach(k => delete paramOverrides[k])
   if (!script.trim()) { parsedParams.value = []; scriptConstats.value = []; return }
   try {
-    const res = await fetch('/api/parse', {
+    const res = await apiFetch('/api/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ script }),
@@ -1383,7 +1441,7 @@ async function refreshParsedParams(overrideValues = null, overrideConstats = nul
     parsedParams.value = data.ok ? data.params : []
     for (const p of parsedParams.value) {
       const ov = overrideValues && (p.name in overrideValues) ? overrideValues[p.name] : null
-      paramOverrides[p.name] = ov !== null ? (p.is_pct ? ov * 100 : ov) : p.raw_default
+      paramOverrides[p.name] = ov !== null ? (p.is_pct ? fractionToPercent(ov) : ov) : p.raw_default
     }
     scriptConstats.value = data.ok ? (data.constats || []) : []
     if (overrideConstats) restoreConstatOverrides(scriptConstats.value, constatOverrides, overrideConstats)
@@ -1402,6 +1460,11 @@ function onSourceToggle(src) {
   refreshParsedParams()
 }
 function onTemplateChange() {
+  const suggested = payoffFamilyForModel(form.template_type)
+  if (!form.payoff_family || form.payoff_family === lastSuggestedFamily) {
+    form.payoff_family = suggested
+  }
+  lastSuggestedFamily = suggested
   duplicateSourceScript.value = null
   sourceProduct.value = null
   sourceProductPricingInput.value = null
@@ -1426,7 +1489,11 @@ function onLibrarySelect(value) {
   } else if (value.startsWith('deal:')) {
     const dealId = Number(value.slice(5))
     form.source_deal_id = dealId
-    duplicateSourceScript.value = dealsForScripts.value.find(d => d.id === dealId)?.script_snapshot || null
+    const deal = dealsForScripts.value.find(d => d.id === dealId)
+    duplicateSourceScript.value = deal?.script_snapshot || null
+    if (!form.payoff_family && deal?.payoff_family) {
+      form.payoff_family = normalizedFamily(deal.payoff_family)
+    }
   }
   refreshParsedParams()
 }
@@ -1486,6 +1553,7 @@ async function fetchDealsForScripts() {
 }
 
 function openCreateForm() {
+  lastSuggestedFamily = ''
   showCreateForm.value = true
   selectedId.value = null
   rfq.current = null
@@ -1496,11 +1564,11 @@ function openCreateForm() {
   sourceProductPricingInput.value = null
   commercialLinkEnabled.value = false
   Object.assign(form, {
-    name: '', ao_date: todayIso(), kind: 'indicatif', sens: 'achat', source: 'template', template_type: '',
+    name: '', ao_date: todayIso(), pricing_date: todayIso(), kind: 'indicatif', sens: 'achat', source: 'template', template_type: '',
     script_id: null, source_deal_id: null,
     transaction_format: opportuniteContexte.value?.transaction_format || '',
     instrument_family: opportuniteContexte.value?.instrument_family || '',
-    payoff_family: opportuniteContexte.value?.payoff_family || '',
+    payoff_family: normalizedFamily(opportuniteContexte.value?.payoff_family),
     payoff_description: opportuniteContexte.value?.payoff_description || '',
     documentation_reference: '',
     opportunity_id: opportuniteContexte.value?.id ?? null,
@@ -1549,14 +1617,14 @@ async function prefillFromProduct(productId) {
   ao.depuisParams({ underlyings: productUnderlyings, ...loaded.calculationInput })
   nominalRaw.value = String(loaded.product.intent?.nominal || 1_000_000)
   formatNominal()
-  advanced.r = Number(loaded.calculationInput?.r ?? 0.03) * 100
+  advanced.r = fractionToPercent(loaded.calculationInput?.r ?? 0.03)
   advanced.N = loaded.calculationInput?.N ?? 20000
   advanced.model = loaded.calculationInput?.model || 'constant'
   await refreshParsedParams()
   for (const parameter of terms.parameters || []) {
     paramOverrides[parameter.name] = Array.isArray(parameter.value)
-      ? parameter.value.map(value => parameter.is_pct ? value * 100 : value)
-      : (parameter.is_pct ? parameter.value * 100 : parameter.value)
+      ? parameter.value.map(value => parameter.is_pct ? fractionToPercent(value) : value)
+      : (parameter.is_pct ? fractionToPercent(parameter.value) : parameter.value)
   }
   restoreConstatOverrides(scriptConstats.value, constatOverrides, terms.constats || {})
 }
@@ -1608,7 +1676,7 @@ function onDirectOpportunityChange() {
   form.primary_affiliation_id = selected.primary_contact?.affiliation_id ?? null
   form.transaction_format ||= selected.transaction_format || ''
   form.instrument_family ||= selected.instrument_family || ''
-  form.payoff_family ||= selected.payoff_family || ''
+  form.payoff_family ||= normalizedFamily(selected.payoff_family)
   form.payoff_description ||= selected.payoff_description || ''
 }
 
@@ -1622,6 +1690,7 @@ async function duplicateRfq(source) {
   Object.assign(form, {
     name: `${source.name || source.reference} (copie)`,
     ao_date: todayIso(),
+    pricing_date: todayIso(),
     kind: source.kind || 'indicatif',
     sens: source.sens || 'achat',
     source: source.script_id ? 'script' : 'template',
@@ -1632,7 +1701,8 @@ async function duplicateRfq(source) {
     primary_affiliation_id: source.primary_affiliation_id ?? null,
     transaction_format: source.transaction_format || '',
     instrument_family: source.instrument_family || '',
-    payoff_family: source.payoff_family || '',
+    payoff_family: normalizedFamily(source.payoff_family)
+      || payoffFamilyForModel(source.template_type),
     payoff_description: source.payoff_description || '',
     documentation_reference: source.documentation_reference || '',
     script_id: source.script_id || null,
@@ -1684,6 +1754,7 @@ async function convertToTrade(source) {
   Object.assign(form, {
     name: `${source.name || source.reference} (to trade)`,
     ao_date: todayIso(),
+    pricing_date: todayIso(),
     kind: 'to_trade',
     sens: source.sens || 'achat',
     source: keepsScriptId ? 'script' : 'template',
@@ -1694,7 +1765,8 @@ async function convertToTrade(source) {
     primary_affiliation_id: source.primary_affiliation_id ?? null,
     transaction_format: source.transaction_format || '',
     instrument_family: source.instrument_family || '',
-    payoff_family: source.payoff_family || '',
+    payoff_family: normalizedFamily(source.payoff_family)
+      || payoffFamilyForModel(source.template_type),
     payoff_description: source.payoff_description || '',
     documentation_reference: source.documentation_reference || '',
     script_id: keepsScriptId ? source.script_id : null,
@@ -1750,7 +1822,7 @@ const detailScriptConstats  = ref([])
 const detailConstatOverrides = reactive({})
 const detailAdvanced = reactive({
   r: 3, N: 20000, model: 'constant',
-  strike_date: '', value_date: '', payment_date: '',
+  strike_date: '', value_date: '', payment_date: '', valuation_date: todayIso(),
 })
 
 async function refreshDetailParams() {
@@ -1769,6 +1841,7 @@ async function _loadDetailParams() {
     strike_date: p.strike_date || '',
     value_date: p.value_date || '',
     payment_date: p.payment_date || '',
+    valuation_date: p.valuation_date || todayIso(),
   })
   // Les hypothèses de marché avec lesquelles cet AO a été pricé, remises dans
   // les cartes. Sans ce retour, elles rouvriraient décochées et le prochain
@@ -1777,7 +1850,7 @@ async function _loadDetailParams() {
   Object.keys(detailParamOverrides).forEach(k => delete detailParamOverrides[k])
   if (!script.trim()) { detailParsedParams.value = []; detailScriptConstats.value = []; return }
   try {
-    const res = await fetch('/api/parse', {
+    const res = await apiFetch('/api/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ script }),
@@ -1787,7 +1860,7 @@ async function _loadDetailParams() {
     const savedParams = p.user_params || {}
     for (const pp of detailParsedParams.value) {
       const ov = pp.name in savedParams ? savedParams[pp.name] : null
-      detailParamOverrides[pp.name] = ov !== null ? (pp.is_pct ? ov * 100 : ov) : pp.raw_default
+      detailParamOverrides[pp.name] = ov !== null ? (pp.is_pct ? fractionToPercent(ov) : ov) : pp.raw_default
     }
     detailScriptConstats.value = data.ok ? (data.constats || []) : []
     restoreConstatOverrides(detailScriptConstats.value, detailConstatOverrides, p.constats || {})
@@ -1930,7 +2003,7 @@ async function _loadUnderlyingParams(ticker, target, status, loading) {
   loading.value = true
   status.value = `Chargement ${tk}…`
   try {
-    const res = await fetch(`/api/finance/hist_vol?tickers=${encodeURIComponent(tk)}&period=1y`)
+    const res = await apiFetch(`/api/finance/hist_vol?tickers=${encodeURIComponent(tk)}&period=1y`)
     const data = await res.json()
     if (data.error) { status.value = `⚠ ${tk} : ${data.error}`; return }
     const vol = data.vols?.[tk] ?? null
@@ -2085,6 +2158,14 @@ const champsManquants = computed(() => {
 
 async function submitCreate() {
   createError.value = ''
+  if (legacyPayoffFamily.value) {
+    createError.value = 'Choisissez une famille de payoff du catalogue pour remplacer l’ancien libellé.'
+    return
+  }
+  if (form.payoff_family === 'Autre' && !form.payoff_description.trim()) {
+    createError.value = 'Décrivez le payoff lorsque la famille « Autre » est choisie.'
+    return
+  }
   if (champsManquants.value.length) {
     createError.value = `À compléter : ${champsManquants.value.join(', ')}`
     return
@@ -2160,6 +2241,7 @@ async function submitCreate() {
         T: horizon,
         N: sourceProduct.value ? (productMarket.N ?? advanced.N) : advanced.N,
         model: sourceProduct.value ? (productMarket.model || advanced.model) : advanced.model,
+        valuation_date: form.pricing_date || todayIso(),
         // Les trois hypothèses de marché saisies au-dessus. Sans elles dans le
         // payload, les cartes seraient éditables sans le moindre effet sur le
         // prix — le projet a déjà connu ça avec la courbe de dividende, qui vaut
@@ -2269,6 +2351,7 @@ async function computeModelPrice() {
         r: detailAdvanced.r / 100,
         N: detailAdvanced.N,
         model: detailAdvanced.model,
+        valuation_date: detailAdvanced.valuation_date || todayIso(),
         // Hypothèses de modèle, donc admises par `_merge_pricing_params` :
         // elles n'appartiennent pas au périmètre contractuel gelé.
         ...aoDetail.hypothesesDeMarche(),
@@ -2288,6 +2371,10 @@ function openAddQuote() {
   quoteForm.contact = ''
   addingQuote.value = true
 }
+
+const availableQuoteContacts = computed(() =>
+  rfq.providers.find(provider => provider.label === quoteForm.provider)?.contacts || [])
+watch(() => quoteForm.provider, () => { quoteForm.contact = '' })
 
 async function submitAddQuote() {
   const provider = quoteForm.provider === 'autre' ? (quoteForm.customProvider.trim() || 'Autre') : quoteForm.provider
@@ -2449,6 +2536,7 @@ const selectedIsBest = computed(
         && Math.abs(selectedQuote.value.price - bestQuote.value.price) <= 1e-9)
 
 const SELECTION_REASONS = [
+  { value: 'price', label: 'Prix' },
   { value: 'client_request', label: 'Demande du Client' },
   { value: 'documentation', label: 'Documentation / programme' },
   { value: 'credit', label: 'Crédit / contrepartie' },

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiFetch } from '../utils/api.js'
+import { PAYOFF_FAMILIES } from '../utils/payoffFamilies.js'
 
 // Épine dorsale du module commercial : clients, personnes, opportunités et
 // interactions. Un seul store plutôt que quatre parce que ces écrans se
@@ -114,10 +115,7 @@ export const TYPES_MANDAT = [
 
 export const FORMATS_TRANSACTION = ['EMTN', 'BMTN', 'OTC']
 export const FAMILLES_INSTRUMENT = ['Note', 'Certificat', 'Swap', 'Option', 'Dépôt structuré']
-export const FAMILLES_PAYOFF = [
-  'Autocall', 'Phoenix', 'Reverse Convertible', 'Participation',
-  'Capital protégé', 'Coupon conditionnel', 'Swap', 'Autre',
-]
+export const FAMILLES_PAYOFF = PAYOFF_FAMILIES.map(family => family.label)
 
 export const ROLES_PARTICIPANT = [
   { value: 'originator', label: 'Apporteur' },

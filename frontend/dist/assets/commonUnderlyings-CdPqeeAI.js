@@ -1,0 +1,1 @@
+import{h as e}from"./reactivity.esm-bundler-BY1qAhqh.js";import{y as t}from"./index-PcBcgpck.js";var n=e([]),r=null;function i(){return n.length?Promise.resolve(n):r||(r=t(`/api/finance/underlyings`).then(e=>e.ok?e.json():[]).then(e=>(n.splice(0,n.length,...e),n)).catch(()=>n).finally(()=>{r=null}),r)}export{n,i as t};

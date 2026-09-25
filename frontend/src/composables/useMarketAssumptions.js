@@ -1,5 +1,6 @@
 import { getCurrentInstance, onBeforeMount, reactive, watch } from 'vue'
 import { courbeDividende } from './useDividendCurve.js'
+import { fractionToPercent } from '../utils/underlyingDefaults.js'
 
 /**
  * Les hypothèses de marché d'un écran : courbe de taux, spread émetteur,
@@ -150,7 +151,7 @@ export function useMarketAssumptions(fiches) {
     const yc = nodes(p.yield_curve)
     yieldCurve.enabled = yc.size > 0
     yieldCurve.pillars.forEach(pil => {
-      if (yc.has(pil.T)) pil.rate = yc.get(pil.T) * 100
+      if (yc.has(pil.T)) pil.rate = fractionToPercent(yc.get(pil.T))
     })
 
     const fc = nodes(p.funding_curve)
@@ -159,11 +160,11 @@ export function useMarketAssumptions(fiches) {
     if (fc.size > 0) {
       fundingCurve.mode = 'pillars'
       fundingCurve.pillars.forEach(pil => {
-        if (fc.has(pil.T)) pil.spread = fc.get(pil.T) * 100
+        if (fc.has(pil.T)) pil.spread = fractionToPercent(fc.get(pil.T))
       })
     } else if (spread !== 0) {
       fundingCurve.mode = 'flat'
-      fundingCurve.level = spread * 100
+      fundingCurve.level = fractionToPercent(spread)
     }
 
     // Le dividende se porte par SOUS-JACENT : chaque fiche retrouve le sien.
@@ -171,7 +172,7 @@ export function useMarketAssumptions(fiches) {
       const ul = (p.underlyings || [])[i] || {}
       fiche.dividendCurveEnabled = (ul.dividend_curve || []).length > 0
       if (fiche.dividendCurveEnabled && ul.dividend_decay != null) {
-        fiche.dividendDecay = Number(ul.dividend_decay) * 100
+        fiche.dividendDecay = fractionToPercent(ul.dividend_decay)
       }
     })
   }

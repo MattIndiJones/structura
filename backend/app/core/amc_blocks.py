@@ -70,7 +70,8 @@ def _nav_reconciliation(nav: List[dict], management_fee_pct: Optional[float],
                         carnet_orders: Optional[list] = None,
                         management_fee_basis: str = "nav_252",
                         performance_crystallization: str = "daily",
-                        cash_income: Optional[float] = None) -> Optional[dict]:
+                        cash_income: Optional[float] = None,
+                        include_annual: bool = True) -> Optional[dict]:
     """Compute the exact NAV-implied fund P&L and estimated fee drag, as of
     the same date the FIFO reconstruction used (not "today").
 
@@ -159,7 +160,28 @@ def _nav_reconciliation(nav: List[dict], management_fee_pct: Optional[float],
     nav_value_prod = last_row["nav"] * filled[-1]
     nav_implied_pnl_prod = nav_value_prod - net_flow_prod
 
+    annual = []
+    if include_annual:
+        previous_fees = dict(management_fee_prod=0.0, performance_fee_prod=0.0, transaction_cost_prod=0.0)
+        previous_nav = rows[0]["nav"]
+        for year in sorted({r["date"][:4] for r in rows}):
+            end = next(r for r in reversed(rows) if r["date"].startswith(year))
+            prefix_orders = [o for o in (carnet_orders or []) if str(o.date)[:10] <= end["date"]]
+            snapshot = _nav_reconciliation(rows, management_fee_pct, end["date"], perf_fee_pct,
+                txn_cost_pct, prefix_orders, management_fee_basis, performance_crystallization,
+                include_annual=False)
+            fees = snapshot["fee_breakdown"]
+            annual.append({"year": int(year), "as_of": end["date"], "nav_final": end["nav"],
+                "return_pct": (end["nav"] / previous_nav - 1) * 100 if previous_nav else None,
+                "hwm_final": fees["performance_fee_hwm_final"],
+                **{k: round(fees[k] - previous_fees[k], 2) if fees[k] is not None else None
+                   for k in previous_fees}})
+            previous_fees = fees
+            previous_nav = end["nav"]
+
     return {
+        "annual_fees": annual,
+        "annual_fees_note": "Charges estimées sur NAV nette publiée ; montants signés. La performance inclut la provision à l’arrêté, qui peut être reprise. HWM cristallisé selon la fréquence configurée.",
         "as_of": last_row["date"],
         "cash_income_prod": cash_income,
         "management_fee_basis": management_fee_basis,

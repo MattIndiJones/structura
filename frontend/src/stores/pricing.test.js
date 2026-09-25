@@ -349,15 +349,52 @@ describe('le préremplissage depuis un AO garde ses dates', () => {
     })
 
     expect(store.underlyings.map(u => [u.ticker, u.sigma, u.q])).toEqual([
-      ['MC.PA', 21, 1.7999999999999998],
+      ['MC.PA', 21, 1.8],
       ['^GDAXI', 27, 3.1],
     ])
     const body = store.pricingBody()
-    expect(body.underlyings.map(u => [u.ticker, u.sigma, u.q])).toEqual([
-      ['MC.PA', 0.21, 0.018],
-      ['^GDAXI', 0.27, 0.031],
-    ])
+    expect(body.underlyings.map(u => u.ticker)).toEqual(['MC.PA', '^GDAXI'])
+    expect(body.underlyings[0].sigma).toBeCloseTo(0.21)
+    expect(body.underlyings[0].q).toBeCloseTo(0.018)
+    expect(body.underlyings[1].sigma).toBeCloseTo(0.27)
+    expect(body.underlyings[1].q).toBeCloseTo(0.031)
     expect(body.corr_matrix).toEqual([[1, 0.45], [0.45, 1]])
+  })
+
+  it('reprend la date et toutes les hypothèses de marché du prix RFQ au booking', async () => {
+    const store = await storeRenseigne()
+    store.yieldCurve.enabled = true
+    store.fundingCurve.enabled = true
+    store.fundingCurve.level = 8
+    await store.loadFromRfq({
+      ...AO,
+      params: {
+        ...AO.params,
+        valuation_date: '2026-09-24',
+        yield_curve: [[0.25, 0.032], [1, 0.036]],
+        funding_spread: 0.015,
+        underlyings: [{
+          name: 'LVMH', ticker: 'MC.PA', ccy: 'EUR', sigma: 0.301, q: 0.0328,
+          dividend_curve: [[1, 0.0328], [2, 0.029]],
+          v0: 0.091, theta: 0.08, xi: 0.45, rho_h: -0.7,
+        }],
+      },
+    })
+    const body = store.pricingBody()
+    expect(store.globalParams.valuation_date).toBe('2026-09-24')
+    expect(store.inLifeBody().valuation_date).toBe('2026-09-24')
+    expect(store.yieldCurve.enabled).toBe(true)
+    expect(store.fundingCurve.enabled).toBe(true)
+    expect(body.yield_curve.map(row => row[0])).toEqual([0.25, 1])
+    expect(body.yield_curve[0][1]).toBeCloseTo(0.032)
+    expect(body.yield_curve[1][1]).toBeCloseTo(0.036)
+    expect(body.funding_spread).toBeCloseTo(0.015)
+    expect(body.underlyings[0].sigma).toBeCloseTo(0.301)
+    expect(body.underlyings[0].q).toBeCloseTo(0.0328)
+    expect(body.underlyings[0].v0).toBeCloseTo(0.091)
+    expect(body.underlyings[0].theta).toBeCloseTo(0.08)
+    expect(body.underlyings[0].xi).toBeCloseTo(0.45)
+    expect(body.underlyings[0].rho_h).toBeCloseTo(-0.7)
   })
 })
 
@@ -700,6 +737,84 @@ AT MATURITY:
 
 const appelsParse = () => globalThis.fetch.mock.calls
   .filter(([url]) => String(url).includes('/api/parse')).length
+
+describe('les calculs transmettent la session au serveur', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.setItem('auth_token', 'pricing-test-session')
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    localStorage.clear()
+    vi.useRealTimers()
+  })
+
+  it.each([
+    ['runPricing', '/api/price'],
+    ['runProfile', '/api/profile'],
+    ['runPaths', '/api/paths'],
+    ['runProba', '/api/proba'],
+    ['runBacktest', '/api/backtest'],
+  ])('lance %s sans modifier le script initial', async (method, endpoint) => {
+    const server = serveurQuiLit({ autres: async () => ({
+      ok: true, json: async () => ({ price: 0.98 }),
+    }) })
+    globalThis.fetch = vi.fn((url, options) => {
+      if (options.headers.Authorization !== 'Bearer pricing-test-session') {
+        return Promise.resolve({
+          ok: false, status: 401, json: async () => ({ detail: 'Not authenticated' }),
+        })
+      }
+      return server(url, options)
+    })
+    const store = usePricingStore()
+    const initialScript = store.script
+    await store[method]()
+    expect(store.script).toBe(initialScript)
+    expect(store.parseError).toBeNull()
+    expect(store.error).toBeNull()
+    expect(server.mock.calls.map(([url]) => url)).toEqual(['/api/parse', endpoint])
+    expect(store.paramOverrides.COUPON).toBe(8)
+    if (method === 'runPricing') expect(store.result.price).toBe(0.98)
+  })
+
+  it.each([
+    [401, { detail: 'Not authenticated' }, 'reconnectez-vous'],
+    [403, { detail: 'Forbidden' }, 'droits nécessaires'],
+    [503, { detail: 'Service indisponible' }, 'Service indisponible'],
+    [502, null, 'HTTP 502'],
+    [200, { detail: 'Unexpected response' }, 'Réponse inattendue'],
+  ])('signale une erreur HTTP %s sans accuser le script', async (status, data, message) => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: status === 200, status, json: async () => data,
+    }))
+    const store = usePricingStore()
+    await store.runPricing()
+    expect(store.error).toContain('Validation du script impossible')
+    expect(store.error).toContain(message)
+    expect(store.error).not.toMatch(/a changé|Script non valide/)
+    expect(globalThis.fetch.mock.calls.map(([url]) => url)).toEqual(['/api/parse'])
+    expect(store.result).toBeNull()
+  })
+
+  it('conserve les saisies après un refus puis reprend la validation', async () => {
+    const store = await storeRenseigne()
+    store.script = `${VALIDE}# nouvelle validation\n`
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false, status: 401, json: async () => ({ detail: 'Not authenticated' }),
+    }))
+    await store.runPricing()
+    expect(store.paramOverrides.COUPON).toBe(1.334167)
+    expect(store.constatOverrides.OBS).toMatchObject(TERM_SHEET)
+    globalThis.fetch = serveurDeParse()
+    expect(await store.validateScript()).toBe(true)
+    expect(store.parseError).toBeNull()
+    store.script = CASSE
+    await store.runPricing()
+    expect(store.error).toContain('Script non valide')
+    expect(store.error).toContain('expression incomplète')
+  })
+})
 
 async function storeQuiLit(texte = VALIDE) {
   setActivePinia(createPinia())

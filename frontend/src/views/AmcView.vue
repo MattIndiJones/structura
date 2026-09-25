@@ -604,6 +604,7 @@
                     {{ manifestData.manifest.params.termsheet_positions.length }} lignes ·
                     {{ formatPercent(manifestData.manifest.params.termsheet_positions.reduce((s,p) => s+(p.weight_pct||0), 0), 1) }}
                   </span>
+                  <span v-else-if="manifestData.manifest?.params?.reference_portfolio" class="text-[9px] text-emerald-500">Panier de référence E / G fourni</span>
                   <span v-else class="text-[9px] text-amber-500">⚠ non configuré</span>
                   <button class="ml-auto text-[9px] text-slate-500 hover:text-slate-300 underline"
                     @click="openTsEditor">
@@ -1282,9 +1283,9 @@
                     <div>
                       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5 flex items-center gap-1">
                         Générer avec l'IA
-                        <span class="group relative inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700/80 text-slate-400 text-[8px] cursor-help ml-0.5 shrink-0">?<span class="pointer-events-none absolute top-full left-0 mt-1.5 w-72 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2.5 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Envoie la totalité des données de l'étude (blocs A/B/C/D/H, méta-données, catalogue) à un LLM. Le modèle rédige une synthèse selon le template éditorial défini pour l'audience choisie (committee / investor / due_diligence). La synthèse générée est éditable et peut être intégrée au rapport PDF.</span></span>
+                        <span class="group relative inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-slate-700/80 text-slate-400 text-[8px] cursor-help ml-0.5 shrink-0">?<span class="pointer-events-none absolute top-full left-0 mt-1.5 w-72 bg-slate-900 border border-slate-700 text-slate-300 text-[10px] leading-relaxed rounded-lg p-2.5 z-[100] shadow-2xl whitespace-normal text-left font-normal normal-case tracking-normal opacity-0 group-hover:opacity-100 transition-opacity">Envoie les résultats résumés des blocs disponibles et les contrôles financiers à un LLM. Le modèle rédige une synthèse selon le template éditorial défini pour l'audience choisie (committee / investor / due_diligence). La synthèse générée est éditable et peut être intégrée au rapport PDF.</span></span>
                       </div>
-                      <div class="text-xs text-slate-600">La totalité des données de l'étude sera envoyée au modèle choisi.</div>
+                      <div class="text-xs text-slate-600">Les résultats résumés et les contrôles financiers seront envoyés au modèle choisi.</div>
                     </div>
                   </div>
 
@@ -2030,8 +2031,8 @@
                           'Score composite 0-10 mesurant la dépendance aux décisions du gérant vs les facteurs de marché.'],
                         ['R²', formatPercent((studyResult.block_a.net.regression.r2||0)*100, 1), 'text-blue-400',
                           'Part de variance expliquée par les facteurs FF. 1 − R² = risque idiosyncratique entrant dans le score.'],
-                        ['Turnover ann.', studyResult.block_a.net.activity?.turnover_ann_pct != null ? formatPercent(studyResult.block_a.net.activity.turnover_ann_pct, 0) : '—', 'text-slate-300',
-                          'Turnover annualisé : notionnel brut échangé / AUM moyen × (252 / N jours). 100% = l\'équivalent du portefeuille rebalancé une fois par an.'],
+                        ['Turnover ann.', studyResult.block_a.net.activity?.turnover_ann_pct != null ? formatPercent(studyResult.block_a.net.activity.turnover_ann_pct, 1) : '—', 'text-slate-300',
+                          'Turnover annualisé : notionnel exécuté / AUM moyen × (365 / jours calendaires entre premier et dernier ordre). 100% = l\'équivalent du portefeuille rebalancé une fois par an.'],
                         ['Trades total', studyResult.block_a.net.activity?.total_trades ?? '—', 'text-slate-300',
                           'Nombre d\'ordres exécutés (état Done) dans le(s) fichier(s) JSON du carnet d\'ordres.'],
                       ]" :key="label" class="bg-slate-900 rounded p-3 text-center">
@@ -2177,9 +2178,9 @@
                       ['P&L FIFO (brut)', fmtPnl(studyResult.block_b.totals?.total_pnl, studyResult.meta?.currency), 'text-slate-200',
                         'P&L total reconstruit par le FIFO, brut de frais de gestion.'],
                       ['Frais cumulés (est.)', fmtPnl(studyResult.block_b.totals?.fee_drag_prod, studyResult.meta?.currency), 'text-red-300',
-                        'Frais de gestion estimés (accrual quotidien sur l\'AUM, au taux du termsheet) cumulés depuis la date de fixing jusqu\'à la date du dernier ordre du carnet.'],
+                        'Frais de gestion, de performance et de transaction estimés jusqu’à l’arrêté, selon les conventions configurées.'],
                       ['P&L net estimé', fmtPnl(studyResult.block_b.totals?.total_pnl_net_of_fees, studyResult.meta?.currency), 'text-slate-200',
-                        'P&L FIFO brut moins les frais de gestion cumulés estimés — comparable à la performance NAV publiée.'],
+                        'P&L prix/change plus dividendes acquis, moins frais de gestion, de performance et de transaction.'],
                       ['P&L implicite NAV', fmtPnl(studyResult.block_b.totals.reconciliation.nav_implied_pnl_prod, studyResult.meta?.currency), 'text-emerald-400',
                         'P&L réel du fonds calculé directement depuis la NAV quotidienne et les flux de souscription/rachat (Δ Outstanding × NAV à chaque mouvement). Indépendant du carnet d\'ordres et du FIFO.'],
                       ['Écart résiduel', studyResult.block_b.totals.reconciliation.gap_pct != null ? (studyResult.block_b.totals.reconciliation.gap_pct >= 0 ? '+' : '') + formatPercent(studyResult.block_b.totals.reconciliation.gap_pct, 1) : '—',
@@ -2225,6 +2226,19 @@
                       </div>
                     </div>
                   </div>
+                </div>
+
+                <div v-if="studyResult.block_b.totals?.reconciliation?.annual_fees?.length" class="card">
+                  <h3 class="text-sm font-bold mb-3">Frais et HWM par année — {{ studyResult.meta?.currency }}</h3>
+                  <p class="text-xs text-slate-400 mb-3">{{ studyResult.block_b.totals.reconciliation.annual_fees_note }}</p>
+                  <div class="overflow-x-auto"><table class="w-full text-xs">
+                    <thead><tr><th class="text-left p-2">Année / arrêté</th><th class="text-right p-2">NAV</th><th class="text-right p-2">HWM</th><th class="text-right p-2">Gestion</th><th class="text-right p-2">Performance</th><th class="text-right p-2">Transactions</th></tr></thead>
+                    <tbody><tr v-for="row in studyResult.block_b.totals.reconciliation.annual_fees" :key="row.year" class="border-t border-slate-700">
+                      <td class="p-2">{{ row.year }} · {{ formatDate(row.as_of) }}</td>
+                      <td class="text-right p-2">{{ formatNumber(row.nav_final, 6) }}</td><td class="text-right p-2">{{ formatNumber(row.hwm_final, 4) }}</td>
+                      <td v-for="key in ['management_fee_prod', 'performance_fee_prod', 'transaction_cost_prod']" :key="key" class="text-right p-2">{{ row[key] == null ? 'non renseigné' : formatNumber(row[key], 2) }}</td>
+                    </tr></tbody>
+                  </table></div>
                 </div>
 
                 <div v-if="studyResult.dividends" class="card">
@@ -2306,7 +2320,7 @@
                     ['Round-trips', studyResult.block_c.round_trips?.count ?? '—', 'text-slate-300',
                       'Nombre d\'aller-retours complets (achat + vente) identifiés par appariement FIFO. Chaque round-trip clôturé génère un P&L réalisé.'],
                     ['Hit ratio', formatPercent(studyResult.block_c.round_trips?.win_rate_pct ?? 0, 1), studyResult.block_c.round_trips?.win_rate_pct >= 50 ? 'text-emerald-400' : 'text-amber-400',
-                      'Pourcentage de round-trips gagnants (P&L réalisé > 0). 50% = autant de gains que de pertes. >60% = bonne qualité de sélection.'],
+                      'Pourcentage de round-trips gagnants (P&L réalisé > 0). 50% = autant de gains que de pertes. Ce taux ne prouve pas une compétence de sélection.'],
                     ['Profit factor', formatNumber(studyResult.block_c.round_trips?.profit_factor ?? 0, 2), studyResult.block_c.round_trips?.profit_factor >= 1 ? 'text-emerald-400' : 'text-red-400',
                       'Somme des P&L gagnants / valeur absolue des P&L perdants. >1 = l\'argent gagné dépasse l\'argent perdu. >2 = excellent. <1 = destruction de valeur.'],
                     ['Durée médiane', formatNumber(studyResult.block_c.round_trips?.median_holding_days ?? 0, 0)+'j', 'text-blue-400',
@@ -2347,7 +2361,7 @@
                         ['Gross traded', fmtPnl(studyResult.block_c.turnover?.gross_traded_prod, studyResult.meta?.currency), 'Notionnel brut total échangé (achats + ventes) sur toute la période du carnet d\'ordres, dans la devise du produit.'],
                         ['AUM moyen', fmtPnl(studyResult.block_c.turnover?.avg_aum_prod, studyResult.meta?.currency), 'AUM moyen estimé sur la période : NAV × certificats en circulation, moyenné sur les observations disponibles.'],
                         ['Turnover (période)', formatPercent((studyResult.block_c.turnover?.turnover_rate ?? 0)*100, 1), 'Gross traded / AUM moyen sur toute la période du carnet d\'ordres. Non annualisé — dépend de la durée couverte.'],
-                        ['Turnover annualisé', formatPercent((studyResult.block_c.turnover?.turnover_annualized ?? 0)*100, 1), 'Turnover rapporté à une année (× 252 / N jours). Permet la comparaison entre produits de durées différentes. 100% = l\'équivalent du portefeuille rebalancé 1× par an.'],
+                        ['Turnover annualisé', formatPercent((studyResult.block_c.turnover?.turnover_annualized ?? 0)*100, 1), 'Turnover rapporté à une année (× 365 / jours calendaires entre premier et dernier ordre). Permet la comparaison entre produits de durées différentes. 100% = l\'équivalent du portefeuille rebalancé 1× par an.'],
                         ['Période', (studyResult.block_c.turnover?.period_days ?? '—')+' jours', 'Nombre de jours calendaires couverts par le carnet d\'ordres (du premier au dernier ordre exécuté).'],
                       ]" :key="k" class="border-b border-slate-800/50">
                         <td class="py-1.5 text-slate-500">
@@ -2379,11 +2393,11 @@
                 <!-- Explication du concept -->
                 <div class="card border border-slate-700/50 text-xs text-slate-400 leading-5">
                   <div class="font-semibold text-slate-300 mb-1">💡 Lecture du Bloc D</div>
-                  Ce bloc classe chaque position clôturée selon <strong class="text-slate-200">deux axes</strong> :
+                  Ce bloc classe chaque titre, réalisé et latent inclus, selon <strong class="text-slate-200">deux axes</strong> :
                   <span class="text-violet-300">la conviction</span> (poids &gt; {{ formatPercentRaw(studyResult.block_d.conviction_matrix?.params?.conviction_weight_pct) }} du portefeuille
                   OU durée maximale &gt;= {{ studyResult.block_d.conviction_matrix?.params?.long_term_days }}j) et
                   <span class="text-violet-300">le résultat</span> (P&L positif ou négatif).
-                  Un bon gérant a un maximum de positions en haut à gauche (conviction → profit) et un minimum en bas à droite (incertitude → pertes).
+                  La matrice décrit les résultats par titre, latent inclus ; elle ne mesure pas un alpha de conviction.
                 </div>
 
                 <!-- KPI row — libellés contextualisés -->
@@ -2392,7 +2406,7 @@
                     [studyResult.block_d.holding_distribution?.long_term_count ?? '—',
                       'Long terme', `> ${studyResult.block_d.conviction_matrix?.params?.long_term_days ?? 180}j`,
                       'text-emerald-400',
-                      'Positions clôturées dont la durée dépasse le seuil long terme du manifeste. Reflet de la conviction du gérant à tenir ses positions.'],
+                      'Positions clôturées dont la durée dépasse le seuil long terme du manifeste. Indicateur de durée, sans preuve de conviction.'],
                     [studyResult.block_d.holding_distribution?.tactical_count ?? '—',
                       'Tactique', 'court terme',
                       'text-amber-400',
@@ -2577,7 +2591,7 @@
               <div v-if="activeStudyTab === 'bh'" class="flex flex-col gap-5">
                 <!-- Période -->
                 <div v-if="studyResult.meta?.nav_start_date" class="text-[10px] text-slate-500 -mb-2">
-                  Période B&amp;H : {{ formatDate(studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
+                  Période B&amp;H : {{ formatDate(studyResult.block_e?.period_start || studyResult.meta.nav_start_date) }} → {{ formatDate(studyResult.meta.nav_current_date) }}
                   · {{ studyResult.meta.nav_n_obs }} observations NAV
                 </div>
 
@@ -2645,7 +2659,7 @@
                         : 'border border-red-800/50 bg-red-950/20'">
                       <div class="text-2xl font-bold"
                         :class="studyResult.block_e.value_added_pct >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                        {{ studyResult.block_e.value_added_pct >= 0 ? '+' : '' }}{{ formatPercent(studyResult.block_e.value_added_pct, 2) }}
+                        {{ studyResult.block_e.value_added_pct >= 0 ? '+' : '' }}{{ formatNumber(studyResult.block_e.value_added_pct, 2) + ' points' }}
                       </div>
                       <div class="text-[10px] text-slate-500 mt-1">Valeur ajoutée par la gestion</div>
                       <div class="text-[10px] mt-1"
@@ -2750,9 +2764,9 @@
                     <div class="grid grid-cols-4 gap-3 study-metric-grid">
                       <div v-for="kpi in [
                         { label: 'Score Entrées', value: studyResult.block_h.entry_score_mean, sub: studyResult.block_h.n_buy + ' BUY',
-                          tip: 'Entry Score (achats). 1.0 = acheté exactement au plus bas local sur ±30 j. 0.5 = trader aléatoire. Formule : (max_local − prix_achat) / (max_local − min_local).' },
+                          tip: 'Entry Score (achats). 1.0 = acheté exactement au plus bas local sur ±30 j. 0.5 = milieu de la fourchette locale, pas un scénario aléatoire. Formule : (max_local − prix_achat) / (max_local − min_local).' },
                         { label: 'Score Sorties', value: studyResult.block_h.exit_score_mean,  sub: studyResult.block_h.n_sell + ' SELL',
-                          tip: 'Exit Score (ventes). 1.0 = vendu exactement au plus haut local sur ±30 j. 0.5 = trader aléatoire. Formule : (prix_vente − min_local) / (max_local − min_local).' },
+                          tip: 'Exit Score (ventes). 1.0 = vendu exactement au plus haut local sur ±30 j. 0.5 = milieu de la fourchette locale, pas un scénario aléatoire. Formule : (prix_vente − min_local) / (max_local − min_local).' },
                         { label: 'Score Global',  value: studyResult.block_h.global_score_mean, sub: 'baseline = 0.50',
                           tip: 'Moyenne de tous les scores (achats + ventes). Baseline aléatoire = 0.50. Un t-test (one-sample, µ₀=0.5) évalue si l\'écart est statistiquement significatif.' },
                         { label: 'Couverture',    value: null, raw: formatPercent(studyResult.block_h.coverage_pct, 0), sub: studyResult.block_h.n_trades_analyzed + '/' + studyResult.block_h.n_trades_total + ' trades',
@@ -2787,7 +2801,7 @@
                         </thead>
                         <tbody class="text-slate-300">
                           <tr class="border-b border-slate-900">
-                            <td class="py-1.5 text-slate-500" title="Score moyen de timing sur la dimension. 1.0 = timing parfait, 0.5 = trader aléatoire, 0.0 = pire timing possible.">Score moyen</td>
+                            <td class="py-1.5 text-slate-500" title="Score moyen de timing sur la dimension. 1.0 = timing parfait, 0.5 = milieu de la fourchette locale, pas un scénario aléatoire, 0.0 = pire timing possible.">Score moyen</td>
                             <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.entry_score_mean, 3) }}</td>
                             <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.exit_score_mean, 3) }}</td>
                             <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.global_score_mean, 3) }}</td>
@@ -2814,7 +2828,7 @@
                             <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.tstat_global, 3) }}</td>
                           </tr>
                           <tr>
-                            <td class="py-1.5 text-slate-500" title="Probabilité d'obtenir ce score si le gérant n'avait aucune compétence de timing (H₀ : µ = 0.5). p &lt; 0.05 = rejet de H₀ à 5%. Calculé uniquement sur le score global (tous trades).">p-value global</td>
+                            <td class="py-1.5 text-slate-500" title="Test de la moyenne globale contre le milieu géométrique de la fourchette (H₀ : µ = 0,5), avec dépendance par titre. Ce test ne compare pas le gérant à un trader aléatoire simulé.">p-value global</td>
                             <td class="text-right text-slate-600">—</td>
                             <td class="text-right text-slate-600">—</td>
                             <td class="text-right font-mono">{{ formatNumber(studyResult.block_h.pvalue_global, 4) }}</td>
@@ -2974,7 +2988,7 @@
                         { label: 'Alpha moyen', value: null, raw: formatPercent((studyResult.block_i.global_alpha_mean ?? 0) * 100, 2), sub: 'benchmark-adjusted', positive: (studyResult.block_i.global_alpha_mean ?? 0) >= 0,
                           tip: 'Alpha moyen global pondéré par horizon (poids : 1M×15%, 3M×25%, 6M×30%, 12M×30%). Positif = sélection surperforme le benchmark en moyenne post-achat.' },
                         { label: 'Taux de succès', value: null, raw: formatPercent((studyResult.block_i.global_success_rate ?? 0) * 100, 0), sub: '% achats α > 0', positive: (studyResult.block_i.global_success_rate ?? 0) >= 0.5,
-                          tip: '% des achats pour lesquels le titre a surperformé le benchmark sur au moins un horizon. 50% = aléatoire. >60% = compétence de sélection.' },
+                          tip: 'Taux de succès agrégé des horizons disponibles, selon les poids du score. 50% = moitié des achats gagnants. Ce taux descriptif ne démontre pas une compétence statistique.' },
                         { label: 'Couverture', value: null, raw: formatPercent(studyResult.block_i.coverage_pct ?? 0, 0), sub: studyResult.block_i.n_buys_analyzed + '/' + studyResult.block_i.n_buys_total + ' achats', positive: true,
                           tip: '% des ordres BUY pour lesquels un historique de prix était disponible dans le Price Store.' },
                       ]" :key="kpi.label"
@@ -3002,8 +3016,8 @@
                               <th class="text-right pb-2" title="Nombre d'achats pour lesquels les données de prix sont disponibles sur cet horizon.">n achats</th>
                               <th class="text-right pb-2" title="Alpha moyen = moyenne(Retour titre − Retour benchmark) sur tous les achats analysés à cet horizon.">Alpha moyen</th>
                               <th class="text-right pb-2" title="Médiane des alphas — moins sensible aux outliers que la moyenne.">Alpha médian</th>
-                              <th class="text-right pb-2" title="% des achats avec alpha positif (titre surperforme le benchmark post-achat). 50% = aléatoire.">Taux succès</th>
-                              <th class="text-right pb-2" title="Écart-type des alphas à cet horizon. Mesure la dispersion de la compétence de sélection.">σ alpha</th>
+                              <th class="text-right pb-2" title="% des achats avec alpha positif (titre surperforme le benchmark post-achat). 50% = moitié des achats gagnants.">Taux succès</th>
+                              <th class="text-right pb-2" title="Écart-type des alphas à cet horizon. Mesure la dispersion des surperformances observées.">σ alpha</th>
                             </tr>
                           </thead>
                           <tbody class="text-slate-300">
@@ -3418,7 +3432,7 @@
                       </div>
                       <div>
                         <div class="text-lg font-bold text-slate-200">
-                          {{ formatPercent(studyResult.block_j.sub_scores.downside_risk.semi_deviation_pct, 2) }}
+                          {{ formatPercent(studyResult.block_j.sub_scores.downside_risk.semi_deviation_ann_pct, 2) }}
                         </div>
                         <div class="text-xs text-slate-400">Semi-déviation</div>
                       </div>
@@ -3628,7 +3642,7 @@
                           <th class="text-left py-2 px-2">Période</th>
                           <th class="text-right py-2 px-2">Trades</th>
                           <th class="text-right py-2 px-2">Ratio activité</th>
-                          <th class="text-right py-2 px-2">Flux net</th>
+                          <th class="text-right py-2 px-2">Flux net ({{ studyResult.meta?.currency }})</th>
                           <th class="text-right py-2 px-2">Timing moy.</th>
                           <th class="text-left py-2 px-2">Diagnostic</th>
                         </tr>
@@ -3831,7 +3845,7 @@
                         <td class="py-1.5 px-2 text-slate-400">Attribution Brinson-Fachler (Bloc G)</td>
                         <td class="py-1.5 px-2 text-center text-slate-600">—</td>
                         <td class="py-1.5 px-2 text-right font-mono text-slate-600">N/C</td>
-                        <td class="py-1.5 px-2 text-slate-600 text-[10px]">Rendements sectoriels via ETFs SPDR US (biais USD). Benchmark snapshot actuel supposé stable.</td>
+                        <td class="py-1.5 px-2 text-slate-600 text-[10px]">Attribution statique sur proxies ; sources et poids détaillés dans le bloc G.</td>
                         <td class="py-1.5 px-2 text-blue-500 text-[10px]">
                           <button @click="activeStudyTab = 'brinson'"
                             class="underline hover:text-blue-400">→ Aller à l'onglet H</button>
@@ -4168,11 +4182,10 @@
                       </div>
                     </div>
                     <div class="mt-3 pt-3 border-t border-slate-800 text-[10px] text-slate-500">
-                      <strong class="text-slate-400">Interprétation recommandée :</strong> "Un panier d'ETFs factoriels aux mêmes expositions aurait réalisé
-                      {{ (studyResult.block_f.replicant_total_pct >= 0 ? '+' : '') + formatPercentRaw(studyResult.block_f.replicant_total_pct) }} —
-                      le gérant a {{ studyResult.block_f.alpha_gap_pct >= 0 ? 'ajouté' : 'détruit' }}
-                      {{ formatPercentRaw(Math.abs(studyResult.block_f.alpha_gap_pct)) }} au-delà
-                      {{ Math.abs(studyResult.block_f.alpha_tstat) >= 2 ? '(statistiquement significatif)' : '(non significatif statistiquement)' }}."
+                      <strong class="text-slate-400">Interprétation :</strong> reconstruction factorielle théorique de
+                      {{ formatPercent(studyResult.block_f.replicant_total_pct, 2) }} ; écart fonds moins réplicant de
+                      {{ formatNumber(studyResult.block_f.alpha_gap_pct, 2) }} points.
+                      Cet ajustement sur le même échantillon ne démontre ni un portefeuille négociable ni un talent durable.
                     </div>
                   </div>
 
@@ -4377,8 +4390,8 @@
                       <div><span class="text-slate-600">Poids benchmark :</span> <span class="text-slate-400">{{ brinsonResult.bench_weight_method }}</span></div>
                     </div>
                     <div class="mt-2 pt-2 border-t border-slate-800 text-[10px] text-amber-700/70 space-y-0.5">
-                      <div>⚠ Rendements sectoriels benchmark = ETFs SPDR (XLK/XLF/XLV…) — biais US. Pour un AMC international, allocation et sélection sont toutes deux sensibles au choix des proxies.</div>
-                      <div>⚠ Benchmark snapshot actuel supposé stable sur la période (raccourci méthodologique noté dans le rapport).</div>
+                      <div>⚠ {{ studyResult.manifest?.files?.market_data ? "Rendements sectoriels fournis dans le dossier ; vérifier la représentativité des proxies." : "Rendements sectoriels via ETFs SPDR US ; vérifier leur adéquation au portefeuille." }}</div>
+                      <div>⚠ Attribution statique selon les poids et dates indiqués ci-dessus ; ce calcul ne retrace pas les allocations successives du fonds.</div>
                     </div>
                   </div>
 
@@ -4998,8 +5011,8 @@ const blockMethodology = {
     sources: 'params.termsheet_positions (recommandé) ou carnet d\'ordres + Def.txt (fallback). yfinance pour les prix ajustés T0 et actuels.',
   },
   replicability: {
-    label: 'F — Réplicabilité par un ETF passif',
-    but: 'Peut-on reproduire la stratégie avec un ETF passif à moindre coût ? Un R² élevé indique que le gérant "ressemble" à un indice — sa valeur ajoutée potentielle est faible relativement aux frais.',
+    label: 'F — Reconstruction factorielle théorique',
+    but: 'Peut-on reproduire la stratégie avec un ETF passif à moindre coût ? Le R² décrit la part des variations expliquée par les facteurs ; il ne démontre pas une réplication investissable.',
     methode: 'Comparaison du R² factoriel avec un seuil de réplicabilité configuré. Calcul de l\'information ratio (alpha / tracking error vs benchmark). Analyse du gap de performance vs le benchmark défini.',
     limites: 'Un R² élevé n\'est pas nécessairement négatif pour une stratégie factor-based explicite. La réplicabilité dépend du benchmark choisi — un benchmark non adapté biaiserait le diagnostic.',
     sources: 'Résultats du Bloc A (régression OLS). Benchmark défini dans le manifeste AMC.',
@@ -5007,13 +5020,13 @@ const blockMethodology = {
   brinson: {
     label: 'G — Attribution Brinson-Fachler (allocation + sélection)',
     but: 'Décomposer la sur- ou sous-performance en deux effets : Allocation (le gérant a-t-il surpondéré les bons secteurs ?) et Sélection (a-t-il choisi les meilleurs titres au sein de chaque secteur ?).',
-    methode: 'Attribution Brinson-Fachler. Poids portefeuille = snapshot actuel Def.txt. Benchmark sectoriel = ETFs SPDR (XLK, XLF, XLV, XLE…). Rendements calculés sur la durée de vie du carnet d\'ordres.',
-    limites: 'Benchmark sectoriel basé sur des ETFs US — biais pour les AMC à composantes non-US. Le snapshot de composition est figé (pas une série temporelle de poids). L\'effet Sélection est plus fiable que l\'effet Allocation pour les AMC internationaux.',
-    sources: 'Composition Def.txt. ETFs SPDR sectoriels via yfinance. Carnet d\'ordres JSON.',
+    methode: 'Attribution Brinson-Fachler. Poids du panier de référence et rendements sectoriels du dossier lorsqu’ils sont fournis, sinon proxies disponibles. Période indiquée dans le bloc G.',
+    limites: 'Attribution statique et indicative, hors scoring. Allocation et sélection dépendent toutes deux de la représentativité des proxies.',
+    sources: 'Panier de référence ou composition ; sources sectorielles et dates indiquées dans le résultat.',
   },
   timing: {
     label: 'H — Timing Score',
-    but: 'Le gérant achète-t-il à des prix bas et vend-il à des prix hauts ? Un score > 50% signifie un meilleur timing que le hasard. Répondre à : "est-ce que le gérant entre et sort au bon moment ?"',
+    but: 'Le gérant achète-t-il à des prix bas et vend-il à des prix hauts ? Un score > 50% situe les exécutions dans la moitié favorable de leur fourchette locale, sans test contre le hasard. Répondre à : "est-ce que le gérant entre et sort au bon moment ?"',
     methode: 'Pour chaque trade, calcul du score positionnel dans le range [min, max] des 30 jours autour de l\'ordre (fenêtre ±15 jours). Score achat : position dans le range (0 = le moins cher, 1 = le plus cher). Score vente = 1 − score achat. Moyenne et test t vs 0.5 (hypothèse nulle = timing aléatoire).',
     limites: 'Utilise des prix ex-post (évaluation rétrospective). Significatif statistiquement seulement pour N > 30 trades. Ne capture pas la gestion du risque intraday ni les conditions de marché extraordinaires.',
     sources: 'Carnet d\'ordres JSON. Prix historiques yfinance (fenêtre ±15 jours autour de chaque trade).',
@@ -5074,7 +5087,7 @@ function receiveAiSynthesis(data) {
     aiPayloadText.value = data.payload || ''
     synthesisNotice.value = accepted.inserted
       ? 'Synthèse IA intégrée au rapport. Vous pouvez la relire et la modifier avant l’export PDF.'
-      : 'Texte IA reçu ci-dessous. Votre synthèse existante est conservée ; cliquez sur « Insérer dans la synthèse » pour la remplacer.'
+      : 'Brouillon IA reçu ci-dessous, non validé. Vérifiez les chiffres, les périodes et les conclusions, puis cliquez sur « Insérer dans la synthèse » pour l’utiliser dans le rapport.'
   } catch (e) { synthesisNotice.value = e.message }
 }
 

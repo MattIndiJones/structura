@@ -6,7 +6,9 @@
           <BackLink :fallback="{ path: '/booking', query: { deal: dealId } }" />
           <div>
             <div class="valuation-eyebrow">Life Cycle · Historique des MtM</div>
-            <h1>{{ deal?.reference || `Deal #${dealId}` }}</h1>
+            <h1><DealReferenceLink v-if="deal" :deal-id="deal.id"
+                                   :reference="deal.reference" />
+              <span v-else>{{ `Deal #${dealId}` }}</span></h1>
             <p v-if="deal">
               {{ deal.product_type || 'Produit structuré' }} · {{ deal.contrepartie || 'Contrepartie non renseignée' }}
             </p>
@@ -233,6 +235,7 @@ import BackLink from '../components/ui/BackLink.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SensitiveValue from '../components/SensitiveValue.vue'
 import PriceComparisonPanel from '../components/PriceComparisonPanel.vue'
+import DealReferenceLink from '../components/DealReferenceLink.vue'
 import { apiFetch } from '../utils/api.js'
 import {
   formatDate, formatDateTime, formatFractionAsPercent, formatInt,
@@ -278,7 +281,7 @@ function modelLabel(run) {
   const model = String(marketUsed(run).model || '').toLowerCase()
   return {
     constant: 'GBM', gbm: 'GBM', heston: 'Heston', sabr: 'SABR',
-    local_vol: 'Vol locale', lsv: 'LSV', deterministic_cashflow: 'Flux déterministe',
+    local_vol: 'Vol locale', localvol: 'Vol locale', lsv: 'LSV', deterministic_cashflow: 'Flux déterministe',
   }[model] || model || '—'
 }
 

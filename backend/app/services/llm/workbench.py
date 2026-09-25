@@ -34,13 +34,15 @@ def connection_options(req):
                 ollama_url=getattr(req, "url", None) or req.ollama_url)
 
 
-def generate_text(preview, req: AiOptions, *, temperature=0.3, max_tokens=3000):
+def generate_text(preview, req: AiOptions, *, temperature=0.3, max_tokens=3000, context_tokens=None):
     prompt = resolve_prompt(preview, req.prompt_override)
     options = connection_options(req)
+    if context_tokens is not None:
+        options["context_tokens"] = context_tokens
     started = time.perf_counter()
     completion = providers.complete_with_metadata(**options, **prompt,
                                                  temperature=temperature, max_tokens=max_tokens)
-    return {"text": completion.text, "provider": options["provider"],
+    return {"text": completion.text, "finish_reason": getattr(completion, "finish_reason", None), "provider": options["provider"],
             "requested_model": options["model"], "model": completion.effective_model,
             "effective_model": completion.effective_model,
             "generated_at": datetime.now(timezone.utc).isoformat(), "generation_id": str(uuid4()),

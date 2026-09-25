@@ -6,6 +6,7 @@ import { courbeDividende } from '../composables/useDividendCurve.js'
 import { CALCULATION_LIMITS, estimatePricingCalculation } from '../utils/calculationBudget.js'
 import { buildModelCalendars } from '../utils/productModels.js'
 import { normaliseCorrelation } from '../utils/rfqBasket.js'
+import { defaultUnderlying, fractionToPercent, PERCENT_MARKET_FIELDS } from '../utils/underlyingDefaults.js'
 
 const DEFAULT_SCRIPT = `# Autocall Athena 3 ans
 PARAM COUPON = 8%
@@ -33,6 +34,7 @@ export const usePricingStore = defineStore('pricing', () => {
   const script = ref(DEFAULT_SCRIPT)
   const scriptParams = ref([])
   const parseError = ref(null)
+  let parseRequestFailed = false
   // Validation is a gesture: Ctrl+S, « Valider », or the start of a
   // calculation. Typing never commits a declaration any more — a
   // `PARAM M_KI_BAR = 6` caught before its `0%` used to price a 6 % barrier.
@@ -869,6 +871,7 @@ export const usePricingStore = defineStore('pricing', () => {
     const parsedScript = script.value
     if (!parsedScript.trim()) {
       scriptParams.value = []; scriptConstats.value = []; parseError.value = null
+      parseRequestFailed = false
       scriptHasMaturityEvent.value = false
       scriptAtDates.value = []
       _syncParamOverrides(); _syncConstatOverrides()
@@ -878,14 +881,27 @@ export const usePricingStore = defineStore('pricing', () => {
       return true
     }
     try {
-      const res = await fetch('/api/parse', {
+      const res = await apiFetch('/api/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ script: parsedScript }),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => null)
       if (revision !== _parseRevision || script.value !== parsedScript) return false
       checkedScript.value = parsedScript
+      if (!res.ok) {
+        const detail = typeof data?.detail === 'string' ? data.detail : data?.detail?.message
+        const message = res.status === 401
+          ? 'Session expirée ou absente : reconnectez-vous.'
+          : res.status === 403
+            ? 'Vous n’avez pas les droits nécessaires pour valider ce script.'
+            : detail || `Le serveur a refusé la validation (HTTP ${res.status}).`
+        throw new Error(message)
+      }
+      if (!data || typeof data.ok !== 'boolean') {
+        throw new Error('Réponse inattendue du serveur de validation. Réessayez.')
+      }
+      parseRequestFailed = false
       if (!data.ok) {
         // A parse error means "I don't know what this script declares", not
         // "it declares nothing". The last valid reading is kept and NOT
@@ -894,7 +910,7 @@ export const usePricingStore = defineStore('pricing', () => {
         //
         // Nothing can be valued on stale declarations: a calculation
         // revalidates the script first and stops on this error.
-        parseError.value = data.errors
+        parseError.value = data.errors || 'Le serveur signale une erreur de syntaxe sans précision.'
         return false
       }
       const previousParams = scriptParams.value
@@ -912,6 +928,7 @@ export const usePricingStore = defineStore('pricing', () => {
     } catch (e) {
       if (revision === _parseRevision && script.value === parsedScript) {
         checkedScript.value = parsedScript
+        parseRequestFailed = true
         parseError.value = e.message
       }
       return false
@@ -954,6 +971,7 @@ export const usePricingStore = defineStore('pricing', () => {
     }
     const detail = Array.isArray(parseError.value)
       ? parseError.value.join('\n') : String(parseError.value)
+    if (parseRequestFailed) return `Validation du script impossible : ${detail.split('\n')[0]}`
     return `Script non valide — corrigez-le dans l’onglet Script : ${detail.split('\n')[0]}`
   }
 
@@ -1070,7 +1088,7 @@ export const usePricingStore = defineStore('pricing', () => {
     const [currency, convention, date] = key.split('|')
     _effectiveInFlight.add(key)
     try {
-      const res = await fetch('/api/calendar/resolve', {
+      const res = await apiFetch('/api/calendar/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date, currency, convention }),
@@ -1369,7 +1387,7 @@ export const usePricingStore = defineStore('pricing', () => {
     _startProgress((globalParams.N / 20000) * 350)
     try {
       request = await _authoritativeProductRequest(request)
-      const res = await fetch('/api/price', {
+      const res = await apiFetch('/api/price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1465,7 +1483,15 @@ export const usePricingStore = defineStore('pricing', () => {
       if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
       else {
         const data = await res.json()
-        result.value = { ...result.value, greeks: data.greeks }
+        result.value = {
+          ...result.value,
+          greeks: data.greeks,
+          // Use the spot/strike ratios from this Greek calculation, not from
+          // an earlier price which may have used different market data.
+          _greekDated: enCours,
+          _greekSpotRatios: enCours ? data.past?.performances : null,
+          _greekPreStrike: enCours && !!data.pre_strike,
+        }
         rightTab.value = 'greeks'
       }
     } catch (e) { error.value = e.message }
@@ -1481,7 +1507,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null
     _startProgress(800)
     try {
-      const res = await fetch('/api/profile', {
+      const res = await apiFetch('/api/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(_baseBody()),
@@ -1499,7 +1525,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null
     _startProgress(1500)
     try {
-      const res = await fetch('/api/paths', {
+      const res = await apiFetch('/api/paths', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ..._baseBody(), N_stat: 500, N_display: 50 }),
@@ -1517,7 +1543,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null
     _startProgress(2000)
     try {
-      const res = await fetch('/api/proba', {
+      const res = await apiFetch('/api/proba', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ..._baseBody(), N: 5000 }),
@@ -1535,7 +1561,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null
     _startProgress(8000)
     try {
-      const res = await fetch('/api/backtest', {
+      const res = await apiFetch('/api/backtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1646,7 +1672,7 @@ export const usePricingStore = defineStore('pricing', () => {
   async function loadTranscribeEngines(force = false) {
     if (transcribeEngines.value && !force) return transcribeEngines.value
     try {
-      const res = await fetch('/api/script/transcribe/engines')
+      const res = await apiFetch('/api/script/transcribe/engines')
       if (res.ok) transcribeEngines.value = await res.json()
     } catch { /* le micro restera grisé */ }
     return transcribeEngines.value
@@ -1657,7 +1683,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // d'une requête de transcription, qui n'y survivait pas.
   async function prepareTranscribe() {
     try {
-      const res = await fetch('/api/script/transcribe/prepare', { method: 'POST' })
+      const res = await apiFetch('/api/script/transcribe/prepare', { method: 'POST' })
       const data = await res.json()
       if (!res.ok) return { error: data.detail || 'Erreur serveur' }
       await loadTranscribeEngines(true)
@@ -1676,7 +1702,7 @@ export const usePricingStore = defineStore('pricing', () => {
       // Le nom de fichier porte l'extension dont le décodeur se sert pour
       // choisir son démultiplexeur — un blob sans nom arrive en `.bin`.
       form.append('audio', blob, 'dictee.webm')
-      const res = await fetch('/api/script/transcribe', { method: 'POST', body: form })
+      const res = await apiFetch('/api/script/transcribe', { method: 'POST', body: form })
       const data = await res.json()
       return res.ok ? data : { error: data.detail || 'Erreur serveur' }
     } catch (e) {
@@ -1735,7 +1761,7 @@ export const usePricingStore = defineStore('pricing', () => {
     // Rough cost calibration: ~4.7s for the 200×500×5 default on a GBM/local-vol model.
     _startProgress((n_outer * n_inner * n_dates / 500000) * 4700)
     try {
-      const res = await fetch('/api/mtf', {
+      const res = await apiFetch('/api/mtf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -1766,7 +1792,7 @@ export const usePricingStore = defineStore('pricing', () => {
     mtfDrillLoading.value = true
     mtfDrillError.value = null
     try {
-      const res = await fetch('/api/mtf/drilldown', {
+      const res = await apiFetch('/api/mtf/drilldown', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...mtfBody.value, t, scenario_ids: ids, labels }),
@@ -1804,7 +1830,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null
     _startProgress((N || 8000) / 8000 * ((max_iter || 40) / 40) * 1500)
     try {
-      const res = await fetch('/api/solve', {
+      const res = await apiFetch('/api/solve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1828,7 +1854,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null
     _startProgress((N || 4000) * (x_steps || 9) * (y_steps || 9) / (4000 * 81) * 3000)
     try {
-      const res = await fetch('/api/grid', {
+      const res = await apiFetch('/api/grid', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1867,7 +1893,7 @@ export const usePricingStore = defineStore('pricing', () => {
     const sequentialMs = cells * (N || 2000) / (45 * 2000) * 3000
     _startProgress(POOL_SPAWN_OVERHEAD_MS + sequentialMs / EFFECTIVE_SPEEDUP)
     try {
-      const res = await fetch('/api/scenarios', {
+      const res = await apiFetch('/api/scenarios', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1943,7 +1969,7 @@ export const usePricingStore = defineStore('pricing', () => {
     marketDataLoading.value = true
     yfStatus.value = `Chargement ${tk}${requestedAsOf ? ` au ${requestedAsOf}` : ''}…`
     try {
-      const res = await fetch(_histVolUrl([tk], requestedAsOf))
+      const res = await apiFetch(_histVolUrl([tk], requestedAsOf))
       const data = await res.json()
       if (revision !== _marketDataRevision) return
       if (data.error) { yfStatus.value = `⚠ ${tk}: ${data.error}`; return }
@@ -1997,7 +2023,7 @@ export const usePricingStore = defineStore('pricing', () => {
     yfStatus.value = `Téléchargement${requestedAsOf ? ` au ${requestedAsOf}` : ''} en cours…`
     const tickers = pairs.map(p => p.tick)
     try {
-      const res = await fetch(_histVolUrl(tickers, requestedAsOf))
+      const res = await apiFetch(_histVolUrl(tickers, requestedAsOf))
       const data = await res.json()
       if (revision !== _marketDataRevision) return
       if (data.error) { yfStatus.value = '⚠ ' + data.error; return }
@@ -2073,7 +2099,7 @@ export const usePricingStore = defineStore('pricing', () => {
     const q = new URLSearchParams({ tickers: tk.join(','),
                                      start: debut.toISOString().split('T')[0], end: jour })
     try {
-      const res = await fetch(`/api/finance/hist_prices?${q}`)
+      const res = await apiFetch(`/api/finance/hist_prices?${q}`)
       if (!res.ok) return {}
       const data = await res.json()
       const dates = data.dates || []
@@ -2092,14 +2118,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // ── Underlyings management ────────────────────────────────────────
   // ── Reset / Load from DB ──────────────────────────────────────────
   function _defaultUnderlying(n) {
-    return {
-      name: `Sous-jacent ${n}`, ticker: '', ccy: 'EUR',
-      sigma: 20, q: 2.0, sigma_fx: 0, rho_sfx: 0, ccyh: 0,
-      dividendCurveEnabled: false, dividendDecay: 10.0,
-      v0: 4.0, kappa: 2.0, theta: 4.0, xi: 35, rho_h: -70, rho_rS: 40,
-      alpha: 20, beta: 50, rho: -30, nu: 40,
-      skew: -10, curvature: 5, showQuanto: false,
-    }
+    return defaultUnderlying(n)
   }
 
   function _clearResults() {
@@ -2153,7 +2172,7 @@ export const usePricingStore = defineStore('pricing', () => {
     activeUnderlyingIdx.value = 0
     for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
     for (const key of Object.keys(constatOverrides)) delete constatOverrides[key]
-    const today = new Date().toISOString().split('T')[0]
+    const today = _localTodayIso()
     Object.assign(globalParams, {
       r: 3.0, T: 3.0, N: 20000, seed: 42, model: 'constant',
       antithetic: true, deal_ccy: 'EUR', rateModel: 'deterministic',
@@ -2285,23 +2304,19 @@ export const usePricingStore = defineStore('pricing', () => {
 
   function _productUnderlying(identity, market, index) {
     const out = { ..._defaultUnderlying(index + 1), ...identity }
-    const pctFields = [
-      'sigma', 'q', 'sigma_fx', 'rho_sfx', 'v0', 'theta', 'xi', 'rho_h',
-      'rho_rS', 'alpha', 'beta', 'rho', 'nu', 'skew', 'curvature',
-    ]
-    for (const field of pctFields) {
-      if (market?.[field] != null) out[field] = Number(market[field]) * 100
+    for (const field of PERCENT_MARKET_FIELDS) {
+      if (market?.[field] != null) out[field] = fractionToPercent(market[field])
     }
     if (market?.ccyh != null) out.ccyh = Number(market.ccyh) * 10000
     if (market?.kappa != null) out.kappa = Number(market.kappa)
     const curve = market?.dividend_curve || []
     if (curve.length) {
       out.dividendCurveEnabled = true
-      out.q = Number(curve[0][1]) * 100
+      out.q = fractionToPercent(curve[0][1])
       out.dividendDecay = curve.length > 1 && Number(curve[0][1]) > 0
         ? Math.max(0, Math.min(100,
           (1 - Number(curve[1][1]) / Number(curve[0][1])) * 100))
-        : Number(market?.dividend_decay || 0) * 100
+        : fractionToPercent(market?.dividend_decay || 0)
     }
     return out
   }
@@ -2326,7 +2341,7 @@ export const usePricingStore = defineStore('pricing', () => {
     activeUnderlyingIdx.value = 0
 
     Object.assign(globalParams, {
-      r: market.r != null ? Number(market.r) * 100 : globalParams.r,
+      r: market.r != null ? fractionToPercent(market.r) : globalParams.r,
       T: terms.T,
       N: market.N ?? globalParams.N,
       model: market.model || globalParams.model,
@@ -2341,25 +2356,25 @@ export const usePricingStore = defineStore('pricing', () => {
       barrierMonitoring: market.barrier_monitoring || 'weekly',
       rateModel: Number(market.sigma_r || 0) === 0
         ? 'deterministic' : (Number(market.a_r || 0) === 0 ? 'abm' : 'hull_white'),
-      sigma_r: Number(market.sigma_r || 0) * 100,
+      sigma_r: fractionToPercent(market.sigma_r || 0),
       a_r: Number(market.a_r || 0),
     })
     if (Array.isArray(market.yield_curve) && market.yield_curve.length) {
       yieldCurve.enabled = true
       yieldCurve.pillars = market.yield_curve.map(([T, rate]) => ({
-        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, rate: Number(rate) * 100,
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, rate: fractionToPercent(rate),
       }))
     }
     if (Array.isArray(market.funding_curve) && market.funding_curve.length) {
       fundingCurve.enabled = true
       fundingCurve.mode = 'pillars'
       fundingCurve.pillars = market.funding_curve.map(([T, spread]) => ({
-        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: Number(spread) * 100,
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: fractionToPercent(spread),
       }))
     } else if (market.funding_spread != null) {
       fundingCurve.enabled = Number(market.funding_spread) !== 0
       fundingCurve.mode = 'flat'
-      fundingCurve.level = Number(market.funding_spread) * 100
+      fundingCurve.level = fractionToPercent(market.funding_spread)
     }
 
     await parseScript()
@@ -2453,7 +2468,7 @@ export const usePricingStore = defineStore('pricing', () => {
       fundingCurve.mode = 'pillars'
       fundingCurve.level = Number(engineFundingCurve[0]?.[1] || 0) * 100
       fundingCurve.pillars = engineFundingCurve.map(([T, spread]) => ({
-        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: Number(spread) * 100,
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: fractionToPercent(spread),
       }))
     } else {
       // Un deal sans funding est un cas valide. Le zéro reste visible et
@@ -2539,10 +2554,9 @@ export const usePricingStore = defineStore('pricing', () => {
   // builds at creation (single r/T/N/model, no Heston/SABR/curve fields) —
   // same defensive merge-over-defaults as loadFromDeal handles that fine.
   async function loadFromRfq(rfqObj) {
-    relacherVariante()
+    _resetInputState()
+    _clearResults()
     currentProduct.value = null
-    scriptGenerationProvenance.value = null
-    adoptedGeneratedScriptText.value = ''
     const p = rfqObj.params || {}
     currentScriptId.value   = rfqObj.script_id || null
     currentScriptName.value = rfqObj.reference
@@ -2555,26 +2569,13 @@ export const usePricingStore = defineStore('pricing', () => {
       // the backend request-body convention) — convert back to the store's
       // percentage-number convention or _buildUls() silently divides by 100
       // a second time (0.2 -> 0.002, a near-zero vol that breaks pricing).
-      underlyings.value = p.underlyings.map((u, i) => {
-        const { sigma, q, dividend_curve, dividend_decay, ...rest } = u
-        const inferredDecay = dividend_curve?.length > 1 && dividend_curve[0]?.[1] > 0
-          ? (1 - dividend_curve[1][1] / dividend_curve[0][1]) * 100
-          : 0
-        return {
-          ..._defaultUnderlying(i + 1),
-          ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v != null)),
-          ...(sigma != null ? { sigma: sigma * 100 } : {}),
-          ...(q != null ? { q: q * 100 } : {}),
-          dividendCurveEnabled: !!dividend_curve?.length,
-          dividendDecay: dividend_decay != null ? dividend_decay * 100 : inferredDecay,
-        }
-      })
+      underlyings.value = p.underlyings.map((u, i) => _productUnderlying(u, u, i))
       corrMatrix.value = normaliseCorrelation(p.corr_matrix, underlyings.value.length)
       activeUnderlyingIdx.value = 0
     }
 
     Object.assign(globalParams, {
-      r: (p.r ?? globalParams.r / 100) * 100,
+      r: fractionToPercent(p.r ?? globalParams.r / 100),
       T: p.T ?? globalParams.T,
       model: p.model || globalParams.model,
       deal_ccy: p.currency || globalParams.deal_ccy,
@@ -2590,6 +2591,7 @@ export const usePricingStore = defineStore('pricing', () => {
       // personne n'avait saisi. Elle date l'échange final des flux : elle se
       // reprend, elle ne se recalcule pas.
       payment_date: p.payment_date || globalParams.payment_date,
+      valuation_date: p.valuation_date || _localTodayIso(),
       // The whole point of landing in the Pricer is to re-run the price and
       // check it against the RFQ's — which only means something if the
       // simulation context matches too, not just the product. rfq.js's
@@ -2601,13 +2603,30 @@ export const usePricingStore = defineStore('pricing', () => {
       // legitimately different number and the comparison proves nothing.
       N: p.N ?? 20000,
       seed: 42,
-      antithetic: true,
-      rateModel: 'deterministic',
-      barrierMonitoring: 'weekly',
+      antithetic: p.antithetic ?? true,
+      rateModel: Number(p.sigma_r || 0) === 0
+        ? 'deterministic' : (Number(p.a_r || 0) === 0 ? 'abm' : 'hull_white'),
+      sigma_r: fractionToPercent(p.sigma_r || 0),
+      a_r: Number(p.a_r || 0),
+      barrierMonitoring: p.barrier_monitoring || 'weekly',
     })
-    yieldCurve.enabled = false
-
-    _clearResults()
+    if (Array.isArray(p.yield_curve) && p.yield_curve.length) {
+      yieldCurve.enabled = true
+      yieldCurve.pillars = p.yield_curve.map(([T, rate]) => ({
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, rate: fractionToPercent(rate),
+      }))
+    }
+    if (Array.isArray(p.funding_curve) && p.funding_curve.length) {
+      fundingCurve.enabled = true
+      fundingCurve.mode = 'pillars'
+      fundingCurve.pillars = p.funding_curve.map(([T, spread]) => ({
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: fractionToPercent(spread),
+      }))
+    } else if (p.funding_spread != null) {
+      fundingCurve.enabled = Number(p.funding_spread) !== 0
+      fundingCurve.mode = 'flat'
+      fundingCurve.level = fractionToPercent(p.funding_spread)
+    }
     currentRfqId.value = rfqObj.id
     await parseScript()
 

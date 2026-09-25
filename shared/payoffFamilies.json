@@ -1,0 +1,58 @@
+{
+  "families": [
+    {
+      "code": "autocall",
+      "label": "Autocall",
+      "aliases": ["Athena", "Autocall Athena", "Autocall worst-of", "Autocall Gear Put"],
+      "model_keys": ["autocall_athena", "autocall_athena_ki_americaine", "autocall_worst_of", "autocall_gear_put", "autocall_gear_put_worst_of", "autocall_barriere_degressive", "autocall_moyenne_periode", "autocall_coupon_moyenne_periode"]
+    },
+    {
+      "code": "phoenix",
+      "label": "Phoenix",
+      "aliases": ["Phoenix Memory", "Phoenix Mémoire", "Phoenix Memoire"],
+      "model_keys": ["phoenix", "phoenix_memoire", "autocall_phoenix"]
+    },
+    {
+      "code": "reverse_convertible",
+      "label": "Reverse convertible",
+      "aliases": ["Reverse Convertible", "Barrier Reverse Convertible", "BRC"],
+      "model_keys": ["reverse_convertible", "brc_ki_americaine"]
+    },
+    {
+      "code": "capital_protected",
+      "label": "Capital protégé",
+      "aliases": ["Capital garanti", "Capital guaranteed", "Capital protection", "Shark", "Shark Note", "Sharks"],
+      "model_keys": ["capital_garanti", "shark_note", "shark_note_worst_of"]
+    },
+    {
+      "code": "participation",
+      "label": "Participation",
+      "aliases": ["Twin Win", "Booster", "Tracker"],
+      "model_keys": ["twin_win", "booster"]
+    },
+    {
+      "code": "option",
+      "label": "Option",
+      "aliases": ["Options", "Call", "Put", "Call Spread", "Digital", "Digitale", "Lookback"],
+      "model_keys": ["call", "put", "call_spread", "digitale", "call_panier_moyenne", "call_lookback", "call_vanilla", "put_vanilla", "digital", "call_moyenne"]
+    },
+    {
+      "code": "credit_linked",
+      "label": "Crédit lié",
+      "aliases": ["Credit-Linked Note", "Credit linked", "CLN"],
+      "model_keys": []
+    },
+    {
+      "code": "cashflow_exchange",
+      "label": "Échange de flux",
+      "aliases": ["Swap", "Swap actions", "Swap de taux", "Equity swap", "Rates swap"],
+      "model_keys": []
+    },
+    {
+      "code": "other",
+      "label": "Autre",
+      "aliases": ["Other", "Divers"],
+      "model_keys": []
+    }
+  ]
+}

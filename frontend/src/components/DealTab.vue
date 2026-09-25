@@ -82,8 +82,8 @@
         </div>
 
         <div class="col-span-2">
-          <label class="label">Type de produit
-            <HelpTip text="Libre — sert à classer et filtrer dans la page Booking (par famille de produit). Pas de lien automatique avec les tags du script sauvegardé." />
+          <label class="label">Appellation / variante du produit
+            <HelpTip text="Nom commercial libre (Athena, coupon mémoire, worst-of…). La famille de payoff normalisée se choisit séparément ci-dessous." />
           </label>
           <input v-model="form.product_type" type="text" class="input" list="product-type-suggestions"
             placeholder="ex: Autocall Athena, Reverse Convertible…" />
@@ -111,9 +111,23 @@
           </datalist>
         </div>
         <div class="col-span-2">
-          <label class="label">Famille de payoff</label>
-          <input v-model="form.payoff_family" class="input"
-                 placeholder="Phoenix, Autocall, Swap…" />
+          <label class="label">Famille de payoff <span class="text-red-400">*</span>
+            <HelpTip text="Famille principale normalisée, distincte du format juridique (EMTN/OTC), de l’instrument (Note/Swap) et de la variante commerciale." />
+          </label>
+          <select v-model="form.payoff_family" class="select">
+            <option value="">— Choisir une famille —</option>
+            <option v-if="legacyPayoffFamily" :value="legacyPayoffFamily">
+              Ancien libellé : {{ legacyPayoffFamily }} — à classer
+            </option>
+            <option v-for="family in PAYOFF_FAMILIES" :key="family.code"
+                    :value="family.label">{{ family.label }}</option>
+          </select>
+          <button v-if="modelFamilyHint && !form.payoff_family" type="button"
+                  class="text-xs underline mt-1" style="color: var(--accent);"
+                  @click="form.payoff_family = modelFamilyHint">
+            Le modèle suggère {{ modelFamilyHint }} — appliquer
+          </button>
+          <p v-if="errors.payoff_family" class="text-red-400 text-xs mt-1">{{ errors.payoff_family }}</p>
         </div>
         <div class="col-span-2">
           <label class="label">Description du payoff</label>
@@ -275,7 +289,9 @@
       </div>
       <div v-if="bookedDeal"
         class="bg-emerald-900/30 border border-emerald-700/50 rounded-lg px-4 py-3 mb-3">
-        <p class="text-emerald-400 font-semibold text-sm">✓ Deal booké — {{ bookedDeal.reference }}</p>
+        <p class="text-emerald-400 font-semibold text-sm">✓ Deal booké —
+          <DealReferenceLink :deal-id="bookedDeal.id" :reference="bookedDeal.reference" />
+        </p>
         <p class="text-slate-400 text-xs mt-1">
           Rendez-vous dans l'onglet Events pour renseigner les spots initiaux (S₀) et suivre les constatations.
         </p>
@@ -301,12 +317,26 @@
       </template>
       <button v-else class="btn-primary w-full py-3 text-sm font-bold"
         :disabled="dealsStore.loading || store.resultIsStale"
-        @click="book">
+        @click="reviewBooking">
         <span v-if="dealsStore.loading"
           class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block mr-2"></span>
-        {{ dealsStore.loading ? 'Booking en cours…' : '📋 Booker le deal' }}
+        {{ dealsStore.loading ? 'Booking en cours…' : '📋 Vérifier les paramètres et booker' }}
       </button>
     </div>
+
+    <BaseModal v-model="showBookingReview" title="Paramètres de pricing figés au booking" max-width="760px">
+      <BookingPricingReview v-if="reviewSnapshot" :snapshot="reviewSnapshot"
+        :has-receipt="!!store.result?.pricing_receipt"
+        :pricing-date="store.result?.pricing_receipt?.pricing_input?.valuation_date || ''" />
+      <template #footer>
+        <button class="btn-secondary" :disabled="bookingSubmitting" @click="editBookingParams">
+          Modifier dans Marché & Paramètres
+        </button>
+        <button class="btn-primary" :disabled="bookingSubmitting" @click="book">
+          {{ bookingSubmitting ? 'Booking en cours…' : 'Confirmer le booking' }}
+        </button>
+      </template>
+    </BaseModal>
 
   </div>
 </template>
@@ -314,20 +344,29 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDealsStore } from '../stores/deals.js'
 import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
 import HelpTip from './HelpTip.vue'
+import BaseModal from './ui/BaseModal.vue'
+import BookingPricingReview from './BookingPricingReview.vue'
+import DealReferenceLink from './DealReferenceLink.vue'
 import { formatPercent, formatMoneyRound } from '../utils/format.js'
+import { findProductModel } from '../utils/productModels.js'
+import { PAYOFF_FAMILIES, canonicalPayoffFamily, payoffFamilyForModel } from '../utils/payoffFamilies.js'
 
 const emit = defineEmits(['go-events'])
 
 const store = usePricingStore()
 const dealsStore = useDealsStore()
 const auth = useAuthStore()
+const route = useRoute()
 
-const today = new Date().toISOString().split('T')[0]
+const now = new Date()
+const today = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+  .toISOString().slice(0, 10)
 
 // Eligible counterparties (admin-managed catalog, active only)
 const counterparties = ref([])
@@ -357,6 +396,13 @@ const form = reactive({
   fair_value: 0,
   price_traded: 0,
   trade_date: store.globalParams.trade_date || today,
+})
+const legacyPayoffFamily = computed(() => form.payoff_family
+  && !canonicalPayoffFamily(form.payoff_family) ? form.payoff_family : '')
+const modelFamilyHint = computed(() => {
+  const model = findProductModel(route.query.modele)
+  return model && store.script.trim() === model.script.trim()
+    ? payoffFamilyForModel(model.key) : ''
 })
 const directClientEnabled = ref(false)
 const directDealClients = ref([])
@@ -412,7 +458,8 @@ function onDirectDealOpportunityChange() {
   form.primary_affiliation_id = selected.primary_contact?.affiliation_id ?? null
   form.transaction_format ||= selected.transaction_format || ''
   form.instrument_family ||= selected.instrument_family || ''
-  form.payoff_family ||= selected.payoff_family || ''
+  form.payoff_family ||= canonicalPayoffFamily(selected.payoff_family)
+    || selected.payoff_family || ''
   form.payoff_description ||= selected.payoff_description || ''
   form.commercial_reason = ''
 }
@@ -453,6 +500,8 @@ watch(() => store.pendingDealPrefill, (prefill) => {
     fair_value_at, rfq_provider_label, ...formFields
   } = prefill
   Object.assign(form, formFields)
+  form.payoff_family = canonicalPayoffFamily(form.payoff_family)
+    || form.payoff_family
   Object.assign(store.globalParams, {
     ...(nominal != null ? { nominal } : {}),
     ...(strike_date ? { strike_date } : {}),
@@ -509,6 +558,10 @@ const errors = reactive({})
 const bookingError = ref(null)
 const bookingFailures = ref([])
 const bookedDeal = ref(null)
+const showBookingReview = ref(false)
+const reviewSnapshot = ref(null)
+const reviewSnapshotJson = ref('')
+const bookingSubmitting = ref(false)
 
 // Le deal existe déjà — soit on vient de le booker, soit on a rouvert un deal
 // booké (store.openedDeal, voir pricing.js:loadFromDeal). Dans les deux cas le
@@ -526,6 +579,12 @@ function rearmBooking() {
 function validate() {
   Object.keys(errors).forEach(k => delete errors[k])
   if (!form.contrepartie.trim()) errors.contrepartie = 'Contrepartie requise'
+  if (!form.payoff_family) errors.payoff_family = 'Choisissez la famille de payoff.'
+  else if (legacyPayoffFamily.value) {
+    errors.payoff_family = 'Reclassez cet ancien libellé dans une famille du catalogue.'
+  } else if (form.payoff_family === 'Autre' && !form.payoff_description.trim()) {
+    errors.payoff_family = 'Décrivez le payoff lorsque la famille « Autre » est choisie.'
+  }
   if (!store.globalParams.nominal || store.globalParams.nominal <= 0) {
     errors.nominal = 'Nominal requis dans Economics'
   }
@@ -550,28 +609,31 @@ function validate() {
   return Object.keys(errors).length === 0
 }
 
-async function book() {
-  bookingError.value = null
-  bookingFailures.value = []
-  bookedDeal.value = null
-  if (!validate()) return
-
-  const underlyings = store.underlyings.map(u => ({
-    name: u.name,
-    ticker: u.ticker || '',
-    ccy: u.ccy,
-  }))
-
+function marketSnapshotForBooking() {
   const fallbackMarketSnapshot = {
     r: store.globalParams.r,
     T: store.globalParams.T,
+    N: store.globalParams.N,
+    seed: store.globalParams.seed,
     model: store.globalParams.model,
     antithetic: store.globalParams.antithetic,
     deal_ccy: store.globalParams.deal_ccy,
     rateModel: store.globalParams.rateModel,
     sigma_r: store.globalParams.sigma_r,
     a_r: store.globalParams.a_r,
+    barrierMonitoring: store.globalParams.barrierMonitoring,
     yieldCurve: store.yieldCurve.enabled ? store.yieldCurve.pillars : [],
+    funding: {
+      enabled: store.fundingCurve.enabled,
+      mode: store.fundingCurve.mode,
+      level: store.fundingCurve.enabled ? store.fundingCurve.level : 0,
+      pillars: store.fundingCurve.enabled && store.fundingCurve.mode === 'pillars'
+        ? store.fundingCurve.pillars : [],
+    },
+    funding_curve: store.fundingCurve.enabled && store.fundingCurve.mode === 'pillars'
+      ? store.fundingCurve.pillars.map(p => [p.T, p.spread / 100]) : [],
+    funding_spread: store.fundingCurve.enabled && store.fundingCurve.mode === 'flat'
+      ? Number(store.fundingCurve.level) / 100 : 0,
     // Full underlying objects (not just name/ticker/sigma/q/ccy) so a smile
     // model (Heston/SABR/Local Vol/quanto) survives a reopen — see
     // pricing.js:loadFromDeal and reprice_inputs' "still alive" branch.
@@ -592,6 +654,48 @@ async function book() {
     // replayed (lifecycle) or residual-MtM'd: the script alone has no dates.
     constats: store.buildConstats(),
   }
+
+  return {
+    ...(store.result?.pricing_receipt?.market_snapshot || fallbackMarketSnapshot),
+    ...(store.scriptProvenance()
+      ? { ai_script_provenance: store.scriptProvenance() } : {}),
+  }
+}
+
+function reviewBooking() {
+  bookingError.value = null
+  bookingFailures.value = []
+  if (!validate()) return
+  reviewSnapshotJson.value = JSON.stringify(marketSnapshotForBooking())
+  reviewSnapshot.value = JSON.parse(reviewSnapshotJson.value)
+  showBookingReview.value = true
+}
+
+function editBookingParams() {
+  showBookingReview.value = false
+  store.leftTab = 'params'
+}
+
+async function book() {
+  if (bookingSubmitting.value || !reviewSnapshot.value) return
+  bookingError.value = null
+  bookingFailures.value = []
+  if (!validate()) {
+    showBookingReview.value = false
+    return
+  }
+  if (JSON.stringify(marketSnapshotForBooking()) !== reviewSnapshotJson.value) {
+    showBookingReview.value = false
+    bookingError.value = 'Les paramètres de pricing ont changé depuis la vérification. Vérifiez-les à nouveau avant de booker.'
+    return
+  }
+
+  const underlyings = store.underlyings.map(u => ({
+    name: u.name,
+    ticker: u.ticker || '',
+    ccy: u.ccy,
+  }))
+  bookingSubmitting.value = true
 
   try {
     const deal = await dealsStore.bookDeal({
@@ -615,11 +719,7 @@ async function book() {
       observation_times: observationTimes.value,
       script_snapshot: store.script,
       script_id: store.currentScriptId || null,
-      market_snapshot: {
-        ...(store.result?.pricing_receipt?.market_snapshot || fallbackMarketSnapshot),
-        ...(store.scriptProvenance()
-          ? { ai_script_provenance: store.scriptProvenance() } : {}),
-      },
+      market_snapshot: reviewSnapshot.value,
       pricing_receipt: store.result?.pricing_receipt || null,
       indicative_id: store.currentIndicativeId || null,
       rfq_id: store.currentRfqId || null,
@@ -635,6 +735,7 @@ async function book() {
       commercial_reason: form.commercial_reason || null,
     })
     bookedDeal.value = deal
+    showBookingReview.value = false
     if (deal.product_id) {
       const productResponse = await apiFetch(`/api/products/${deal.product_id}`)
       if (!productResponse.ok) {
@@ -646,6 +747,9 @@ async function book() {
   } catch (e) {
     bookingError.value = e.message
     bookingFailures.value = e.failures || []
+    showBookingReview.value = false
+  } finally {
+    bookingSubmitting.value = false
   }
 }
 </script>

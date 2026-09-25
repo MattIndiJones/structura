@@ -35,6 +35,18 @@ from .client_cycle import (
     Cycle, compare_cycles, compute_cycle, observed_lead_days,
     recommend_contact_window,
 )
+from .payoff_families import canonical_payoff_family
+
+
+def _payoff_family_for_reporting(row) -> str | None:
+    """Group known historical labels without changing their stored values."""
+    raw = row.payoff_family or row.product_type
+    if not raw:
+        return None
+    inferred = famille_de_produit(row.product_type)
+    return (canonical_payoff_family(raw)
+            or canonical_payoff_family(inferred)
+            or row.payoff_family or inferred)
 
 
 def _date_iso(valeur: Optional[str]) -> Optional[date]:
@@ -429,8 +441,8 @@ def observed_behaviour(deals: Sequence[Transaction]) -> dict:
     formats = Counter(d.transaction_format for d in deals if d.transaction_format)
     instruments = Counter(d.instrument_family for d in deals if d.instrument_family)
     payoffs = Counter(
-        d.payoff_family or famille_de_produit(d.product_type)
-        for d in deals if d.payoff_family or famille_de_produit(d.product_type))
+        family for d in deals
+        if (family := _payoff_family_for_reporting(d)))
     documentations = Counter(
         d.documentation_reference for d in deals if d.documentation_reference)
     devises = Counter(d.currency for d in deals if d.currency)
@@ -496,8 +508,7 @@ def observed_behaviour(deals: Sequence[Transaction]) -> dict:
             "transaction_format": sum(1 for d in deals if d.transaction_format),
             "instrument_family": sum(1 for d in deals if d.instrument_family),
             "payoff_family": sum(
-                1 for d in deals
-                if d.payoff_family or famille_de_produit(d.product_type)),
+                1 for d in deals if _payoff_family_for_reporting(d)),
             "documentation_reference": sum(
                 1 for d in deals if d.documentation_reference),
             "currency": sum(1 for d in deals if d.currency),
@@ -539,7 +550,7 @@ _HABIT_DIMENSIONS = (
     ("transaction_format", "Format", lambda row: [row.transaction_format]),
     ("instrument_family", "Instrument", lambda row: [row.instrument_family]),
     ("payoff_family", "Payoff", lambda row: [
-        row.payoff_family or famille_de_produit(row.product_type)]),
+        _payoff_family_for_reporting(row)]),
     ("issuer", "Émetteur / contrepartie", lambda row: [row.issuer]),
     ("currency", "Devise", lambda row: [row.currency]),
     ("underlying", "Sous-jacent", lambda row: list(row.underlyings)),

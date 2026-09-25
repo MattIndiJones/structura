@@ -13,7 +13,7 @@
           <div class="min-w-0">
             <div class="text-[10px] uppercase tracking-wider" style="color: var(--muted);">Deal booké</div>
             <div class="font-mono text-sm font-semibold break-all" style="color: var(--text);">
-              {{ deal.reference }}
+              <DealReferenceLink :deal-id="deal.id" :reference="deal.reference" />
               <span class="text-xs font-normal" style="color: var(--muted);">v{{ deal.contract_version || 1 }}</span>
             </div>
           </div>
@@ -679,6 +679,7 @@ import { usePricingStore } from '../stores/pricing.js'
 import { useAuthStore } from '../stores/auth.js'
 import HelpTip from './HelpTip.vue'
 import AutoFixingExceptionModal from './AutoFixingExceptionModal.vue'
+import DealReferenceLink from './DealReferenceLink.vue'
 import { formatDate, formatNumber } from '../utils/format.js'
 import { apiFetch } from '../utils/api.js'
 import { useObservationPreview } from '../composables/useObservationPreview.js'

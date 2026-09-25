@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 import datetime
 import os
 from typing import Any
@@ -62,14 +63,14 @@ S_TITLE   = _sty("title",  fontName="Helvetica-Bold", fontSize=22, textColor=C_W
 S_SECTION = _sty("section",fontName="Helvetica-Bold", fontSize=11, textColor=C_BLUE,
                  leading=15, spaceBefore=14, spaceAfter=6)
 S_BODY    = _sty("body",   fontSize=8.5, textColor=C_MUTED, leading=12)
-S_SMALL   = _sty("small",  fontSize=7.5, textColor=C_FAINT, leading=10)
+S_SMALL   = _sty("small",  fontSize=7.5, textColor=C_MUTED, leading=10)
 S_CENTER  = _sty("center", alignment=TA_CENTER, fontSize=8.5, textColor=C_MUTED)
 S_NUM     = _sty("num",    fontName="Helvetica-Bold", alignment=TA_RIGHT,
                  fontSize=8.5, textColor=C_TEXT)
 S_NUM_SM  = _sty("numsm",  alignment=TA_RIGHT, fontSize=8, textColor=C_MUTED)
 S_LABEL   = _sty("label",  fontSize=8, textColor=C_FAINT)
 S_WARN    = _sty("warn",   fontSize=7.5, textColor=C_AMBER, leading=11)
-S_HDR     = _sty("hdr",    fontName="Helvetica-Bold", fontSize=8, textColor=C_FAINT,
+S_HDR     = _sty("hdr",    fontName="Helvetica-Bold", fontSize=8, textColor=C_MUTED,
                  alignment=TA_RIGHT)
 S_JUST    = _sty("just",   fontSize=8.5, textColor=C_MUTED, leading=13,
                  alignment=TA_JUSTIFY)
@@ -270,7 +271,7 @@ def _tbl(data, col_widths, style_extra=None):
     return Table(data, colWidths=col_widths, style=ts, repeatRows=1)
 
 
-def _p(text, style=None): return Paragraph(str(text), style or S_BODY)
+def _p(text, style=None): return Paragraph(re.sub(r"&(?!#?\w+;)", "&amp;", str(text)), style or S_BODY)
 def _pn(text, style=None): return Paragraph(str(text), style or S_NUM)
 
 
@@ -309,10 +310,11 @@ def _kpi_row(items, n_cols=None):
     n = n_cols or max(len(items), 1)
     col_w = INNER_W / n
     val_size = 20 if n <= 4 else (16 if n == 5 else 13)
+    label_height = max((Paragraph(re.sub(r"&(?!#?\w+;)", "&amp;", label).replace("\n", "<br/>"), S_CENTER).wrap(col_w - 8, 1000)[1] for label, _, _ in items), default=12)
     cell_data = []
     for label, val, col in items:
         # Normalise newlines → <br/> so ReportLab renders them as actual line breaks
-        lbl_html = label.replace("\n", "<br/>")
+        lbl_html = re.sub(r"&(?!#?\w+;)", "&amp;", label).replace("\n", "<br/>")
         cell_data.append(
             Table([[Paragraph(str(val),
                               ParagraphStyle(f"kv{n}_{id(val)}", fontName="Helvetica-Bold",
@@ -321,7 +323,7 @@ def _kpi_row(items, n_cols=None):
                                              alignment=TA_CENTER,
                                              leading=val_size + 4))],
                    [Paragraph(lbl_html, S_CENTER)]],
-                  colWidths=[col_w],
+                  colWidths=[col_w], rowHeights=[val_size + 28, label_height + 24],
                   style=TableStyle([
                       ("ALIGN",          (0,0), (-1,-1), "CENTER"),
                       ("BACKGROUND",     (0,0), (-1,-1), C_CARD),
@@ -1657,6 +1659,7 @@ def _append_block_b(story, b, ccy, space, meta=None):
         story.append(_kpi_row([
             (f"P&L FIFO (brut){ccy_lbl}", _fmt_prod(totals.get("total_pnl")),
              "#10b981" if (totals.get("total_pnl") or 0) >= 0 else "#ef4444"),
+            (f"Dividendes acquis{ccy_lbl}", _fmt_prod(recon.get("cash_income_prod")), "#10b981"),
             (f"Frais cumulés{ccy_lbl}", _fmt_prod(totals.get("fee_drag_prod")), "#ef4444"),
             (f"P&L net estimé{ccy_lbl}", _fmt_prod(totals.get("total_pnl_net_of_fees")),
              "#10b981" if (totals.get("total_pnl_net_of_fees") or 0) >= 0 else "#ef4444"),
@@ -1667,15 +1670,20 @@ def _append_block_b(story, b, ccy, space, meta=None):
         story.append(space(8))
 
         fb = recon.get("fee_breakdown") or {}
+        basis = {"nav_252": "NAV courante / 252", "previous_nav_act365": "NAV précédente ACT/365",
+                 "current_nav_act365": "NAV courante ACT/365", "previous_nav_act360": "NAV précédente ACT/360",
+                 "current_nav_act360": "NAV courante ACT/360"}.get(recon.get("management_fee_basis"), "convention non renseignée")
+        frequency = {"daily": "journalière", "monthly": "mensuelle", "quarterly": "trimestrielle", "annual": "annuelle"}.get(recon.get("performance_crystallization"), "non renseignée")
+
         if any(fb.get(k) for k in ("management_fee_prod", "performance_fee_prod", "transaction_cost_prod")):
             mgmt_pct = fb.get("management_fee_pct")
             perf_pct = fb.get("performance_fee_pct")
             txn_pct = fb.get("transaction_cost_pct")
             fee_rows = [
-                [_p(f"Gestion ({mgmt_pct}% p.a., accrual quotidien)" if mgmt_pct else "Gestion — non renseigné", S_BODY),
+                [_p(f"Gestion ({mgmt_pct}% p.a., {basis})" if mgmt_pct is not None else "Gestion — non renseigné", S_BODY),
                  _pn(_fmt_prod(fb.get("management_fee_prod"), ccy))],
-                [_p(f"Performance ({perf_pct}% sur High Water Mark, {fb.get('performance_fee_events', '—')} plus-hauts, prélevé le jour même)"
-                    if perf_pct else "Performance — non renseigné", S_BODY),
+                [_p(f"Performance ({perf_pct}% HWM ; cristallisation {frequency} ; provision incluse à l’arrêté)"
+                    if perf_pct is not None else "Performance — non renseigné", S_BODY),
                  _pn(_fmt_prod(fb.get("performance_fee_prod"), ccy))],
                 [_p(f"Transaction ({txn_pct}% du notionnel par rebalancement)" if txn_pct else "Transaction — non renseigné", S_BODY),
                  _pn(_fmt_prod(fb.get("transaction_cost_prod"), ccy))],
@@ -1692,13 +1700,26 @@ def _append_block_b(story, b, ccy, space, meta=None):
             story.append(space(6))
 
         story.append(Paragraph(
-            "P&L implicite NAV calculé directement depuis la NAV quotidienne et les flux de "
+            "P&amp;L implicite NAV calculé directement depuis la NAV quotidienne et les flux de "
             "souscription/rachat (Δ Outstanding × NAV à chaque mouvement), indépendamment du "
-            "carnet d'ordres. Frais de performance modélisés en High Water Mark journalier "
-            "(prélevé uniquement les jours de nouveau plus-haut, pas un accrual continu).", S_SMALL))
+            f"carnet d'ordres. Gestion : {basis}. Performance : cristallisation {frequency}. "
+            "Le net estimé inclut les dividendes acquis et les trois postes de frais. Une provision de performance peut subsister à un arrêté intermédiaire.", S_SMALL))
         story.append(space(12))
 
-    story.append(Paragraph("P&L par sous-jacent (réalisé + latent, devise produit)", S_SECTION))
+    if recon and recon.get("annual_fees"):
+        story.append(Paragraph("Frais et HWM par année", S_SECTION))
+        annual_rows = [[_p(x, S_HDR) for x in ("Arrêté", "NAV", "HWM", "Gestion", "Performance", "Transactions")]]
+        for row in recon["annual_fees"]:
+            annual_rows.append([_p(row["as_of"]), _pn(f"{row['nav_final']:.6f}"),
+                _pn(f"{row['hwm_final']:.4f}" if row.get("hwm_final") is not None else "—"),
+                *[_pn(f"{row[k]:,.2f}" if row.get(k) is not None else "—") for k in
+                  ("management_fee_prod", "performance_fee_prod", "transaction_cost_prod")]])
+        story.append(_tbl(annual_rows, col_widths=[2.8*cm, 2.6*cm, 2.6*cm, 3.1*cm, 3.1*cm, 3.2*cm]))
+        story.append(_p(f"Montants en {ccy}. " + recon.get("annual_fees_note", ""), S_SMALL))
+        story.append(space(10))
+
+    story.append(CondPageBreak(100))
+    story.append(Paragraph("P&amp;L par sous-jacent (réalisé + latent, devise produit)", S_SECTION))
     story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
     story.append(space(6))
 
@@ -1725,13 +1746,22 @@ def _append_block_b(story, b, ccy, space, meta=None):
     story.append(_tbl(tbl_data,
         col_widths=[4.2*cm, 2.4*cm, 2.2*cm, 2.2*cm, 2.2*cm, 2.4*cm, 1.8*cm]))
     story.append(space(6))
-    story.append(Paragraph(b.get("note", ""), S_SMALL))
+    story.append(_p(b.get("note", ""), S_SMALL))
+    if any("dividends_net" in r for r in rows_all):
+        story.append(Paragraph("Dividendes et contribution totale par sous-jacent", S_SECTION))
+        dividend_rows = [[_p(x, S_HDR) for x in ("Titre", "P&L prix/change", "Dividendes", "Total avec dividendes")]]
+        for row in rows_all:
+            dividend_rows.append([_p(row["name"][:35]), _pn(_fmt_prod(row.get("total_pnl"))),
+                _pn(_fmt_prod(row.get("dividends_net"))), _pn(_fmt_prod(row.get("total_with_dividends")))])
+        story.append(_tbl(dividend_rows, col_widths=[6.4*cm, 3.6*cm, 3.4*cm, 4*cm]))
+        story.append(space(8))
+
 
     # Quarterly chart
     qchart = _chart_quarterly_pnl(b.get("quarterly_realized", []))
     if qchart:
         story.append(space(12))
-        story.append(Paragraph("P&L réalisé par trimestre", S_SECTION))
+        story.append(Paragraph("P&amp;L réalisé par trimestre", S_SECTION))
         story.append(HRFlowable(INNER_W, thickness=0.5, color=C_BORDER))
         story.append(space(6))
         story.append(qchart)
@@ -2015,7 +2045,7 @@ def _append_block_g_brinson(story, bg, space):
         gap_col = "#f59e0b" if abs(recon) > 2 else "#64748b"
         recon_txt = (
             f"<b>Réconciliation NAV :</b> le rendement portefeuille Brinson ({port_r:+.2f}%) "
-            f"est calculé sur {n_avail}/{n_total} titres disponibles dans le Price Store. "
+            f"est calculé sur {n_avail} lignes évaluées, liquidités comprises le cas échéant. "
             f"NAV réelle sur la même période : <b>{nav_r:+.2f}%</b>. "
             f"Écart de réconciliation : <font color='{gap_col}'><b>{recon:+.2f}%</b></font>. "
             f"Le panier statique brut et la NAV nette gérée suivent des allocations, des frais et des politiques de dividendes différents. Cet écart ne constitue pas une erreur de rapprochement comptable."

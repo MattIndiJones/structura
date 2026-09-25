@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex flex-col min-h-0 text-slate-100">
+  <div class="risk-management-view flex-1 flex flex-col min-h-0 text-slate-100">
 
     <main class="flex-1 overflow-y-auto p-6">
       <div class="max-w-[1600px] mx-auto flex flex-col gap-3">
@@ -212,7 +212,7 @@
                                   <tbody>
                                     <tr v-for="c in g.contributions" :key="c.deal_id"
                                       class="hover:bg-slate-800/40 cursor-pointer" @click.stop="openDealDetail(c.deal_id)">
-                                      <td class="py-1 pr-3 font-mono font-semibold text-blue-400">{{ c.reference }}</td>
+                                      <td class="py-1 pr-3 font-mono font-semibold text-blue-400"><DealReferenceLink :deal-id="c.deal_id" :reference="c.reference" /></td>
                                       <td class="py-1 pr-3 text-right font-mono text-slate-400">
                                         {{ formatNominal(c.delta_eur) }} <span class="text-slate-600">({{ sharePct(c.delta_eur, g.delta_eur) }})</span>
                                       </td>
@@ -271,7 +271,7 @@
                                     <tbody>
                                       <tr v-for="c in g.contributions" :key="c.deal_id"
                                         class="hover:bg-slate-800/40 cursor-pointer" @click.stop="openDealDetail(c.deal_id)">
-                                        <td class="py-1 pr-3 font-mono font-semibold text-blue-400">{{ c.reference }}</td>
+                                        <td class="py-1 pr-3 font-mono font-semibold text-blue-400"><DealReferenceLink :deal-id="c.deal_id" :reference="c.reference" /></td>
                                         <td class="py-1 text-right font-mono text-slate-400">{{ formatNominal(c.corr_eur) }}</td>
                                       </tr>
                                     </tbody>
@@ -411,7 +411,7 @@
                                   <tbody>
                                     <tr v-for="dl in c.deals" :key="dl.id"
                                       class="hover:bg-slate-800/40 cursor-pointer" @click.stop="openDealDetail(dl.id)">
-                                      <td class="py-1 pr-3 font-mono font-semibold text-blue-400">{{ dl.reference }}</td>
+                                      <td class="py-1 pr-3 font-mono font-semibold text-blue-400"><DealReferenceLink :deal-id="dl.id" :reference="dl.reference" /></td>
                                       <td class="py-1 text-right font-mono text-slate-400">{{ formatNominal(dl.nominal_eur) }}</td>
                                     </tr>
                                   </tbody>
@@ -511,7 +511,7 @@
                           <tr v-for="c in shockResult.contributions" :key="c.deal_id"
                             class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
                             @click="openDealDetail(c.deal_id)">
-                            <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400">{{ c.reference }}</td>
+                            <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400"><DealReferenceLink :deal-id="c.deal_id" :reference="c.reference" /></td>
                             <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ (c.mtm_before * 100).toFixed(2) }}%</td>
                             <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ (c.mtm_after * 100).toFixed(2) }}%</td>
                             <td class="py-1.5 text-right font-mono" :class="c.delta_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">
@@ -698,7 +698,8 @@
                     <div v-if="varExcludedDeals.length" class="text-xs text-slate-500 flex flex-col gap-1">
                       <div class="font-semibold text-slate-400">Deals exclus du périmètre calculable</div>
                       <div v-for="deal in varExcludedDeals" :key="`${deal.phase}-${deal.deal_id}`">
-                        <span class="font-mono text-slate-300">{{ deal.reference }}</span>
+                        <DealReferenceLink :deal-id="deal.deal_id" :reference="deal.reference"
+                                           class="font-mono text-blue-400" />
                         — {{ deal.reason }}
                       </div>
                     </div>
@@ -793,7 +794,8 @@
                     class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
                     ⚠ Deal(s) non expliqués :
                     <span v-for="(s, i) in [...pnlResult.skipped, ...pnlResult.errors]" :key="s.deal_id">
-                      {{ i > 0 ? ' · ' : '' }}{{ s.reference }} <span class="text-amber-600">({{ s.reason || s.error }})</span>
+                      {{ i > 0 ? ' · ' : '' }}<DealReferenceLink :deal-id="s.deal_id"
+                        :reference="s.reference" class="font-mono text-blue-400" /> <span class="text-amber-600">({{ s.reason || s.error }})</span>
                     </span>
                   </div>
 
@@ -845,7 +847,7 @@
                         <tr v-for="c in pnlResult.contributions" :key="c.deal_id"
                           class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
                           @click="openDealDetail(c.deal_id)">
-                          <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400">{{ c.reference }}</td>
+                          <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400"><DealReferenceLink :deal-id="c.deal_id" :reference="c.reference" /></td>
                           <td class="py-1.5 pr-3 text-slate-500 whitespace-nowrap">{{ c.date1 }} → {{ c.date2 }}</td>
                           <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ formatNominal(c.steps_eur.temps ?? 0) }}</td>
                           <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ formatNominal(c.steps_eur.spot ?? 0) }}</td>
@@ -978,10 +980,12 @@
                   class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
                   {{ pf.smileResult.skipped.length }} non applicable(s) · {{ pf.smileResult.errors.length }} erreur(s).
                   <span v-for="row in pf.smileResult.skipped" :key="`skip-${row.deal_id}`" class="block mt-1">
-                    {{ row.reference }} — {{ row.reason }}
+                    <DealReferenceLink :deal-id="row.deal_id" :reference="row.reference"
+                                       class="font-mono text-blue-400" /> — {{ row.reason }}
                   </span>
                   <span v-for="row in pf.smileResult.errors" :key="`err-${row.deal_id}`" class="block mt-1">
-                    {{ row.reference }} — {{ row.error }}
+                    <DealReferenceLink :deal-id="row.deal_id" :reference="row.reference"
+                                       class="font-mono text-blue-400" /> — {{ row.error }}
                   </span>
                 </div>
 
@@ -1001,7 +1005,7 @@
                       <tr v-for="row in pf.smileResult.contributions" :key="row.deal_id"
                         class="border-b border-slate-800/50 hover:bg-slate-800/20 cursor-pointer"
                         @click="openDealDetail(row.deal_id)">
-                        <td class="py-2 pr-3 font-mono font-semibold text-blue-400">{{ row.reference }}</td>
+                        <td class="py-2 pr-3 font-mono font-semibold text-blue-400"><DealReferenceLink :deal-id="row.deal_id" :reference="row.reference" /></td>
                         <td class="py-2 pr-3 uppercase text-[10px] text-slate-400">{{ row.model }}</td>
                         <td class="py-2 pr-3 text-[10px] text-slate-400">
                           <span v-for="u in row.parameter_changes" :key="u.ticker || u.name" class="block">
@@ -1087,7 +1091,8 @@
                   class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
                   ⚠ Deal(s) non évalués (erreur marché) :
                   <span v-for="(e, i) in pf.barriers.errors" :key="e.deal_id">
-                    {{ i > 0 ? ' · ' : '' }}{{ e.reference }} <span class="text-amber-600">({{ e.error }})</span>
+                    {{ i > 0 ? ' · ' : '' }}<DealReferenceLink :deal-id="e.deal_id"
+                      :reference="e.reference" class="font-mono text-blue-400" /> <span class="text-amber-600">({{ e.error }})</span>
                   </span>
                 </div>
 
@@ -1111,7 +1116,7 @@
                       <tr v-for="w in pf.barriers.rows" :key="w.deal_id"
                         class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
                         @click="openDealDetail(w.deal_id)">
-                        <td class="py-2 pr-3 font-mono font-semibold text-blue-400 whitespace-nowrap">{{ w.reference }}</td>
+                        <td class="py-2 pr-3 font-mono font-semibold text-blue-400 whitespace-nowrap"><DealReferenceLink :deal-id="w.deal_id" :reference="w.reference" /></td>
                         <td class="py-2 pr-3 text-slate-400 whitespace-nowrap">
                           {{ (w.underlyings || []).map(u => u.ticker || u.name).join(' / ') || '—' }}
                         </td>
@@ -1230,7 +1235,7 @@
                       class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
                       :class="riskState(d).active ? '' : 'opacity-45 grayscale bg-slate-900/40'"
                       @click="openDealDetail(d.id)">
-                      <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400">{{ d.reference }}</td>
+                      <td class="py-1.5 pr-3 font-mono font-semibold text-blue-400"><DealReferenceLink :deal-id="d.id" :reference="d.reference" /></td>
                       <td class="py-1.5 pr-3 text-slate-300">{{ d.contrepartie }}</td>
                       <td class="py-1.5 pr-3 text-slate-500 text-[10px]">{{ d.product_type || '—' }}</td>
                       <td class="py-1.5 pr-3 text-[10px]"
@@ -1289,6 +1294,7 @@ import { dealRiskState, localTodayIso } from '../utils/riskDates.js'
 import { runConcurrentPool } from '../utils/concurrentPool.js'
 import HelpTip from '../components/HelpTip.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
+import DealReferenceLink from '../components/DealReferenceLink.vue'
 import { confirmer } from '../composables/useConfirm.js'
 
 const route = useRoute()
@@ -1786,3 +1792,16 @@ onUnmounted(() => {
   if (calculationTimer) clearInterval(calculationTimer)
 })
 </script>
+
+<style scoped>
+/* Keep every heading directly above its values, including nested detail tables. */
+.risk-management-view table th,
+.risk-management-view table td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.risk-management-view table td > .flex {
+  justify-content: center;
+}
+</style>

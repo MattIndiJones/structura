@@ -66,8 +66,11 @@
         <span class="inline-flex h-6 w-6 items-center justify-center rounded-full"
               style="background: color-mix(in srgb, var(--accent) 12%, transparent);" aria-hidden="true">🔒</span>
         <span class="font-semibold">{{ store.openedDeal ? 'Contrat booké' : 'Produit conservé' }}</span>
-        <span class="font-mono font-semibold" style="color: var(--accent);">
-          {{ store.openedDeal?.reference || store.currentProduct?.reference }}
+        <DealReferenceLink v-if="store.openedDeal"
+                           :deal-id="store.openedDeal.id" :reference="store.openedDeal.reference"
+                           class="font-mono font-semibold" style="color: var(--accent);" />
+        <span v-else class="font-mono font-semibold" style="color: var(--accent);">
+          {{ store.currentProduct?.reference }}
         </span>
         <span style="color: var(--muted);">
           Payoff, panier et dates figés. Marché, modèle et date de valorisation restent modifiables pour le repricing.
@@ -134,6 +137,7 @@ import KidPanel        from '../components/KidPanel.vue'
 import EmtPanel        from '../components/EmtPanel.vue'
 import SensitiveValue  from '../components/SensitiveValue.vue'
 import ProductContextBar from '../components/ProductContextBar.vue'
+import DealReferenceLink from '../components/DealReferenceLink.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'

@@ -8,7 +8,7 @@ import sys
 def report(root, *, unified_result=None, output=None):
     def load(path): return json.loads((root / path).read_text(encoding='utf-8'))
     ref = load('reference/summary.json')
-    if unified_result is not None and unified_result.get('provenance', {}).get('method_version') == 'studies-2.4':
+    if unified_result is not None and unified_result.get('provenance', {}).get('method_version') in ('studies-2.4', 'studies-2.5'):
         from methodology_reference import revised_reference
         ref = revised_reference(root, ref)
     result = unified_result if unified_result is not None else load('comparison/studies_full.json')
@@ -66,7 +66,7 @@ def report(root, *, unified_result=None, output=None):
         writer = csv.DictWriter(stream,fieldnames=checks[0].keys()); writer.writeheader(); writer.writerows(checks)
     gaps = [r for r in checks if r['status'] != 'OK']
     data = {'comparisons':len(checks),'passed':len(checks)-len(gaps),'to_examine':gaps,
-            'scope': 'Scan et moteur standard, dossier autonome, réseau interdit' if unified_result is not None else 'Banc isolé, données injectées en mémoire'}
+            'scope': 'Moteur standard, dossier autonome ; politique réseau à documenter pour chaque exécution' if unified_result is not None else 'Banc isolé, données injectées en mémoire'}
     (output / 'summary.json').write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps(data,ensure_ascii=False,indent=2))
     return data

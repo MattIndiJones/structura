@@ -183,11 +183,11 @@ def get_synthesis_payload(
 
 
 def synthesis_prompt(req):
-    from ..core.amc_synthesize import build_synthesis_payload, _get_system_prompt
-    payload = build_synthesis_payload(req.study_result, req.vag_result, req.attribution_result, req.brinson_result)
+    from ..core.amc_synthesize import build_synthesis_brief, _get_system_prompt
+    payload = build_synthesis_brief({**req.study_result, **({"block_g": req.brinson_result} if req.brinson_result else {})})
     audience = (req.study_result.get("meta") or {}).get("audience", "committee")
     language = (req.study_result.get("output") or {}).get("language", "fr")
-    return prompt_preview(_get_system_prompt(audience, language), payload, "amc-synthesis-v1")
+    return prompt_preview(_get_system_prompt(audience, language), payload, "amc-synthesis-v2")
 
 
 @router.post("/synthesize/prompt")
@@ -198,7 +198,9 @@ def preview_synthesis(req: SynthesizeRequest, current: Annotated[User, Depends(g
 @router.post("/synthesize")
 def synthesize_study(req: SynthesizeRequest, current: Annotated[User, Depends(get_current_user)]):
     try:
-        result = generate_text(synthesis_prompt(req), req)
+        result = generate_text(synthesis_prompt(req), req, context_tokens=16384)
+        from ..core.amc_synthesize import validate_synthesis
+        validate_synthesis(result["text"], result.get("finish_reason"))
         return {**result, "synthesis": result["text"], "payload": result["prompt"]["user"],
                 "study_hash": req.study_result.get("provenance", {}).get("result_hash")}
     except LlmError as e:

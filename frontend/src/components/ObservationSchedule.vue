@@ -101,6 +101,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { apiFetch } from '../utils/api.js'
 import SensitiveValue from './SensitiveValue.vue'
 
 const props = defineProps({
@@ -151,7 +152,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const res = await fetch('/api/schedule/generate', {
+    const res = await apiFetch('/api/schedule/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(r),
@@ -172,7 +173,7 @@ async function load() {
     l'échéancier : on perd le détail, pas les dates. */
 async function loadFenetres(r) {
   try {
-    const res = await fetch('/api/schedule/period-window', {
+    const res = await apiFetch('/api/schedule/period-window', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

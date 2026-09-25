@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import RfqProvider, User, Entity, Counterparty, Underlying
+from ..db.models import RfqProvider, RfqProviderContact, User, Entity, Counterparty, Underlying
 from .auth import get_current_admin
 from ..core import admin_registry
 from ..core.amc_prices import fetch_prices as _fetch_prices, price_status as _price_status, _slug
@@ -47,6 +47,22 @@ class RfqProviderUpdate(BaseModel):
     # counterparty (the update loop below sets whatever was sent, unset
     # fields excluded).
     counterparty_id: Optional[int] = None
+
+
+class RfqContactCreate(BaseModel):
+    name: str
+    email: str = ""
+
+
+class RfqContactUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    active: Optional[bool] = None
+
+
+def _contact_row(contact: RfqProviderContact) -> dict:
+    return {"id": contact.id, "provider_id": contact.provider_id,
+            "name": contact.name, "email": contact.email, "active": contact.active}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -171,8 +187,77 @@ def delete_rfq_provider(
     p = session.get(RfqProvider, provider_id)
     if not p:
         raise HTTPException(404, "Fournisseur introuvable")
+    for contact in session.exec(select(RfqProviderContact).where(
+            RfqProviderContact.provider_id == provider_id)).all():
+        session.delete(contact)
     session.delete(p)
     session.commit()
+
+
+@router.get("/rfq-providers/{provider_id}/contacts")
+def list_rfq_provider_contacts(
+    provider_id: int,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    if not session.get(RfqProvider, provider_id):
+        raise HTTPException(404, "Fournisseur introuvable")
+    contacts = session.exec(select(RfqProviderContact).where(
+        RfqProviderContact.provider_id == provider_id).order_by(RfqProviderContact.name)).all()
+    return [_contact_row(c) for c in contacts]
+
+
+@router.post("/rfq-providers/{provider_id}/contacts", status_code=201)
+def create_rfq_provider_contact(
+    provider_id: int,
+    body: RfqContactCreate,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    if not session.get(RfqProvider, provider_id):
+        raise HTTPException(404, "Fournisseur introuvable")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "Le nom du contact est requis")
+    existing = session.exec(select(RfqProviderContact).where(
+        RfqProviderContact.provider_id == provider_id)).all()
+    if any(c.name.casefold() == name.casefold() for c in existing):
+        raise HTTPException(409, "Ce contact existe déjà pour ce fournisseur")
+    contact = RfqProviderContact(provider_id=provider_id, name=name, email=body.email.strip())
+    session.add(contact)
+    session.commit()
+    session.refresh(contact)
+    return _contact_row(contact)
+
+
+@router.patch("/rfq-providers/{provider_id}/contacts/{contact_id}")
+def update_rfq_provider_contact(
+    provider_id: int,
+    contact_id: int,
+    body: RfqContactUpdate,
+    admin: Annotated[User, Depends(get_current_admin)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    contact = session.get(RfqProviderContact, contact_id)
+    if not contact or contact.provider_id != provider_id:
+        raise HTTPException(404, "Contact introuvable")
+    if body.name is not None:
+        contact.name = body.name.strip()
+        if not contact.name:
+            raise HTTPException(422, "Le nom du contact est requis")
+        siblings = session.exec(select(RfqProviderContact).where(
+            RfqProviderContact.provider_id == provider_id)).all()
+        if any(c.id != contact_id and c.name.casefold() == contact.name.casefold()
+               for c in siblings):
+            raise HTTPException(409, "Ce contact existe déjà pour ce fournisseur")
+    if body.email is not None:
+        contact.email = body.email.strip()
+    if body.active is not None:
+        contact.active = body.active
+    session.add(contact)
+    session.commit()
+    session.refresh(contact)
+    return _contact_row(contact)
 
 
 # ── Counterparties eligible to face a booked deal ─────────────────────

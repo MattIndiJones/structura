@@ -128,6 +128,16 @@ def test_six_year_reference_end_to_end(tmp_path, monkeypatch):
     for kind in ['management', 'performance', 'transaction']:
         field = kind+'_expense_usd' if kind != 'transaction' else 'transaction_cost_usd'
         assert b['reconciliation']['fee_breakdown'][kind+'_fee_prod' if kind != 'transaction' else 'transaction_cost_prod'] == pytest.approx(-expected[field], abs=.005)
+    annual = b['reconciliation']['annual_fees']
+    expected_annual = list(csv.DictReader((Path(__file__).parent/'fixtures/studies_long_only_annual.csv').open()))
+    assert len(annual) == len(expected_annual) == 6
+    for actual, ref in zip(annual, expected_annual):
+        assert actual['year'] == int(ref['period'])
+        assert actual['nav_final'] == pytest.approx(float(ref['ending_nav_usd']), abs=.000001)
+        assert actual['hwm_final'] == pytest.approx(float(ref['ending_hwm_usd']), abs=.00005)
+        assert actual['management_fee_prod'] == pytest.approx(-float(ref['management_expense_usd']), abs=.011)
+        assert actual['performance_fee_prod'] == pytest.approx(-float(ref['performance_expense_usd']), abs=.011)
+        assert actual['transaction_cost_prod'] == pytest.approx(-float(ref['transaction_cost_usd']), abs=.011)
     c = result['block_c']['round_trips']
     assert c['count'] == 1341
     assert c['win_rate_pct'] == 59.1

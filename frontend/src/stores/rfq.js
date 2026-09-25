@@ -172,7 +172,9 @@ export const useRfqStore = defineStore('rfq', () => {
   // fixing relative to the valuation date; /api/price only represents t=0.
   async function computeModelPrice(rfq) {
     const p = rfq.params || {}
-    const valuationDate = p.valuation_date || rfq.ao_date || new Date().toISOString().slice(0, 10)
+    const now = new Date()
+    const today = new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+    const valuationDate = p.valuation_date || today
     const dated = !!(p.strike_date && valuationDate !== p.strike_date)
     const maturityDate = rfqMaturityDate(p)
     if (dated && !maturityDate) {

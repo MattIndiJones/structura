@@ -21,9 +21,20 @@ en français. Code, commentaires, noms de fichiers/variables : anglais.
 ## Règles non négociables
 
 - Ne jamais commit ni push sans instruction explicite dans le message courant.
-- Ne jamais lancer le serveur backend (`run.py`) en arrière-plan depuis une session —
-  c'est l'instance de Philippe ; le redémarrage après modif backend lui revient
-  (`reload=False` définitif, le reloader Windows est cassé).
+- L’assistant peut démarrer le backend (`backend/run.py`) pour utiliser ou tester
+  l’application. Avant le lancement, vérifier si une instance existe déjà : la
+  réutiliser sans la remplacer ni l’arrêter. Conserver `reload=False` (le reloader
+  Windows est cassé) et lancer sans fenêtre supplémentaire visible.
+- Pour toute instance lancée par l’assistant, mémoriser le PID, l’heure de création
+  et la commande du processus. À la fin de l’utilisation ou des tests, en cas
+  d’erreur ou d’abandon, arrêter cette instance : fermer le frontend ne termine
+  pas le backend Python. Ne pas l’arrêter immédiatement après le démarrage.
+  Préférer un arrêt propre ; si nécessaire, terminer uniquement le processus
+  identifié et ses descendants créés pour cette instance, après vérification
+  de leur identité. Vérifier que ces processus ont quitté et libéré leur port.
+  Ne jamais tuer tous les processus Python ni arrêter une instance préexistante.
+  Ne laisser une instance lancée par l’assistant active qu’à la demande explicite
+  de Philippe, en indiquant comment l’arrêter.
 - `npm run build` (depuis `frontend/`) obligatoire après toute modification Vue avant
   de considérer un changement frontend terminé.
 - pytest se lance toujours depuis la **racine** du repo, jamais depuis `backend/`.

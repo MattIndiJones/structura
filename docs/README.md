@@ -37,6 +37,12 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
+Organisations et accès : [Cadrage de l'admission et des habilitations](projects/platform/ORGANIZATION_ACCESS_DESIGN_2026-09-24.md)
+— **À faire, développement différé**. Plateforme commune et installation client ; propriété des données par l'organisation actée ; invitations, approbations, migration et recette à préparer.
+
+Dernière correction Pricing : [Authentification des appels et erreurs de validation](projects/pricing/PRICING_AUTHENTIFICATION_2026-09-24.md)
+— 30 appels harmonisés ; 217 tests frontend et build réussis ; pricing initial et profil de payoff vérifiés dans le navigateur.
+
 Studies : [Audit métier et technique du 20/09/2026](audits/AUDIT_STUDIES_2026-09-20.md)
 — constats initiaux ; corrections et contrôles décrits dans le [processus Studies](projects/studies/STUDIES_PROCESS_ET_CORRECTIONS_2026-09-20.md), avec limites de données et extensions restantes.
 [Pitch de partenariat consulting](projects/studies/STUDIES_CONSULTING_PITCH_2026-09-20.md)

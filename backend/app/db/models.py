@@ -791,6 +791,21 @@ class RfqProvider(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class RfqProviderContact(SQLModel, table=True):
+    """Client-admin directory of contacts for a quoting provider.
+
+    Quotes retain a contact name snapshot, so a later directory edit does not
+    rewrite the historical record.
+    """
+    __tablename__ = "rfq_provider_contacts"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider_id: int = Field(foreign_key="rfq_providers.id", index=True)
+    name: str
+    email: str = Field(default="")
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class Alert(SQLModel, table=True):
     """Lifecycle/barrier alert raised by the daily refresh (or the manual
     'Rafraîchir le book' action) — see services/lifecycle_alerts.py.

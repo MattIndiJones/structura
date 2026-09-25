@@ -215,7 +215,8 @@ const scheduleRows = computed(() => {
   return constats.map((c, idx) => {
     const date = contractualDate(c.date, c.t)
     const payDate = contractualDate(c.date_paiement, c.t_paiement ?? c.t)
-    const calendar = c.calendrier ? `${c.calendrier} ` : 'Obs. '
+    const calendar = c.calendrier
+      ? `${c.calendrier.replace(/^OBSERVATIONS$/i, 'Obs')} ` : 'Obs '
     return {
       key: `${c.calendrier || 'literal'}-${c.rang ?? idx}-${c.t}`,
       label: `${calendar}${c.rang ?? idx + 1}`,

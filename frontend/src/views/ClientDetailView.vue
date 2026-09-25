@@ -351,7 +351,7 @@
                          style="color: var(--subtle)">{{ t.documentation_reference }}</div>
                   </td>
                   <td class="py-2 pr-3">
-                    {{ t.payoff_family || t.product_type || '—' }}
+                    {{ payoffFamilyForDisplay(t.payoff_family || t.product_type) || '—' }}
                     <div v-if="t.payoff_description" class="text-xs"
                          style="color: var(--subtle)">{{ t.payoff_description }}</div>
                   </td>
@@ -480,6 +480,7 @@ import ClientCard from '../components/clients/ClientCard.vue'
 import TechnicalPanel from '../components/clients/TechnicalPanel.vue'
 import ConstraintsPanel from '../components/clients/ConstraintsPanel.vue'
 import { formatDate, formatInt } from '../utils/format.js'
+import { payoffFamilyForDisplay } from '../utils/payoffFamilies.js'
 
 // Le registre. Ajouter un onglet = une entrée ici et un bloc dans le template.
 const ONGLETS = [

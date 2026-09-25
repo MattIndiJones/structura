@@ -28,18 +28,26 @@ import {
 Chart.register(LineElement, LineController, PointElement, LinearScale, CategoryScale, Tooltip, Legend)
 applyChartTheme(Chart)
 
-const props = defineProps({ idx: { type: Number, required: true } })
+const props = defineProps({
+  idx: { type: Number, default: 0 },
+  underlying: { type: Object, default: null },
+  model: { type: String, default: '' },
+  horizon: { type: Number, default: null },
+})
 const store = usePricingStore()
 const demo = useDemoModeStore()
 const canvas = ref(null)
 let chart = null
+const activeUnderlying = computed(() => props.underlying || store.underlyings[props.idx])
+const activeModel = computed(() => props.model || store.globalParams.model)
+const activeHorizon = computed(() => props.horizon ?? store.globalParams.T)
 
 const showSmile = computed(() =>
-  ['localvol', 'heston', 'sabr', 'lsv'].includes(store.globalParams.model)
+  ['localvol', 'heston', 'sabr', 'lsv'].includes(activeModel.value)
 )
 
 const title = computed(() => {
-  const m = store.globalParams.model
+  const m = activeModel.value
   return m === 'localvol' ? 'DUPIRE SMILE Σ(K)'
     : m === 'lsv' ? 'DUPIRE SMILE Σ(K) — cible de calibration LSV'
     : m === 'heston' ? 'HESTON SMILE Σ(K) — approx.'
@@ -47,7 +55,7 @@ const title = computed(() => {
 })
 
 const tsLabel = computed(() => {
-  const T = store.globalParams.T
+  const T = activeHorizon.value
   const ts = buildTs(T)
   return ts.map(t => `T=${t}Y`).join(', ')
 })
@@ -97,10 +105,10 @@ function hestonVol(K, T, v0, kappa, theta, xi, rho_h) {
 const COLORS = chartTheme.series.slice(0, 4)
 
 function computeData() {
-  const u = store.underlyings[props.idx]
+  const u = activeUnderlying.value
   if (!u) return null
-  const model = store.globalParams.model
-  const Tmax = store.globalParams.T
+  const model = activeModel.value
+  const Tmax = activeHorizon.value
   const Ts = buildTs(Tmax)
 
   const nK = 41
@@ -180,9 +188,9 @@ async function renderChart() {
 
 // Reactive key — triggers redraw when any relevant param changes
 const smileKey = computed(() => {
-  const model = store.globalParams.model
-  const T = store.globalParams.T
-  const u = store.underlyings[props.idx]
+  const model = activeModel.value
+  const T = activeHorizon.value
+  const u = activeUnderlying.value
   if (!u || !showSmile.value) return null
   if (model === 'localvol' || model === 'lsv')
     return `lv|${u.sigma}|${u.skew}|${u.curvature}|${T}`

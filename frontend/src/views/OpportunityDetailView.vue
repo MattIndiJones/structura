@@ -122,7 +122,8 @@
               <ul class="flex flex-col divide-y" style="border-color: var(--border)">
                 <li v-for="deal in opportunite.deals" :key="deal.id"
                     class="py-2.5 flex items-center justify-between gap-3">
-                  <span class="text-sm font-mono">{{ deal.reference }}</span>
+                  <DealReferenceLink :deal-id="deal.id" :reference="deal.reference"
+                                     class="text-sm font-mono" />
                   <span class="text-sm tabular-nums">
                     {{ montant(deal.nominal) }} {{ deal.devise }}
                   </span>
@@ -175,7 +176,7 @@
               </div>
               <div class="flex items-center justify-between text-sm gap-3">
                 <span style="color: var(--muted)">Payoff</span>
-                <span>{{ opportunite.payoff_family || '—' }}</span>
+                <span>{{ payoffFamilyForDisplay(opportunite.payoff_family) || '—' }}</span>
               </div>
               <p v-if="opportunite.payoff_description" class="text-xs whitespace-pre-line"
                  style="color: var(--muted)">{{ opportunite.payoff_description }}</p>
@@ -268,10 +269,12 @@ import AlertMessage from '../components/ui/AlertMessage.vue'
 import BackLink from '../components/ui/BackLink.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
+import DealReferenceLink from '../components/DealReferenceLink.vue'
 import OpportunityFormModal from '../components/clients/OpportunityFormModal.vue'
 import InteractionFormModal from '../components/clients/InteractionFormModal.vue'
 import LostReasonModal from '../components/clients/LostReasonModal.vue'
 import { formatDate, formatInt } from '../utils/format.js'
+import { payoffFamilyForDisplay } from '../utils/payoffFamilies.js'
 
 const route = useRoute()
 const router = useRouter()

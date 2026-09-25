@@ -426,6 +426,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { apiFetch } from '../utils/api.js'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { useVariantMark, cheminConstat, cheminGlobal, cheminParam, valeurLisible } from '../composables/useVariantMark.js'
@@ -501,7 +502,7 @@ async function proposePaymentDate(maturity) {
   const revision = ++proposalRevision
   if (contractTermsLocked.value || !usableDate(maturity) || paymentDateDirty.value) return
   try {
-    const response = await fetch('/api/calendar/resolve', {
+    const response = await apiFetch('/api/calendar/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date: maturity, currency: store.globalParams.deal_ccy || 'EUR', business_days: 3 }),
@@ -628,7 +629,7 @@ async function refreshWindowPreviews() {
         continue
       }
       try {
-        const response = await fetch('/api/schedule/period-window', {
+        const response = await apiFetch('/api/schedule/period-window', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             start_date: value.start_date, end_date: value.end_date, roll_date: value.roll_date,
@@ -645,7 +646,7 @@ async function refreshWindowPreviews() {
     const anchor = calendar.kind === 'single' ? value.date : value.end_date
     if (!anchor) { delete windowPreviews[calendar.name]; continue }
     try {
-      const response = await fetch('/api/schedule/window', {
+      const response = await apiFetch('/api/schedule/window', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: anchor, window_length: tenor(value.window_length), window_frequency: sampling,
@@ -673,7 +674,7 @@ async function loadCalendarDates() {
   const dates = new Set()
   for (const calendar of calendars) {
     try {
-      const response = await fetch('/api/schedule/generate', {
+      const response = await apiFetch('/api/schedule/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(scheduleRequest(calendar)),
       })
@@ -722,7 +723,7 @@ async function loadPastCloses() {
       start: store.globalParams.strike_date || pastDays[0],
       end: today,
     })
-    const response = await fetch(`/api/finance/hist_prices?${query}`)
+    const response = await apiFetch(`/api/finance/hist_prices?${query}`)
     if (!response.ok) return
     const payload = await response.json()
     const result = {}

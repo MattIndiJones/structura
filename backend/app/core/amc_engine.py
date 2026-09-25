@@ -847,6 +847,12 @@ def _compute_activity(tx_records: list[dict], nav_records: list[dict]) -> dict:
     # Trading days
     trading_days = int(tx_df["_date"].dt.normalize().nunique()) if date_col else 0
 
+    period_days = None
+    if date_col:
+        dates = pd.to_datetime(tx_df[date_col], errors="coerce").dropna()
+        if not dates.empty:
+            period_days = (dates.max().normalize() - dates.min().normalize()).days
+
     # Side analysis
     side_col = next((c for c in tx_df.columns if c == "Side"), None)
     buy_notional = sell_notional = 0.0
@@ -865,8 +871,10 @@ def _compute_activity(tx_records: list[dict], nav_records: list[dict]) -> dict:
         "avg_aum":        round(avg_aum, 0),
         "turnover_rate":  round(turnover_rate, 4),
         "turnover_ann_pct": round(
-            turnover_rate / (max(len(nav_records), 1) / 252) * 100, 1
-        ) if nav_records else None,
+            turnover_rate * 365 / period_days * 100, 1
+        ) if period_days and avg_aum > 0 else None,
+        "turnover_period_days": period_days,
+        "turnover_convention": "ACT/365 entre premier et dernier ordre",
         "monthly":        monthly,
     }
 

@@ -211,6 +211,18 @@ def _run_study(manifest_dict: dict, folder: str) -> dict:
     # ── Bloc C — trading ──
     if toggles.C_trading and not fifo_error:
         result["block_c"] = block_c_trading(recon, orders, nav, composition)
+        # Share the executed-order turnover convention across the unified study.
+        turnover = result["block_c"]["turnover"]
+        for scope in ("net", "gross"):
+            a = (result.get("block_a") or {}).get(scope)
+            if a:
+                activity = a.setdefault("activity", {})
+                activity.update(turnover_rate=turnover["turnover_rate"],
+                    turnover_ann_pct=(turnover["turnover_annualized"] * 100
+                                      if turnover["turnover_annualized"] is not None else None),
+                    turnover_period_days=turnover["period_days"],
+                    turnover_convention="Notionnel exécuté / AUM moyen ; ACT/365 entre premier et dernier ordre")
+
 
     # ── Bloc D — comportement ──
     if toggles.D_behaviour and not fifo_error:

@@ -28,9 +28,9 @@ def test_pricing_booking_mtm_au_strike_conservent_le_meme_produit(monkeypatch):
         script=SCRIPT,
         underlyings=[{
             "name": "AAA", "ticker": "AAA", "ccy": "EUR",
-            "sigma": 0.20, "q": 0.01,
+            "sigma": 0.20, "q": 0.01, "skew": -0.10, "curvature": 0.05,
         }],
-        corr_matrix=[[1.0]], r=0.03, T=tenor, N=2000,
+        corr_matrix=[[1.0]], r=0.03, T=tenor, N=2000, model="localvol",
         funding_spread=0.015, barrier_monitoring="continuous",
         strike_date=strike, value_date=strike, maturity_date=maturity,
         payment_date=payment, settlement_ccy="EUR",
@@ -85,3 +85,6 @@ def test_pricing_booking_mtm_au_strike_conservent_le_meme_produit(monkeypatch):
     assert mtm["mtm"] == priced.price
     assert mtm["market_used"]["funding_spread"] == 1.5
     assert mtm["market_used"]["barrier_monitoring"] == "continuous"
+    assert body.market_snapshot["model"] == "localvol"
+    assert body.market_snapshot["underlyings"][0]["skew"] == -10.0
+    assert mtm["market_used"]["model"] == "localvol"

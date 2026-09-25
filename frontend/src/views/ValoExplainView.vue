@@ -65,7 +65,8 @@
 
     <template v-if="note">
       <section class="evidence card">
-        <div class="section-title"><h2>{{ currentEvidence.data.deal.reference }}</h2><span class="badge">Chiffres archivés · non éditables</span></div>
+        <div class="section-title"><h2><DealReferenceLink :deal-id="note.deal_id"
+          :reference="currentEvidence.data.deal.reference" /></h2><span class="badge">Chiffres archivés · non éditables</span></div>
         <div class="facts">
           <article v-for="r in note.evidence.runs" :key="r.run_id"><span>Valorisation au {{ r.data.mtm.valuation_date }}</span>
             <strong><SensitiveValue>{{ percent(r.data.mtm.mtm) }}</SensitiveValue></strong>
@@ -129,6 +130,7 @@ import AiWorkbench from '../components/AiWorkbench.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
 import SensitiveValue from '../components/SensitiveValue.vue'
+import DealReferenceLink from '../components/DealReferenceLink.vue'
 import { useDemoModeStore } from '../stores/demoMode'
 import { apiFetch } from '../utils/api'
 import { localDay, readMtmResponse, runTimestamp } from '../composables/useBookingMtm'

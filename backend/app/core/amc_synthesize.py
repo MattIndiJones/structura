@@ -459,7 +459,7 @@ def build_synthesis_payload(
             reg = ((ba.get(scope) or {}).get("regression")) or {}
             if not reg:
                 continue
-            label = "NET (après frais)" if scope == "net" else "BRUT (avant frais)"
+            label = "NET (après frais)" if scope == "net" else "AJUSTÉ DES SEULS FRAIS DE GESTION (pas une performance brute comptable)"
             add(f"\n  {label}")
             add(f"    Alpha annualisé  : {_pct(reg.get('alpha_ann_pct'))}")
             add(f"    Alpha t-stat     : {_fmt(reg.get('alpha_tstat'), 2)}")
@@ -951,7 +951,14 @@ def build_synthesis_payload(
     add(f"Audience cible : {audience}  |  Langue de rédaction : {language}")
     add("=" * 66)
 
-    lines.append("\nCONTRÔLES ET TRAÇABILITÉ : " + __import__("json").dumps({"quality": study_result.get("data_quality"), "provenance": study_result.get("provenance")}, ensure_ascii=False))
+    quality = study_result.get("data_quality") or {}
+    add("CONTRÔLES : " + __import__("json").dumps({k: quality.get(k) for k in
+        ("status", "issues", "missing_marks", "reconciliation_gap_aum_bps")}, ensure_ascii=False))
+    reconciliation = ((study_result.get("block_b") or {}).get("totals") or {}).get("reconciliation") or {}
+    add("RAPPROCHEMENT ET FRAIS : " + __import__("json").dumps({k: reconciliation.get(k) for k in
+        ("cash_income_prod", "fee_breakdown", "annual_fees", "annual_fees_note", "management_fee_basis",
+         "performance_crystallization", "nav_implied_pnl_prod", "gap_prod", "gap_aum_bps")}, ensure_ascii=False))
+    add("Rédige maintenant une synthèse en français : constats chiffrés, limites, points à vérifier, conclusion conditionnelle. Aucun JSON ni recopie des données techniques. 400 à 600 mots maximum.")
     return "\n".join(lines)
 
 
@@ -982,3 +989,71 @@ def call_openai(payload, system_prompt, api_key, model=None, timeout=180):
     from ..services.llm.providers import complete_with_metadata
     return complete_with_metadata("openai", model, system_prompt, payload,
                                   api_key=api_key, temperature=0.3, max_tokens=3000).text
+
+
+def validate_synthesis(text: str, finish_reason=None) -> None:
+    """Reject unusable output, without claiming semantic or financial certification."""
+    import re
+    from ..services.llm.providers import LlmError
+    value = (text or "").strip()
+    if finish_reason in ("length", "max_tokens"):
+        raise LlmError("Synthèse interrompue par la limite de génération ; aucun texte intégré. Essayez un modèle adapté ou un prompt plus court.")
+    if (len(value.split()) < 40 or value.startswith(("{", "[", "```"))
+            or re.search(r'"(?:sha256|n_obs|bundle:|execution:)', value)
+            or value.count("```") % 2):
+        raise LlmError("Synthèse inexploitable : réponse technique, trop courte ou incomplète. Aucun texte intégré ; vérifiez le modèle et le prompt.")
+
+
+def build_synthesis_brief(result: dict) -> str:
+    """Bounded editorial context; full tables and hashes remain in the study archive."""
+    meta = result.get("meta") or {}
+    blocks = {k: result.get('block_' + k) or {} for k in 'abcdefghijk'}
+    b = blocks['b'].get('totals') or {}
+    rec = b.get('reconciliation') or {}
+    lines = ["DONNÉES OBSERVÉES — ne pas inférer un mandat à partir des facteurs de régression.",
+             f"Produit : {meta.get('product_name', meta.get('isin'))}. Devise : {meta.get('currency')}.",
+             f"Période : {meta.get('nav_start_date')} au {meta.get('nav_current_date')}."]
+    def add(label, values):
+        lines.append(label + ' : ' + '; '.join(f'{k} = {v}' for k, v in values.items()))
+    def selected(data, keys):
+        return {k: data.get(k, 'non disponible') for k in keys.split()}
+    add('Historique NAV (la performance cumulée porte sur toute la période)',
+        selected(meta, 'nav_start_value nav_current_value nav_n_obs n_orders'))
+    add('Performance NETTE cumulée sur toute la période (%)', selected((blocks['a'].get('net') or {}).get('performance') or {}, 'full_total_ret_pct'))
+    add('P&L en devise du fonds, avant frais sauf mention explicite',
+        selected(b, 'realized_pnl unreal_pnl total_pnl realized_fx_pnl fx_share_of_realized_pct total_pnl_net_of_fees'))
+    add('Rapprochement NAV', selected(rec, 'cash_income_prod nav_value_prod nav_implied_pnl_prod gap_prod gap_aum_bps'))
+    add('Conventions de frais', selected(rec, 'management_fee_basis performance_crystallization'))
+    add('Frais cumulés signés', rec.get('fee_breakdown') or {})
+    for row in rec.get('annual_fees') or []:
+        add(f"ANNÉE {row['year']} UNIQUEMENT (pas rendement des six ans)", row)
+    a = (blocks['a'].get('net') or {}).get('regression') or {}
+    add('A — régression des rendements NETS ; alpha estimé, pas performance cumulée',
+        selected(a, 'alpha_ann_pct alpha_tstat alpha_pvalue r2 n_obs'))
+    for factor in a.get('factors') or []:
+        add('A — facteur observé (pas mandat déclaré)', selected(factor, 'name beta tstat pvalue'))
+    add('C — appariements FIFO (le taux gagnant porte sur les lots, pas sur les ordres)', blocks['c'].get('round_trips') or {})
+    add('C — turnover ACT/365 entre premier et dernier ordre', blocks['c'].get('turnover') or {})
+    add('D — titres classés par résultat, pas alpha de conviction', (blocks['d'].get('conviction_matrix') or {}).get('counts') or {})
+    add('E — panier passif BRUT dividendes réinvestis vs fonds NET selon politique configurée',
+        selected(blocks['e'], 'available period_start bh_perf_pct actual_perf_pct value_added_pct'))
+    add('F — reconstruction factorielle théorique ajustée sur le même échantillon, PAS portefeuille investissable ni réplication du benchmark',
+        selected(blocks['f'], 'available score replicant_total_pct amc_total_pct alpha_gap_pct'))
+    add('G — attribution statique indicative sur proxies, hors scoring ; effets en points',
+        selected(blocks['g'], 'available allocation_pct selection_pct interaction_pct active_return_pct'))
+    add('H — position dans une fourchette locale rétrospective ; 0,5 est son milieu, PAS le hasard',
+        selected(blocks['h'], 'available n_trades_analyzed entry_score_mean exit_score_mean global_score_mean tstat_global pvalue_global'))
+    add('I — comparaison rétrospective des achats au benchmark', selected(blocks['i'], 'available score tstat_alpha pvalue_alpha'))
+    for horizon, stats in (blocks['i'].get('stats_by_horizon') or {}).items():
+        add('I — ' + horizon, selected(stats, 'n alpha_mean success_rate'))
+    add('J — risque descriptif', selected(blocks['j'], 'available score'))
+    for label, stats in (blocks['j'].get('sub_scores') or {}).items():
+        add('J — ' + label, {k: v for k, v in stats.items() if isinstance(v, (str, int, float)) or v is None})
+    for event in blocks['k'].get('events') or []:
+        add('K — choc historique ' + str(event.get('id')), selected(event, 'n_trades net_flow activity_ratio'))
+    skill = result.get('manager_skill_score') or {}
+    add('Manager Skill — composite descriptif, PAS preuve de talent', selected(skill, 'score score_label'))
+    add('Qualité des données', selected(result.get('data_quality') or {}, 'status issues'))
+    lines.append("LIMITES OBLIGATOIRES : alpha non significatif si p >= 0,05 ; aucune preuve de talent durable issue des scores. La couverture est documentaire, pas statistique. L'écart E inclut frais et politique de dividendes différents ; F n'est pas investissable ; G est statique et hors scoring ; H/I sont rétrospectifs. Les valeurs absentes restent non disponibles. Les statistiques factorielles ne décrivent pas la stratégie déclarée du fonds.")
+    lines.append("Rédige maintenant 300 à 500 mots en français, sans JSON, en quatre sections : Constats chiffrés ; Limites ; Points à vérifier ; Conclusion conditionnelle. Cite la performance cumulée, pas le rendement de la dernière année pour décrire toute la période. N'invente aucune information et ne recommande aucun investissement.")
+    return '\n'.join(lines)
