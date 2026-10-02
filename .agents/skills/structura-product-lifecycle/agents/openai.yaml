@@ -1,0 +1,4 @@
+interface:
+  display_name: "Structura Product Lifecycle"
+  short_description: "Préserver le cycle de vie produit Structura"
+  default_prompt: "Use $structura-product-lifecycle to change or review this Structura RFQ, booking, fixing, lifecycle, or MtM workflow safely."

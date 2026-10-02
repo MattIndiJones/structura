@@ -1,6 +1,6 @@
 <template>
-  <div class="min-h-screen flex flex-col">
-    <AppHeader v-if="!route.meta.public" />
+  <div class="flex flex-col" :class="route.meta.fixedViewport ? 'h-dvh overflow-hidden' : 'min-h-screen'">
+    <AppHeader v-if="!route.meta.public" class="shrink-0" />
     <RouterView />
     <!-- Montée UNE fois, ici : le service de confirmation rend une promesse
          qu'il faut pouvoir résoudre depuis n'importe où, y compris depuis un

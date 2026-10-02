@@ -78,6 +78,11 @@ const routes = [
     meta: { title: 'Risk Management' },
   },
   {
+    path: '/risk/ccr',
+    component: () => import('../views/CcrView.vue'),
+    meta: { title: 'Risque de contrepartie — CCR', fixedViewport: true },
+  },
+  {
     path: '/reinvest',
     component: () => import('../views/ReinvestView.vue'),
     meta: { title: 'Réinvestissement' },

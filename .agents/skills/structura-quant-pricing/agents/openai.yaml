@@ -1,0 +1,4 @@
+interface:
+  display_name: "Structura Quant Pricing"
+  short_description: "Sécuriser le pricing quantitatif de Structura"
+  default_prompt: "Use $structura-quant-pricing to design or review this Structura pricing change with explicit units, model wiring, and quantitative tests."

@@ -8,6 +8,7 @@
           <div class="flex items-center gap-3">
             <BackLink :fallback="{ path: '/', query: { category: 'risk_management' } }" />
             <h1 class="page-title">Risk Management</h1>
+            <a href="/risk/ccr" class="btn-secondary btn-sm">Risque de contrepartie — CCR</a>
           </div>
         </div>
 

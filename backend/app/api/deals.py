@@ -79,6 +79,7 @@ router = APIRouter(prefix="/api/deals", tags=["deals"])
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
 class DealCreate(BaseModel):
+    ccr_netting_set_id: Optional[int] = None
     product_id: Optional[int] = None
     product_terms_version: Optional[int] = None
     sens: Literal["achat", "vente"] = "vente"
@@ -651,6 +652,9 @@ def _deal_row(
         "reference": d.reference,
         "entity_id": d.entity_id,
         "user_id": d.user_id,
+        "counterparty_id": d.counterparty_id,
+        "ccr_netting_set_id": d.ccr_netting_set_id,
+        "uat_batch_id": d.uat_batch_id,
         "indicative_id": d.indicative_id,
         "rfq_id": d.rfq_id,
         # Frozen best-execution record — see _rfq_provenance. None outside
@@ -1642,6 +1646,8 @@ def _book_deal(
         _validate_economics(body)
         ai_provenance = _ai_script_provenance(body)
         _apply_pricing_receipt(body, ai_provenance)
+        from ..core.ccr.service import enforce_booking
+        enforce_booking(session, current, body)
         if ai_provenance and not body.pricing_receipt:
             body.market_snapshot["ai_script_provenance"] = ai_provenance
     except HTTPException as exc:
@@ -2075,6 +2081,7 @@ def _book_deal(
         contrepartie=body.contrepartie,
         counterparty_id=(session.exec(select(Counterparty.id).where(
             Counterparty.name == body.contrepartie)).first()),
+        ccr_netting_set_id=body.ccr_netting_set_id,
         devise=body.devise,
         product_type=body.product_type,
         fixing_policy=FixingPolicy.AUTO_YAHOO.value,

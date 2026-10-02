@@ -1048,6 +1048,8 @@
             </div>
 
             <RfqPricingPanel :rfq="rfq.current" :pricing="rfq.lastPricing" />
+            <CcrCreditCheck v-if="selectedQuote" :rfq-id="rfq.current.id" :quote-id="selectedQuote.id"
+              :counterparty-name="selectedQuote.counterparty" />
           </div>
         </div>
 
@@ -1103,6 +1105,7 @@ import DataFilterBar from '../components/ui/DataFilterBar.vue'
 import { useDataFilter } from '../composables/useDataFilter.js'
 import RfqParamsEditor from '../components/RfqParamsEditor.vue'
 import RfqPricingPanel from '../components/RfqPricingPanel.vue'
+import CcrCreditCheck from '../components/CcrCreditCheck.vue'
 import { formatDate, formatDateTime, formatPercent, formatInt, formatBps } from '../utils/format.js'
 
 // Catalogue de sous-jacents : chargé depuis la base au montage.

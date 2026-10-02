@@ -1,6 +1,10 @@
 <template>
   <div class="flex flex-col gap-5">
 
+    <CcrCreditCheck :counterparty-name="form.contrepartie" :pricing="store.resultIsStale ? null : store.result?.pricing_receipt?.pricing_input"
+      :booked-deal="existingDeal"
+      :nominal="store.globalParams.nominal" :currency="store.globalParams.deal_ccy" :sens="form.sens"
+      :product-type="form.product_type" @netting-set="ccrNettingSetId = $event" />
     <!-- No pricing result warning -->
     <div v-if="!store.result && !store.contractTermsLocked" class="card border-amber-800/50 bg-amber-950/20">
       <p class="text-amber-400 text-sm">
@@ -350,6 +354,7 @@ import { useDealsStore } from '../stores/deals.js'
 import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
 import HelpTip from './HelpTip.vue'
+import CcrCreditCheck from './CcrCreditCheck.vue'
 import BaseModal from './ui/BaseModal.vue'
 import BookingPricingReview from './BookingPricingReview.vue'
 import DealReferenceLink from './DealReferenceLink.vue'
@@ -360,6 +365,7 @@ import { PAYOFF_FAMILIES, canonicalPayoffFamily, payoffFamilyForModel } from '..
 const emit = defineEmits(['go-events'])
 
 const store = usePricingStore()
+const ccrNettingSetId = ref(null)
 const dealsStore = useDealsStore()
 const auth = useAuthStore()
 const route = useRoute()
@@ -699,6 +705,7 @@ async function book() {
 
   try {
     const deal = await dealsStore.bookDeal({
+      ccr_netting_set_id: ccrNettingSetId.value,
       product_id: store.currentProduct?.product_id || null,
       product_terms_version: store.currentProduct?.terms_version || null,
       sens: form.sens,

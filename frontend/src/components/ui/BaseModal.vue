@@ -7,13 +7,14 @@
   <Teleport to="body">
     <Transition name="modal">
       <div v-if="modelValue" class="modal-overlay" @mousedown.self="close" @keydown.esc="close">
-        <div ref="panelEl" class="modal-panel" :style="{ maxWidth: maxWidth }"
+        <div ref="panelEl" class="modal-panel" :class="{ 'modal-fullscreen': fullscreen }" :style="{ maxWidth: fullscreen ? 'none' : maxWidth }"
              role="dialog" aria-modal="true" :aria-label="title" tabindex="-1" @keydown.tab="onTab">
           <div v-if="title" class="modal-header">
             <h2 class="modal-title">{{ title }}</h2>
             <button class="modal-close" aria-label="Fermer" @click="close">✕</button>
           </div>
           <div class="modal-body">
+            <div v-if="$slots.summary" class="modal-summary"><slot name="summary" /></div>
             <slot />
           </div>
           <div v-if="$slots.footer" class="modal-footer">
@@ -32,10 +33,12 @@ const props = defineProps({
   modelValue: { type: Boolean, required: true },
   title: { type: String, default: '' },
   maxWidth: { type: String, default: '420px' },
+  fullscreen: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'close'])
 
 const panelEl = ref(null)
+let previousFocus
 
 function close() {
   emit('update:modelValue', false)
@@ -62,7 +65,8 @@ function onTab(e) {
 }
 
 watch(() => props.modelValue, async (open) => {
-  if (!open) return
+  if (!open) { if (props.fullscreen) previousFocus?.focus?.(); return }
+  if (props.fullscreen) previousFocus = document.activeElement
   await nextTick()
   const els = focusableEls()
   ;(els[0] || panelEl.value)?.focus()
@@ -119,6 +123,14 @@ watch(() => props.modelValue, async (open) => {
 }
 .modal-close:hover { background: var(--negative-light); border-color: var(--negative); color: var(--negative); }
 .modal-footer { display: flex; gap: .5rem; justify-content: flex-end; }
+.modal-fullscreen { height: calc(100dvh - 2rem); max-height: none; min-height: 0; overflow: hidden; }
+.modal-fullscreen > .modal-header, .modal-fullscreen > .modal-footer { flex-shrink: 0; min-width: 0; }
+.modal-fullscreen > .modal-body { flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.modal-fullscreen > .modal-body > .modal-summary { position: sticky; top: 0; z-index: 2; background: var(--surface); padding-bottom: .5rem; }
+.modal-fullscreen > .modal-footer { flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: .75rem; }
+@media (max-width: 639px) {
+  .modal-fullscreen { padding: .75rem; gap: .5rem; }
+}
 
 .modal-enter-active, .modal-leave-active { transition: opacity .18s ease; }
 .modal-enter-from, .modal-leave-to { opacity: 0; }

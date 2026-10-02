@@ -2529,7 +2529,11 @@ export const usePricingStore = defineStore('pricing', () => {
       payment_date: deal.payment_date || null,
       settlement_ccy: market.deal_ccy ?? deal.devise ?? globalParams.deal_ccy,
     }
-    openedDeal.value = { id: deal.id, reference: deal.reference }
+    openedDeal.value = {
+      id: deal.id, reference: deal.reference, contract_version: deal.contract_version,
+      counterparty_id: deal.counterparty_id, ccr_netting_set_id: deal.ccr_netting_set_id,
+      uat_batch_id: deal.uat_batch_id, devise: deal.devise,
+    }
     pendingDealPrefill.value = {
       sens: deal.sens,
       contrepartie: deal.contrepartie || '',

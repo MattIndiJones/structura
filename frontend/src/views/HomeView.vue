@@ -250,6 +250,10 @@
           </div>
 
           <div v-else-if="selectedCategory === 'risk_management'" class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl">
+            <RouterLink to="/risk/ccr" class="card hover:border-blue-400 transition-colors">
+              <div class="font-semibold">Risque de contrepartie — CCR</div>
+              <p class="text-xs mt-1 text-slate-500">Expositions, netting, collatéral, CVA et limites de crédit</p>
+            </RouterLink>
 
             <!-- Création de portefeuille -->
             <RouterLink to="/risk?tab=portfolios"

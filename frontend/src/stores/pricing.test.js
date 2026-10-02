@@ -404,6 +404,10 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
     await store.loadFromDeal({
       id: 7,
       reference: 'DEAL-7',
+      contract_version: 3,
+      counterparty_id: 11,
+      ccr_netting_set_id: 9,
+      uat_batch_id: 21,
       script_snapshot: VALIDE,
       market_snapshot: {
         deal_ccy: 'USD', user_params: { COUPON: 0.0175 }, constats: {},
@@ -425,6 +429,11 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
     })
 
     expect(store.globalParams.nominal).toBe(2_500_000)
+    expect(store.openedDeal).toEqual({
+      id: 7, reference: 'DEAL-7', contract_version: 3,
+      counterparty_id: 11, ccr_netting_set_id: 9,
+      uat_batch_id: 21, devise: 'USD',
+    })
     expect(store.globalParams.deal_ccy).toBe('USD')
     expect(store.globalParams.strike_date).toBe('2026-09-03')
     expect(store.globalParams.value_date).toBe('2026-09-07')

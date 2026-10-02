@@ -12,6 +12,7 @@
           </p>
         </div>
         <div class="page-actions">
+          <RouterLink to="/risk/ccr" class="btn-secondary btn-sm">Crédit & accords juridiques</RouterLink>
           <RouterLink to="/admin" class="btn-ghost btn-sm">← Administration</RouterLink>
         </div>
       </div>

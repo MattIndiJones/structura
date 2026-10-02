@@ -37,6 +37,11 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
+CCR : [Intégration du risque de contrepartie](projects/pricing/CCR_IMPLEMENTATION_2026-09-28.md)
+— **V1 intégrée, recette visuelle restante** : référentiel juridique/crédit, exposition
+GBM, CVA simple, contrôles Pricing/RFQ et blocage au booking ; limites de modèle
+et résultats de validation détaillés dans le rapport.
+
 Organisations et accès : [Cadrage de l'admission et des habilitations](projects/platform/ORGANIZATION_ACCESS_DESIGN_2026-09-24.md)
 — **À faire, développement différé**. Plateforme commune et installation client ; propriété des données par l'organisation actée ; invitations, approbations, migration et recette à préparer.
 
@@ -176,6 +181,7 @@ Le backend doit être redémarré pour que ces changements soient actifs.
 | `CONSTATATIONS_PERIODE_DESIGN.md` | 10-11/09 | MIN/MAX/AVG par sous-jacent, `PERIOD`, `INDEX` par échéancier, échéancier contractuel, fixings des relevés, lecture par date, Mark-to-Future ; §1 à §24 commités | En cours | Theta, P&L explain, KID (§14) ; `REALVOL` à fenêtre de départ ouverte (§24) |
 | `EDITEUR_ECONOMICS_DESIGN.md` | 11/09 | Règle « Economics fait foi », décisions D1 à D8, lots 0 à 3 | En cours | Lot 1 codé le 14/09 (note suivante). Restent P2, champ vidé bloquant, lot 2 (EMT vérifié), lot 3 en attente |
 | `MODELES_PRODUITS_DESIGN.md` | 14/09 | Ctrl+S et « Valider », maturité = dernière constatation, catalogue de 19 fiches, module « Modèles de produits » ; lots 1 à 4 codés | En cours | Non commité ; questions du §6.2 ; lot 5 : exemples Normal et Expert, scripts UAT, corpus de l'assistant, guide d'ajout d'un payoff |
+| [SA_CCR_PORTEFEUILLE_MIXTE_ROADMAP_2026-09-29.md](projects/pricing/SA_CCR_PORTEFEUILLE_MIXTE_ROADMAP_2026-09-29.md) | 29/09 | Projet futur : classement notes/OTC, portefeuille mixte et SA-CCR equity sans produits de taux | À faire | Lots 0 à 5 ; juridiction, premier produit OTC et qualification des historiques à décider |
 
 ### `projects/lifecycle/`
 

@@ -47,6 +47,10 @@ def _migrate():
     tables, it never ALTERs an existing one. No Alembic in this project;
     keep patches here small and check-before-add."""
     with engine.connect() as conn:
+        ccr_deal_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deals)"))}
+        if ccr_deal_cols and "ccr_netting_set_id" not in ccr_deal_cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN ccr_netting_set_id INTEGER REFERENCES ccr_netting_sets(id)"))
+            conn.commit()
         from .product_migrations import migrate_product_links
         migrate_product_links(conn)
         conn.commit()

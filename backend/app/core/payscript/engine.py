@@ -1557,7 +1557,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 # démarre alors avant elle, et le temps antérieur ne doit
                 # compter dans aucun état contractuel (REALVOL au premier chef).
                 state_start_step: int = 0,
-                state_out: list | None = None) -> list[float]:
+                state_out: list | None = None,
+                flows_at_payment: bool = False) -> list[float]:
     """Evaluate PayScript on pre-computed spot paths. Observation-only loop.
 
     wof_min_init / bof_max_init (None, a scalar, or array of shape (N,)) seed the
@@ -1718,7 +1719,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     ctx["total_cf"] += cf
                     ctx["total_cf_raw"] += fl["v"]
                     if path_flows is not None and fl["v"] != 0:
-                        path_flows.append((ctx["t"], fl["v"]))
+                        path_flows.append((t_pay if flows_at_payment and t_pay is not None else ctx["t"], fl["v"]))
                     if record and fl["v"] != 0:
                         key = f"{ctx['t']:.6f}|{fl['lbl']}"
                         if key not in flux_map:
@@ -1772,7 +1773,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     ctx["total_cf"] += cf
                     ctx["total_cf_raw"] += fl["v"]
                     if path_flows is not None and fl["v"] != 0:
-                        path_flows.append((ctx["t"], fl["v"]))
+                        path_flows.append((mat_pay_t if flows_at_payment and mat_pay_t is not None else ctx["t"], fl["v"]))
                     if record and fl["v"] != 0:
                         key = f"{ctx['t']:.6f}|{fl['lbl']}"
                         if key not in flux_map:
@@ -3683,7 +3684,11 @@ def run_mark_to_future(script: CompiledScript,
                         state: dict | None = None,
                         mtm_dates: list[float] | None = None,
                         yield_curve=None,
-                        sigma_r: float = 0.0) -> dict:
+                        sigma_r: float = 0.0,
+                        outer_paths: np.ndarray | None = None,
+                        credit_exposure: bool = False,
+                        maturity_payment_t: float | None = None,
+                        progress=None) -> dict:
     """Run the full nested Monte Carlo Mark-to-Future analysis (see module section
     docstring above). main_price is the t=0 fair price (% of notional); it is only
     used as the threshold for the P(MTM >= P0) diagnostic.
@@ -3743,9 +3748,26 @@ def run_mark_to_future(script: CompiledScript,
     # vivant va à la CONSTATATION, pas à l'évaluateur : transmise telle quelle au
     # rejeu extérieur, elle faisait tomber tout Mark-to-Future en cours de vie.
     fix_hist = _state.pop("fix_state_init", None)
-    S_outer = _simulate_mtf_outer(
+    S_outer = outer_paths if outer_paths is not None else _simulate_mtf_outer(
         underlyings, corr_matrix, r, mtm_dates, n_outer, seed, spot_mult=_spot0
     )
+    if S_outer.shape[1:] != (n, n_outer) or S_outer.shape[0] <= _mtf_step(mtm_dates[-1]):
+        raise ValueError("Dimensions des scénarios extérieurs incohérentes")
+
+    def credit_payments(contract, event_map, maturity, payment):
+        pay_map = {}
+        for ev in contract.events:
+            if ev.type == "AT_MATURITY":
+                continue
+            for idx, d in enumerate(ev.dates):
+                step = max(1, round(d * SY))
+                if step not in event_map:
+                    continue
+                p = (ev.payment_dates[idx] if ev.payment_dates and idx < len(ev.payment_dates) else d)
+                if payment is not None and abs(d - maturity) < 1e-6:
+                    p = payment
+                pay_map.setdefault(step, []).append(p)
+        return pay_map, {p: math.exp(-r * p) for rows in pay_map.values() for p in rows}
 
     use_heston = model == "heston"
     use_lv     = model == "localvol"
@@ -3757,7 +3779,12 @@ def run_mark_to_future(script: CompiledScript,
 
     results = []
     for k, t0 in enumerate(mtm_dates):
+        if progress:
+            progress(k, len(mtm_dates))
         step_k = _mtf_step(t0)
+        credit_matured = credit_exposure and step_k >= max(1, _mtf_step(T_max))
+        if credit_matured:
+            step_k = max(1, _mtf_step(T_max))
         spot_k = S_outer[step_k]                # (n, N_outer) — spot at this MTM date
 
         # ── Replay each outer scenario from inception to the mark date ──────
@@ -3784,13 +3811,22 @@ def run_mark_to_future(script: CompiledScript,
         _S_past, _, _, _lvl_past = _constater(
             script, S_outer[:step_k + 1], step_k, n, n_outer, None, None,
             fix_hist, past_step_map)
+        credit_past_args = {}
+        if credit_exposure:
+            pm, pdf = credit_payments(script, past_step_map, T_max, maturity_payment_t)
+            final_pay = maturity_payment_t if maturity_payment_t is not None else T_max
+            credit_past_args = dict(pay_map=pm, pay_df=pdf, mat_pay_t=final_pay,
+                                    mat_pay_df=math.exp(-r * final_pay), flows_at_payment=True)
         _eval_paths(script, _S_past, step_k, n, n_outer, dt, r,
-                    user_params, past_step_map, [], {}, record=False,
+                    user_params, past_step_map,
+                    [ev for ev in script.events if ev.type == "AT_MATURITY"] if credit_matured else [], {}, record=False,
                     state_out=outer_states, flows_out=outer_flows,
                     lvl_map=_lvl_past,
-                    rank_map=_rangs_observation(past_step_map), **_state)
+                    rank_map=_rangs_observation(past_step_map), **credit_past_args, **_state)
 
         alive = np.array([not st["done"] for st in outer_states])
+        if credit_matured:
+            alive[:] = False
         # Cash already paid out, expressed at t0 (the replay discounts to t=0).
         # There is deliberately no "cash already paid" series here any more.
         # It only ever described the RECALLED scenarios, and those now leave
@@ -3833,6 +3869,12 @@ def run_mark_to_future(script: CompiledScript,
         releves_k = _mtf_releves_realises(script, _S_past, step_k)
         residual_script, step_map, mat_events, ts_eff = _mtf_residual_script(
             script, t0, T_max)
+        credit_inner_args = {}
+        if credit_exposure:
+            final_pay = (maturity_payment_t if maturity_payment_t is not None else T_max) - t0
+            pm, pdf = credit_payments(residual_script, step_map, T_max - t0, final_pay)
+            credit_inner_args = dict(pay_map=pm, pay_df=pdf, mat_pay_t=final_pay,
+                                     mat_pay_df=math.exp(-r * final_pay))
 
         lv_grids = nK = lkm = lkx = None
         if use_lv:
@@ -3898,6 +3940,7 @@ def run_mark_to_future(script: CompiledScript,
                                     "t": np.repeat(rv_t_k[sl], n_inner)},
                 lvl_map=lvl_in,
                 rank_map=_rangs_observation(step_map),
+                **credit_inner_args,
             )
 
             # Each outer scenario's MTF value = mean of its N_inner inner PVs (% notional).
@@ -3917,6 +3960,14 @@ def run_mark_to_future(script: CompiledScript,
         # being alive at t0. The survival rate is published beside it: read
         # apart, a conditional percentile says nothing about the book.
         scenario_pvs = np.where(alive, scenario_pvs, 0.0)
+        if credit_exposure:
+            # Observation is not settlement: stopped contracts still carry
+            # their unpaid receivables. All scenarios remain in CCR quantiles.
+            scenario_pvs += np.array([
+                sum(cf * 100 * math.exp(-r * (pay - t0))
+                    for pay, cf in flows if pay > t0 + 1e-9)
+                for flows in outer_flows
+            ])
         alive_pvs = scenario_pvs[alive]
         n_alive = int(alive.sum())
 
@@ -3944,6 +3995,8 @@ def run_mark_to_future(script: CompiledScript,
                       if n_alive > 0 else None),
         })
 
+    if progress:
+        progress(len(mtm_dates), len(mtm_dates))
     return {
         "main_price": round(main_price, 4),
         "n_outer": n_outer,

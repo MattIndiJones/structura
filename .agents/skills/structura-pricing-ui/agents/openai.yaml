@@ -1,0 +1,4 @@
+interface:
+  display_name: "Structura Pricing UI"
+  short_description: "Concevoir les écrans de pricing Structura"
+  default_prompt: "Use $structura-pricing-ui to refine this Structura pricing workflow while keeping source values, editable assumptions, and used values unambiguous."

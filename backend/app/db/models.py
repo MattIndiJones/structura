@@ -3,6 +3,10 @@ from typing import Optional
 from datetime import datetime
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Column, Text
+from .ccr_models import (  # register additive CCR tables with the shared metadata
+    CCRCreditProfile, CCRMasterAgreement, CCRCSAAgreement, CCRNettingSet,
+    CCRCreditLimit, CCRCollateralPosition, CCRCreditOverride, CCRExposureCalculation,
+)
 
 
 class ProductRecord(SQLModel, table=True):
@@ -258,6 +262,7 @@ class Deal(SQLModel, table=True):
     product_id: Optional[int] = Field(default=None, foreign_key="products.id", unique=True)
     product_terms_version: Optional[int] = Field(default=None)
     counterparty_id: Optional[int] = Field(default=None, foreign_key="counterparties.id")
+    ccr_netting_set_id: Optional[int] = Field(default=None, foreign_key="ccr_netting_sets.id")
     # Unique: the reference is the trade's business identity (valuation notes,
     # KID, client correspondence). Handed out by core/references.py, which
     # numbers off the highest suffix rather than the row count so deleting one

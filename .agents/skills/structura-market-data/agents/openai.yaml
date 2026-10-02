@@ -1,0 +1,4 @@
+interface:
+  display_name: "Structura Market Data"
+  short_description: "Fiabiliser les données de marché Structura"
+  default_prompt: "Use $structura-market-data to design or review this Structura market-data flow with explicit provenance, units, overrides, and fallbacks."
