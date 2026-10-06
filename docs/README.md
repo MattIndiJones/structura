@@ -1,9 +1,12 @@
 # Notes du projet Structura
 
 Toutes les notes de travail du dépôt, rangées par nature. Chaque note garde son nom
-d'origine : seul son dossier a changé, le 14/09/2026. Les états ci-dessous datent de ce
-jour. Quand une ligne porte « vérifié », le point a été contrôlé dans le code le 14/09 ;
-sinon, l'état est celui que rapporte la note ou celle qui l'a prolongée.
+d'origine : seul son dossier a changé, le 14/09/2026. **Revue documentaire du
+05/10/2026**, sur `main`, commit `15d7ccf` : les points revérifiés et leurs preuves
+figurent dans [la revue de reprise](audits/REVUE_DOCUMENTAIRE_2026-10-05.md).
+Il s'agit d'une lecture du code et des tests, sans nouvelle exécution ni recette UI.
+Les autres états restent ceux des notes datées ; « vérifié » sans date désigne
+le contrôle historique du 14/09, pas une validation actuelle.
 
 **Une nouvelle note va dans le dossier de sa nature et entre dans cet index.** Rien à la
 racine du dépôt, à part `CLAUDE.md`.
@@ -37,13 +40,38 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
+PayScript : [UNDERLYING, StartDate et paramètres Economics](projects/pricing/PAYSCRIPT_STARTDATE_UNDERLYING_DESIGN_2026-10-06.md)
+— **Audit et proposition au 06/10, sans implémentation** : panier lié à Economics,
+fixing initial explicite, première observation distincte, masques Pricer/RFQ/Booking,
+PARAM sans défaut obligatoire et flux séparés. Pas de migration des deals de test.
+Revue transversale ajoutée : Risk/CCR, workers, variantes, KID/EMT, Clients,
+assistants, génération UAT et dépendances des scripts à supprimer (§7–8).
+[Deuxième revue systématique](audits/AUDIT_TRANSVERSAL_PAYSCRIPT_2026-10-06.md) :
+brouillons incomplets, Réinvestissement/backtests, contrôles de chemin, preuves de
+calcul et inventaire SQLite en lecture seule. 0 script sauvegardé mais 42 deals,
+41 RFQ et 42 Products ; aucune suppression ni implémentation effectuée.
+
+Product Optimizer : [V1 — architecture, capacités et recette](PRODUCT_OPTIMIZER_V1.md)
+— **Implémenté localement le 05/10** : Athena mono-actif / worst-of sous GBM,
+résolution du coupon, contraintes avec IC95, classement, comparaison et Pareto.
+Hypothèses manuelles ; convergence, marché qualifié et extensions restent à faire.
+Note placée à ce chemin sur demande explicite de Philippe.
+
 CCR : [Intégration du risque de contrepartie](projects/pricing/CCR_IMPLEMENTATION_2026-09-28.md)
-— **V1 intégrée, recette visuelle restante** : référentiel juridique/crédit, exposition
-GBM, CVA simple, contrôles Pricing/RFQ et blocage au booking ; limites de modèle
-et résultats de validation détaillés dans le rapport.
+— **Socle et extensions CCR 1.2 présents dans le code au 05/10** : référentiel
+juridique/crédit, préparation des MtM, marché commun, exposition GBM, CVA simple,
+contrôles Pricing/RFQ/deal booké et limites au booking. Taux commun provisoire
+de 3 % lors de la préparation, explicitement qualifié comme hypothèse.
+Recette visuelle complète et convergence restent ouvertes selon le rapport.
+
+SA-CCR : [Portefeuille mixte notes / OTC](projects/pricing/SA_CCR_PORTEFEUILLE_MIXTE_ROADMAP_2026-09-29.md)
+— **Cadrage seulement, confirmé au 05/10** : l'EAD réglementaire reste absente
+du moteur ; ne pas la confondre avec la PFE économique du CCR.
 
 Organisations et accès : [Cadrage de l'admission et des habilitations](projects/platform/ORGANIZATION_ACCESS_DESIGN_2026-09-24.md)
-— **À faire, développement différé**. Plateforme commune et installation client ; propriété des données par l'organisation actée ; invitations, approbations, migration et recette à préparer.
+— **À faire, développement différé, confirmé au 05/10**. L'existant conserve
+`User.entity_id` et un rôle global ; invitations, approbations, propriété stable
+des données par organisation et habilitations par desk restent à construire.
 
 Dernière correction Pricing : [Authentification des appels et erreurs de validation](projects/pricing/PRICING_AUTHENTIFICATION_2026-09-24.md)
 — 30 appels harmonisés ; 217 tests frontend et build réussis ; pricing initial et profil de payoff vérifiés dans le navigateur.
@@ -52,55 +80,79 @@ Studies : [Audit métier et technique du 20/09/2026](audits/AUDIT_STUDIES_2026-0
 — constats initiaux ; corrections et contrôles décrits dans le [processus Studies](projects/studies/STUDIES_PROCESS_ET_CORRECTIONS_2026-09-20.md), avec limites de données et extensions restantes.
 [Pitch de partenariat consulting](projects/studies/STUDIES_CONSULTING_PITCH_2026-09-20.md)
 — préparation du rendez-vous du 23/09 : argumentaire, démonstration et pilote accompagné.
+La [recette UI du 22/09](projects/studies/COMPTE_RENDU_RECETTE_UI_2026-09-22.md)
+et ses [corrections en méthode 2.5](projects/studies/CORRECTIONS_RECETTE_2026-09-22.md)
+prolongent les notes du 21/09 : elles consignent une exécution, une réouverture
+et les comparaisons du jeu long-only. `studies-2.5` est confirmé dans le code
+au 05/10 ; ces résultats historiques n'ont pas été réexécutés lors de cette revue.
 
 IA : [Socle commun aux cinq assistants](projects/platform/IA_COMMUNE_2026-09-17.md)
-— implémenté le 17/09/2026 ; catalogue, éditeur de prompt et suivi partagés ; activation après redémarrage du backend.
+— implémenté selon la note du 17/09/2026 ; catalogue, éditeur de prompt et suivi partagés. L'état du serveur local n'est pas vérifié par cet index.
 
 Nouveau module Life Cycle : [Valo Explain — édition, comparaison et PDF figés](projects/lifecycle/VALO_EXPLAIN_2026-09-17.md)
-— implémenté le 17/09/2026 ; activation au prochain démarrage du backend local.
+— implémenté selon la note du 17/09/2026 ; l'état du serveur local n'est pas vérifié par cet index.
 
 Dernière correction Booking : [MtM quotidien et progression du calcul](projects/lifecycle/BOOKING_MTM_QUOTIDIEN_2026-09-17.md)
-— implémenté le 17/09/2026 ; activation serveur après redémarrage du backend local.
+— implémenté selon la note du 17/09/2026 ; l'état du serveur local n'est pas vérifié par cet index.
 
 ### Avant toute ouverture hors du poste local
 
-- 25 routes répondent sans authentification : `api/pricing.py` (18), `api/schedule.py`
-  (4), `api/simulation.py` (2), `api/scenarios.py` (1). Vérifié.
-- CORS ouvert à toute origine, avec credentials (`main.py`). Vérifié.
-- L'inscription rattache par défaut à l'entité « Demo », celle des comptes réels
-  (`api/auth.py`). Vérifié.
-- Aucun en-tête de durcissement HTTP global (CSP, `X-Frame-Options`…). Vérifié.
+- **Revérifié au 05/10** : les routeurs Pricing, Simulation et Scénarios imposent
+  `get_current_user`. Les **quatre routes Schedule** restent sans dépendance
+  d'authentification. Ce contrôle ne constitue pas un inventaire de toutes les API.
+- CORS limité par défaut aux origines locales 5173/8000 ; surcharge possible par
+  `STRUCTURA_CORS_ORIGINS`, avec credentials. Configuration déployée non inspectée.
+- Inscription publique désactivée par défaut (`STRUCTURA_ALLOW_REGISTRATION`).
+  Si activée, une entité non renseignée retombe encore sur « Demo », sans admission
+  contrôlée par organisation.
+- Aucun middleware global de durcissement HTTP identifié dans `main.py`
+  (CSP, `X-Frame-Options`…). Un `nosniff` local existe dans `api/deals.py`.
 
 Sources : audit de production du 31/07, audit du 02/08, contre-expertise du 11/09 (F01).
 
 ### Risque et portefeuille
 
-- Les deals UAT entrent dans l'exposition, les limites et les agrégats : `uat_batch_id`
-  n'est lu ni par `portfolios.py`, ni par `shocks.py`, ni par `var.py`. Vérifié.
-- Le Mode Démo ne masque rien sur Booking, Events, RFQ et Risk Management. Vérifié.
-- La sensibilité au spread émetteur n'est pas agrégée au niveau du book. Vérifié.
-- L'écran VaR n'a jamais été testé en conditions réelles et sa méthodologie n'a jamais
-  été challengée (reprise du 27/07).
+- **Revérifié au 05/10** : les chemins historiques `portfolios.py`, `shocks.py`
+  et `var.py` n'appliquent pas de filtre `uat_batch_id`. En revanche, le **CCR**
+  sépare explicitement Production / Recette UAT dans son API et son service.
+- Aucun branchement au Mode Démo identifié dans BookingView, EventsTab, RfqView
+  et RiskManagementView au 05/10 ; comportement visuel non recetté dans cette revue.
+- La sensibilité au spread émetteur n'est pas agrégée dans `api/portfolios.py`
+  au 05/10.
+- La reprise du 27/07 demandait une recette VaR réelle. Ne pas transformer ce
+  constat daté en « jamais testé » : la couverture et les évolutions ultérieures
+  doivent être examinées avant un nouveau verdict méthodologique.
 
 ### Moteur
 
-- Monitoring continu par pont brownien : −14,3 % sur une barrière proche, signalé à
-  l'écran, non corrigé (audits du 01/08 et du 02/08).
+- Monitoring continu par pont brownien : l'écart de −14,3 % est une mesure historique
+  des audits du 01/08 et du 02/08, **non reproduite au 05/10**. Le moteur expose
+  aujourd'hui une note sur les limites de l'interpolation ; le défaut chiffré reste
+  à requalifier par une mesure, sans le déclarer corrigé ni encore reproduit.
 - Vega Heston : la couverture est annoncée par `vega_scope`, sans vega sur les paramètres
   calibrés.
-- Mark-to-Future : `n_outer` à 200 par défaut, grille de dates uniforme non calée sur les
-  observations, quantiles de `run_mc_proba` sans interpolation. Vérifié.
+- Mark-to-Future du Pricer : `n_outer` à 200 et grille uniforme par défaut, confirmés
+  au 05/10. Le moteur accepte aussi des dates explicites ; le CCR enrichit sa grille.
+  `run_mc_proba` conserve des quantiles sans interpolation ; ceux du MTF utilisent
+  `np.quantile`. Ces chemins ne doivent pas être confondus.
 - Pas de champ repo distinct du rendement de dividende `q`. Vérifié.
-- Constatations sur période : theta (`_respan` perd fenêtres, rangs et paiements), P&L
-  explain et KID ; `REALVOL` d'un deal vivant à fenêtre de départ ouverte, non sondé.
-- Mesurer par un test l'origine des temps en cours de vie (règle A7, audit du 08/09).
+- Constatations sur période : `_age_compiled_script` conserve désormais fenêtres,
+  rangs, relevés passés et paiements. Le theta refuse explicitement les transitions
+  de fenêtre/observation non résolues ; tests dédiés présents. P&L explain, KID et
+  `REALVOL` à fenêtre de départ ouverte restent à recetter selon les cas du §24.
+- Règle A7 : quatre tests dédiés existent dans `test_inlife_pricing.py` (horizon
+  résiduel, flux depuis la valorisation, passé depuis le strike, déplacement de la
+  frontière). Présence et assertions lues au 05/10 ; aucune nouvelle mesure ici.
 
 ### Éditeur, Economics et modèles
 
-- L'EMT lit encore la valeur du script : levier sur `stored_val` (`api/emt.py`), texte sur
-  `raw_default` (`core/emt_synthesize.py`), contrairement à « Economics fait foi ».
-  Vérifié. Les autres lecteurs relevés le 11/09 sont à revérifier.
-- Changement de forme d'un CONSTAT (P2 du 11/09) ; un champ vidé ne bloque pas le calcul.
+- EMT corrigé dans le code au 05/10 : levier sur `user_params`, export des
+  `effective_parameters`, priorité à ces valeurs dans la synthèse. Les défauts du
+  script ne servent que de repli ; les autres lecteurs du 11/09 restent à contrôler.
+- Changement de forme d'un CONSTAT (P2 du 11/09) : conversion single → schedule
+  toujours à traiter. `_buildUserParams` refuse les chaînes vides et les tableaux
+  vides/non numériques ; `null`/`undefined` utilisent encore le défaut via `??`.
+  Ne plus affirmer globalement qu'un champ vidé ne bloque jamais le calcul.
 - Modèles de produits : questions ouvertes du §6.2 et vérification à l'écran après
   redémarrage du backend.
 - Mode debug : dernière priorité, à redemander avant de le coder.
@@ -112,9 +164,10 @@ Sources : audit de production du 31/07, audit du 02/08, contre-expertise du 11/0
   dédiée, identifiant de corrélation (rapports du 31/07).
 - Déclinaisons : coût de débouclage, gel d'une proposition client, traçabilité. Aucune
   trace dans l'API des variantes. Vérifié.
-- L'écran RFQ ne saisit aucune fenêtre de constatation (MIN/MAX/AVG) : une RFQ sur un tel
-  script ne peut pas la figer, et le booking la refusera dès que le Pricer en envoie une.
-  Vérifié : aucune gestion de fenêtre dans `RfqView.vue`.
+- Les constructeurs locaux de calendriers de `RfqView.vue` omettent toujours les
+  champs de fenêtre. En revanche, une RFQ liée à un Product reprend ses termes
+  côté serveur. Le risque concerne les parcours locaux de saisie/restauration ;
+  un refus systématique de toute RFQ à fenêtre n'est pas établi.
 - Mineurs RFQ du 30/07 : nom d'AO vide et script non compilable acceptés par le serveur,
   mode Expert détecté par la seule chaîne `CONSTAT`, devise de cotation morte,
   numérotation globale des références, conversion indicatif → to trade sans lien avec
@@ -122,8 +175,11 @@ Sources : audit de production du 31/07, audit du 02/08, contre-expertise du 11/0
 
 ### Chantiers non commencés ou à poursuivre
 
-- Objet Product : lots RFQ, booking et portefeuille, cycle de vie, risk et documents,
-  reprise historique.
+- Objet Product : RFQ, indicatif, booking, lifecycle, MtM/VaR et documents sont
+  reliés dans le code au 05/10. Création interne lors d'un geste métier durable ;
+  « Conserver » contrôle la visibilité dans la bibliothèque. Restent la reprise
+  historique et la consolidation des consommateurs secondaires. Les anciens deals
+  sans Product sont refusés par MtM/VaR, sans repli automatique.
 - Déploiement on-premise : installeur, service Windows, sauvegarde de la base, mises à
   jour, journaux.
 - Données de marché : FRED, taux officiels, données d'options.
@@ -135,7 +191,11 @@ Pages publiées : contre-expertise de l'audit externe du 11/09 (P0 retenus F01, 
 F14, F20, F28 ; arbitrages A0 à A10 en attente), audit qualité du 30/08, analyse SaaS du
 11/09, étude de l'objet Product du 13/09, plan Client Intelligence du 31/08.
 
-## En cours, non commité (14 et 15/09)
+## Historique des travaux des 14 et 15/09
+
+Les puces suivantes décrivent la session de septembre. **Elles ne sont plus un état
+Git actuel** : au début de la revue du 05/10, `main` pointe sur `15d7ccf` et aucun
+fichier suivi n'est modifié. Product et les modèles sont présents sur cette branche.
 
 - Modèles de produits, lots 1 à 4 : `projects/pricing/MODELES_PRODUITS_DESIGN.md`, §9.
 - Booking d'une RFQ à échéancier CONSTAT, refusé depuis le 10/09 (« termes contractuels
@@ -151,7 +211,8 @@ F14, F20, F28 ; arbitrages A0 à A10 en attente), audit qualité du 30/08, analy
 - Ce classement : notes déplacées sans `git mv`, chemin de la référence PayScript mis à
   jour dans `services/llm/prompt.py` et dans son test.
 
-Le backend doit être redémarré pour que ces changements soient actifs.
+Le besoin de redémarrage était celui de cette session ; aucun état de processus
+local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 ## Détail par dossier
 
@@ -164,13 +225,14 @@ Le backend doit être redémarré pour que ces changements soient actifs.
 | `TESTING_JOURNAL.md` | 29/07 | Journal de l'agent client-tester : pricing, booking, cycle de vie, RFQ | Clos | Sélecteur d'exemples sans confirmation visuelle, jugé mineur |
 | `AUDIT_CHAINE_RFQ_2026-07-30.md` | 30/07 | Chaîne RFQ → pricing → booking, 9 constats | Clos | Mineurs du §10 ; ténor du Pricer contre calendrier, à revoir avec la règle de maturité du 14/09 |
 | `AUDIT_COMPLET_PRICING_RFQ_LIFECYCLE_2026-07-31.md` | 31/07 | Audit fonctionnel et quantitatif, 11 P0, NO-GO | Dépassé | Repris par les audits du 01/08, du 02/08 et du 07/08 |
-| `AUDIT_PRODUCTION_COMPLET_HORS_AMC_2026-07-31.md` | 31/07 | Production : sécurité, performance, pricing, lifecycle, KID, NO-GO | Suivi | Routes publiques, CORS, inscription, en-têtes de durcissement HTTP absents (vérifié). Existe depuis : budget de calcul par requête (`core/compute_budget.py`) |
+| `AUDIT_PRODUCTION_COMPLET_HORS_AMC_2026-07-31.md` | 31/07 | Production : sécurité, performance, pricing, lifecycle, KID, NO-GO historique | Suivi | Revue 05/10 : Pricing/Simulation/Scénarios authentifiés, CORS restreint par défaut, inscription désactivée par défaut ; Schedule public et durcissement global restent ouverts. Budget de calcul présent |
 | `AUDIT_QUANTITATIF_COMPLET_HORS_AMC_2026-07-31.md` | 31/07 | 40 constats quantitatifs, dont 12 critiques | Dépassé | Repris par la vague 1 du 31/07 et l'audit du 01/08 |
 | `AUDIT_QUANTITATIF_2026-08-01.md` | 01/08 | Revérification : 6 bloquants sur 12 fermés | Dépassé | Repris par l'audit du 02/08 |
-| `AUDIT_COMPLET_2026-08-02.md` | 02/08 | 20 constats rejoués ; lots 1 et 2 corrigés : secret JWT, FX manquant, backward fill, horizons et rendement du KID, facteur de taux, IRR, VaR | Suivi | Lots 3 et 4 : pont brownien, vega Heston, grille hebdomadaire du Monte Carlo, en-têtes HTTP et CORS ; saturation de la vol locale à revérifier depuis la reformulation de Dupire du 03/09 |
+| `AUDIT_COMPLET_2026-08-02.md` | 02/08 | 20 constats rejoués ; lots 1 et 2 corrigés selon le rapport | Suivi | Revue 05/10 : CORS restreint par défaut ; pont brownien à remesurer, vega Heston partiel, grille hebdomadaire et durcissement HTTP global restent ouverts ; vol locale non revalidée |
 | `AUDIT_MTF_2026-08-03.md` | 03/08 | Mark-to-Future : 5 défauts corrigés (double comptage, STRIKE_FIX, courbe, quantile, date proche) | Suivi | `n_outer` par défaut, grille de dates, quantile de `run_mc_proba` (vérifié) ; valorisation risque-neutre ou projection client |
-| `AUDIT_FRONT_TO_RISK_2026-08-07.md` | 07/08 | RFQ → booking → MtM → Greeks → risque : 6 P1, 13 P2, 6 P3 | Suivi | Fermés : taux figé à 0, exposition entre maturité et règlement, reprise du job quotidien, politique de fixing FOUR_EYES, alerte de rappel unique. Ouverts : deals UAT dans le risque, Mode Démo, CORS (vérifié) ; P2 et P3 restants non revérifiés |
-| `AUDIT_CONVENTIONS_PRICING_2026-09-08.md` | 08/09 | Conventions de `CLAUDE.md` mesurées : code conforme, 4 écarts de documentation | Clos | Recommandations 1 et 2 appliquées dans `CLAUDE.md` ; mesure de la règle A7 |
+| `AUDIT_FRONT_TO_RISK_2026-08-07.md` | 07/08 | RFQ → booking → MtM → Greeks → risque : 6 P1, 13 P2, 6 P3 | Suivi | Revue 05/10 : CORS restreint par défaut ; UAT filtré dans CCR, pas dans les agrégats historiques ; Mode Démo non branché dans les vues inspectées. Autres P2/P3 non revérifiés |
+| `AUDIT_CONVENTIONS_PRICING_2026-09-08.md` | 08/09 | Conventions de `CLAUDE.md` mesurées : code conforme, 4 écarts de documentation | Clos selon le rapport | Revue 05/10 : quatre tests A7 existent ; assertions lues, sans nouvelle exécution |
+| [REVUE_DOCUMENTAIRE_2026-10-05.md](audits/REVUE_DOCUMENTAIRE_2026-10-05.md) | 05/10 | Confrontation des points de reprise au code et aux tests présents | Lecture statique terminée | Recettes et mesures restant ouvertes distinguées des corrections implémentées |
 
 ### `projects/pricing/`
 
@@ -178,9 +240,11 @@ Le backend doit être redémarré pour que ces changements soient actifs.
 |---|---|---|---|---|
 | `PAYSCRIPT_PARAM_PAR_OBSERVATION.md` | 18/07 | `PARAM()` à une valeur par observation, convention `M_` ; valeur initiale obligatoire depuis le 14/09 | Fait | — |
 | `SCRIPTING_IA_DESIGN.md` | 03/08 | Assistant de scripting : référence sous test, fournisseurs (Ollama par défaut), fiche de contrôle, écho d'intention ; phases 0 à 4 codées | Fait | Choisir le modèle local (`backend/scripts/eval_script_assistant.py`) ; aligner le corpus sur le catalogue de modèles |
-| `CONSTATATIONS_PERIODE_DESIGN.md` | 10-11/09 | MIN/MAX/AVG par sous-jacent, `PERIOD`, `INDEX` par échéancier, échéancier contractuel, fixings des relevés, lecture par date, Mark-to-Future ; §1 à §24 commités | En cours | Theta, P&L explain, KID (§14) ; `REALVOL` à fenêtre de départ ouverte (§24) |
-| `EDITEUR_ECONOMICS_DESIGN.md` | 11/09 | Règle « Economics fait foi », décisions D1 à D8, lots 0 à 3 | En cours | Lot 1 codé le 14/09 (note suivante). Restent P2, champ vidé bloquant, lot 2 (EMT vérifié), lot 3 en attente |
-| `MODELES_PRODUITS_DESIGN.md` | 14/09 | Ctrl+S et « Valider », maturité = dernière constatation, catalogue de 19 fiches, module « Modèles de produits » ; lots 1 à 4 codés | En cours | Non commité ; questions du §6.2 ; lot 5 : exemples Normal et Expert, scripts UAT, corpus de l'assistant, guide d'ajout d'un payoff |
+| `CONSTATATIONS_PERIODE_DESIGN.md` | 10-11/09, suivi 05/10 | MIN/MAX/AVG, PERIOD, INDEX, calendriers et fixings ; theta conserve désormais les métadonnées | En cours | Recette P&L explain/KID et REALVOL à fenêtre de départ ouverte ; theta indisponible sur transitions non résolues |
+| `EDITEUR_ECONOMICS_DESIGN.md` | 11/09, suivi 05/10 | Règle « Economics fait foi », validation explicite, EMT effectif et contrôles de PARAM implémentés | En cours | P2 single → schedule, cas null/undefined, autres consommateurs et mode debug différé |
+| `MODELES_PRODUITS_DESIGN.md` | 14/09, suivi 05/10 | Ctrl+S, « Valider », maturité et catalogue présents sur main | En cours | Questions du §6.2 et recette UI ; état complet du lot 5 non revérifié |
+| [CCR_IMPLEMENTATION_2026-09-28.md](projects/pricing/CCR_IMPLEMENTATION_2026-09-28.md) | 28/09, suivi 05/10 | CCR économique et extensions de préparation MtM / marché commun / deal booké | Code présent | Recette visuelle complète, convergence, taux du jour ; aucune EAD SA-CCR |
+| [CCR_UAT_TEST_CLIENT_2026-09-29.md](projects/pricing/CCR_UAT_TEST_CLIENT_2026-09-29.md) | 29/09 | Hypothèses fictives de recette partagées au niveau de Demo ; notes exclues des sets OTC simulés | État de données historique | Base réelle non relue au 05/10 |
 | [SA_CCR_PORTEFEUILLE_MIXTE_ROADMAP_2026-09-29.md](projects/pricing/SA_CCR_PORTEFEUILLE_MIXTE_ROADMAP_2026-09-29.md) | 29/09 | Projet futur : classement notes/OTC, portefeuille mixte et SA-CCR equity sans produits de taux | À faire | Lots 0 à 5 ; juridiction, premier produit OTC et qualification des historiques à décider |
 
 ### `projects/lifecycle/`
@@ -210,7 +274,8 @@ Le backend doit être redémarré pour que ces changements soient actifs.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
-| `PLAN_IMPLEMENTATION_OBJET_PRODUCT.md` | 14/09 | Objet `Product` transverse ; première tranche livrée sur `codex/product-workflow` : conservation explicite, bibliothèque « Mes Produits », reçus de calcul signés | En cours | Lots du §9 : RFQ, booking et portefeuille, cycle de vie, risk et documents, reprise historique ; sauvegarde automatique aux gestes engageants non tranchée |
+| `PLAN_IMPLEMENTATION_OBJET_PRODUCT.md` | 14/09, suivi 05/10 | Dossier canonique présent sur main : RFQ/indicatif/booking/lifecycle/MtM/VaR/documents ; création interne aux gestes durables | En cours | Reprise historique et consolidation des consommateurs secondaires ; aucun repli MtM/VaR pour un deal sans Product |
+| [ORGANIZATION_ACCESS_DESIGN_2026-09-24.md](projects/platform/ORGANIZATION_ACCESS_DESIGN_2026-09-24.md) | 24/09, suivi 05/10 | Admission, propriété par organisation, habilitations et desks | Cadrage, non implémenté | Invitations, approbations, migration, isolation et recette |
 | `HOME_REDESIGN_DESIGN.md` | 19/07 | Accueil en quatre catégories, drill-down | Fait | — |
 | `DEPLOIEMENT_ONPREM.md` | 25/07 | Un serveur par client, sous Windows | À faire | Installeur, service Windows, sauvegarde de la base, mises à jour, journaux, cinq questions ouvertes. Fait depuis : secret JWT propre à chaque machine (02/08) |
 | `FRED_INTEGRATION_ROADMAP.md` | 29/08 | Données FRED pour la VaR, les scénarios, les régimes et les backtests | À faire | Décisions du §11 ; rien de codé (vérifié) |
@@ -218,8 +283,13 @@ Le backend doit être redémarré pour que ces changements soient actifs.
 
 ### `projects/studies/`
 
+Les états du 21/09 ci-dessous sont historiques : la recette UI et les corrections
+du 22/09 les prolongent. Ils ne signifient pas qu'aucune recette n'a eu lieu depuis.
+
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [COMPTE_RENDU_RECETTE_UI_2026-09-22.md](projects/studies/COMPTE_RENDU_RECETTE_UI_2026-09-22.md) | 22/09 | Recette A–K du jeu long-only, sauvegarde et contrôles financiers | Exécution historique consignée | Constats repris dans les corrections suivantes |
+| [CORRECTIONS_RECETTE_2026-09-22.md](projects/studies/CORRECTIONS_RECETTE_2026-09-22.md) | 22/09 | Méthode 2.5 : IA, PDF, turnover, affichage et frais/HWM | Code 2.5 confirmé au 05/10 ; résultats de septembre non rejoués | Limites des autres jeux et annexes PDF non intégralement inspectées |
 | [STUDIES_DIVIDENDS_2026-09-21.md](projects/studies/STUDIES_DIVIDENDS_2026-09-21.md) | 21/09 | Studies 2.2 : dividendes par titre, créances, fiscalité, réinvestissement et contrôles | Livré ; 79 tests backend ciblés, 194 frontend et build réussis | Recette UI ; distributions investisseurs et calendriers contractuels étendus ultérieurs |
 | [STUDIES_INTERFACE_2026-09-21.md](projects/studies/STUDIES_INTERFACE_2026-09-21.md) | 21/09 | Configuration en pleine largeur, tableaux et indicateurs harmonisés | 194 tests frontend ; build réussi | Recette visuelle dans le navigateur utilisateur |
 | [STUDIES_EXISTING_FIXES_2026-09-21.md](projects/studies/STUDIES_EXISTING_FIXES_2026-09-21.md) | 21/09 | Méthode 2.4 : calculs, sources et restitution des blocs existants | Tests ciblés et recette indépendante | Guide des corrections et résultats attendus |

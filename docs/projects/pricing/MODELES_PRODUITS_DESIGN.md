@@ -1,10 +1,17 @@
 # Modèles de produits, éditeur et maturité — note de travail
 
-> **Statut au 14/09/2026 (soir) : lots 1 à 4 codés**, à la demande de Philippe, sur la
-> branche `codex/product-workflow` après son commit `553dee6`. **Non commité.** Le détail de
+> **Nouvelle demande au 06/10/2026, non implémentée :** reprise Normal/Expert avec
+> UNDERLYING lié à Economics, StartDate explicite et première observation distincte.
+> Les masques Pricer/RFQ/Booking entrent dans le périmètre : M7 n'interdit donc plus
+> leur adaptation. Voir le [cadrage actuel](PAYSCRIPT_STARTDATE_UNDERLYING_DESIGN_2026-10-06.md),
+> qui remplace aussi l'obligation de valeur initiale des PARAM pour ce chantier.
+
+> **Statut revu au 05/10/2026 : code présent sur `main` (`15d7ccf`).** Les lots 1 à 4
+> étaient annoncés codés le 14/09 ; la mention « non commité » de cette session est
+> périmée. La recette UI et les questions ouvertes ne sont pas clôturées par cette lecture. Le détail de
 > ce qui a été fait, des choix d'implémentation et des points encore ouverts est au §9.
 >
-> **Redémarrage du backend nécessaire** (parser et `/api/parse`) : sans lui, le frontend
+> **Consigne historique de déploiement du 14/09** (parser et `/api/parse`) : sans redémarrage à cette date, le frontend
 > fonctionne mais sans le refus d'une maturité antérieure à la dernière année `AT`, et le
 > message explicite de `PARAM()` sans valeur n'apparaît pas.
 >

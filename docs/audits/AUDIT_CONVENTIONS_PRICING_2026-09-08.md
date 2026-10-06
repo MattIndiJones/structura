@@ -5,6 +5,13 @@ Vérification, règle par règle, que les conventions écrites dans `CLAUDE.md` 
 
 **Aucune modification de code.** Cet audit constate, mesure et consigne.
 
+> **Suivi documentaire du 05/10/2026** : la recommandation 3 (mesurer A7) a
+> désormais une couverture dédiée dans `backend/tests/test_inlife_pricing.py` :
+> quatre fonctions `test_A7_*` vérifient l'horizon restant, l'origine des flux,
+> le passé depuis le strike et le déplacement de la frontière passé/futur.
+> Assertions lues, tests non relancés lors de cette revue. Les mesures et
+> conclusions ci-dessous conservent leur date du 08/09.
+
 ---
 
 ## Méthode

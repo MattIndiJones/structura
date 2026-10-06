@@ -1,7 +1,20 @@
 # Éditeur PayScript et Economics — note de travail
 
-> **Statut au 11/09/2026 : analyse et plan, aucun code.** Rien n'est implémenté ; on ne
-> code pas tant que Philippe ne le demande pas.
+> **Nouvelle demande au 06/10/2026, non implémentée :** Philippe demande des PARAM
+> sans valeur obligatoire, en % par défaut. Cette cible remplace D1/D4 ci-dessous
+> pour le prochain chantier ; le code actuel conserve leur comportement historique.
+> Voir le [cadrage UNDERLYING / StartDate](PAYSCRIPT_STARTDATE_UNDERLYING_DESIGN_2026-10-06.md).
+
+> **Revue au 05/10/2026 : partiellement implémenté sur `main`.** Le plan et les
+> constats du 11/09 ci-dessous sont historiques. La validation explicite et la
+> synchronisation des valeurs initiales sont présentes dans `stores/pricing.js`.
+> L'EMT lit `user_params`, fournit `effective_parameters` et les utilise dans sa
+> synthèse (`api/emt.py`, `core/emt_synthesize.py`, test de levier dans `test_emt.py`).
+> `_buildUserParams` refuse chaînes vides et tableaux vides/non numériques ; les
+> valeurs `null`/`undefined` retombent toutefois sur le défaut via `??`.
+> La conversion CONSTAT single → schedule reste incomplète dans
+> `_syncConstatOverrides`. Lecture statique, sans nouvelle recette ni tests lancés.
+> Voir la [revue de reprise](../../audits/REVUE_DOCUMENTAIRE_2026-10-05.md).
 >
 > **Le mode debug (lot 3) est la dernière priorité. Avant de le coder, redemander à
 > Philippe s'il faut le faire.**

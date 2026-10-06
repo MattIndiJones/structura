@@ -6,6 +6,14 @@ Date : 24/09/2026.
 n'est implémenté dans cette session.** Cette note conserve la discussion avec
 Philippe ; elle distingue les décisions explicites des propositions à arbitrer.
 
+**Revue du 05/10/2026** : cadrage toujours non implémenté dans les chemins
+inspectés. `User` conserve une seule `entity_id` et un rôle global ;
+`product_repository.owned_record` contrôle encore le propriétaire utilisateur
+ou le rôle admin ; les scripts partagés lisent l'entité actuelle de leur auteur.
+L'inscription reste fermée par défaut, sans parcours d'invitation/approbation
+dans `api/auth.py`. Ce contrôle statique ne vaut pas audit exhaustif de
+l'isolation. Voir la [revue de reprise](../../audits/REVUE_DOCUMENTAIRE_2026-10-05.md).
+
 ## 1. Objectif et origine
 
 Permettre à une organisation cliente de Structura d'admettre ses collaborateurs,

@@ -1,5 +1,13 @@
 # CCR — intégration STRUCTURA
 
+> **Revue documentaire du 05/10/2026** : socle et extensions CCR 1.2 présents
+> sur `main` (`15d7ccf`) : préparation MtM, marché commun, cache/progression et
+> contrôle d'un deal booké. Les paragraphes initiaux décrivent la V1 du 28/09 ;
+> les sections ultérieures précisent ses évolutions, notamment le taux provisoire
+> commun de 3 % lors de la préparation. EAD SA-CCR toujours absente. La recette
+> visuelle complète reste ouverte ; aucune nouvelle exécution ni consultation
+> de la base réelle lors de cette revue. Voir les [preuves de lecture](../../audits/REVUE_DOCUMENTAIRE_2026-10-05.md).
+
 ## Architecture inspectée
 
 FastAPI / SQLModel / SQLite (`db/models.py`, migrations additives dans

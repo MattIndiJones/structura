@@ -4,6 +4,12 @@
 **Statut :** cadrage, aucun calcul SA-CCR livré  
 **Périmètre initial :** dérivés OTC sur actions et indices ; aucun produit de taux dans cette première version.
 
+**Confirmé par lecture du code le 05/10/2026** : `core/ccr/service.py` publie
+`regulatory.ead=None`, avec statut `NOT_APPLICABLE`. Le champ de limite `ead`
+ne constitue pas un calcul réglementaire. Aucun nouveau calcul ni contrôle
+de la base UAT n'a été réalisé ; les constats sur les 23 deals restent datés
+du 29/09. Voir la [revue de reprise](../../audits/REVUE_DOCUMENTAIRE_2026-10-05.md).
+
 ## Objectif
 
 Donner une vue cohérente du risque de crédit d'un portefeuille qui contient à la fois des notes et des dérivés OTC, puis calculer l'exposition au défaut réglementaire **SA-CCR** des seuls contrats éligibles. La vue doit identifier qui porte le risque, envers quelle entité juridique et selon quel accord. Elle conserve séparément l'exposition économique actuelle, les profils EE/PFE et la CVA du CCR existant.

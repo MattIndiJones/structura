@@ -1163,5 +1163,11 @@ passent inchangés.
 - `REALVOL` sur un deal vivant dont la fenêtre de départ n'est pas close : le rejeu
   historique compte les rendements pendant la fenêtre, le Monte-Carlo les aplatit.
   Non sondé.
-- Le theta vieillit le produit par `_respan`, qui reconstruit les événements sans
-  fenêtres, sans rangs et sans dates de paiement : c'est le point suivant du plan.
+- **Mise à jour du 05/10/2026, lecture du code** : l'ancien `_respan` a été remplacé
+  par `_age_compiled_script`, qui conserve fenêtres, rangs, relevés passés et dates
+  de paiement. `_theta_and_event` refuse explicitement de franchir un relevé de
+  fenêtre ou une observation exigeant une transition d'état ; le theta peut donc
+  être indisponible avec motif. `test_greeks_stateful.py` et
+  `test_settlement_discounting.py` portent des tests dédiés, non relancés ici.
+  Le défaut de perte de métadonnées n'est plus présent dans ce chemin ; cela ne
+  clôture pas la recette P&L explain/KID ni le cas REALVOL ci-dessus.

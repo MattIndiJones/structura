@@ -1,19 +1,20 @@
 # Plan d’implémentation de l’objet Product dans Structura
 
 Date : 14 septembre 2026  
-Statut : première tranche implémentée sur la branche `codex/product-workflow`, en attente de revue et de commit.  
+Statut revu le 05/10/2026 : socle et intégrations présents sur `main` (`15d7ccf`) ; reprise historique et consolidation des consommateurs secondaires restantes.
+
 Périmètre : Structura, parcours produit hors AMC. Les principes INDEX_STUDIO fournis dans la conversation ne conduisent pas à introduire des concepts d’indices dans cette architecture.
 
-## 0. État de l’implémentation au 14 septembre 2026
+## 0. État de l’implémentation revu le 5 octobre 2026
 
-Cette branche livre le socle transversal demandé. Les sections suivantes conservent le plan directeur et ses lots de migration progressive ; elles ne signifient pas que toutes les compatibilités historiques ont déjà été retirées.
+Lecture du code et des tests existants, sans nouvelle exécution. La [revue de reprise](../../audits/REVUE_DOCUMENTAIRE_2026-10-05.md) détaille les preuves. Les sections de conception et les lots ci-dessous conservent le plan du 14/09 ; ils ne sont pas une liste de travaux tous encore à réaliser. Le socle n'est plus une branche en attente de commit.
 
 ### Livré dans cette tranche
 
 - Un `Product` Pydantic profondément figé, séparant les termes contractuels des hypothèses de marché et des résultats de calcul.
-- Une création durable uniquement sur action « Conserver le produit ». Une session Nouveau Pricing reste sans identité ni ligne en base tant que cette action n’est pas déclenchée.
+- Une exploration Nouveau Pricing reste temporaire. « Conserver le produit » crée un dossier visible dans la bibliothèque ; un geste métier durable (indicatif, RFQ, booking direct) crée aussi, si nécessaire, un Product interne avec `listed=False`. Persistance et visibilité dans « Mes Produits » sont distinctes (`stage_internal_product`, `api/indicatives.py`, `api/rfq.py`, `api/deals.py`).
 - Une identité stable, une référence lisible, une version de termes et une révision de dossier avec contrôle optimiste.
-- Des tables additives pour l’identité, les versions de termes, les révisions, les calculs datés et l’idempotence des commandes. Les versions, révisions et calculs sont protégés contre `UPDATE` et `DELETE` au niveau SQLite.
+- Des tables additives pour l’identité, les versions de termes, les révisions, les calculs datés et l’idempotence des commandes. Les versions, révisions et calculs sont protégés contre `UPDATE` et `DELETE` au niveau SQLite, avec une exception de suppression pour les Products explicitement rattachés à un lot UAT. Des triggers exigent le lien Product à l'insertion des objets métier durables et protègent ce lien contre les changements.
 - Une API de création, lecture, liste, archivage, révision explicite des termes, composition d’entrées de pricing et conservation de calculs signés.
 - Une signature HMAC des reçus émis par les pricings neuf et en vie. Un prix modifié, un reçu non signé ou un calcul portant sur d’autres termes est refusé.
 - Une bibliothèque « Mes Produits », une route de réouverture dans le Pricer et une barre de contexte distinguant clairement une session éphémère d’un Product conservé.
@@ -21,7 +22,7 @@ Cette branche livre le socle transversal demandé. Les sections suivantes conser
 - Le rattachement Product/version dans RFQ, Booking, Deal, KID, EMT et documents, avec enrichissement du Product dans la transaction métier.
 - Le calendrier résolu figé est réutilisé par le pricing, le pricing en vie, le MtM et les calculs dérivés au lieu d’être reconstruit à la date de lecture.
 - Le lifecycle du Deal est projeté dans les révisions Product au booking, à la saisie/validation/rejet des fixings, au monitoring, aux exceptions et à l’application d’une résolution. Les observations de marché indicatives ne sont pas embarquées dans les termes du Product.
-- Le MtM et la VaR prennent les termes du Product comme autorité pour les deals liés. Les anciens deals sans Product conservent leur chemin de compatibilité.
+- Le MtM et la VaR prennent les termes du Product comme autorité. Un ancien deal sans Product est refusé par `deal_valuation.mtm_core` et exclu explicitement par `var_engine.build_deal_scenario_base` (`DEAL_PRODUCT_MISSING`) ; aucun chemin automatique de compatibilité ne reprice ce deal.
 - L’AMC et Fama-French restent hors périmètre, conformément à la décision prise.
 
 ### Limites volontaires de cette tranche
@@ -31,7 +32,9 @@ Cette branche livre le socle transversal demandé. Les sections suivantes conser
 - La modification des termes existe par API avant booking, avec création d’une nouvelle version et justification. L’interface de réouverture garde les termes verrouillés afin d’éviter une mutation ambiguë.
 - Les analytiques secondaires du Pricer continuent à recevoir la projection locale verrouillée. Le prix principal et le pricing en vie passent par la composition autoritaire de l’API Product ; l’extension du même appel direct à chaque écran analytique reste une étape de consolidation.
 
-### Vérification exécutée
+### Vérification exécutée lors de la livraison du 14/09 (historique)
+
+Les résultats ci-dessous sont ceux consignés à cette date, pas une exécution du 05/10.
 
 - Tests Product dédiés : conservation sans prix, reçu signé, altération, idempotence, isolation utilisateur, composition marché/termes, repricing daté, RFQ, booking, lifecycle initial, KID, EMT, document et protections SQL.
 - Suite backend complète : `1687 passed`; deux tests échouent aussi sur le commit de départ `d638b51` et ne sont pas causés par cette branche (`test_client_affiliations.py` et `test_strike_value_split.py`). Après le durcissement final des reçus et des entrées KID/EMT, les 58 tests directement concernés ont été rejoués avec succès.
@@ -42,12 +45,12 @@ Cette branche livre le socle transversal demandé. Les sections suivantes conser
 
 Créer un objet Python `Product` qui constitue l’entrée métier commune des modules. Le Pricer, la RFQ, le Booking, le suivi de vie, le Risk et les documents utilisent sa définition du produit. Chaque module apporte ses informations par une opération explicite, conserve les informations des autres modules et restitue un dossier cohérent.
 
-Le parcours demandé est : exploration temporaire → conservation volontaire → RFQ et retours au Pricer → booking → vie du produit et risque. Les allers-retours sont possibles. Le deal apparaît seulement au booking.
+Le parcours initial était : exploration temporaire → conservation volontaire → RFQ et retours au Pricer → booking → vie du produit et risque. Le code actuel autorise aussi le passage direct à un geste métier durable, qui crée son Product interne ; l'ajout à la bibliothèque reste distinct. Les allers-retours sont possibles. Le deal apparaît seulement au booking.
 
 ### 1.1 Exigences issues des échanges
 
 - Ouvrir Nouveau Pricing et calculer ne crée aucun produit durable, indicatif, RFQ ou deal.
-- Le bouton « Conserver le produit » crée l’identité durable. Aucun enregistrement métier automatique avant cette action.
+- Le bouton « Conserver le produit » crée l’identité durable visible dans la bibliothèque. La création interne lors d'un indicatif, d'une RFQ ou d'un booking constitue une évolution du parcours initial, constatée dans le code au 05/10.
 - La bibliothèque des produits reste distincte de Mes Scripts : un script est une source ou un modèle réutilisable ; un produit est un dossier concret.
 - Tous les modules prennent `Product` comme entrée pour les informations produit. Les hypothèses de marché et paramètres de calcul sont fournis séparément.
 - Le produit conserve les termes contractuels, les faits métier acquis et les références des résultats. Il ne contient pas de bloc de marché courant.
@@ -65,7 +68,7 @@ La non-conservation de l’exploration concerne les dossiers métier et les rés
 |---|---|
 | Modèle Python | `Product` composé de sous-objets Pydantic v2 figés ; collections immuables, pas de dictionnaire métier modifiable exposé |
 | Identité | Identifiant de dossier attribué à la conservation ; identifiant technique entier compatible avec l’audit existant et référence lisible unique |
-| Exploration | Même modèle métier construit en mémoire, sans identifiant persistant et sans enregistrement |
+| Exploration | Même modèle métier construit en mémoire, sans identifiant persistant tant qu'aucun geste métier durable n'est commandé |
 | Marché | Contexte externe, transmis au module de calcul ; aucune vol, courbe ou configuration numérique dans les termes de `Product` |
 | Résultats | Références et résumés dans le produit ; entrées effectives, résultats détaillés et preuves dans des enregistrements de calcul séparés |
 | Stockage | Tables dédiées aux produits, versions des termes et révisions ; réutilisation des tables métier existantes |
@@ -268,7 +271,7 @@ Deux variantes peuvent avoir le même parent. La version la plus élevée n’es
 | Pricing temporaire | Termes de travail + contexte externe compatibles avec le moteur | Résultat temporaire ; zéro dossier durable |
 | Conserver | Nom, termes structurellement valides, identité utilisateur ; résultat facultatif | Produit, termes v1, révision initiale et audit ; exécution absente |
 | Enregistrer des termes modifiés | Révision attendue ; distinction brouillon/version déjà sollicitée | Nouvelle version si modification contractuelle ; anciennes cotations liées à l’ancienne version |
-| Créer/solliciter une RFQ | Produit conservé, version choisie, intention commerciale et disponibilité RFQ | Nouveau tour rattaché ; gel des éléments sollicités selon les règles existantes |
+| Créer/solliciter une RFQ | Product existant ou termes permettant sa création interne, intention commerciale et disponibilité RFQ | Nouveau tour rattaché ; Product interne créé si nécessaire ; gel des éléments sollicités selon les règles existantes |
 | Retour RFQ → Pricer | Identifiant produit + RFQ + version concernée | Ouverture du même dossier ; restauration de marché seulement depuis un calcul/contexte explicitement choisi |
 | Retenir/revoir une quote | Quote appartenant à la RFQ, contrôles actuels de statut/validité | Sélection auditée ; historique du tour conservé |
 | Booker | Version et sélection exactes, conditions exécutées, contrôles métier et idempotence | Deal, calendrier, événements initiaux, provenance, révision et audit atomiques |

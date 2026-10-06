@@ -48,6 +48,7 @@ from .api.alerts import router as alerts_router
 from .api.compute import router as compute_router
 from .api.var import router as var_router
 from .api.products import router as products_router
+from .api.product_optimizer import router as product_optimizer_router
 from .db.database import init_db
 from .services.lifecycle_alerts import (
     SCHEDULER_TIMEZONE, configure_lifecycle_handlers,
@@ -133,6 +134,7 @@ app.include_router(alerts_router)
 app.include_router(compute_router)
 app.include_router(var_router)
 app.include_router(products_router)
+app.include_router(product_optimizer_router)
 app.include_router(pricing_router)
 app.include_router(market_data_router)
 app.include_router(simulation_router)

@@ -3,6 +3,16 @@ import { useAuthStore } from '../stores/auth'
 
 const routes = [
   {
+    path: '/structuring',
+    component: () => import('../views/StructuringView.vue'),
+    meta: { title: 'Structuring Intelligence' },
+  },
+  {
+    path: '/structuring/optimizer',
+    component: () => import('../views/ProductOptimizerView.vue'),
+    meta: { title: 'Product Optimizer' },
+  },
+  {
     path: '/login',
     component: () => import('../views/LoginView.vue'),
     meta: { public: true },
