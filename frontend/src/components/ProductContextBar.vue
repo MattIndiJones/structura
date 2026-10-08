@@ -127,7 +127,7 @@ async function retain() {
     modal.value = false
     return
   }
-  const pricingInput = receipt?.pricing_input || pricing.pricingBody()
+  const pricingInput = receipt?.pricing_input || pricing.draftProductBody()
   const saved = await products.retainPricing({
     name: name.value,
     pricingInput,

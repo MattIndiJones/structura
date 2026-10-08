@@ -1,7 +1,9 @@
 # Revue transversale avant refonte PayScript — 06/10/2026
 
-**État : revue statique et inventaire SQLite en lecture seule ; aucune implémentation,
-suppression, exécution de tests ou recette UI.** Complète le
+**Photographie avant développement : revue statique et inventaire SQLite en lecture seule.**
+Les constats ne décrivent plus l'état courant : voir le
+[rapport d'implémentation et de recette](../projects/pricing/PAYSCRIPT_STARTDATE_IMPLEMENTATION_2026-10-06.md).
+Cette revue complète le
 [cadrage de la refonte](../projects/pricing/PAYSCRIPT_STARTDATE_UNDERLYING_DESIGN_2026-10-06.md).
 
 ## 1. Méthode et couverture

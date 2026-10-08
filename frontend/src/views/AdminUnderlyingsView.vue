@@ -92,7 +92,7 @@
               <thead>
                 <tr>
                   <th class="w-32">Ticker</th><th>Libellé</th>
-                  <th class="w-24">Devise</th><th class="w-40">Groupe</th>
+                  <th class="w-24">Devise</th><th>Type</th><th class="w-40">Groupe</th>
                   <th class="w-20">Actif</th><th class="w-10"></th>
                 </tr>
               </thead>
@@ -107,6 +107,7 @@
                     <input class="input py-1 px-2 w-20 font-mono" :value="u.ccy"
                            @change="update(u, { ccy: $event.target.value.toUpperCase() })" />
                   </td>
+                  <td><select class="select py-1 px-2" :aria-label="`Type ${u.ticker}`" :value="u.asset_class || 'unknown'" @change="update(u,{asset_class:$event.target.value})"><option value="unknown">À qualifier</option><option value="equity">Action</option><option value="index">Indice</option></select></td>
                   <td>
                     <input class="input py-1 px-2" :value="u.group" list="groupes-existants"
                            @change="update(u, { group: $event.target.value })" />
@@ -247,7 +248,8 @@ async function add(r) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ticker: r.ticker, label: r.label,
-                             group: r.group || 'Autres', exchange: r.exchange }),
+                             group: r.group || 'Autres', exchange: r.exchange,
+                             asset_class: r.type==='EQUITY'?'equity':r.type==='INDEX'?'index':'unknown' }),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || 'Ajout impossible')

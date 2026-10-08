@@ -94,7 +94,7 @@ CASES = [
      "protection du capital à 60% à maturité",
      [("compile", lambda o: o["ok"]),
       ("STOP présent", lambda o: o["has_stop"]),
-      ("worst-of", _has(r"\bWOF\b")),
+      ("worst-of", _has(r"\b(?:WOF|WORSTOF)\b")),
       ("4 observations", _n_dates(4))]),
 
     ("capital garanti",

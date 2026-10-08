@@ -231,14 +231,14 @@ def test_heston_qe_vectorized_matches_scalar():
 
 
 def test_lsv_marginal_matches_local_vol_target():
-    """The defining property of LSV: its leverage function recalibrates the
-    stochastic-vol dynamics every step so the MARGINAL distribution of the
-    spot matches the Dupire local vol target exactly (same lv_grids
-    _simulate_lv itself calibrates to) — even though the PATH dynamics
-    differ (that's the whole point, see test below). Prices a few strikes,
-    inverts implied vol via Black-Scholes, and compares to _dupire_vol at
-    the same strikes."""
+    """Compare MC IMPLIED vol to the input IMPLIED smile, not local vol.
+
+    Local instantaneous volatility is not a vanilla implied-vol oracle.
+    This moderate-smile smoke check allows finite-particle/time-step error;
+    the wider offline audit controls downside tails and digitals separately.
+    """
     from scipy.optimize import brentq
+    from backend.app.core.payscript.engine import _smile_vol
     r, q, T = 0.03, 0.0, 1.0
     sigma0, skew, curvature = 0.20, -0.05, 0.02
     forward = math.exp(r * T)
@@ -251,18 +251,18 @@ def test_lsv_marginal_matches_local_vol_target():
         res = run_mc(cs, params, CORR, r=r, T_max=T, N=20000, model='lsv',
                      seed=11, antithetic=True, user_params={'K': K})
         implied = brentq(lambda s: bs_call(1.0, K, r, q, s, T) - res['price'], 0.01, 2.0)
-        target = _dupire_vol(K, T, sigma0, skew, curvature, r, q)
+        target = _smile_vol(math.log(K), sigma0, skew, curvature)
         assert abs(implied - target) < 0.03, \
-            f"K={K}: MC implied vol={implied:.4f} local vol target={target:.4f}"
+            f"K={K}: MC implied vol={implied:.4f} implied vol target={target:.4f}"
 
 
 def test_lsv_differs_from_pure_local_vol_on_autocall():
     """LSV must NOT silently degenerate into pure local vol on a genuinely
     path-dependent payoff. A payoff observed ONLY at maturity (e.g. a plain
-    KI check) is NOT a good test for this: LSV and local vol are calibrated
-    to the exact same terminal marginal (see test_lsv_marginal_matches_
-    local_vol_target above), so they necessarily agree on anything that only
-    depends on S_T. The forward-skew dynamics LSV and local vol genuinely
+    KI check) is NOT a good test for this: LSV and local vol aim for the
+    same terminal marginal (see test_lsv_marginal_matches_local_vol_target),
+    with finite-particle/time-step calibration residuals audited separately.
+    The forward-skew dynamics LSV and local vol genuinely
     disagree on only show up across MULTIPLE observation dates — an
     autocall with early-exercise dates plus a maturity KI check, same
     structure already confirmed by hand to diverge materially between these

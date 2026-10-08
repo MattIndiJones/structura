@@ -93,9 +93,13 @@ def _price(script_text, *, model="constant", antithetic=True, curve=None,
 # l'identité au dernier chiffre : localvol == constant ci-dessous, à tout N.
 # Voir test_dupire_calibration.py, qui exige l'identité plutôt qu'une valeur.
 #
-# lsv bouge par conséquence — sa cible de vol locale a changé. Son écart à la
-# vol constante reste du bruit Monte Carlo (+1,21 % à N=2000, +0,06 % à 40 000),
-# pas un biais : la leverage y est bien conditionnée par E[V|S].
+# Both LSV baselines were deliberately rebased on 2026-10-07: thin buckets
+# borrow their spot neighbours instead of using unconditional E[V], and
+# conditional variance uses a finer grid independent of the LV lookup.
+# Deep-put bias is demonstrated on three independent seeds and reduced by
+# the correction. See docs/audits/VALIDATION_MODELES_VOL_2026-10-07.md and
+# test_vol_model_validation.py. At N=2000 the ATM call changes by -0.60 bp
+# with antithetics, -2.65 bp without. All other baselines remain unchanged.
 GOLDEN_MODELES = {
     ("constant", True):  0.087814,
     ("constant", False): 0.083430,
@@ -105,8 +109,8 @@ GOLDEN_MODELES = {
     ("sabr",     False): 0.086724,
     ("localvol", True):  0.087814,   # == constant, et ce n'est pas un hasard
     ("localvol", False): 0.083430,   # == constant
-    ("lsv",      True):  0.088875,
-    ("lsv",      False): 0.084951,
+    ("lsv",      True):  0.088815,
+    ("lsv",      False): 0.084686,
 }
 
 

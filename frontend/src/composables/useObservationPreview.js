@@ -49,18 +49,33 @@ export function useObservationPreview(store, strikeDate, devise) {
   function _tenor(t) { return (t && t.value) ? `${t.value}${t.unit}` : null }
 
   async function chargerCalendrier() {
-    const calendriers = (store.scriptConstats || []).filter(c => c.kind !== 'single')
+    const calendriers = (store.scriptConstats || []).filter(c => c.role !== 'initial_fixing')
     if (!calendriers.length) { datesCalendrier.value = []; return }
     const toutes = new Set()
     for (const c of calendriers) {
       const v = store.constatOverrides[c.name] || {}
-      if (!v.start_date || !v.end_date) continue
+      if (c.kind === 'single') {
+        const date = typeof v === 'string' ? v : v.date
+        if (date) {
+          if (typeof v === 'object' && v.convention && v.convention !== 'none') {
+            try {
+              const response = await apiFetch('/api/calendar/resolve', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date, currency: devise(), convention: v.convention }),
+              })
+              if (response.ok) toutes.add((await response.json()).date)
+            } catch { /* An incomplete convention is not an observed date. */ }
+          } else toutes.add(date)
+        }
+        continue
+      }
+      if (!(v.first_observation_date || v.start_date) || !v.end_date) continue
       try {
         const res = await apiFetch('/api/schedule/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
+            first_observation_date: v.first_observation_date || undefined, start_date: v.start_date || undefined, end_date: v.end_date, roll_date: v.roll_date || v.first_observation_date,
             frequency: _tenor(v.frequency), stub: v.stub,
             sub_frequency: _tenor(v.sub_frequency) || null,
             currency: devise() || 'EUR',
@@ -71,7 +86,7 @@ export function useObservationPreview(store, strikeDate, devise) {
         if (!res.ok) continue
         const data = await res.json()
         // La première date est le début de période, pas une observation.
-        ;(data.dates || []).slice(1).forEach(d => toutes.add(d))
+        ;(data.dates || []).slice(data.first_is_observation ? 0 : 1).forEach(d => toutes.add(d))
       } catch { /* calendrier incomplet : on retombe sur les flux */ }
     }
     datesCalendrier.value = [...toutes].sort()

@@ -138,8 +138,8 @@ const demo = useDemoModeStore()
 
 const names = store.scriptParams.map(p => p.name)
 const form = reactive({
-  param_x: names[0] || '', x_min: 0, x_max: 0, x_steps: 9,
-  param_y: names[1] || names[0] || '', y_min: 0, y_max: 0, y_steps: 9,
+  param_x: names[0] || '', x_min: null, x_max: null, x_steps: 9,
+  param_y: names[1] || names[0] || '', y_min: null, y_max: null, y_steps: 9,
   N: 4000,
 })
 
@@ -151,14 +151,18 @@ const ySuffix = computed(() => store.paramIsPct(form.param_y) ? ' (%)' : '')
 function prefillX() {
   const p = store.scriptParams.find(p => p.name === form.param_x)
   if (!p) return
-  form.x_min = +(p.raw_default * 0.5).toFixed(4)
-  form.x_max = +(p.raw_default > 0 ? p.raw_default * 1.5 : p.raw_default + 1).toFixed(4)
+  const d = store.paramOverrides[p.name] ?? p.display_default
+  if (d == null || d === '' || Array.isArray(d)) { form.x_min = null; form.x_max = null; return }
+  form.x_min = +(Number(d) * 0.5).toFixed(4)
+  form.x_max = +(Number(d) > 0 ? Number(d) * 1.5 : Number(d) + 1).toFixed(4)
 }
 function prefillY() {
   const p = store.scriptParams.find(p => p.name === form.param_y)
   if (!p) return
-  form.y_min = +(p.raw_default * 0.5).toFixed(4)
-  form.y_max = +(p.raw_default > 0 ? p.raw_default * 1.5 : p.raw_default + 1).toFixed(4)
+  const d = store.paramOverrides[p.name] ?? p.display_default
+  if (d == null || d === '' || Array.isArray(d)) { form.y_min = null; form.y_max = null; return }
+  form.y_min = +(Number(d) * 0.5).toFixed(4)
+  form.y_max = +(Number(d) > 0 ? Number(d) * 1.5 : Number(d) + 1).toFixed(4)
 }
 prefillX()
 prefillY()

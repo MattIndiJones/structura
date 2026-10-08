@@ -28,7 +28,7 @@ UNDERLYINGS_SEED: list[tuple[str, str, str, str]] = [
     ('TTE.PA', "TotalEnergies", 'Actions FR (CAC)', 'EUR'),
     ('SAN.PA', "Sanofi", 'Actions FR (CAC)', 'EUR'),
     ('BNP.PA', "BNP Paribas", 'Actions FR (CAC)', 'EUR'),
-    ('AXA.PA', "AXA", 'Actions FR (CAC)', 'EUR'),
+    ('CS.PA', "AXA", 'Actions FR (CAC)', 'EUR'),
     ('OR.PA', "L'Oréal", 'Actions FR (CAC)', 'EUR'),
     ('AIR.PA', "Airbus", 'Actions FR (CAC)', 'EUR'),
     ('GLE.PA', "Société Générale", 'Actions FR (CAC)', 'EUR'),
@@ -77,3 +77,13 @@ UNDERLYINGS_SEED: list[tuple[str, str, str, str]] = [
     ('CPRI', "Capri Holdings", 'Luxe', 'USD'),
     ('PVH', "PVH Corp", 'Luxe', 'USD'),
 ]
+
+
+def seeded_asset_class(ticker: str) -> str:
+    """Explicit catalogue classification, never a symbol-prefix heuristic."""
+    groups = {group for symbol, _, group, _ in UNDERLYINGS_SEED if symbol == ticker}
+    if any(group.startswith("Indices ") for group in groups):
+        return "index"
+    if any(group.startswith("Actions ") or group in {"Banques", "Luxe"} for group in groups):
+        return "equity"
+    return "unknown"

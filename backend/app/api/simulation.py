@@ -36,7 +36,11 @@ def _parse_and_validate(req) -> tuple:
             # pair a l'emission n'a rien a voir avec le chercher sur ce qu'il
             # reste a courir, coupons deja accumules compris.
             compiled, uls = ctx.script, ctx.underlyings
-            r_eff, T_eff, etat = ctx.r, ctx.T_remaining, ctx.mc_kwargs
+            r_eff, T_eff = ctx.r, ctx.T_remaining
+            # The solver and parameter grid must discount the residual final
+            # redemption at the same payment date as pricing and stress cells.
+            etat = {**ctx.mc_kwargs, "maturity_payment_t": ctx.payment_t,
+                    "strike_set_t": ctx.residuel.strike_set_t}
             yc = ctx.sur_axe_residuel(req.yield_curve)
         else:
             compiled = resolve_analysis_constats(parse_script(req.script), req)

@@ -505,16 +505,11 @@ def test_param_array_declaration():
     assert seed.is_pct is True
 
 
-def test_param_array_requires_a_value():
-    """D4 (11/09/2026) : `PARAM()` exige une valeur, comme `PARAM`. Sans elle,
-    la déclaration passait à 0 % en silence ; les deux formes nomment désormais
-    ce qui manque au lieu de parler d'instruction inconnue."""
-    with pytest.raises(ValueError, match=r"PARAM\(\) M_BAR attend une valeur initiale"):
-        parse_script("PARAM() M_BAR\nAT 1:\n  PAY INDIC(WOF >= M_BAR)")
-    with pytest.raises(ValueError, match=r"PARAM\(\) M_BAR attend une valeur initiale"):
-        parse_script('PARAM() M_BAR "barrière"\nAT 1:\n  PAY INDIC(WOF >= M_BAR)')
-    with pytest.raises(ValueError, match="PARAM COUPON attend une valeur initiale"):
-        parse_script("PARAM COUPON\nAT MATURITY:\n  PAY COUPON")
+def test_parameter_without_default_requires_economics_value():
+    """A bare declaration is a required percentage, never a zero default."""
+    for source in ('PARAM() M_BAR', 'PARAM() M_BAR "barrière"', 'PARAM COUPON'):
+        param = parse_script(source).params[0]
+        assert param.required and param.is_pct and param.stored_val is None
     # L'unité reste celle qui est écrite : sans %, la valeur est un nombre brut.
     cs = parse_script("PARAM() M_BAR = 0.95\nAT 1:\n  PAY INDIC(WOF >= M_BAR)")
     p = cs.params[0]

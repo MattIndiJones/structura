@@ -1,20 +1,65 @@
 {
-  "version": 1,
+  "version": "2.0",
   "tenors": [
-    { "code": "6M", "months": 6, "label": "6 mois" },
-    { "code": "1Y", "months": 12, "label": "1 an" },
-    { "code": "18M", "months": 18, "label": "18 mois" },
-    { "code": "2Y", "months": 24, "label": "2 ans" },
-    { "code": "3Y", "months": 36, "label": "3 ans" },
-    { "code": "4Y", "months": 48, "label": "4 ans" },
-    { "code": "5Y", "months": 60, "label": "5 ans" },
-    { "code": "7Y", "months": 84, "label": "7 ans" },
-    { "code": "10Y", "months": 120, "label": "10 ans" }
+    {
+      "code": "6M",
+      "months": 6,
+      "label": "6 mois"
+    },
+    {
+      "code": "1Y",
+      "months": 12,
+      "label": "1 an"
+    },
+    {
+      "code": "18M",
+      "months": 18,
+      "label": "18 mois"
+    },
+    {
+      "code": "2Y",
+      "months": 24,
+      "label": "2 ans"
+    },
+    {
+      "code": "3Y",
+      "months": 36,
+      "label": "3 ans"
+    },
+    {
+      "code": "4Y",
+      "months": 48,
+      "label": "4 ans"
+    },
+    {
+      "code": "5Y",
+      "months": 60,
+      "label": "5 ans"
+    },
+    {
+      "code": "7Y",
+      "months": 84,
+      "label": "7 ans"
+    },
+    {
+      "code": "10Y",
+      "months": 120,
+      "label": "10 ans"
+    }
   ],
   "families": [
-    { "key": "autocalls", "label": "Autocalls" },
-    { "key": "capital", "label": "Produits à capital" },
-    { "key": "options", "label": "Options" }
+    {
+      "key": "autocalls",
+      "label": "Autocalls"
+    },
+    {
+      "key": "capital",
+      "label": "Produits à capital"
+    },
+    {
+      "key": "options",
+      "label": "Options"
+    }
   ],
   "products": [
     {
@@ -22,497 +67,936 @@
       "label": "Autocall Athena (barrière à maturité)",
       "family": "autocalls",
       "description": "Rappel au pair avec coupons cumulés dès que le worst-of atteint la barrière de rappel. À défaut, la protection du capital se juge à la dernière constatation.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y",
+        "7Y",
+        "10Y"
+      ],
       "constats": {
-        "OBSERVATIONS": { "role": "observations", "frequency": "1Y" }
+        "OBSERVATIONDATES": {
+          "role": "observations",
+          "frequency": "1Y"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Autocall Athena — barrière de protection observée à maturité",
-        "PARAM COUPON = 8%",
-        "PARAM M_AC_BAR = 100%",
-        "PARAM M_KI_BAR = 60%",
+        "PARAM COUPON",
+        "PARAM M_AC_BAR",
+        "PARAM M_KI_BAR",
         "",
-        "CONSTAT() OBSERVATIONS",
+        "CONSTAT StartDate",
+        "CONSTAT() ObservationDates",
         "",
-        "AT OBSERVATIONS:",
-        "  SET CALL = INDIC(WOF >= M_AC_BAR)",
-        "  PAY CALL * COUPON * INDEX \"Coupons cumulés\"",
-        "  PAY CALL * 1 \"Remboursement anticipé\"",
-        "  IF CALL = 1:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT Date FROM ObservationDates:",
+        "  SET PERF = WORSTOF(Basket.yield)",
+        "  IF PERF >= M_AC_BAR:",
+        "    PAY COUPON * INDEX \"Coupons cumulés\"",
+        "    PAY 1 \"Capital — remboursement au rappel\"",
         "    STOP",
         "",
-        "AT OBSERVATIONS.last:",
-        "  SET KI = INDIC(WOF < M_KI_BAR)",
-        "  PAY (1 - KI) * 1 \"Remboursement au pair\"",
-        "  PAY KI * WOF \"Perte en capital\""
-      ]
+        "AT ObservationDates.last:",
+        "  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)",
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "autocall_athena_ki_americaine",
       "label": "Autocall Athena à barrière américaine",
       "family": "autocalls",
       "description": "Rappel au pair avec coupons cumulés dès que le worst-of atteint la barrière de rappel. La protection du capital est perdue si le worst-of franchit la barrière à un moment quelconque de la vie du produit.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y",
+        "7Y",
+        "10Y"
+      ],
       "constats": {
-        "OBSERVATIONS": { "role": "observations", "frequency": "1Y" }
+        "OBSERVATIONDATES": {
+          "role": "observations",
+          "frequency": "1Y"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Autocall Athena — barrière de protection américaine",
-        "PARAM COUPON = 8%",
-        "PARAM M_AC_BAR = 100%",
-        "PARAM M_KI_BAR = 60%",
+        "PARAM COUPON",
+        "PARAM M_AC_BAR",
+        "PARAM M_KI_BAR",
         "",
-        "CONSTAT() OBSERVATIONS",
+        "CONSTAT StartDate",
+        "CONSTAT() ObservationDates",
         "",
-        "AT OBSERVATIONS:",
-        "  SET CALL = INDIC(WOF >= M_AC_BAR)",
-        "  PAY CALL * COUPON * INDEX \"Coupons cumulés\"",
-        "  PAY CALL * 1 \"Remboursement anticipé\"",
-        "  IF CALL = 1:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT Date FROM ObservationDates:",
+        "  SET PERF = WORSTOF(Basket.yield)",
+        "  IF PERF >= M_AC_BAR:",
+        "    PAY COUPON * INDEX \"Coupons cumulés\"",
+        "    PAY 1 \"Capital — remboursement au rappel\"",
         "    STOP",
         "",
-        "AT OBSERVATIONS.last:",
+        "AT ObservationDates.last:",
         "  SET KI = INDIC(WOF_MIN < M_KI_BAR)",
-        "  PAY (1 - KI) * 1 \"Remboursement au pair\"",
-        "  PAY KI * WOF \"Perte en capital\""
-      ]
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "phoenix",
       "label": "Phoenix",
       "family": "autocalls",
       "description": "Coupon versé à chaque constatation où le worst-of dépasse la barrière de coupon, rappel au pair au-dessus de la barrière de rappel. Protection du capital jugée à la dernière constatation.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y",
+        "7Y",
+        "10Y"
+      ],
       "constats": {
-        "OBSERVATIONS": { "role": "observations", "frequency": "1Y" }
+        "OBSERVATIONDATES": {
+          "role": "observations",
+          "frequency": "1Y"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Phoenix — coupon conditionnel, barrière de protection observée à maturité",
-        "PARAM COUPON = 10%",
-        "PARAM M_AC_BAR = 100%",
-        "PARAM M_CPN_BAR = 80%",
-        "PARAM M_KI_BAR = 60%",
+        "PARAM COUPON",
+        "PARAM M_AC_BAR",
+        "PARAM M_CPN_BAR",
+        "PARAM M_KI_BAR",
         "",
-        "CONSTAT() OBSERVATIONS",
+        "CONSTAT StartDate",
+        "CONSTAT() ObservationDates",
         "",
-        "AT OBSERVATIONS:",
-        "  SET CALL = INDIC(WOF >= M_AC_BAR)",
-        "  SET CPN = INDIC(WOF >= M_CPN_BAR)",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT Date FROM ObservationDates:",
+        "  SET CALL = INDIC(WORSTOF(Basket.yield) >= M_AC_BAR)",
+        "  SET CPN = INDIC(WORSTOF(Basket.yield) >= M_CPN_BAR)",
         "  PAY CPN * COUPON \"Coupon conditionnel\"",
-        "  PAY CALL * 1 \"Remboursement anticipé\"",
         "  IF CALL = 1:",
+        "    PAY 1 \"Capital — remboursement au rappel\"",
         "    STOP",
         "",
-        "AT OBSERVATIONS.last:",
-        "  SET KI = INDIC(WOF < M_KI_BAR)",
-        "  PAY (1 - KI) * 1 \"Remboursement au pair\"",
-        "  PAY KI * WOF \"Perte en capital\""
-      ]
+        "AT ObservationDates.last:",
+        "  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)",
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "phoenix_memoire",
       "label": "Phoenix à coupon mémoire",
       "family": "autocalls",
       "description": "Phoenix dont les coupons manqués sont rattrapés à la première constatation où le worst-of repasse la barrière de coupon. Protection du capital jugée à la dernière constatation.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y",
+        "7Y",
+        "10Y"
+      ],
       "constats": {
-        "OBSERVATIONS": { "role": "observations", "frequency": "1Y" }
+        "OBSERVATIONDATES": {
+          "role": "observations",
+          "frequency": "1Y"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Phoenix à coupon mémoire — les coupons manqués sont rattrapés",
-        "PARAM COUPON = 8%",
-        "PARAM M_AC_BAR = 100%",
-        "PARAM M_CPN_BAR = 70%",
-        "PARAM M_KI_BAR = 60%",
+        "PARAM COUPON",
+        "PARAM M_AC_BAR",
+        "PARAM M_CPN_BAR",
+        "PARAM M_KI_BAR",
         "",
-        "CONSTAT() OBSERVATIONS",
+        "CONSTAT StartDate",
+        "CONSTAT() ObservationDates",
         "",
-        "AT OBSERVATIONS:",
-        "  IF WOF >= M_CPN_BAR:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT Date FROM ObservationDates:",
+        "  IF WORSTOF(Basket.yield) >= M_CPN_BAR:",
         "    PAY COUPON * (INDEX - MEMO) \"Coupon et rattrapage\"",
         "    SET MEMO = INDEX",
-        "  IF WOF >= M_AC_BAR:",
+        "  IF WORSTOF(Basket.yield) >= M_AC_BAR:",
         "    PAY 1 \"Remboursement anticipé\"",
         "    STOP",
         "",
-        "AT OBSERVATIONS.last:",
-        "  SET KI = INDIC(WOF < M_KI_BAR)",
-        "  PAY (1 - KI) * 1 \"Remboursement au pair\"",
-        "  PAY KI * WOF \"Perte en capital\""
-      ]
+        "AT ObservationDates.last:",
+        "  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)",
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "autocall_barriere_degressive",
       "label": "Autocall à barrière de rappel dégressive",
       "family": "autocalls",
       "description": "Athena dont la barrière de rappel change à chaque constatation : une ligne par constatation dans Economics, la dernière s'étend aux suivantes.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y",
+        "7Y",
+        "10Y"
+      ],
       "constats": {
-        "OBSERVATIONS": { "role": "observations", "frequency": "1Y" }
+        "OBSERVATIONDATES": {
+          "role": "observations",
+          "frequency": "1Y"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Autocall à barrière de rappel dégressive — une barrière par constatation",
-        "PARAM COUPON = 8%",
-        "PARAM() M_AC_BAR = 100%",
-        "PARAM M_KI_BAR = 60%",
+        "PARAM COUPON",
+        "PARAM() M_AC_BAR",
+        "PARAM M_KI_BAR",
         "",
-        "CONSTAT() OBSERVATIONS",
+        "CONSTAT StartDate",
+        "CONSTAT() ObservationDates",
         "",
-        "AT OBSERVATIONS:",
-        "  SET CALL = INDIC(WOF >= M_AC_BAR)",
-        "  PAY CALL * COUPON * INDEX \"Coupons cumulés\"",
-        "  PAY CALL * 1 \"Remboursement anticipé\"",
-        "  IF CALL = 1:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT Date FROM ObservationDates:",
+        "  SET PERF = WORSTOF(Basket.yield)",
+        "  IF PERF >= M_AC_BAR:",
+        "    PAY COUPON * INDEX \"Coupons cumulés\"",
+        "    PAY 1 \"Capital — remboursement au rappel\"",
         "    STOP",
         "",
-        "AT OBSERVATIONS.last:",
-        "  SET KI = INDIC(WOF < M_KI_BAR)",
-        "  PAY (1 - KI) * 1 \"Remboursement au pair\"",
-        "  PAY KI * WOF \"Perte en capital\""
-      ]
+        "AT ObservationDates.last:",
+        "  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)",
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "autocall_gear_put",
       "label": "Autocall à put leveragé (gear put)",
       "family": "autocalls",
       "description": "Rappel au pair avec coupon au-dessus de la barrière de rappel. Sans rappel, perte démultipliée sous le strike du put, plafonnée au capital.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y",
+        "7Y",
+        "10Y"
+      ],
       "constats": {
-        "OBSERVATIONS": { "role": "observations", "frequency": "1Y" }
+        "OBSERVATIONDATES": {
+          "role": "observations",
+          "frequency": "1Y"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Autocall gear put — perte avec levier sous le strike du put",
-        "PARAM COUPON = 10%",
-        "PARAM M_AC_BAR = 100%",
-        "PARAM M_PUT_STRIKE = 80%",
-        "PARAM GEARING = 150%",
+        "PARAM COUPON",
+        "PARAM M_AC_BAR",
+        "PARAM M_PUT_STRIKE",
+        "PARAM GEARING",
         "",
-        "CONSTAT() OBSERVATIONS",
+        "CONSTAT StartDate",
+        "CONSTAT() ObservationDates",
         "",
-        "AT OBSERVATIONS:",
-        "  SET CALL = INDIC(WOF >= M_AC_BAR)",
-        "  PAY CALL * COUPON \"Coupon\"",
-        "  PAY CALL * 1 \"Remboursement anticipé\"",
-        "  IF CALL = 1:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT Date FROM ObservationDates:",
+        "  SET PERF = WORSTOF(Basket.yield)",
+        "  IF PERF >= M_AC_BAR:",
+        "    PAY COUPON \"Coupon\"",
+        "    PAY 1 \"Capital — remboursement au rappel\"",
         "    STOP",
         "",
-        "AT OBSERVATIONS.last:",
-        "  SET KI = INDIC(WOF < M_PUT_STRIKE)",
+        "AT ObservationDates.last:",
+        "  SET KI = INDIC(WORSTOF(Basket.yield) < M_PUT_STRIKE)",
         "  PAY 1 \"Remboursement nominal\"",
-        "  PAY -1 * KI * MIN(1, GEARING * (1 - WOF / M_PUT_STRIKE)) \"Put vendu avec levier, perte plafonnée au capital\""
-      ]
+        "  PAY -1 * KI * MIN(1, GEARING * (1 - WORSTOF(Basket.yield) / M_PUT_STRIKE)) \"Put vendu avec levier, perte plafonnée au capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "autocall_coupon_moyenne_periode",
       "label": "Autocall à coupon constaté sur la moyenne de la période",
       "family": "autocalls",
       "description": "Chaque constatation moyenne les relevés de la période écoulée, par sous-jacent, avant l'agrégation worst-of. La protection finale lit le cours de clôture.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y"
+      ],
       "constats": {
-        "OBSERVATIONS": { "role": "observations", "frequency": "1Y", "window_frequency": "3M" }
+        "OBSERVATIONDATES": {
+          "role": "observations",
+          "frequency": "1Y",
+          "window_frequency": "3M"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Autocall — rappel et coupon constatés sur la moyenne de la période",
         "# Chaque constatation moyenne ses relevés sur la période écoulée, par",
-        "# sous-jacent, avant que WOF n'agrège. La protection finale lit le cours de",
+        "# sous-jacent, avant que WORSTOF(Basket.yield) n'agrège. La protection finale lit le cours de",
         "# clôture : .last.last descend de la constatation à son dernier relevé.",
-        "PARAM COUPON = 8%",
-        "PARAM M_AC_BAR = 100%",
-        "PARAM M_PDI_BAR = 60%",
+        "PARAM COUPON",
+        "PARAM M_AC_BAR",
+        "PARAM M_PDI_BAR",
         "",
-        "CONSTAT() OBSERVATIONS AVG PERIOD",
+        "CONSTAT StartDate",
+        "CONSTAT() ObservationDates AVG PERIOD",
         "",
-        "AT OBSERVATIONS:",
-        "  SET CALL = INDIC(WOF >= M_AC_BAR)",
-        "  PAY CALL * (1 + COUPON * INDEX) \"Rappel et coupons sur moyenne de période\"",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT Date FROM ObservationDates:",
+        "  SET CALL = INDIC(WORSTOF(Basket.yield) >= M_AC_BAR)",
         "  IF CALL = 1:",
+        "    PAY COUPON * INDEX \"Coupons cumulés sur moyenne de période\"",
+        "    PAY 1 \"Capital — remboursement au rappel\"",
         "    STOP",
         "",
-        "AT OBSERVATIONS.last.last:",
-        "  SET KI = INDIC(WOF < M_PDI_BAR)",
-        "  PAY 1 - KI * (1 - WOF) \"Remboursement, protection sur le cours final\""
-      ]
+        "AT ObservationDates.last.last:",
+        "  SET KI = INDIC(WORSTOF(Basket.yield) < M_PDI_BAR)",
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "reverse_convertible",
       "label": "Reverse convertible à barrière (observée à maturité)",
       "family": "capital",
       "description": "Coupon garanti. Le capital est remboursé au pair si le worst-of est au-dessus de la barrière à la date de maturité, sinon il suit sa performance.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["6M", "1Y", "18M", "2Y", "3Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "6M",
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Reverse convertible à barrière — coupon garanti, barrière observée à maturité",
-        "PARAM COUPON = 10%",
-        "PARAM M_KI_BAR = 80%",
+        "PARAM COUPON",
+        "PARAM M_KI_BAR",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
         "  PAY COUPON \"Coupon\"",
-        "  SET KI = INDIC(WOF < M_KI_BAR)",
-        "  PAY (1 - KI) * 1 \"Remboursement au pair\"",
-        "  PAY KI * WOF \"Perte en capital\""
-      ]
+        "  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)",
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "brc_ki_americaine",
       "label": "Barrier reverse convertible à barrière américaine",
       "family": "capital",
       "description": "Coupon garanti. Le capital suit la performance du worst-of si celui-ci a franchi la barrière à un moment quelconque de la vie du produit, sinon il est remboursé au pair.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["6M", "1Y", "18M", "2Y", "3Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "6M",
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Barrier reverse convertible — coupon garanti, barrière américaine",
-        "PARAM COUPON = 9%",
-        "PARAM M_KI_BAR = 65%",
+        "PARAM COUPON",
+        "PARAM M_KI_BAR",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
         "  PAY COUPON \"Coupon\"",
         "  SET KI = INDIC(WOF_MIN < M_KI_BAR)",
-        "  PAY (1 - KI) * 1 \"Remboursement au pair\"",
-        "  PAY KI * WOF \"Perte en capital\""
-      ]
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "capital_garanti",
       "label": "Capital garanti avec participation",
       "family": "capital",
       "description": "Capital remboursé au pair à maturité, plus une participation à la hausse du worst-of au-dessus du strike.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "18M", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y",
+        "7Y",
+        "10Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Capital garanti — participation à la hausse au-dessus du strike",
-        "PARAM PART = 80%",
-        "PARAM STRIKE = 100%",
+        "PARAM PART",
+        "PARAM STRIKE",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
         "  PAY 1 \"Capital garanti\"",
-        "  PAY MAX(0, WOF - STRIKE) * PART \"Participation à la hausse\""
-      ]
+        "  PAY MAX(0, WORSTOF(Basket.yield) - STRIKE) * PART \"Participation à la hausse\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "twin_win",
       "label": "Twin Win",
       "family": "capital",
       "description": "Gain sur la valeur absolue de la performance, plafonné, tant que la barrière américaine n'est pas franchie. Barrière franchie : le capital suit le worst-of.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "18M", "2Y", "3Y", "4Y", "5Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Twin Win — performance absolue plafonnée tant que la barrière n'est pas franchie",
-        "PARAM CAP = 150%",
-        "PARAM M_KI_BAR = 70%",
+        "PARAM CAP",
+        "PARAM M_KI_BAR",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
         "  SET BREACHED = INDIC(WOF_MIN < M_KI_BAR)",
-        "  SET UPS = MIN(CAP, MAX(1, WOF))",
-        "  SET DNS = MIN(CAP, MAX(1, 2 - WOF))",
-        "  PAY (1 - BREACHED) * MAX(UPS, DNS) \"Performance absolue plafonnée\"",
-        "  PAY BREACHED * WOF \"Barrière franchie : performance du worst-of\""
-      ]
+        "  SET UPS = MIN(CAP, MAX(1, WORSTOF(Basket.yield)))",
+        "  SET DNS = MIN(CAP, MAX(1, 2 - WORSTOF(Basket.yield)))",
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY (1 - BREACHED) * (MAX(UPS, DNS) - 1) \"Performance absolue plafonnée\"",
+        "  PAY BREACHED * MAX(WORSTOF(Basket.yield) - 1, 0) \"Hausse après franchissement\"",
+        "  PAY -BREACHED * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "booster",
       "label": "Booster",
       "family": "capital",
       "description": "Hausse du worst-of démultipliée et plafonnée ; baisse subie une pour une, sans protection.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "18M", "2Y", "3Y", "4Y", "5Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Booster — hausse démultipliée et plafonnée, baisse subie une pour une",
-        "PARAM PART = 200%",
-        "PARAM CAP = 140%",
+        "PARAM PART",
+        "PARAM CAP",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
-        "  SET PERF = WOF",
-        "  SET IS_UP = INDIC(PERF >= 1)",
-        "  PAY IS_UP * MIN(CAP, 1 + (PERF - 1) * PART) \"Hausse avec levier, plafonnée\"",
-        "  PAY (1 - IS_UP) * PERF \"Baisse subie une pour une\""
-      ]
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
+        "  SET PERF = WORSTOF(Basket.yield)",
+        "  PAY 1 \"Capital — remboursement à maturité\"",
+        "  PAY INDIC(PERF >= 1) * (MIN(CAP, 1 + (PERF - 1) * PART) - 1) \"Participation plafonnée\"",
+        "  PAY -MAX(1 - PERF, 0) \"Put vendu — perte en capital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "shark_note",
       "label": "Shark note",
       "family": "capital",
       "description": "Capital garanti et participation à la hausse, remplacée par un rebate si le best-of a touché la barrière désactivante pendant la vie du produit.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["1Y", "18M", "2Y", "3Y", "4Y", "5Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Shark note — capital garanti, participation perdue au-delà de la barrière",
-        "PARAM PART = 100%",
-        "PARAM STRIKE = 100%",
-        "PARAM M_KO_BAR = 130%",
-        "PARAM REBATE = 3%",
+        "PARAM PART",
+        "PARAM STRIKE",
+        "PARAM M_KO_BAR",
+        "PARAM REBATE",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
         "  SET KO = INDIC(BOF_MAX >= M_KO_BAR)",
-        "  SET CALL = PART * MAX(0, WOF - STRIKE)",
+        "  SET CALL = PART * MAX(0, WORSTOF(Basket.yield) - STRIKE)",
         "  PAY 1 \"Remboursement nominal\"",
         "  PAY CALL \"Participation à la hausse\"",
         "  PAY -1 * KO * (CALL - REBATE) \"Barrière touchée : rebate à la place de la participation\""
-      ]
+      ],
+      "version": "2.0"
     },
     {
       "key": "call",
       "label": "Call",
       "family": "options",
       "description": "Call européen sur le worst-of, payé à maturité.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["6M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "6M",
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Call — sur le worst-of",
-        "PARAM STRIKE = 100%",
+        "PARAM STRIKE",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
-        "  PAY MAX(0, WOF - STRIKE) \"Call\""
-      ]
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
+        "  PAY MAX(0, WORSTOF(Basket.yield) - STRIKE) \"Call\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "put",
       "label": "Put",
       "family": "options",
       "description": "Put européen sur le worst-of, payé à maturité.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["6M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "6M",
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Put — sur le worst-of",
-        "PARAM STRIKE = 100%",
+        "PARAM STRIKE",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
-        "  PAY MAX(0, STRIKE - WOF) \"Put\""
-      ]
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
+        "  PAY MAX(0, STRIKE - WORSTOF(Basket.yield)) \"Put\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "call_spread",
       "label": "Call spread",
       "family": "options",
       "description": "Call acheté au strike bas et vendu au strike haut : hausse du worst-of captée entre les deux strikes.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["6M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "6M",
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Call spread — hausse captée entre deux strikes",
-        "PARAM K1 = 100%",
-        "PARAM K2 = 120%",
+        "PARAM K1",
+        "PARAM K2",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
-        "  PAY MAX(0, MIN(WOF - K1, K2 - K1)) \"Call spread\""
-      ]
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
+        "  PAY MAX(0, MIN(WORSTOF(Basket.yield) - K1, K2 - K1)) \"Call spread\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "digitale",
       "label": "Digitale",
       "family": "options",
       "description": "Coupon fixe versé à maturité si le worst-of est au-dessus du strike, rien sinon.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["6M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "6M",
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y",
+        "4Y",
+        "5Y"
+      ],
       "constats": {
-        "MATURITE": { "role": "maturity" }
+        "MATURITYDATE": {
+          "role": "maturity"
+        },
+        "STARTDATE": {
+          "role": "initial_fixing"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Digitale — coupon fixe si le worst-of termine au-dessus du strike",
-        "PARAM STRIKE = 100%",
-        "PARAM COUPON = 10%",
+        "PARAM STRIKE",
+        "PARAM COUPON",
         "",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
-        "  PAY INDIC(WOF >= STRIKE) * COUPON \"Coupon digital\""
-      ]
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
+        "  PAY INDIC(WORSTOF(Basket.yield) >= STRIKE) * COUPON \"Coupon digital\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "call_panier_moyenne",
       "label": "Call panier à strike et niveau final moyennés",
       "family": "options",
       "description": "Call sur un panier équipondéré ; niveau initial et niveau final de chaque sous-jacent moyennés sur leur fenêtre avant l'agrégation.",
-      "underlyings": { "min": 2, "max": 5 },
-      "tenors": ["6M", "1Y", "18M", "2Y", "3Y"],
+      "underlyings": {
+        "min": 2,
+        "max": 5
+      },
+      "tenors": [
+        "6M",
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y"
+      ],
       "constats": {
-        "STRIKE_FIX": { "role": "strike_window", "window_length": "10D", "window_frequency": "1D" },
-        "MATURITE": { "role": "maturity", "window_length": "30D", "window_frequency": "1D" }
+        "STARTDATE": {
+          "role": "initial_fixing",
+          "window_length": "10D",
+          "window_frequency": "1D"
+        },
+        "MATURITYDATE": {
+          "role": "maturity",
+          "window_length": "30D",
+          "window_frequency": "1D"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Call panier — strike et niveau final moyennés",
         "# Chaque sous-jacent est moyenné sur sa fenêtre, au départ comme à",
-        "# l'arrivée, avant que BASKET n'agrège.",
-        "PARAM STRIKE = 100%",
+        "# l'arrivée, avant que AVG(Basket.yield) n'agrège.",
+        "PARAM STRIKE",
         "",
-        "CONSTAT STRIKE_FIX AVG",
-        "CONSTAT MATURITE AVG",
+        "CONSTAT StartDate AVG",
+        "CONSTAT MaturityDate AVG",
         "",
-        "AT MATURITE:",
-        "  PAY MAX(0, BASKET - STRIKE) \"Call panier moyenné\""
-      ]
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
+        "  PAY MAX(0, AVG(Basket.yield) - STRIKE) \"Call panier moyenné\""
+      ],
+      "version": "2.0"
     },
     {
       "key": "call_lookback",
       "label": "Call à strike lookback",
       "family": "options",
       "description": "Call sur le worst-of dont le niveau initial de chaque sous-jacent est son plus bas sur la fenêtre de départ.",
-      "underlyings": { "min": 1, "max": 5 },
-      "tenors": ["6M", "1Y", "18M", "2Y", "3Y"],
+      "underlyings": {
+        "min": 1,
+        "max": 5
+      },
+      "tenors": [
+        "6M",
+        "1Y",
+        "18M",
+        "2Y",
+        "3Y"
+      ],
       "constats": {
-        "STRIKE_FIX": { "role": "strike_window", "window_length": "10D", "window_frequency": "1D" },
-        "MATURITE": { "role": "maturity" }
+        "STARTDATE": {
+          "role": "initial_fixing",
+          "window_length": "10D",
+          "window_frequency": "1D"
+        },
+        "MATURITYDATE": {
+          "role": "maturity"
+        }
       },
       "script": [
+        "UNDERLYING Basket",
+        "",
         "# Call à strike lookback — strike au plus bas de la fenêtre de départ",
-        "PARAM STRIKE = 100%",
+        "PARAM STRIKE",
         "",
-        "CONSTAT STRIKE_FIX MIN",
-        "CONSTAT MATURITE",
+        "CONSTAT StartDate MIN",
+        "CONSTAT MaturityDate",
         "",
-        "AT MATURITE:",
-        "  PAY MAX(0, WOF - STRIKE) \"Call sur la performance depuis le plus bas de départ\""
-      ]
+        "AT StartDate:",
+        "  Basket.spot0 = Basket.spot@StartDate",
+        "",
+        "AT MaturityDate:",
+        "  PAY MAX(0, WORSTOF(Basket.yield) - STRIKE) \"Call sur la performance depuis le plus bas de départ\""
+      ],
+      "version": "2.0"
     }
   ]
 }

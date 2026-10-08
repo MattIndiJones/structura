@@ -14,7 +14,7 @@ du strike à la maturité), `maturity` (date unique à maturité), `strike_windo
 (fenêtre de départ STRIKE_FIX). Les dates viennent du Pricer, jamais du script.
 """
 
-CATALOGUE_VERSION = 1
+CATALOGUE_VERSION = '2.0'
 
 TENORS: dict[str, dict] = {'6M': {'months': 6, 'label': '6 mois'},
  '1Y': {'months': 12, 'label': '1 an'},
@@ -35,25 +35,34 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                     'capital se juge à la dernière constatation.',
                      'underlyings': {'min': 1, 'max': 5},
                      'tenors': ['1Y', '2Y', '3Y', '4Y', '5Y', '7Y', '10Y'],
-                     'constats': {'OBSERVATIONS': {'role': 'observations', 'frequency': '1Y'}},
-                     'script': '# Autocall Athena — barrière de protection observée à maturité\n'
-                               'PARAM COUPON = 8%\n'
-                               'PARAM M_AC_BAR = 100%\n'
-                               'PARAM M_KI_BAR = 60%\n'
+                     'constats': {'OBSERVATIONDATES': {'role': 'observations', 'frequency': '1Y'},
+                                  'STARTDATE': {'role': 'initial_fixing'}},
+                     'version': '2.0',
+                     'script': 'UNDERLYING Basket\n'
                                '\n'
-                               'CONSTAT() OBSERVATIONS\n'
+                               '# Autocall Athena — barrière de protection observée à maturité\n'
+                               'PARAM COUPON\n'
+                               'PARAM M_AC_BAR\n'
+                               'PARAM M_KI_BAR\n'
                                '\n'
-                               'AT OBSERVATIONS:\n'
-                               '  SET CALL = INDIC(WOF >= M_AC_BAR)\n'
-                               '  PAY CALL * COUPON * INDEX "Coupons cumulés"\n'
-                               '  PAY CALL * 1 "Remboursement anticipé"\n'
-                               '  IF CALL = 1:\n'
+                               'CONSTAT StartDate\n'
+                               'CONSTAT() ObservationDates\n'
+                               '\n'
+                               'AT StartDate:\n'
+                               '  Basket.spot0 = Basket.spot@StartDate\n'
+                               '\n'
+                               'AT Date FROM ObservationDates:\n'
+                               '  SET PERF = WORSTOF(Basket.yield)\n'
+                               '  IF PERF >= M_AC_BAR:\n'
+                               '    PAY COUPON * INDEX "Coupons cumulés"\n'
+                               '    PAY 1 "Capital — remboursement au rappel"\n'
                                '    STOP\n'
                                '\n'
-                               'AT OBSERVATIONS.last:\n'
-                               '  SET KI = INDIC(WOF < M_KI_BAR)\n'
-                               '  PAY (1 - KI) * 1 "Remboursement au pair"\n'
-                               '  PAY KI * WOF "Perte en capital"'},
+                               'AT ObservationDates.last:\n'
+                               '  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n'
+                               '  PAY 1 "Capital — remboursement à maturité"\n'
+                               '  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte '
+                               'en capital"'},
  'autocall_athena_ki_americaine': {'label': 'Autocall Athena à barrière américaine',
                                    'family': 'autocalls',
                                    'description': 'Rappel au pair avec coupons cumulés dès que le '
@@ -63,27 +72,36 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                                   'la vie du produit.',
                                    'underlyings': {'min': 1, 'max': 5},
                                    'tenors': ['1Y', '2Y', '3Y', '4Y', '5Y', '7Y', '10Y'],
-                                   'constats': {'OBSERVATIONS': {'role': 'observations',
-                                                                 'frequency': '1Y'}},
-                                   'script': '# Autocall Athena — barrière de protection '
+                                   'constats': {'OBSERVATIONDATES': {'role': 'observations',
+                                                                     'frequency': '1Y'},
+                                                'STARTDATE': {'role': 'initial_fixing'}},
+                                   'version': '2.0',
+                                   'script': 'UNDERLYING Basket\n'
+                                             '\n'
+                                             '# Autocall Athena — barrière de protection '
                                              'américaine\n'
-                                             'PARAM COUPON = 8%\n'
-                                             'PARAM M_AC_BAR = 100%\n'
-                                             'PARAM M_KI_BAR = 60%\n'
+                                             'PARAM COUPON\n'
+                                             'PARAM M_AC_BAR\n'
+                                             'PARAM M_KI_BAR\n'
                                              '\n'
-                                             'CONSTAT() OBSERVATIONS\n'
+                                             'CONSTAT StartDate\n'
+                                             'CONSTAT() ObservationDates\n'
                                              '\n'
-                                             'AT OBSERVATIONS:\n'
-                                             '  SET CALL = INDIC(WOF >= M_AC_BAR)\n'
-                                             '  PAY CALL * COUPON * INDEX "Coupons cumulés"\n'
-                                             '  PAY CALL * 1 "Remboursement anticipé"\n'
-                                             '  IF CALL = 1:\n'
+                                             'AT StartDate:\n'
+                                             '  Basket.spot0 = Basket.spot@StartDate\n'
+                                             '\n'
+                                             'AT Date FROM ObservationDates:\n'
+                                             '  SET PERF = WORSTOF(Basket.yield)\n'
+                                             '  IF PERF >= M_AC_BAR:\n'
+                                             '    PAY COUPON * INDEX "Coupons cumulés"\n'
+                                             '    PAY 1 "Capital — remboursement au rappel"\n'
                                              '    STOP\n'
                                              '\n'
-                                             'AT OBSERVATIONS.last:\n'
+                                             'AT ObservationDates.last:\n'
                                              '  SET KI = INDIC(WOF_MIN < M_KI_BAR)\n'
-                                             '  PAY (1 - KI) * 1 "Remboursement au pair"\n'
-                                             '  PAY KI * WOF "Perte en capital"'},
+                                             '  PAY 1 "Capital — remboursement à maturité"\n'
+                                             '  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put '
+                                             'vendu — perte en capital"'},
  'phoenix': {'label': 'Phoenix',
              'family': 'autocalls',
              'description': 'Coupon versé à chaque constatation où le worst-of dépasse la barrière '
@@ -91,28 +109,37 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                             'Protection du capital jugée à la dernière constatation.',
              'underlyings': {'min': 1, 'max': 5},
              'tenors': ['1Y', '2Y', '3Y', '4Y', '5Y', '7Y', '10Y'],
-             'constats': {'OBSERVATIONS': {'role': 'observations', 'frequency': '1Y'}},
-             'script': '# Phoenix — coupon conditionnel, barrière de protection observée à '
+             'constats': {'OBSERVATIONDATES': {'role': 'observations', 'frequency': '1Y'},
+                          'STARTDATE': {'role': 'initial_fixing'}},
+             'version': '2.0',
+             'script': 'UNDERLYING Basket\n'
+                       '\n'
+                       '# Phoenix — coupon conditionnel, barrière de protection observée à '
                        'maturité\n'
-                       'PARAM COUPON = 10%\n'
-                       'PARAM M_AC_BAR = 100%\n'
-                       'PARAM M_CPN_BAR = 80%\n'
-                       'PARAM M_KI_BAR = 60%\n'
+                       'PARAM COUPON\n'
+                       'PARAM M_AC_BAR\n'
+                       'PARAM M_CPN_BAR\n'
+                       'PARAM M_KI_BAR\n'
                        '\n'
-                       'CONSTAT() OBSERVATIONS\n'
+                       'CONSTAT StartDate\n'
+                       'CONSTAT() ObservationDates\n'
                        '\n'
-                       'AT OBSERVATIONS:\n'
-                       '  SET CALL = INDIC(WOF >= M_AC_BAR)\n'
-                       '  SET CPN = INDIC(WOF >= M_CPN_BAR)\n'
+                       'AT StartDate:\n'
+                       '  Basket.spot0 = Basket.spot@StartDate\n'
+                       '\n'
+                       'AT Date FROM ObservationDates:\n'
+                       '  SET CALL = INDIC(WORSTOF(Basket.yield) >= M_AC_BAR)\n'
+                       '  SET CPN = INDIC(WORSTOF(Basket.yield) >= M_CPN_BAR)\n'
                        '  PAY CPN * COUPON "Coupon conditionnel"\n'
-                       '  PAY CALL * 1 "Remboursement anticipé"\n'
                        '  IF CALL = 1:\n'
+                       '    PAY 1 "Capital — remboursement au rappel"\n'
                        '    STOP\n'
                        '\n'
-                       'AT OBSERVATIONS.last:\n'
-                       '  SET KI = INDIC(WOF < M_KI_BAR)\n'
-                       '  PAY (1 - KI) * 1 "Remboursement au pair"\n'
-                       '  PAY KI * WOF "Perte en capital"'},
+                       'AT ObservationDates.last:\n'
+                       '  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n'
+                       '  PAY 1 "Capital — remboursement à maturité"\n'
+                       '  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte en '
+                       'capital"'},
  'phoenix_memoire': {'label': 'Phoenix à coupon mémoire',
                      'family': 'autocalls',
                      'description': 'Phoenix dont les coupons manqués sont rattrapés à la première '
@@ -120,27 +147,36 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                     'Protection du capital jugée à la dernière constatation.',
                      'underlyings': {'min': 1, 'max': 5},
                      'tenors': ['1Y', '2Y', '3Y', '4Y', '5Y', '7Y', '10Y'],
-                     'constats': {'OBSERVATIONS': {'role': 'observations', 'frequency': '1Y'}},
-                     'script': '# Phoenix à coupon mémoire — les coupons manqués sont rattrapés\n'
-                               'PARAM COUPON = 8%\n'
-                               'PARAM M_AC_BAR = 100%\n'
-                               'PARAM M_CPN_BAR = 70%\n'
-                               'PARAM M_KI_BAR = 60%\n'
+                     'constats': {'OBSERVATIONDATES': {'role': 'observations', 'frequency': '1Y'},
+                                  'STARTDATE': {'role': 'initial_fixing'}},
+                     'version': '2.0',
+                     'script': 'UNDERLYING Basket\n'
                                '\n'
-                               'CONSTAT() OBSERVATIONS\n'
+                               '# Phoenix à coupon mémoire — les coupons manqués sont rattrapés\n'
+                               'PARAM COUPON\n'
+                               'PARAM M_AC_BAR\n'
+                               'PARAM M_CPN_BAR\n'
+                               'PARAM M_KI_BAR\n'
                                '\n'
-                               'AT OBSERVATIONS:\n'
-                               '  IF WOF >= M_CPN_BAR:\n'
+                               'CONSTAT StartDate\n'
+                               'CONSTAT() ObservationDates\n'
+                               '\n'
+                               'AT StartDate:\n'
+                               '  Basket.spot0 = Basket.spot@StartDate\n'
+                               '\n'
+                               'AT Date FROM ObservationDates:\n'
+                               '  IF WORSTOF(Basket.yield) >= M_CPN_BAR:\n'
                                '    PAY COUPON * (INDEX - MEMO) "Coupon et rattrapage"\n'
                                '    SET MEMO = INDEX\n'
-                               '  IF WOF >= M_AC_BAR:\n'
+                               '  IF WORSTOF(Basket.yield) >= M_AC_BAR:\n'
                                '    PAY 1 "Remboursement anticipé"\n'
                                '    STOP\n'
                                '\n'
-                               'AT OBSERVATIONS.last:\n'
-                               '  SET KI = INDIC(WOF < M_KI_BAR)\n'
-                               '  PAY (1 - KI) * 1 "Remboursement au pair"\n'
-                               '  PAY KI * WOF "Perte en capital"'},
+                               'AT ObservationDates.last:\n'
+                               '  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n'
+                               '  PAY 1 "Capital — remboursement à maturité"\n'
+                               '  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte '
+                               'en capital"'},
  'autocall_barriere_degressive': {'label': 'Autocall à barrière de rappel dégressive',
                                   'family': 'autocalls',
                                   'description': 'Athena dont la barrière de rappel change à '
@@ -149,27 +185,36 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                                  'suivantes.',
                                   'underlyings': {'min': 1, 'max': 5},
                                   'tenors': ['1Y', '2Y', '3Y', '4Y', '5Y', '7Y', '10Y'],
-                                  'constats': {'OBSERVATIONS': {'role': 'observations',
-                                                                'frequency': '1Y'}},
-                                  'script': '# Autocall à barrière de rappel dégressive — une '
+                                  'constats': {'OBSERVATIONDATES': {'role': 'observations',
+                                                                    'frequency': '1Y'},
+                                               'STARTDATE': {'role': 'initial_fixing'}},
+                                  'version': '2.0',
+                                  'script': 'UNDERLYING Basket\n'
+                                            '\n'
+                                            '# Autocall à barrière de rappel dégressive — une '
                                             'barrière par constatation\n'
-                                            'PARAM COUPON = 8%\n'
-                                            'PARAM() M_AC_BAR = 100%\n'
-                                            'PARAM M_KI_BAR = 60%\n'
+                                            'PARAM COUPON\n'
+                                            'PARAM() M_AC_BAR\n'
+                                            'PARAM M_KI_BAR\n'
                                             '\n'
-                                            'CONSTAT() OBSERVATIONS\n'
+                                            'CONSTAT StartDate\n'
+                                            'CONSTAT() ObservationDates\n'
                                             '\n'
-                                            'AT OBSERVATIONS:\n'
-                                            '  SET CALL = INDIC(WOF >= M_AC_BAR)\n'
-                                            '  PAY CALL * COUPON * INDEX "Coupons cumulés"\n'
-                                            '  PAY CALL * 1 "Remboursement anticipé"\n'
-                                            '  IF CALL = 1:\n'
+                                            'AT StartDate:\n'
+                                            '  Basket.spot0 = Basket.spot@StartDate\n'
+                                            '\n'
+                                            'AT Date FROM ObservationDates:\n'
+                                            '  SET PERF = WORSTOF(Basket.yield)\n'
+                                            '  IF PERF >= M_AC_BAR:\n'
+                                            '    PAY COUPON * INDEX "Coupons cumulés"\n'
+                                            '    PAY 1 "Capital — remboursement au rappel"\n'
                                             '    STOP\n'
                                             '\n'
-                                            'AT OBSERVATIONS.last:\n'
-                                            '  SET KI = INDIC(WOF < M_KI_BAR)\n'
-                                            '  PAY (1 - KI) * 1 "Remboursement au pair"\n'
-                                            '  PAY KI * WOF "Perte en capital"'},
+                                            'AT ObservationDates.last:\n'
+                                            '  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n'
+                                            '  PAY 1 "Capital — remboursement à maturité"\n'
+                                            '  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put '
+                                            'vendu — perte en capital"'},
  'autocall_gear_put': {'label': 'Autocall à put leveragé (gear put)',
                        'family': 'autocalls',
                        'description': 'Rappel au pair avec coupon au-dessus de la barrière de '
@@ -177,27 +222,36 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                       'put, plafonnée au capital.',
                        'underlyings': {'min': 1, 'max': 5},
                        'tenors': ['1Y', '2Y', '3Y', '4Y', '5Y', '7Y', '10Y'],
-                       'constats': {'OBSERVATIONS': {'role': 'observations', 'frequency': '1Y'}},
-                       'script': '# Autocall gear put — perte avec levier sous le strike du put\n'
-                                 'PARAM COUPON = 10%\n'
-                                 'PARAM M_AC_BAR = 100%\n'
-                                 'PARAM M_PUT_STRIKE = 80%\n'
-                                 'PARAM GEARING = 150%\n'
+                       'constats': {'OBSERVATIONDATES': {'role': 'observations', 'frequency': '1Y'},
+                                    'STARTDATE': {'role': 'initial_fixing'}},
+                       'version': '2.0',
+                       'script': 'UNDERLYING Basket\n'
                                  '\n'
-                                 'CONSTAT() OBSERVATIONS\n'
+                                 '# Autocall gear put — perte avec levier sous le strike du put\n'
+                                 'PARAM COUPON\n'
+                                 'PARAM M_AC_BAR\n'
+                                 'PARAM M_PUT_STRIKE\n'
+                                 'PARAM GEARING\n'
                                  '\n'
-                                 'AT OBSERVATIONS:\n'
-                                 '  SET CALL = INDIC(WOF >= M_AC_BAR)\n'
-                                 '  PAY CALL * COUPON "Coupon"\n'
-                                 '  PAY CALL * 1 "Remboursement anticipé"\n'
-                                 '  IF CALL = 1:\n'
+                                 'CONSTAT StartDate\n'
+                                 'CONSTAT() ObservationDates\n'
+                                 '\n'
+                                 'AT StartDate:\n'
+                                 '  Basket.spot0 = Basket.spot@StartDate\n'
+                                 '\n'
+                                 'AT Date FROM ObservationDates:\n'
+                                 '  SET PERF = WORSTOF(Basket.yield)\n'
+                                 '  IF PERF >= M_AC_BAR:\n'
+                                 '    PAY COUPON "Coupon"\n'
+                                 '    PAY 1 "Capital — remboursement au rappel"\n'
                                  '    STOP\n'
                                  '\n'
-                                 'AT OBSERVATIONS.last:\n'
-                                 '  SET KI = INDIC(WOF < M_PUT_STRIKE)\n'
+                                 'AT ObservationDates.last:\n'
+                                 '  SET KI = INDIC(WORSTOF(Basket.yield) < M_PUT_STRIKE)\n'
                                  '  PAY 1 "Remboursement nominal"\n'
-                                 '  PAY -1 * KI * MIN(1, GEARING * (1 - WOF / M_PUT_STRIKE)) "Put '
-                                 'vendu avec levier, perte plafonnée au capital"'},
+                                 '  PAY -1 * KI * MIN(1, GEARING * (1 - WORSTOF(Basket.yield) / '
+                                 'M_PUT_STRIKE)) "Put vendu avec levier, perte plafonnée au '
+                                 'capital"'},
  'autocall_coupon_moyenne_periode': {'label': 'Autocall à coupon constaté sur la moyenne de la '
                                               'période',
                                      'family': 'autocalls',
@@ -207,34 +261,46 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                                     'lit le cours de clôture.',
                                      'underlyings': {'min': 1, 'max': 5},
                                      'tenors': ['1Y', '2Y', '3Y', '4Y', '5Y'],
-                                     'constats': {'OBSERVATIONS': {'role': 'observations',
-                                                                   'frequency': '1Y',
-                                                                   'window_frequency': '3M'}},
-                                     'script': '# Autocall — rappel et coupon constatés sur la '
+                                     'constats': {'OBSERVATIONDATES': {'role': 'observations',
+                                                                       'frequency': '1Y',
+                                                                       'window_frequency': '3M'},
+                                                  'STARTDATE': {'role': 'initial_fixing'}},
+                                     'version': '2.0',
+                                     'script': 'UNDERLYING Basket\n'
+                                               '\n'
+                                               '# Autocall — rappel et coupon constatés sur la '
                                                'moyenne de la période\n'
                                                '# Chaque constatation moyenne ses relevés sur la '
                                                'période écoulée, par\n'
-                                               "# sous-jacent, avant que WOF n'agrège. La "
-                                               'protection finale lit le cours de\n'
+                                               '# sous-jacent, avant que WORSTOF(Basket.yield) '
+                                               "n'agrège. La protection finale lit le cours de\n"
                                                '# clôture : .last.last descend de la constatation '
                                                'à son dernier relevé.\n'
-                                               'PARAM COUPON = 8%\n'
-                                               'PARAM M_AC_BAR = 100%\n'
-                                               'PARAM M_PDI_BAR = 60%\n'
+                                               'PARAM COUPON\n'
+                                               'PARAM M_AC_BAR\n'
+                                               'PARAM M_PDI_BAR\n'
                                                '\n'
-                                               'CONSTAT() OBSERVATIONS AVG PERIOD\n'
+                                               'CONSTAT StartDate\n'
+                                               'CONSTAT() ObservationDates AVG PERIOD\n'
                                                '\n'
-                                               'AT OBSERVATIONS:\n'
-                                               '  SET CALL = INDIC(WOF >= M_AC_BAR)\n'
-                                               '  PAY CALL * (1 + COUPON * INDEX) "Rappel et '
-                                               'coupons sur moyenne de période"\n'
+                                               'AT StartDate:\n'
+                                               '  Basket.spot0 = Basket.spot@StartDate\n'
+                                               '\n'
+                                               'AT Date FROM ObservationDates:\n'
+                                               '  SET CALL = INDIC(WORSTOF(Basket.yield) >= '
+                                               'M_AC_BAR)\n'
                                                '  IF CALL = 1:\n'
+                                               '    PAY COUPON * INDEX "Coupons cumulés sur '
+                                               'moyenne de période"\n'
+                                               '    PAY 1 "Capital — remboursement au rappel"\n'
                                                '    STOP\n'
                                                '\n'
-                                               'AT OBSERVATIONS.last.last:\n'
-                                               '  SET KI = INDIC(WOF < M_PDI_BAR)\n'
-                                               '  PAY 1 - KI * (1 - WOF) "Remboursement, '
-                                               'protection sur le cours final"'},
+                                               'AT ObservationDates.last.last:\n'
+                                               '  SET KI = INDIC(WORSTOF(Basket.yield) < '
+                                               'M_PDI_BAR)\n'
+                                               '  PAY 1 "Capital — remboursement à maturité"\n'
+                                               '  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put '
+                                               'vendu — perte en capital"'},
  'reverse_convertible': {'label': 'Reverse convertible à barrière (observée à maturité)',
                          'family': 'capital',
                          'description': 'Coupon garanti. Le capital est remboursé au pair si le '
@@ -242,19 +308,28 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                         'maturité, sinon il suit sa performance.',
                          'underlyings': {'min': 1, 'max': 5},
                          'tenors': ['6M', '1Y', '18M', '2Y', '3Y'],
-                         'constats': {'MATURITE': {'role': 'maturity'}},
-                         'script': '# Reverse convertible à barrière — coupon garanti, barrière '
+                         'constats': {'MATURITYDATE': {'role': 'maturity'},
+                                      'STARTDATE': {'role': 'initial_fixing'}},
+                         'version': '2.0',
+                         'script': 'UNDERLYING Basket\n'
+                                   '\n'
+                                   '# Reverse convertible à barrière — coupon garanti, barrière '
                                    'observée à maturité\n'
-                                   'PARAM COUPON = 10%\n'
-                                   'PARAM M_KI_BAR = 80%\n'
+                                   'PARAM COUPON\n'
+                                   'PARAM M_KI_BAR\n'
                                    '\n'
-                                   'CONSTAT MATURITE\n'
+                                   'CONSTAT StartDate\n'
+                                   'CONSTAT MaturityDate\n'
                                    '\n'
-                                   'AT MATURITE:\n'
+                                   'AT StartDate:\n'
+                                   '  Basket.spot0 = Basket.spot@StartDate\n'
+                                   '\n'
+                                   'AT MaturityDate:\n'
                                    '  PAY COUPON "Coupon"\n'
-                                   '  SET KI = INDIC(WOF < M_KI_BAR)\n'
-                                   '  PAY (1 - KI) * 1 "Remboursement au pair"\n'
-                                   '  PAY KI * WOF "Perte en capital"'},
+                                   '  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n'
+                                   '  PAY 1 "Capital — remboursement à maturité"\n'
+                                   '  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — '
+                                   'perte en capital"'},
  'brc_ki_americaine': {'label': 'Barrier reverse convertible à barrière américaine',
                        'family': 'capital',
                        'description': 'Coupon garanti. Le capital suit la performance du worst-of '
@@ -262,35 +337,53 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                       'la vie du produit, sinon il est remboursé au pair.',
                        'underlyings': {'min': 1, 'max': 5},
                        'tenors': ['6M', '1Y', '18M', '2Y', '3Y'],
-                       'constats': {'MATURITE': {'role': 'maturity'}},
-                       'script': '# Barrier reverse convertible — coupon garanti, barrière '
+                       'constats': {'MATURITYDATE': {'role': 'maturity'},
+                                    'STARTDATE': {'role': 'initial_fixing'}},
+                       'version': '2.0',
+                       'script': 'UNDERLYING Basket\n'
+                                 '\n'
+                                 '# Barrier reverse convertible — coupon garanti, barrière '
                                  'américaine\n'
-                                 'PARAM COUPON = 9%\n'
-                                 'PARAM M_KI_BAR = 65%\n'
+                                 'PARAM COUPON\n'
+                                 'PARAM M_KI_BAR\n'
                                  '\n'
-                                 'CONSTAT MATURITE\n'
+                                 'CONSTAT StartDate\n'
+                                 'CONSTAT MaturityDate\n'
                                  '\n'
-                                 'AT MATURITE:\n'
+                                 'AT StartDate:\n'
+                                 '  Basket.spot0 = Basket.spot@StartDate\n'
+                                 '\n'
+                                 'AT MaturityDate:\n'
                                  '  PAY COUPON "Coupon"\n'
                                  '  SET KI = INDIC(WOF_MIN < M_KI_BAR)\n'
-                                 '  PAY (1 - KI) * 1 "Remboursement au pair"\n'
-                                 '  PAY KI * WOF "Perte en capital"'},
+                                 '  PAY 1 "Capital — remboursement à maturité"\n'
+                                 '  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte '
+                                 'en capital"'},
  'capital_garanti': {'label': 'Capital garanti avec participation',
                      'family': 'capital',
                      'description': 'Capital remboursé au pair à maturité, plus une participation '
                                     'à la hausse du worst-of au-dessus du strike.',
                      'underlyings': {'min': 1, 'max': 5},
                      'tenors': ['1Y', '18M', '2Y', '3Y', '4Y', '5Y', '7Y', '10Y'],
-                     'constats': {'MATURITE': {'role': 'maturity'}},
-                     'script': '# Capital garanti — participation à la hausse au-dessus du strike\n'
-                               'PARAM PART = 80%\n'
-                               'PARAM STRIKE = 100%\n'
+                     'constats': {'MATURITYDATE': {'role': 'maturity'},
+                                  'STARTDATE': {'role': 'initial_fixing'}},
+                     'version': '2.0',
+                     'script': 'UNDERLYING Basket\n'
                                '\n'
-                               'CONSTAT MATURITE\n'
+                               '# Capital garanti — participation à la hausse au-dessus du strike\n'
+                               'PARAM PART\n'
+                               'PARAM STRIKE\n'
                                '\n'
-                               'AT MATURITE:\n'
+                               'CONSTAT StartDate\n'
+                               'CONSTAT MaturityDate\n'
+                               '\n'
+                               'AT StartDate:\n'
+                               '  Basket.spot0 = Basket.spot@StartDate\n'
+                               '\n'
+                               'AT MaturityDate:\n'
                                '  PAY 1 "Capital garanti"\n'
-                               '  PAY MAX(0, WOF - STRIKE) * PART "Participation à la hausse"'},
+                               '  PAY MAX(0, WORSTOF(Basket.yield) - STRIKE) * PART "Participation '
+                               'à la hausse"'},
  'twin_win': {'label': 'Twin Win',
               'family': 'capital',
               'description': 'Gain sur la valeur absolue de la performance, plafonné, tant que la '
@@ -298,39 +391,60 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                              'capital suit le worst-of.',
               'underlyings': {'min': 1, 'max': 5},
               'tenors': ['1Y', '18M', '2Y', '3Y', '4Y', '5Y'],
-              'constats': {'MATURITE': {'role': 'maturity'}},
-              'script': "# Twin Win — performance absolue plafonnée tant que la barrière n'est pas "
+              'constats': {'MATURITYDATE': {'role': 'maturity'},
+                           'STARTDATE': {'role': 'initial_fixing'}},
+              'version': '2.0',
+              'script': 'UNDERLYING Basket\n'
+                        '\n'
+                        "# Twin Win — performance absolue plafonnée tant que la barrière n'est pas "
                         'franchie\n'
-                        'PARAM CAP = 150%\n'
-                        'PARAM M_KI_BAR = 70%\n'
+                        'PARAM CAP\n'
+                        'PARAM M_KI_BAR\n'
                         '\n'
-                        'CONSTAT MATURITE\n'
+                        'CONSTAT StartDate\n'
+                        'CONSTAT MaturityDate\n'
                         '\n'
-                        'AT MATURITE:\n'
+                        'AT StartDate:\n'
+                        '  Basket.spot0 = Basket.spot@StartDate\n'
+                        '\n'
+                        'AT MaturityDate:\n'
                         '  SET BREACHED = INDIC(WOF_MIN < M_KI_BAR)\n'
-                        '  SET UPS = MIN(CAP, MAX(1, WOF))\n'
-                        '  SET DNS = MIN(CAP, MAX(1, 2 - WOF))\n'
-                        '  PAY (1 - BREACHED) * MAX(UPS, DNS) "Performance absolue plafonnée"\n'
-                        '  PAY BREACHED * WOF "Barrière franchie : performance du worst-of"'},
+                        '  SET UPS = MIN(CAP, MAX(1, WORSTOF(Basket.yield)))\n'
+                        '  SET DNS = MIN(CAP, MAX(1, 2 - WORSTOF(Basket.yield)))\n'
+                        '  PAY 1 "Capital — remboursement à maturité"\n'
+                        '  PAY (1 - BREACHED) * (MAX(UPS, DNS) - 1) "Performance absolue '
+                        'plafonnée"\n'
+                        '  PAY BREACHED * MAX(WORSTOF(Basket.yield) - 1, 0) "Hausse après '
+                        'franchissement"\n'
+                        '  PAY -BREACHED * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte en '
+                        'capital"'},
  'booster': {'label': 'Booster',
              'family': 'capital',
              'description': 'Hausse du worst-of démultipliée et plafonnée ; baisse subie une pour '
                             'une, sans protection.',
              'underlyings': {'min': 1, 'max': 5},
              'tenors': ['1Y', '18M', '2Y', '3Y', '4Y', '5Y'],
-             'constats': {'MATURITE': {'role': 'maturity'}},
-             'script': '# Booster — hausse démultipliée et plafonnée, baisse subie une pour une\n'
-                       'PARAM PART = 200%\n'
-                       'PARAM CAP = 140%\n'
+             'constats': {'MATURITYDATE': {'role': 'maturity'},
+                          'STARTDATE': {'role': 'initial_fixing'}},
+             'version': '2.0',
+             'script': 'UNDERLYING Basket\n'
                        '\n'
-                       'CONSTAT MATURITE\n'
+                       '# Booster — hausse démultipliée et plafonnée, baisse subie une pour une\n'
+                       'PARAM PART\n'
+                       'PARAM CAP\n'
                        '\n'
-                       'AT MATURITE:\n'
-                       '  SET PERF = WOF\n'
-                       '  SET IS_UP = INDIC(PERF >= 1)\n'
-                       '  PAY IS_UP * MIN(CAP, 1 + (PERF - 1) * PART) "Hausse avec levier, '
-                       'plafonnée"\n'
-                       '  PAY (1 - IS_UP) * PERF "Baisse subie une pour une"'},
+                       'CONSTAT StartDate\n'
+                       'CONSTAT MaturityDate\n'
+                       '\n'
+                       'AT StartDate:\n'
+                       '  Basket.spot0 = Basket.spot@StartDate\n'
+                       '\n'
+                       'AT MaturityDate:\n'
+                       '  SET PERF = WORSTOF(Basket.yield)\n'
+                       '  PAY 1 "Capital — remboursement à maturité"\n'
+                       '  PAY INDIC(PERF >= 1) * (MIN(CAP, 1 + (PERF - 1) * PART) - 1) '
+                       '"Participation plafonnée"\n'
+                       '  PAY -MAX(1 - PERF, 0) "Put vendu — perte en capital"'},
  'shark_note': {'label': 'Shark note',
                 'family': 'capital',
                 'description': 'Capital garanti et participation à la hausse, remplacée par un '
@@ -338,19 +452,27 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                'vie du produit.',
                 'underlyings': {'min': 1, 'max': 5},
                 'tenors': ['1Y', '18M', '2Y', '3Y', '4Y', '5Y'],
-                'constats': {'MATURITE': {'role': 'maturity'}},
-                'script': '# Shark note — capital garanti, participation perdue au-delà de la '
+                'constats': {'MATURITYDATE': {'role': 'maturity'},
+                             'STARTDATE': {'role': 'initial_fixing'}},
+                'version': '2.0',
+                'script': 'UNDERLYING Basket\n'
+                          '\n'
+                          '# Shark note — capital garanti, participation perdue au-delà de la '
                           'barrière\n'
-                          'PARAM PART = 100%\n'
-                          'PARAM STRIKE = 100%\n'
-                          'PARAM M_KO_BAR = 130%\n'
-                          'PARAM REBATE = 3%\n'
+                          'PARAM PART\n'
+                          'PARAM STRIKE\n'
+                          'PARAM M_KO_BAR\n'
+                          'PARAM REBATE\n'
                           '\n'
-                          'CONSTAT MATURITE\n'
+                          'CONSTAT StartDate\n'
+                          'CONSTAT MaturityDate\n'
                           '\n'
-                          'AT MATURITE:\n'
+                          'AT StartDate:\n'
+                          '  Basket.spot0 = Basket.spot@StartDate\n'
+                          '\n'
+                          'AT MaturityDate:\n'
                           '  SET KO = INDIC(BOF_MAX >= M_KO_BAR)\n'
-                          '  SET CALL = PART * MAX(0, WOF - STRIKE)\n'
+                          '  SET CALL = PART * MAX(0, WORSTOF(Basket.yield) - STRIKE)\n'
                           '  PAY 1 "Remboursement nominal"\n'
                           '  PAY CALL "Participation à la hausse"\n'
                           '  PAY -1 * KO * (CALL - REBATE) "Barrière touchée : rebate à la place '
@@ -360,57 +482,89 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
           'description': 'Call européen sur le worst-of, payé à maturité.',
           'underlyings': {'min': 1, 'max': 5},
           'tenors': ['6M', '1Y', '18M', '2Y', '3Y', '4Y', '5Y'],
-          'constats': {'MATURITE': {'role': 'maturity'}},
-          'script': '# Call — sur le worst-of\n'
-                    'PARAM STRIKE = 100%\n'
+          'constats': {'MATURITYDATE': {'role': 'maturity'},
+                       'STARTDATE': {'role': 'initial_fixing'}},
+          'version': '2.0',
+          'script': 'UNDERLYING Basket\n'
                     '\n'
-                    'CONSTAT MATURITE\n'
+                    '# Call — sur le worst-of\n'
+                    'PARAM STRIKE\n'
                     '\n'
-                    'AT MATURITE:\n'
-                    '  PAY MAX(0, WOF - STRIKE) "Call"'},
+                    'CONSTAT StartDate\n'
+                    'CONSTAT MaturityDate\n'
+                    '\n'
+                    'AT StartDate:\n'
+                    '  Basket.spot0 = Basket.spot@StartDate\n'
+                    '\n'
+                    'AT MaturityDate:\n'
+                    '  PAY MAX(0, WORSTOF(Basket.yield) - STRIKE) "Call"'},
  'put': {'label': 'Put',
          'family': 'options',
          'description': 'Put européen sur le worst-of, payé à maturité.',
          'underlyings': {'min': 1, 'max': 5},
          'tenors': ['6M', '1Y', '18M', '2Y', '3Y', '4Y', '5Y'],
-         'constats': {'MATURITE': {'role': 'maturity'}},
-         'script': '# Put — sur le worst-of\n'
-                   'PARAM STRIKE = 100%\n'
+         'constats': {'MATURITYDATE': {'role': 'maturity'},
+                      'STARTDATE': {'role': 'initial_fixing'}},
+         'version': '2.0',
+         'script': 'UNDERLYING Basket\n'
                    '\n'
-                   'CONSTAT MATURITE\n'
+                   '# Put — sur le worst-of\n'
+                   'PARAM STRIKE\n'
                    '\n'
-                   'AT MATURITE:\n'
-                   '  PAY MAX(0, STRIKE - WOF) "Put"'},
+                   'CONSTAT StartDate\n'
+                   'CONSTAT MaturityDate\n'
+                   '\n'
+                   'AT StartDate:\n'
+                   '  Basket.spot0 = Basket.spot@StartDate\n'
+                   '\n'
+                   'AT MaturityDate:\n'
+                   '  PAY MAX(0, STRIKE - WORSTOF(Basket.yield)) "Put"'},
  'call_spread': {'label': 'Call spread',
                  'family': 'options',
                  'description': 'Call acheté au strike bas et vendu au strike haut : hausse du '
                                 'worst-of captée entre les deux strikes.',
                  'underlyings': {'min': 1, 'max': 5},
                  'tenors': ['6M', '1Y', '18M', '2Y', '3Y', '4Y', '5Y'],
-                 'constats': {'MATURITE': {'role': 'maturity'}},
-                 'script': '# Call spread — hausse captée entre deux strikes\n'
-                           'PARAM K1 = 100%\n'
-                           'PARAM K2 = 120%\n'
+                 'constats': {'MATURITYDATE': {'role': 'maturity'},
+                              'STARTDATE': {'role': 'initial_fixing'}},
+                 'version': '2.0',
+                 'script': 'UNDERLYING Basket\n'
                            '\n'
-                           'CONSTAT MATURITE\n'
+                           '# Call spread — hausse captée entre deux strikes\n'
+                           'PARAM K1\n'
+                           'PARAM K2\n'
                            '\n'
-                           'AT MATURITE:\n'
-                           '  PAY MAX(0, MIN(WOF - K1, K2 - K1)) "Call spread"'},
+                           'CONSTAT StartDate\n'
+                           'CONSTAT MaturityDate\n'
+                           '\n'
+                           'AT StartDate:\n'
+                           '  Basket.spot0 = Basket.spot@StartDate\n'
+                           '\n'
+                           'AT MaturityDate:\n'
+                           '  PAY MAX(0, MIN(WORSTOF(Basket.yield) - K1, K2 - K1)) "Call spread"'},
  'digitale': {'label': 'Digitale',
               'family': 'options',
               'description': 'Coupon fixe versé à maturité si le worst-of est au-dessus du strike, '
                              'rien sinon.',
               'underlyings': {'min': 1, 'max': 5},
               'tenors': ['6M', '1Y', '18M', '2Y', '3Y', '4Y', '5Y'],
-              'constats': {'MATURITE': {'role': 'maturity'}},
-              'script': '# Digitale — coupon fixe si le worst-of termine au-dessus du strike\n'
-                        'PARAM STRIKE = 100%\n'
-                        'PARAM COUPON = 10%\n'
+              'constats': {'MATURITYDATE': {'role': 'maturity'},
+                           'STARTDATE': {'role': 'initial_fixing'}},
+              'version': '2.0',
+              'script': 'UNDERLYING Basket\n'
                         '\n'
-                        'CONSTAT MATURITE\n'
+                        '# Digitale — coupon fixe si le worst-of termine au-dessus du strike\n'
+                        'PARAM STRIKE\n'
+                        'PARAM COUPON\n'
                         '\n'
-                        'AT MATURITE:\n'
-                        '  PAY INDIC(WOF >= STRIKE) * COUPON "Coupon digital"'},
+                        'CONSTAT StartDate\n'
+                        'CONSTAT MaturityDate\n'
+                        '\n'
+                        'AT StartDate:\n'
+                        '  Basket.spot0 = Basket.spot@StartDate\n'
+                        '\n'
+                        'AT MaturityDate:\n'
+                        '  PAY INDIC(WORSTOF(Basket.yield) >= STRIKE) * COUPON "Coupon digital"'},
  'call_panier_moyenne': {'label': 'Call panier à strike et niveau final moyennés',
                          'family': 'options',
                          'description': 'Call sur un panier équipondéré ; niveau initial et niveau '
@@ -418,43 +572,56 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                                         "avant l'agrégation.",
                          'underlyings': {'min': 2, 'max': 5},
                          'tenors': ['6M', '1Y', '18M', '2Y', '3Y'],
-                         'constats': {'STRIKE_FIX': {'role': 'strike_window',
-                                                     'window_length': '10D',
-                                                     'window_frequency': '1D'},
-                                      'MATURITE': {'role': 'maturity',
-                                                   'window_length': '30D',
-                                                   'window_frequency': '1D'}},
-                         'script': '# Call panier — strike et niveau final moyennés\n'
+                         'constats': {'STARTDATE': {'role': 'initial_fixing',
+                                                    'window_length': '10D',
+                                                    'window_frequency': '1D'},
+                                      'MATURITYDATE': {'role': 'maturity',
+                                                       'window_length': '30D',
+                                                       'window_frequency': '1D'}},
+                         'version': '2.0',
+                         'script': 'UNDERLYING Basket\n'
+                                   '\n'
+                                   '# Call panier — strike et niveau final moyennés\n'
                                    '# Chaque sous-jacent est moyenné sur sa fenêtre, au départ '
                                    'comme à\n'
-                                   "# l'arrivée, avant que BASKET n'agrège.\n"
-                                   'PARAM STRIKE = 100%\n'
+                                   "# l'arrivée, avant que AVG(Basket.yield) n'agrège.\n"
+                                   'PARAM STRIKE\n'
                                    '\n'
-                                   'CONSTAT STRIKE_FIX AVG\n'
-                                   'CONSTAT MATURITE AVG\n'
+                                   'CONSTAT StartDate AVG\n'
+                                   'CONSTAT MaturityDate AVG\n'
                                    '\n'
-                                   'AT MATURITE:\n'
-                                   '  PAY MAX(0, BASKET - STRIKE) "Call panier moyenné"'},
+                                   'AT StartDate:\n'
+                                   '  Basket.spot0 = Basket.spot@StartDate\n'
+                                   '\n'
+                                   'AT MaturityDate:\n'
+                                   '  PAY MAX(0, AVG(Basket.yield) - STRIKE) "Call panier '
+                                   'moyenné"'},
  'call_lookback': {'label': 'Call à strike lookback',
                    'family': 'options',
                    'description': 'Call sur le worst-of dont le niveau initial de chaque '
                                   'sous-jacent est son plus bas sur la fenêtre de départ.',
                    'underlyings': {'min': 1, 'max': 5},
                    'tenors': ['6M', '1Y', '18M', '2Y', '3Y'],
-                   'constats': {'STRIKE_FIX': {'role': 'strike_window',
-                                               'window_length': '10D',
-                                               'window_frequency': '1D'},
-                                'MATURITE': {'role': 'maturity'}},
-                   'script': '# Call à strike lookback — strike au plus bas de la fenêtre de '
+                   'constats': {'STARTDATE': {'role': 'initial_fixing',
+                                              'window_length': '10D',
+                                              'window_frequency': '1D'},
+                                'MATURITYDATE': {'role': 'maturity'}},
+                   'version': '2.0',
+                   'script': 'UNDERLYING Basket\n'
+                             '\n'
+                             '# Call à strike lookback — strike au plus bas de la fenêtre de '
                              'départ\n'
-                             'PARAM STRIKE = 100%\n'
+                             'PARAM STRIKE\n'
                              '\n'
-                             'CONSTAT STRIKE_FIX MIN\n'
-                             'CONSTAT MATURITE\n'
+                             'CONSTAT StartDate MIN\n'
+                             'CONSTAT MaturityDate\n'
                              '\n'
-                             'AT MATURITE:\n'
-                             '  PAY MAX(0, WOF - STRIKE) "Call sur la performance depuis le plus '
-                             'bas de départ"'}}
+                             'AT StartDate:\n'
+                             '  Basket.spot0 = Basket.spot@StartDate\n'
+                             '\n'
+                             'AT MaturityDate:\n'
+                             '  PAY MAX(0, WORSTOF(Basket.yield) - STRIKE) "Call sur la '
+                             'performance depuis le plus bas de départ"'}}
 
 
 def by_family() -> dict[str, list[str]]:

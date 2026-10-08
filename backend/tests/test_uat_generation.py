@@ -393,11 +393,28 @@ def test_booked_uat_uses_the_same_pricing_snapshot_boundary_as_the_pricer():
     "ATHENA", "PHOENIX", "REVERSE_CONVERTIBLE", "CAPITAL_GUARANTEED",
 ])
 def test_every_offered_product_family_completes_the_full_chain(family):
+    from backend.app.core.payscript.catalogue import PRODUCTS
+
+    catalogue_key = {
+        "ATHENA": "autocall_athena", "PHOENIX": "phoenix_memoire",
+        "REVERSE_CONVERTIBLE": "reverse_convertible",
+        "CAPITAL_GUARANTEED": "capital_garanti",
+    }[family]
     session, admin, target = _session_and_users()
     batch = generate_batch(_request(
         target, count=1, product_types=[family], seed=3), admin, session)
     assert batch["status"] == "COMPLETED"
     assert batch["rfq_count"] == batch["deal_count"] == 1
+    deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).one()
+    rfq = session.exec(select(RfqRequest).where(RfqRequest.uat_batch_id == batch["id"])).one()
+    product = load_product(session, deal.product_id)
+    assert product.terms.script == rfq.script_snapshot == deal.script_snapshot == PRODUCTS[catalogue_key]["script"]
+    rfq_params = json.loads(rfq.params_json)
+    snapshot = json.loads(deal.market_snapshot_json)
+    assert product.terms.user_params() == rfq_params["user_params"] == snapshot["pricing_input"]["user_params"]
+    assert rfq_params["constats"]["STARTDATE"] == deal.strike_date
+    assert all(event.event_date > deal.strike_date for event in session.exec(
+        select(DealEvent).where(DealEvent.deal_id == deal.id, DealEvent.t_years > 0)).all())
 
 
 @pytest.mark.parametrize(("profile", "family"), [
@@ -438,7 +455,7 @@ def test_every_reached_observation_carries_its_real_close(profile, family):
     events = session.exec(select(DealEvent).where(
         DealEvent.deal_id == deal.id).order_by(DealEvent.event_index)).all()
     today = date.today().isoformat()
-    reached = [e for e in events if e.event_date <= today]
+    reached = [e for e in events if e.event_date <= today and e.status != "annulé"]
     assert reached, f"{profile} devrait avoir au moins la constatation de strike"
 
     # The strike must be fixed: without S0 the barrier watchlist computes

@@ -83,12 +83,12 @@
         </div>
         <div class="mc-param-field">
           <label class="label">Modèle vol
-            <HelpTip width="w-72" text="Constant (GBM) : volatilité fixe, le plus rapide, suffisant pour la plupart des produits. Heston/SABR : volatilité stochastique avec smile, à utiliser si le produit est sensible au smile (barrières proches de la monnaie, options digitales). Local Vol (Dupire) : calibré sur un skew/convexité paramétriques, réconcilie exactement les prix vanille au marché mais avec une dynamique de skew forward peu réaliste. Local-Stochastic Vol : combine les deux — calibré comme Local Vol, dynamique de skew forward réaliste comme Heston. Recommandé pour les barrières/autocalls, plus lent à calculer." />
+            <HelpTip width="w-72" text="GBM : vol de référence constante. Les profils Actions/Indices sont des hypothèses de surface SSVI éditables. Local Vol et LSV utilisent cette cible ; Heston/SABR sont ajustés dessus avec une erreur de reproduction visible, ou utilisent vos paramètres manuels. Le profil indicatif n’est pas une surface cotée de marché." />
           </label>
           <select v-model="store.globalParams.model" class="select">
             <option value="constant">Constant (GBM)</option>
             <option value="heston">Heston QE</option>
-            <option value="sabr">SABR (Hagan)</option>
+            <option value="sabr">SABR (spot simulé)</option>
             <option value="localvol">Local Vol (Dupire)</option>
             <option value="lsv">Local-Stochastic Vol</option>
           </select>
@@ -237,6 +237,7 @@
 
         <UnderlyingVolFields :au="au" :model="store.globalParams.model"
                              :horizon="store.globalParams.T"
+                             :rate="store.globalParams.r"
                              :rate-model="store.globalParams.rateModel" />
 
         <!-- Quanto / CCY -->

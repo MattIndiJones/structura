@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from .api.pricing import router as pricing_router
+from .api.volatility import router as volatility_router
 from .api.ccr import router as ccr_router
 from .api.inlife import router as inlife_router
 from .api.market_data import router as market_data_router
@@ -78,6 +79,15 @@ configure_lifecycle_handlers(refresh_deal_core, build_watchlist_row)
 @app.on_event("startup")
 def on_startup():
     init_db()
+    from .services.optimizer_research import recover
+    from .db.database import engine
+    recover(engine)
+
+
+@app.on_event("shutdown")
+async def stop_optimizer_researches():
+    from .services.optimizer_research import shutdown
+    await asyncio.to_thread(shutdown)
 
 
 # Daily lifecycle pass at 23:00 local — after the US close, since deal events
@@ -104,6 +114,7 @@ async def start_lifecycle_scheduler():
     asyncio.create_task(_daily_loop())
 
 app.include_router(inlife_router)
+app.include_router(volatility_router)
 app.include_router(ccr_router)
 app.include_router(auth_router)
 app.include_router(folders_router)

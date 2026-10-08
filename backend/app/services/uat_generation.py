@@ -66,6 +66,14 @@ PRODUCTS = {
     "CAPITAL_GUARANTEED": "Capital Garanti",
 }
 
+# Keep UAT families on the same generic payoff as the product library.
+PRODUCT_CATALOGUE_KEYS = {
+    "ATHENA": "autocall_athena",
+    "PHOENIX": "phoenix_memoire",
+    "REVERSE_CONVERTIBLE": "reverse_convertible",
+    "CAPITAL_GUARANTEED": "capital_garanti",
+}
+
 UNDERLYINGS = [
     {"ticker": "^STOXX50E", "name": "Euro Stoxx 50", "ccy": "EUR", "s0": 5200.0,
      "sigma": 0.18, "q": 0.025},
@@ -425,69 +433,17 @@ def _profile_dates(profile: str, tenor: float, today: date) -> tuple[date, date,
 def _phoenix_period_coupon(coupon: float, period_years: float) -> float:
     """Phoenix coupon actually paid at ONE observation, from an annual rate.
 
-    The Phoenix pays `CPN * COUPON` at *every* observation, so an un-scaled
-    coupon makes the price a function of the observation frequency rather
-    than of the product's economics: the same drawn 12% priced 110% annually,
-    139% semi-annually and 183% quarterly. Athena and Reverse Convertible
-    need no such scaling — they pay once (at call, then STOP; at maturity)
-    and are already frequency-invariant."""
+    The Phoenix pays a period coupon, with missed periods caught up later.
+    The drawn annual rate must therefore be scaled to the observation period,
+    as for Athena's COUPON * INDEX. Reverse Convertible instead pays its
+    total coupon once at maturity.
+    """
     return coupon * period_years
 
 
-def _product_script(family: str, coupon: float, ac_bar: float,
-                    coupon_bar: float, ki_bar: float, participation: float,
-                    period_years: float = 1.0) -> str:
-    if family == "ATHENA":
-        return f"""PARAM COUPON = {coupon:.2f}%
-PARAM M_AC_BAR = {ac_bar:.2f}%
-PARAM M_KI_BAR = {ki_bar:.2f}%
-CONSTAT() OBSERVATIONS
-AT OBSERVATIONS:
-  SET CALL = INDIC(WOF >= M_AC_BAR)
-  PAY CALL * COUPON
-  PAY CALL * 1
-  IF CALL = 1:
-    STOP
-AT MATURITY:
-  SET KI = INDIC(WOF < M_KI_BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF
-"""
-    if family == "PHOENIX":
-        period_coupon = _phoenix_period_coupon(coupon, period_years)
-        return f"""PARAM COUPON = {period_coupon:.4f}%  # {coupon:.2f}% p.a. sur {period_years:.2f} an
-PARAM M_AC_BAR = {ac_bar:.2f}%
-PARAM M_CPN_BAR = {coupon_bar:.2f}%
-PARAM M_KI_BAR = {ki_bar:.2f}%
-CONSTAT() OBSERVATIONS
-AT OBSERVATIONS:
-  SET CALL = INDIC(WOF >= M_AC_BAR)
-  SET CPN = INDIC(WOF >= M_CPN_BAR)
-  PAY CPN * COUPON
-  PAY CALL * 1
-  IF CALL = 1:
-    STOP
-AT MATURITY:
-  SET KI = INDIC(WOF < M_KI_BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF
-"""
-    if family == "REVERSE_CONVERTIBLE":
-        return f"""PARAM COUPON = {coupon:.2f}%
-PARAM M_KI_BAR = {ki_bar:.2f}%
-CONSTAT OBSERVATIONS
-AT OBSERVATIONS:
-  SET KI = INDIC(WOF < M_KI_BAR)
-  PAY COUPON
-  PAY (1 - KI) * 1
-  PAY KI * WOF
-"""
-    return f"""PARAM M_PARTICIPATION = {participation:.2f}%
-CONSTAT OBSERVATIONS
-AT OBSERVATIONS:
-  PAY 1
-  PAY MAX(0, WOF - 1) * M_PARTICIPATION
-"""
+def _product_script(family: str) -> str:
+    from ..core.payscript.catalogue import PRODUCTS as CATALOGUE
+    return CATALOGUE[PRODUCT_CATALOGUE_KEYS[family]]["script"]
 
 
 def _build_specs(body: UatGenerationRequest) -> list[dict]:
@@ -512,8 +468,8 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
                 if months / 12 < maturity_years
             ])
             frequency = {3: "3M", 6: "6M", 12: "1Y"}[frequency_months]
-            first = strike + timedelta(
-                days=round(frequency_months * 365.25 / 12))
+            from dateutil.relativedelta import relativedelta
+            first = strike + relativedelta(months=frequency_months)
         else:
             frequency_months = 12
             frequency = "1Y"
@@ -528,18 +484,16 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
         coupon_bar = float(rng.choice([60, 70, 80]))
         ki_bar = float(rng.choice([50, 55, 60, 65, 70]))
         participation = float(rng.choice([80, 90, 100, 110, 120]))
-        script = _product_script(
-            family, coupon, ac_bar, coupon_bar, ki_bar, participation,
-            period_years)
+        script = _product_script(family)
         if family == "ATHENA":
             user_params = {
-                "COUPON": coupon / 100,
+                "COUPON": coupon * period_years / 100,
                 "M_AC_BAR": ac_bar / 100,
                 "M_KI_BAR": ki_bar / 100,
             }
         elif family == "PHOENIX":
             # Annualised: the drawn coupon is a yearly rate, the script pays
-            # its per-observation share. Must match _product_script's PARAM.
+            # its per-observation share, including memory catch-up.
             user_params = {
                 "COUPON": _phoenix_period_coupon(coupon, period_years) / 100,
                 "M_AC_BAR": ac_bar / 100,
@@ -552,14 +506,14 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
                 "M_KI_BAR": ki_bar / 100,
             }
         else:
-            user_params = {"M_PARTICIPATION": participation / 100}
+            user_params = {"PART": participation / 100, "STRIKE": 1.0}
         # Deux jours ouvrés pour le règlement initial, cinq pour le final :
         # les usages les plus courants sur notes structurées EUR et CHF.
         value_date = add_business_days(strike, 2, currency)
         # Trois jours ouvres apres la derniere constatation : l usage courant.
         payment_date = add_business_days(maturity, 3, currency)
         constat_value = ({
-            "start_date": first.isoformat(),
+            "first_observation_date": first.isoformat(),
             "end_date": maturity.isoformat(),
             "roll_date": first.isoformat(),
             "frequency": frequency,
@@ -576,7 +530,8 @@ def _build_specs(body: UatGenerationRequest) -> list[dict]:
         params = {
             "underlyings": selected_underlyings,
             "user_params": user_params,
-            "constats": {"OBSERVATIONS": constat_value},
+            "constats": {"STARTDATE": strike.isoformat(),
+                         ("OBSERVATIONDATES" if family in {"ATHENA", "PHOENIX"} else "MATURITYDATE"): constat_value},
             "notional": float(nominal),
             "currency": currency,
             "strike_date": strike.isoformat(),

@@ -59,6 +59,8 @@ class EmtRequest(PricingRequest):
 
 
 def _script_without_comments(script_text: str) -> str:
+    from ..core.payscript.bindings import monitoring_source
+    script_text = monitoring_source(script_text)
     lines = []
     for line in script_text.splitlines():
         code = line.split("#", 1)[0]

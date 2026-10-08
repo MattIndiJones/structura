@@ -33,7 +33,13 @@ def test_preview_edit_and_generation_share_exact_prompt(module, monkeypatch):
     req.prompt_override = PromptOverride(base_hash=prompt["base_hash"],
         system=prompt["system"] + "\nRédige en trois paragraphes.", user=prompt["user"] + "\nExplique les limites.")
     captured = []
-    monkeypatch.setattr(P, "complete_with_metadata", lambda **kwargs: captured.append(kwargs) or P.Completion("Réponse", "resolved-model"))
+    response = (
+        "Cette synthèse de test présente les observations disponibles et distingue les faits des hypothèses. "
+        "Les risques et les limites sont explicités pour permettre une lecture prudente des résultats. "
+        "Les recommandations restent conditionnées à la qualité des données et doivent être examinées "
+        "avant toute décision concernant le produit étudié."
+    )
+    monkeypatch.setattr(P, "complete_with_metadata", lambda **kwargs: captured.append(kwargs) or P.Completion(response, "resolved-model"))
     result = generate(req, None)
     assert captured[0]["system"] == req.prompt_override.system
     assert captured[0]["user"] == req.prompt_override.user

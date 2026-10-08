@@ -2,7 +2,7 @@
   <div class="flex-1 flex flex-col min-h-0">
 
     <!-- ── Barre d'outils : statut de pricing + actions ─────────── -->
-    <div class="sticky top-0 z-30 border-b px-5 py-2.5 flex items-center gap-4 shrink-0"
+    <div class="sticky top-0 z-30 border-b px-5 py-2.5 flex flex-wrap items-center gap-4 shrink-0"
          style="background: rgba(250,249,246,.90); backdrop-filter: blur(10px); border-color: var(--border); box-shadow: 0 4px 14px rgba(11,26,49,.025);">
 
       <BackLink :fallback="{ path: '/', query: { category: 'pricing' } }" />
@@ -23,14 +23,15 @@
             <SensitiveValue>{{ store.result.elapsed_ms.toFixed(0) }} ms · {{ store.result.n_eff.toLocaleString() }} chemins</SensitiveValue>
           </span>
         </div>
-        <!-- Error display -->
-        <div v-if="store.error" class="text-xs truncate" style="color: var(--negative);">⚠ {{ store.error }}</div>
-        <div v-else-if="store.marketDataLoading" class="text-xs truncate" style="color: var(--accent);">
+        <div v-if="store.marketDataLoading" class="text-xs truncate" style="color: var(--accent);">
           ↻ Mise à jour du marché à la date de valorisation…
         </div>
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
+        <button class="btn-secondary text-xs" :disabled="store.loading" @click="newPricing">
+          Nouveau pricing
+        </button>
         <span class="hidden md:inline-flex text-[10px] font-mono px-2 py-1 rounded border"
           :class="estimateClass(store.pricingEstimate)"
           :title="estimateTitle(store.pricingEstimate, 'Prix')">
@@ -51,6 +52,9 @@
           {{ store.marketDataLoading ? 'Marché…' : store.loading ? 'Calcul…' : '▶ Pricer' }}
         </button>
       </div>
+      <AlertMessage v-if="store.error" class="w-full min-w-0">
+        <span class="whitespace-pre-line break-words">{{ store.error }}</span>
+      </AlertMessage>
     </div>
 
     <ProductContextBar />
@@ -137,24 +141,32 @@ import KidPanel        from '../components/KidPanel.vue'
 import EmtPanel        from '../components/EmtPanel.vue'
 import SensitiveValue  from '../components/SensitiveValue.vue'
 import ProductContextBar from '../components/ProductContextBar.vue'
+import AlertMessage from '../components/ui/AlertMessage.vue'
 import DealReferenceLink from '../components/DealReferenceLink.vue'
-import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
-import { useDealsStore } from '../stores/deals.js'
-import { useRfqStore } from '../stores/rfq.js'
-import { useProductsStore } from '../stores/products.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
-import { findProductModel } from '../utils/productModels.js'
+import { confirmer } from '../composables/useConfirm.js'
 
 const store = usePricingStore()
-const dealsStore = useDealsStore()
-const rfqStore = useRfqStore()
-const productsStore = useProductsStore()
 const demo = useDemoModeStore()
-const route = useRoute()
+const router = useRouter()
 
-const eventsInitialDealId = ref(null)
+async function newPricing() {
+  if (store.hasUnsavedSession()) {
+    const accepted = await confirmer({
+      titre: 'Ouvrir un nouveau pricing ?',
+      message: 'Les termes, le marché et les résultats de la session actuelle seront remplacés.',
+      confirmer: 'Nouveau pricing', danger: true,
+    })
+    if (!accepted) return
+  }
+  store.resetToDefaults()
+  await router.replace('/pricer')
+}
+
+const eventsInitialDealId = ref(store.openedDeal?.id || null)
 
 function formatWork(value) {
   if (value >= 1e9) return `${(value / 1e9).toFixed(1)} Md u.`
@@ -183,64 +195,6 @@ function goToEvents(dealId) {
   eventsInitialDealId.value = dealId
   store.leftTab = 'events'
 }
-
-// Deep link from the Booking view (/pricer?dealId=…) — reload that deal's
-// exact frozen state (script + params + underlyings) into every tab. Callers
-// can name the landing tab; legacy links still open the lifecycle events.
-onMounted(async () => {
-  const dealId = route.query.dealId
-  if (dealId) {
-    const deal = await dealsStore.selectDeal(Number(dealId))
-    if (deal) {
-      await store.loadFromDeal(deal)
-      if (!deal.product_id) {
-        store.error = 'Ce deal ne possède pas de Product canonique.'
-        return
-      }
-      const loaded = await productsStore.fetchOne(deal.product_id)
-      if (!loaded) {
-        store.error = 'Le Product canonique de ce deal ne peut pas être chargé.'
-        return
-      }
-      store.currentProduct = loaded.product
-    }
-    if (route.query.tab === 'script') store.leftTab = 'script'
-    else goToEvents(Number(dealId))
-    return
-  }
-
-  // Deep link from RfqView.vue's "Booker cette réponse" (/pricer?fromRfq=…)
-  // — pre-fill script/underlyings/params from the RFQ and contrepartie/
-  // price_traded from its retained quote, then land straight on Deal so
-  // the only thing left to do is complete dates/sens and book.
-  const fromRfq = route.query.fromRfq
-  if (fromRfq) {
-    const rfqObj = await rfqStore.fetchOne(Number(fromRfq))
-    if (rfqObj) {
-      await store.loadFromRfq(rfqObj)
-      if (!rfqObj.product_id) {
-        store.error = 'Cette RFQ ne possède pas de Product canonique.'
-        return
-      }
-      const loaded = await productsStore.fetchOne(rfqObj.product_id)
-      if (loaded) store.currentProduct = loaded.product
-    }
-    store.leftTab = 'deal'
-    return
-  }
-
-  // Opened from « Modèles de produits » (/pricer?modele=…&sousJacents=…&tenor=…):
-  // the same mechanism as the RFQ deep link, the screen itself is unchanged.
-  // An ephemeral session — nothing is kept without an explicit action.
-  const model = findProductModel(route.query.modele)
-  if (model) {
-    await store.loadFromProductModel(model, {
-      underlyingCount: route.query.sousJacents ? Number(route.query.sousJacents) : null,
-      tenorCode: route.query.tenor || null,
-    })
-    store.leftTab = 'script'
-  }
-})
 
 const leftTabs = [
   { id: 'script', label: '✏️ Script PayScript' },

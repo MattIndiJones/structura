@@ -177,11 +177,11 @@
               <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-lg bg-green-900/50 flex items-center justify-center text-xl">✏️</div>
                 <div>
-                  <div class="font-bold text-slate-100 group-hover:text-green-300 transition-colors">Nouveau Pricing</div>
+                  <div class="font-bold text-slate-100 group-hover:text-green-300 transition-colors">{{ pricing.sessionRouteKey ? 'Reprendre le pricing' : 'Nouveau Pricing' }}</div>
                   <div class="text-xs text-slate-500">Session éphémère</div>
                 </div>
               </div>
-              <p class="text-xs text-slate-600">Testez et calculez librement ; rien n'est conservé sans action explicite.</p>
+              <p class="text-xs text-slate-600">{{ pricing.sessionRouteKey ? 'Retrouvez vos saisies et résultats. La session reste disponible pendant la navigation, jusqu’au rechargement de la page.' : 'Testez et calculez librement ; rien n’est enregistré sans action explicite.' }}</p>
             </RouterLink>
 
             <!-- Documentation -->
@@ -555,10 +555,12 @@
 import { ref, computed, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
+import { usePricingStore } from '../stores/pricing.js'
 import BackLink from '../components/ui/BackLink.vue'
 import { apiFetch } from '../utils/api.js'
 
 const auth   = useAuthStore()
+const pricing = usePricingStore()
 const route  = useRoute()
 const router = useRouter()
 

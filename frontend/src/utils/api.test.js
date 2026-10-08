@@ -2,11 +2,35 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join, relative } from 'node:path'
-import { apiFetch } from './api.js'
+import { apiFetch, apiErrorMessage } from './api.js'
 
 afterEach(() => {
   localStorage.clear()
   vi.unstubAllGlobals()
+})
+
+describe('messages de validation API lisibles', () => {
+  it('traduit les dates et nombres absents sans afficher le JSON ni doubler StartDate', () => {
+    const message = apiErrorMessage({ detail: [
+      { type: 'float_type', loc: ['body', 'T'], input: null, msg: 'Input should be a valid number' },
+      { type: 'date_from_datetime_parsing', loc: ['body', 'anchor'], input: '' },
+      { type: 'date_from_datetime_parsing', loc: ['body', 'strike_date'], input: '' },
+    ] })
+    expect(message).toBe('Durée entre StartDate et maturité : à renseigner.\nStartDate / date de strike : à renseigner.')
+  })
+
+  it('identifie le sous-jacent et la contrainte de cours initial', () => {
+    expect(apiErrorMessage({ detail: [{
+      type: 'greater_than', loc: ['body', 'underlyings', 1, 'spot0'], input: -50, ctx: { gt: 0 },
+    }] })).toBe('Sous-jacent 2 — Cours initial en devise : la valeur doit être supérieure à 0.')
+  })
+
+  it('préserve le message métier du serveur et traite les formes inconnues', () => {
+    expect(apiErrorMessage({ detail: 'La première observation doit suivre StartDate.' })).toBe('La première observation doit suivre StartDate.')
+    expect(apiErrorMessage({ detail: { message: 'Cours indisponible.' } })).toBe('Cours indisponible.')
+    expect(apiErrorMessage({ detail: { unexpected: 3 } }, 'Calcul impossible.')).toBe('Calcul impossible.')
+    expect(apiErrorMessage({ detail: [{ loc: ['body', 'x'], type: 'unknown', input: 2 }] })).toBe('Une valeur saisie : valeur invalide, à corriger.')
+  })
 })
 
 describe('authentification des appels API', () => {

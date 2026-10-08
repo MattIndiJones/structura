@@ -141,6 +141,9 @@ def _snapshot_underlying(u: UnderlyingParams) -> dict:
         "alpha": u.alpha * 100, "beta": u.beta * 100,
         "rho": u.rho * 100, "nu": u.nu * 100,
         "skew": u.skew * 100, "curvature": u.curvature * 100,
+        "vol_surface": u.vol_surface.model_dump() if u.vol_surface else None,
+        "asset_class": u.asset_class,
+        "smile_parameter_mode": u.smile_parameter_mode,
     }
 
 
@@ -305,7 +308,7 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
     pre_strike = valuation < req.strike_date
 
     tickers = [u.ticker for u in req.underlyings if u.ticker]
-    if not tickers:
+    if not tickers and not pre_strike:
         raise HTTPException(422, "Chaque sous-jacent doit porter un ticker pour "
                                   "qu'on puisse aller chercher son historique.")
 
@@ -314,7 +317,10 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
     # would start after its own end, so it is bounded by the valuation date, as
     # in the deal MtM.
     debut = (min(req.strike_date, valuation) - timedelta(days=7)).isoformat()
-    px = load_hist_prices(tickers, debut, valuation.isoformat())
+    # No contractual fixing exists before StartDate. Market assumptions are
+    # supplied by the request; an unavailable historical feed cannot block it.
+    px = ({"dates": [], "prices": {}} if pre_strike else
+          load_hist_prices(tickers, debut, valuation.isoformat()))
     if "error" in px:
         raise HTTPException(422, px["error"])
     dates_list, prices = px.get("dates", []), px.get("prices", {})
@@ -505,7 +511,7 @@ def price_in_life(
     # accumulés, sur un produit qui en vaut 75. Seules les variables écrites
     # après la constatation initiale sont un état.
     noms_params = {p.name for p in (residuel.compiled.params if residuel.compiled else [])}
-    etat_repris = {k: v for k, v in etat["memo"].items() if k not in noms_params}
+    etat_repris = {k: v for k, v in etat["memo"].items() if k not in noms_params and not k.startswith('__')}
     schedule = (residuel.compiled.echeancier.to_dict()
                 if residuel.compiled and residuel.compiled.echeancier else None)
     return {

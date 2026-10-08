@@ -65,12 +65,31 @@ def validate_correlation_matrix(matrix: List[List[float]], n: int) -> List[List[
     return normalized
 
 
+class VolatilitySurfaceParams(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False, extra='forbid')
+    version: int = Field(default=1, ge=1, le=1)
+    profile: str = Field(default='equity', pattern='^(equity|index|custom)$')
+    mode: str = Field(default='automatic', pattern='^(automatic|manual)$')
+    rho: float = Field(ge=-.99, le=.99)
+    eta: float = Field(ge=0, le=3)
+    shape_scale: float = Field(default=.04, gt=0, le=10)
+    max_expiry: float = Field(default=10, gt=0, le=MAX_MATURITY_YEARS)
+    atm_nodes: List[List[float]] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode='after')
+    def validate_surface(self):
+        from .volatility_surface import TermSSVISurface
+        TermSSVISurface(self.model_dump())
+        return self
+
+
 class UnderlyingParams(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
 
     name: str = "Underlying"
     ticker: str = ""
     ccy: str = "EUR"
+    spot0: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     sigma: float = Field(default=0.20, ge=0.0, le=10.0)
     q: float = Field(default=0.02, ge=0.0, le=2.0)
     # Optional piecewise-constant annual dividend-yield curve. Each node is
@@ -97,6 +116,11 @@ class UnderlyingParams(BaseModel):
     # Dupire local vol
     skew: float = 0.0
     curvature: float = 0.0
+    # Forward-moneyness SSVI assumption, in engine fractions at every boundary.
+    # None retains the legacy model path for saved/API products.
+    vol_surface: VolatilitySurfaceParams | None = None
+    asset_class: str = Field(default='unknown', pattern='^(equity|index|unknown)$')
+    smile_parameter_mode: str = Field(default='automatic', pattern='^(automatic|manual)$')
 
     @field_validator("dividend_curve")
     @classmethod
@@ -250,6 +274,8 @@ class ParseRequest(BaseModel):
 
 class ParseResponse(BaseModel):
     ok: bool
+    underlying: str | None = None
+    initial_fixing: str | None = None
     params: List[Dict[str, Any]]
     constats: List[Dict[str, Any]] = []
     events_count: int
@@ -414,7 +440,7 @@ class ScriptGenerateRequest(AiOptions):
     underlyings: List[UnderlyingParams] = Field(default_factory=list, max_length=MAX_UNDERLYINGS)
     corr_matrix: List[List[float]] = []
     r: float = 0.03
-    T: float = Field(default=3.0, gt=0.0, le=MAX_MATURITY_YEARS)
+    T: Optional[float] = Field(default=None, gt=0.0, le=MAX_MATURITY_YEARS)
     user_params: Dict[str, Any] = {}
     # Affinage : repart du script courant au lieu de tout réécrire.
     current_script: str = Field(default="", max_length=MAX_SCRIPT_CHARS)
@@ -558,9 +584,10 @@ class ScheduleRequest(BaseModel):
     """CONSTAT()/CONSTAT()() calendar generation — "expert mode", independent
     of any script. Dates are ISO strings (YYYY-MM-DD); frequency/sub_frequency
     are tenor strings (e.g. "3M", "1W", "1Y", "1D")."""
-    start_date: str
+    start_date: Optional[str] = None
+    first_observation_date: Optional[str] = None
     end_date: str
-    roll_date: str
+    roll_date: Optional[str] = None
     frequency: str
     stub: str = Field(default="short_last",
                        pattern="^(short_first|short_last|long_first|long_last)$")
@@ -583,6 +610,7 @@ class PeriodWindowPreviewRequest(BaseModel):
     C'est la question que se pose l'utilisateur en saisissant « 1Y » et « 3M » :
     ai-je bien 3 constatations de 4 relevés, ou 12 observations ?"""
     start_date: str
+    first_observation_date: Optional[str] = None
     end_date: str
     roll_date: str
     frequency: str

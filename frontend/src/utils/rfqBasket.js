@@ -32,6 +32,11 @@ export function rfqBasketFromParams(underlyings, fallbackCcy = 'EUR') {
       name: name || defaults.name,
       ticker: ticker || '',
       ccy: ccy || fallbackCcy,
+      vol_surface: market.vol_surface ? JSON.parse(JSON.stringify(market.vol_surface)) : null,
+      asset_class: market.asset_class || 'unknown',
+      smile_parameter_mode: market.smile_parameter_mode || 'automatic',
+      _smileDefaults: false,
+      vol_level_source: 'saved',
       market: {
         ...rest,
         ...(dividend_curve?.length ? { dividend_curve } : {}),
@@ -50,6 +55,9 @@ export function rfqUnderlyingToParams(row, dividend = {}) {
     ccy: row?.ccy || 'EUR',
     kappa: Number(row?.kappa ?? 2),
     ccyh: Number(row?.ccyh ?? 0) / 1e4,
+    vol_surface: row?.vol_surface ? JSON.parse(JSON.stringify(row.vol_surface)) : null,
+    asset_class: row?.asset_class || 'unknown',
+    smile_parameter_mode: row?.smile_parameter_mode || 'automatic',
     ...dividend,
   }
   for (const field of PERCENT_MARKET_FIELDS) {

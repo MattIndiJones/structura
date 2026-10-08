@@ -1,0 +1,3258 @@
+[
+  {
+    "product_family": "autocall_athena",
+    "status": "SUPPORTED",
+    "label": "Autocall Athena (barrière à maturité)",
+    "description": "Rappel au pair avec coupons cumulés dès que le worst-of atteint la barrière de rappel. À défaut, la protection du capital se juge à la dernière constatation.",
+    "script": "UNDERLYING Basket\n\n# Autocall Athena — barrière de protection observée à maturité\nPARAM COUPON\nPARAM M_AC_BAR\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  SET PERF = WORSTOF(Basket.yield)\n  IF PERF >= M_AC_BAR:\n    PAY COUPON * INDEX \"Coupons cumulés\"\n    PAY 1 \"Capital — remboursement au rappel\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
+    "script_hash": "e072633239f8e58d37ee96ec7bd716a76c7152fff8d5de7f141a6d97a104f9eb",
+    "script_parameters": [
+      {
+        "name": "COUPON",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "solved",
+        "binding": "coupon"
+      },
+      {
+        "name": "M_AC_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "autocall_trigger"
+      },
+      {
+        "name": "M_KI_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "protection_barrier"
+      }
+    ],
+    "range_fields": [
+      {
+        "key": "maturity_months",
+        "label": "Maturité (mois)",
+        "minimum": 12,
+        "maximum": 60,
+        "step": 1,
+        "initial": 36,
+        "unit": "months"
+      },
+      {
+        "key": "autocall_trigger",
+        "label": "Rappel initial (%)",
+        "minimum": 0.8,
+        "maximum": 1.2,
+        "step": 0.005,
+        "initial": 1.0,
+        "unit": "fraction",
+        "script_param": "M_AC_BAR"
+      },
+      {
+        "key": "protection_barrier",
+        "label": "Protection (%)",
+        "minimum": 0.3,
+        "maximum": 1.0,
+        "step": 0.005,
+        "initial": 0.6,
+        "unit": "fraction",
+        "script_param": "M_KI_BAR"
+      }
+    ],
+    "fixed_fields": [],
+    "solved_field": {
+      "key": "coupon",
+      "script_param": "COUPON",
+      "label": "Coupon annuel nominal (%)",
+      "unit": "fraction",
+      "value_convention": "annual",
+      "minimum": 0.0,
+      "maximum": 0.5,
+      "initial_minimum": 0.0,
+      "initial_maximum": 0.3,
+      "minimum_key": "coupon_minimum",
+      "maximum_key": "coupon_maximum"
+    },
+    "solved_parameters": [
+      "coupon"
+    ],
+    "frontier": {
+      "x": {
+        "key": "protection_barrier",
+        "label": "Barrière de protection (%)",
+        "unit": "fraction",
+        "preference": "min"
+      },
+      "y": {
+        "key": "coupon",
+        "label": "Coupon annuel nominal (%)",
+        "unit": "fraction",
+        "preference": "max"
+      }
+    },
+    "optimization_parameters": [
+      "maturity_months",
+      "autocall_trigger",
+      "protection_barrier",
+      "observation_months"
+    ],
+    "modes": {
+      "maximize_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "protection_barrier",
+          "observation_months"
+        ]
+      },
+      "maximize_protection": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "protection_barrier",
+          "observation_months"
+        ]
+      },
+      "target_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "protection_barrier",
+          "observation_months"
+        ]
+      }
+    },
+    "objective": "maximize_coupon",
+    "objectives": [
+      {
+        "value": "maximize_coupon",
+        "label": "Maximiser le coupon"
+      },
+      {
+        "value": "maximize_protection",
+        "label": "Maximiser la protection"
+      },
+      {
+        "value": "target_coupon",
+        "label": "Coupon cible et meilleure protection"
+      }
+    ],
+    "has_autocall": true,
+    "coupon_rule": "Coupon par période cumulé et payé au rappel ; aucun coupon sans rappel.",
+    "coupon_analytics": false,
+    "risk_severity": false,
+    "models": [
+      "constant"
+    ],
+    "underlying_types": [
+      "equity",
+      "index"
+    ],
+    "basket_types": [
+      "single_asset",
+      "worst_of"
+    ],
+    "max_underlyings": 3,
+    "observation_months": [
+      1,
+      3,
+      6,
+      12
+    ]
+  },
+  {
+    "product_family": "phoenix",
+    "status": "SUPPORTED",
+    "label": "Phoenix",
+    "description": "Coupon versé à chaque constatation où le worst-of dépasse la barrière de coupon, rappel au pair au-dessus de la barrière de rappel. Protection du capital jugée à la dernière constatation.",
+    "script": "UNDERLYING Basket\n\n# Phoenix — coupon conditionnel, barrière de protection observée à maturité\nPARAM COUPON\nPARAM M_AC_BAR\nPARAM M_CPN_BAR\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  SET CALL = INDIC(WORSTOF(Basket.yield) >= M_AC_BAR)\n  SET CPN = INDIC(WORSTOF(Basket.yield) >= M_CPN_BAR)\n  PAY CPN * COUPON \"Coupon conditionnel\"\n  IF CALL = 1:\n    PAY 1 \"Capital — remboursement au rappel\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
+    "script_hash": "f7e3ef898dd55e1491279e486714bb8e10c3007e118e3acc1989de9c85a2ccab",
+    "script_parameters": [
+      {
+        "name": "COUPON",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "solved",
+        "binding": "coupon"
+      },
+      {
+        "name": "M_AC_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "autocall_trigger"
+      },
+      {
+        "name": "M_CPN_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "coupon_barrier"
+      },
+      {
+        "name": "M_KI_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "protection_barrier"
+      }
+    ],
+    "range_fields": [
+      {
+        "key": "maturity_months",
+        "label": "Maturité (mois)",
+        "minimum": 12,
+        "maximum": 60,
+        "step": 1,
+        "initial": 36,
+        "unit": "months"
+      },
+      {
+        "key": "autocall_trigger",
+        "label": "Rappel initial (%)",
+        "minimum": 0.8,
+        "maximum": 1.2,
+        "step": 0.005,
+        "initial": 1.0,
+        "unit": "fraction",
+        "script_param": "M_AC_BAR"
+      },
+      {
+        "key": "coupon_barrier",
+        "label": "Barrière coupon (%)",
+        "minimum": 0.3,
+        "maximum": 1.0,
+        "step": 0.005,
+        "initial": 0.7,
+        "unit": "fraction",
+        "script_param": "M_CPN_BAR"
+      },
+      {
+        "key": "protection_barrier",
+        "label": "Protection (%)",
+        "minimum": 0.3,
+        "maximum": 1.0,
+        "step": 0.005,
+        "initial": 0.6,
+        "unit": "fraction",
+        "script_param": "M_KI_BAR"
+      }
+    ],
+    "fixed_fields": [],
+    "solved_field": {
+      "key": "coupon",
+      "script_param": "COUPON",
+      "label": "Coupon annuel nominal (%)",
+      "unit": "fraction",
+      "value_convention": "annual",
+      "minimum": 0.0,
+      "maximum": 0.5,
+      "initial_minimum": 0.0,
+      "initial_maximum": 0.3,
+      "minimum_key": "coupon_minimum",
+      "maximum_key": "coupon_maximum"
+    },
+    "solved_parameters": [
+      "coupon"
+    ],
+    "frontier": {
+      "x": {
+        "key": "protection_barrier",
+        "label": "Barrière de protection (%)",
+        "unit": "fraction",
+        "preference": "min"
+      },
+      "y": {
+        "key": "coupon",
+        "label": "Coupon annuel nominal (%)",
+        "unit": "fraction",
+        "preference": "max"
+      }
+    },
+    "optimization_parameters": [
+      "maturity_months",
+      "autocall_trigger",
+      "coupon_barrier",
+      "protection_barrier",
+      "observation_months"
+    ],
+    "modes": {
+      "maximize_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_CPN_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "coupon_barrier"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "coupon_barrier",
+            "label": "Barrière coupon (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.7,
+            "unit": "fraction",
+            "script_param": "M_CPN_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "coupon_barrier",
+          "protection_barrier",
+          "observation_months"
+        ]
+      },
+      "maximize_protection": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_CPN_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "coupon_barrier"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "coupon_barrier",
+            "label": "Barrière coupon (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.7,
+            "unit": "fraction",
+            "script_param": "M_CPN_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "coupon_barrier",
+          "protection_barrier",
+          "observation_months"
+        ]
+      },
+      "target_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_CPN_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "coupon_barrier"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "coupon_barrier",
+            "label": "Barrière coupon (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.7,
+            "unit": "fraction",
+            "script_param": "M_CPN_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "coupon_barrier",
+          "protection_barrier",
+          "observation_months"
+        ]
+      }
+    },
+    "objective": "maximize_coupon",
+    "objectives": [
+      {
+        "value": "maximize_coupon",
+        "label": "Maximiser le coupon"
+      },
+      {
+        "value": "maximize_protection",
+        "label": "Maximiser la protection"
+      },
+      {
+        "value": "target_coupon",
+        "label": "Coupon cible et meilleure protection"
+      }
+    ],
+    "has_autocall": true,
+    "coupon_rule": "Coupon par période payé si la barrière coupon tient ; coupon manqué définitivement perdu.",
+    "coupon_analytics": true,
+    "risk_severity": false,
+    "models": [
+      "constant"
+    ],
+    "underlying_types": [
+      "equity",
+      "index"
+    ],
+    "basket_types": [
+      "single_asset",
+      "worst_of"
+    ],
+    "max_underlyings": 3,
+    "observation_months": [
+      1,
+      3,
+      6,
+      12
+    ]
+  },
+  {
+    "product_family": "phoenix_memoire",
+    "status": "SUPPORTED",
+    "label": "Phoenix à coupon mémoire",
+    "description": "Phoenix dont les coupons manqués sont rattrapés à la première constatation où le worst-of repasse la barrière de coupon. Protection du capital jugée à la dernière constatation.",
+    "script": "UNDERLYING Basket\n\n# Phoenix à coupon mémoire — les coupons manqués sont rattrapés\nPARAM COUPON\nPARAM M_AC_BAR\nPARAM M_CPN_BAR\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  IF WORSTOF(Basket.yield) >= M_CPN_BAR:\n    PAY COUPON * (INDEX - MEMO) \"Coupon et rattrapage\"\n    SET MEMO = INDEX\n  IF WORSTOF(Basket.yield) >= M_AC_BAR:\n    PAY 1 \"Remboursement anticipé\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
+    "script_hash": "8a33f01e5db1a6824ccb57e427f7797da294b4050435f152c673569633af6d60",
+    "script_parameters": [
+      {
+        "name": "COUPON",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "solved",
+        "binding": "coupon"
+      },
+      {
+        "name": "M_AC_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "autocall_trigger"
+      },
+      {
+        "name": "M_CPN_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "coupon_barrier"
+      },
+      {
+        "name": "M_KI_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "protection_barrier"
+      }
+    ],
+    "range_fields": [
+      {
+        "key": "maturity_months",
+        "label": "Maturité (mois)",
+        "minimum": 12,
+        "maximum": 60,
+        "step": 1,
+        "initial": 36,
+        "unit": "months"
+      },
+      {
+        "key": "autocall_trigger",
+        "label": "Rappel initial (%)",
+        "minimum": 0.8,
+        "maximum": 1.2,
+        "step": 0.005,
+        "initial": 1.0,
+        "unit": "fraction",
+        "script_param": "M_AC_BAR"
+      },
+      {
+        "key": "coupon_barrier",
+        "label": "Barrière coupon (%)",
+        "minimum": 0.3,
+        "maximum": 1.0,
+        "step": 0.005,
+        "initial": 0.7,
+        "unit": "fraction",
+        "script_param": "M_CPN_BAR"
+      },
+      {
+        "key": "protection_barrier",
+        "label": "Protection (%)",
+        "minimum": 0.3,
+        "maximum": 1.0,
+        "step": 0.005,
+        "initial": 0.6,
+        "unit": "fraction",
+        "script_param": "M_KI_BAR"
+      }
+    ],
+    "fixed_fields": [],
+    "solved_field": {
+      "key": "coupon",
+      "script_param": "COUPON",
+      "label": "Coupon annuel nominal (%)",
+      "unit": "fraction",
+      "value_convention": "annual",
+      "minimum": 0.0,
+      "maximum": 0.5,
+      "initial_minimum": 0.0,
+      "initial_maximum": 0.3,
+      "minimum_key": "coupon_minimum",
+      "maximum_key": "coupon_maximum"
+    },
+    "solved_parameters": [
+      "coupon"
+    ],
+    "frontier": {
+      "x": {
+        "key": "protection_barrier",
+        "label": "Barrière de protection (%)",
+        "unit": "fraction",
+        "preference": "min"
+      },
+      "y": {
+        "key": "coupon",
+        "label": "Coupon annuel nominal (%)",
+        "unit": "fraction",
+        "preference": "max"
+      }
+    },
+    "optimization_parameters": [
+      "maturity_months",
+      "autocall_trigger",
+      "coupon_barrier",
+      "protection_barrier",
+      "observation_months"
+    ],
+    "modes": {
+      "maximize_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_CPN_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "coupon_barrier"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "coupon_barrier",
+            "label": "Barrière coupon (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.7,
+            "unit": "fraction",
+            "script_param": "M_CPN_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "coupon_barrier",
+          "protection_barrier",
+          "observation_months"
+        ]
+      },
+      "maximize_protection": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_CPN_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "coupon_barrier"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "coupon_barrier",
+            "label": "Barrière coupon (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.7,
+            "unit": "fraction",
+            "script_param": "M_CPN_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "coupon_barrier",
+          "protection_barrier",
+          "observation_months"
+        ]
+      },
+      "target_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_CPN_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "coupon_barrier"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "coupon_barrier",
+            "label": "Barrière coupon (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.7,
+            "unit": "fraction",
+            "script_param": "M_CPN_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "coupon_barrier",
+          "protection_barrier",
+          "observation_months"
+        ]
+      }
+    },
+    "objective": "maximize_coupon",
+    "objectives": [
+      {
+        "value": "maximize_coupon",
+        "label": "Maximiser le coupon"
+      },
+      {
+        "value": "maximize_protection",
+        "label": "Maximiser la protection"
+      },
+      {
+        "value": "target_coupon",
+        "label": "Coupon cible et meilleure protection"
+      }
+    ],
+    "has_autocall": true,
+    "coupon_rule": "Coupons manqués rattrapés au prochain paiement ; mémoire non payée si la barrière coupon ne tient jamais à nouveau.",
+    "coupon_analytics": true,
+    "risk_severity": false,
+    "models": [
+      "constant"
+    ],
+    "underlying_types": [
+      "equity",
+      "index"
+    ],
+    "basket_types": [
+      "single_asset",
+      "worst_of"
+    ],
+    "max_underlyings": 3,
+    "observation_months": [
+      1,
+      3,
+      6,
+      12
+    ]
+  },
+  {
+    "product_family": "autocall_barriere_degressive",
+    "status": "SUPPORTED",
+    "label": "Autocall à barrière de rappel dégressive",
+    "description": "Athena dont la barrière de rappel change à chaque constatation : une ligne par constatation dans Economics, la dernière s'étend aux suivantes.",
+    "script": "UNDERLYING Basket\n\n# Autocall à barrière de rappel dégressive — une barrière par constatation\nPARAM COUPON\nPARAM() M_AC_BAR\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  SET PERF = WORSTOF(Basket.yield)\n  IF PERF >= M_AC_BAR:\n    PAY COUPON * INDEX \"Coupons cumulés\"\n    PAY 1 \"Capital — remboursement au rappel\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
+    "script_hash": "0b50f698da4235ee42159b9b874bb79dcecdb78d918ccca1242dfef6c1615474",
+    "script_parameters": [
+      {
+        "name": "COUPON",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "solved",
+        "binding": "coupon"
+      },
+      {
+        "name": "M_AC_BAR",
+        "kind": "array",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "autocall_trigger"
+      },
+      {
+        "name": "M_KI_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "protection_barrier"
+      }
+    ],
+    "range_fields": [
+      {
+        "key": "maturity_months",
+        "label": "Maturité (mois)",
+        "minimum": 12,
+        "maximum": 60,
+        "step": 1,
+        "initial": 36,
+        "unit": "months"
+      },
+      {
+        "key": "autocall_trigger",
+        "label": "Rappel initial (%)",
+        "minimum": 0.8,
+        "maximum": 1.2,
+        "step": 0.005,
+        "initial": 1.0,
+        "unit": "fraction",
+        "script_param": "M_AC_BAR"
+      },
+      {
+        "key": "protection_barrier",
+        "label": "Protection (%)",
+        "minimum": 0.3,
+        "maximum": 1.0,
+        "step": 0.005,
+        "initial": 0.6,
+        "unit": "fraction",
+        "script_param": "M_KI_BAR"
+      }
+    ],
+    "fixed_fields": [
+      {
+        "key": "decrement",
+        "label": "Baisse par constatation — points %",
+        "minimum": 0,
+        "maximum": 0.2,
+        "step": 0.005,
+        "initial": 0.025,
+        "unit": "fraction",
+        "script_param": "M_AC_BAR"
+      },
+      {
+        "key": "floor",
+        "label": "Plancher de rappel (%)",
+        "minimum": 0.3,
+        "maximum": 1.2,
+        "step": 0.005,
+        "initial": 0.8,
+        "unit": "fraction",
+        "script_param": "M_AC_BAR"
+      },
+      {
+        "key": "first_decrease_rank",
+        "label": "Première constatation avec baisse",
+        "minimum": 2,
+        "maximum": 60,
+        "step": 1,
+        "initial": 2,
+        "unit": "rank",
+        "script_param": "M_AC_BAR"
+      }
+    ],
+    "solved_field": {
+      "key": "coupon",
+      "script_param": "COUPON",
+      "label": "Coupon annuel nominal (%)",
+      "unit": "fraction",
+      "value_convention": "annual",
+      "minimum": 0.0,
+      "maximum": 0.5,
+      "initial_minimum": 0.0,
+      "initial_maximum": 0.3,
+      "minimum_key": "coupon_minimum",
+      "maximum_key": "coupon_maximum"
+    },
+    "solved_parameters": [
+      "coupon"
+    ],
+    "frontier": {
+      "x": {
+        "key": "protection_barrier",
+        "label": "Barrière de protection (%)",
+        "unit": "fraction",
+        "preference": "min"
+      },
+      "y": {
+        "key": "coupon",
+        "label": "Coupon annuel nominal (%)",
+        "unit": "fraction",
+        "preference": "max"
+      }
+    },
+    "optimization_parameters": [
+      "maturity_months",
+      "autocall_trigger",
+      "protection_barrier",
+      "observation_months"
+    ],
+    "modes": {
+      "maximize_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "array",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [
+          {
+            "key": "decrement",
+            "label": "Baisse par constatation — points %",
+            "minimum": 0,
+            "maximum": 0.2,
+            "step": 0.005,
+            "initial": 0.025,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "floor",
+            "label": "Plancher de rappel (%)",
+            "minimum": 0.3,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 0.8,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "first_decrease_rank",
+            "label": "Première constatation avec baisse",
+            "minimum": 2,
+            "maximum": 60,
+            "step": 1,
+            "initial": 2,
+            "unit": "rank",
+            "script_param": "M_AC_BAR"
+          }
+        ],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "protection_barrier",
+          "observation_months"
+        ]
+      },
+      "maximize_protection": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "array",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [
+          {
+            "key": "decrement",
+            "label": "Baisse par constatation — points %",
+            "minimum": 0,
+            "maximum": 0.2,
+            "step": 0.005,
+            "initial": 0.025,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "floor",
+            "label": "Plancher de rappel (%)",
+            "minimum": 0.3,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 0.8,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "first_decrease_rank",
+            "label": "Première constatation avec baisse",
+            "minimum": 2,
+            "maximum": 60,
+            "step": 1,
+            "initial": 2,
+            "unit": "rank",
+            "script_param": "M_AC_BAR"
+          }
+        ],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "protection_barrier",
+          "observation_months"
+        ]
+      },
+      "target_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "array",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [
+          {
+            "key": "decrement",
+            "label": "Baisse par constatation — points %",
+            "minimum": 0,
+            "maximum": 0.2,
+            "step": 0.005,
+            "initial": 0.025,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "floor",
+            "label": "Plancher de rappel (%)",
+            "minimum": 0.3,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 0.8,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "first_decrease_rank",
+            "label": "Première constatation avec baisse",
+            "minimum": 2,
+            "maximum": 60,
+            "step": 1,
+            "initial": 2,
+            "unit": "rank",
+            "script_param": "M_AC_BAR"
+          }
+        ],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "protection_barrier",
+          "observation_months"
+        ]
+      }
+    },
+    "objective": "maximize_coupon",
+    "objectives": [
+      {
+        "value": "maximize_coupon",
+        "label": "Maximiser le coupon"
+      },
+      {
+        "value": "maximize_protection",
+        "label": "Maximiser la protection"
+      },
+      {
+        "value": "target_coupon",
+        "label": "Coupon cible et meilleure protection"
+      }
+    ],
+    "has_autocall": true,
+    "coupon_rule": "Coupon par période cumulé au rappel ; seuil de rappel dégressif explicite par constatation.",
+    "coupon_analytics": false,
+    "risk_severity": false,
+    "models": [
+      "constant"
+    ],
+    "underlying_types": [
+      "equity",
+      "index"
+    ],
+    "basket_types": [
+      "single_asset",
+      "worst_of"
+    ],
+    "max_underlyings": 3,
+    "observation_months": [
+      1,
+      3,
+      6,
+      12
+    ]
+  },
+  {
+    "product_family": "reverse_convertible",
+    "status": "SUPPORTED",
+    "label": "Reverse convertible à barrière (observée à maturité)",
+    "description": "Coupon garanti. Le capital est remboursé au pair si le worst-of est au-dessus de la barrière à la date de maturité, sinon il suit sa performance.",
+    "script": "UNDERLYING Basket\n\n# Reverse convertible à barrière — coupon garanti, barrière observée à maturité\nPARAM COUPON\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  PAY COUPON \"Coupon\"\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
+    "script_hash": "0f7b287e28377314587981c7fd5eea6f6d7621812ecc789ab3a6c2c04ad2ec7e",
+    "script_parameters": [
+      {
+        "name": "COUPON",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "solved",
+        "binding": "coupon"
+      },
+      {
+        "name": "M_KI_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "protection_barrier"
+      }
+    ],
+    "range_fields": [
+      {
+        "key": "maturity_months",
+        "label": "Maturité (mois)",
+        "minimum": 12,
+        "maximum": 60,
+        "step": 1,
+        "initial": 36,
+        "unit": "months"
+      },
+      {
+        "key": "protection_barrier",
+        "label": "Protection (%)",
+        "minimum": 0.3,
+        "maximum": 1.0,
+        "step": 0.005,
+        "initial": 0.6,
+        "unit": "fraction",
+        "script_param": "M_KI_BAR"
+      }
+    ],
+    "fixed_fields": [],
+    "solved_field": {
+      "key": "coupon",
+      "script_param": "COUPON",
+      "label": "Coupon annuel nominal (%)",
+      "unit": "fraction",
+      "value_convention": "annual",
+      "minimum": 0.0,
+      "maximum": 0.5,
+      "initial_minimum": 0.0,
+      "initial_maximum": 0.3,
+      "minimum_key": "coupon_minimum",
+      "maximum_key": "coupon_maximum"
+    },
+    "solved_parameters": [
+      "coupon"
+    ],
+    "frontier": {
+      "x": {
+        "key": "protection_barrier",
+        "label": "Barrière de protection (%)",
+        "unit": "fraction",
+        "preference": "min"
+      },
+      "y": {
+        "key": "coupon",
+        "label": "Coupon annuel nominal (%)",
+        "unit": "fraction",
+        "preference": "max"
+      }
+    },
+    "optimization_parameters": [
+      "maturity_months",
+      "protection_barrier"
+    ],
+    "modes": {
+      "maximize_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "protection_barrier"
+        ]
+      },
+      "maximize_protection": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "protection_barrier"
+        ]
+      },
+      "target_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_KI_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "protection_barrier"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "protection_barrier",
+            "label": "Protection (%)",
+            "minimum": 0.3,
+            "maximum": 1.0,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_KI_BAR"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon annuel nominal (%)",
+          "unit": "fraction",
+          "value_convention": "annual",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "protection_barrier",
+            "label": "Barrière de protection (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon annuel nominal (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "protection_barrier"
+        ]
+      }
+    },
+    "objective": "maximize_coupon",
+    "objectives": [
+      {
+        "value": "maximize_coupon",
+        "label": "Maximiser le coupon"
+      },
+      {
+        "value": "maximize_protection",
+        "label": "Maximiser la protection"
+      },
+      {
+        "value": "target_coupon",
+        "label": "Coupon cible et meilleure protection"
+      }
+    ],
+    "has_autocall": false,
+    "coupon_rule": "Coupon unique à maturité, égal au coupon annuel nominal × maturité en mois / 12 ; aucun rappel.",
+    "coupon_analytics": false,
+    "risk_severity": false,
+    "models": [
+      "constant"
+    ],
+    "underlying_types": [
+      "equity",
+      "index"
+    ],
+    "basket_types": [
+      "single_asset",
+      "worst_of"
+    ],
+    "max_underlyings": 3,
+    "observation_months": []
+  },
+  {
+    "product_family": "capital_garanti",
+    "status": "SUPPORTED",
+    "label": "Capital garanti avec participation",
+    "description": "Capital remboursé au pair à maturité, plus une participation à la hausse du worst-of au-dessus du strike.",
+    "script": "UNDERLYING Basket\n\n# Capital garanti — participation à la hausse au-dessus du strike\nPARAM PART\nPARAM STRIKE\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  PAY 1 \"Capital garanti\"\n  PAY MAX(0, WORSTOF(Basket.yield) - STRIKE) * PART \"Participation à la hausse\"",
+    "script_hash": "8e6b78e68e0789ca8b9d1b3ad0c440f57201405aeafdd0ab82f25ab5828cf651",
+    "script_parameters": [
+      {
+        "name": "PART",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "solved",
+        "binding": "participation"
+      },
+      {
+        "name": "STRIKE",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "strike"
+      }
+    ],
+    "range_fields": [
+      {
+        "key": "maturity_months",
+        "label": "Maturité (mois)",
+        "minimum": 12,
+        "maximum": 60,
+        "step": 1,
+        "initial": 36,
+        "unit": "months"
+      },
+      {
+        "key": "strike",
+        "label": "Strike de participation (%)",
+        "minimum": 0.5,
+        "maximum": 1.5,
+        "step": 0.005,
+        "initial": 1.0,
+        "unit": "fraction",
+        "script_param": "STRIKE"
+      }
+    ],
+    "fixed_fields": [],
+    "solved_field": {
+      "key": "participation",
+      "script_param": "PART",
+      "label": "Participation (%)",
+      "unit": "fraction",
+      "value_convention": "fraction",
+      "minimum": 0.0,
+      "maximum": 5.0,
+      "initial_minimum": 0.0,
+      "initial_maximum": 3.0,
+      "minimum_key": "participation_minimum",
+      "maximum_key": "participation_maximum"
+    },
+    "solved_parameters": [
+      "participation"
+    ],
+    "frontier": {
+      "x": {
+        "key": "strike",
+        "label": "Strike de participation (%)",
+        "unit": "fraction",
+        "preference": "min"
+      },
+      "y": {
+        "key": "participation",
+        "label": "Participation (%)",
+        "unit": "fraction",
+        "preference": "max"
+      }
+    },
+    "optimization_parameters": [
+      "maturity_months",
+      "strike"
+    ],
+    "modes": {
+      "maximize_participation": {
+        "script_parameters": [
+          {
+            "name": "PART",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "participation"
+          },
+          {
+            "name": "STRIKE",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "strike"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "strike",
+            "label": "Strike de participation (%)",
+            "minimum": 0.5,
+            "maximum": 1.5,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "STRIKE"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "participation",
+          "script_param": "PART",
+          "label": "Participation (%)",
+          "unit": "fraction",
+          "value_convention": "fraction",
+          "minimum": 0.0,
+          "maximum": 5.0,
+          "initial_minimum": 0.0,
+          "initial_maximum": 3.0,
+          "minimum_key": "participation_minimum",
+          "maximum_key": "participation_maximum"
+        },
+        "solved_parameters": [
+          "participation"
+        ],
+        "frontier": {
+          "x": {
+            "key": "strike",
+            "label": "Strike de participation (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "participation",
+            "label": "Participation (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "strike"
+        ]
+      }
+    },
+    "objective": "maximize_participation",
+    "objectives": [
+      {
+        "value": "maximize_participation",
+        "label": "Maximiser la participation"
+      }
+    ],
+    "has_autocall": false,
+    "coupon_rule": "Nominal protégé à maturité, hors défaut émetteur ; participation à la hausse au-dessus du strike, sans coupon ni rappel.",
+    "coupon_analytics": false,
+    "risk_severity": false,
+    "models": [
+      "constant"
+    ],
+    "underlying_types": [
+      "equity",
+      "index"
+    ],
+    "basket_types": [
+      "single_asset",
+      "worst_of"
+    ],
+    "max_underlyings": 3,
+    "observation_months": []
+  },
+  {
+    "product_family": "booster",
+    "status": "SUPPORTED",
+    "label": "Booster",
+    "description": "Hausse du worst-of démultipliée et plafonnée ; baisse subie une pour une, sans protection.",
+    "script": "UNDERLYING Basket\n\n# Booster — hausse démultipliée et plafonnée, baisse subie une pour une\nPARAM PART\nPARAM CAP\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  SET PERF = WORSTOF(Basket.yield)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY INDIC(PERF >= 1) * (MIN(CAP, 1 + (PERF - 1) * PART) - 1) \"Participation plafonnée\"\n  PAY -MAX(1 - PERF, 0) \"Put vendu — perte en capital\"",
+    "script_hash": "2ee5adb2581170bc3f4949cc55576e6dc89e61bfbacb980c9303e1380460e787",
+    "script_parameters": [
+      {
+        "name": "PART",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "solved",
+        "binding": "participation"
+      },
+      {
+        "name": "CAP",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "redemption_cap"
+      }
+    ],
+    "range_fields": [
+      {
+        "key": "maturity_months",
+        "label": "Maturité (mois)",
+        "minimum": 12,
+        "maximum": 60,
+        "step": 1,
+        "initial": 36,
+        "unit": "months"
+      },
+      {
+        "key": "redemption_cap",
+        "label": "Cap de remboursement (%)",
+        "minimum": 1.0,
+        "maximum": 3.0,
+        "step": 0.005,
+        "initial": 1.3,
+        "unit": "fraction",
+        "script_param": "CAP"
+      }
+    ],
+    "fixed_fields": [],
+    "solved_field": {
+      "key": "participation",
+      "script_param": "PART",
+      "label": "Participation (%)",
+      "unit": "fraction",
+      "value_convention": "fraction",
+      "minimum": 0.0,
+      "maximum": 5.0,
+      "initial_minimum": 0.0,
+      "initial_maximum": 3.0,
+      "minimum_key": "participation_minimum",
+      "maximum_key": "participation_maximum"
+    },
+    "solved_parameters": [
+      "participation"
+    ],
+    "frontier": {
+      "x": {
+        "key": "redemption_cap",
+        "label": "Cap de remboursement (%)",
+        "unit": "fraction",
+        "preference": "max"
+      },
+      "y": {
+        "key": "participation",
+        "label": "Participation (%)",
+        "unit": "fraction",
+        "preference": "max"
+      }
+    },
+    "optimization_parameters": [
+      "maturity_months",
+      "redemption_cap"
+    ],
+    "modes": {
+      "maximize_participation": {
+        "script_parameters": [
+          {
+            "name": "PART",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "participation"
+          },
+          {
+            "name": "CAP",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "redemption_cap"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "redemption_cap",
+            "label": "Cap de remboursement (%)",
+            "minimum": 1.0,
+            "maximum": 3.0,
+            "step": 0.005,
+            "initial": 1.3,
+            "unit": "fraction",
+            "script_param": "CAP"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "participation",
+          "script_param": "PART",
+          "label": "Participation (%)",
+          "unit": "fraction",
+          "value_convention": "fraction",
+          "minimum": 0.0,
+          "maximum": 5.0,
+          "initial_minimum": 0.0,
+          "initial_maximum": 3.0,
+          "minimum_key": "participation_minimum",
+          "maximum_key": "participation_maximum"
+        },
+        "solved_parameters": [
+          "participation"
+        ],
+        "frontier": {
+          "x": {
+            "key": "redemption_cap",
+            "label": "Cap de remboursement (%)",
+            "unit": "fraction",
+            "preference": "max"
+          },
+          "y": {
+            "key": "participation",
+            "label": "Participation (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "redemption_cap"
+        ]
+      },
+      "maximize_cap": {
+        "script_parameters": [
+          {
+            "name": "PART",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "fixed",
+            "binding": "participation"
+          },
+          {
+            "name": "CAP",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "redemption_cap"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          }
+        ],
+        "fixed_fields": [
+          {
+            "key": "participation",
+            "label": "Participation imposée (%)",
+            "minimum": 0.005,
+            "maximum": 5.0,
+            "step": 0.005,
+            "initial": 1.5,
+            "unit": "fraction",
+            "script_param": "PART"
+          }
+        ],
+        "solved_field": {
+          "key": "redemption_cap",
+          "script_param": "CAP",
+          "label": "Cap de remboursement (%)",
+          "unit": "fraction",
+          "value_convention": "fraction",
+          "minimum": 1.0,
+          "maximum": 3.0,
+          "initial_minimum": 1.01,
+          "initial_maximum": 2.0,
+          "minimum_key": "cap_minimum",
+          "maximum_key": "cap_maximum"
+        },
+        "solved_parameters": [
+          "redemption_cap"
+        ],
+        "frontier": {
+          "x": {
+            "key": "expected_capital_loss",
+            "label": "Perte en capital moyenne Q (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "redemption_cap",
+            "label": "Cap de remboursement (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months"
+        ]
+      }
+    },
+    "objective": "maximize_participation",
+    "objectives": [
+      {
+        "value": "maximize_participation",
+        "label": "Maximiser la participation"
+      },
+      {
+        "value": "maximize_cap",
+        "label": "Maximiser le cap à participation imposée"
+      }
+    ],
+    "has_autocall": false,
+    "coupon_rule": "Hausse démultipliée, remboursement plafonné ; baisse subie une pour une. Cap 130 % = gain maximal 30 %, hors défaut émetteur.",
+    "coupon_analytics": false,
+    "risk_severity": true,
+    "models": [
+      "constant"
+    ],
+    "underlying_types": [
+      "equity",
+      "index"
+    ],
+    "basket_types": [
+      "single_asset",
+      "worst_of"
+    ],
+    "max_underlyings": 3,
+    "observation_months": []
+  },
+  {
+    "product_family": "autocall_gear_put",
+    "status": "SUPPORTED",
+    "label": "Autocall à put leveragé (gear put)",
+    "description": "Rappel au pair avec coupon au-dessus de la barrière de rappel. Sans rappel, perte démultipliée sous le strike du put, plafonnée au capital.",
+    "script": "UNDERLYING Basket\n\n# Autocall gear put — perte avec levier sous le strike du put\nPARAM COUPON\nPARAM M_AC_BAR\nPARAM M_PUT_STRIKE\nPARAM GEARING\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  SET PERF = WORSTOF(Basket.yield)\n  IF PERF >= M_AC_BAR:\n    PAY COUPON \"Coupon\"\n    PAY 1 \"Capital — remboursement au rappel\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_PUT_STRIKE)\n  PAY 1 \"Remboursement nominal\"\n  PAY -1 * KI * MIN(1, GEARING * (1 - WORSTOF(Basket.yield) / M_PUT_STRIKE)) \"Put vendu avec levier, perte plafonnée au capital\"",
+    "script_hash": "24eab56a2f920661dc44c1cbae44f3356c09916c1065313f526b2e7736003e3b",
+    "script_parameters": [
+      {
+        "name": "COUPON",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "solved",
+        "binding": "coupon"
+      },
+      {
+        "name": "M_AC_BAR",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "autocall_trigger"
+      },
+      {
+        "name": "M_PUT_STRIKE",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "put_strike"
+      },
+      {
+        "name": "GEARING",
+        "kind": "scalar",
+        "required": true,
+        "unit": "fraction",
+        "default": null,
+        "role": "range",
+        "binding": "gearing"
+      }
+    ],
+    "range_fields": [
+      {
+        "key": "maturity_months",
+        "label": "Maturité (mois)",
+        "minimum": 12,
+        "maximum": 60,
+        "step": 1,
+        "initial": 36,
+        "unit": "months"
+      },
+      {
+        "key": "autocall_trigger",
+        "label": "Rappel initial (%)",
+        "minimum": 0.8,
+        "maximum": 1.2,
+        "step": 0.005,
+        "initial": 1.0,
+        "unit": "fraction",
+        "script_param": "M_AC_BAR"
+      },
+      {
+        "key": "put_strike",
+        "label": "Strike du put (%)",
+        "minimum": 0.3,
+        "maximum": 1.2,
+        "step": 0.005,
+        "initial": 0.6,
+        "unit": "fraction",
+        "script_param": "M_PUT_STRIKE"
+      },
+      {
+        "key": "gearing",
+        "label": "Levier du put (×)",
+        "minimum": 1.0,
+        "maximum": 5.0,
+        "step": 0.1,
+        "initial": 2.0,
+        "unit": "multiple",
+        "script_param": "GEARING"
+      }
+    ],
+    "fixed_fields": [],
+    "solved_field": {
+      "key": "coupon",
+      "script_param": "COUPON",
+      "label": "Coupon unique (%)",
+      "unit": "fraction",
+      "value_convention": "total",
+      "minimum": 0.0,
+      "maximum": 0.5,
+      "initial_minimum": 0.0,
+      "initial_maximum": 0.3,
+      "minimum_key": "coupon_minimum",
+      "maximum_key": "coupon_maximum"
+    },
+    "solved_parameters": [
+      "coupon"
+    ],
+    "frontier": {
+      "x": {
+        "key": "put_strike",
+        "label": "Strike du put (%)",
+        "unit": "fraction",
+        "preference": "min"
+      },
+      "y": {
+        "key": "coupon",
+        "label": "Coupon unique (%)",
+        "unit": "fraction",
+        "preference": "max"
+      }
+    },
+    "optimization_parameters": [
+      "maturity_months",
+      "autocall_trigger",
+      "put_strike",
+      "gearing",
+      "observation_months"
+    ],
+    "modes": {
+      "maximize_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_PUT_STRIKE",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "put_strike"
+          },
+          {
+            "name": "GEARING",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "gearing"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "put_strike",
+            "label": "Strike du put (%)",
+            "minimum": 0.3,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_PUT_STRIKE"
+          },
+          {
+            "key": "gearing",
+            "label": "Levier du put (×)",
+            "minimum": 1.0,
+            "maximum": 5.0,
+            "step": 0.1,
+            "initial": 2.0,
+            "unit": "multiple",
+            "script_param": "GEARING"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon unique (%)",
+          "unit": "fraction",
+          "value_convention": "total",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "put_strike",
+            "label": "Strike du put (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon unique (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "put_strike",
+          "gearing",
+          "observation_months"
+        ]
+      },
+      "target_coupon": {
+        "script_parameters": [
+          {
+            "name": "COUPON",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "solved",
+            "binding": "coupon"
+          },
+          {
+            "name": "M_AC_BAR",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "autocall_trigger"
+          },
+          {
+            "name": "M_PUT_STRIKE",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "put_strike"
+          },
+          {
+            "name": "GEARING",
+            "kind": "scalar",
+            "required": true,
+            "unit": "fraction",
+            "default": null,
+            "role": "range",
+            "binding": "gearing"
+          }
+        ],
+        "range_fields": [
+          {
+            "key": "maturity_months",
+            "label": "Maturité (mois)",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "initial": 36,
+            "unit": "months"
+          },
+          {
+            "key": "autocall_trigger",
+            "label": "Rappel initial (%)",
+            "minimum": 0.8,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 1.0,
+            "unit": "fraction",
+            "script_param": "M_AC_BAR"
+          },
+          {
+            "key": "put_strike",
+            "label": "Strike du put (%)",
+            "minimum": 0.3,
+            "maximum": 1.2,
+            "step": 0.005,
+            "initial": 0.6,
+            "unit": "fraction",
+            "script_param": "M_PUT_STRIKE"
+          },
+          {
+            "key": "gearing",
+            "label": "Levier du put (×)",
+            "minimum": 1.0,
+            "maximum": 5.0,
+            "step": 0.1,
+            "initial": 2.0,
+            "unit": "multiple",
+            "script_param": "GEARING"
+          }
+        ],
+        "fixed_fields": [],
+        "solved_field": {
+          "key": "coupon",
+          "script_param": "COUPON",
+          "label": "Coupon unique (%)",
+          "unit": "fraction",
+          "value_convention": "total",
+          "minimum": 0.0,
+          "maximum": 0.5,
+          "initial_minimum": 0.0,
+          "initial_maximum": 0.3,
+          "minimum_key": "coupon_minimum",
+          "maximum_key": "coupon_maximum"
+        },
+        "solved_parameters": [
+          "coupon"
+        ],
+        "frontier": {
+          "x": {
+            "key": "put_strike",
+            "label": "Strike du put (%)",
+            "unit": "fraction",
+            "preference": "min"
+          },
+          "y": {
+            "key": "coupon",
+            "label": "Coupon unique (%)",
+            "unit": "fraction",
+            "preference": "max"
+          }
+        },
+        "optimization_parameters": [
+          "maturity_months",
+          "autocall_trigger",
+          "put_strike",
+          "gearing",
+          "observation_months"
+        ]
+      }
+    },
+    "objective": "maximize_coupon",
+    "objectives": [
+      {
+        "value": "maximize_coupon",
+        "label": "Maximiser le coupon"
+      },
+      {
+        "value": "target_coupon",
+        "label": "Coupon cible et perte en capital minimale"
+      }
+    ],
+    "has_autocall": true,
+    "coupon_rule": "Coupon unique au rappel, sans INDEX ni cumul ; perte sous le strike du put démultipliée par le gearing et plafonnée au nominal.",
+    "coupon_analytics": false,
+    "risk_severity": true,
+    "models": [
+      "constant"
+    ],
+    "underlying_types": [
+      "equity",
+      "index"
+    ],
+    "basket_types": [
+      "single_asset",
+      "worst_of"
+    ],
+    "max_underlyings": 3,
+    "observation_months": [
+      1,
+      3,
+      6,
+      12
+    ]
+  }
+]

@@ -13,6 +13,10 @@ racine du dépôt, à part `CLAUDE.md`.
 
 ## Arborescence
 
+Correctif récent : [pricing avant strike et reprise de session (07/10/2026)](audits/RECETTE_FORWARD_SESSION_2026-10-07.md).
+
+Vérification complémentaire : [générateur UAT et scripts actuels (07/10/2026)](audits/AUDIT_GENERATEUR_UAT_2026-10-07.md).
+
 ```text
 docs/
 ├── README.md        cet index
@@ -40,22 +44,140 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
-PayScript : [UNDERLYING, StartDate et paramètres Economics](projects/pricing/PAYSCRIPT_STARTDATE_UNDERLYING_DESIGN_2026-10-06.md)
-— **Audit et proposition au 06/10, sans implémentation** : panier lié à Economics,
-fixing initial explicite, première observation distincte, masques Pricer/RFQ/Booking,
-PARAM sans défaut obligatoire et flux séparés. Pas de migration des deals de test.
-Revue transversale ajoutée : Risk/CCR, workers, variantes, KID/EMT, Clients,
-assistants, génération UAT et dépendances des scripts à supprimer (§7–8).
-[Deuxième revue systématique](audits/AUDIT_TRANSVERSAL_PAYSCRIPT_2026-10-06.md) :
-brouillons incomplets, Réinvestissement/backtests, contrôles de chemin, preuves de
-calcul et inventaire SQLite en lecture seule. 0 script sauvegardé mais 42 deals,
-41 RFQ et 42 Products ; aucune suppression ni implémentation effectuée.
+Laboratoire de tests : [plan de simulation du desk du 08/10](projects/platform/DESK_SIMULATION_ACTION_PLAN_2026-10-08.md)
+— **Cadrage avant développement** : Alex émetteur/distributeur, contrats avant
+pricing, agents clients et banques, horloge suspendue pendant les calculs,
+supervision Camille et boucle de correction/rejeu. Matrice des actions,
+interface de recette et huit lots proposés ; capacités d'émission, règlements,
+opérations liées et adaptation des dates métier à qualifier avant le pilote.
+Objectif : tester et améliorer Structura, avec preuves et couverture explicites.
+
+**URGENT — smile actions et ailes basses** : [diagnostic et méthode de reprise
+du 08/10](projects/pricing/SMILE_ACTIONS_URGENT_2026-10-08.md). Profils synthétiques
+trop modérés pour les exemples de desk décrits, matrice contrainte par une forme
+commune et strike 50 % absent. Reprendre matrice cible, représentation, digitaux
+et effets de rappel avant de généraliser les comparatifs. Développement différé
+par Philippe ; priorité immédiate à l'Optimizer en calcul direct parallèle.
+
+PayScript : [implémentation Basket / StartDate du 06/10](projects/pricing/PAYSCRIPT_STARTDATE_IMPLEMENTATION_2026-10-06.md)
+— **Implémenté sur `codex/payscript-basket-startdate`** : 19 modèles génériques,
+panier Economics, fixing initial explicite, paramètres requis en %, première
+observation incluse et flux séparés. L’[éditeur unique et ses 15 exemples préremplis](projects/pricing/PAYSCRIPT_PRESETS_EDITOR_2026-10-07.md)
+sont livrés le 07/10 : réglages avancés locaux, exemples facultatifs dans le
+Pricer et la RFQ, panier et hypothèses de marché conservés. Pricer, RFQ, Product et
+consommateurs de calendriers adaptés ; tests ciblés et recette navigateur réalisés.
+Les 42 deals de test, 41 RFQ et leurs dossiers associés ont été supprimés après
+sauvegarde. Les référentiels sont conservés. Le rapport précise la couverture
+effective, les limites et la procédure de reprise ; aucune suite backend complète.
+La [recette complémentaire du 06/10](audits/RECETTE_PAYSCRIPT_2026-10-06.md)
+valide 514 cas backend distincts, 233 tests frontend et un parcours navigateur
+jusqu’au booking isolé. Trois anomalies corrigées : erreurs de paramètres requis,
+ancre de fenêtre sur jour fermé et conservation des termes lors des changements
+de type/conversions RFQ. Base réelle inchangée pendant cette recette.
+Retour utilisateur traité ensuite : StartDate manquante signalée avant calcul,
+erreurs API lisibles et cours en devise clarifiés ; 243 tests frontend passent
+avec les dix cas complémentaires, décrits dans le même rapport.
+Le [cadrage](projects/pricing/PAYSCRIPT_STARTDATE_UNDERLYING_DESIGN_2026-10-06.md)
+et la [revue transversale](audits/AUDIT_TRANSVERSAL_PAYSCRIPT_2026-10-06.md)
+restent des photographies de l'état antérieur à cette implémentation.
 
 Product Optimizer : [V1 — architecture, capacités et recette](PRODUCT_OPTIMIZER_V1.md)
 — **Implémenté localement le 05/10** : Athena mono-actif / worst-of sous GBM,
 résolution du coupon, contraintes avec IC95, classement, comparaison et Pareto.
-Hypothèses manuelles ; convergence, marché qualifié et extensions restent à faire.
+Hypothèses explicites ; convergence temporelle précise, marché qualifié et extensions restent à faire.
+Priorités confirmées le 08/10 : validation quantitative, enrichissement du marché
+et extension des payoffs. Conservation/exploitation des recherches dans un second
+temps ; Copilot après l'Optimizer.
+Calcul direct parallèle livré le 08/10 : 1 à 4 candidats simultanés (défaut 2),
+budget CPU/mémoire, annulation et équivalence séquentielle vérifiés. 48 tests
+Optimizer, 5 tests de l'exécuteur et build avec 287 tests frontend réussis.
+Benchmark synthétique de quatre Athena : 26,3 s → 15,4 s avec deux processus.
+[Validation quantitative indépendante du 08/10](projects/pricing/PRODUCT_OPTIMIZER_QUANT_VALIDATION_2026-10-08.md)
+livrée ensuite : cinq candidats au maximum, coupons conservés, nouveaux tirages
+N/2N, métriques par paire, correction de sélection et diagnostic du classement.
+65 tests backend ciblés distincts et 288 tests frontend réussis. Référence GBM
+aux dates contractuelles sur trois scénarios, 60 contrôles compatibles ;
+convergence temporelle à quelques bps encore à qualifier. Benchmark complet
+avec validation : 31,4 s → 17,9 s, résultats identiques et classement signalé
+incertain lorsque les intervalles se recouvrent.
+[Marché et économie d’émission du 08/10](projects/pricing/PRODUCT_OPTIMIZER_MARKET_ECONOMICS_2026-10-08.md)
+livrés ensuite : copie explicite de la session Pricer GBM, snapshot tracé par
+champ, courbes de taux/dividendes, funding en actualisation et budget payoff net
+de frais/marge. 95 tests backend ciblés distincts et build avec 299 tests frontend
+réussis ; équivalence des processus avec courbes et coûts vérifiée. Les sources
+restent des hypothèses, sans certification de marché ; prochaine extension Phoenix.
+[Payoffs et champs dynamiques du 08/10](projects/pricing/PRODUCT_OPTIMIZER_PAYOFFS_2026-10-08.md)
+livrés ensuite : Phoenix, mémoire, Athena dégressif et reverse convertible européenne.
+Champs issus des paramètres du script sélectionné, refus des champs inapplicables,
+coupons Phoenix à plusieurs dates et mémoire qualifiés, séries de rappel explicites.
+142 tests backend ciblés distincts et build avec 305 tests frontend réussis.
+[Participation, cap et gear put du 08/10](projects/pricing/PRODUCT_OPTIMIZER_PARTICIPATION_GEAR_2026-10-08.md)
+complète les huit familles et précise les quantités résolues, les unités et la perte en capital.
+164 tests backend ciblés distincts et build avec 308 tests frontend réussis.
+Recette navigateur des quatre modes de ce lot sur base isolée ; smile et convergence temporelle restent ouverts.
+[Marché automatique et recherche complète du 08/10](projects/pricing/PRODUCT_OPTIMIZER_AUTOMATIC_MARKET_SEARCH_2026-10-08.md)
+ajoute le chargement par panier et date, la classification du référentiel,
+les surcharges tracées, les axes fixes / explorés, 256 candidats au maximum,
+le budget temps configurable et l’arrêt avec résultat partiel.
+193 tests backend ciblés et 321 tests frontend avec build réussis ; recette API
+isolée de 135 Phoenix terminée en environ 17 minutes, aucun échec, un candidat
+confirmé parmi cinq validations indépendantes terminées. Date de pricing explicite, parcours
+à l’émission ; taux et funding manuels, volatilités réalisées non implicites.
+Recette visuelle bloquée par l’accès navigateur à localhost.
+[Dossiers et page de résultats du 08/10](projects/pricing/PRODUCT_OPTIMIZER_RESEARCH_WORKSPACE_2026-10-08.md)
+implémentés à la demande suivante de Philippe : résultats sur page dédiée,
+radar à échelles explicites, panneaux repliables/scrollables et aides de champs.
+Bibliothèque **Recherches & pricings** : sauvegarde propriétaire de la demande,
+de l’intention, du marché figé et des prix, versions liées, archive et export.
+Calcul détaché de la page, résultats partiels conservés et reprise explicite.
+59 tests backend ciblés distincts, dont une recette réelle à deux processus,
+et 346 tests frontend avec build réussis ;
+activation de ces nouvelles routes et de la table au redémarrage du backend.
+Le Copilot et l’exploitation AI des dossiers restent à réaliser.
+
+Retour utilisateur traité dans la même note : un seul défilement vertical sur les
+résultats, tableau paginé par 10/25, admissibilité provisoire distincte de la
+confirmation et diagnostic explicite des rejets Monte-Carlo. Reprise proposée à
+16 000 paires depuis 4 000, à contraintes et marché conservés, sans lancement
+automatique. Dossier utilisateur lu seulement pour le diagnostic ; 355 tests
+frontend et build réussis après ce correctif, sans modification backend.
+
+[Contrôles de fusion PayScript / Optimizer du 08/10](audits/RECETTE_FUSION_PAYSCRIPT_OPTIMIZER_2026-10-08.md) :
+deux échecs du premier contrôle GitHub corrigés, date de paiement final transmise
+au solveur et à la grille résiduelle, réponse fictive AMC conforme au validateur ;
+32 tests backend ciblés distincts réussis. État GitHub et fusion dans la PR #1.
+
+État au contrôle final du lot précédent (historique) :
+Backend à lancer pour utiliser ce lot (aucun serveur actif au contrôle final) ;
+recette visuelle non refaite après le blocage d’accès localhost du navigateur.
 Note placée à ce chemin sur demande explicite de Philippe.
+
+Modèles de volatilité : [validation du 07/10](audits/VALIDATION_MODELES_VOL_2026-10-07.md)
+et [autocalls sur cible commune](audits/AUTOCALL_SURFACE_COMMUNE_2026-10-07.md)
+— **Benchmark hors interface exécuté** : référence SABR spot indépendante par PDE,
+estimation conditionnelle LSV corrigée, cible SSVI sans arbitrage et dix prix
+d'autocalls quatre ans mono / worst-of. Calls, puts, digitaux et convergence
+temporelle passent les seuils retenus à 208 pas/an dans les régimes testés.
+Local Vol et LSV reproduisent la cible ; Heston reste approximatif et SABR à
+paramètres constants insuffisant. Ces écarts de calibration limitent le comparatif.
+Le [workflow de surface du 07/10](projects/pricing/VOL_SURFACE_EDITOR_2026-10-07.md)
+est désormais intégré : profils Actions/Indices selon le niveau de vol, édition
+à la souris, matrice synchronisée, cible transmise à LV/LSV et ajustement
+indicatif Heston/SABR. Build avec 254 tests frontend et recette navigateur
+isolée. Les ajustements paramétriques et la précision restent à améliorer ;
+le défaut de l'application reste 52 pas/an.
+
+La [recette quantitative des profils intégrés du 07/10](audits/RECETTE_SMILE_INTEGRE_2026-10-07.md)
+reprend l'autocall quatre ans à 20 % et 30 % ATM, mono et worst-of :
+20 calculs API, flux réconciliés, contrôles indépendants de vanilles/digitaux,
+édition de courbe effectivement consommée et convergence 52/104/208 pas/an.
+Les petites alertes de la passe principale ne sont pas reproduites après
+augmentation des trajectoires ; elles restent consignées. À 30 %, Local Vol
+coûte seulement 0,08 point en mono et 0,39 en multi face au constant ;
+à 20 %, les écarts sont 0,97 et 1,86 point. Hypothèses synthétiques.
+SABR reste insuffisamment calibré (jusqu'à 143 bps vanille / 403 bps digital).
+Les prix affinés utilisent 208 pas/an ; la revue dédiée LV à 30 % mesure
+encore 6–8 bps entre 52 et 208, sans franchissement du seuil statistique retenu.
 
 CCR : [Intégration du risque de contrepartie](projects/pricing/CCR_IMPLEMENTATION_2026-09-28.md)
 — **Socle et extensions CCR 1.2 présents dans le code au 05/10** : référentiel
@@ -233,11 +355,19 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 | `AUDIT_FRONT_TO_RISK_2026-08-07.md` | 07/08 | RFQ → booking → MtM → Greeks → risque : 6 P1, 13 P2, 6 P3 | Suivi | Revue 05/10 : CORS restreint par défaut ; UAT filtré dans CCR, pas dans les agrégats historiques ; Mode Démo non branché dans les vues inspectées. Autres P2/P3 non revérifiés |
 | `AUDIT_CONVENTIONS_PRICING_2026-09-08.md` | 08/09 | Conventions de `CLAUDE.md` mesurées : code conforme, 4 écarts de documentation | Clos selon le rapport | Revue 05/10 : quatre tests A7 existent ; assertions lues, sans nouvelle exécution |
 | [REVUE_DOCUMENTAIRE_2026-10-05.md](audits/REVUE_DOCUMENTAIRE_2026-10-05.md) | 05/10 | Confrontation des points de reprise au code et aux tests présents | Lecture statique terminée | Recettes et mesures restant ouvertes distinguées des corrections implémentées |
+| [AUDIT_AUTOCALL_SMILE_2026-10-06.md](audits/AUDIT_AUTOCALL_SMILE_2026-10-06.md) | 06/10 | Revue des prix mono / multi, référence GBM indépendante, arbitrage de la cible et contrôle du pas | GBM corroboré ; comparatif smile non validé en l’état | Surface sans arbitrage, calibration commune et convergence à reprendre |
+| [AUDIT_CALLS_MODELES_2026-10-07.md](audits/AUDIT_CALLS_MODELES_2026-10-07.md) | 07/10 | Première grille calls / puts sur cinq modèles et cas limites | Diagnostic initial | Prolongé par la validation du même jour |
+| [VALIDATION_MODELES_VOL_2026-10-07.md](audits/VALIDATION_MODELES_VOL_2026-10-07.md) | 07/10 | Correction LSV, référence SABR/PDE, vanilles et digitaux mono / marginales multi | Premier lot historique ; prolongé par le benchmark de cible commune | Limites de précision initiales traitées à 208 pas/an sur la grille du benchmark |
+| [AUTOCALL_SURFACE_COMMUNE_2026-10-07.md](audits/AUTOCALL_SURFACE_COMMUNE_2026-10-07.md) | 07/10 | SSVI sans arbitrage, calibration, vanilles, convergence, dix autocalls et flux séparés | Benchmark hors interface exécuté ; 29 tests ciblés passent | Ajustements Heston/SABR imparfaits ; workflow surface et précision à intégrer |
 
 ### `projects/pricing/`
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [COMPARAISON_AUTOCALL_4ANS_MODELES_2026-10-06.md](projects/pricing/COMPARAISON_AUTOCALL_4ANS_MODELES_2026-10-06.md) | 06/10 | Athena 4 ans, cinq modèles de vol, mono et worst-of à deux actifs | Dix prix calculés et flux réconciliés | Hypothèses explicites non calibrées ; convergence du pas et calibration hors périmètre |
+| [VOL_SURFACE_EDITOR_2026-10-07.md](projects/pricing/VOL_SURFACE_EDITOR_2026-10-07.md) | 07/10 | Profils indicatifs Actions/Indices par niveau de vol, courbes éditables, matrice et consommation moteur | Implémenté ; tests ciblés, build et recette navigateur | Ajustements paramétriques approximatifs, précision et chocs de forme SSVI à approfondir |
+| [PAYSCRIPT_PRESETS_EDITOR_2026-10-07.md](projects/pricing/PAYSCRIPT_PRESETS_EDITOR_2026-10-07.md) | 07/10 | Éditeur unique, réglages avancés locaux et 15 exemples préremplis partagés Pricer/RFQ | Implémenté ; 109 tests backend ciblés, build avec 284 tests frontend et recette navigateur | Termes illustratifs à adapter ; pas de nouvelle recette de booking/cycle de vie |
+| [COMPARAISON_AUTOCALL_SMILE_ACTIONS_2026-10-06.md](projects/pricing/COMPARAISON_AUTOCALL_SMILE_ACTIONS_2026-10-06.md) | 06/10 | Même Athena avec skew actions renforcé ; prix, écarts et smile implicite simulé | Sorties conservées avec réserve après audit | Cible invalide dans l’aile basse ; calibration commune et validation numérique restent à faire |
 | `PAYSCRIPT_PARAM_PAR_OBSERVATION.md` | 18/07 | `PARAM()` à une valeur par observation, convention `M_` ; valeur initiale obligatoire depuis le 14/09 | Fait | — |
 | `SCRIPTING_IA_DESIGN.md` | 03/08 | Assistant de scripting : référence sous test, fournisseurs (Ollama par défaut), fiche de contrôle, écho d'intention ; phases 0 à 4 codées | Fait | Choisir le modèle local (`backend/scripts/eval_script_assistant.py`) ; aligner le corpus sur le catalogue de modèles |
 | `CONSTATATIONS_PERIODE_DESIGN.md` | 10-11/09, suivi 05/10 | MIN/MAX/AVG, PERIOD, INDEX, calendriers et fixings ; theta conserve désormais les métadonnées | En cours | Recette P&L explain/KID et REALVOL à fenêtre de départ ouverte ; theta indisponible sur transitions non résolues |
@@ -274,6 +404,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [DESK_SIMULATION_ACTION_PLAN_2026-10-08.md](projects/platform/DESK_SIMULATION_ACTION_PLAN_2026-10-08.md) | 08/10 | Simulation du desk pour tester et améliorer Structura : contrats, agents, horloge, interface, contrôles et rejeu | Cadrage | Inventaire du lot 0, choix du pilote et lots 1 à 7 ; aucune implémentation |
 | `PLAN_IMPLEMENTATION_OBJET_PRODUCT.md` | 14/09, suivi 05/10 | Dossier canonique présent sur main : RFQ/indicatif/booking/lifecycle/MtM/VaR/documents ; création interne aux gestes durables | En cours | Reprise historique et consolidation des consommateurs secondaires ; aucun repli MtM/VaR pour un deal sans Product |
 | [ORGANIZATION_ACCESS_DESIGN_2026-09-24.md](projects/platform/ORGANIZATION_ACCESS_DESIGN_2026-09-24.md) | 24/09, suivi 05/10 | Admission, propriété par organisation, habilitations et desks | Cadrage, non implémenté | Invitations, approbations, migration, isolation et recette |
 | `HOME_REDESIGN_DESIGN.md` | 19/07 | Accueil en quatre catégories, drill-down | Fait | — |

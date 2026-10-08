@@ -138,7 +138,7 @@ let traceChart = null
 const form = reactive({
   param_name: store.scriptParams[0]?.name || '',
   target_price_pct: store.result ? +(store.result.price * 100).toFixed(2) : 100,
-  lo: 0, hi: 0,
+  lo: null, hi: null,
   N: 8000, tol: 0.0001, max_iter: 40,
 })
 
@@ -150,7 +150,8 @@ const unitSuffix = computed(() => store.paramIsPct(form.param_name) ? ' (%)' : '
 function prefillBounds() {
   const p = store.scriptParams.find(p => p.name === form.param_name)
   if (!p) return
-  const d = p.raw_default
+  const d = store.paramOverrides[p.name] ?? p.display_default
+  if (d == null || d === '' || Array.isArray(d)) { form.lo = null; form.hi = null; return }
   form.lo = +(d * 0.5).toFixed(4)
   form.hi = +(d > 0 ? d * 1.5 : d + 1).toFixed(4)
 }

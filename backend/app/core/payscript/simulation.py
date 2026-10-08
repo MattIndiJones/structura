@@ -28,7 +28,8 @@ def _price_with_params(script: CompiledScript, underlyings, corr_matrix, r: floa
                         base_user_params: dict, overrides: dict,
                         yield_curve=None, sigma_r: float = 0.0, a_r: float = 0.0,
                         barrier_monitoring: str = "weekly",
-                        state: dict | None = None) -> float:
+                        state: dict | None = None, funding_curve=None,
+                        funding_spread: float = 0.0) -> float:
     """Price the product with one or more PARAMs overridden, all else held fixed.
 
     `state` porte l'etat d'un produit deja en cours de vie — memoire de coupons,
@@ -39,6 +40,7 @@ def _price_with_params(script: CompiledScript, underlyings, corr_matrix, r: floa
     res = run_mc(script, underlyings, corr_matrix, r, T, N, model, seed,
                  antithetic=True, user_params=user_params,
                  yield_curve=yield_curve or [], sigma_r=sigma_r, a_r=a_r,
+                 funding_curve=funding_curve or [], funding_spread=funding_spread,
                  barrier_monitoring=barrier_monitoring, **(state or {}))
     return res["price"]
 
@@ -67,7 +69,8 @@ def solve_for_param(script: CompiledScript, underlyings, corr_matrix, r: float, 
                      N: int = DEFAULT_SOLVER_N, tol: float = 1e-4, max_iter: int = 40,
                      yield_curve=None, sigma_r: float = 0.0, a_r: float = 0.0,
                      barrier_monitoring: str = "weekly",
-                     state: dict | None = None) -> dict:
+                     state: dict | None = None, funding_curve=None,
+                     funding_spread: float = 0.0) -> dict:
     """Bisection root-find: find param_value in [lo, hi] such that
     price(param_value) == target_price.
 
@@ -80,7 +83,8 @@ def solve_for_param(script: CompiledScript, underlyings, corr_matrix, r: float, 
         return _price_with_params(script, underlyings, corr_matrix, r, T, N, model, seed,
                                    base_user_params, {param_name: x},
                                    yield_curve=yield_curve, sigma_r=sigma_r, a_r=a_r,
-                                   barrier_monitoring=barrier_monitoring, state=state) - target_price
+                                   barrier_monitoring=barrier_monitoring, state=state,
+                                   funding_curve=funding_curve, funding_spread=funding_spread) - target_price
 
     f_lo, f_hi = f(lo), f(hi)
     trace = [{"iter": 0, "x": lo, "price": f_lo + target_price},

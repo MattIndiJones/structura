@@ -691,6 +691,7 @@ class UnderlyingCreate(BaseModel):
     group: str = "Autres"
     ccy: str = ""
     exchange: str = ""
+    asset_class: Literal["equity", "index", "unknown"] = "unknown"
 
 
 class UnderlyingUpdate(BaseModel):
@@ -698,13 +699,14 @@ class UnderlyingUpdate(BaseModel):
     group: Optional[str] = None
     ccy: Optional[str] = None
     active: Optional[bool] = None
+    asset_class: Literal["equity", "index", "unknown"] = None
 
 
 def _underlying_row(u: Underlying) -> dict:
     return {
         "id": u.id, "ticker": u.ticker, "label": u.label,
         "group": u.group_name, "ccy": u.ccy, "exchange": u.exchange,
-        "active": u.active,
+        "active": u.active, "asset_class": u.asset_class,
     }
 
 
@@ -760,6 +762,7 @@ def create_underlying(
         # de cotation, qui ne dit rien d'une place multidevise.
         ccy=((body.ccy or "").strip() or sonde.get("ccy") or "EUR").upper(),
         exchange=(body.exchange or "").strip(),
+        asset_class=body.asset_class,
     )
     session.add(u)
     session.commit()

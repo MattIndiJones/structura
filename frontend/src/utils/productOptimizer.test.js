@@ -12,6 +12,14 @@ describe('Product Optimizer', () => {
   it('never recommends a rejected candidate', () => {
     expect(rankedCandidates({candidates:[{rank:1,constraint_status:'REJECTED'},{rank:2,constraint_status:'PASS'}]})).toEqual([{rank:2,constraint_status:'PASS'}])
   })
+  it('excludes exploration-only and unfinished holdout candidates from recommendations', () => {
+    const confirmed = {rank:1, constraint_status:'PASS', validation_status:'PASSED'}
+    expect(rankedCandidates({validation:{complete:false}, candidates:[
+      {rank:null,constraint_status:'PASS',validation_status:'NOT_SELECTED'},
+      {rank:null,constraint_status:'PASS',validation_status:'PENDING'},
+      confirmed,
+    ]})).toEqual([confirmed])
+  })
   it('handles fragmented UTF-8 streams and requires a final result', async () => {
     vi.stubGlobal('localStorage', {getItem:()=> 'token'})
     const bytes=new TextEncoder().encode('{"type":"progress","message":"évaluation"}\n{"type":"result","result":{}}\n')

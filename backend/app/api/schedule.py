@@ -7,7 +7,7 @@ from ..core.schemas import (BusinessDayRequest, PeriodWindowPreviewRequest,
 from ..core.calendars import (
     BusinessDayConvention, UnsupportedCurrency, add_business_days, adjust,
 )
-from ..core.schedule import (generate_schedule, observation_window,
+from ..core.schedule import (generate_schedule, generate_observation_schedule, observation_window,
                              parse_tenor, period_windows, StubConvention)
 
 router = APIRouter(prefix="/api", tags=["schedule"])
@@ -16,22 +16,23 @@ router = APIRouter(prefix="/api", tags=["schedule"])
 def _parse_date(s: str, field: str) -> date:
     try:
         return date.fromisoformat(s)
-    except ValueError:
+    except (ValueError, TypeError):
         raise HTTPException(status_code=422, detail=f"{field} invalide (attendu YYYY-MM-DD): {s!r}")
 
 
 @router.post("/schedule/generate")
 async def generate_schedule_endpoint(req: ScheduleRequest):
     """Build a CONSTAT()/CONSTAT()() date schedule and its year-fraction preview."""
-    start = _parse_date(req.start_date, "start_date")
+    start = _parse_date(req.first_observation_date or req.start_date, "first_observation_date")
     end = _parse_date(req.end_date, "end_date")
-    roll = _parse_date(req.roll_date, "roll_date")
+    roll = _parse_date(req.roll_date or req.first_observation_date or req.start_date, "roll_date")
 
     try:
         frequency = parse_tenor(req.frequency)
         sub_frequency = parse_tenor(req.sub_frequency) if req.sub_frequency else None
         stub = StubConvention(req.stub)
-        result = generate_schedule(
+        generator = generate_observation_schedule if req.first_observation_date else generate_schedule
+        result = generator(
             start, end, roll, frequency, stub, sub_frequency,
             currency=req.currency,
             convention=BusinessDayConvention(req.convention),
@@ -40,6 +41,7 @@ async def generate_schedule_endpoint(req: ScheduleRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
     return {
+        "first_is_observation": bool(req.first_observation_date),
         "main_dates": [d.isoformat() for d in result["main_dates"]],
         "dates": [d.isoformat() for d in result["dates"]],
         "raw_dates": [d.isoformat() for d in result["raw_dates"]],
@@ -100,7 +102,8 @@ async def period_window_preview_endpoint(req: PeriodWindowPreviewRequest):
             _parse_date(req.roll_date, "roll_date"),
             parse_tenor(req.frequency), StubConvention(req.stub),
             parse_tenor(req.window_frequency), currency=req.currency,
-            convention=BusinessDayConvention(req.convention))
+            convention=BusinessDayConvention(req.convention),
+            first_observation_date=_parse_date(req.first_observation_date, "first_observation_date") if req.first_observation_date else None)
     except (ValueError, UnsupportedCurrency) as e:
         raise HTTPException(status_code=422, detail=str(e))
     # Un calendrier absurde — une année tapée « 0026 » au lieu de « 2026 » — ne

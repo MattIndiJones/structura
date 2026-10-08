@@ -215,7 +215,7 @@ def construire(script, dates_par_constat: dict | None = None,
 
     depart = None
     if script.strike_fix_reduction and script.strike_fix_dates:
-        jours = jours_de_releve.get("STRIKE_FIX") or []
+        jours = jours_de_releve.get(script.initial_fixing_name or "STRIKE_FIX") or []
         plats = jours[0] if jours else []
         depart = FenetreDepart(
             reduction=script.strike_fix_reduction,

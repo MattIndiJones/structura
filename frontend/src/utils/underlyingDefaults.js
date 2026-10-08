@@ -7,6 +7,7 @@ export function defaultUnderlying(n = 1, ccy = 'EUR') {
     v0: 4, kappa: 2, theta: 4, xi: 35, rho_h: -70, rho_rS: 40,
     alpha: 20, beta: 50, rho: -30, nu: 40,
     skew: -10, curvature: 5, showQuanto: false,
+    asset_class: 'unknown', vol_surface: null, _smileDefaults: true, vol_level_source: 'default',
   }
 }
 

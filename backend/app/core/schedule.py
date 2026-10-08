@@ -227,10 +227,30 @@ def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
     }
 
 
+def generate_observation_schedule(first: date, end: date, roll_date: date,
+                                  frequency: Tenor, stub: StubConvention,
+                                  sub_frequency: Tenor | None = None, *,
+                                  currency: str | None = None,
+                                  convention=BusinessDayConvention.NONE,
+                                  settlement_lag: int = 0) -> dict:
+    """An inclusive observation calendar, including the one-observation case."""
+    if end != first:
+        return generate_schedule(first, end, roll_date, frequency, stub, sub_frequency,
+                                 currency=currency, convention=convention,
+                                 settlement_lag=settlement_lag)
+    if settlement_lag and not currency:
+        raise ValueError('Un décalage de règlement exige une devise.')
+    observed = adjust(first, currency, convention) if currency else first
+    paid = add_business_days(observed, settlement_lag, currency) if currency else observed
+    return dict(main_dates=[observed], dates=[observed], raw_dates=[first],
+                payment_dates=[paid], year_fractions=[(observed-first).days / DAYS_PER_YEAR])
+
+
 def period_windows(start: date, end: date, roll_date: date, frequency: Tenor,
                     stub: StubConvention, sample: Tenor, *,
                     currency: str | None = None,
                     convention: BusinessDayConvention = BusinessDayConvention.NONE,
+                    first_observation_date: date | None = None,
                     ) -> tuple[list[date], list[list[date]]]:
     """Constatations d'un calendrier, et les relevés que chacune moyenne.
 
@@ -251,6 +271,16 @@ def period_windows(start: date, end: date, roll_date: date, frequency: Tenor,
     ouverte à gauche et fermée à droite, si bien qu'une date de roll partagée
     par deux périodes n'est comptée qu'une fois.
     """
+    if first_observation_date is not None:
+        if start >= first_observation_date:
+            raise ValueError('Le début de période doit précéder la première observation.')
+        obs = generate_observation_schedule(first_observation_date, end, roll_date,
+            frequency, stub, currency=currency, convention=convention)['dates']
+        boundaries = [start, *obs]
+        windows = [generate_schedule(lo, hi, hi, sample, StubConvention.SHORT_FIRST,
+                     currency=currency, convention=convention)['dates'][1:] or [hi]
+                   for lo, hi in zip(boundaries[:-1], boundaries[1:])]
+        return obs, windows
     full = generate_schedule(start, end, roll_date, frequency, stub,
                              sub_frequency=sample, currency=currency,
                              convention=convention)
@@ -293,7 +323,7 @@ def observation_window(anchor: date, length: Tenor, frequency: Tenor, *,
     """
     if length.unit == "D":
         span = length.value - 1          # anchor already counts as one point
-        limit = (add_business_days(anchor, span if forward else -span, currency)
+        limit = anchor if span == 0 else (add_business_days(anchor, span if forward else -span, currency)
                  if currency else
                  anchor + timedelta(days=span if forward else -span))
     else:
@@ -302,7 +332,11 @@ def observation_window(anchor: date, length: Tenor, frequency: Tenor, *,
     out: list[date] = []
     k = 0
     while True:
-        if frequency.unit == "D" and currency:
+        if k == 0:
+            # A zero business-day shift rolls a closed day forward. Sampling
+            # must retain its anchor until the explicit convention is applied.
+            d = anchor
+        elif frequency.unit == "D" and currency:
             step = frequency.value * k
             d = add_business_days(anchor, step if forward else -step, currency)
         else:

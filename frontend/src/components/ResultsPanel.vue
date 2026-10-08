@@ -413,7 +413,7 @@
       <!-- ── Spots ────────────────────────────────────────────────── -->
       <div class="flex flex-col gap-2">
         <div class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">
-          Niveaux initiaux constatés (S₀)
+          {{ store.result?.pre_strike ? 'Fixing initial à venir (S₀)' : 'Niveaux initiaux constatés (S₀)' }}
           <HelpTip text="Clôture NON AJUSTÉE de chaque sous-jacent à la date de strike — le fixing officiel, celui que cite un term sheet. Quand une valorisation en cours de vie a eu lieu, ce sont les niveaux que le moteur a réellement retenus pour mesurer les performances, donc ceux qui ont produit le prix ci-dessus." />
         </div>
         <div class="flex flex-col gap-2">
@@ -422,7 +422,10 @@
             <span class="font-semibold text-slate-200 min-w-[80px]">
               <SensitiveValue placeholder="SJ">{{ demo.underlyingLabel(u.name, i) }}</SensitiveValue>
             </span>
-            <template v-if="u.ticker">
+            <span v-if="store.result?.pre_strike" class="text-slate-600">
+              Non encore constaté — simulé au {{ formatDate(inputs.strike_date) }}
+            </span>
+            <template v-else-if="u.ticker">
               <span v-if="spotState[u.ticker]?.loading" class="text-slate-500">chargement…</span>
               <template v-else-if="spotState[u.ticker]?.value">
                 <span class="font-mono font-bold text-slate-100">
@@ -675,7 +678,7 @@ const spotState = reactive({})
 
 async function loadSpots() {
   const inp = inputs.value
-  if (!inp?.underlyings?.length) return
+  if (!inp?.underlyings?.length || store.result?.pre_strike) return
   const jour = inp.strike_date || todayStr()
   const tickers = inp.underlyings.map(u => u.ticker).filter(Boolean)
   for (const t of tickers) {

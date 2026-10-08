@@ -17,6 +17,7 @@ un état, et il signale ses refus par ValuationError.
 from __future__ import annotations
 
 import re
+import copy
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Optional
@@ -169,7 +170,7 @@ def _engine_underlyings(market: dict, underlyings_json: list) -> list[dict]:
             dividend_curve.append([float(maturity), float(rate) / 100.0])
         out.append({
             "name": u_ref.get("name", ""), "ticker": u_ref.get("ticker", ""),
-            "ccy": u.get("ccy", "EUR"),
+            "ccy": u.get("ccy", "EUR"), "spot0": u.get("spot0"),
             "sigma": g("sigma", 0.20), "q": g("q", 0.02),
             "dividend_curve": dividend_curve,
             "dividend_decay": g("dividendDecay", 0.0),
@@ -181,6 +182,9 @@ def _engine_underlyings(market: dict, underlyings_json: list) -> list[dict]:
             "alpha": g("alpha", 0.20), "beta": g("beta", 0.50),
             "rho": g("rho", -0.30), "nu": g("nu", 0.40),
             "skew": g("skew", -0.10), "curvature": g("curvature", 0.05),
+            "vol_surface": copy.deepcopy(u.get('vol_surface')),
+            "asset_class": u.get('asset_class','unknown'),
+            "smile_parameter_mode": u.get('smile_parameter_mode','automatic'),
         })
     return out
 
@@ -295,7 +299,7 @@ def _etat_repris_par_la_variante(memo: dict, script_variante: str) -> dict:
     montre à côté du prix. Un fait tu vaut moins qu'un fait affiché."""
     ecrites = _variables_ecrites(script_variante)
     return {nom: {"valeur": valeur, "lu_par_la_variante": nom in ecrites}
-            for nom, valeur in (memo or {}).items()}
+            for nom, valeur in (memo or {}).items() if not nom.startswith('__')}
 
 
 def _compiler_variante(variant: VariantTerms, p: InLifeProduct,
@@ -343,7 +347,7 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
     market = p.market
     underlyings_json = list(p.underlyings)
     tickers = [u["ticker"] for u in underlyings_json if u.get("ticker")]
-    if not tickers:
+    if not tickers and asof >= p.strike_date:
         raise ValuationError("Aucun ticker défini sur ce deal")
 
     try:
@@ -483,8 +487,8 @@ def _assembler_residuel(p: InLifeProduct, market: dict, underlyings_json: list,
     Les deux régimes se rejoignent ici parce qu'à partir de ce point ils sont
     le même exercice : substituer les termes d'une variante, décaler le
     calendrier de `T_elapsed`, conditionner la courbe de dividende. Avant le
-    strike `T_elapsed` vaut zéro, donc le décalage et le conditionnement sont
-    des identités et le produit à pricer est le produit d'origine."""
+    strike `T_elapsed` est négatif : les événements et le fixing futur sont
+    décalés sur l'axe qui commence à la date de valorisation."""
 
     # ── Le point où le passé et l'avenir cessent d'être le même produit ──
     #

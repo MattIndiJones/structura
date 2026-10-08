@@ -145,7 +145,7 @@ function onToggle(event) {
 
 async function load() {
   const r = props.request
-  if (!r?.start_date || !r?.end_date || !r?.frequency) {
+  if (!(r?.first_observation_date || r?.start_date) || !r?.end_date || !r?.frequency) {
     error.value = 'Calendrier incomplet — dates et fréquence requises.'
     return
   }
@@ -177,7 +177,7 @@ async function loadFenetres(r) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        start_date: r.start_date, end_date: r.end_date, roll_date: r.roll_date,
+        start_date: r.period_start_date || r.start_date, first_observation_date: r.first_observation_date, end_date: r.end_date, roll_date: r.roll_date || r.first_observation_date,
         frequency: r.frequency, window_frequency: props.windowFrequency,
         stub: r.stub, currency: r.currency, convention: r.convention || 'none',
       }),
@@ -222,7 +222,7 @@ const rows = computed(() => {
 
   return d.dates.map((date, i) => ({
     date,
-    index: i === 0 ? null : i,
+    index: d.first_is_observation ? i + 1 : i === 0 ? null : i,
     weekday: weekdayOf(date),
     payment: d.payment_dates?.[i] !== date ? d.payment_dates?.[i] : null,
     days: periods[i],
@@ -238,8 +238,8 @@ const summary = computed(() => {
   if (!d?.dates?.length) return ''
   const r = props.request
   const parts = [
-    `${d.dates.length - 1} constatation${d.dates.length > 2 ? 's' : ''}`,
-    `${d.dates[1] || d.dates[0]} → ${d.dates[d.dates.length - 1]}`,
+    `${d.dates.length - (d.first_is_observation ? 0 : 1)} constatation(s)`,
+    `${d.dates[d.first_is_observation ? 0 : 1] || d.dates[0]} → ${d.dates[d.dates.length - 1]}`,
   ]
   if (r.frequency) parts.push(`tous les ${r.frequency}`)
   if (STUB_LABELS[r.stub]) parts.push(STUB_LABELS[r.stub])

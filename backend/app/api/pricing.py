@@ -78,9 +78,12 @@ def parse_endpoint(req: ParseRequest):
                 "is_pct": p.is_pct,
                 "desc": p.desc,
                 "kind": p.kind,
+                "required": p.required,
             } for p in compiled.params],
             constats=[{"name": c.name, "kind": c.kind, "reduction": c.reduction,
-                       "window_scope": c.window_scope} for c in compiled.constats],
+                       "window_scope": c.window_scope, "role": c.role} for c in compiled.constats],
+            underlying=compiled.underlying_name,
+            initial_fixing=compiled.initial_fixing_name,
             events_count=len(compiled.events),
             has_stop=compiled.has_stop,
             has_maturity_event=any(
@@ -107,8 +110,8 @@ def price_endpoint(req: PricingRequest):
     # L'axe du temps s'ancre sur la date de strike : c'est là que le niveau
     # initial est constaté, donc là que la diffusion démarre. Sans elle, on
     # retombe sur `anchor` — la value date, comme avant.
-    origin = analysis_origin(req)
     try:
+        origin = analysis_origin(req)
         compiled = parse_script(req.script)
         # Meme resolveur que toutes les analytiques : c'est ce qui garantit que
         # le profil, les probas ou la grille decrivent le produit qu'on price.

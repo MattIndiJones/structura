@@ -1,6 +1,9 @@
 # PayScript — UNDERLYING, StartDate et paramètres Economics
 
-**État au 06/10/2026 : audit statique et proposition, sans implémentation.**
+**Document de conception antérieur à l'implémentation du 06/10/2026.**
+L'existant décrit ci-dessous est celui de l'audit préalable. Pour le code livré,
+les tests et le nettoyage autorisé, lire le
+[rapport d'implémentation](PAYSCRIPT_STARTDATE_IMPLEMENTATION_2026-10-06.md).
 Demande de Philippe : examiner l'existant avant de coder, reprendre les modèles
 Normal/Expert, déclarer les paramètres sans valeur obligatoire, rendre le fixing
 initial explicite et séparer les flux coupon, capital et put.

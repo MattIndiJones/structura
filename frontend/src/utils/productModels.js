@@ -78,14 +78,25 @@ export function buildModelCalendars(model, { strikeDate, tenorCode }) {
       ...(spec.window_frequency ? { window_frequency: tenorPair(spec.window_frequency) } : {}),
     }
     if (spec.role === 'observations') {
+      const frequency = tenorPair(spec.frequency)
+      let first = maturity
+      if (frequency) {
+        if (['M', 'Y'].includes(frequency.unit)) first = addMonthsIso(strikeDate, frequency.value * (frequency.unit === 'Y' ? 12 : 1))
+        else {
+          const day = new Date(`${strikeDate}T00:00:00Z`)
+          day.setUTCDate(day.getUTCDate() + frequency.value * (frequency.unit === 'W' ? 7 : 1))
+          first = day.toISOString().slice(0, 10)
+        }
+      }
       constats[name] = {
-        start_date: strikeDate, end_date: maturity, roll_date: strikeDate,
+        first_observation_date: first > maturity ? maturity : first,
+        period_start_date: strikeDate, end_date: maturity, roll_date: strikeDate,
         frequency: tenorPair(spec.frequency), stub: 'short_last',
         convention: 'none', settlement_lag: 0, ...windows,
       }
     } else if (spec.role === 'maturity') {
       constats[name] = { date: maturity, ...windows }
-    } else if (spec.role === 'strike_window') {
+    } else if (spec.role === 'initial_fixing' || spec.role === 'strike_window') {
       constats[name] = { date: strikeDate, ...windows }
     }
   }
