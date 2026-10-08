@@ -9,6 +9,7 @@ Greeks: CRN bump-and-reprice.
 Analytics: payoff profile, MC paths visualization, probability analysis, historical backtest.
 """
 from __future__ import annotations
+from .bindings import effective_parameters
 import bisect
 import math
 import time
@@ -362,11 +363,34 @@ def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int 
     the Dupire inversion is built on are discounted at the same curve that
     discounts the payoff — the calibration is the third place a rate enters a
     pricing run, and it used to be the one nobody wired to the curve."""
-    logKmin, logKmax = math.log(0.20), math.log(3.0)
+    has_surface = any(u.get('vol_surface') for u in underlyings)
+    if has_surface:
+        nK = max(nK, 300)
+    logKmin, logKmax = ((math.log(.01), math.log(10.)) if has_surface
+                       else (math.log(.20), math.log(3.)))
     Ks = [math.exp(logKmin + i/(nK-1)*(logKmax-logKmin)) for i in range(nK)]
     grids = []
     dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
     for asset_index, u in enumerate(underlyings):
+        if u.get('vol_surface'):
+            from ..volatility_surface import surface_from_underlying
+            surface = surface_from_underlying(u, ts*dt)
+            grid = np.empty((ts, nK), dtype=np.float64)
+            for step in range(ts):
+                t = (step+.5)*dt
+                # Integrate the same carry used by the diffusion, interpolated
+                # to mid-step. Dupire derivatives are at fixed forward k.
+                r0 = rates.r_flat if rates.zero is None else float(rates.zero[step])
+                r1 = rates.r_flat if rates.zero is None else float(rates.zero[step+1])
+                carry = (r0*step*dt+r1*(step+1)*dt)/2
+                carry -= (u.get('q',.02)*t if dividend_steps is None else
+                          float(dividend_steps[:step,asset_index].sum())*dt+
+                          .5*dt*float(dividend_steps[step,asset_index]))
+                grid[step] = surface.local_vol(np.log(Ks)-carry,t)
+            if not np.all(np.isfinite(grid)) or np.any(grid <= 0) or np.any(grid > 3):
+                raise ValueError('Surface de volatilité hors du domaine numérique Local Vol/LSV.')
+            grids.append(grid)
+            continue
         sig0 = u.get("sigma", 0.20)
         skew = u.get("skew", 0.0)
         curv = u.get("curvature", 0.0)
@@ -667,9 +691,41 @@ def _simulate_lv(ts: int, n: int, N: int, dt: float, sq_dt: float,
 
 # Minimum paths a log-moneyness bucket needs before its E[V|S] estimate is
 # trusted — see _simulate_lsv. Below this, the bucket average is too noisy
-# (especially early time steps, before paths have dispersed), so we fall
-# back to the step's unconditional mean variance instead.
+# (especially early time steps, before paths have dispersed), so we borrow
+# neighbouring spot buckets instead of the unconditional variance.
 _LSV_MIN_BUCKET_PATHS = 30
+# Conditional variance needs finer spot resolution than the local-vol lookup,
+# particularly for short-dated digitals. Keep these two grids independent.
+_LSV_CONDITIONAL_BUCKETS = 200
+
+
+def _lsv_conditional_variance(bucket_indices: np.ndarray, variance: np.ndarray,
+                              n_buckets: int) -> np.ndarray:
+    """Estimate E[V|S], widening only thin spot buckets to local neighbours.
+
+    Substituting E[V] in a thin tail erases the spot/variance dependence and
+    creates excess downside variance even with a flat local-vol target.
+    Symmetric windows retain that dependence while keeping at least 30
+    particles (or the whole sample when fewer are available). Dense buckets
+    retain their own conditional mean. Only start-of-step variance is used.
+    """
+    sums = np.bincount(bucket_indices, weights=variance, minlength=n_buckets)
+    counts = np.bincount(bucket_indices, minlength=n_buckets)
+    cumulative_sum = np.concatenate(([0.], np.cumsum(sums)))
+    cumulative_count = np.concatenate(([0], np.cumsum(counts)))
+    occupied = np.flatnonzero(counts)
+    lo = occupied.copy()
+    hi = lo + 1
+    count = cumulative_count[hi] - cumulative_count[lo]
+    minimum = min(_LSV_MIN_BUCKET_PATHS, variance.size)
+    while np.any(count < minimum):
+        thin = count < minimum
+        lo[thin] = np.maximum(lo[thin]-1, 0)
+        hi[thin] = np.minimum(hi[thin]+1, n_buckets)
+        count = cumulative_count[hi] - cumulative_count[lo]
+    means = np.zeros(n_buckets)
+    means[occupied] = np.maximum(cumulative_sum[hi]-cumulative_sum[lo], 0.) / np.maximum(count, 1)
+    return means[bucket_indices]
 
 
 def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
@@ -680,9 +736,11 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
     """Local-Stochastic Vol (Guyon & Henry-Labordère) — a stochastic variance
     process (the same Heston QE dynamics as _simulate_heston, but vectorized
     via _heston_qe_vectorized) whose effect on the spot is rescaled at every
-    time step by a "leverage" function so that the MARGINAL distribution of
-    the spot always matches the Dupire local vol target (lv_grids, the exact
-    same grid _simulate_lv calibrates to) — while the PATH dynamics (forward
+    time step by a "leverage" function to approximate the MARGINAL distribution
+    implied by the Dupire local vol target (lv_grids, the same grid used by
+    _simulate_lv). Finite particles, buckets, steps and clipping leave a
+    calibration residual which must be checked on vanillas and digitals.
+    The PATH dynamics (forward
     skew) behave like a genuine stochastic-vol model instead of local vol's
     unrealistically flat forward skew. This is the reason to prefer LSV over
     plain local vol for barrier/autocall-type payoffs, which are sensitive
@@ -695,12 +753,13 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
     below — which only the step-major structure gives for free.
 
     Particle method, at each (step, underlying):
-      1. Bucket the current cross-section (S, V_old) into the same nK
-         log-moneyness bins as lv_grids, and average V_old within each bucket
+      1. Bucket the current cross-section (S, V_old) into a finer conditional
+         log-moneyness grid (independent of lv_grids), and average V_old within each bucket
          -> an estimate of the conditional expectation E[V|S] (the
          "particles" of the method). Buckets with fewer than
-         _LSV_MIN_BUCKET_PATHS paths fall back to the step's unconditional
-         mean V_old instead of a noisy per-bucket average. V_old (the
+         _LSV_MIN_BUCKET_PATHS paths borrow adjacent spot buckets until
+         sufficiently populated, rather than using unconditional variance.
+         V_old (the
          variance already known at the start of this step), not V_next or an
          average of the two — see the inline comment where it's used for why
          that matters (martingale property).
@@ -727,6 +786,11 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
     V = [np.full(N, u.get("v0", 0.04), dtype=np.float64) for u in underlyings]
 
     dlogK = (logKmax - logKmin) / (nK - 1)
+    # Preserve conditional spot resolution when an offline target supplies a
+    # wider LV domain. The historical [.2,3] grid still has exactly 200 bins.
+    conditional_buckets = max(_LSV_CONDITIONAL_BUCKETS,
+        round((logKmax-logKmin)/math.log(15)*(_LSV_CONDITIONAL_BUCKETS-1))+1)
+    conditional_step = (logKmax-logKmin)/(conditional_buckets-1)
     dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
 
     for step in range(ts):
@@ -752,8 +816,8 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
             g = lv_grids[i]
             lv_target = g[step, k0] * (1.0-frac) + g[step, k0+1] * frac
 
-            # Particle-method conditional expectation E[V|S], bucketed on the
-            # same log-moneyness grid as the local vol lookup above. Uses
+            # Particle-method conditional expectation E[V|S], bucketed on a
+            # finer grid than the local-vol lookup above. Uses
             # V_old (not V_next/V_bar): V_next is computed from zv_i, which is
             # correlated with the SAME Brownian cZ[step,i,:] that drives the
             # spot below — feeding a look-ahead, correlated variance into
@@ -764,13 +828,10 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
             # own shocks, so it's safe to use in both the bucketing and the
             # spot update below. Confirmed empirically by
             # test_heston_spot_process_is_martingale-style E[S_T] check.
-            bucket_sum = np.bincount(k0, weights=V_old, minlength=nK)
-            bucket_cnt = np.bincount(k0, minlength=nK)
-            overall_mean = max(float(V_old.mean()), 1e-6)
-            bucket_mean = np.where(bucket_cnt >= _LSV_MIN_BUCKET_PATHS,
-                                    bucket_sum / np.maximum(bucket_cnt, 1),
-                                    overall_mean)
-            E_V_given_S = bucket_mean[k0]
+            conditional_bucket = np.clip(((logS-logKmin)/conditional_step).astype(int),
+                                          0, conditional_buckets-2)
+            E_V_given_S = _lsv_conditional_variance(conditional_bucket, V_old,
+                                                   conditional_buckets)
 
             leverage = np.clip(lv_target / np.sqrt(np.maximum(E_V_given_S, 1e-6)), 0.2, 5.0)
             eff_vol = leverage * np.sqrt(np.maximum(V_old, 0.0))
@@ -1312,8 +1373,10 @@ def _constater(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
         steps = _strike_fix_steps(script, ts, dt)
         S, bridge_min, bridge_max = _rebaser_sur_le_niveau_initial(
             S, ref, max(steps) if steps else 0, bridge_min, bridge_max)
-    return S, bridge_min, bridge_max, _niveaux_constates(
-        script, S, ts, step_map, releves_realises, dt)
+    levels = _niveaux_constates(script, S, ts, step_map, releves_realises, dt)
+    if ref is not None:
+        levels['__initial_ratio'] = ref
+    return S, bridge_min, bridge_max, levels
 
 
 def _rangs_observation(step_map: dict, dt: float = 1.0 / SY) -> dict:
@@ -1524,6 +1587,22 @@ def _running_state(script, S, n: int, N: int, bridge_min, bridge_max,
     )
 
 
+def _basket_references(underlyings):
+    values = [u.get("spot0") for u in underlyings]
+    return values if values and all(v is not None for v in values) else None
+
+
+def _path_references(values, levels, path):
+    if values is None:
+        return None
+    references = np.asarray(values, dtype=float)
+    references = references[:, path] if references.ndim == 2 else references
+    ratio = (levels or {}).get('__initial_ratio')
+    if ratio is not None:
+        references = references * ratio[:, path]
+    return references.tolist()
+
+
 def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 dt: float, r_eff: float, user_params: dict,
                 step_map: dict, mat_events: list, flux_map: dict,
@@ -1558,7 +1637,9 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 # compter dans aucun état contractuel (REALVOL au premier chef).
                 state_start_step: int = 0,
                 state_out: list | None = None,
-                flows_at_payment: bool = False) -> list[float]:
+                flows_at_payment: bool = False,
+                reference_spots=None,
+                flow_labels_out: list | None = None) -> list[float]:
     """Evaluate PayScript on pre-computed spot paths. Observation-only loop.
 
     wof_min_init / bof_max_init (None, a scalar, or array of shape (N,)) seed the
@@ -1615,8 +1696,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
 
     # PARAM defaults first, user_params (partial or full) override — a caller
     # that omits a param must fall back to its script default, not silently 0.
-    full_params = {p.name: p.stored_val for p in script.params}
-    full_params.update(user_params)
+    full_params = effective_parameters(script.params, user_params)
 
     for path in range(N):
         # Dated cash flows of THIS path, when the caller asks for them.
@@ -1625,6 +1705,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
         # rate of return needs. Off by default: it is the only per-path
         # structure here that grows with the number of flows.
         path_flows: list | None = [] if flows_out is not None else None
+        path_labels: list | None = [] if flow_labels_out is not None else None
         if _sprev is None:
             _spots0 = [1.0] * n
         else:
@@ -1634,6 +1715,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             # copies spots -> s_prev before overwriting spots, so the real
             # previous fixing lands in S_PREV through the normal mechanics.
             "spots": _spots0,
+            "reference_spots": _path_references(reference_spots, lvl_map, path),
             "accum": float(accum_init[path]) if _accum_by_path else accum_init,
             "index": 0,
             "wof_min": 1.0, "bof_max": 1.0, "t": 0.0,
@@ -1720,12 +1802,14 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     ctx["total_cf_raw"] += fl["v"]
                     if path_flows is not None and fl["v"] != 0:
                         path_flows.append((t_pay if flows_at_payment and t_pay is not None else ctx["t"], fl["v"]))
-                    if record and fl["v"] != 0:
-                        key = f"{ctx['t']:.6f}|{fl['lbl']}"
+                        if path_labels is not None:
+                            path_labels.append(fl["lbl"])
+                    if record:
+                        key = f"{ctx['t']:.6f}|{fl['lbl']}|{fl.get('leg', 0)}|{t_pay}"
                         if key not in flux_map:
                             flux_map[key] = {"t": ctx["t"], "lbl": fl["lbl"], "n": 0, "sum": 0.0, "pv": 0.0,
                                              "t_pay": t_pay if t_pay is not None else ctx["t"]}
-                        flux_map[key]["n"] += 1
+                        flux_map[key]["n"] += int(fl["v"] != 0)
                         flux_map[key]["sum"] += fl["v"]
                         flux_map[key]["pv"] += cf
                 if st["done"]:
@@ -1774,12 +1858,14 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     ctx["total_cf_raw"] += fl["v"]
                     if path_flows is not None and fl["v"] != 0:
                         path_flows.append((mat_pay_t if flows_at_payment and mat_pay_t is not None else ctx["t"], fl["v"]))
-                    if record and fl["v"] != 0:
-                        key = f"{ctx['t']:.6f}|{fl['lbl']}"
+                        if path_labels is not None:
+                            path_labels.append(fl["lbl"])
+                    if record:
+                        key = f"{ctx['t']:.6f}|{fl['lbl']}|{fl.get('leg', 0)}|{mat_pay_t}"
                         if key not in flux_map:
                             flux_map[key] = {"t": ctx["t"], "lbl": fl["lbl"], "n": 0, "sum": 0.0, "pv": 0.0,
                                              "t_pay": mat_pay_t if mat_pay_t is not None else ctx["t"]}
-                        flux_map[key]["n"] += 1
+                        flux_map[key]["n"] += int(fl["v"] != 0)
                         flux_map[key]["sum"] += fl["v"]
                         flux_map[key]["pv"] += cf
                 if st["done"]:
@@ -1789,6 +1875,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
         payoffs_raw.append(ctx["total_cf_raw"])
         if flows_out is not None:
             flows_out.append(path_flows)
+        if flow_labels_out is not None:
+            flow_labels_out.append(path_labels)
         if stop_times_out is not None and not ctx["done"]:
             stop_times_out.append(ts * dt)
         if state_out is not None:
@@ -1796,6 +1884,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             # tensor — everything a residual repricing needs to continue from
             # here rather than start over. Mark-to-Future replays each outer
             # scenario up to its mark date and feeds this straight back in.
+            if ctx.get("reference_spots") is not None:
+                ctx["memo"].setdefault("__REFERENCE_SPOTS", list(ctx["reference_spots"]))
             state_out.append({
                 "done": done,
                 "realized_cf": ctx["total_cf"],
@@ -1836,7 +1926,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                           realvol_state_init: dict | None = None,
                           lvl_map: dict | None = None,
                           rank_map: dict | None = None,
-                          state_start_step: int = 0) -> dict:
+                          state_start_step: int = 0, reference_spots=None) -> dict:
     """Like _eval_paths but returns per-path outcome classification.
 
     df_arr (ts+1,) — optional deterministic discount curve; None falls back to
@@ -1869,8 +1959,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
 
     # PARAM defaults first, user_params (partial or full) override — a caller
     # that omits a param must fall back to its script default, not silently 0.
-    full_params = {p.name: p.stored_val for p in script.params}
-    full_params.update(user_params)
+    full_params = effective_parameters(script.params, user_params)
 
     for path in range(N):
         # s_prev_init amorce "spots" (pas "s_prev") : la premiere constatation
@@ -1882,6 +1971,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
             _spots0 = list(_sprev[:, path]) if _sprev_by_path else list(_sprev)
         ctx = {
             "spots": _spots0,
+            "reference_spots": _path_references(reference_spots, lvl_map, path),
             "accum": float(accum_init[path]) if _accum_by_path else accum_init,
             "index": 0,
             "wof_min": 1.0, "bof_max": 1.0, "t": 0.0,
@@ -2098,7 +2188,7 @@ def run_mc(script: CompiledScript,
            wof0_init: float | None = None,
            realvol_state_init: dict | None = None,
            fix_state_init: dict | None = None,
-           per_path_flows: bool = False):
+           per_path_flows: bool = False, per_path_flow_labels: bool = False):
 
     t0 = time.perf_counter()
     if barrier_monitoring not in ("weekly", "continuous"):
@@ -2109,7 +2199,7 @@ def run_mc(script: CompiledScript,
         )
     use_bridge = barrier_monitoring == "continuous"
     validate_model(model, underlyings)
-    user_params = user_params or {}
+    user_params = effective_parameters(script.params, user_params)
     n = len(underlyings)
     T = T_max + dt_add
     validate_compiled_dates(script)
@@ -2331,6 +2421,9 @@ def run_mc(script: CompiledScript,
     br_min_b, br_max_b = _bridge_extrema(S_base, vol_base, dt, rng) if use_bridge else (None, None)
     # Puis, si le strike n'est pas encore constaté, chaque trajectoire fixe le
     # sien. Après le pont, qui se tire lui aussi aux vrais niveaux.
+    raw_references_base = _basket_references(underlyings)
+    if raw_references_base is not None and strike_step:
+        raw_references_base = np.asarray(raw_references_base)[:, None] * S_base[strike_step]
     S_base, br_min_b, br_max_b = _fixer_le_strike_sur_les_trajectoires(
         S_base, strike_step, br_min_b, br_max_b)
     # Puis la constatation sur periode : S0 par sous-jacent, rebasage, et les
@@ -2341,6 +2434,7 @@ def run_mc(script: CompiledScript,
 
     stop_times_base: list[float] | None = [] if script.has_stop else None
     flows_base: list | None = [] if per_path_flows else None
+    labels_base = [] if per_path_flows and per_path_flow_labels else None
     # One discount factor per distinct payment date, computed once on the same
     # curve as the rest of the run. A payment date lands between two grid steps
     # (or past the last one) — see _df_at_time.
@@ -2370,6 +2464,7 @@ def run_mc(script: CompiledScript,
                                           pv_rebase=pv_rebase,
                                           stop_times_out=stop_times_base,
                                           flows_out=flows_base,
+                                          flow_labels_out=labels_base,
                                           bridge_min=br_min_b, bridge_max=br_max_b,
                                           wof_min_init=wof_min_init, bof_max_init=bof_max_init,
                                           index_offset=index_offset, memo_init=memo_init,
@@ -2379,11 +2474,13 @@ def run_mc(script: CompiledScript,
                                           realvol_state_init=realvol_state_init,
                                           lvl_map=lvl_b,
                                           rank_map=_rangs_observation(step_map, dt),
-                                          state_start_step=strike_step)
+                                          state_start_step=strike_step, reference_spots=raw_references_base)
 
     payoffs_anti: list[float] = []
     raw_anti:     list[float] = []
     flux_map_anti: dict = {}
+    flows_anti = None
+    labels_anti = None
     if antithetic:
         # The antithetic leg is the same draw with the sign flipped: it needs no
         # new randomness, and it should need no new memory either. Two
@@ -2428,6 +2525,9 @@ def run_mc(script: CompiledScript,
                                     vol_out=vol_anti)
         S_anti = _apply_delayed_bump(S_anti)
         br_min_a, br_max_a = _bridge_extrema(S_anti, vol_anti, dt, rng) if use_bridge else (None, None)
+        raw_references_anti = _basket_references(underlyings)
+        if raw_references_anti is not None and strike_step:
+            raw_references_anti = np.asarray(raw_references_anti)[:, None] * S_anti[strike_step]
         S_anti, br_min_a, br_max_a = _fixer_le_strike_sur_les_trajectoires(
             S_anti, strike_step, br_min_a, br_max_a)
         S_anti, br_min_a, br_max_a, lvl_a = _constater(
@@ -2435,6 +2535,7 @@ def run_mc(script: CompiledScript,
             fix_state_init, step_map, dt=dt)
         stop_times_anti: list[float] | None = [] if script.has_stop else None
         flows_anti = [] if per_path_flows else None
+        labels_anti = [] if per_path_flows and per_path_flow_labels else None
         payoffs_anti, raw_anti = _eval_paths(script, S_anti, ts, n, N_pairs, dt, r_eff,
                                               user_params, step_map, mat_events, flux_map_anti,
                                               record=True, df_arr=df_anti,
@@ -2446,6 +2547,7 @@ def run_mc(script: CompiledScript,
                                               pv_rebase=pv_rebase,
                                               stop_times_out=stop_times_anti,
                                               flows_out=flows_anti,
+                                              flow_labels_out=labels_anti,
                                               bridge_min=br_min_a, bridge_max=br_max_a,
                                               wof_min_init=wof_min_init, bof_max_init=bof_max_init,
                                               index_offset=index_offset, memo_init=memo_init,
@@ -2455,7 +2557,7 @@ def run_mc(script: CompiledScript,
                                               realvol_state_init=realvol_state_init,
                                               lvl_map=lvl_a,
                                               rank_map=_rangs_observation(step_map, dt),
-                                              state_start_step=strike_step)
+                                              state_start_step=strike_step, reference_spots=raw_references_anti)
 
     # Price: antithetic average of paired paths (lower variance).
     payoffs_avg = [(p1 + p2) / 2 for p1, p2 in zip(payoffs_base, payoffs_anti)] \
@@ -2516,6 +2618,10 @@ def run_mc(script: CompiledScript,
         # across paths and cannot answer it either. This can.
         **({"path_flows": (flows_base + flows_anti) if flows_anti else flows_base}
            if per_path_flows else {}),
+        **({"path_flow_labels": labels_base + (labels_anti or []),
+            "path_stop_times": (stop_times_base or [T_max]*N_pairs)
+                + ((stop_times_anti or [T_max]*N_pairs) if antithetic else [])}
+           if per_path_flows and per_path_flow_labels else {}),
         "flux_table": flux_map,
         "elapsed_ms": round(elapsed, 1),
         "n_paths": N,
@@ -2943,7 +3049,7 @@ def run_payoff_profile(script: CompiledScript, underlyings, corr_matrix,
         # coupons accumulés et redessine des barrières déjà franchies.
         _, pfs_raw = _eval_paths(script, S, ts, n, N_p, dt, r, user_params,
                                   step_map, mat_events, {}, record=False,
-                                  stop_times_out=stop_times, **etat_evaluateur)
+                                  stop_times_out=stop_times, **etat_evaluateur, reference_spots=_basket_references(underlyings))
         payoff = round(sum(pfs_raw) / N_p * 100, 3)
         t_realized = (sum(stop_times) / len(stop_times)) if stop_times else T_max
         t_realized = max(t_realized, 1 / 365)  # guard against div-by-~0 for a same-day trigger
@@ -3056,7 +3162,7 @@ def run_mc_paths(script: CompiledScript, underlyings, corr_matrix,
                                 pay_df={t: _df_at_time(df_arr_pay, t, dt, ts, r)
                                         for entries in pay_map.values()
                                         for t in entries if t is not None},
-                                **(state or {}))
+                                **(state or {}), reference_spots=_basket_references(underlyings))
 
     # Downsample time steps: take every 2 weeks for display
     stride = max(1, ts // 60)
@@ -3208,7 +3314,7 @@ def run_mc_proba(script: CompiledScript, underlyings, corr_matrix,
                                 pay_df={t: _df_at_time(df_arr_pay, t, dt, ts, r)
                                         for entries in pay_map.values()
                                         for t in entries if t is not None},
-                                **(state or {}))
+                                **(state or {}), reference_spots=_basket_references(underlyings))
 
     ac = sum(1 for o in det["outcomes"] if o == "autocall")
     ki = sum(1 for o in det["outcomes"] if o == "ki")
@@ -3822,7 +3928,7 @@ def run_mark_to_future(script: CompiledScript,
                     [ev for ev in script.events if ev.type == "AT_MATURITY"] if credit_matured else [], {}, record=False,
                     state_out=outer_states, flows_out=outer_flows,
                     lvl_map=_lvl_past,
-                    rank_map=_rangs_observation(past_step_map), **credit_past_args, **_state)
+                    rank_map=_rangs_observation(past_step_map), **credit_past_args, **_state, reference_spots=_basket_references(underlyings))
 
         alive = np.array([not st["done"] for st in outer_states])
         if credit_matured:
@@ -3941,7 +4047,7 @@ def run_mark_to_future(script: CompiledScript,
                 lvl_map=lvl_in,
                 rank_map=_rangs_observation(step_map),
                 **credit_inner_args,
-            )
+             reference_spots=_basket_references(underlyings))
 
             # Each outer scenario's MTF value = mean of its N_inner inner PVs (% notional).
             scenario_pvs[start:end] = np.array(payoffs).reshape(n_chunk, n_inner).mean(axis=1) * 100
@@ -4216,7 +4322,7 @@ def run_mtf_drilldown(script: CompiledScript,
     _eval_paths(script, _S_past, step_k, n, n_outer, dt, r, user_params,
                 _mtf_past_step_map(script, step_k), [], {}, record=False,
                 state_out=outer_states, flows_out=outer_flows, lvl_map=_lvl_past,
-                rank_map=_rangs_observation(_mtf_past_step_map(script, step_k)))
+                rank_map=_rangs_observation(_mtf_past_step_map(script, step_k)), reference_spots=_basket_references(underlyings))
     alive = np.array([not st["done"] for st in outer_states])
     fix_state_k, _ = _mtf_realized_fix(script, S_outer, step_k)
     # Mêmes relevés déjà constatés que l'éventail, scénario par scénario.
@@ -4261,7 +4367,7 @@ def run_mtf_drilldown(script: CompiledScript,
             script, _p_i, ts_full, n, 1, dt, r, user_params,
             full_step_map, full_mat, flux_full, record=True,
             stop_times_out=stops, flows_out=flows_full, lvl_map=_p_lvl,
-            rank_map=_rangs_observation(full_step_map))
+            rank_map=_rangs_observation(full_step_map), reference_spots=_basket_references(underlyings))
         stop_t = float(stops[0]) if stops else float(ts_full * dt)
         stop_step = int(round(stop_t * SY))
         fired: dict[int, list] = {}
@@ -4360,7 +4466,7 @@ def run_mtf_drilldown(script: CompiledScript,
                                     "t": float(outer_states[i]["realvol_t"])},
                 lvl_map=_lvl_i,
                 rank_map=_rangs_observation(step_map),
-            )
+             reference_spots=_basket_references(underlyings))
             mtf_i = float(np.mean(payoffs)) * 100
             rows = _mtf_flux_rows(flux, n_inner, t0)
             mat_t = ts_eff * dt
@@ -4594,6 +4700,15 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     n = len(tickers)
     if not dates or not 0 <= start_idx < len(dates):
         return None
+    binding = next((c for c in compiled.constats if c.role == 'initial_fixing'), None)
+    if origine is None and binding and binding.source and binding.calendar_values and compiled.origine:
+        from .bindings import shift_calendars
+        from .parser import parse_script, resolve_constats, effective_T_max
+        shifted_origin = date.fromisoformat(dates[start_idx])
+        compiled = resolve_constats(parse_script(binding.source),
+            shift_calendars(binding.calendar_values, compiled.origine, shifted_origin),
+            anchor=shifted_origin, currency=binding.calendar_currency)
+        T_max = effective_T_max(compiled, T_max)
     lecture = _LectureParDate(dates, start_idx, getattr(compiled, "origine", None), origine)
 
     # Les blocs d'une même DATE s'exécutent ensemble, dans l'ordre du script —
@@ -4695,8 +4810,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     if not ref:
         return None
 
-    full_params = {p.name: p.stored_val for p in compiled.params}
-    full_params.update(user_params)
+    full_params = effective_parameters(compiled.params, user_params)
 
     end_idx = len(dates) - 1
 
@@ -4785,7 +4899,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                 }
 
     ctx = {
-        "spots": [1.0]*n, "accum": 0.0, "index": 0,
+        "spots": [1.0]*n, "reference_spots": [ref[tk] for tk in tickers], "accum": 0.0, "index": 0,
         "wof_min": 1.0, "bof_max": 1.0, "t": 0.0,
         "s_min": [1.0]*n, "s_max": [1.0]*n, "s_prev": [1.0]*n, "realvol": 0.0,
         "done": False, "memo": full_params, "total_cf": 0.0,
@@ -4965,7 +5079,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
         # realized quadratic variation of the WOF series (REALVOL leg) and the
         # realized part of the STRIKE_FIX window. See api/deals.py:deal_mtm.
         "state": {
-            "memo": dict(ctx["memo"]),
+            "memo": {**ctx["memo"], "__REFERENCE_SPOTS": [ref[tk] for tk in tickers]},
             "index": obs_idx,
             "wof_min": wof_run,
             "bof_max": bof_run,

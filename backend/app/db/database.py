@@ -41,12 +41,20 @@ def get_session():
         yield session
 
 
+def _migrate_underlying_classes(conn):
+    columns = {row[1] for row in conn.execute(text("PRAGMA table_info(underlyings)"))}
+    if columns and "asset_class" not in columns:
+        conn.execute(text("ALTER TABLE underlyings ADD COLUMN asset_class TEXT NOT NULL DEFAULT 'unknown'"))
+
+
 def _migrate():
     """Additive, idempotent schema patches for columns added to tables that
     already exist in deployed databases — create_all() only creates missing
     tables, it never ALTERs an existing one. No Alembic in this project;
     keep patches here small and check-before-add."""
     with engine.connect() as conn:
+        _migrate_underlying_classes(conn)
+        conn.commit()
         ccr_deal_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deals)"))}
         if ccr_deal_cols and "ccr_netting_set_id" not in ccr_deal_cols:
             conn.execute(text("ALTER TABLE deals ADD COLUMN ccr_netting_set_id INTEGER REFERENCES ccr_netting_sets(id)"))
@@ -862,12 +870,36 @@ def _seed_underlyings():
     """Sème le catalogue repris du front. Idempotent : n'ajoute que les couples
     (ticker, groupe) absents, donc une base déjà administrée n'est pas écrasée
     et une base existante récupère les nouveautés du seed."""
-    from .underlyings_seed import UNDERLYINGS_SEED
+    from .underlyings_seed import UNDERLYINGS_SEED, seeded_asset_class
 
     with Session(engine) as s:
+        for row in s.exec(select(Underlying)).all():
+            kind = seeded_asset_class(row.ticker)
+            if row.asset_class == "unknown" and kind != "unknown":
+                row.asset_class = kind
+                s.add(row)
+        s.commit()
+        # Correct the original seeded Yahoo symbol, preserving the catalogue
+        # row's identity. Contractual snapshots and user-defined groups stay intact.
+        seeded_axa = s.exec(select(Underlying).where(
+            Underlying.ticker == "AXA.PA", Underlying.label == "AXA",
+            Underlying.group_name == "Actions FR (CAC)")).first()
+        corrected_axa = s.exec(select(Underlying).where(
+            Underlying.ticker == "CS.PA",
+            Underlying.group_name == "Actions FR (CAC)")).first()
+        if seeded_axa and not corrected_axa:
+            seeded_axa.ticker = "CS.PA"
+            s.add(seeded_axa)
+            s.commit()
+        elif seeded_axa and seeded_axa.active:
+            # Keep the old row recoverable if an administrator already added
+            # CS.PA in the same group; the invalid duplicate is no longer offered.
+            seeded_axa.active = False
+            s.add(seeded_axa)
+            s.commit()
         existants = {(u.ticker, u.group_name) for u in s.exec(select(Underlying)).all()}
         ajouts = [
-            Underlying(ticker=ticker, label=label, group_name=groupe, ccy=ccy)
+            Underlying(ticker=ticker, label=label, group_name=groupe, ccy=ccy, asset_class=seeded_asset_class(ticker))
             for ticker, label, groupe, ccy in UNDERLYINGS_SEED
             if (ticker, groupe) not in existants
         ]

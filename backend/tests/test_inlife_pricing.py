@@ -166,10 +166,8 @@ def test_avant_la_constatation_initiale_le_fixing_est_simule(monkeypatch):
     assert res["past"]["years_elapsed"] == 0.0
     assert res["past"]["strike_levels"] == {}
     assert 0.0 < res["price"] < 2.0
-    # La fenêtre de cours s'arrête à la valorisation : partir du strike moins
-    # sept jours la ferait commencer après sa propre fin.
-    assert appels[0] == ((valorisation - timedelta(days=7)).isoformat(),
-                         valorisation.isoformat())
+    # No fixing has occurred: pricing must not depend on the historical feed.
+    assert appels == []
 
 
 def test_avant_le_strike_l_actualisation_part_de_la_date_de_valorisation(monkeypatch):
@@ -278,6 +276,14 @@ def test_valoriser_apres_la_maturite_est_refuse(marche):
         api.price_in_life(_requete(valuation_date=MATURITE), USER)
     assert exc.value.status_code == 422
     assert "plus d'optionnalité" in exc.value.detail
+
+
+def test_missing_history_still_blocks_a_product_after_strike(monkeypatch):
+    monkeypatch.setattr(api, 'load_hist_prices', lambda *_: {'error': 'Aucune donnée historique disponible'})
+    with pytest.raises(HTTPException) as exc:
+        api.price_in_life(_requete(valuation_date=STRIKE + timedelta(days=7)), USER)
+    assert exc.value.status_code == 422
+    assert exc.value.detail == 'Aucune donnée historique disponible'
 
 
 def test_sans_historique_un_produit_dependant_du_chemin_est_refuse(monkeypatch):

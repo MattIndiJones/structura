@@ -15,7 +15,7 @@ from ..db.models import Deal, DealEvent, ValuationRun
 
 
 _ENGINE_FILES = (
-    "payscript/engine.py", "payscript/parser.py", "valuation_context.py",
+    "payscript/engine.py", "payscript/parser.py", "payscript/bindings.py", "payscript/schedule_model.py", "schedule.py", "valuation_context.py",
     "deal_valuation.py", "inlife_valuation.py",
 )
 

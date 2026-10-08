@@ -36,24 +36,34 @@ script sur chacune.
 ## 2. Structure d'un script
 
 ```
-PARAM COUPON = 8%           # déclarations (indentation 0)
-PARAM M_AC_BAR = 100%
+UNDERLYING Basket
 
-AT 1, 2, 3:                 # bloc d'observation (indentation 0)
-  SET CALL = INDIC(WOF >= M_AC_BAR)     # corps (indenté)
-  PAY CALL * COUPON * INDEX
-  PAY CALL * 1
-  IF CALL = 1:
+# Autocall Athena — barrière de protection observée à maturité
+PARAM COUPON
+PARAM M_AC_BAR
+PARAM M_KI_BAR
+
+CONSTAT StartDate
+CONSTAT() ObservationDates
+
+AT StartDate:
+  Basket.spot0 = Basket.spot@StartDate
+
+AT Date FROM ObservationDates:
+  SET PERF = WORSTOF(Basket.yield)
+  IF PERF >= M_AC_BAR:
+    PAY COUPON * INDEX "Coupons cumulés"
+    PAY 1 "Capital — remboursement au rappel"
     STOP
 
-AT MATURITY:                # bloc de maturité — toujours en dernier
-  SET KI = INDIC(WOF < 0.6)
-  PAY (1 - KI) * 1
-  PAY KI * WOF
+AT ObservationDates.last:
+  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)
+  PAY 1 "Capital — remboursement à maturité"
+  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte en capital"
 ```
 
-**Tout produit doit avoir un bloc `AT MATURITY`** qui le solde. Sans lui, une
-trajectoire jamais rappelée ne paie rien.
+Le dernier bloc solde le produit à `ObservationDates.last`. `STOP` empêche
+un second remboursement lorsque le rappel a lieu à cette dernière date.
 
 ---
 
@@ -89,6 +99,8 @@ trajectoire jamais rappelée ne paie rien.
 
 | Nom | Sens |
 |---|---|
+| `WORSTOF` | `WORSTOF(Basket.yield)` : minimum des ratios individuels |
+| `BESTOF` | `BESTOF(Basket.yield)` : maximum des ratios individuels |
 | `MAX` | `MAX(a, b)` — maximum |
 | `MIN` | `MIN(a, b)` — minimum |
 | `ABS` | Valeur absolue |
@@ -114,8 +126,9 @@ trajectoire jamais rappelée ne paie rien.
 
 | Nom | Sens |
 |---|---|
-| `PARAM` | `PARAM NOM = valeur[%] ["description"]` — paramètre scalaire, surchargeable depuis l'interface |
-| `PARAM()` | `PARAM() NOM = valeur[%]` — **une valeur par observation** (barrière dégressive, coupon progressif). La valeur initiale est **obligatoire**, comme pour `PARAM`, et remplit la première ligne. Les valeurs se saisissent dans l'interface ; la dernière ligne s'étend aux observations suivantes |
+| `UNDERLYING` | `UNDERLYING Basket` lie le panier aux sous-jacents Economics, dans leur ordre contractuel |
+| `PARAM` | `PARAM NOM [= valeur[%]] ["description"]` — sans valeur : pourcentage obligatoire dans Economics ; avec valeur : défaut explicite, brut si sans `%` |
+| `PARAM()` | `PARAM() NOM [= valeur[%]]` — une valeur par observation. Sans défaut, série obligatoire dans Economics ; la dernière ligne s’étend aux observations suivantes |
 | `CONSTAT` | `CONSTAT Nom [MIN\|MAX\|AVG]` — une date unique, renseignée depuis l'interface |
 | `CONSTAT()` | `CONSTAT() Nom [MIN\|MAX\|AVG]` — un calendrier (début / fin / roll / fréquence / stub) |
 | `CONSTAT()()` | `CONSTAT()() Nom` — un calendrier dont chaque intervalle est subdivisé. La sous-grille **se recale** sur chaque date principale au lieu de courir en continu — voir §4.2 |
@@ -151,6 +164,87 @@ Comparaisons : `>=` `<=` `>` `<` `!=` (ou `<>`) et **`=` qui teste l'égalité**
 dans une expression (`IF CALL = 1:`). L'affectation se fait uniquement par `SET`.
 
 ---
+
+## Objet Basket et Economics (version du 06/10/2026)
+
+`Basket.yield` est le vecteur des ratios individuels spot courant / spot initial.
+110 sur un strike de 100 donne **1,10**, et non 0,10. L’agrégation est explicite :
+`WORSTOF`, `BESTOF` ou `AVG` (moyenne équipondérée). Le panier ne choisit jamais
+un ticker lui-même : son identité et son ordre viennent d’Economics.
+
+`CONSTAT StartDate` et `AT StartDate: Basket.spot0 = Basket.spot@StartDate`
+fixent une seule fois les références individuelles. Ce bloc ne verse aucun flux
+et ne consomme aucun rang INDEX. Pour une fenêtre initiale, écrire
+`CONSTAT StartDate AVG`, `MIN` ou `MAX` et saisir sa longueur et sa fréquence.
+`CONSTAT() StartDate` est refusé : réinitialiser les strikes à chaque date serait
+un autre contrat. La première observation doit suivre le fixing initial, et ne
+peut pas précéder la fin de sa fenêtre.
+
+StartDate reçoit la date effective du fixing. Si une convention de jour ouvré
+déplacerait cette date, le moteur demande de saisir la date effective plutôt
+que de déplacer silencieusement l'origine de simulation.
+
+`AT Date FROM ObservationDates:` exécute le bloc à chaque date. Dans le bloc,
+`Basket.spot@Date` désigne le fixing courant. Les références futures ou à des
+dates arbitraires sont refusées. `Basket.spot / Basket.spot0` est équivalent à
+`Basket.yield`. Les cours absolus nécessitent des références individuelles
+explicites ; leur absence n’est jamais remplacée par des cours fictifs de 1.
+Pour un payoff en pourcentages, aucun cours en devise n’est nécessaire au
+pricing initial : la normalisation du moteur suffit, y compris pour
+`Basket.spot / Basket.spot0`. Par exemple, un cours courant de 45 pour un fixing
+initial de 50 donne `Basket.yield = 0.90`, soit 90 % du niveau initial.
+Si le payoff lit les cours absolus, le Pricer propose une hypothèse de cours
+initial par actif dans Economics, sous « Cours en devise —
+scripts spécifiques ». Cette saisie de simulation n’enregistre pas un fixing
+contractuel dans Events.
+En cours de vie, les fixings contractuels et leur historique fournissent ces
+références ; un choc de marché ne les réinitialise pas.
+
+Les calendriers utilisent `first_observation_date` **incluse**, `end_date`,
+`frequency`, le roll facultatif et les conventions de règlement. La date de
+strike est portée exclusivement par StartDate, jamais par le début d’un
+échéancier. Pour `PERIOD`, `period_start_date` ouvre la première période ; sans
+saisie distincte, c’est StartDate. Les périodes suivantes commencent à
+l’observation précédente. Aucun coupon n’est dû au début de période.
+
+`PARAM COUPON` n’a aucun défaut. 8 dans Economics signifie 8 %, soit 0,08 dans
+le moteur. `COUPON * 100` fournit 8 si le calcul attend une quantité brute.
+`PARAM MULTIPLIER = 1.5` déclare au contraire une valeur brute avec un défaut
+explicite. Les paramètres manquants bloquent les calculs ; les brouillons peuvent
+rester incomplets. `COUPON * INDEX` cumule un coupon **par observation**, sans
+annualisation implicite.
+
+Les modèles génériques ne portent ni durée, ni dates, ni valeurs de paramètres.
+L’éditeur est unique, sans sélecteur Normal/Expert. Les réglages de roll et de
+stub restent accessibles sous « Réglages avancés du calendrier », dans le
+Pricer comme dans la RFQ. Les cours en devise apparaissent lorsqu’un script
+lit des cours absolus ou qu’un cours initial a déjà été saisi.
+
+« Exemples préremplis… » propose 15 jeux de termes : Autocall 3Y/4Y/5Y,
+Autocall à barrière américaine 3Y, Autocall dégressif 5Y, Phoenix et Phoenix
+mémoire trimestriels 3Y/5Y, Reverse Convertible 1Y, Capital garanti 5Y,
+Twin Win 3Y, Call/Put/Call Spread 1Y. Le script reste celui du modèle générique ;
+les exemples fournissent les paramètres et les dates dans Economics. Leur
+aperçu annonce les termes remplacés, la convention « jour ouvré suivant » et
+le règlement J+3 ouvrés selon la devise. StartDate et date de valeur sont
+proposées au départ ajusté ; la première observation est ultérieure. Le panier
+et les hypothèses de marché sont conservés. Tous ces termes sont modifiables.
+
+Une configuration conserve séparément une
+version du script, les valeurs, les dates et, facultativement, le panier.
+« Sauvegarder » conserve un modèle sans ses saisies Economics. Utiliser
+« Mes configurations enregistrées… » pour conserver puis appliquer un jeu de termes
+prérempli ; son aperçu annonce les données qui seront remplacées.
+
+Chaque `PAY` représente une jambe distincte : coupon, capital, put vendu.
+Une perte s’écrit `PAY -KI * MAX(1 - PERF, 0)` après `PAY 1`, ce qui sépare la
+protection du remboursement nominal. Les lignes nulles restent dans la
+décomposition et ne créent pas de paiement dans les statistiques de durée.
+
+Les notations historiques `AT 1, 2`, `WOF`, `BASKET` et `STRIKE_FIX` restent
+acceptées pour les calculs et scripts techniques. Les exemples historiques
+ci-dessous expliquent ces primitives ; les nouveaux modèles utilisent Basket
+et StartDate comme dans le script complet ci-dessus.
 
 ## 4. Dates d'observation
 
@@ -399,29 +493,35 @@ Le parser refuse ces déclarations avec un message explicite. Préférer
 
 ---
 
-## 6. Exemple complet commenté — Autocall Athena 3 ans
+## 6. Exemple complet — Autocall Athena
 
 ```
-# Autocall Athena 3 ans
-PARAM COUPON = 8%           # coupon annuel, cumulé jusqu'au rappel
-PARAM M_AC_BAR = 100%       # barrière de rappel
-PARAM M_KI_BAR = 60%        # barrière de perte en capital
+UNDERLYING Basket
 
-AT 1, 2, 3:
-  SET CALL = INDIC(WOF >= M_AC_BAR)   # 1 si rappelé, 0 sinon
-  PAY CALL * COUPON * INDEX           # coupons cumulés depuis l'origine
-  PAY CALL * 1                        # remboursement du nominal
-  IF CALL = 1:
-    STOP                              # le contrat s'arrête ici
+# Autocall Athena — barrière de protection observée à maturité
+PARAM COUPON
+PARAM M_AC_BAR
+PARAM M_KI_BAR
 
-AT MATURITY:
-  SET KI = INDIC(WOF < M_KI_BAR)      # 1 si sous la barrière
-  PAY (1 - KI) * 1                    # au-dessus : le pair
-  PAY KI * WOF                        # en dessous : la performance
+CONSTAT StartDate
+CONSTAT() ObservationDates
+
+AT StartDate:
+  Basket.spot0 = Basket.spot@StartDate
+
+AT Date FROM ObservationDates:
+  SET PERF = WORSTOF(Basket.yield)
+  IF PERF >= M_AC_BAR:
+    PAY COUPON * INDEX "Coupons cumulés"
+    PAY 1 "Capital — remboursement au rappel"
+    STOP
+
+AT ObservationDates.last:
+  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)
+  PAY 1 "Capital — remboursement à maturité"
+  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte en capital"
 ```
 
-Lecture : à chaque date annuelle, si le plus bas sous-jacent est au moins à son
-niveau initial, l'investisseur reçoit le nominal plus 8 % par année écoulée et le
-produit s'arrête. Sinon on continue. À maturité, s'il n'y a pas eu de rappel :
-capital garanti tant que le worst-of est au-dessus de 60 %, sinon perte à
-hauteur de la baisse.
+Les valeurs et le calendrier se renseignent dans Economics. Le coupon est payé
+au rappel, y compris à la dernière observation si la barrière de rappel est
+atteinte. Sinon, seul le capital diminué du put éventuel est versé.

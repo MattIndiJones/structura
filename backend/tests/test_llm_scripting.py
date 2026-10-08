@@ -36,6 +36,14 @@ def _levels(v):
     return {c.label: c.level for c in v.checks}
 
 
+def test_missing_maturity_does_not_invent_a_pricing_horizon():
+    response = f"{SCRIPT_MARK}\nAT MATURITY:\n  PAY MAX(WOF - 1, 0)\n{EXPLAIN_MARK}\nOption."
+    result = _validate(response, "option call", T=None)
+    assert result.compiles
+    assert result.pricing_check == 'not_run'
+    assert result.price_pct is None
+
+
 # ── Exemples complémentaires ────────────────────────────────────────
 
 @pytest.mark.parametrize("key", sorted(EXTRA_EXAMPLES))

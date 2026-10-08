@@ -73,7 +73,17 @@ def test_le_rendement_declare_rapporte_les_dividendes_au_cours(yahoo):
     assert res["ok"]
     # Un dividende de 4 sur un cours de 100 : 4 % sur un an.
     assert res["yield_declared"] == pytest.approx(0.04, abs=1e-6)
+    assert res['asof_effective']=='2026-08-27'
     assert [d["amount"] for d in res["dividends"]] == [4.0]
+
+
+def test_dividend_feed_error_is_missing_data_not_a_zero_yield(yahoo,monkeypatch):
+    class Broken(_FauxTitre):
+        @property
+        def dividends(self):raise RuntimeError('offline')
+    monkeypatch.setattr(market_data.yf,'Ticker',Broken)
+    result=market_data.dividend_profile('X.PA',asof='2026-08-27')
+    assert not result['ok'] and 'yield_declared' not in result
 
 
 def test_le_rendement_implicite_se_lit_dans_l_ecart_des_deux_series(yahoo):

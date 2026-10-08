@@ -12,7 +12,7 @@ Use this checklist for designing or reviewing a product script. The exact accept
 | Is a window reduced? | `MIN`, `MAX`, `AVG`, optionally `PERIOD` | Each underlying is reduced first; Economics supplies window length and sampling. |
 | Is each subdate a separate observation? | `CONSTAT()()` | The fine grid resets at each parent interval; do not use it merely to calculate an average. |
 | Does a terminal raw fixing coexist with an average? | A qualified subdate such as `AT OBS.last.last:` | Both readings share one date source but use the intended raw or reduced value. |
-| Is a threshold editable? | `PARAM` or `PARAM()` with explicit value and unit | Economics has the effective value; `PARAM()` belongs to one observation schedule. |
+| Is a threshold editable? | `PARAM` or `PARAM()` (required percentage unless an explicit default supplies a unit) | Economics has the effective value; `PARAM()` belongs to one observation schedule. |
 | Is a threshold monitored after booking? | `M_` parameter when appropriate | The monitored observable and comparison direction are unambiguous. |
 | Does an amount accumulate or depend on history? | Top-level `SET`, event-level `SET`, `ACCRUE`, or an explicit `INDEX` formula | Memory changes only at the defined event; `INDEX` is not confused with a payment count. |
 | Does the product terminate early? | Redemption `PAY` plus conditional `STOP` | Called paths have no later flows, including at maturity. |

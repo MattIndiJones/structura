@@ -6,7 +6,7 @@
         <div>
           <h1 class="page-title">Modèles de produits</h1>
           <p class="page-subtitle">
-            Un produit, un nombre de sous-jacents et un ténor : le Pricer s'ouvre complété.
+            Choisissez un payoff générique ; ses valeurs et ses dates se renseignent dans Economics.
           </p>
         </div>
       </div>
@@ -56,8 +56,7 @@
       <!-- Opening: three choices, no field to type. -->
       <aside class="card lg:sticky lg:top-4 flex flex-col gap-4" aria-live="polite">
         <p v-if="!selected" class="card-hint">
-          Choisissez un produit dans la liste. Ses calendriers seront générés depuis la date de
-          strike du Pricer, aujourd'hui par défaut.
+          Choisissez un produit dans la liste. Les valeurs et les dates restent vierges. Un ténor peut être choisi explicitement pour proposer un calendrier.
         </p>
         <template v-else>
           <div>
@@ -94,7 +93,7 @@
 
           <div class="stat-box text-xs flex flex-col gap-1.5" style="color: var(--muted);">
             <div class="micro-label">Le Pricer s'ouvrira avec</div>
-            <div>Le script générique, validé, aux valeurs initiales de ses paramètres.</div>
+            <div>Le script générique validé, avec ses paramètres à renseigner.</div>
             <div>
               {{ count }} sous-jacent{{ count > 1 ? 's' : '' }} aux hypothèses par défaut
               ({{ count > 1 ? 'corrélation nulle, ' : '' }}tickers à choisir).
@@ -221,6 +220,8 @@ async function open() {
     })
     if (!replace) return
   }
+  // This explicit action replaces even a session opened from the same model.
+  pricing.sessionRouteKey = null
   router.push({
     path: '/pricer',
     query: {

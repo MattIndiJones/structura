@@ -1,29 +1,19 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, computed, watch } from 'vue'
-import { apiFetch } from '../utils/api.js'
+import { apiFetch, apiErrorMessage } from '../utils/api.js'
 import { calculerDelta, contexteDepuisCorps } from '../composables/useVariantDelta.js'
 import { courbeDividende } from '../composables/useDividendCurve.js'
 import { CALCULATION_LIMITS, estimatePricingCalculation } from '../utils/calculationBudget.js'
 import { buildModelCalendars } from '../utils/productModels.js'
 import { normaliseCorrelation } from '../utils/rfqBasket.js'
 import { defaultUnderlying, fractionToPercent, PERCENT_MARKET_FIELDS } from '../utils/underlyingDefaults.js'
+import { underlyingGroups } from '../data/commonUnderlyings.js'
+import { classifyUnderlying, makeSurface, resizeSurfaceLevel } from '../utils/volSurface.js'
+import { calibrateUnderlying } from '../utils/smileCalibration.js'
 
-const DEFAULT_SCRIPT = `# Autocall Athena 3 ans
-PARAM COUPON = 8%
-PARAM M_AC_BAR = 100%
-PARAM M_KI_BAR = 60%
+import { examples } from '../data/payscriptTemplates.js'
 
-AT 1, 2, 3:
-  SET CALL = INDIC(WOF >= M_AC_BAR)
-  PAY CALL * COUPON * INDEX
-  PAY CALL * 1
-  IF CALL = 1:
-    STOP
-
-AT MATURITY:
-  SET KI = INDIC(WOF < M_KI_BAR)
-  PAY (1 - KI) * 1
-  PAY KI * WOF`
+const DEFAULT_SCRIPT = examples.autocall_athena
 
 export const usePricingStore = defineStore('pricing', () => {
   // ── Tabs ──────────────────────────────────────────────────────────
@@ -114,6 +104,8 @@ export const usePricingStore = defineStore('pricing', () => {
       const old = previous.get(p.name)
       if (!old || !(p.name in paramOverrides)) continue
       const unitChanged = !!old.is_pct !== !!p.is_pct
+      if (old.required && p.required && !unitChanged) continue
+      if (p.required && !unitChanged) continue
       if (!unitChanged && _sameNumber(old.display_default, p.display_default)) continue
       const current = paramOverrides[p.name]
       if (p.kind === 'array') {
@@ -140,7 +132,7 @@ export const usePricingStore = defineStore('pricing', () => {
     return report
   }
 
-  // ── CONSTAT (calendrier — mode expert) ──────────────────────────────
+  // ── CONSTAT calendars ──────────────────────────────────────────────
   // Same "sticky" pattern as paramOverrides: scriptConstats comes straight
   // from /api/parse (name + kind), constatOverrides holds the actual values
   // the user fills in, seeded once per name and never touched again by a
@@ -162,8 +154,8 @@ export const usePricingStore = defineStore('pricing', () => {
     // Une fenêtre de PÉRIODE n'a pas de longueur — elle court d'une
     // constatation à la suivante — donc seule la fréquence de relevé se saisit.
     return {
-      window_length: scope === 'period' ? null : { value: 10, unit: 'D' },
-      window_frequency: { value: scope === 'period' ? 3 : 1,
+      window_length: scope === 'period' ? null : { value: null, unit: 'D' },
+      window_frequency: { value: null,
                           unit: scope === 'period' ? 'M' : 'D' },
     }
   }
@@ -176,8 +168,8 @@ export const usePricingStore = defineStore('pricing', () => {
       return reduction ? reactive({ date: '', ..._defaultWindow(scope) }) : ''
     }
     return reactive({
-      start_date: '', end_date: '', roll_date: '',
-      frequency: { value: 3, unit: 'M' }, stub: 'short_last',
+      start_date: '', first_observation_date: '', period_start_date: '', end_date: '', roll_date: '',
+      frequency: { value: null, unit: 'M' }, stub: 'short_last',
       sub_frequency: kind === 'nested_schedule' ? { value: 1, unit: 'M' } : null,
       // Sans ajustement ni décalage par défaut : c'est déjà ce que le parseur
       // suppose faute de valeur, donc rien ne bouge pour un script existant.
@@ -207,24 +199,29 @@ export const usePricingStore = defineStore('pricing', () => {
       } else if (c.reduction && v && typeof v === 'object' && !v.window_frequency) {
         Object.assign(v, _defaultWindow(c.window_scope))
       } else if (!c.reduction && c.kind === 'single' && v && typeof v === 'object') {
-        constatOverrides[c.name] = v.date || ''
+        // Removing a window must not drop the payment convention or lag.
+        delete v.window_length; delete v.window_frequency
       }
     }
   }
 
-  // ── Underlyings ───────────────────────────────────────────────────
-  const underlyings = ref([
-    {
-      name: 'Sous-jacent 1', ticker: '', ccy: 'EUR',
-      sigma: 20, q: 2.0,
-      dividendCurveEnabled: false, dividendDecay: 10.0,
-      sigma_fx: 0, rho_sfx: 0, ccyh: 0,
-      v0: 4.0, kappa: 2.0, theta: 4.0, xi: 35, rho_h: -70, rho_rS: 40,
-      alpha: 20, beta: 50, rho: -30, nu: 40,
-      skew: -10, curvature: 5,
-      showQuanto: false,
+  const initialFixingName = computed(() => scriptConstats.value.find(c => c.role === 'initial_fixing')?.name || null)
+  const startDate = computed({
+    get: () => {
+      const value = initialFixingName.value ? constatOverrides[initialFixingName.value] : globalParams.strike_date
+      return typeof value === 'string' ? value : value?.date || ''
     },
-  ])
+    set: value => {
+      const name = initialFixingName.value
+      if (name) {
+        if (constatOverrides[name] && typeof constatOverrides[name] === 'object') constatOverrides[name].date = value
+        else constatOverrides[name] = value
+      }
+      globalParams.strike_date = value
+    },
+  })
+  // ── Underlyings ───────────────────────────────────────────────────
+  const underlyings = ref([defaultUnderlying(1)])
   const corrMatrix = ref([[1.0]])
   // Which underlying is being shown/edited — shared between the Deal tab
   // (ticker picker) and Marché & Paramètres (market-data calibration) so
@@ -234,7 +231,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // ── Global params ─────────────────────────────────────────────────
   const globalParams = reactive({
     r: 3.0,
-    T: 3.0,
+    T: null,
     N: 20000,
     seed: 42,
     model: 'constant',
@@ -246,8 +243,8 @@ export const usePricingStore = defineStore('pricing', () => {
     nominal: 1_000_000,
     deal_ccy: 'EUR',
     trade_date: new Date().toISOString().split('T')[0],
-    strike_date: new Date().toISOString().split('T')[0],
-    value_date: new Date().toISOString().split('T')[0],
+    strike_date: '',
+    value_date: '',
     // Échange final des flux. Vide, le remboursement est actualisé à la
     // maturité — ce qui surestime la note des jours de règlement.
     payment_date: '',
@@ -275,6 +272,23 @@ export const usePricingStore = defineStore('pricing', () => {
   })
 
   // ── Yield curve (term structure of zero rates) ────────────────────
+  watch(() => underlyings.value.map(u => [u, u.ticker, u.sigma, underlyingGroups.length]), (rows, previous = []) => {
+    for (const [u,ticker,sigma] of rows) {
+      const before=previous.find(row=>row[0]===u)
+      const detected=classifyUnderlying(ticker,underlyingGroups)
+      if ((u._smileDefaults && u.asset_class==='unknown' && detected!=='unknown') ||
+          (before && before[1]!==ticker && detected!=='unknown' && u.vol_surface?.mode==='automatic'
+           && u.asset_class!==detected)) {
+        u.asset_class=detected
+        if (u.vol_level_source==='default') u.sigma=detected==='equity'?30:20
+        u.vol_surface=makeSurface(detected,u.sigma,globalParams.T)
+        u._smileDefaults=false
+      } else if (before && sigma!==before[2] && u.vol_surface && Number(sigma)>0) {
+        resizeSurfaceLevel(u)
+      }
+    }
+  }, { flush: 'sync' })
+
   const yieldCurve = reactive({
     enabled: false,
     // Ancrage sur le taux sans risque de l'écran : la courbe se dérive alors
@@ -399,6 +413,8 @@ export const usePricingStore = defineStore('pricing', () => {
   // Dossier Product conservé actuellement ouvert. Null signifie que la
   // session reste un brouillon de pricing entièrement éphémère.
   const currentProduct = ref(null)
+  // Last explicitly opened pricing entry. Navigation does not replace it.
+  const sessionRouteKey = ref(null)
 
   // RFQ this pricing session was pre-filled from (see loadFromRfq below) —
   // sent as Deal.rfq_id at booking time so the winning quote's RFQ can be
@@ -530,11 +546,18 @@ export const usePricingStore = defineStore('pricing', () => {
     setTimeout(() => { progress.value = 0 }, 600)
   }
 
+  watch(startDate, value => { if (initialFixingName.value) globalParams.strike_date = value }, { flush: 'sync' })
+
   // ── Helpers ───────────────────────────────────────────────────────
-  function _buildUserParams() {
+  function _buildUserParams({ omit = [], allowMissing = false } = {}) {
     const up = {}
     for (const p of scriptParams.value) {
+      if (omit.includes(p.name)) continue
       const v = paramOverrides[p.name] ?? p.raw_default
+      if (allowMissing && (v == null || v === '' || (Array.isArray(v) && v.some(x => x == null || x === '')))) {
+        up[p.name] = null
+        continue
+      }
       if (Array.isArray(v)) {
         if (!v.length) throw new Error(`Le paramètre ${p.name} doit contenir au moins une valeur.`)
         up[p.name] = v.map((x, index) => {
@@ -563,7 +586,7 @@ export const usePricingStore = defineStore('pricing', () => {
 
   function _buildUls() {
     return underlyings.value.map(u => ({
-      name: u.name, ticker: u.ticker, ccy: u.ccy,
+      name: u.name, ticker: u.ticker, ccy: u.ccy, spot0: u.spot0 || null,
       sigma: u.sigma / 100,
       q: u.q / 100,
       dividend_curve: _buildDividendCurve(u).map(p => [p.T, p.rate / 100]),
@@ -585,6 +608,9 @@ export const usePricingStore = defineStore('pricing', () => {
       nu: u.nu / 100,
       skew: u.skew / 100,
       curvature: u.curvature / 100,
+      asset_class: u.asset_class || 'unknown',
+      smile_parameter_mode: u.smile_parameter_mode || 'automatic',
+      vol_surface: u.vol_surface ? JSON.parse(JSON.stringify(u.vol_surface)) : null,
     }))
   }
 
@@ -645,7 +671,8 @@ export const usePricingStore = defineStore('pricing', () => {
         }
       } else {
         out[c.name] = {
-          start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
+          ...(initialFixingName.value ? { first_observation_date: v.first_observation_date, period_start_date: v.period_start_date || startDate.value } : { start_date: v.start_date }),
+          end_date: v.end_date, roll_date: v.roll_date || v.first_observation_date,
           frequency: _tenorStr(v.frequency), stub: v.stub,
           window_length: _tenorStr(v.window_length),
           window_frequency: _tenorStr(v.window_frequency),
@@ -691,7 +718,7 @@ export const usePricingStore = defineStore('pricing', () => {
         // compact editor historically kept it as a string. Restore the date
         // instead of silently leaving the field empty.
         if (typeof ov === 'string') {
-          constatOverrides[k] = v.date || ''
+          constatOverrides[k] = { ...v }
           continue
         }
         if (ov && typeof ov === 'object') {
@@ -700,6 +727,8 @@ export const usePricingStore = defineStore('pricing', () => {
           if (v.date !== undefined) ov.date = v.date || ''
           _restoreTenor(ov, v, 'window_length', { value: 10, unit: 'D' })
           _restoreTenor(ov, v, 'window_frequency', { value: 1, unit: 'D' })
+          ov.first_observation_date = v.first_observation_date || ''
+          ov.period_start_date = v.period_start_date || ''
           ov.start_date = v.start_date || ''
           ov.end_date   = v.end_date   || ''
           ov.roll_date  = v.roll_date  || ''
@@ -740,7 +769,7 @@ export const usePricingStore = defineStore('pricing', () => {
    * des rappels qui n'ont jamais eu lieu. Le prix affichait une chose, la
    * distribution en décrivait une autre — et rien ne le signalait.
    */
-  function _baseBody() {
+  function _baseBody(parameterOptions = {}) {
     const frozen = _activeBookedContract()
     return _avecTermesDOrigine({
       script: frozen?.script ?? script.value,
@@ -750,7 +779,7 @@ export const usePricingStore = defineStore('pricing', () => {
       T: frozen?.T ?? globalParams.T,
       seed: globalParams.seed,
       model: globalParams.model,
-      user_params: frozen?.user_params ?? _buildUserParams(),
+      user_params: frozen?.user_params ?? _buildUserParams(parameterOptions),
       yield_curve: yieldCurve.enabled
         ? yieldCurve.pillars.map(p => [p.T, p.rate / 100])
         : [],
@@ -866,7 +895,7 @@ export const usePricingStore = defineStore('pricing', () => {
    * Responses are sequenced: a stale one, or one arriving after a keystroke,
    * is ignored. Resolves to true when this text is now validated.
    */
-  async function parseScript({ explicit = false } = {}) {
+  async function parseScript({ explicit = false, validation = null } = {}) {
     const revision = ++_parseRevision
     const parsedScript = script.value
     if (!parsedScript.trim()) {
@@ -881,7 +910,10 @@ export const usePricingStore = defineStore('pricing', () => {
       return true
     }
     try {
-      const res = await apiFetch('/api/parse', {
+      // A prepared example was validated before touching the current session.
+      const res = validation?.script === parsedScript && validation.data?.ok
+        ? { ok: true, json: async () => validation.data }
+        : await apiFetch('/api/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ script: parsedScript }),
@@ -951,7 +983,7 @@ export const usePricingStore = defineStore('pricing', () => {
    * A frozen contract (booked deal, Product) prices its own script: the
    * read-only editor text never enters the request.
    */
-  function _prepareCalculation(report = message => { error.value = message }) {
+  function _prepareScriptCalculation(report = message => { error.value = message }) {
     if (contractTermsLocked.value) return null
     if (script.value === validatedScript.value) {
       // The text went back to the last valid version after a failed attempt:
@@ -963,6 +995,19 @@ export const usePricingStore = defineStore('pricing', () => {
       if (!ok) report(_scriptErrorMessage())
       return ok
     })
+  }
+
+  function _prepareCalculation(report = message => { error.value = message }) {
+    const scriptReady=_prepareScriptCalculation(report)
+    const items=underlyings.value.filter(u=>u.vol_surface && ['heston','sabr','lsv'].includes(globalParams.model))
+    if(!items.length) return scriptReady
+    return (async()=>{
+      if(scriptReady && !(await scriptReady)) return false
+      try {
+        for(const u of items) await calibrateUnderlying(u,globalParams.model,globalParams.T,globalParams.r)
+        return true
+      } catch(e) { report(e.message); return false }
+    })()
   }
 
   function _scriptErrorMessage() {
@@ -987,6 +1032,7 @@ export const usePricingStore = defineStore('pricing', () => {
   function _snapshotInputs() {
     return {
       underlyings: underlyings.value.map(u => ({
+        ...JSON.parse(JSON.stringify(u)),
         name: u.name, ticker: u.ticker, ccy: u.ccy, sigma: u.sigma, q: u.q, rho_rS: u.rho_rS,
         dividendCurveEnabled: !!u.dividendCurveEnabled,
         dividendDecay: u.dividendDecay,
@@ -1114,7 +1160,7 @@ export const usePricingStore = defineStore('pricing', () => {
   function _datedConstats() {
     const out = []
     for (const c of scriptConstats.value) {
-      if (c.name === 'STRIKE_FIX') continue
+      if (c.name === 'STRIKE_FIX' || c.role === 'initial_fixing') continue
       const value = constatOverrides[c.name]
       let raw = ''
       let convention = 'none'
@@ -1336,13 +1382,38 @@ export const usePricingStore = defineStore('pricing', () => {
     }
   }
 
+  function _validatePricingDates(request) {
+    if (!initialFixingName.value) return
+    const requireDate = (value, label) => {
+      if (!value) throw new Error(`Renseignez ${label} dans Economics.`)
+      const date = new Date(`${value}T00:00:00Z`)
+      if (!_plausibleIsoDate(value) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+        throw new Error(`Corrigez ${label} dans Economics : la date est invalide.`)
+      }
+    }
+    requireDate(request.strike_date, 'la StartDate (date de strike)')
+    for (const calendar of scriptConstats.value) {
+      if (calendar.role === 'initial_fixing') continue
+      const value = request.constats?.[calendar.name]
+      if (calendar.kind === 'single') {
+        requireDate(typeof value === 'string' ? value : value?.date, `la date de ${calendar.name}`)
+      } else {
+        requireDate(value?.first_observation_date, `la première observation de ${calendar.name}`)
+        requireDate(value?.end_date, `la dernière observation de ${calendar.name}`)
+        if (!value.frequency) throw new Error(`Renseignez la fréquence de ${calendar.name} dans Economics.`)
+      }
+    }
+  }
+
   /** Valorisation en cours de vie : le passé est rejoué sur cours réels, seule
    *  la vie restante est simulée. Voir api/inlife.py pour pourquoi un simple
    *  « repartir du bon spot » ne suffirait pas sur un produit à mémoire. */
   async function runInLifePricing() {
     const preparing = _prepareCalculation()
     if (preparing && !(await preparing)) return
-    let request = _inLifeBody()
+    let request
+    try { request = _inLifeBody(); _validatePricingDates(request) }
+    catch (e) { error.value = e.message; leftTab.value = 'economics'; return }
     request.seed = 42
     const requestKey = _requestKey(request)
     const inputs = _snapshotInputs()
@@ -1362,7 +1433,7 @@ export const usePricingStore = defineStore('pricing', () => {
         if (revision === _pricingRevision) error.value = 'Les paramètres ont changé pendant le calcul. Relancez le pricing.'
         return
       }
-      if (!res.ok) { error.value = data.detail || 'Erreur serveur'; return }
+      if (!res.ok) { error.value = apiErrorMessage(data, 'Erreur serveur'); return }
       if (data.early_recall) { error.value = data.message; return }
       result.value = { ...data, _inputs: inputs, _requestKey: requestKey }
       rightTab.value = 'results'
@@ -1377,7 +1448,9 @@ export const usePricingStore = defineStore('pricing', () => {
     const preparing = _prepareCalculation()
     if (preparing && !(await preparing)) return
     if (usesDatedPricing()) return runInLifePricing()
-    let request = _pricingBody()
+    let request
+    try { request = _pricingBody(); _validatePricingDates(request) }
+    catch (e) { error.value = e.message; leftTab.value = 'economics'; return }
     request.seed = 42
     const requestKey = _requestKey(request)
     const inputs = _snapshotInputs()
@@ -1400,7 +1473,7 @@ export const usePricingStore = defineStore('pricing', () => {
         if (revision === _pricingRevision) error.value = 'Les paramètres ont changé pendant le calcul. Relancez le pricing.'
         return
       }
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
       else { result.value = { ...(await res.json()), _inputs: inputs, _requestKey: requestKey }; rightTab.value = 'results' }
     } catch (e) { error.value = e.message }
     finally {
@@ -1437,7 +1510,7 @@ export const usePricingStore = defineStore('pricing', () => {
                                 target_price: prixCiblePct / 100 }),
       })
       const data = await res.json()
-      if (!res.ok) { error.value = data.detail || 'Erreur serveur'; return }
+      if (!res.ok) { error.value = apiErrorMessage(data, 'Erreur serveur'); return }
       impliedFunding.value = data
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
@@ -1480,7 +1553,7 @@ export const usePricingStore = defineStore('pricing', () => {
         if (revision === _pricingRevision) error.value = 'Les paramètres ont changé pendant le calcul. Relancez le pricing.'
         return
       }
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
       else {
         const data = await res.json()
         result.value = {
@@ -1512,7 +1585,7 @@ export const usePricingStore = defineStore('pricing', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(_baseBody()),
       })
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err) }
       else { profile.value = await res.json(); rightTab.value = 'profile' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
@@ -1530,7 +1603,7 @@ export const usePricingStore = defineStore('pricing', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ..._baseBody(), N_stat: 500, N_display: 50 }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err) }
       else { paths.value = await res.json(); rightTab.value = 'paths' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
@@ -1548,7 +1621,7 @@ export const usePricingStore = defineStore('pricing', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ..._baseBody(), N: 5000 }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err) }
       else { proba.value = await res.json(); rightTab.value = 'proba' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
@@ -1573,7 +1646,7 @@ export const usePricingStore = defineStore('pricing', () => {
           rf_rate: params.rf_rate || 2.0,
         }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err) }
       else { backtest.value = await res.json(); rightTab.value = 'backtest' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
@@ -1660,7 +1733,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // Business context and adoption stay here; the shared workbench owns AI calls.
   function scriptAssistantPayload({ description, refine = false, currentScript = '' }) {
     return { description, underlyings: _buildUls(), corr_matrix: _buildCorr(),
-      r: globalParams.r / 100, T: globalParams.T, user_params: _buildUserParams(),
+      r: globalParams.r / 100, T: globalParams.T || null, user_params: _buildUserParams({ allowMissing: true }),
       current_script: refine ? currentScript : '', refine }
   }
 
@@ -1766,7 +1839,7 @@ export const usePricingStore = defineStore('pricing', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
       else {
         mtf.value = await res.json()
         // Le corps EXACT qui a produit cet éventail. Le drill-down le rejoue tel
@@ -1830,11 +1903,12 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null
     _startProgress((N || 8000) / 8000 * ((max_iter || 40) / 40) * 1500)
     try {
+      if (lo == null || hi == null || lo === '' || hi === '' || !(Number(lo) < Number(hi))) throw new Error('Renseignez deux bornes de recherche croissantes.')
       const res = await apiFetch('/api/solve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ..._baseBody(),
+          ..._baseBody({ omit: [param_name] }),
           param_name,
           target_price: target_price_pct / 100,
           lo: toStoredUnits(param_name, lo),
@@ -1842,7 +1916,7 @@ export const usePricingStore = defineStore('pricing', () => {
           N: N || 8000, tol: tol || 1e-4, max_iter: max_iter || 40,
         }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
       else { solver.value = await res.json(); rightTab.value = 'simulation' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
@@ -1854,11 +1928,12 @@ export const usePricingStore = defineStore('pricing', () => {
     loading.value = true; error.value = null
     _startProgress((N || 4000) * (x_steps || 9) * (y_steps || 9) / (4000 * 81) * 3000)
     try {
+      if ([x_min, x_max, y_min, y_max].some(v => v == null || v === '') || !(Number(x_min) < Number(x_max)) || !(Number(y_min) < Number(y_max))) throw new Error('Renseignez les bornes croissantes de chaque axe.')
       const res = await apiFetch('/api/grid', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ..._baseBody(),
+          ..._baseBody({ omit: [param_x, param_y] }),
           param_x, x_min: toStoredUnits(param_x, x_min), x_max: toStoredUnits(param_x, x_max),
           x_steps: x_steps || 9,
           param_y, y_min: toStoredUnits(param_y, y_min), y_max: toStoredUnits(param_y, y_max),
@@ -1866,7 +1941,7 @@ export const usePricingStore = defineStore('pricing', () => {
           N: N || 4000,
         }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
       else { grid.value = await res.json(); rightTab.value = 'simulation' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
@@ -1903,7 +1978,7 @@ export const usePricingStore = defineStore('pricing', () => {
           N: N || 2000,
         }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = err.detail || 'Erreur serveur' }
+      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
       else { scenarios.value = await res.json(); rightTab.value = 'scenarios' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
@@ -1985,6 +2060,7 @@ export const usePricingStore = defineStore('pricing', () => {
         // Keep enough precision for the Pricer to reproduce the deal MtM with
         // the same seed. Formatting belongs to the input, not to the value sent
         // to the engine.
+        underlyings.value[idx].vol_level_source = 'realized'
         underlyings.value[idx].sigma = Math.round(vol * 1e8) / 1e6
         underlyings.value[idx].alpha = Math.round(vol * 1e8) / 1e6
         if (q != null) underlyings.value[idx].q = Math.round(q * 1e8) / 1e6
@@ -2037,6 +2113,7 @@ export const usePricingStore = defineStore('pricing', () => {
         if (vol == null) return
         const div = dividendProfiles[pairIndex]
         const q = div?.ok ? div.yield_declared : null
+        underlyings.value[idx].vol_level_source = 'realized'
         underlyings.value[idx].sigma = Math.round(vol * 1e8) / 1e6
         underlyings.value[idx].alpha = Math.round(vol * 1e8) / 1e6
         if (q != null) underlyings.value[idx].q = Math.round(q * 1e8) / 1e6
@@ -2174,11 +2251,11 @@ export const usePricingStore = defineStore('pricing', () => {
     for (const key of Object.keys(constatOverrides)) delete constatOverrides[key]
     const today = _localTodayIso()
     Object.assign(globalParams, {
-      r: 3.0, T: 3.0, N: 20000, seed: 42, model: 'constant',
+      r: 3.0, T: null, N: 20000, seed: 42, model: 'constant',
       antithetic: true, deal_ccy: 'EUR', rateModel: 'deterministic',
       sigma_r: 1.5, a_r: 0.3, barrierMonitoring: 'weekly',
       nominal: 1_000_000,
-      trade_date: today, strike_date: today, value_date: today,
+      trade_date: today, strike_date: '', value_date: '',
       maturity_date: '', payment_date: '', valuation_date: '',
     })
     yfStatus.value = ''
@@ -2205,6 +2282,7 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   function resetToDefaults() {
+    sessionRouteKey.value = 'draft'
     _resetInputState()
     _clearResults()
     parseScript().then(_markSessionBaseline)
@@ -2267,7 +2345,7 @@ export const usePricingStore = defineStore('pricing', () => {
     script.value = model.script
 
     const plan = tenorCode
-      ? buildModelCalendars(model, { strikeDate: globalParams.strike_date, tenorCode })
+      ? buildModelCalendars(model, { strikeDate: _localTodayIso(), tenorCode })
       : null
     if (!plan) {
       globalParams.strike_date = ''
@@ -2289,7 +2367,8 @@ export const usePricingStore = defineStore('pricing', () => {
         }
       } else if (current && typeof current === 'object') {
         Object.assign(current, {
-          start_date: generated.start_date, end_date: generated.end_date,
+          start_date: generated.start_date, first_observation_date: generated.first_observation_date,
+          period_start_date: generated.period_start_date, end_date: generated.end_date,
           roll_date: generated.roll_date, stub: generated.stub,
           convention: generated.convention, settlement_lag: generated.settlement_lag,
         })
@@ -2298,12 +2377,55 @@ export const usePricingStore = defineStore('pricing', () => {
         if (generated.window_frequency) current.window_frequency = { ...generated.window_frequency }
       }
     }
-    if (plan) syncTenorFromMaturity()
+    if (plan) { globalParams.strike_date = startDate.value; syncTenorFromMaturity() }
+    _markSessionBaseline()
+  }
+
+  /** Replace product terms with a reviewed example, keeping the desk's market. */
+  async function loadFromPreset(plan) {
+    if (contractTermsLocked.value) throw Error('Les termes de ce contrat sont figés. Ouvrez un nouveau pricing pour charger un exemple.')
+    if (!plan?.validation?.data?.ok || plan.validation.script !== plan.model?.script)
+      throw Error('Préparez et validez l’exemple avant de le charger.')
+    if (plan.currency !== globalParams.deal_ccy)
+      throw Error('La devise a changé. Préparez à nouveau l’exemple.')
+    const { min = 1, max = 1 } = plan.model.underlyings || {}
+    if (underlyings.value.length < min || underlyings.value.length > max)
+      throw Error(`Cet exemple accepte ${min} à ${max} sous-jacents.`)
+    const basket = underlyings.value, correlation = corrMatrix.value
+    const active = activeUnderlyingIdx.value
+    const globals = { ...globalParams }
+    const curve = JSON.parse(JSON.stringify(yieldCurve))
+    const funding = JSON.parse(JSON.stringify(fundingCurve))
+    const market = [yfStatus.value, marketDataAsOf.value, marketDataEffectiveDate.value]
+    _resetInputState()
+    _clearResults()
+    underlyings.value = basket; corrMatrix.value = correlation
+    activeUnderlyingIdx.value = active
+    Object.assign(globalParams, globals, {
+      strike_date: plan.strikeDate, value_date: plan.strikeDate,
+      maturity_date: plan.maturityDate, payment_date: plan.paymentDate,
+      valuation_date: '', T: plan.T,
+    })
+    Object.assign(yieldCurve, curve); Object.assign(fundingCurve, funding)
+    yfStatus.value = market[0]
+    marketDataAsOf.value = market[1]
+    marketDataEffectiveDate.value = market[2]
+    script.value = plan.model.script
+    await parseScript({ validation: plan.validation })
+    Object.assign(paramOverrides, JSON.parse(JSON.stringify(plan.params)))
+    _restoreConstats(plan.constats)
+    error.value = null
+    leftTab.value = 'economics'
     _markSessionBaseline()
   }
 
   function _productUnderlying(identity, market, index) {
     const out = { ..._defaultUnderlying(index + 1), ...identity }
+    out.vol_surface=market?.vol_surface ? JSON.parse(JSON.stringify(market.vol_surface)) : null
+    out.asset_class=market?.asset_class || 'unknown'
+    out.smile_parameter_mode=market?.smile_parameter_mode || 'automatic'
+    out._smileDefaults=false
+    out.vol_level_source='saved'
     for (const field of PERCENT_MARKET_FIELDS) {
       if (market?.[field] != null) out[field] = fractionToPercent(market[field])
     }
@@ -2422,6 +2544,8 @@ export const usePricingStore = defineStore('pricing', () => {
       underlyings.value = savedUnderlyings.map((u, i) => ({
         ..._defaultUnderlying(i + 1),
         ...Object.fromEntries(Object.entries(u).filter(([, v]) => v != null)),
+        _smileDefaults: false,
+        vol_level_source: 'saved',
       }))
       corrMatrix.value = market.corrMatrix?.length ? market.corrMatrix : [[1.0]]
       activeUnderlyingIdx.value = 0
@@ -2731,12 +2855,14 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   async function loadFromDb(data) {
+    _resetInputState()
     // Charger une ORIGINE efface toute variante affichée : sans ça, la barre
     // de déclinaison survivrait à la navigation et colorerait des champs par
     // rapport à un parent qui n'est plus à l'écran.
     relacherVariante()
-    currentScriptId.value   = data.id
-    currentScriptName.value = data.name
+    const configuration = JSON.parse(data.global_params_json || '{}').configuration
+    currentScriptId.value   = configuration ? null : data.id
+    currentScriptName.value = configuration ? '' : data.name
     script.value = data.script_text
     try {
       scriptGenerationProvenance.value = JSON.parse(data.ai_provenance_json || '{}')
@@ -2950,7 +3076,7 @@ export const usePricingStore = defineStore('pricing', () => {
     const res = await apiFetch('/api/db/scripts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description, folder_id: folderId, is_shared: isShared, tags, ..._scriptBody() }),
+      body: JSON.stringify({ name, description, folder_id: folderId, is_shared: isShared, tags, ..._scriptBody(), params_json: '{}', constats_json: '{}', global_params_json: '{}' }),
     })
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur sauvegarde') }
     const saved = await res.json()
@@ -2968,7 +3094,7 @@ export const usePricingStore = defineStore('pricing', () => {
     const res = await apiFetch(`/api/db/scripts/${currentScriptId.value}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...patch, ..._scriptBody() }),
+      body: JSON.stringify({ ...patch, ..._scriptBody(), params_json: '{}', constats_json: '{}', global_params_json: '{}' }),
     })
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Erreur mise à jour') }
     const updated = await res.json()
@@ -2977,18 +3103,34 @@ export const usePricingStore = defineStore('pricing', () => {
     return updated
   }
 
+  async function saveConfiguration(name, includeBasket = false) {
+    if (!await validateScript()) throw new Error('Validez le script avant de conserver une configuration.')
+    const body = _scriptBody()
+    const global = JSON.parse(body.global_params_json)
+    if (!includeBasket) { delete global.underlyings; delete global.corr_matrix }
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(script.value))
+    global.configuration = {
+      version: 1, script_version: Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join(''),
+      model_key: Object.entries(examples).find(([, text]) => text === script.value)?.[0] || null,
+      include_basket: includeBasket,
+      model_version: Object.entries(examples).some(([, text]) => text === script.value) ? '2.0' : null,
+      parameter_units: Object.fromEntries(scriptParams.value.map(p => [p.name, p.is_pct ? ' %' : ''])),
+    }
+    body.global_params_json = JSON.stringify(global)
+    const response = await apiFetch('/api/db/scripts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, name, tags: 'configuration:payscript-v2', is_shared: false }),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.detail || 'Enregistrement refusé.')
+    return data
+  }
+
   function addUnderlying() {
     if (contractTermsLocked.value) return
     const n = underlyings.value.length
     if (n >= CALCULATION_LIMITS.maxUnderlyings) return
-    underlyings.value.push({
-      name: `Sous-jacent ${n+1}`, ticker: '', ccy: 'EUR',
-      sigma: 20, q: 2.0, sigma_fx: 0, rho_sfx: 0, ccyh: 0,
-      dividendCurveEnabled: false, dividendDecay: 10.0,
-      v0: 4.0, kappa: 2.0, theta: 4.0, xi: 35, rho_h: -70, rho_rS: 40,
-      alpha: 20, beta: 50, rho: -30, nu: 40,
-      skew: -10, curvature: 5, showQuanto: false,
-    })
+    underlyings.value.push(_defaultUnderlying(n+1))
     const m = corrMatrix.value
     m.forEach(row => row.push(0))
     m.push(new Array(n+1).fill(0))
@@ -3029,6 +3171,8 @@ export const usePricingStore = defineStore('pricing', () => {
     inLifeBody: _inLifeBody,
     currentIndicativeId, currentProduct, productTitle, ensureIndicative,
     currentRfqId, pendingDealPrefill, openedDeal, contractTermsLocked,
+    initialFixingName, startDate, saveConfiguration,
+    draftProductBody: () => _baseBody({ allowMissing: true }),
     parseScript, runPricing, runGreeks,
     runProfile, runPaths, runProba, runBacktest, runMtf,
     runSolver, runGrid, paramIsPct, fromStoredUnits, runScenarios,
@@ -3044,11 +3188,19 @@ export const usePricingStore = defineStore('pricing', () => {
     loadYfOne, loadYfAll, onValuationDateChange, loadStrikeCloses,
     setMaturityDate, syncTenorFromMaturity, maturityError,
     addUnderlying, removeUnderlying,
-    resetToDefaults, loadFromDb, loadVariant, saveVariant, variantInfo,
+    resetToDefaults, sessionRouteKey, loadFromDb, loadVariant, saveVariant, variantInfo,
     relacherVariante,
     variantDirty,
     loadFromDeal, loadFromRfq, loadFromProduct, saveScript, updateScript,
-    loadFromProductModel, hasUnsavedSession,
+    loadFromProductModel, loadFromPreset, hasUnsavedSession,
     pricingBody: _pricingBody,
+    optimizerMarketInputs: () => ({
+      model: globalParams.model, rate_model: globalParams.rateModel,
+      currency: globalParams.deal_ccy,
+      as_of: globalParams.valuation_date || marketDataAsOf.value || globalParams.strike_date || new Date().toLocaleDateString('en-CA'),
+      r: globalParams.r / 100, underlyings: _buildUls(), corr_matrix: _buildCorr(),
+      yield_curve: yieldCurve.enabled ? yieldCurve.pillars.map(p => [p.T,p.rate/100]) : [],
+      ..._fundingPayload(),
+    }),
   }
 })

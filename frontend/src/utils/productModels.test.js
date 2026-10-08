@@ -33,7 +33,7 @@ describe('le catalogue', () => {
     for (const model of productModels) {
       expect(model.script).not.toMatch(/^AT\s+\d/m)
       for (const spec of Object.values(model.constats)) {
-        expect(['observations', 'maturity', 'strike_window']).toContain(spec.role)
+        expect(['observations', 'maturity', 'initial_fixing']).toContain(spec.role)
       }
       expect(tenorsFor(model).length).toBe(model.tenors.length)
     }
@@ -52,8 +52,8 @@ describe('buildModelCalendars', () => {
       { strikeDate: '2026-09-14', tenorCode: '3Y' })
 
     expect(plan.maturity).toBe('2029-09-14')
-    expect(plan.constats.OBSERVATIONS).toEqual({
-      start_date: '2026-09-14', end_date: '2029-09-14', roll_date: '2026-09-14',
+    expect(plan.constats.OBSERVATIONDATES).toEqual({
+      first_observation_date: '2027-09-14', period_start_date: '2026-09-14', end_date: '2029-09-14', roll_date: '2026-09-14',
       frequency: { value: 1, unit: 'Y' }, stub: 'short_last',
       convention: 'none', settlement_lag: 0,
     })
@@ -63,11 +63,11 @@ describe('buildModelCalendars', () => {
     const plan = buildModelCalendars(findProductModel('call_panier_moyenne'),
       { strikeDate: '2026-09-14', tenorCode: '18M' })
 
-    expect(plan.constats.STRIKE_FIX).toEqual({
+    expect(plan.constats.STARTDATE).toEqual({
       date: '2026-09-14',
       window_length: { value: 10, unit: 'D' }, window_frequency: { value: 1, unit: 'D' },
     })
-    expect(plan.constats.MATURITE).toEqual({
+    expect(plan.constats.MATURITYDATE).toEqual({
       date: '2028-03-14',
       window_length: { value: 30, unit: 'D' }, window_frequency: { value: 1, unit: 'D' },
     })
@@ -77,7 +77,7 @@ describe('buildModelCalendars', () => {
     const plan = buildModelCalendars(findProductModel('autocall_coupon_moyenne_periode'),
       { strikeDate: '2026-09-14', tenorCode: '2Y' })
 
-    expect(plan.constats.OBSERVATIONS.window_frequency).toEqual({ value: 3, unit: 'M' })
+    expect(plan.constats.OBSERVATIONDATES.window_frequency).toEqual({ value: 3, unit: 'M' })
   })
 
   it('ne génère rien sans strike ou sans ténor connu', () => {

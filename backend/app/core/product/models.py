@@ -54,7 +54,7 @@ class UnderlyingIdentity(FrozenModel):
 
 class ContractParameter(FrozenModel):
     name: str = Field(min_length=1)
-    value: float | tuple[float, ...]
+    value: float | tuple[float, ...] | None
     is_pct: bool
     kind: Literal["scalar", "array"]
     description: str = ""
@@ -70,9 +70,9 @@ class ProductTerms(FrozenModel):
     schema_version: Literal[1] = 1
     script: str = Field(min_length=1, max_length=32000)
     parameters: tuple[ContractParameter, ...] = ()
-    underlyings: tuple[UnderlyingIdentity, ...] = Field(min_length=1, max_length=12)
+    underlyings: tuple[UnderlyingIdentity, ...] = Field(default=(), max_length=12)
     constats: FrozenObject = Field(default_factory=FrozenObject)
-    T: float = Field(gt=0, le=30)
+    T: float | None = Field(default=None, gt=0, le=30)
     strike_date: date | None = None
     value_date: date | None = None
     maturity_date: date | None = None
@@ -104,6 +104,17 @@ class ProductTerms(FrozenModel):
     def user_params(self) -> dict:
         return {p.name: list(p.value) if isinstance(p.value, tuple) else p.value
                 for p in self.parameters}
+
+    def require_complete(self):
+        missing = [p.name for p in self.parameters if p.value is None]
+        if not self.underlyings:
+            missing.append('panier de sous-jacents')
+        if self.T is None:
+            missing.append('calendrier / maturité')
+        if missing:
+            raise ValueError('Produit incomplet : ' + ', '.join(missing) + '.')
+        if self.schedule_error:
+            raise ValueError(self.schedule_error)
 
     def pricing_fields(self) -> dict:
         """Fresh contractual projection; market fields cannot be supplied here."""

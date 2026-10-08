@@ -51,6 +51,43 @@ def test_le_semis_reprend_la_liste_du_front(monkeypatch):
     # Un ticker peut figurer dans deux groupes, comme dans le fichier d'origine.
     bnp = [u.group_name for u in rows if u.ticker == "BNP.PA"]
     assert len(bnp) == 2, bnp
+    assert [u.ticker for u in rows if u.label == 'AXA'] == ['CS.PA']
+    assert next(u for u in rows if u.ticker=='STMPA.PA').asset_class=='equity'
+    assert next(u for u in rows if u.ticker=='000300.SS').asset_class=='index'
+
+
+def test_seed_corrects_original_axa_symbol_without_changing_its_id(monkeypatch):
+    engine = create_engine('sqlite://')
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(db, 'engine', engine)
+    with Session(engine) as session:
+        row = Underlying(ticker='AXA.PA', label='AXA', group_name='Actions FR (CAC)', ccy='EUR')
+        session.add(row); session.commit(); session.refresh(row)
+        original_id = row.id
+    db._seed_underlyings()
+    db._seed_underlyings()
+    with Session(engine) as session:
+        assert session.get(Underlying, original_id).ticker == 'CS.PA'
+        assert len(session.exec(select(Underlying)).all()) == 65
+
+
+def test_seed_keeps_existing_correct_axa_and_custom_catalogue_entries(monkeypatch):
+    engine = create_engine('sqlite://')
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(db, 'engine', engine)
+    with Session(engine) as session:
+        session.add_all([
+            Underlying(ticker='AXA.PA', label='AXA', group_name='Actions FR (CAC)'),
+            Underlying(ticker='CS.PA', label='AXA vérifié', group_name='Actions FR (CAC)'),
+            Underlying(ticker='AXA.PA', label='Saisie personnelle', group_name='Personnalisé')])
+        session.commit()
+    db._seed_underlyings()
+    with Session(engine) as session:
+        rows = session.exec(select(Underlying)).all()
+        old = next(u for u in rows if u.label == 'AXA')
+        assert old.active is False
+        assert next(u for u in rows if u.label == 'AXA vérifié').active is True
+        assert next(u for u in rows if u.label == 'Saisie personnelle').ticker == 'AXA.PA'
 
 
 def test_ajouter_un_titre_verifie_qu_il_repond(s, yahoo_ok):

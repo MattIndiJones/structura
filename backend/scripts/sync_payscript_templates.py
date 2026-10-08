@@ -5,7 +5,7 @@ La bibliothèque d'exemples PayScript vit côté frontend
 l'éditeur et la typologie produit du module RFQ. L'assistant IA en a besoin
 côté serveur, comme corpus few-shot — l'appel au modèle part du backend.
 
-Plutôt que de recopier 16 scripts à la main (et de les laisser diverger),
+Plutôt que de recopier les scripts du catalogue à la main (et de les laisser diverger),
 ce script les extrait et génère le module Python.
 `backend/tests/test_payscript_templates.py` rejoue l'extraction et échoue si le
 fichier généré n'est plus à jour : la duplication est donc mécanique et
@@ -16,6 +16,7 @@ Usage :  .venv\\Scripts\\python.exe backend\\scripts\\sync_payscript_templates.p
 from __future__ import annotations
 
 import re
+import json
 import sys
 from pathlib import Path
 
@@ -46,6 +47,11 @@ def extract(js_text: str) -> tuple[dict[str, tuple[str, str]], list[tuple[str, s
     scripts se compilent et se pricent tels quels. Les variantes expert
     référencent des CONSTAT dont les valeurs vivent dans l'interface — un
     exemple que le modèle ne pourrait pas reproduire de façon autonome."""
+    if "import catalogue from './productCatalogue.json'" in js_text:
+        catalogue = json.loads((JS_SOURCE.parent / 'productCatalogue.json').read_text(encoding='utf-8'))
+        families = {f['key']: f['label'] for f in catalogue['families']}
+        return ({p['key']: (p['label'], families[p['family']]) for p in catalogue['products']},
+                [(p['key'], '\n'.join(p['script'])) for p in catalogue['products']])
     meta_block = re.search(r"export const templateMeta = \[(.*?)\n\]", js_text, re.S)
     if not meta_block:
         raise SystemExit("templateMeta introuvable dans le fichier JS.")

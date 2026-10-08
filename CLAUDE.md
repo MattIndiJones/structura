@@ -65,7 +65,7 @@ d'un prix faux qui ne se signalait pas. Le détail est dans `docs/handoffs/REPRI
 
 | Date | Rôle |
 |---|---|
-| **Strike** | première constatation — **origine de l'axe des temps du moteur** |
+| **Strike / StartDate** | fixing initial de S₀, distinct de la première observation du payoff — **origine de l'axe des temps du moteur** |
 | **Valeur** | échange du cash ; le prix s'y exprime (rebasage du PV) |
 | **Maturité** | dernière constatation |
 | **Paiement** | règlement final, J+3 ouvrés par défaut, modifiable |

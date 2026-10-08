@@ -596,6 +596,7 @@ def dividend_profile(ticker: str, asof: Optional[str] = None,
                         for d, v in fenetre.items()]
         except Exception as exc:
             logger.debug("dividends %s: %s", symbole, exc)
+            return {"ok": False, "error": "Historique des dividendes indisponible ; rendement à renseigner."}
 
         total = sum(d["amount"] for d in detaches)
         yield_declared = round(total / cours_fin / window_years, 6) if cours_fin else 0.0
@@ -625,6 +626,7 @@ def dividend_profile(ticker: str, asof: Optional[str] = None,
             "ok": True,
             "ticker": symbole,
             "asof": fin.isoformat(),
+            "asof_effective": avant_fin.index[-1].date().isoformat(),
             "window_years": window_years,
             "price": round(cours_fin, 6),
             "yield_declared": yield_declared,

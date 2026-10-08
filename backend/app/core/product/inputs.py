@@ -5,7 +5,8 @@ from datetime import date
 from types import SimpleNamespace
 
 from .models import ContractParameter, FrozenObject, Product, ProductTerms, UnderlyingIdentity
-from ..payscript.parser import parse_script, resolve_analysis_constats
+from ..payscript.parser import parse_script, resolve_analysis_constats, analysis_origin
+from ..payscript.bindings import effective_parameters
 from ..schemas import UnderlyingParams
 from .calendar import freeze_calendar
 
@@ -29,11 +30,19 @@ def terms_from_input(payload: dict, *, allow_unresolved: bool = False) -> Produc
     unknown = set(supplied) - declared
     if unknown:
         raise ValueError("Paramètres non déclarés : " + ", ".join(sorted(unknown)))
+    supplied = effective_parameters(compiled.params, supplied, allow_missing=allow_unresolved)
     params = tuple(ContractParameter(
         name=p.name, value=supplied.get(p.name, p.stored_val),
         is_pct=p.is_pct, kind=p.kind, description=p.desc,
     ) for p in compiled.params)
     tenor = payload.get("T")
+    if compiled.initial_fixing_name:
+        try:
+            initial = analysis_origin(SimpleNamespace(**payload))
+            payload = {**payload, 'strike_date': initial.isoformat()}
+        except ValueError:
+            if not allow_unresolved:
+                raise
     if tenor is None and payload.get("strike_date") and payload.get("maturity_date"):
         start = date.fromisoformat(str(payload["strike_date"]))
         end = date.fromisoformat(str(payload["maturity_date"]))
@@ -57,8 +66,17 @@ def terms_from_input(payload: dict, *, allow_unresolved: bool = False) -> Produc
     try:
         compiled = resolve_analysis_constats(compiled, SimpleNamespace(**terms.pricing_fields()))
         schedule = FrozenObject(compiled.echeancier.to_dict())
-        return terms.model_copy(update={"schedule": schedule,
-                                        "resolved_events": FrozenObject(freeze_calendar(compiled))})
+        updates = {"schedule": schedule, "resolved_events": FrozenObject(freeze_calendar(compiled))}
+        if compiled.initial_fixing_name:
+            horizon = max((d for e in compiled.events for d in e.dates), default=0)
+            if horizon > 0:
+                from datetime import timedelta
+                updates['T'] = horizon
+                updates['maturity_date'] = terms.strike_date + timedelta(days=round(horizon * 365.25))
+        resolved = ProductTerms.model_validate({**terms.model_dump(), **updates})
+        if not allow_unresolved:
+            resolved.require_complete()
+        return resolved
     except ValueError as exc:
         if not allow_unresolved:
             raise
@@ -86,6 +104,7 @@ def pricing_input(product: Product, context: dict) -> dict:
     Context underlying arrays are ordered exactly like the contractual basket.
     Names/tickers/currencies and other contractual overrides are rejected.
     """
+    product.terms.require_complete()
     forbidden = (set(context) & TERM_FIELDS) - {"underlyings"}
     if forbidden:
         raise ValueError("Le contexte tente de modifier les termes : " + ", ".join(sorted(forbidden)))

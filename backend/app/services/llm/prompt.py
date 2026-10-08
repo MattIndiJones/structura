@@ -25,7 +25,7 @@ EXPLAIN_MARK = "===EXPLICATION==="
 # les exemples : montrer un call vanille à qui demande un phoenix dilue le
 # signal et fait payer des jetons pour rien.
 _FAMILY_HINTS = {
-    "Autocall": ("autocall", "athena", "phoenix", "rappel", "rappelable",
+    "Autocalls": ("autocall", "athena", "phoenix", "rappel", "rappelable",
                  "callable", "worst-of", "worst of", "coupon conditionnel",
                  "memoire", "mémoire"),
     "Produits à capital": ("capital garanti", "capital protégé", "capital protege",
@@ -77,7 +77,7 @@ def select_examples(description: str, limit: int = _MAX_EXAMPLES) -> list[str]:
     if not ordered:
         # Demande non classée : partir de l'autocall, de très loin la famille
         # la plus fréquente sur un desk.
-        ordered = sorted(k for k, t in lib.items() if t.get("group") == "Autocall")
+        ordered = sorted(k for k, t in lib.items() if t.get("group") == "Autocalls")
 
     chosen = ordered[:limit]
     for idiome in _REQUIRED_IDIOMS:
@@ -122,18 +122,21 @@ EXEMPLES DE SCRIPTS QUI FONCTIONNENT RÉELLEMENT ICI
 RÈGLES IMPÉRATIVES
 ═══════════════════════════════════════════════════════════════════
 1. N'utilise QUE le vocabulaire de la référence. Aucun mot inventé.
-2. Tout script comporte un bloc `AT MATURITY` qui solde le produit.
+2. Déclare UNDERLYING Basket et CONSTAT StartDate ; initialise Basket.spot0 dans AT StartDate.
+   Solde le produit dans AT ObservationDates.last ou dans sa constatation finale nommée.
 3. Tout rappel anticipé se termine par `STOP`. Sans `STOP`, ce n'est pas un rappel.
-4. Barrière observée à la date de constatation -> `WOF`. Barrière franchie à un
+4. Barrière observée à la date de constatation -> `WORSTOF(Basket.yield)`. Barrière franchie à un
    moment quelconque de la vie du produit (knock-in de termsheet) -> `WOF_MIN`.
-   En cas de doute sur une barrière de perte en capital, c'est `WOF_MIN`.
+   Ne transforme pas une barrière à maturité en barrière américaine sans indication.
 5. Ne rembourse jamais le nominal deux fois.
 6. Un coupon à mémoire exige `SET MEMO = INDEX` après le versement.
 7. Préfixe `M_` les paramètres de barrière (rappel, knock-in).
-8. Déclare en `PARAM` tout niveau chiffré, avec sa valeur par défaut. N'écris
-   jamais un niveau en dur dans une expression.
+8. Déclare les niveaux par PARAM NOM, sans valeur (pourcentage par défaut). Les valeurs
+   appartiennent à Economics. Une valeur explicite ne se justifie que si demandée.
+   Sépare chaque coupon, capital et put vendu dans son propre PAY.
 9. Un nom de PARAM ou de SET ne peut pas être un mot du langage (§ Noms réservés).
-10. Les dates `AT` sont en années depuis la date de strike, strictement positives.
+10. CONSTAT() ObservationDates porte les dates du payoff, distinctes de StartDate.
+    AT Date FROM ObservationDates parcourt ces dates ; INDEX commence à 1 au premier payoff.
 
 ═══════════════════════════════════════════════════════════════════
 FORMAT DE RÉPONSE — impératif

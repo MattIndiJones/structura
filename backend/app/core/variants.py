@@ -146,6 +146,11 @@ def _poser(ctx: dict, adresse: tuple, valeur, mode: str) -> None:
         ctx["params"][nom] = valeur
         return
     if espace == "constats":
+        if mode == MODE_AVENANT:
+            from .payscript.parser import parse_script
+            initial = parse_script(ctx['script_text']).initial_fixing_name
+            if initial and nom.upper() == initial:
+                raise VariantError('Le fixing initial est figé en avenant. Créez une nouvelle note (roll).')
         if not champs:
             ctx["constats"][nom] = valeur
             return
@@ -410,8 +415,8 @@ def valider(delta: dict | None, mode: str) -> None:
 # date de valorisation, elles sont déjà les bonnes.
 
 # Les dates que porte le contexte global, et ce qu'elles deviennent.
-_DATES_GLOBALES = ("trade_date", "strike_date", "value_date", "payment_date")
-_DATES_CONSTAT = ("start_date", "roll_date", "end_date")
+_DATES_GLOBALES = ("trade_date", "strike_date", "value_date", "maturity_date", "payment_date")
+_DATES_CONSTAT = ("date", "start_date", "first_observation_date", "period_start_date", "roll_date", "end_date")
 
 
 def _decaler(iso: str, jours: int) -> str:
@@ -467,6 +472,10 @@ def deriver_roll(ctx: dict, figes: set) -> dict:
         if g.get(cle) and f"global.{cle}" not in figes:
             g[cle] = _decaler(g[cle], jours)
     for nom, valeurs in (ctx.get("constats") or {}).items():
+        if isinstance(valeurs, str):
+            if f"constats[{nom}]" not in figes:
+                ctx['constats'][nom] = _decaler(valeurs, jours)
+            continue
         if not isinstance(valeurs, dict):
             continue
         for cle in _DATES_CONSTAT:
@@ -480,6 +489,8 @@ def deriver_roll(ctx: dict, figes: set) -> dict:
     g["strike_date"] = str(nouveau)
     g["valuation_date"] = str(nouveau)
     g.pop("strike_levels", None)
+    for underlying in g.get('underlyings') or []:
+        underlying.pop('spot0', None)
     return ctx
 
 

@@ -5,27 +5,18 @@
     <div class="flex items-center gap-2 flex-wrap">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mr-auto">PayScript</h2>
 
-      <!-- Normal / Expert toggle -->
-      <div class="flex items-center text-[10px] border border-slate-700 rounded overflow-hidden shrink-0">
-        <button
-          :class="['px-2 py-1 transition-colors', !expertMode ? 'bg-slate-700 text-slate-200 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-          @click="expertMode = false"
-        >Normal</button>
-        <button
-          :class="['px-2 py-1 transition-colors', expertMode ? 'bg-blue-900/80 text-blue-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-          @click="expertMode = true"
-        >Expert</button>
-      </div>
-      <HelpTip width="w-72" text="Normal : dates AT écrites en dur (AT 1, 2, 3). Expert : calendrier CONSTAT() généré (start/end/roll/fréquence/stub), pratique pour des échéanciers réguliers longs sans lister chaque date à la main, et pour rejouer un calendrier réel avec jours fériés/roll gérés proprement. Change seulement les templates chargés — ne convertit pas le script actuellement en cours d'édition." />
-
       <select class="select text-xs w-auto" :disabled="store.contractTermsLocked"
               @change="loadExample($event.target.value); $event.target.value=''">
-        <option value="">{{ expertMode ? 'Exemples (expert)…' : 'Exemples…' }}</option>
+        <option value="">Modèles génériques…</option>
         <option value="__blank__">— Script libre (vide) —</option>
         <optgroup v-for="(items, group) in groupedTemplates" :key="group" :label="group">
           <option v-for="t in items" :key="t.key" :value="t.key">{{ t.label }}</option>
         </optgroup>
       </select>
+
+      <PayScriptPresetPicker :disabled="store.contractTermsLocked" :currency="store.globalParams.deal_ccy"
+                            :start-date="store.startDate" :underlying-count="store.underlyings.length"
+                            :on-apply="store.loadFromPreset" />
 
       <button class="btn-secondary text-xs px-3 py-1.5 shrink-0"
               :disabled="store.contractTermsLocked" @click="assistantOpen = true">
@@ -113,6 +104,8 @@
       </template>
     </BaseModal>
 
+    <PayScriptConfigurations v-if="!store.contractTermsLocked" />
+
     <!-- Editor -->
     <div class="card p-0 overflow-hidden">
       <SensitiveValue mode="blur">
@@ -194,7 +187,9 @@ import HelpTip from './HelpTip.vue'
 import BaseModal from './ui/BaseModal.vue'
 import AlertMessage from './ui/AlertMessage.vue'
 import ScriptAssistantModal from './ScriptAssistantModal.vue'
-import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
+import PayScriptConfigurations from './PayScriptConfigurations.vue'
+import PayScriptPresetPicker from './PayScriptPresetPicker.vue'
+import { templateMeta, examples } from '../data/payscriptTemplates.js'
 
 const store = usePricingStore()
 const notice = ref('')
@@ -202,16 +197,12 @@ const notice = ref('')
 const groupedTemplates = computed(() => {
   const groups = {}
   for (const t of templateMeta) {
-    // Un modèle `expertOnly` constate sur une période : sa fenêtre vit dans un
-    // CONSTAT, que le mode normal ne déclare pas. Le proposer là chargerait un
-    // script vide.
-    if (t.expertOnly && !expertMode.value) continue
     ;(groups[t.group] ||= []).push(t)
   }
   return groups
 })
 
-const expertMode = ref(false)
+
 const assistantOpen = ref(false)
 
 // ── Validation (Ctrl+S / « Valider ») ─────────────────────────────
@@ -317,170 +308,12 @@ async function doSave() {
   }
 }
 
-// ── Date helpers ───────────────────────────────────────────────────
-function isoToday() {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function addYears(n) {
-  const d = new Date()
-  d.setFullYear(d.getFullYear() + n)
-  return d.toISOString().slice(0, 10)
-}
-
-function addMonths(n) {
-  const d = new Date()
-  d.setMonth(d.getMonth() + n)
-  return d.toISOString().slice(0, 10)
-}
-
-// Templates (examples / expertExamples) now live in ../data/payscriptTemplates.js
-// ── Expert CONSTAT pre-fill (dates computed from today) ────────────
-function getExpertConstatDefaults(key) {
-  const t0 = isoToday()
-  const defs = []
-
-  // Products with CONSTAT() OBSERVATIONS (annual schedule)
-  const scheduleMap = {
-    autocall_athena:            3,
-    autocall_phoenix:           3,
-    autocall_worst_of:          3,
-    autocall_gear_put:          3,
-    autocall_gear_put_worst_of: 3,
-  }
-
-  // Products with CONSTAT MATURITE (single date) → years to maturity
-  const singleMap = {
-    call_vanilla:        1,
-    put_vanilla:         1,
-    call_spread:         1,
-    digital:             1,
-    capital_garanti:     5,
-    reverse_convertible: 1,
-    twin_win:            3,
-    booster:             3,
-    zcb:                 1,
-    shark_note:          3,
-    shark_note_worst_of: 3,
-    call_moyenne:        1,
-    call_lookback:       1,
-  }
-
-  // Produits portant une fenêtre de départ (STRIKE_FIX). La valeur est la
-  // longueur par défaut de la fenêtre, en jours ouvrés — elle se re-saisit à
-  // l'écran, c'est une donnée de term sheet.
-  const strikeFixMap = {
-    autocall_gear_put:          10,
-    autocall_gear_put_worst_of: 10,
-    call_moyenne:               10,
-    call_lookback:              10,
-  }
-  // Constatation finale sur période : longueur par défaut, même unité.
-  const finalWindowMap = { call_moyenne: 30 }
-
-  // Calendrier à fenêtre de PÉRIODE : la sous-fréquence de relevé remplace la
-  // longueur, qui n'a pas de sens quand la fenêtre est la période elle-même.
-  const periodMap = { autocall_moyenne_periode: { years: 3, sample: { value: 3, unit: 'M' } } }
-  if (key in periodMap) {
-    const endDate = addYears(periodMap[key].years)
-    defs.push({ name: 'OBSERVATIONS', kind: 'schedule', values: {
-      start_date: t0, end_date: endDate, roll_date: endDate,
-      frequency: { value: 1, unit: 'Y' }, stub: 'short_last',
-      window_frequency: periodMap[key].sample,
-    }})
-    return defs
-  }
-
-  if (key in scheduleMap) {
-    const endDate = addYears(scheduleMap[key])
-    defs.push({ name: 'OBSERVATIONS', kind: 'schedule', values: {
-      start_date: t0, end_date: endDate, roll_date: endDate,
-      frequency: { value: 1, unit: 'Y' }, stub: 'short_last',
-    }})
-  }
-
-  if (key in singleMap) {
-    const win = finalWindowMap[key]
-    defs.push({ name: 'MATURITE', kind: 'single',
-                values: win
-                  ? { date: addYears(singleMap[key]),
-                      window_length: { value: win, unit: 'D' },
-                      window_frequency: { value: 1, unit: 'D' } }
-                  : addYears(singleMap[key]) })
-  }
-
-  if (key in strikeFixMap) {
-    defs.push({ name: 'STRIKE_FIX', kind: 'single', values: {
-      date: t0,
-      window_length: { value: strikeFixMap[key], unit: 'D' },
-      window_frequency: { value: 1, unit: 'D' },
-    }})
-  }
-
-  return defs
-}
-
-// ── Load example ───────────────────────────────────────────────────
-const BLANK_SCRIPT = `# Script libre — décrivez votre payoff.
-# Aide : bouton ✨ Assistant IA, ou le mémo de vocabulaire ci-dessous.
-
-AT MATURITY:
-  PAY 1
-`
-
+// Loading a model starts a blank contract; values live in optional configurations.
 async function loadExample(key) {
   if (!key || store.contractTermsLocked) return
-  Object.keys(store.paramOverrides).forEach(k => delete store.paramOverrides[k])
-
-  // Point de départ vierge : un squelette qui parse (donc qui price) plutôt
-  // qu'un éditeur vide, qui afficherait une erreur avant la première frappe.
-  if (key === '__blank__') {
-    store.script = BLANK_SCRIPT
-    await store.parseScript()
-    return
-  }
-
-  if (expertMode.value) {
-    store.script = expertExamples[key] || examples[key] || ''
-    await store.parseScript()
-    applyConstatDefaults(key)
-  } else {
-    store.script = examples[key] || ''
-    await store.parseScript()
-    applyConstatDefaults(key)
-  }
-}
-
-/** Pré-remplit les CONSTAT déclarés par le modèle qu'on vient de charger. */
-function applyConstatDefaults(key) {
-  for (const def of getExpertConstatDefaults(key)) {
-    if (!(def.name in store.constatOverrides)) continue
-    const ov = store.constatOverrides[def.name]
-    if (def.kind === 'single') {
-      // Un modèle à fenêtre stocke un objet : on le remplit plutôt que de
-      // l'écraser, sinon la réactivité du panneau saute.
-      if (typeof def.values === 'object' && ov && typeof ov === 'object') {
-        ov.date = def.values.date
-        _applyTenor(ov, 'window_length', def.values.window_length)
-        _applyTenor(ov, 'window_frequency', def.values.window_frequency)
-      } else {
-        store.constatOverrides[def.name] = def.values
-      }
-    } else if (ov && typeof ov === 'object') {
-      ov.start_date = def.values.start_date
-      ov.end_date   = def.values.end_date
-      ov.roll_date  = def.values.roll_date
-      ov.frequency.value = def.values.frequency.value
-      ov.frequency.unit  = def.values.frequency.unit
-      ov.stub = def.values.stub
-    }
-  }
-}
-
-function _applyTenor(ov, key, tenor) {
-  if (!tenor) return
-  if (!ov[key]) ov[key] = { value: tenor.value, unit: tenor.unit }
-  else { ov[key].value = tenor.value; ov[key].unit = tenor.unit }
+  const text = key === '__blank__' ? examples.call : examples[key]
+  if (!text) return
+  await store.loadFromProductModel({ script: text, underlyings: { min: 1, max: 12 } })
 }
 
 // ── Misc ───────────────────────────────────────────────────────────
@@ -499,77 +332,33 @@ function insertTab(e) {
 // Entries are listed in alphabetical order within each section (sections keep
 // their reading order). Insert a new entry at its alphabetical place.
 const referenceSections = [
-  {
-    title: 'Déclarations & dates',
-    items: [
-      { kw: 'AT 1, 2, 3:', desc: 'Événement à des dates précises, en années depuis la date de strike' },
-      { kw: 'AT 1..5:0.5', desc: 'Événement sur une plage (début..fin:pas, pas=1 par défaut)' },
-      { kw: 'AT MATURITY:', desc: 'Événement à maturité' },
-      { kw: 'AT Nom:', desc: 'Événement à chaque date d\'un calendrier nommé' },
-      { kw: 'AT Nom.first:', desc: 'Événement additionnel à la 1ère date du calendrier' },
-      { kw: 'AT Nom.last:', desc: 'Événement additionnel à la dernière date (ex : check KI à maturité)' },
-      { kw: 'AT Nom.last.last:', desc: 'Deux niveaux de qualificateur : le premier désigne une constatation, le second UN RELEVÉ dans sa fenêtre. .last = la dernière constatation (donc la moyenne), .last.last = son dernier relevé (donc le cours). C\'est ainsi qu\'un PDI sur clôture cohabite avec un coupon sur moyenne, même date, même calendrier' },
-      { kw: 'AT Nom[3]:', desc: 'Événement additionnel à la 3e date (1-indexé)' },
-      { kw: 'CONSTAT Nom', desc: 'Date unique nommée, remplie via l\'UI (mode expert)' },
-      { kw: 'CONSTAT Nom MIN|MAX|AVG', desc: 'Constatation sur PERIODE : chaque date devient le min/max/moyenne des cours de CHAQUE sous-jacent sur une fenetre, et WOF/BOF/BASKET n\'agregent qu\'ensuite. Longueur et frequence de la fenetre se saisissent a l\'ecran : ce sont des donnees de term sheet, pas du payoff' },
-      { kw: 'CONSTAT STRIKE_FIX AVG', desc: 'Nom reserve : la fenetre de depart, celle qui fixe S0 par sous-jacent. Elle PART de sa date vers l\'avant, la ou toute autre fenetre arrive a la sienne. Ensuite WOF/BOF/BASKET valent directement la performance contre S0. Tant qu\'elle n\'est pas close, les barrieres americaines (WOF_MIN) ne courent pas' },
-      { kw: 'CONSTAT() Nom', desc: 'Calendrier nommé : début/fin/roll/fréquence/stub, rempli via l\'UI' },
-      { kw: 'CONSTAT() Nom AVG PERIOD', desc: 'Fenêtre = LA PÉRIODE, d\'une constatation à la suivante, échantillonnée à la fréquence de relevé saisie à l\'écran. Trois constatations annuelles moyennées sur leurs relevés trimestriels, par exemple. Sans PERIOD, la fenêtre a une longueur fixe avant chaque date' },
-      { kw: 'CONSTAT()() Nom', desc: 'Comme CONSTAT() + une sous-fréquence (subdivise chaque intervalle)' },
-      { kw: 'Ctrl+S / Valider', desc: 'Valide le script : une valeur initiale ou une unité modifiée s\'applique à Economics. N\'enregistre pas' },
-      { kw: 'PARAM K = 5%', desc: 'Paramètre modifiable par l\'UI ("desc" ou # desc optionnelle)' },
-      { kw: 'PARAM M_XXX', desc: 'Préfixe M_ = surveillé par la watchlist Booking. Direction et observable déduits de l\'usage : WOF >= M_X = rappel par le haut, WOF < M_X = KI par le bas' },
-      { kw: 'PARAM() K = 5%', desc: 'Paramètre par observation : tableau d\'une valeur par date AT dans l\'UI (la dernière ligne s\'étend, une ligne = constant). Valeur obligatoire, comme pour PARAM : le = 5% pré-remplit la 1ère ligne' },
-    ],
-  },
-  {
-    title: 'Instructions',
-    items: [
-      { kw: 'ACCRUE expr', desc: 'Accumuler une valeur dans ACCUM' },
-      { kw: 'IF cond: / ELSE IF: / ELSE:', desc: 'Branchement conditionnel' },
-      { kw: 'PAY expr "label"', desc: 'Flux actualisé au pricing, étiquette optionnelle (alias : FLOW)' },
-      { kw: 'SET X = expr', desc: 'Stocker une valeur (variable mémo)' },
-      { kw: 'STOP', desc: 'Arrêter le chemin (autocall)' },
-    ],
-  },
-  {
-    title: 'Variables intégrées',
-    items: [
-      { kw: 'ACCUM', desc: 'Valeur accumulée via ACCRUE' },
-      { kw: 'BOF', desc: 'Best-of actuel (max des spots)' },
-      { kw: 'BOF_MAX', desc: 'Max historique du BoF depuis t=0' },
-      { kw: 'INDEX', desc: 'Numéro d\'observation (1, 2, …)' },
-      { kw: 'N', desc: 'Nombre de sous-jacents' },
-      { kw: 'REALVOL', desc: 'Vol réalisée annualisée du WoF depuis t=0' },
-      { kw: 'S[i]', desc: 'Spot du sous-jacent i (1-indexé)' },
-      { kw: 'S_MIN[i] / S_MAX[i]', desc: 'Min/max historique du sous-jacent i' },
-      { kw: 'S_PREV[i]', desc: 'Spot du sous-jacent i à l\'observation précédente' },
-      { kw: 'T', desc: 'Temps actuel (en années)' },
-      { kw: 'WOF', desc: 'Worst-of actuel (min des spots)' },
-      { kw: 'WOF_MIN', desc: 'Min historique du WoF depuis t=0' },
-    ],
-  },
-  {
-    title: 'Fonctions',
-    items: [
-      { kw: 'ABS(x)', desc: 'Valeur absolue' },
-      { kw: 'BASKET', desc: 'Moyenne simple des spots (équipondérée)' },
-      { kw: 'BASKET(w1, w2, …)', desc: 'Panier pondéré des spots' },
-      { kw: 'CEIL(x) / FLOOR(x)', desc: 'Arrondi supérieur / inférieur' },
-      { kw: 'EXP(x) / LOG(x) / SQRT(x)', desc: 'Exponentielle, log népérien, racine carrée' },
-      { kw: 'INDIC(cond)', desc: '1 si vrai, 0 sinon' },
-      { kw: 'MAX(a, b) / MIN(a, b)', desc: 'Maximum / minimum' },
-      { kw: 'ROUND(x)', desc: 'Arrondi à l\'entier' },
-    ],
-  },
-  {
-    title: 'Opérateurs logiques & comparaisons',
-    items: [
-      { kw: '>=  <=  =  !=', desc: 'Comparateurs (= et == sont équivalents)' },
-      { kw: 'AND / OR / NOT', desc: 'Et / ou / négation' },
-      { kw: 'FALSE / TRUE', desc: 'Booléens' },
-    ],
-  },
+  { title: 'Panier et fixing initial', items: [
+    { kw: 'UNDERLYING Basket', desc: 'Panier lié aux sous-jacents Economics, dans le même ordre' },
+    { kw: 'CONSTAT StartDate', desc: 'Date du fixing initial ; distincte des observations du payoff' },
+    { kw: 'Basket.spot0 = Basket.spot@StartDate', desc: 'Dans AT StartDate : fixe les références individuelles une seule fois' },
+    { kw: 'Basket.yield', desc: 'Ratios spot courant / spot initial : 1,10 = 110 %' },
+    { kw: 'WORSTOF / BESTOF / AVG(Basket.yield)', desc: 'Minimum / maximum / moyenne équipondérée des ratios' },
+  ] },
+  { title: 'Termes et calendrier', items: [
+    { kw: 'PARAM COUPON', desc: 'Pourcentage obligatoire dans Economics, sans valeur par défaut' },
+    { kw: 'PARAM() M_AC_BAR', desc: 'Tableau par observation ; dernière valeur prolongée' },
+    { kw: 'PARAM X = 1.5', desc: 'Valeur brute avec défaut explicite ; = 8% déclare un défaut en pourcentage' },
+    { kw: 'CONSTAT() ObservationDates', desc: 'Première observation incluse ; dates saisies dans Economics' },
+    { kw: 'AT Date FROM ObservationDates:', desc: 'Exécute le bloc à chaque observation ; INDEX commence à 1' },
+    { kw: 'AT ObservationDates.last:', desc: 'Dernière observation ; remboursement final si le produit est vivant' },
+    { kw: 'MIN / MAX / AVG après CONSTAT', desc: 'Fenêtre de fixing par sous-jacent, avant agrégation du panier' },
+    { kw: 'PERIOD', desc: 'Fenêtre depuis la constatation précédente ; StartDate ouvre la première période' },
+  ] },
+  { title: 'Flux et état', items: [
+    { kw: 'PAY expression "Libellé"', desc: 'Une ligne par coupon, capital ou put ; montants en fraction du nominal' },
+    { kw: 'PAY 1 / PAY -KI * MAX(1 - PERF, 0)', desc: 'Deux lignes distinctes : remboursement nominal et perte sur put vendu' },
+    { kw: 'STOP', desc: 'Arrête le produit et empêche tout second remboursement' },
+    { kw: 'SET / IF / ELSE / ACCRUE', desc: 'Variables, conditions et accumulation' },
+    { kw: 'COUPON * INDEX', desc: 'Cumul d’un coupon par période, sans annualisation implicite' },
+    { kw: 'INDIC(condition)', desc: '1 si la condition est vraie, 0 sinon' },
+    { kw: 'M_', desc: 'Barrière surveillée par Booking ; observable et direction déduits de son usage' },
+    { kw: 'WOF_MIN / BOF_MAX / S_MIN[i]', desc: 'Extrema historiques depuis le fixing initial (barrières américaines)' },
+  ] },
 ]
 
 store.parseScript()

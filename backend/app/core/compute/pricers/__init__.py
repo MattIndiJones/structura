@@ -11,9 +11,11 @@ new PayScript product template."""
 from .payscript import price_payscript_job
 from .var_scenario import price_var_scenario_job
 from .scenario_grid import price_scenario_grid_job
+from .product_optimizer import price_optimizer_candidate_job
 
 PRICERS = {
     "payscript_reprice": price_payscript_job,
     "var_scenario": price_var_scenario_job,
     "scenario_grid": price_scenario_grid_job,
+    "product_optimizer_candidate": price_optimizer_candidate_job,
 }

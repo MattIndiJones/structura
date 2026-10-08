@@ -88,6 +88,31 @@ class ProductCommand(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class OptimizerResearch(SQLModel, table=True):
+    """A dated exploration and its server-owned calculation; never a booked product."""
+    __tablename__ = "optimizer_researches"
+    __table_args__ = (UniqueConstraint("user_id", "command_key"),)
+    id: str = Field(primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    parent_id: Optional[str] = Field(default=None, foreign_key="optimizer_researches.id", index=True)
+    command_key: str
+    title: str
+    intention: str = ""
+    summary: str
+    product_family: str = Field(index=True)
+    pricing_date: str = Field(index=True)
+    status: str = Field(default="RUNNING", index=True)
+    archived: bool = Field(default=False, index=True)
+    request_hash: str
+    request_json: str = Field(sa_column=Column(Text, nullable=False))
+    context_json: str = Field(sa_column=Column(Text, nullable=False))
+    result_json: str = Field(default="{}", sa_column=Column(Text))
+    progress_json: str = Field(default="{}", sa_column=Column(Text))
+    error: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: Optional[datetime] = None
+
+
 class Entity(SQLModel, table=True):
     __tablename__ = "entities"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -766,6 +791,7 @@ class Underlying(SQLModel, table=True):
     # expose « group ».
     group_name: str = Field(default="Autres")
     ccy: str = Field(default="EUR")
+    asset_class: str = Field(default="unknown")
     # Place de cotation telle que Yahoo la nomme (PAR, MIL, NYQ…), renseignée
     # par la recherche. Purement informative, elle aide à trancher entre deux
     # cotations du même titre.

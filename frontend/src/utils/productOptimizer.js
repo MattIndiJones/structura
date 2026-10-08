@@ -1,15 +1,16 @@
 import { apiFetch } from './api.js'
 
 export function rangeCount(range) {
+  if (!range) return null
   const { minimum, maximum, step } = range
   if (![minimum, maximum, step].every(Number.isFinite) || step <= 0 || maximum < minimum) return null
   return Math.floor((maximum - minimum) / step + 1e-8) + 1
 }
 
 export function searchSize(ranges) {
-  const counts = ['maturity_months', 'protection_barrier', 'autocall_trigger'].map(key => rangeCount(ranges[key]))
-  if (counts.some(x => x == null) || !ranges.observation_months.length) return null
-  return counts.reduce((a, b) => a * b, ranges.observation_months.length)
+  const counts = Object.entries(ranges).filter(([key])=>key!=='observation_months').map(([,range])=>rangeCount(range))
+  if (!counts.length || counts.some(x => x == null) || ranges.observation_months?.length === 0) return null
+  return counts.reduce((a, b) => a * b, ranges.observation_months?.length ?? 1)
 }
 
 export async function responseError(response) {
@@ -59,5 +60,6 @@ export async function runOptimizer(body, signal, onEvent) {
 }
 
 export function rankedCandidates(result) {
-  return (result?.candidates || []).filter(c => c.constraint_status === 'PASS').sort((a, b) => a.rank - b.rank)
+  return (result?.candidates || []).filter(c => c.constraint_status === 'PASS'
+    && (!result.validation || c.validation_status === 'PASSED')).sort((a, b) => a.rank - b.rank)
 }

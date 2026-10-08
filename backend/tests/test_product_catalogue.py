@@ -27,7 +27,7 @@ TARGET = ROOT / "backend" / "app" / "core" / "payscript" / "catalogue.py"
 
 # M9 : les ténors que le module propose, filtrés ensuite par fiche.
 TENORS_M9 = ["6M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y"]
-ROLES = {"observations", "maturity", "strike_window"}
+ROLES = {"observations", "maturity", "initial_fixing"}
 STRIKE = date(2026, 9, 14)
 UL = dict(name="S1", ticker="", ccy="EUR", sigma=0.22, q=0.02, v0=0.0484,
           kappa=2.0, theta=0.0484, xi=0.35, rho_h=-0.70, alpha=0.22, beta=1.0,
@@ -44,7 +44,7 @@ def generated_constats(product: dict, tenor: str, strike: date = STRIKE) -> dict
     for name, spec in product["constats"].items():
         role = spec["role"]
         if role == "observations":
-            value = {"start_date": strike.isoformat(), "end_date": maturity.isoformat(),
+            value = {"first_observation_date": min(maturity, strike + relativedelta(years=1)).isoformat(), "period_start_date": strike.isoformat(), "end_date": maturity.isoformat(),
                      "roll_date": strike.isoformat(), "frequency": spec["frequency"],
                      "stub": "short_last"}
             for key in ("window_length", "window_frequency"):
@@ -56,7 +56,7 @@ def generated_constats(product: dict, tenor: str, strike: date = STRIKE) -> dict
                 value = {"date": maturity.isoformat(), "window_length": spec["window_length"],
                          "window_frequency": spec.get("window_frequency", "1D")}
         else:
-            value = {"date": strike.isoformat(), "window_length": spec["window_length"],
+            value = {"date": strike.isoformat(), "window_length": spec.get("window_length"),
                      "window_frequency": spec.get("window_frequency", "1D")}
         values[name] = value
     return values
@@ -109,7 +109,7 @@ def test_chaque_fiche_compile_et_declare_ses_roles(key):
             assert kind in ("schedule", "nested_schedule") and spec.get("frequency")
         else:
             assert kind == "single", f"{key} : {name} doit être une date unique"
-        assert (spec["role"] == "strike_window") == (name == "STRIKE_FIX")
+        assert (spec["role"] == "initial_fixing") == (name == "STARTDATE")
         if declared[name].reduction and declared[name].window_scope != "period":
             assert spec.get("window_length"), f"{key} : fenêtre de {name} sans longueur"
     # Une constatation terminale : sans elle, rien ne date la maturité.
@@ -134,7 +134,13 @@ def test_chaque_fiche_price_sur_un_calendrier_genere(key):
         f"{key} : la dernière constatation ({last:.4f}) n'est pas la maturité ({maturity:.4f})")
     corr = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
     res = run_mc(compiled, [dict(UL, name=f"S{i + 1}") for i in range(n)], corr,
-                 r=0.03, T_max=maturity, N=300, model="constant", seed=7)
+                 r=0.03, T_max=maturity, N=300, model="constant", seed=7,
+                 user_params={p.name: {
+                     'COUPON': .08, 'M_AC_BAR': 1., 'M_KI_BAR': .6, 'M_CPN_BAR': .8,
+                     'M_PDI_BAR': .6, 'M_PUT_STRIKE': .8, 'GEARING': 1.5, 'CAP': 1.5,
+                     'PART': 1., 'STRIKE': 1., 'K1': 1., 'K2': 1.2, 'M_KO_BAR': 1.3,
+                     'REBATE': .03,
+                 }[p.name] for p in compiled.params})
     price = res["price"] * 100
     assert price == price, f"{key} : prix NaN"
     assert -50.0 < price < 400.0, f"{key} : prix hors de toute plausibilité ({price:.2f}%)"
@@ -147,7 +153,7 @@ def test_le_calendrier_genere_part_du_strike_et_finit_a_maturite():
     compiled = resolve_constats(parse_script(product["script"]),
                                 generated_constats(product, "3Y"),
                                 anchor=STRIKE, currency="EUR")
-    event = next(e for e in compiled.events if e.constat_ref == "OBSERVATIONS"
+    event = next(e for e in compiled.events if e.constat_ref == "OBSERVATIONDATES"
                  and not e.constat_qualifier)
     assert [round(d * 365.25) for d in event.dates] == [
         (date(2027, 9, 14) - STRIKE).days, (date(2028, 9, 14) - STRIKE).days,

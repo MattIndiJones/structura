@@ -107,7 +107,7 @@ def _strip_fences(s: str) -> str:
     lines = s.split("\n")
     start = 0
     for i, line in enumerate(lines):
-        if re.match(r"^\s*(PARAM|CONSTAT|SET|AT|#)", line, re.I):
+        if re.match(r"^\s*(UNDERLYING|PARAM|CONSTAT|SET|AT|#)", line, re.I):
             start = i
             break
     return "\n".join(lines[start:])
@@ -128,11 +128,13 @@ def structural_checks(compiled: CompiledScript, script: str,
                       description: str, n_underlyings: int) -> list[Check]:
     """La fiche de contrôle. Chaque ligne répond à « le script fait-il ce que
     la demande dit ? », jamais à « le script compile-t-il ? »."""
+    from ...core.payscript.bindings import monitoring_source
+    script = monitoring_source(script)
     d = (description or "").lower()
     checks: list[Check] = []
 
     # -- Le produit se solde-t-il ?
-    has_mat = any(e.type == "AT_MATURITY" for e in compiled.events)
+    has_mat = any(e.type == "AT_MATURITY" or (e.constat_ref and ((e.constat_qualifier and all(q == ("last",) for q in e.constat_qualifier)) or any(c.name == e.constat_ref and c.kind == "single" for c in compiled.constats))) for e in compiled.events)
     checks.append(Check(
         "Bloc de maturité", OK if has_mat else WARN,
         "Présent." if has_mat else
@@ -347,11 +349,11 @@ def validate(raw_response: str, *, description: str, underlyings, corr,
     v.checks = structural_checks(compiled, script, description, len(underlyings))
 
     # Un script à CONSTAT non résolus ne peut pas être pricé hors interface.
-    if any(e.constat_ref for e in compiled.events):
+    if T is None or any(e.constat_ref for e in compiled.events):
         v.checks.append(Check(
             "Pricing de contrôle", INFO,
-            "Non exécuté : le script référence un calendrier CONSTAT dont les "
-            "dates se renseignent dans l'interface."))
+            "Non exécuté : renseignez la maturité et les dates des calendriers "
+            "CONSTAT dans Economics."))
         v.checks_status = ("warning" if any(c.level == WARN for c in v.checks)
                            else "passed")
         v.pricing_check = "not_run"

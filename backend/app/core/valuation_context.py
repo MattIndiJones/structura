@@ -146,6 +146,12 @@ def run_valuation(script, context: ValuationContext | dict, **overrides):
             numeric = float(value)
             if not math.isfinite(numeric):
                 raise ValueError(f"Valeur non finie pour {key}.{field_name}")
+            if (underlying.get("vol_surface") and ctx.model in {"localvol", "lsv"}
+                    and field_name in {"skew", "curvature"}
+                    and numeric != underlying.get(field_name)):
+                raise ValueError(
+                    f"{key} : ce scénario utilise les anciens paramètres de smile ; "
+                    "la surface SSVI exige un choc de ses propres paramètres.")
             underlying[field_name] = numeric
 
     kwargs = {

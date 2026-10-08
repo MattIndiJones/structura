@@ -131,8 +131,8 @@
                 </div>
                 <p class="text-[10px] text-slate-600 mt-0.5">
                   {{ form.kind === 'indicatif'
-                    ? "Sonder rapidement un niveau de prix pour affiner une idée — script Normal, pas de trade attendu."
-                    : "Pensée pour aboutir à un trade — script en mode Expert (calendrier CONSTAT réel) : template Expert prédéfini, script sauvegardé ou deal déjà booké." }}
+                    ? "Sonder un niveau de prix pour affiner une idée, avec les Economics du produit."
+                    : "Préparer un trade avec ses termes, son panier et son calendrier contractuel complets." }}
                 </p>
               </div>
 
@@ -249,7 +249,7 @@
 
               <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
                 <button :class="['px-2 py-1 transition-colors', form.source === 'template' ? 'bg-slate-700 text-slate-200 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                        @click="onSourceToggle('template')">{{ form.kind === 'to_trade' ? 'Template Expert' : 'Template no-code' }}</button>
+                        @click="onSourceToggle('template')">Modèle générique</button>
                 <button :class="['px-2 py-1 transition-colors', form.source === 'script' ? 'bg-blue-900/80 text-blue-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
                         @click="onSourceToggle('script')">Script existant</button>
               </div>
@@ -263,8 +263,11 @@
                   </optgroup>
                 </select>
                 <p v-if="form.kind === 'to_trade'" class="text-[10px] text-slate-600 mt-0.5">
-                  Version Expert du template (calendrier CONSTAT déjà en place) — les mêmes 16 modèles qu'en mode Normal.
+                  Modèle générique ; termes à compléter ci-dessous ou à charger depuis un exemple.
                 </p>
+                <PayScriptPresetPicker :currency="form.currency" :start-date="form.strike_date"
+                  :underlying-count="createBasket.length" :disabled="!!sourceProduct"
+                  :on-apply="applyCreatePreset" />
               </div>
               <div v-else class="flex flex-col gap-1">
                 <label class="label">Script de la bibliothèque</label>
@@ -273,14 +276,14 @@
                   <optgroup label="Scripts sauvegardés">
                     <option v-for="s in scripts" :key="'s'+s.id" :value="'script:'+s.id">{{ s.name }}</option>
                   </optgroup>
-                  <optgroup v-if="expertDeals.length" label="Deals bookés (mode Expert)">
-                    <option v-for="d in expertDeals" :key="'d'+d.id" :value="'deal:'+d.id">
+                  <optgroup v-if="scriptedDeals.length" label="Deals bookés">
+                    <option v-for="d in scriptedDeals" :key="'d'+d.id" :value="'deal:'+d.id">
                       {{ d.reference }} — {{ d.product_type || d.contrepartie }}
                     </option>
                   </optgroup>
                 </select>
                 <p v-if="form.kind === 'to_trade'" class="text-[10px] text-slate-600 mt-0.5">
-                  Seuls les scripts avec un calendrier CONSTAT réel (mode Expert) conviennent pour une RFQ to trade.
+                  Une RFQ to trade nécessite un calendrier contractuel complet.
                 </p>
               </div>
 
@@ -361,9 +364,9 @@
                 <div class="flex flex-col gap-1">
                   <label class="label"
                          title="Date de constatation du niveau initial du ou des sous-jacents. C'est là que démarre la diffusion Monte Carlo.">Date de strike *</label>
-                  <input v-model="form.strike_date" type="date" class="input"
+                  <input v-model="form.strike_date" :readonly="scriptConstats.some(c => c.role === 'initial_fixing')" type="date" class="input"
                          @change="resolveFormDate('strike_date')" />
-                  <select v-model="form.strike_date_convention" class="select py-1 text-[11px]"
+                  <select v-if="!scriptConstats.some(c => c.role === 'initial_fixing')" v-model="form.strike_date_convention" class="select py-1 text-[11px]"
                           title="Ce que devient cette date si elle tombe un week-end ou un jour férié du calendrier de la devise."
                           @change="resolveFormDate('strike_date')">
                     <option value="none">Aucun ajustement</option>
@@ -462,7 +465,7 @@
                 <div v-if="createBasket[createActiveUnderlyingIdx]" class="mt-3 border-t border-slate-800 pt-3">
                   <div class="label">Volatilité · {{ createBasket[createActiveUnderlyingIdx].ticker || 'sous-jacent' }}</div>
                   <UnderlyingVolFields :au="createBasket[createActiveUnderlyingIdx]"
-                                       :model="advanced.model" :horizon="form.T" />
+                                       :model="advanced.model" :horizon="form.T" :rate="advanced.r" />
                 </div>
 
                 <div v-if="createBasket.length > 1" class="mt-3 overflow-x-auto">
@@ -757,7 +760,7 @@
                       </div>
                       <div class="flex flex-col gap-1">
                         <label class="label">Date de strike</label>
-                        <input v-model="detailAdvanced.strike_date" type="date" class="input"
+                        <input v-model="detailAdvanced.strike_date" type="date" class="input" :readonly="detailScriptConstats.some(c => c.role === 'initial_fixing')"
                                :disabled="!!rfq.current.quotes?.length" />
                       </div>
                       <div class="flex flex-col gap-1">
@@ -780,7 +783,7 @@
                     <div v-if="detailBasket[detailActiveUnderlyingIdx]" class="mt-3 border-t border-slate-800 pt-3">
                       <div class="label">Volatilité · {{ detailBasket[detailActiveUnderlyingIdx].ticker || 'sous-jacent' }}</div>
                       <UnderlyingVolFields :au="detailBasket[detailActiveUnderlyingIdx]"
-                                           :model="detailAdvanced.model" :horizon="detailHorizon" />
+                                           :model="detailAdvanced.model" :horizon="detailHorizon" :rate="detailAdvanced.r" />
                     </div>
 
                     <div v-if="detailBasket.length > 1" class="mt-3 overflow-x-auto border-t border-slate-800 pt-3">
@@ -1090,8 +1093,10 @@ import YieldCurveCard from '../components/YieldCurveCard.vue'
 import FundingCurveCard from '../components/FundingCurveCard.vue'
 import DividendCurveCard from '../components/DividendCurveCard.vue'
 import UnderlyingVolFields from '../components/UnderlyingVolFields.vue'
+import { calibrateUnderlying } from '../utils/smileCalibration.js'
 import { apiFetch } from '../utils/api.js'
-import { templateMeta, examples, expertExamples } from '../data/payscriptTemplates.js'
+import { calendarValue, serializeCalendars, fixingDate, parameterValues, tenorString, tenorPair } from '../utils/payscriptEconomics.js'
+import { templateMeta, examples } from '../data/payscriptTemplates.js'
 import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
 import {
   emptyRfqUnderlying, normaliseCorrelation, rfqBasketFromParams,
@@ -1104,6 +1109,7 @@ import AlertMessage from '../components/ui/AlertMessage.vue'
 import DataFilterBar from '../components/ui/DataFilterBar.vue'
 import { useDataFilter } from '../composables/useDataFilter.js'
 import RfqParamsEditor from '../components/RfqParamsEditor.vue'
+import PayScriptPresetPicker from '../components/PayScriptPresetPicker.vue'
 import RfqPricingPanel from '../components/RfqPricingPanel.vue'
 import CcrCreditCheck from '../components/CcrCreditCheck.vue'
 import { formatDate, formatDateTime, formatPercent, formatInt, formatBps } from '../utils/format.js'
@@ -1115,72 +1121,18 @@ onMounted(ensureUnderlyings)
 // shape/serialization (see RfqParamsEditor.vue's docstring), duplicated
 // here rather than imported since pricing.js's version is tangled up with
 // that store's own script/parseScript state.
-function makeDefaultConstatValue(kind) {
-  if (kind === 'single') return ''
-  return reactive({
-    start_date: '', end_date: '', roll_date: '',
-    frequency: { value: 3, unit: 'M' }, stub: 'short_last',
-    sub_frequency: kind === 'nested_schedule' ? { value: 1, unit: 'M' } : null,
-    // Pas de convention par défaut : une date fixée par un term sheet ne se
-    // déplace pas tant que personne n'a dit comment.
-    convention: 'none', settlement_lag: 0,
-  })
-}
-function syncConstatOverrides(constats, overridesObj) {
+function syncConstatOverrides(constats, values) {
   const names = new Set(constats.map(c => c.name))
-  for (const name of Object.keys(overridesObj)) {
-    if (!names.has(name)) delete overridesObj[name]
-  }
-  for (const c of constats) {
-    if (!(c.name in overridesObj)) overridesObj[c.name] = makeDefaultConstatValue(c.kind)
-  }
+  for (const name of Object.keys(values)) if (!names.has(name)) delete values[name]
+  for (const c of constats) values[c.name] = calendarValue(c, values[c.name])
 }
-function tenorStr(t) {
-  return (t && t.value) ? `${t.value}${t.unit}` : null
+const tenorStr = tenorString
+const parseTenor = tenorPair
+function buildConstatsPayload(constats, values) {
+  return serializeCalendars(constats, values, fixingDate(constats, values))
 }
-function parseTenor(s) {
-  const m = s ? String(s).match(/^(\d+)([DMY])$/) : null
-  return m ? { value: Number(m[1]), unit: m[2] } : { value: 3, unit: 'M' }
-}
-function buildConstatsPayload(constats, overridesObj) {
-  const out = {}
-  for (const c of constats) {
-    const v = overridesObj[c.name]
-    if (c.kind === 'single') {
-      out[c.name] = v
-    } else {
-      out[c.name] = {
-        start_date: v.start_date, end_date: v.end_date, roll_date: v.roll_date,
-        frequency: tenorStr(v.frequency), stub: v.stub,
-        sub_frequency: c.kind === 'nested_schedule' ? tenorStr(v.sub_frequency) : null,
-        convention: v.convention || 'none',
-        settlement_lag: v.settlement_lag || 0,
-      }
-    }
-  }
-  return out
-}
-// Restores overridesObj from a previously-saved constats payload (same
-// shape buildConstatsPayload produces) — used when duplicating/converting
-// an RFQ, or loading the detail view's editable copy.
-function restoreConstatOverrides(constats, overridesObj, saved) {
-  syncConstatOverrides(constats, overridesObj)
-  for (const c of constats) {
-    const sv = saved?.[c.name]
-    if (sv == null) continue
-    if (c.kind === 'single') {
-      overridesObj[c.name] = typeof sv === 'string' ? sv : (sv.date || '')
-    } else {
-      overridesObj[c.name].start_date = sv.start_date || ''
-      overridesObj[c.name].end_date = sv.end_date || ''
-      overridesObj[c.name].roll_date = sv.roll_date || ''
-      overridesObj[c.name].frequency = parseTenor(sv.frequency)
-      overridesObj[c.name].stub = sv.stub || 'short_last'
-      overridesObj[c.name].convention = sv.convention || 'none'
-      overridesObj[c.name].settlement_lag = sv.settlement_lag || 0
-      if (c.kind === 'nested_schedule') overridesObj[c.name].sub_frequency = parseTenor(sv.sub_frequency)
-    }
-  }
+function restoreConstatOverrides(constats, values, saved) {
+  for (const c of constats) values[c.name] = calendarValue(c, saved?.[c.name])
 }
 
 const rfq = useRfqStore()
@@ -1217,12 +1169,12 @@ const computing      = ref(false)
 const computeError   = ref('')
 const addingQuote    = ref(false)
 const scripts        = ref([])
-// Booked deals, used only to offer their frozen Expert-mode script as an
+// Booked deals, used only to offer their frozen PayScript as an
 // alternative source in the "Script de la bibliothèque" picker below — a
 // desk often already has the exact precise calendar it wants sitting on a
 // past deal rather than saved separately in the script library.
 const dealsForScripts = ref([])
-const expertDeals = computed(() =>
+const scriptedDeals = computed(() =>
   dealsForScripts.value.filter(d => d.script_snapshot?.includes('CONSTAT'))
 )
 
@@ -1278,7 +1230,7 @@ const form = reactive({
   mandate_id: null,
   primary_affiliation_id: null,
   script_id: null,
-  source_deal_id: null,  // set instead of script_id when sourced from expertDeals
+  source_deal_id: null,  // set instead of script_id when sourced from scriptedDeals
   currency: 'CHF',
   T: 3,
   // Aucune date par défaut : elles viennent du term sheet, pas d'une règle
@@ -1313,8 +1265,8 @@ const paymentDateSaisie = ref(false)
 // else value_date + T years.
 const createMaturityDate = computed(() => {
   const ends = scriptConstats.value
-    .filter(c => c.kind !== 'single')
-    .map(c => constatOverrides[c.name]?.end_date)
+    .filter(c => c.role !== 'initial_fixing')
+    .map(c => c.kind === 'single' ? (typeof constatOverrides[c.name] === 'string' ? constatOverrides[c.name] : constatOverrides[c.name]?.date) : constatOverrides[c.name]?.end_date)
     .filter(Boolean)
   if (ends.length) return ends.reduce((max, d) => (d > max ? d : max))
   // Sans calendrier, la maturité se compte depuis le strike : T est l'horizon
@@ -1323,13 +1275,9 @@ const createMaturityDate = computed(() => {
   return addYears(form.strike_date, form.T)
 })
 
-// "To trade" needs the precision a real Expert-mode CONSTAT calendar gives —
-// currentScriptText() below switches the template wizard to expertExamples
-// for this kind instead of hiding it, since every template already has a
-// ready Expert version (same 16 keys as examples/templateMeta).
+// Both RFQ kinds share the same generic catalogue and explicit calendars.
 function onKindToggle(kind) {
   form.kind = kind
-  refreshParsedParams()
 }
 
 const advanced = reactive({ r: 3, N: 20000, model: 'constant' })
@@ -1424,13 +1372,15 @@ const duplicateSourceScript = ref(null)
 function currentScriptText() {
   if (duplicateSourceScript.value) return duplicateSourceScript.value
   if (form.source === 'template') {
-    const lib = form.kind === 'to_trade' ? expertExamples : examples
+    const lib = examples
     return lib[form.template_type] || ''
   }
   return scripts.value.find(x => x.id === form.script_id)?.script_text || ''
 }
 
+let createParseRevision = 0
 async function refreshParsedParams(overrideValues = null, overrideConstats = null) {
+  const revision = ++createParseRevision
   const script = currentScriptText()
   Object.keys(paramOverrides).forEach(k => delete paramOverrides[k])
   if (!script.trim()) { parsedParams.value = []; scriptConstats.value = []; return }
@@ -1441,18 +1391,44 @@ async function refreshParsedParams(overrideValues = null, overrideConstats = nul
       body: JSON.stringify({ script }),
     })
     const data = await res.json()
+    if (revision !== createParseRevision || script !== currentScriptText()) return
     parsedParams.value = data.ok ? data.params : []
     for (const p of parsedParams.value) {
       const ov = overrideValues && (p.name in overrideValues) ? overrideValues[p.name] : null
-      paramOverrides[p.name] = ov !== null ? (p.is_pct ? fractionToPercent(ov) : ov) : p.raw_default
+      paramOverrides[p.name] = Array.isArray(ov) ? ov.map(v => p.is_pct ? fractionToPercent(v) : v) : ov !== null ? (p.is_pct ? fractionToPercent(ov) : ov) : p.kind === 'array' ? [p.display_default] : p.display_default
     }
     scriptConstats.value = data.ok ? (data.constats || []) : []
     if (overrideConstats) restoreConstatOverrides(scriptConstats.value, constatOverrides, overrideConstats)
     else syncConstatOverrides(scriptConstats.value, constatOverrides)
   } catch {
+    if (revision !== createParseRevision) return
     parsedParams.value = []
     scriptConstats.value = []
   }
+}
+
+function applyCreatePreset(plan) {
+  if (sourceProduct.value) throw Error('Cette RFQ utilise les termes figés d’un Product.')
+  if (plan.currency !== form.currency) throw Error('La devise a changé. Préparez à nouveau l’exemple.')
+  if (createBasket.length < plan.model.underlyings.min || createBasket.length > plan.model.underlyings.max)
+    throw Error('Le panier a changé. Préparez à nouveau l’exemple.')
+  createParseRevision += 1
+  duplicateSourceScript.value = null
+  form.source = 'template'; form.template_type = plan.model.key
+  form.script_id = null; form.source_deal_id = null
+  const suggested = payoffFamilyForModel(plan.model.key)
+  if (!form.payoff_family || form.payoff_family === lastSuggestedFamily) form.payoff_family = suggested
+  lastSuggestedFamily = suggested
+  if (!form.name) form.name = plan.preset.label
+  form.strike_date = plan.strikeDate; form.value_date = plan.strikeDate
+  form.payment_date = plan.paymentDate; form.T = plan.T
+  paymentDateSaisie.value = true
+  parsedParams.value = plan.validation.data.params
+  scriptConstats.value = plan.validation.data.constats
+  for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
+  Object.assign(paramOverrides, JSON.parse(JSON.stringify(plan.params)))
+  for (const key of Object.keys(constatOverrides)) delete constatOverrides[key]
+  restoreConstatOverrides(scriptConstats.value, constatOverrides, plan.constats)
 }
 
 function onSourceToggle(src) {
@@ -1474,7 +1450,7 @@ function onTemplateChange() {
   refreshParsedParams()
 }
 // The picker offers two kinds of options in one <select>: rows from the
-// saved script library (form.script_id) and Expert-mode scripts frozen on
+// saved script library (form.script_id) and PayScripts frozen on
 // already-booked deals (form.source_deal_id, no Script row to point at —
 // the deal's snapshot is handed to duplicateSourceScript instead, same
 // override currentScriptText() already uses for RFQ duplication).
@@ -1686,6 +1662,8 @@ function onDirectOpportunityChange() {
 // Pre-fills the create form from an existing RFQ (new tender round on the
 // same product, params free to adjust before submitting as a new RFQ).
 async function duplicateRfq(source) {
+  sourceProduct.value = null
+  sourceProductPricingInput.value = null
   showCreateForm.value = true
   selectedId.value = null
   createError.value = ''
@@ -1739,70 +1717,14 @@ async function duplicateRfq(source) {
     await loadDirectCommercialOptions(source.client_id)
   }
   await refreshParsedParams(p.user_params || {}, p.constats || {})
+  form.strike_date = fixingDate(scriptConstats.value, constatOverrides) || ''
 }
 
-// Promote an indicatif RFQ into a "to trade" one — same idea as duplicateRfq
-// (new round, params adjustable), but the script must clear the Expert-mode
-// bar: keep the source's script_id only if it's actually a CONSTAT script,
-// otherwise fall back to that same product's Expert template (every
-// template_type has one, see expertExamples) so the user isn't left staring
-// at an empty picker.
+// Conversion preserves the quoted script, required values and explicit calendars.
 async function convertToTrade(source) {
-  showCreateForm.value = true
-  selectedId.value = null
-  createError.value = ''
-  const p = source.params || {}
-  const sourceScript = source.script_id && scripts.value.find(s => s.id === source.script_id)
-  const keepsScriptId = sourceScript?.script_text?.includes('CONSTAT')
-  Object.assign(form, {
-    name: `${source.name || source.reference} (to trade)`,
-    ao_date: todayIso(),
-    pricing_date: todayIso(),
-    kind: 'to_trade',
-    sens: source.sens || 'achat',
-    source: keepsScriptId ? 'script' : 'template',
-    template_type: source.template_type || '',
-    opportunity_id: source.opportunity_id ?? null,
-    client_id: source.client_id ?? null,
-    mandate_id: source.mandate_id ?? null,
-    primary_affiliation_id: source.primary_affiliation_id ?? null,
-    transaction_format: source.transaction_format || '',
-    instrument_family: source.instrument_family || '',
-    payoff_family: normalizedFamily(source.payoff_family)
-      || payoffFamilyForModel(source.template_type),
-    payoff_description: source.payoff_description || '',
-    documentation_reference: source.documentation_reference || '',
-    script_id: keepsScriptId ? source.script_id : null,
-    source_deal_id: null,
-    currency: p.currency || 'CHF',
-    T: p.T ?? 3,
-    // Aucune date inventee : ni a l ouverture du formulaire, ni en dupliquant,
-    // ni en convertissant. Elles viennent du term sheet de l affaire en cours,
-    // pas de celle d avant.
-    strike_date: '', value_date: '', payment_date: '',
-  })
-  // Le drapeau de saisie suit les dates : sans ça, avoir saisi une date de
-  // paiement sur une affaire empêcherait toute proposition sur la suivante.
-  paymentDateSaisie.value = false
-  Object.assign(advanced, {
-    r: Math.round((p.r ?? 0.03) * 1000) / 10,
-    N: p.N ?? 20000,
-    model: p.model || 'constant',
-  })
-  setCreateBasket(p.underlyings, p.corr_matrix)
-  ao.depuisParams(p)
-  nominalRaw.value = String(p.notional ?? 1000000)
-  formatNominal()
-  duplicateSourceScript.value = null
-  if (source.client_id && !opportuniteContexte.value) {
-    commercialLinkEnabled.value = true
-    if (!directClients.value.length) {
-      const response = await apiFetch('/api/clients')
-      if (response.ok) directClients.value = await response.json()
-    }
-    await loadDirectCommercialOptions(source.client_id)
-  }
-  await refreshParsedParams(null, keepsScriptId ? (p.constats || {}) : null)
+  await duplicateRfq(source)
+  form.kind = 'to_trade'
+  form.name = `${source.name || source.reference} (to trade)`
 }
 
 async function selectRfq(id) {
@@ -1863,7 +1785,7 @@ async function _loadDetailParams() {
     const savedParams = p.user_params || {}
     for (const pp of detailParsedParams.value) {
       const ov = pp.name in savedParams ? savedParams[pp.name] : null
-      detailParamOverrides[pp.name] = ov !== null ? (pp.is_pct ? fractionToPercent(ov) : ov) : pp.raw_default
+      detailParamOverrides[pp.name] = Array.isArray(ov) ? ov.map(v => pp.is_pct ? fractionToPercent(v) : v) : ov !== null ? (pp.is_pct ? fractionToPercent(ov) : ov) : pp.kind === 'array' ? [pp.display_default] : pp.display_default
     }
     detailScriptConstats.value = data.ok ? (data.constats || []) : []
     restoreConstatOverrides(detailScriptConstats.value, detailConstatOverrides, p.constats || {})
@@ -1897,11 +1819,7 @@ function canonical(v) {
 // personne n'avait touché.
 function detailTermsPayload() {
   const stored = rfq.current?.params || {}
-  const user_params = {}
-  for (const pp of detailParsedParams.value) {
-    const v = detailParamOverrides[pp.name] ?? pp.raw_default
-    user_params[pp.name] = pp.is_pct ? v / 100 : v
-  }
+  const user_params = parameterValues(detailParsedParams.value, detailParamOverrides, { allowMissing: true })
   return {
     ...stored,
     user_params,
@@ -2016,6 +1934,7 @@ async function _loadUnderlyingParams(ticker, target, status, loading) {
       return
     }
     const q = data.div_yields?.[tk] ?? 0
+    target.vol_level_source = 'realized'
     target.sigma = Math.round(vol * 1000) / 10
     target.q = Math.round(q * 10000) / 100
     status.value = `✓ ${tk} — σ=${(vol * 100).toFixed(1)}%, q=${(q * 100).toFixed(2)}% · ${data.n_obs} obs.`
@@ -2040,8 +1959,8 @@ function loadDetailUnderlyingParams() {
 // below whether there is a real maturity date to price against.
 const detailCalendarEnd = computed(() => {
   const ends = detailScriptConstats.value
-    .filter(c => c.kind !== 'single')
-    .map(c => detailConstatOverrides[c.name]?.end_date)
+    .filter(c => c.role !== 'initial_fixing')
+    .map(c => c.kind === 'single' ? (typeof detailConstatOverrides[c.name] === 'string' ? detailConstatOverrides[c.name] : detailConstatOverrides[c.name]?.date) : detailConstatOverrides[c.name]?.end_date)
     .filter(Boolean)
   return ends.length ? ends.reduce((max, d) => (d > max ? d : max)) : ''
 })
@@ -2100,14 +2019,17 @@ async function resolveFormDate(field) {
 // à moitié rempli, et ne suivait plus jamais.
 async function proposePaymentDate() {
   if (paymentDateSaisie.value || !createMaturityDate.value) return
+  const maturity = createMaturityDate.value, currency = form.currency
   try {
     const res = await apiFetch('/api/calendar/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: createMaturityDate.value, currency: form.currency,
+      body: JSON.stringify({ date: maturity, currency,
                              business_days: 3 }),
     })
-    if (res.ok) form.payment_date = (await res.json()).date
+    const data = res.ok ? await res.json() : null
+    if (data && !paymentDateSaisie.value && createMaturityDate.value === maturity && form.currency === currency)
+      form.payment_date = data.date
   } catch { /* rien à proposer, le champ reste à saisir */ }
 }
 
@@ -2147,15 +2069,15 @@ const champsManquants = computed(() => {
         if (!day) trous.push(`date du calendrier ${calendar.name}`)
         continue
       }
-      for (const [field, label] of [['start_date', 'début'], ['end_date', 'fin'],
-                                    ['roll_date', 'date de roll'], ['frequency', 'fréquence']]) {
-        if (!value?.[field]) trous.push(`${label} du calendrier ${calendar.name}`)
+      for (const [field, label] of [[scriptConstats.value.some(c => c.role === 'initial_fixing') ? 'first_observation_date' : 'start_date', 'première observation'], ['end_date', 'fin'], ['frequency', 'fréquence']]) {
+        if (!value?.[field] || (field === 'frequency' && !value.frequency.value)) trous.push(`${label} du calendrier ${calendar.name}`)
       }
       if (calendar.kind === 'nested_schedule' && !value?.sub_frequency) {
         trous.push(`sous-fréquence du calendrier ${calendar.name}`)
       }
     }
   }
+  try { parameterValues(parsedParams.value, paramOverrides) } catch (e) { trous.push(e.message) }
   return trous
 })
 
@@ -2189,21 +2111,21 @@ async function submitCreate() {
   }
   const script_snapshot = currentScriptText()
   if (form.kind === 'to_trade' && !script_snapshot.includes('CONSTAT')) {
-    createError.value = "Une RFQ 'to trade' doit utiliser un script en mode Expert (calendrier CONSTAT réel) — choisissez-le ci-dessus."
+    createError.value = "Une RFQ 'to trade' nécessite un calendrier CONSTAT complet — choisissez un modèle ci-dessus."
     return
   }
 
-  const user_params = {}
-  for (const p of parsedParams.value) {
-    const v = paramOverrides[p.name] ?? p.raw_default
-    user_params[p.name] = p.is_pct ? v / 100 : v
-  }
+  let user_params
+  try { user_params = parameterValues(parsedParams.value, paramOverrides) }
+  catch (error) { createError.value = error.message; return }
 
   creating.value = true
   try {
     const productMarket = sourceProductPricingInput.value || {}
     const horizon = createMaturityDate.value
       ? yearsBetween(form.strike_date, createMaturityDate.value) : form.T
+    if (!sourceProduct.value) await Promise.all(createBasket.map(u=>
+      calibrateUnderlying(u,advanced.model,horizon,advanced.r)))
     const basketPayload = createBasket.map((underlying, index) =>
       rfqUnderlyingToParams(
         underlying, ao.dividendeDuSousJacent(index, horizon)))
@@ -2344,6 +2266,8 @@ async function computeModelPrice() {
     // sigma/q sont fusionnés par INDICE sur le panier stocké (voir
     // _merge_pricing_params) : la taille du panier vient de l'AO, pas du
     // formulaire de pricing.
+    await Promise.all(detailBasket.map(u=>
+      calibrateUnderlying(u,detailAdvanced.model,detailHorizon.value,detailAdvanced.r)))
     const pricingUnderlyings = detailBasket.map((underlying, index) =>
       rfqUnderlyingToParams(
         underlying, aoDetail.dividendeDuSousJacent(index, detailHorizon.value)))
@@ -2609,4 +2533,10 @@ function bookFromRfq() {
 function openBookedDeal() {
   router.push({ path: '/booking', query: { deal: rfq.current.booked_deal.id } })
 }
+watch(() => fixingDate(scriptConstats.value, constatOverrides), value => {
+  if (scriptConstats.value.some(c => c.role === 'initial_fixing')) form.strike_date = value
+}, { flush: 'sync' })
+watch(() => fixingDate(detailScriptConstats.value, detailConstatOverrides), value => {
+  if (detailScriptConstats.value.some(c => c.role === 'initial_fixing')) detailAdvanced.strike_date = value
+}, { flush: 'sync' })
 </script>

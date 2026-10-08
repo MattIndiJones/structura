@@ -39,7 +39,7 @@ def request(**changes):
 
 
 @pytest.mark.parametrize("patch", [
-    {"model": "heston"}, {"product_family": "phoenix"}, {"objective": "opaque_ai"},
+    {"model": "heston"}, {"product_family": "autocall_athena_ki_americaine"}, {"objective": "opaque_ai"},
     {"convention": "unknown"}, {"currency": "XXX"}, {"funding_spread": .01},
     {"search": {"simulations": 20001}}, {"search": {"seed": 43}},
     {"objective": "target_coupon"},
@@ -82,7 +82,7 @@ def test_market_date_currency_duplicates_and_correlation_are_not_guessed():
 def test_registry_is_explicit_and_not_shared_mutable_state():
     caps = capabilities()
     assert caps["families"][0]["models"] == ["constant"]
-    assert caps["families"][1]["status"] == "UNSUPPORTED"
+    assert all(family["status"] == "SUPPORTED" for family in caps["families"])
     caps["families"][0]["models"].append("heston")
     assert capabilities()["families"][0]["models"] == ["constant"]
 
@@ -171,7 +171,10 @@ def test_one_failure_does_not_stop_search_or_leak_exception(monkeypatch):
         if candidate.candidate_id == "C0001":
             raise RuntimeError("secret internal detail")
         return evaluated(req, candidate_id=candidate.candidate_id)
-    events = list(service.run_events(req, adapter=adapter))
+    def validation_adapter(req, candidate, size):
+        candidate.validation_status = "PASSED"
+        return candidate
+    events = list(service.run_events(req, adapter=adapter, validation_adapter=validation_adapter))
     out = events[-1]["result"]
     assert out["statistics"]["failed"] == 1 and out["statistics"]["valid"] == 1
     assert out["recommended_id"] == "C0002"
@@ -289,14 +292,14 @@ def test_api_runs_are_ephemeral_user_isolated_and_capacity_is_released(api_clien
     from backend.app.api import product_optimizer as api
     from backend.app.db.models import User
     client, _, current = api_client
-    monkeypatch.setattr(api, "run_events", lambda req: iter([{"type":"result","result":{"rate":req.market.rate}}]))
+    monkeypatch.setattr(api, "run_events", lambda req, **kwargs: iter([{"type":"result","result":{"rate":req.market.rate}}]))
     a = client.post('/api/product-optimizer/run',json=payload())
     assert a.status_code == 200 and a.headers['cache-control'] == 'no-store'
     current['user'] = User(id=2,username="bob",email="b@test",password_hash="x")
     p = payload(); p['market']['rate'] = .04
     b = client.post('/api/product-optimizer/run',json=p)
-    assert json.loads(a.text)['result']['rate'] == .03
-    assert json.loads(b.text)['result']['rate'] == .04
+    assert json.loads(a.text.splitlines()[-1])['result']['rate'] == .03
+    assert json.loads(b.text.splitlines()[-1])['result']['rate'] == .04
     assert client.get('/api/product-optimizer/result/1').status_code == 404
     assert api._capacity.acquire(blocking=False)
     try:
@@ -308,7 +311,7 @@ def test_api_runs_are_ephemeral_user_isolated_and_capacity_is_released(api_clien
 def test_api_stream_error_releases_capacity(api_client, monkeypatch):
     from backend.app.api import product_optimizer as api
     client, _, _ = api_client
-    def broken(_req):
+    def broken(_req, **kwargs):
         yield {'type':'started'}
         raise RuntimeError('private traceback')
     monkeypatch.setattr(api, 'run_events', broken)

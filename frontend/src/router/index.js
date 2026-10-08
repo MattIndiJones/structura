@@ -10,7 +10,17 @@ const routes = [
   {
     path: '/structuring/optimizer',
     component: () => import('../views/ProductOptimizerView.vue'),
-    meta: { title: 'Product Optimizer' },
+    meta: { title: 'Product Optimizer', fixedViewport: true },
+  },
+  {
+    path: '/structuring/researches',
+    component: () => import('../views/OptimizerResearchListView.vue'),
+    meta: { title: 'Recherches & pricings', fixedViewport: true },
+  },
+  {
+    path: '/structuring/researches/:researchId',
+    component: () => import('../views/OptimizerResultsView.vue'),
+    meta: { title: 'Résultats de recherche', fixedViewport: true },
   },
   {
     path: '/login',

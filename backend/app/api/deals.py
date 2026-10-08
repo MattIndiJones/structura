@@ -2652,8 +2652,10 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
         params_by_name = {p.name: p for p in compiled.params}
 
         def _observable_value(obs: str | None) -> float | None:
-            if obs is None or obs == "WOF":
+            if obs == "WOF":
                 return wof
+            if obs is None:
+                return None
             if obs == "BOF":
                 return bof
             if obs == "WOF_MIN":
@@ -2676,7 +2678,7 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
                 idx = (next_obs_index or len(v)) - 1
                 idx = max(0, idx)
                 return float(v[idx]) if idx < len(v) else float(v[-1])
-            return float(v)
+            return float(v) if v is not None else None
 
         monitors = compiled.monitors or []
         if monitors:
@@ -2697,7 +2699,7 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
                 barriers.append({
                     "name": mon["name"],
                     "kind": kind,
-                    "observable": mon["observable"] or "WOF",
+                    "observable": mon["observable"],
                     "level": round(level, 4),
                     # None = the observable isn't computable yet (strike not
                     # fixed, prices unavailable). Every consumer must read it
@@ -2708,14 +2710,15 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
         else:
             # Legacy scripts with no M_ params — name heuristic vs WOF.
             for p in compiled.params:
-                kind = classify_param_barrier(p.name, p.stored_val)
+                level = _level_for(p.name)
+                kind = classify_param_barrier(p.name, level)
                 if kind:
                     barriers.append({
                         "name": p.name,
                         "kind": kind,
                         "observable": "WOF",
-                        "level": p.stored_val,
-                        "gap_pts": round((wof - p.stored_val) * 100, 1) if wof is not None else None,
+                        "level": level,
+                        "gap_pts": round((wof - level) * 100, 1) if wof is not None else None,
                     })
     except ValueError:
         pass   # unparseable snapshot — leave barriers empty, keep the row
@@ -2785,7 +2788,8 @@ def _script_flags(deal: Deal) -> dict:
     except ValueError:
         return {"has_stop": False, "has_ki_param": False, "has_autocall_param": False}
     scalar_params = [p for p in compiled.params if p.kind == "scalar"]
-    kinds = {classify_param_barrier(p.name, p.stored_val) for p in scalar_params}
+    values = json.loads(deal.market_snapshot_json or "{}").get("user_params", {})
+    kinds = {classify_param_barrier(p.name, values.get(p.name, p.stored_val)) for p in scalar_params}
     return {
         "has_stop": compiled.has_stop,
         "has_ki_param": "ki" in kinds,
@@ -6421,7 +6425,9 @@ def reinvest_roll_endpoint(
 
     try:
         compiled = parse_script(deal.script_snapshot)
-        compiled = resolve_constats(compiled, market.get("constats") or {}, anchor=date.today(),
+        from ..core.payscript.bindings import shift_calendars
+        rolled = shift_calendars(market.get("constats") or {}, deal.strike_date, date.today())
+        compiled = resolve_constats(compiled, rolled, anchor=date.today(),
                                     currency=(deal.devise or "").strip().upper() or None)
     except ValueError as e:
         raise HTTPException(422, f"Script non exploitable pour la reconduction : {e}")
@@ -6461,7 +6467,7 @@ def reinvest_roll_endpoint(
     yc = [[p["T"], p["rate"] / 100.0] for p in market.get("yieldCurve") or []]
     funding_curve, funding_spread = funding_from_market_snapshot(market)
 
-    T_new = deal.T
+    T_new = effective_T_max(compiled, deal.T)
     value_date_new = date.today()
     maturity_date_new = value_date_new + timedelta(days=round(T_new * 365.25))
 
@@ -6563,7 +6569,33 @@ def _reinvest_context(deal: Deal, req_T: float | None):
                                   "produits mono-sous-jacent (limitation v1).")
     try:
         compiled = parse_script(deal.script_snapshot)
-        compiled = resolve_constats(compiled, market.get("constats") or {}, anchor=date.today(),
+        from ..core.payscript.bindings import shift_calendars
+        rolled = shift_calendars(market.get("constats") or {}, deal.strike_date, date.today())
+        if req_T is not None and compiled.initial_fixing_name:
+            terminal = (date.today() + timedelta(days=round(req_T * 365.25))).isoformat()
+            ends = [value if isinstance(value, str) else value.get('end_date') or value.get('date')
+                    for declaration in compiled.constats if declaration.role != 'initial_fixing'
+                    for value in [rolled.get(declaration.name)] if value]
+            old_terminal = max((value for value in ends if value), default=None)
+            for declaration in compiled.constats:
+                if declaration.role == 'initial_fixing':
+                    continue
+                value = rolled.get(declaration.name)
+                end = value if isinstance(value, str) else (value or {}).get('end_date') or (value or {}).get('date')
+                if end != old_terminal:
+                    if end and end > terminal:
+                        raise ValueError('La nouvelle maturité précède un calendrier intermédiaire ; '
+                                         'ajustez les termes dans le Pricer.')
+                    continue
+                if isinstance(value, dict) and value.get('end_date'):
+                    value['end_date'] = terminal
+                    if value.get('first_observation_date', '') > terminal:
+                        value['first_observation_date'] = terminal
+                        value['roll_date'] = terminal
+                elif declaration.kind == 'single':
+                    if isinstance(value, dict): value['date'] = terminal
+                    else: rolled[declaration.name] = terminal
+        compiled = resolve_constats(compiled, rolled, anchor=date.today(),
                                     currency=(deal.devise or "").strip().upper() or None)
     except ValueError as e:
         raise HTTPException(422, f"Script non exploitable : {e}")

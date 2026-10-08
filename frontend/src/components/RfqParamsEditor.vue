@@ -14,7 +14,14 @@
         <div v-for="p in parsedParams" :key="p.name" class="flex flex-col gap-1">
           <label class="label">{{ p.name }}</label>
           <div class="relative">
-            <input type="number" class="input pr-6" step="any" v-model.number="paramOverrides[p.name]" />
+            <template v-if="p.kind === 'array'">
+              <div v-for="(_, i) in paramOverrides[p.name]" :key="i" class="flex gap-1">
+                <input type="number" class="input pr-6" step="any" v-model.number="paramOverrides[p.name][i]" />
+                <button type="button" v-if="paramOverrides[p.name].length > 1" @click="paramOverrides[p.name].splice(i, 1)">−</button>
+              </div>
+              <button type="button" class="text-xs" @click="paramOverrides[p.name].push(null)">+ Observation</button>
+            </template>
+            <input v-else type="number" class="input pr-6" step="any" v-model.number="paramOverrides[p.name]" />
             <span v-if="p.is_pct" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">%</span>
           </div>
           <span v-if="p.desc && p.desc !== p.name" class="text-[10px] text-slate-600">{{ p.desc }}</span>
@@ -22,88 +29,13 @@
       </div>
     </div>
 
-    <div v-if="constats.length" class="flex flex-col gap-3 border-t border-slate-800 pt-3">
-      <div class="label mb-0">Calendrier{{ constats.length > 1 ? 's' : '' }} CONSTAT</div>
-      <div v-for="c in constats" :key="c.name" class="flex flex-col gap-1.5">
-        <span class="text-xs font-semibold text-slate-300">{{ c.name }}</span>
+    <PayScriptCalendars :declarations="constats" :values="constatOverrides" :currency="currency" />
 
-        <div v-if="c.kind === 'single'" class="max-w-xs">
-          <input type="date" v-model="constatOverrides[c.name]" class="input" />
-        </div>
-
-        <div v-else class="flex flex-col gap-2">
-          <div class="flex flex-wrap items-end gap-2">
-            <div class="flex flex-col gap-0.5">
-              <label class="text-[10px] text-slate-600"
-                     title="Début de la première période (typiquement la date de strike) — pas elle-même une observation, toujours exclue des dates de pricing. Pour N observations à partir d'une date donnée, recule cette date d'un cran (ex: date de strike).">Début ⓘ</label>
-              <input type="date" v-model="constatOverrides[c.name].start_date" class="input py-1 px-2" />
-            </div>
-            <div class="flex flex-col gap-0.5">
-              <label class="text-[10px] text-slate-600">Fin</label>
-              <input type="date" v-model="constatOverrides[c.name].end_date" class="input py-1 px-2" />
-            </div>
-            <div class="flex flex-col gap-0.5">
-              <label class="text-[10px] text-slate-600">Roll</label>
-              <input type="date" v-model="constatOverrides[c.name].roll_date" class="input py-1 px-2" />
-            </div>
-            <div class="flex flex-col gap-0.5">
-              <label class="text-[10px] text-slate-600">Fréquence</label>
-              <div class="flex gap-1">
-                <input type="number" min="1" v-model.number="constatOverrides[c.name].frequency.value" class="input py-1 px-2 w-14" />
-                <select v-model="constatOverrides[c.name].frequency.unit" class="select py-1 pl-2 w-16">
-                  <option value="D">D</option><option value="M">M</option><option value="Y">Y</option>
-                </select>
-              </div>
-            </div>
-            <div class="flex flex-col gap-0.5">
-              <label class="text-[10px] text-slate-600"
-                     title="Ce que devient une constatation qui tombe un week-end ou un jour férié du calendrier de la devise de règlement. « Aucun ajustement » laisse la date là où le term sheet l'a mise.">Convention ⓘ</label>
-              <select v-model="constatOverrides[c.name].convention" class="select py-1 px-2">
-                <option value="none">Aucun ajustement</option>
-                <option value="following">Jour ouvré suivant</option>
-                <option value="modified_following">Suivant, sauf changement de mois</option>
-                <option value="preceding">Jour ouvré précédent</option>
-                <option value="modified_preceding">Précédent, sauf changement de mois</option>
-              </select>
-            </div>
-            <div class="flex flex-col gap-0.5">
-              <label class="text-[10px] text-slate-600"
-                     title="Jours ouvrés entre une constatation et le mouvement effectif du cash. 0 = payé le jour de la constatation.">Règlement ⓘ</label>
-              <div class="flex items-center gap-1">
-                <input type="number" min="0" max="30" class="input py-1 px-2 w-14"
-                       v-model.number="constatOverrides[c.name].settlement_lag" />
-                <span class="text-[10px] text-slate-600">j. ouvrés</span>
-              </div>
-            </div>
-            <div class="flex flex-col gap-0.5">
-              <label class="text-[10px] text-slate-600">Stub</label>
-              <select v-model="constatOverrides[c.name].stub" class="select py-1 px-2">
-                <option value="short_last">Short Last</option>
-                <option value="long_last">Long Last</option>
-                <option value="short_first">Short First</option>
-                <option value="long_first">Long First</option>
-              </select>
-            </div>
-            <div v-if="c.kind === 'nested_schedule'" class="flex flex-col gap-0.5">
-              <label class="text-[10px] text-slate-600">Sous-fréquence</label>
-              <div class="flex gap-1">
-                <input type="number" min="1" v-model.number="constatOverrides[c.name].sub_frequency.value" class="input py-1 px-2 w-14" />
-                <select v-model="constatOverrides[c.name].sub_frequency.unit" class="select py-1 pl-2 w-16">
-                  <option value="D">D</option><option value="M">M</option><option value="Y">Y</option>
-                </select>
-              </div>
-            </div>
-          </div>
-          <ObservationSchedule :request="scheduleRequest(c)" />
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { reactive } from 'vue'
-import ObservationSchedule from './ObservationSchedule.vue'
+import PayScriptCalendars from './PayScriptCalendars.vue'
 
 const props = defineProps({
   parsedParams: { type: Array, default: () => [] },

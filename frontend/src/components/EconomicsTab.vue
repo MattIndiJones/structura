@@ -44,12 +44,16 @@
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Dates économiques</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label class="label">Strike date <span class="text-slate-600 font-normal">(fixing S₀)</span>
-            <HelpTip text="Première constatation et origine de l'axe des temps du moteur. Les performances du produit sont mesurées relativement aux niveaux S₀ constatés à cette date." />
+          <label class="label">StartDate / strike <span class="text-slate-600 font-normal">(fixing S₀)</span>
+            <HelpTip text="Fixing initial du panier, distinct de la première observation de payoff, et origine de l'axe des temps du moteur. Les performances du produit sont mesurées relativement aux niveaux S₀ constatés à cette date." />
           </label>
-          <input v-model="store.globalParams.strike_date" type="date" class="input"
+          <input v-model="store.startDate" type="date" class="input" aria-label="StartDate / date de strike"
+                 :aria-required="!!store.initialFixingName"
                  :readonly="datesLocked"
                  :class="[datesLocked ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : '', marque.classe(cheminGlobal('strike_date'))]" />
+          <p v-if="store.initialFixingName && !store.startDate" class="text-xs text-slate-500 mt-1">
+            Requise pour fixer les niveaux initiaux, avant la première observation.
+          </p>
           <p v-if="datesLocked" class="text-[10px] text-slate-500 mt-0.5">
             {{ contractTermsLocked ? 'Figée au booking.' : 'Figée sur un avenant — le passé a été rejoué dessus.' }}
           </p>
@@ -234,6 +238,23 @@
               @blur="onTickerBlur" />
           </SensitiveValue>
         </div>
+        <details v-if="absoluteSpots || activeU.spot0" :open="absoluteSpots" class="mt-2 text-xs">
+          <summary class="cursor-pointer text-slate-400">Cours en devise — scripts spécifiques</summary>
+          <p class="text-slate-500 mt-2">
+            Inutile pour un payoff en pourcentage : <code>Basket.yield</code> et
+            <code>Basket.spot / Basket.spot0</code> utilisent directement les ratios.
+          </p>
+          <label class="label mt-2">Cours initial du sous-jacent ({{ activeU.ccy }})
+            <SensitiveValue mode="input">
+              <input type="number" min="0" step="any" class="input max-w-xs" v-model.number="activeU.spot0"
+                     placeholder="Seulement pour les cours absolus" />
+            </SensitiveValue>
+          </label>
+          <p class="text-slate-500 mt-1">
+            Hypothèse de simulation si le script utilise des cours en devise.
+            Les fixings contractuels sont gérés dans Events.
+          </p>
+        </details>
         <div class="w-32">
           <label class="label">Devise du sous-jacent</label>
           <select v-model="activeU.ccy" class="select">
@@ -244,127 +265,12 @@
       </fieldset>
     </div>
 
-    <!-- ── Calendriers du script ─────────────────────────────── -->
-    <div v-if="calendarControls.length" class="card">
-      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Échéanciers du script (CONSTAT)
-        <HelpTip width="w-72" text="Chaque CONSTAT déclaré dans le script reçoit ici ses dates, fréquences, conventions de jour ouvré et délais de règlement. Ces valeurs sont utilisées par le moteur puis figées au booking." />
-      </div>
-      <div class="flex flex-col gap-3">
-        <fieldset v-for="calendar in calendarControls" :key="calendar.name"
-             :disabled="contractTermsLocked"
-             class="bg-slate-800/60 border border-slate-700 rounded-lg p-3">
-          <div class="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-2">
-            {{ calendar.name }}
-            <span v-if="calendar.reduction"
-                  class="px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 text-[10px] font-bold">
-              {{ calendar.reduction }} sur période
-            </span>
-            <HelpTip v-if="calendar.reduction" width="w-80"
-                     :text="`Chaque date de ce CONSTAT applique ${calendar.reduction} aux cours de chaque sous-jacent sur la fenêtre définie ci-dessous, avant l'agrégation worst-of, best-of ou panier.`" />
-          </div>
-
-          <p v-if="!hasEditableShape(calendar)" class="text-xs text-amber-600">
-            Les valeurs de ce CONSTAT ne correspondent pas à sa déclaration dans le script.
-            Validez le script ; si le message persiste, sa forme a changé : renommez-le.
-          </p>
-          <template v-else-if="calendar.kind === 'single'">
-            <div class="text-xs max-w-xs">
-              <label class="label">Date</label>
-              <SensitiveValue mode="input">
-                <input v-if="calendar.reduction" type="date" v-model="store.constatOverrides[calendar.name].date" class="input" />
-                <input v-else type="date" v-model="store.constatOverrides[calendar.name]" class="input" />
-              </SensitiveValue>
-            </div>
-            <div v-if="calendar.reduction" class="flex flex-wrap gap-3 items-end text-xs mt-2">
-              <ConstatWindowFields :scope="calendar.window_scope"
-                                   :valeurs="store.constatOverrides[calendar.name]"
-                                   :apercu="windowPreviews[calendar.name]" />
-            </div>
-          </template>
-
-          <div v-else class="flex flex-col gap-2 text-xs">
-            <div class="flex flex-wrap gap-3 items-end">
-              <div>
-                <label class="label">Date de début
-                  <HelpTip text="Début de la première période. Ce point initialise la grille mais n'est pas lui-même une observation : les constatations commencent à la date suivante générée." />
-                </label>
-                <SensitiveValue mode="input">
-                  <input type="date" v-model="store.constatOverrides[calendar.name].start_date" class="input"
-                         :class="marque.classe(cheminConstat(calendar.name, 'start_date'))" />
-                </SensitiveValue>
-              </div>
-              <div>
-                <label class="label">Date de fin</label>
-                <SensitiveValue mode="input">
-                  <input type="date" v-model="store.constatOverrides[calendar.name].end_date" class="input"
-                         :class="marque.classe(cheminConstat(calendar.name, 'end_date'))" />
-                </SensitiveValue>
-              </div>
-              <div>
-                <label class="label">Date de roll</label>
-                <SensitiveValue mode="input">
-                  <input type="date" v-model="store.constatOverrides[calendar.name].roll_date" class="input"
-                         :class="marque.classe(cheminConstat(calendar.name, 'roll_date'))" />
-                </SensitiveValue>
-              </div>
-              <div>
-                <label class="label">Fréquence</label>
-                <div class="flex gap-1">
-                  <input type="number" min="1" v-model.number="store.constatOverrides[calendar.name].frequency.value" class="input w-14" />
-                  <select v-model="store.constatOverrides[calendar.name].frequency.unit" class="select">
-                    <option value="D">D</option><option value="M">M</option><option value="Y">Y</option>
-                  </select>
-                </div>
-              </div>
-              <ConstatWindowFields v-if="calendar.reduction"
-                                   :scope="calendar.window_scope"
-                                   :valeurs="store.constatOverrides[calendar.name]"
-                                   :apercu="windowPreviews[calendar.name]" />
-              <div>
-                <label class="label">Convention
-                  <HelpTip text="Ajustement appliqué lorsqu'une constatation tombe un jour fermé sur le calendrier de la devise de règlement." />
-                </label>
-                <select v-model="store.constatOverrides[calendar.name].convention" class="select">
-                  <option value="none">Aucun ajustement</option>
-                  <option value="following">Jour ouvré suivant</option>
-                  <option value="modified_following">Suivant, sauf changement de mois</option>
-                  <option value="preceding">Jour ouvré précédent</option>
-                  <option value="modified_preceding">Précédent, sauf changement de mois</option>
-                </select>
-              </div>
-              <div>
-                <label class="label">Règlement
-                  <HelpTip text="Nombre de jours ouvrés entre la constatation et l'échange du cash correspondant. C'est la date de paiement qui porte l'actualisation." />
-                </label>
-                <div class="flex items-center gap-1">
-                  <input type="number" min="0" max="15" class="input w-16"
-                         v-model.number="store.constatOverrides[calendar.name].settlement_lag" />
-                  <span class="text-[10px] text-slate-500 whitespace-nowrap">j. ouvrés</span>
-                </div>
-              </div>
-              <div>
-                <label class="label">Stub</label>
-                <select v-model="store.constatOverrides[calendar.name].stub" class="select">
-                  <option value="short_last">Short Last</option><option value="long_last">Long Last</option>
-                  <option value="short_first">Short First</option><option value="long_first">Long First</option>
-                </select>
-              </div>
-              <div v-if="calendar.kind === 'nested_schedule'">
-                <label class="label">Sous-fréquence</label>
-                <div class="flex gap-1">
-                  <input type="number" min="1" v-model.number="store.constatOverrides[calendar.name].sub_frequency.value" class="input w-14" />
-                  <select v-model="store.constatOverrides[calendar.name].sub_frequency.unit" class="select">
-                    <option value="D">D</option><option value="M">M</option><option value="Y">Y</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <ObservationSchedule class="mt-1" :request="scheduleRequest(calendar)"
-                                 :window-frequency="samplingFrequency(calendar)" />
-          </div>
-        </fieldset>
-      </div>
-    </div>
+    <fieldset class="card" :disabled="contractTermsLocked">
+      <h2 class="label">Calendriers du script</h2>
+      <PayScriptCalendars :declarations="calendarControls" :values="store.constatOverrides"
+        :currency="store.globalParams.deal_ccy"
+        :initial-date="store.startDate" :explicit-fixing="!!store.initialFixingName" />
+    </fieldset>
 
     <!-- ── Aperçu consolidé ──────────────────────────────────── -->
     <div class="card">
@@ -425,19 +331,21 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { apiFetch } from '../utils/api.js'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { useVariantMark, cheminConstat, cheminGlobal, cheminParam, valeurLisible } from '../composables/useVariantMark.js'
 import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
 import { formatDate, formatInt, formatNumber } from '../utils/format.js'
-import ConstatWindowFields from './ConstatWindowFields.vue'
+import PayScriptCalendars from './PayScriptCalendars.vue'
+import { usesAbsoluteSpots } from '../utils/payscriptEconomics.js'
 import HelpTip from './HelpTip.vue'
-import ObservationSchedule from './ObservationSchedule.vue'
+import { useObservationPreview } from '../composables/useObservationPreview.js'
 import SensitiveValue from './SensitiveValue.vue'
 
 const store = usePricingStore()
+const absoluteSpots = computed(() => usesAbsoluteSpots(store.script))
 const demo = useDemoModeStore()
 const marque = useVariantMark(store)
 
@@ -550,20 +458,7 @@ const activeU = computed(() => store.underlyings[activeUIdx.value] ?? store.unde
 // Every CONSTAT keeps its card, `MATURITE` included: its window and convention
 // are typed there. The Maturity field moves the terminal constatations,
 // whatever their name.
-const calendarControls = computed(() => store.scriptConstats)
-
-// A card only binds to values whose shape matches the declaration. A mismatch
-// (a single date left under a name now declared CONSTAT(), for instance) used
-// to throw while rendering, which blanks the whole tab and can break the
-// Pricer's later navigation.
-function hasEditableShape(calendar) {
-  const value = store.constatOverrides[calendar.name]
-  if (calendar.kind === 'single') {
-    return calendar.reduction ? !!(value && typeof value === 'object') : typeof value === 'string'
-  }
-  return !!(value && typeof value === 'object' && value.frequency
-    && (calendar.kind !== 'nested_schedule' || value.sub_frequency))
-}
+const calendarControls = computed(() => store.scriptConstats.filter(c => c.role !== 'initial_fixing' || c.reduction))
 
 function onAddUnderlying() {
   if (!contractTermsLocked.value) store.addUnderlying()
@@ -581,188 +476,6 @@ function onTickerBlur() {
   activeU.value.ticker = activeU.value.ticker.trim().toUpperCase()
 }
 
-const tenor = value => (value?.value ? `${value.value}${value.unit}` : null)
-
-function scheduleRequest(calendar) {
-  const value = store.constatOverrides[calendar.name] || {}
-  return {
-    start_date: value.start_date,
-    end_date: value.end_date,
-    roll_date: value.roll_date,
-    frequency: tenor(value.frequency),
-    stub: value.stub,
-    sub_frequency: tenor(value.sub_frequency),
-    currency: store.globalParams.deal_ccy || 'EUR',
-    convention: value.convention || 'none',
-    settlement_lag: value.settlement_lag || 0,
-  }
-}
-
-function samplingFrequency(calendar) {
-  if (calendar.window_scope !== 'period') return null
-  const value = store.constatOverrides[calendar.name]
-  return tenor(value && typeof value === 'object' ? value.window_frequency : null)
-}
-
-const windowPreviews = reactive({})
-
-function keepWindowPreview(name, response, payload, wrap) {
-  if (response.ok) { windowPreviews[name] = wrap(payload); return }
-  if (response.status === 422 && typeof payload?.detail === 'string') {
-    windowPreviews[name] = { erreur: payload.detail }
-  } else {
-    delete windowPreviews[name]
-  }
-}
-
-async function refreshWindowPreviews() {
-  for (const calendar of store.scriptConstats) {
-    const value = store.constatOverrides[calendar.name]
-    if (!calendar.reduction || !value || typeof value !== 'object' || !value.window_frequency?.value) {
-      delete windowPreviews[calendar.name]
-      continue
-    }
-    const sampling = tenor(value.window_frequency)
-    if (calendar.window_scope === 'period') {
-      if (!(value.start_date && value.end_date && value.roll_date)) {
-        delete windowPreviews[calendar.name]
-        continue
-      }
-      try {
-        const response = await apiFetch('/api/schedule/period-window', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            start_date: value.start_date, end_date: value.end_date, roll_date: value.roll_date,
-            frequency: tenor(value.frequency), window_frequency: sampling,
-            stub: value.stub || 'short_last', currency: store.globalParams.deal_ccy || null,
-            convention: value.convention || 'none',
-          }),
-        })
-        keepWindowPreview(calendar.name, response, await response.json(), payload => ({ periode: payload }))
-      } catch { delete windowPreviews[calendar.name] }
-      continue
-    }
-    if (!value.window_length?.value) { delete windowPreviews[calendar.name]; continue }
-    const anchor = calendar.kind === 'single' ? value.date : value.end_date
-    if (!anchor) { delete windowPreviews[calendar.name]; continue }
-    try {
-      const response = await apiFetch('/api/schedule/window', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: anchor, window_length: tenor(value.window_length), window_frequency: sampling,
-          forward: calendar.name === 'STRIKE_FIX', currency: store.globalParams.deal_ccy || null,
-          convention: value.convention || 'none',
-        }),
-      })
-      keepWindowPreview(calendar.name, response, await response.json(), payload => payload)
-    } catch { delete windowPreviews[calendar.name] }
-  }
-}
-
-let previewTimer = null
-watch(() => [store.scriptConstats, store.constatOverrides, store.globalParams.deal_ccy], () => {
-  clearTimeout(previewTimer)
-  previewTimer = setTimeout(refreshWindowPreviews, 350)
-}, { deep: true, immediate: true })
-
-const calendarDates = ref([])
-const pastCloses = ref({})
-
-async function loadCalendarDates() {
-  const calendars = store.scriptConstats.filter(calendar => calendar.kind !== 'single')
-  if (!calendars.length) { calendarDates.value = []; return }
-  const dates = new Set()
-  for (const calendar of calendars) {
-    try {
-      const response = await apiFetch('/api/schedule/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(scheduleRequest(calendar)),
-      })
-      if (!response.ok) continue
-      const payload = await response.json()
-      ;(payload.dates || []).slice(1).forEach(date => dates.add(date))
-    } catch { /* calendrier incomplet : repli sur les flux du pricing */ }
-  }
-  calendarDates.value = [...dates].sort()
-}
-
-const observationTimes = computed(() => {
-  if (!store.result?.flux_table) return []
-  return [...new Set(Object.values(store.result.flux_table).map(event => event.t))].sort((a, b) => a - b)
-})
-
-function addDays(isoDate, days) {
-  const date = new Date(isoDate)
-  date.setDate(date.getDate() + Math.round(days))
-  return date.toISOString().split('T')[0]
-}
-
-const observationDates = computed(() => {
-  if (calendarDates.value.length) return calendarDates.value
-  const strike = store.globalParams.strike_date
-  if (!strike) return []
-  if ((store.result?.in_life || store.result?.pre_strike) && store.result.valuation_date) {
-    const past = [...new Set((store.result.past?.realized_flows || []).map(flow => flow.t))]
-      .sort((a, b) => a - b).map(time => addDays(strike, time * 365.25))
-    const future = observationTimes.value.map(time => addDays(store.result.valuation_date, time * 365.25))
-    return [...past, ...future]
-  }
-  return observationTimes.value.map(time => addDays(strike, time * 365.25))
-})
-
-async function loadPastCloses() {
-  const today = new Date().toISOString().split('T')[0]
-  const days = new Set(observationDates.value)
-  if (store.globalParams.strike_date) days.add(store.globalParams.strike_date)
-  const pastDays = [...days].filter(day => day <= today).sort()
-  const tickers = store.underlyings.map(underlying => underlying.ticker).filter(Boolean)
-  if (!pastDays.length || !tickers.length) { pastCloses.value = {}; return }
-  try {
-    const query = new URLSearchParams({
-      tickers: tickers.join(','),
-      start: store.globalParams.strike_date || pastDays[0],
-      end: today,
-    })
-    const response = await apiFetch(`/api/finance/hist_prices?${query}`)
-    if (!response.ok) return
-    const payload = await response.json()
-    const result = {}
-    for (const day of pastDays) {
-      let index = -1
-      for (let i = 0; i < (payload.dates || []).length; i += 1) {
-        if (payload.dates[i] <= day) index = i
-        else break
-      }
-      if (index < 0) continue
-      result[day] = {}
-      for (const ticker of tickers) {
-        const series = payload.prices?.[ticker]
-        if (series?.[index]) result[day][ticker] = series[index]
-      }
-    }
-    pastCloses.value = result
-  } catch { /* source indisponible : l'aperçu reste sans clôture */ }
-}
-
-watch(() => [store.scriptConstats, store.constatOverrides, store.globalParams.strike_date],
-  loadCalendarDates, { deep: true, immediate: true })
-watch(observationDates, loadPastCloses, { immediate: true })
-
-const previewEvents = computed(() => {
-  if (!observationDates.value.length && !store.result) return []
-  const today = new Date().toISOString().split('T')[0]
-  const strike = store.globalParams.strike_date || today
-  const events = [{ label: 'Strike / Fixing S₀', date: strike, t: 0, isFuture: strike > today }]
-  const dates = observationDates.value.length
-    ? observationDates.value
-    : observationTimes.value.map(time => addDays(strike, time * 365.25))
-  dates.forEach((date, index) => {
-    const time = Math.round(((new Date(date) - new Date(strike)) / 86400000 / 365.25) * 1e4) / 1e4
-    events.push({
-      label: index === dates.length - 1 ? 'Maturité' : `Obs. ${index + 1}`,
-      date, t: time, isFuture: date > today,
-    })
-  })
-  return events
-})
+const { previewEvents, datesObservations: observationDates, closesPassees: pastCloses } = useObservationPreview(
+  store, () => store.startDate, () => store.globalParams.deal_ccy)
 </script>

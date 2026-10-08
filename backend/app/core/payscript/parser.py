@@ -35,6 +35,7 @@ import re
 import math
 from dataclasses import dataclass
 from typing import Callable
+from .bindings import lower_source, effective_parameters, asset_values, average, monitoring_source
 
 from ..compute_budget import (
     MAX_EXPANDED_DATES,
@@ -59,6 +60,7 @@ _SAFE_MATH = {
     # the body, only compiles it — this class of bug is invisible until a
     # script using the keyword actually prices).
     'sum': sum, 'len': len,
+    '_asset_values': asset_values, '_average': average,
 }
 
 
@@ -118,6 +120,7 @@ def _reduction_of(m: re.Match) -> tuple[str | None, str]:
 
 # Nom PayScript -> fonction du bac à sable _SAFE_MATH.
 FUNCTIONS = {
+    'WORSTOF': 'min', 'BESTOF': 'max', 'AVG': '_average',
     'MAX': 'max', 'MIN': 'min', 'ABS': 'abs',
     'FLOOR': 'floor', 'CEIL': 'ceil',
     'SQRT': 'sqrt', 'LOG': 'log', 'EXP': 'exp',
@@ -130,7 +133,7 @@ BASKET_KEYWORD = 'BASKET'
 LOGIC_KEYWORDS = ('AND', 'OR', 'NOT', 'TRUE', 'FALSE')
 
 # Instructions reconnues, niveau 0 (déclarations et blocs) puis corps de bloc.
-TOP_LEVEL_STATEMENTS = ('PARAM', 'PARAM()', 'CONSTAT', 'CONSTAT()', 'CONSTAT()()',
+TOP_LEVEL_STATEMENTS = ('UNDERLYING', 'PARAM', 'PARAM()', 'CONSTAT', 'CONSTAT()', 'CONSTAT()()',
                         'SET', 'AT', 'AT MATURITY')
 BODY_STATEMENTS = ('IF', 'ELSE IF', 'ELSE', 'PAY', 'FLOW', 'ACCRUE', 'SET', 'STOP')
 
@@ -177,13 +180,17 @@ def language_vocabulary() -> dict[str, tuple]:
 @dataclass
 class Param:
     name: str
-    raw_default: float
-    stored_val: float
+    raw_default: float | None
+    stored_val: float | None
     is_pct: bool
     desc: str
     # 'scalar' (PARAM) | 'array' (PARAM() — one value per observation, the UI
     # supplies a table; stored_val/raw_default then only seed the first row).
     kind: str = 'scalar'
+
+    @property
+    def required(self):
+        return self.stored_val is None
 
 
 def _pobs(ctx, name):
@@ -193,10 +200,12 @@ def _pobs(ctx, name):
     observations — so a single row behaves exactly like a scalar PARAM, and
     AT MATURITY naturally lands on the last row. A plain scalar (user sent
     one value, or the seed default) passes through untouched."""
-    v = ctx["memo"].get(name, 0)
+    v = ctx["memo"].get(name)
+    if v is None:
+        raise ValueError(f'PARAM {name} : valeur manquante.')
     if isinstance(v, (list, tuple)):
         if not v:
-            return 0
+            raise ValueError(f'PARAM {name} : série vide.')
         idx = int(ctx.get("index", 1)) - 1
         if idx < 0:
             idx = 0
@@ -229,6 +238,11 @@ class Constat:
     # ouverte à gauche et fermée à droite ; seule la fréquence de relevé se
     # saisit alors, la longueur n'a plus de sens.
     window_scope: str = 'length'
+    role: str = 'observation'
+    underlying: str | None = None
+    source: str | None = None
+    calendar_values: dict | None = None
+    calendar_currency: str | None = None
 
 
 @dataclass
@@ -273,6 +287,14 @@ class CompiledScript:
     # CompiledEvent.releves_passes) ; les deux parts se recombinent à la
     # constatation, comme la fenêtre de départ avec `fix_state`.
     releves_realises: dict | None = None
+
+    @property
+    def initial_fixing_name(self):
+        return next((c.name for c in self.constats if c.role == 'initial_fixing'), None)
+
+    @property
+    def underlying_name(self):
+        return next((c.underlying for c in self.constats if c.underlying), None)
 
 
 @dataclass
@@ -356,6 +378,10 @@ def _transpile_expr(src: str, unknown: set | None = None,
             while i < len(s) and (s[i].isalnum() or s[i] == '_'):
                 ident += s[i]; i += 1
             u = ident.upper()
+            if u in ('__ASSET_YIELD', '__ASSET_SPOT', '__ASSET_SPOT0'):
+                attr = u.removeprefix('__ASSET_').lower()
+                out.append(f'_asset_values(_c, "{attr}")')
+                continue
             if u == 'S' and i < len(s) and s[i] == '[':
                 idx = ''; i += 1
                 while i < len(s) and s[i] != ']':
@@ -509,7 +535,7 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0,
             if unknown is not None:
                 for name in refs: unknown[name] = no
             lbl = lbl_raw.replace("'", "\\'")
-            out.append(f"if not _c['done'] and not _st['done']: _st['flows'].append({{'v': {e}, 'lbl': '{lbl}'}})")
+            out.append(f"if not _c['done'] and not _st['done']: _st['flows'].append({{'v': {e}, 'lbl': '{lbl}', 'leg': {no}}})")
             i += 1; continue
 
         m = re.match(r'^ACCRUE\s+(.+?)(?:\s+"[^"]*")?\s*$', text, re.I)
@@ -596,6 +622,8 @@ def _parse_dates(s: str, line_no: int) -> list[float]:
 
 def parse_script(code: str) -> CompiledScript:
     validate_script_source(code)
+    original_source = code
+    code, binding = lower_source(code)
     raw_lines = code.split('\n')
     lines = []
     for i, raw in enumerate(raw_lines):
@@ -651,9 +679,14 @@ def parse_script(code: str) -> CompiledScript:
         m_missing = re.match(r'^(PARAM\(\)|PARAM)\s+([A-Za-z_]\w*)\s*(?:"[^"]*")?\s*$', text, re.I)
         if m_missing:
             keyword, name = m_missing.group(1).upper(), m_missing.group(2).upper()
-            errors.append(
-                f'Ligne {no}: {keyword} {name} attend une valeur initiale '
-                f'avec son unité, ex. `{keyword} {name} = 100%`.')
+            bad = check_reserved(name, no, keyword)
+            if bad:
+                errors.append(bad); i += 1; continue
+            description = re.search(r'"([^"]*)"', text)
+            params.append(Param(name=name, raw_default=None, stored_val=None, is_pct=True,
+                                desc=description[1] if description else ln.get('comment') or name,
+                                kind='array' if keyword == 'PARAM()' else 'scalar'))
+            declared.add(name)
             i += 1; continue
 
         # PARAM() NAME = value[%] ["description" | # description] — per-
@@ -818,6 +851,21 @@ def parse_script(code: str) -> CompiledScript:
         errors.append(f'Ligne {no}: instruction inconnue au niveau 0: "{text}"')
         i += 1
 
+    if len({p.name for p in params}) != len(params):
+        errors.append('Un PARAM ne peut être déclaré deux fois.')
+    if len({c.name for c in constats}) != len(constats):
+        errors.append('Un CONSTAT ne peut être déclaré deux fois.')
+    if binding:
+        for constat in constats:
+            if constat.name == binding.fixing:
+                constat.role = 'initial_fixing'
+                constat.underlying = binding.name
+                constat.source = original_source
+        if any(e.constat_ref == binding.fixing for e in events):
+            errors.append('Le fixing initial ne peut pas être réutilisé comme observation de paiement.')
+        if any('_asset_values' in stmt for stmt in top_stmts):
+            errors.append('Les propriétés du panier se lisent dans un bloc AT après le fixing initial.')
+
     for name, line_no in unknown.items():
         if name not in declared:
             errors.append(f'Ligne {line_no}: identifiant inconnu "{name}" (ni PARAM ni SET déclaré — faute de frappe ?)')
@@ -845,7 +893,7 @@ def parse_script(code: str) -> CompiledScript:
     # anticipé absent du fichier réglementaire EMT (api/emt.py: has_autocall),
     # détection de cycle de vie muette (api/deals.py).
     has_stop = any(re.match(r'^STOP$', ln['text'], re.I) for ln in lines)
-    monitors = _analyze_monitors(code, [p.name for p in params if p.name.startswith('M_')])
+    monitors = _analyze_monitors(original_source, [p.name for p in params if p.name.startswith('M_')])
     return CompiledScript(events=events, init_fn=init_fn, params=params, constats=constats,
                           has_stop=has_stop, monitors=monitors)
 
@@ -926,6 +974,7 @@ def _verifier_portee_du_rang(blocs, array_param_names) -> list[str]:
 
 
 def _analyze_monitors(code: str, m_param_names: list[str]) -> list[dict]:
+    code = monitoring_source(code)
     monitors = []
     for name in m_param_names:
         found: list[tuple] = []   # (observable, direction)
@@ -983,6 +1032,10 @@ def resolve_analysis_constats(compiled, req):
     """
     if getattr(req, "frozen_schedule", None) is not None:
         from ..product.calendar import restore_calendar
+        if compiled.initial_fixing_name:
+            origin = analysis_origin(req)
+            if req.frozen_schedule.get('origin') != origin.isoformat():
+                raise ValueError('La date initiale diffère du calendrier contractuel figé.')
         return restore_calendar(compiled, req.frozen_schedule)
     return resolve_constats(compiled, req.constats, anchor=analysis_origin(req),
                             currency=getattr(req, "settlement_ccy", None))
@@ -997,6 +1050,18 @@ def analysis_origin(req):
     meme axe que les constatations.
     """
     from datetime import date as _date
+    source = getattr(req, 'script', '')
+    if isinstance(source, str) and re.search(r'^UNDERLYING\s', source, re.I | re.M):
+        compiled = parse_script(source)
+        raw = {str(k).upper(): v for k, v in (getattr(req, 'constats', None) or {}).items()}.get(compiled.initial_fixing_name)
+        raw = raw.get('date') if isinstance(raw, dict) else raw
+        if not raw:
+            raise ValueError(f'CONSTAT {compiled.initial_fixing_name} : date du fixing initial à renseigner.')
+        initial = raw if isinstance(raw, _date) else _date.fromisoformat(raw)
+        supplied = getattr(req, 'strike_date', None)
+        if supplied and str(supplied) != initial.isoformat():
+            raise ValueError('StartDate et la date de strike doivent désigner le même fixing initial.')
+        return initial
     return (getattr(req, "strike_date", None)
             or getattr(req, "anchor", None)
             or _date.today())
@@ -1035,7 +1100,9 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
     date, in script order, same mechanism step_map already uses for any two
     events that land on the same step (a STOP in the first skips the second,
     since both share the same per-path `done` flag)."""
-    has_strike_fix = any(c.name == 'STRIKE_FIX' for c in script.constats)
+    fixing_name = script.initial_fixing_name or 'STRIKE_FIX'
+    has_strike_fix = any(c.name == fixing_name for c in script.constats)
+    constat_values = {str(k).upper(): v for k, v in (constat_values or {}).items()}
     if not has_strike_fix and not any(getattr(ev, 'constat_ref', None) for ev in script.events):
         # Rien à résoudre — mode simple, dates écrites en dur. L'échéancier se
         # construit quand même : un produit en mode normal se booke, se suit et
@@ -1046,7 +1113,7 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
 
     from datetime import date
     from ..calendars import BusinessDayConvention, add_business_days, adjust
-    from ..schedule import (generate_schedule, observation_window, parse_tenor,
+    from ..schedule import (generate_schedule, generate_observation_schedule, observation_window, parse_tenor,
                             period_windows, StubConvention)
 
     today = anchor or date.today()
@@ -1104,9 +1171,12 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
                 paid = observed
             return [_to_year_frac(observed)], [_to_year_frac(paid)], [observed]
 
-        start = _parse_date_field(v.get('start_date'), name, 'start_date')
+        first = v.get('first_observation_date')
+        if script.underlying_name and not first:
+            raise ValueError(f'CONSTAT {name}: première observation à renseigner (first_observation_date).')
+        start = _parse_date_field(first or v.get('start_date'), name, 'first_observation_date' if first else 'start_date')
         end = _parse_date_field(v.get('end_date'), name, 'end_date')
-        roll = _parse_date_field(v.get('roll_date'), name, 'roll_date')
+        roll = _parse_date_field(v.get('roll_date') or first, name, 'roll_date')
         if not v.get('frequency'):
             raise ValueError(f"CONSTAT {name}: champ 'frequency' manquant.")
         freq = parse_tenor(v['frequency'])
@@ -1116,14 +1186,16 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
             raise ValueError(f"CONSTAT {name}: convention de stub invalide: {v.get('stub')!r}")
         sub_freq = parse_tenor(v['sub_frequency']) if v.get('sub_frequency') else None
 
-        result = generate_schedule(start, end, roll, freq, stub, sub_freq,
+        generator = generate_observation_schedule if first else generate_schedule
+        result = generator(start, end, roll, freq, stub, sub_freq,
                                    currency=currency, convention=conv,
                                    settlement_lag=lag)
         # Drop the schedule's own start_date: it's the start of the first
         # accrual period, not itself an observation/payment date.
-        return ([_to_year_frac(d) for d in result['dates'][1:]],
-                [_to_year_frac(d) for d in result['payment_dates'][1:]],
-                list(result['dates'][1:]))
+        offset = 0 if first else 1
+        return ([_to_year_frac(d) for d in result['dates'][offset:]],
+                [_to_year_frac(d) for d in result['payment_dates'][offset:]],
+                list(result['dates'][offset:]))
 
     _cache: dict[str, tuple[list[float], list[float], list[date]]] = {}
 
@@ -1156,12 +1228,14 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         v = constat_values[name]
         _, freq = _window_tenors(name)
         return period_windows(
-            _parse_date_field(v.get('start_date'), name, 'start_date'),
+            _parse_date_field(v.get('period_start_date') or (today.isoformat() if script.underlying_name else v.get('start_date')), name, 'period_start_date'),
             _parse_date_field(v.get('end_date'), name, 'end_date'),
-            _parse_date_field(v.get('roll_date'), name, 'roll_date'),
+            _parse_date_field(v.get('roll_date') or v.get('first_observation_date'), name, 'roll_date'),
             parse_tenor(v['frequency']),
             StubConvention(v.get('stub', 'short_last')),
-            freq, currency=currency, convention=_convention(name, v))
+            freq, currency=currency, convention=_convention(name, v),
+            first_observation_date=(_parse_date_field(v['first_observation_date'], name, 'first_observation_date')
+                                    if v.get('first_observation_date') else None))
 
     def _windows_dates(name: str, observed: list[date]) -> list[list[date]] | None:
         """Une fenêtre par constatation, en dates. None si ce CONSTAT ne
@@ -1194,7 +1268,7 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         conv = _convention(name, v)
         # STRIKE_FIX is the one window that DEPARTS from its date: it fixes S0
         # going forward. Every other constatation ARRIVES at its date.
-        forward = (name == 'STRIKE_FIX')
+        forward = (name == fixing_name)
         return [observation_window(obs, length, freq, forward=forward,
                                    currency=currency, convention=conv)
                 for obs in observed]
@@ -1275,19 +1349,34 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
 
     strike_fix_dates = strike_fix_reduction = None
     if has_strike_fix:
-        red = constat_by_name['STRIKE_FIX'].reduction
+        red = constat_by_name[fixing_name].reduction
         if red:
             # A reduction turns STRIKE_FIX into a real window around one date;
             # its own schedule (if it was declared as CONSTAT()) is then only
             # the anchor, and the window is what the UI supplies.
-            _, _, observed = _full_dates('STRIKE_FIX')
-            strike_fix_dates = _windows_for('STRIKE_FIX', observed)[0]
+            _, _, observed = _full_dates(fixing_name)
+            strike_fix_dates = _windows_for(fixing_name, observed)[0]
             strike_fix_reduction = red
         else:
-            strike_fix_dates = _full_dates('STRIKE_FIX')[0]
+            initial_dates = _full_dates(fixing_name)[0]
+            # A punctual explicit fixing is owned by the valuation origin /
+            # pre-strike rebase, not the historical FIX_AVG window mechanism.
+            strike_fix_dates = None if script.initial_fixing_name else initial_dates
+        if script.initial_fixing_name:
+            initial_dates = _full_dates(fixing_name)[0]
+            if initial_dates[0] != 0:
+                raise ValueError('StartDate doit être la date effective du fixing initial et l’origine du calcul. Ajustez sa date si une convention la déplace.')
+            if any(d <= initial_dates[0] for e in new_events for d in e.dates):
+                raise ValueError('La première observation doit suivre le fixing initial.')
+            if strike_fix_dates and any(d < max(strike_fix_dates) for e in new_events for d in e.dates):
+                raise ValueError('Une observation ne peut pas précéder la fin de la fenêtre initiale.')
 
+    from dataclasses import replace
+    from copy import deepcopy
+    bound_constats = [replace(c, calendar_values=deepcopy(constat_values), calendar_currency=currency)
+                     if c.role == 'initial_fixing' else c for c in script.constats]
     resolu = CompiledScript(events=new_events, init_fn=script.init_fn,
-                            params=script.params, constats=script.constats,
+                            params=script.params, constats=bound_constats,
                             has_stop=script.has_stop, monitors=script.monitors,
                             strike_fix_dates=strike_fix_dates,
                             strike_fix_reduction=strike_fix_reduction,
@@ -1319,8 +1408,10 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
 
 
 def effective_T_max(script: CompiledScript, requested_T: float) -> float:
-    """The simulation horizon must cover every AT event's date, or indexing
-    into the simulated path array goes out of bounds. Returns
+    """Dated Basket contracts derive maturity from their contractual events.
+
+    For legacy scripts or AT MATURITY, cover every AT event to prevent path
+    indexing beyond the simulation horizon. This branch returns
     max(requested_T, the latest date among all of this script's events) — a
     no-op when the script's dates already fit within requested_T (the
     overwhelming common case), and a safety net otherwise. This isn't
@@ -1328,6 +1419,10 @@ def effective_T_max(script: CompiledScript, requested_T: float) -> float:
     has the exact same failure mode — CONSTAT-resolved schedules just make it
     much easier to hit in practice (the calendar's real end date can easily
     drift past whatever Maturité value happens to be sitting in the form)."""
+    if script.initial_fixing_name and not any(e.type == 'AT_MATURITY' for e in script.events):
+        contractual_dates = [d for event in script.events for d in event.dates]
+        if contractual_dates:
+            return max(contractual_dates)
     max_date = requested_T
     for ev in script.events:
         if ev.dates:

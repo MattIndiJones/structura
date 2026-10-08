@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config'
+import vue from '@vitejs/plugin-vue'
 
 // Tests unitaires du front. Le pricing lui-même est testé côté Python — ici on
 // couvre ce que la suite backend ne peut PAS voir : le store et les composables,
@@ -6,6 +7,7 @@ import { defineConfig } from 'vitest/config'
 // mal. Trois défauts de ce chantier vivaient exactement là, et aucun test ne
 // pouvait les attraper.
 export default defineConfig({
+  plugins: [vue()],
   test: {
     // Le store n'a pas besoin du DOM. `localStorage`, seul emprunt au
     // navigateur (utils/api.js y lit le jeton), est bouchonné dans setup.js —

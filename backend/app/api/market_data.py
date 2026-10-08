@@ -57,7 +57,7 @@ def list_underlyings_endpoint(
     groupes: dict[str, list] = {}
     for u in rows:
         groupes.setdefault(u.group_name, []).append(
-            {"ticker": u.ticker, "label": u.label, "ccy": u.ccy})
+            {"ticker": u.ticker, "label": u.label, "ccy": u.ccy, "asset_class": u.asset_class})
     return [{"group": g, "items": groupes[g]} for g in sorted(groupes)]
 
 
