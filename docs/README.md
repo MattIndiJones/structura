@@ -142,6 +142,11 @@ confirmation et diagnostic explicite des rejets Monte-Carlo. Reprise proposée �
 automatique. Dossier utilisateur lu seulement pour le diagnostic ; 355 tests
 frontend et build réussis après ce correctif, sans modification backend.
 
+[Contrôles de fusion PayScript / Optimizer du 08/10](audits/RECETTE_FUSION_PAYSCRIPT_OPTIMIZER_2026-10-08.md) :
+deux échecs du premier contrôle GitHub corrigés, date de paiement final transmise
+au solveur et à la grille résiduelle, réponse fictive AMC conforme au validateur ;
+32 tests backend ciblés distincts réussis. État GitHub et fusion dans la PR #1.
+
 État au contrôle final du lot précédent (historique) :
 Backend à lancer pour utiliser ce lot (aucun serveur actif au contrôle final) ;
 recette visuelle non refaite après le blocage d’accès localhost du navigateur.

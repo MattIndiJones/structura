@@ -655,12 +655,15 @@ def test_les_scenarios_suivent_la_variante(client):
         "la grille de stress doit décrire la variante, pas l'origine")
 
 
-def test_la_grille_de_stress_et_la_grille_2d_concordent(client):
+@pytest.mark.parametrize("payment_delay_days", [0, 9, 45])
+def test_la_grille_de_stress_et_la_grille_2d_concordent(client, monkeypatch, payment_delay_days):
     """Deux chemins de code entièrement distincts — l'un par processus séparés,
     l'autre en direct — doivent pricer la même variante à l'identique. Qu'ils
     divergent signalerait qu'une hypothèse n'atteint pas l'un des deux."""
     from backend.app.api import scenarios as api_sc, simulation as api_sim
-    from backend.app.core.schemas import ScenarioRequest, GridRequest
+    from backend.app.core.schemas import ScenarioRequest, GridRequest, SolverRequest
+
+    monkeypatch.setitem(BASE, "payment_date", (MATURITE + timedelta(days=payment_delay_days)).isoformat())
 
     pid = _origine(client)
     vue = _vue(client, _variante(client, pid, "AC 50", MODE_AVENANT,
@@ -671,3 +674,12 @@ def test_la_grille_de_stress_et_la_grille_2d_concordent(client):
                             param_x="M_CPN_BAR", x_min=0.5, x_max=0.6, x_steps=2,
                             param_y="M_KI_BAR", y_min=0.5, y_max=0.6, y_steps=2)
     assert stress["prices"][0][0] == pytest.approx(grille["prices"][0][0], rel=1e-9)
+
+    # The solver shares the grid setup and must reproduce the same price at
+    # the unchanged coupon, including the contractual final payment delay.
+    _, solved = _analytique(vue, api_sim.solve_endpoint, SolverRequest, N=2000,
+                            param_name="COUPON", target_price=stress["prices"][0][0],
+                            lo=0.02, hi=0.03, tol=1e-6)
+    assert solved["converged"]
+    assert solved["param_value"] == pytest.approx(0.02, abs=1e-9)
+    assert solved["achieved_price"] == stress["prices"][0][0]
