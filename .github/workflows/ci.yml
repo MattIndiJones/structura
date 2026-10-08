@@ -1,14 +1,52 @@
 name: Tests Structura
 
 on:
-  push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      backend_tests:
+        description: 'Tests backend ciblés : fichiers ou nœuds pytest séparés par des espaces'
+        type: string
+        default: ''
+      full_suite:
+        description: 'Lancer explicitement les suites complètes backend et frontend'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
+  selection:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_tests: ${{ steps.tests.outputs.backend_tests }}
+      frontend: ${{ steps.tests.outputs.frontend }}
+      base: ${{ steps.tests.outputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s .github/scripts -p 'test_*.py'
+      - id: tests
+        run: python .github/scripts/select_tests.py
+
   backend:
+    needs: selection
+    if: needs.selection.outputs.backend_tests != '[]'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -16,22 +54,39 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements.lock.txt
       - run: python backend/scripts/check_environment.py
-      - run: python -m pytest -q backend/tests
+      - name: Tests backend sélectionnés
+        shell: pwsh
+        run: |
+          python -c 'import json, os, subprocess, sys; targets = json.loads(os.environ["TEST_TARGETS"]); assert targets; sys.exit(subprocess.call([sys.executable, "-m", "pytest", "-q", *targets]))'
         env:
+          TEST_TARGETS: ${{ needs.selection.outputs.backend_tests }}
           PYTHONPATH: .
           STRUCTURA_DISABLE_SCHEDULER: '1'
 
   frontend:
+    needs: selection
+    if: needs.selection.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npm run build
+      - name: Tests frontend ciblés
+        if: inputs.full_suite != true
+        run: npm test -- --changed "$TEST_BASE" --passWithNoTests
+        env:
+          TEST_BASE: ${{ needs.selection.outputs.base }}
+      - name: Suite frontend complète demandée
+        if: inputs.full_suite == true
+        run: npm test
+      - run: npm run build:skip-tests

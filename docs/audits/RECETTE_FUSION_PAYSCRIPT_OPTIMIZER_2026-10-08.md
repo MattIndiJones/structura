@@ -20,4 +20,12 @@ Sur le cas de régression initial, le stress donnait 0,459539 contre 0,459700 po
 - Au total : **32 tests backend distincts** ; les trois cas de délai ont été rejoués après ajout du contrôle du solveur.
 - Tests offline, historiques synthétiques et base SQLite en mémoire. La base réelle n’a pas été utilisée ; son horodatage est resté inchangé pendant ces vérifications.
 
-Les contrôles GitHub du commit correctif sont relancés automatiquement au push. Leur état final et la fusion sont consultables dans la PR. Les limites de pricing et de recette visuelle restent celles des notes des lots ; ce contrôle de fusion ne les remplace pas.
+Sur le commit correctif `70c7e6f`, GitHub valide **2 617 tests backend**, trois ignorés, ainsi que le frontend et son build. Ce contrôle automatique a encore pris 20 min 40 s pour pytest.
+
+## Tests ciblés et déclenchement CI
+
+À la demande de Philippe, la CI ne relance plus la suite complète à chaque commit. Un seul déclenchement automatique est conservé sur les PR, sans doublon au push ni après fusion. Les tests modifiés et les consommateurs directs des modules backend modifiés sont sélectionnés ; côté frontend, Vitest sélectionne les tests liés au changement, puis Vite construit le build sans relancer une deuxième fois les tests. Une modification de documentation ou de build généré seule ne rejoue pas les tests applicatifs.
+
+La sélection backend est indicative : elle ne calcule pas la totalité des dépendances transitives. Les modules partagés (`main`, schéma global, connexion et modèles de base) ne déclenchent pas tous les domaines. Le résumé CI signale ces cas ; les tests d'intégration et le périmètre métier se précisent via le champ `backend_tests` du lancement manuel. Le booléen `full_suite`, désactivé par défaut, est le seul moyen de lancer explicitement les suites complètes. Les cibles ciblées acceptent des fichiers ou des nœuds pytest, sans possibilité de passer implicitement le dossier de toute la suite.
+
+Le sélecteur est vérifié par neuf tests isolés de l'application et de la base. Les tests métier déjà validés ne sont pas rejoués pour ce changement de CI. Les limites de pricing et de recette visuelle restent celles des notes des lots ; ce contrôle de fusion ne les remplace pas. L'état final et la fusion sont consultables dans la PR.
