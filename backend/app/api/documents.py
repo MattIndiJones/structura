@@ -23,7 +23,9 @@ from .auth import get_current_user
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
-_DOCS_DIR = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "documents"
+from ..runtime import data_path
+
+_DOCS_DIR = data_path("documents")
 _DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
 

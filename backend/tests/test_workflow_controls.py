@@ -10,6 +10,7 @@ import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import HTTPException
@@ -235,7 +236,13 @@ def _fixing_submission(
         f"{(supersedes_version or 0) + 1}"
     ).encode("utf-8")
     observed_at = datetime.now(timezone.utc)
-    if event.event_date != observed_at.date().isoformat():
+    market_timezone='UTC'
+    # At Paris midnight UTC is still yesterday. Declare the actual local
+    # observation and its zone, rather than invent tomorrow's noon in UTC.
+    if event.event_date==date.today().isoformat() and event.event_date!=observed_at.date().isoformat():
+        observed_at=observed_at.astimezone(ZoneInfo('Europe/Paris'))
+        market_timezone='Europe/Paris'
+    elif event.event_date != observed_at.date().isoformat():
         observed_at = datetime.fromisoformat(f"{event.event_date}T12:00:00+00:00")
     return deals_api.EventUpdate(
         spots=spots,
@@ -245,7 +252,7 @@ def _fixing_submission(
         observed_at=observed_at.isoformat(),
         venue="Official close",
         calendar="TARGET",
-        timezone="UTC",
+        timezone=market_timezone,
         evidence_sha256=hashlib.sha256(evidence_payload).hexdigest(),
         evidence_filename=f"fixing-{event.id}.txt",
         evidence_content_type="text/plain",

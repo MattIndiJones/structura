@@ -23,11 +23,13 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-_PRICE_STORE = Path(__file__).parent.parent.parent / "data" / "underlying_prices"
+from ..runtime import data_path
+
+_PRICE_STORE = data_path("underlying_prices")
 _PRICE_STORE.mkdir(parents=True, exist_ok=True)
 
 _TICKER_MAP_FILE = _PRICE_STORE / "_ticker_map.json"
-_FX_STORE = Path(__file__).parent.parent.parent / "data" / "fx_rates"
+_FX_STORE = data_path("fx_rates")
 _FX_STORE.mkdir(parents=True, exist_ok=True)
 
 

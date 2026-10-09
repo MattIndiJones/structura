@@ -26,7 +26,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 _LEAKED_SECRET = "structura-jwt-secret-change-in-prod"
 
 # backend/app/api/auth.py -> parents[2] == backend/
-_SECRET_FILE = Path(__file__).resolve().parents[2] / "data" / ".jwt_secret"
+from ..runtime import data_path
+
+_SECRET_FILE = data_path(".jwt_secret")
 
 
 def _load_secret() -> str:

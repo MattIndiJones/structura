@@ -1,6 +1,15 @@
 # Plan de simulation du desk pour tester et améliorer Structura
 
-Date : 08/10/2026. Statut : cadrage avant développement.
+Date : 08/10/2026. Statut : cadrage historique, à reprendre.
+
+Le laboratoire développé après ce plan a été retiré le 08/10/2026. Philippe
+redéfinit les spécifications autour d'agents qui utilisent chacun leur propre
+Structura, par les écrans et les API. Hector remplace Alex et Achille remplace
+Camille. Les nouvelles décisions et le chantier RFQ différé sont conservés dans
+[la note multi-entités](INTER_ENTITY_RFQ_BACKLOG_2026-10-08.md). Le présent plan
+ne constitue plus la spécification active à implémenter. Le
+[plan d'action multi-Structura](MULTI_STRUCTURA_AGENT_ACTION_PLAN_2026-10-08.md)
+définit désormais l'ordre de développement.
 
 La simulation doit exercer les fonctions de Structura, découvrir leurs défauts,
 conserver des preuves et mesurer les améliorations après correction. Son aspect

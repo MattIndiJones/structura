@@ -1,7 +1,7 @@
 <template>
   <header class="app-header sticky top-0 z-40 border-b bg-surface2/95 backdrop-blur"
           style="border-color: var(--border); background-color: rgba(255,255,255,.95);">
-    <div class="px-5 py-2.5 flex items-center gap-1">
+    <div class="header-row px-5 py-2.5 flex items-center gap-1">
       <RouterLink to="/" class="flex items-center gap-2.5 pr-4 mr-1 border-r shrink-0 hover:opacity-80 transition-opacity"
                   style="border-color: var(--border);">
         <span class="brand-mark">
@@ -10,7 +10,7 @@
         <span class="font-display font-black tracking-tight text-[15px]" style="color: var(--text);">Structura</span>
       </RouterLink>
 
-      <nav class="flex items-center gap-0.5 overflow-x-auto" aria-label="Navigation principale">
+      <nav class="header-nav flex items-center gap-0.5 overflow-x-auto" aria-label="Navigation principale">
         <RouterLink v-for="item in navItems" :key="item.label" :to="item.to"
           class="nav-link" :class="{ 'nav-link-active': isActive(item) }"
           :aria-current="isActive(item) ? 'page' : null">
@@ -18,7 +18,7 @@
         </RouterLink>
       </nav>
 
-      <div class="ml-auto flex items-center gap-2.5 shrink-0 pl-2">
+      <div class="header-actions ml-auto flex items-center gap-2.5 shrink-0 pl-2">
         <DemoModeToggle />
         <span class="text-xs hidden sm:inline" style="color: var(--muted);">{{ auth.user?.username }}</span>
         <RouterLink v-if="auth.isAdmin" to="/admin" title="Administration" aria-label="Administration" class="admin-gear">⚙️</RouterLink>
@@ -136,4 +136,9 @@ function logout() {
   transition: color .15s;
 }
 .admin-gear:hover { color: var(--gold); }
+@media (max-width: 760px) {
+  .header-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 12px; }
+  .header-nav { order: 3; min-width: 0; width: 100%; }
+  .header-actions { margin-left: 0; padding-left: 0; width: 100%; flex-wrap: wrap; gap: 8px; }
+}
 </style>

@@ -3,6 +3,7 @@ structured product against Structura's own model price."""
 from __future__ import annotations
 import json
 from datetime import date, datetime, timezone
+from ..runtime import business_now, business_today
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -183,7 +184,7 @@ def _rfq_row(r: RfqRequest, quotes: list | None = None, cpty_map: dict | None = 
         r.status, ready=not rfq_readiness_failures(r))
     if r.status == "retenue" and quotes:
         selected = next((quote for quote in quotes if quote.id == r.selected_quote_id), None)
-        if selected and selected.valid_until and selected.valid_until <= datetime.utcnow():
+        if selected and selected.valid_until and selected.valid_until <= business_now():
             business_status = RfqBusinessStatus.EXPIRED.value
     row = {
         "id": r.id,
@@ -318,7 +319,7 @@ def _quote_row(q: RfqQuote, cpty_map: dict | None = None, *,
     comparable = (
         not superseded and q.price is not None
         and q.status not in {"decline", "expire"}
-        and (q.valid_until is None or q.valid_until > datetime.utcnow())
+        and (q.valid_until is None or q.valid_until > business_now())
     )
     return {
         "id": q.id,
@@ -905,7 +906,7 @@ def _create_rfq(
         product_id=product.product_id,
         product_terms_version=product.terms_version,
         name=body.name.strip(),
-        ao_date=body.ao_date or date.today().isoformat(),
+        ao_date=body.ao_date or business_today().isoformat(),
         kind=body.kind,
         sens=body.sens,
         template_type=body.template_type,
@@ -1157,7 +1158,7 @@ def update_rfq(
                 422, f"Un prix modèle négatif ({mp}) n'est pas un prix de produit — tous les "
                      f"écarts aux cotations en découlent.")
         rfq.model_price = mp
-        rfq.model_price_at = datetime.utcnow()
+        rfq.model_price_at = business_now()
         rfq.model_input_hash = (
             pricing_input_hash(rfq.script_snapshot, json.loads(rfq.params_json or "{}"))
             if mp is not None else None)
@@ -1181,7 +1182,7 @@ def update_rfq(
             if q.status in {"decline", "expire"}:
                 raise HTTPException(
                     422, f"Une réponse au statut « {q.status} » ne peut pas être retenue.")
-            if q.valid_until is not None and q.valid_until <= datetime.utcnow():
+            if q.valid_until is not None and q.valid_until <= business_now():
                 raise HTTPException(
                     422, "Cette cotation a expiré. Demandez une réponse ferme à jour "
                          "avant de la retenir.")
@@ -1383,7 +1384,7 @@ def update_quote(
         if "status" not in data:
             data["status"] = "recu" if data["price"] is not None else "en_attente"
         if data["price"] is not None and q.quoted_at is None and "quoted_at" not in data:
-            data["quoted_at"] = datetime.utcnow()
+            data["quoted_at"] = business_now()
         # Contre-cote de last look : elle doit améliorer la cotation qu'elle
         # remplace. Sinon elle sortait la meilleure réponse du fournisseur de
         # ses propres statistiques — un UBS à +102 bps en notre faveur devenu

@@ -11,8 +11,11 @@ from .models import (
     OfficialFixingVersion, UatGenerationBatch, Underlying,
     ValuationRun, SchedulerRun,
 )
+from . import trading_models  # Register reusable trading tables before create_all.
 
-_DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "structura.db"
+from ..runtime import data_path
+
+_DB_PATH = data_path("structura.db")
 _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 engine = create_engine(f"sqlite:///{_DB_PATH}", echo=False,

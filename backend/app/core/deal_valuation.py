@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..db.models import Deal, DealEvent
+from ..runtime import business_today
 from ..services.market_data import (
     dividend_profile, load_hist_prices, market_data_provider_for_deal,
 )
@@ -95,7 +96,7 @@ def mtm_core(
     realized_loader = realized_loader or realized_market
     body = body or MtmRequest()
     deal_id = deal.id
-    calendar_today = date.today()
+    calendar_today = business_today()
     today = asof or body.valuation_date or calendar_today
     if today > calendar_today:
         raise HTTPException(422, "La date de valorisation ne peut pas être future")

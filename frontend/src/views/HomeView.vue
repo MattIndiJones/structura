@@ -119,6 +119,11 @@
               <p class="text-xs text-slate-600">Qui vous couvrez, qui y travaille et ce qu'ils achètent réellement.</p>
             </div>
 
+            <RouterLink to="/agent-workshop" class="card flex flex-col gap-3 hover:shadow-lg transition-all">
+              <strong>🧪 Recette par utilisateurs IA</strong>
+              <p class="text-xs text-slate-600">Hector, les banques, les clients et Achille utilisent leurs Structura et remontent les difficultés. Lancer une partie ou consulter ses preuves.</p>
+            </RouterLink>
+
           </div>
 
           <!-- Niveau 2 : sous-cards de la catégorie sélectionnée -->
@@ -406,6 +411,10 @@
 
           <div v-else-if="selectedCategory === 'competitive_bidding'" class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl">
 
+            <RouterLink to="/trading" class="card border-t-2 border-t-cyan-500 hover:bg-cyan-950/20 transition-colors">
+              <div class="font-bold text-slate-100">Relations et exécutions</div>
+              <p class="text-xs text-slate-400 mt-2">Préparez la documentation bilatérale, consultez les positions de notes et enregistrez les preuves de règlement.</p>
+            </RouterLink>
             <!-- RFQ Fournisseurs -->
             <RouterLink to="/rfq"
               class="card flex flex-col gap-3

@@ -210,6 +210,9 @@ def market_data_provider_for_deal(deal, session) -> str:
     platform default.  The function intentionally uses the SQLModel mapper
     dynamically, keeping this service independent from the database models.
     """
+    from .scenario_market import configured_path, PROVIDER
+    if configured_path():
+        return PROVIDER
     client_id = getattr(deal, "client_id", None)
     if not client_id:
         return DEFAULT_MARKET_DATA_PROVIDER
@@ -266,6 +269,9 @@ def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
     True returns the dividend-adjusted close, for statistical estimates where
     total return is the honest input: realized volatility, correlations,
     calibration. Never for anything a payoff reads."""
+    from .scenario_market import configured_path, history
+    if configured_path():
+        return history(tickers, start, end, adjusted)
     try:
         provider = normalize_market_data_provider(provider)
     except ValueError as exc:
@@ -397,6 +403,13 @@ def load_yahoo_reference_closes(
     date.  ``series`` therefore keeps one independent date/value mapping per
     ticker and records stock splits for the automated exception controls.
     """
+    from .scenario_market import configured_path
+    if configured_path():
+        # Do not relabel a simulated close as Yahoo. The ordinary manual
+        # exception workflow must sign and source each reached fixing.
+        return {"series": {}, "splits": {}, "currencies": {}, "provider": "YAHOO",
+            "fetched_at": datetime.utcnow().isoformat(), "missing": tickers,
+            "warnings": [{"code":"YAHOO_DISABLED_IN_SCENARIO", "message":"Fixings synthétiques à déclarer par décision utilisateur sourcée."}]}
     if not _HAS_YF:
         return {"error": "yfinance non installé"}
     try:

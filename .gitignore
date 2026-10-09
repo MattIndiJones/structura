@@ -39,6 +39,7 @@ backend/data/underlying_prices/
 backend/data/whisper_models/
 backend/data/fx_rates/
 backend/data/ff_data/
+backend/data/agent_workshop/
 
 # Claude memory (local session state, worktrees...) — but agent definitions
 # under .claude/agents/ are meant to be shared with the team, keep those.

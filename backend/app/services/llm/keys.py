@@ -19,7 +19,9 @@ import os
 from pathlib import Path
 
 # backend/app/services/llm/keys.py -> parents[3] == backend/
-_KEY_DIR = Path(__file__).resolve().parents[3] / "data"
+from ...runtime import data_path
+
+_KEY_DIR = data_path()
 
 # Fournisseur -> (variable d'environnement, fichier de repli)
 _SOURCES = {

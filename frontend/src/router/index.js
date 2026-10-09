@@ -2,6 +2,9 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const routes = [
+  { path: '/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { title: 'Recette par utilisateurs IA' } },
+  { path: '/admin/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { requiresAdmin: true, title: 'Recette par utilisateurs IA' } },
+  { path: '/trading', component: () => import('../views/TradingView.vue'), meta: { title: 'Relations et exécutions' } },
   {
     path: '/structuring',
     component: () => import('../views/StructuringView.vue'),

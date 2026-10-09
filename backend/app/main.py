@@ -3,7 +3,7 @@ import mimetypes
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 
 # Windows registry can have wrong MIME entries for .js/.css — force correct types
 # so StaticFiles doesn't serve module scripts as text/plain (breaks ES modules).
@@ -50,6 +50,8 @@ from .api.compute import router as compute_router
 from .api.var import router as var_router
 from .api.products import router as products_router
 from .api.product_optimizer import router as product_optimizer_router
+from .api.trading import router as trading_router
+from .api.agent_workshop import router as agent_workshop_router, admin_router as admin_agent_workshop_router
 from .db.database import init_db
 from .services.lifecycle_alerts import (
     SCHEDULER_TIMEZONE, configure_lifecycle_handlers,
@@ -88,6 +90,8 @@ def on_startup():
 async def stop_optimizer_researches():
     from .services.optimizer_research import shutdown
     await asyncio.to_thread(shutdown)
+    from .services.agent_workshop.engine import manager
+    await asyncio.to_thread(manager.shutdown)
 
 
 # Daily lifecycle pass at 23:00 local — after the US close, since deal events
@@ -146,6 +150,9 @@ app.include_router(compute_router)
 app.include_router(var_router)
 app.include_router(products_router)
 app.include_router(product_optimizer_router)
+app.include_router(trading_router)
+app.include_router(agent_workshop_router)
+app.include_router(admin_agent_workshop_router)
 app.include_router(pricing_router)
 app.include_router(market_data_router)
 app.include_router(simulation_router)
@@ -157,7 +164,24 @@ DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    result = {"status": "ok", "version": "0.1.0"}
+    if os.environ.get("STRUCTURA_INSTANCE_ID"):
+        result.update(instance_id=os.environ["STRUCTURA_INSTANCE_ID"], process_id=os.getpid())
+    return result
+
+
+@app.post("/_instance/stop", include_in_schema=False)
+async def stop_owned_instance(request: Request):
+    import secrets
+    expected = os.environ.get("STRUCTURA_INSTANCE_CONTROL_TOKEN", "")
+    supplied = request.headers.get("X-Instance-Control", "")
+    if not expected or not secrets.compare_digest(expected, supplied):
+        raise HTTPException(404, "Not found")
+    server = getattr(app.state, "instance_server", None)
+    if server is None:
+        raise HTTPException(409, "Instance not managed")
+    server.should_exit = True
+    return {"stopping": True}
 
 
 if DIST.exists():
