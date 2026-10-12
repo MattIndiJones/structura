@@ -4,10 +4,12 @@ import os
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .auth import get_current_admin, get_current_user
 from ..db.models import User
 from ..services.agent_workshop.store import store, CampaignConfig
 from ..services.agent_workshop.engine import manager
+from ..services.agent_workshop.consultation import consultations
 
 def controller_only():
     if os.environ.get("STRUCTURA_WORKSHOP_CHILD") == "1":
@@ -23,6 +25,7 @@ def owned(key, admin):
     except (ValueError, FileNotFoundError): raise HTTPException(404, "Campagne introuvable.")
     if state["owner"] != admin.id:
         raise HTTPException(404, "Campagne introuvable.")
+    state["consultations"] = consultations.status(key)
     return state
 
 
@@ -59,11 +62,11 @@ def detail(key: str, admin: Owner):
 
 
 @routes.post("/{key}/{action}")
-def command(key: str, action: Literal["start", "pause", "resume", "stop", "reset"], admin: Owner):
+def command(key: str, action: Literal["start", "pause", "resume", "stop", "reset", "replay"], admin: Owner):
     owned(key, admin)
     try:
-        if action == 'reset':
-            fresh = manager.manage(key, admin.id, 'reset')
+        if action in {'reset', 'replay'}:
+            fresh = manager.manage(key, admin.id, action)
             return manager.snapshot(fresh['id'])
         if action == "start": manager.start(key)
         else: manager.control(key, action)
@@ -71,6 +74,58 @@ def command(key: str, action: Literal["start", "pause", "resume", "stop", "reset
     except FileNotFoundError: raise HTTPException(404, 'Campagne introuvable.')
     except (OSError, RuntimeError, httpx.HTTPError): raise HTTPException(409, 'Les installations ou la sauvegarde ne sont pas disponibles ; opération annulée. Réessayer après leur fermeture.')
     return manager.snapshot(key)
+
+
+class IssueReview(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    status: Literal['OPEN', 'IN_PROGRESS', 'CLOSED'] = 'OPEN'
+    qualification: Literal['UNCONFIRMED', 'CONFIRMED_BUG', 'USAGE', 'EXPECTED_REFUSAL', 'HARNESS', 'MISSING', 'DATA'] = 'UNCONFIRMED'
+    note: str = Field(default='', max_length=3000)
+
+    @model_validator(mode='after')
+    def require_diagnosis(self):
+        self.note = self.note.strip()
+        if (self.status == 'CLOSED' or self.qualification != 'UNCONFIRMED') and not self.note:
+            raise ValueError('Préciser le diagnostic ou le motif de clôture.')
+        return self
+
+
+ConsultationActor = Literal['hector', 'bnp', 'ca', 'sg', 'client']
+
+
+@routes.post('/{key}/consultations/{actor}')
+def open_consultation(key: str, actor: ConsultationActor, admin: Owner):
+    owned(key, admin)
+    try:
+        return consultations.open(key, admin.id, actor)
+    except FileNotFoundError:
+        raise HTTPException(404, 'Campagne introuvable.')
+    except (ValueError, RuntimeError, OSError, httpx.HTTPError) as exc:
+        raise HTTPException(409, str(exc))
+
+
+@routes.delete('/{key}/consultations/{actor}')
+def close_consultation(key: str, actor: ConsultationActor, admin: Owner):
+    owned(key, admin)
+    try:
+        return consultations.close(key, admin.id, actor)
+    except FileNotFoundError:
+        raise HTTPException(404, 'Campagne introuvable.')
+    except (ValueError, RuntimeError, OSError, httpx.HTTPError) as exc:
+        raise HTTPException(409, str(exc))
+
+
+@routes.patch('/{key}/issues/{issue_id}')
+def review_issue(key: str, issue_id: str, body: IssueReview, admin: Owner):
+    owned(key, admin)
+    try:
+        return store.review_issue(key, admin.id, issue_id, body.model_dump())
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    except OSError:
+        raise HTTPException(409, 'Le diagnostic n’a pas pu être enregistré. Réessayer.')
 
 
 @routes.delete('/{key}')

@@ -44,6 +44,27 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
+[Simulation entre agents — tests restants et futur échange RFQ (12/10)](projects/platform/AGENT_SIMULATION_TESTS_RESTANTS_2026-10-12.md)
+— Recette priorisée : cycle jusqu'au paiement, AR produit, discours, audit,
+durée, consultation et année complète. Matrice dédiée à l'échange automatique
+de prix RFQ, prévu dans une autre branche et un autre chat.
+
+[Consultation des installations BNP/Hector après arrêt (12/10)](projects/platform/AGENT_SIMULATION_CONSULTATION_2026-10-12.md)
+— Boutons d'ouverture et de fermeture des books natifs conservés, connexion
+automatique, calendrier figé et lecture seule SQLite/API, sans relance des IA.
+
+[Bilan de l'essai réel arrêté le 12/10](projects/platform/AGENT_SIMULATION_BILAN_2026-10-12.md)
+— Cinq dossiers, 50 M€, vingt écritures réglées et 105 MtM natifs ; limites,
+durées et priorités de reprise. La campagne annuelle n'est pas qualifiée.
+
+[Simulation entre agents — pilotage du 12/10](projects/platform/AGENT_SIMULATION_PILOT_2026-10-12.md)
+— Première consolidation locale : avancement permanent, reprise vierge conservant
+l’ancien essai, suppression sauvegardée, historique intégral paginé, diagnostics
+persistants, books lisibles et rapprochement durci. 47 tests backend ciblés,
+379 tests frontend et build, deux recettes UI isolées et parcours natif Phoenix
+jusqu’à échéance. Horloge événementielle, diversité des acteurs, flux financiers
+et rejeu déterministe restent à développer ; détail et limites dans la note.
+
 Simulation de recette : [livraison multi-Structura du 09/10](projects/platform/MULTI_STRUCTURA_AGENT_IMPLEMENTATION_2026-10-09.md)
 — **Implémentée localement** : utilisateurs IA de leurs installations distinctes,
 inscription UI, contrats, CRM, pricing natif, conversations, quatre books,

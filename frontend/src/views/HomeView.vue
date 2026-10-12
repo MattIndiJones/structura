@@ -120,7 +120,7 @@
             </div>
 
             <RouterLink to="/agent-workshop" class="card flex flex-col gap-3 hover:shadow-lg transition-all">
-              <strong>🧪 Recette par utilisateurs IA</strong>
+              <strong>🧪 Simulation entre agents</strong>
               <p class="text-xs text-slate-600">Hector, les banques, les clients et Achille utilisent leurs Structura et remontent les difficultés. Lancer une partie ou consulter ses preuves.</p>
             </RouterLink>
 

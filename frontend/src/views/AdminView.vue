@@ -12,8 +12,8 @@
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl">
         <RouterLink to="/admin/agent-workshop" class="card border-t-2 border-t-blue-500 hover:bg-blue-950/20 transition-colors">
-          <div class="font-bold text-slate-100">Recette par utilisateurs IA</div>
-          <p class="text-xs text-slate-400 mt-2">Hector, les banques, le client et Achille utilisent leurs propres Structura. Conversations, preuves et bugs observés.</p>
+          <div class="font-bold text-slate-100">Simulation entre agents</div>
+          <p class="text-xs text-slate-400 mt-2">Créer et suivre une partie avec Hector, les banques, le client et Achille. Avancement, opérations et erreurs observées.</p>
         </RouterLink>
         <RouterLink to="/trading" class="card border-t-2 border-t-cyan-500 hover:bg-cyan-950/20 transition-colors">
           <div class="font-bold text-slate-100">Relations et exécutions</div>

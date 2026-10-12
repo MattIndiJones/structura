@@ -13,12 +13,14 @@ from .models import (
 )
 from . import trading_models  # Register reusable trading tables before create_all.
 
-from ..runtime import data_path
+from ..runtime import data_path, consultation_mode
 
 _DB_PATH = data_path("structura.db")
 _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-engine = create_engine(f"sqlite:///{_DB_PATH}", echo=False,
+_DATABASE_URL = (f"sqlite:///{_DB_PATH.as_uri()}?mode=ro&uri=true"
+                 if consultation_mode() else f"sqlite:///{_DB_PATH}")
+engine = create_engine(_DATABASE_URL, echo=False,
                         connect_args={"check_same_thread": False})
 
 
@@ -28,6 +30,8 @@ def _sqlite_integrity_pragmas(dbapi_connection, _connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.execute("PRAGMA busy_timeout=5000")
+    if consultation_mode():
+        cursor.execute("PRAGMA query_only=ON")
     cursor.close()
 
 
@@ -858,6 +862,10 @@ def _retire_four_eyes_fixing_policy():
 
 
 def init_db():
+    if consultation_mode():
+        if not _DB_PATH.is_file():
+            raise RuntimeError("Le book sauvegardé est introuvable ; consultation annulée.")
+        return
     SQLModel.metadata.create_all(engine)
     _migrate()
     _retire_four_eyes_fixing_policy()

@@ -2,8 +2,10 @@ import { actorName, actionTitle } from './workshopProgress'
 
 export const issueCategories = {
   structura:'Appels Structura à diagnostiquer', agent:'Erreurs IA / usage', pilot:'Problèmes du pilote de test',
-  reported:'Bugs signalés par une IA', improvement:'Améliorations / fonctions manquantes', other:'Autres points à examiner',
+  reported:'Bugs signalés par une IA', improvement:'Améliorations / fonctions manquantes', other:'Autres points à examiner', expected:'Refus métier attendus',
 }
+export const issueQualifications = {UNCONFIRMED:'À examiner — non confirmé',CONFIRMED_BUG:'Bug confirmé par le propriétaire',USAGE:'Erreur d’usage',EXPECTED_REFUSAL:'Refus métier attendu',HARNESS:'Incident du pilote',MISSING:'Fonction manquante / amélioration',DATA:'Problème de données'}
+export const issueStatuses = {OPEN:'À examiner',IN_PROGRESS:'En cours d’analyse',CLOSED:'Clos par le propriétaire'}
 
 function linkedAction(state, incident) {
   const actions=state.actions || []
@@ -13,6 +15,7 @@ function linkedAction(state, incident) {
 }
 
 function categoryFor(incident, action) {
+  if(incident.kind==='RECONCILIATION')return 'structura'
   if(incident.kind==='HARNESS')return 'pilot'
   if(incident.source==='AGENT')return incident.kind==='BUG' ? 'reported' : incident.kind==='USAGE' ? 'agent' : ['IMPROVEMENT','MISSING'].includes(incident.kind) ? 'improvement' : 'other'
   if(action?.http_calls?.some(c=>c.status>=400))return 'structura'
@@ -22,6 +25,7 @@ function categoryFor(incident, action) {
 
 function explanationFor(incident, action, category) {
   const error=incident.description || ''
+  if(incident.kind==='RECONCILIATION')return {summary:'Les écritures ou leurs preuves ne permettent pas un rapprochement complet.',next:'Ouvrir le dossier dans Books et risques, examiner les écarts champ par champ et les écritures natives avant de reprendre. Une clôture de ce signalement ne modifie pas les books.'}
   if(action?.tool==='mail'&&/Intervenant inconnu/i.test(error))return {summary:'L’IA a choisi un destinataire qui n’existe pas dans la messagerie de la campagne.', next:`Vérifier le destinataire « ${action.args?.to || '—'} » et les correspondants proposés à l’IA. Une adresse mail externe n’est pas un identifiant d’acteur de cette simulation.`}
   if(/PRICING_RECEIPT/i.test(error))return {summary:'Structura a refusé le booking car la preuve serveur du pricing est invalide.',next:'Vérifier le reçu, son installation d’origine et les reprises de session ; recalculer le prix dans la même installation avant de retenter. Le refus observé ne démontre pas à lui seul un bug de Structura.'}
   if(action?.http_calls?.some(c=>c.status===404))return {summary:'L’agent a appelé une route que son installation n’a pas trouvée.',next:'Comparer le chemin demandé aux capacités OpenAPI de cette installation et à la décision de l’IA. Une route inventée est une erreur d’usage ; une route attendue absente demande un diagnostic de l’application.'}
@@ -46,13 +50,18 @@ export function campaignIssues(state) {
     const category=categoryFor(incident,action)
     rows.push({...incident,number:rows.length+1,actionIndex:index,action,category,...explanationFor(incident,action,category),qualification:'À examiner — non confirmé'})
   })
-  return rows
+  return rows.map(row=>{
+    const review=state.issue_reviews?.[row.id]
+    const reviewedCategory={CONFIRMED_BUG:'structura',USAGE:'agent',EXPECTED_REFUSAL:'expected',HARNESS:'pilot',MISSING:'improvement',DATA:'other'}[review?.qualification]
+    return {...row,review,category:reviewedCategory||row.category,status:review?.status||'OPEN',qualification:issueQualifications[review?.qualification]||row.qualification}
+  })
 }
 
 export function issueReport(state, rows=campaignIssues(state)) {
   return [`Signalements de recette — ${state.config.name}`,`Campagne : ${state.id}`,`Date du jeu : ${state.business_date}`,
     'Ces fiches sont des observations à diagnostiquer, pas une liste de bugs confirmés.',
     ...rows.flatMap(row=>['',`POINT ${row.number} — ${issueCategories[row.category]}`,`Acteur : ${actorName(state,row.actor)} · date du jeu : ${row.date}`,
-      `Source : ${row.source} · ${row.qualification}`,`Observation : ${row.summary}`,`Message original : ${row.description}`,
+      `Source : ${row.source} · ${row.qualification} · ${issueStatuses[row.status]}`,`Observation : ${row.summary}`,`Message original : ${row.description}`,
+      ...(row.review ? [`Diagnostic du propriétaire : ${row.review.note}`,`Historique des diagnostics : ${JSON.stringify(row.review.history || [])}`] : []),
       `À vérifier : ${row.next}`,row.action ? `Action ${row.actionIndex+1} : ${actionTitle(row.action)}\nDécision : ${row.action.reason}\nArguments : ${JSON.stringify(row.action.args)}\nRéponses HTTP : ${JSON.stringify(row.action.http_calls || [])}\nRésultat : ${JSON.stringify(row.action.result)}` : 'Aucune action liée avec certitude dans le journal.'])].join('\n')
 }

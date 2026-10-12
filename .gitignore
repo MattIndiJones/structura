@@ -77,3 +77,4 @@ artifacts/
 
 # Local validation snapshots, screenshots and intermediate reports
 /tmp/
+/output/

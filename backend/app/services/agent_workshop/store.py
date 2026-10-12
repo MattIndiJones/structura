@@ -1,6 +1,6 @@
 from copy import deepcopy
 from contextlib import contextmanager
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from dateutil.relativedelta import relativedelta
 import json
 import hashlib
@@ -136,6 +136,43 @@ class Store:
             raise
         return fresh
 
+    def replay(self, key, owner):
+        previous = self.load(key)
+        fresh = self.initial_state(CampaignConfig(**previous['config']), owner)
+        fresh['replay_of'] = key
+        try:
+            self.save(fresh)
+        except Exception:
+            if self.path(fresh['id']).exists():
+                self.archive(fresh['id'])
+            raise
+        return fresh
+
+    def issue_reviews(self, key):
+        try:
+            return json.loads((self.path(key) / 'issue_reviews.json').read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            return {}
+
+    def review_issue(self, key, owner, issue_id, review):
+        # Separate annotations cannot be overwritten by a running CLI controller.
+        with self.lifecycle_guard(key):
+            state = self.load(key)
+            if state['owner'] != owner:
+                raise FileNotFoundError('Campagne introuvable.')
+            known = any(i.get('id') == issue_id for i in state.get('incidents', []))
+            if not known and issue_id.startswith('action-') and issue_id[7:].isdigit():
+                index = int(issue_id[7:])
+                known = index < len(state.get('actions', [])) and state['actions'][index].get('status') == 'FAILED'
+            if not known:
+                raise FileNotFoundError('Signalement introuvable.')
+            reviews = self.issue_reviews(key)
+            entry = dict(review, reviewed_by=owner, reviewed_at=datetime.now(timezone.utc).isoformat())
+            entry['history'] = reviews.get(issue_id, {}).get('history', []) + [entry.copy()]
+            reviews[issue_id] = entry
+            atomic_write(self.path(key) / 'issue_reviews.json', json.dumps(reviews, ensure_ascii=False, allow_nan=False, indent=2))
+            return entry
+
     def command(self, key, action):
         with self.lock:
             path=self.path(key)
@@ -155,7 +192,7 @@ class Store:
             try:
                 state = json.loads(path.read_text(encoding="utf-8"))
                 if state["owner"] == owner:
-                    rows.append({**{k: state[k] for k in ("id", "status", "created_at", "business_date", "config", "turns")},'updated_at':state.get('updated_at',state['created_at'])})
+                    rows.append({**{k: state[k] for k in ("id", "status", "created_at", "business_date", "config", "turns")},'month':state.get('month', 0),'replay_of':state.get('replay_of'),'updated_at':state.get('updated_at',state['created_at'])})
             except (ValueError, OSError, KeyError):
                 continue
         return sorted(rows, key=lambda x: x["updated_at"], reverse=True)

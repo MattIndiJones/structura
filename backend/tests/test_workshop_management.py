@@ -81,13 +81,13 @@ def test_delete_only_selected_campaign_and_keep_private_backup(workshop):
     assert next((local.root / '_archive').glob('*/instances/hector/structura.db')).read_bytes() == b'private test book'
 
 
-@pytest.mark.parametrize('action', ['reset', 'delete'])
+@pytest.mark.parametrize('action', ['reset', 'delete', 'replay'])
 def test_external_lease_blocks_management_even_when_saved_state_says_completed(workshop, action):
     local, _, client, _ = workshop
     state = completed(local)
     lease = CampaignLease(local.path(state['id']))
     try:
-        response = client.post(f"/api/agent-workshop/{state['id']}/reset") if action == 'reset' else client.delete(f"/api/agent-workshop/{state['id']}")
+        response = client.delete(f"/api/agent-workshop/{state['id']}") if action == 'delete' else client.post(f"/api/agent-workshop/{state['id']}/{action}")
         assert response.status_code == 409
         assert local.load(state['id'])['turns'] == 58
         assert not (local.root / '_archive').exists()
@@ -170,3 +170,49 @@ def test_deleting_an_old_run_does_not_interrupt_another_live_campaign(workshop):
     manager.manage(old['id'], 3, 'delete')
     assert manager.key == active['id'] and manager.thread.is_alive()
     assert not manager.cancel.is_set() and local.path(active['id']).exists()
+
+
+def test_replay_keeps_previous_campaign_visible_and_creates_no_shared_data(workshop):
+    local, manager, client, _ = workshop
+    previous = completed(local)
+    before = (local.path(previous['id']) / 'campaign.json').read_bytes()
+    response = client.post(f"/api/agent-workshop/{previous['id']}/replay")
+    assert response.status_code == 200, response.text
+    fresh = response.json()
+    assert fresh['replay_of'] == previous['id'] and fresh['config'] == previous['config']
+    assert fresh['turns'] == 0 and fresh['actors']['hector']['deals'] == []
+    assert fresh['issue_reviews'] == {} and not (local.path(fresh['id']) / 'instances').exists()
+    assert len(local.list(3)) == 2
+    assert (local.path(previous['id']) / 'campaign.json').read_bytes() == before
+    assert client.get(f"/api/agent-workshop/{previous['id']}").status_code == 200
+
+
+def test_issue_review_survives_controller_save_and_is_exported(workshop):
+    local, manager, client, _ = workshop
+    state = completed(local)
+    path = f"/api/agent-workshop/{state['id']}/issues/action-0"
+    body = {'status': 'CLOSED', 'qualification': 'USAGE', 'note': 'Destinataire corrigé et action vérifiée.'}
+    response = client.patch(path, json=body)
+    assert response.status_code == 200, response.text
+    local.save(state)
+    exported = client.get(f"/api/agent-workshop/{state['id']}/export").json()
+    assert exported['issue_reviews']['action-0']['note'] == body['note']
+    assert exported['actions'] == state['actions']
+    body.update(status='OPEN', note='À réexaminer')
+    assert client.patch(path, json=body).status_code == 200
+    assert len(manager.snapshot(state['id'])['issue_reviews']['action-0']['history']) == 2
+
+
+def test_issue_review_requires_evidence_note_and_respects_boundaries(workshop, monkeypatch):
+    local, _, client, identity = workshop
+    state = completed(local)
+    path = f"/api/agent-workshop/{state['id']}/issues/action-0"
+    assert client.patch(path, json={'status': 'CLOSED'}).status_code == 422
+    assert client.patch(path.replace('action-0', 'action-99'), json={}).status_code == 404
+    identity.id = 4
+    assert client.patch(path, json={}).status_code == 404
+    assert client.post(f"/api/agent-workshop/{state['id']}/replay").status_code == 404
+    identity.id = 3
+    monkeypatch.setenv('STRUCTURA_WORKSHOP_CHILD', '1')
+    assert client.patch(path, json={}).status_code == 403
+    assert client.post(f"/api/agent-workshop/{state['id']}/replay").status_code == 403

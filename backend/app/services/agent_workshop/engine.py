@@ -5,14 +5,16 @@ import json
 import re
 import time
 import threading
+import httpx
 from uuid import uuid4
 from dateutil.relativedelta import relativedelta
 from ...core.calendars import adjust, BusinessDayConvention
 from .store import store, contract_mandate, source_manifest
 from .instances import Instances, clock_file
 from .tools import Tools
-from .brain import decide, action_schema
+from .brain import decide, action_schema, prepare_model
 from .lease import CampaignLease
+from .reconciliation import check_books
 
 
 def public_state(state):
@@ -30,26 +32,67 @@ def safe_record(value):
     return value
 
 
-def check_books(state):
-    checks = []
-    for case in state["cases"].values():
-        legs = [dict(d, actor=k) for k,a in state["actors"].items() for d in a["deals"] if d["case_id"] == case["id"]]
-        buy = next((d for d in legs if d["leg"] == "HECTOR_BUY"), None)
-        sell = next((d for d in legs if d["leg"] == "BANK_SELL"), None)
-        client = next((d for d in legs if d["leg"] == "HECTOR_SELL"), None)
-        client_buy = next((d for d in legs if d["leg"] == "CLIENT_BUY"), None)
-        status = "PENDING"
-        if not legs and case.get('outcome') in {'CLIENT_DECLINED','NO_QUOTE'}:
-            status='NO_TRADE'
-        if buy and sell:
-            status = "MATCHED" if all(buy[f] == sell[f] for f in ("trade_reference", "instrument_reference", "issuer", "nominal", "currency", "price_traded", "value_date", "contract_hash")) and buy["our_side"] == "BUY" and sell["our_side"] == "SELL" else "MISMATCH"
-        if client and status == "MATCHED":
-            status = "MATCHED" if all(client[f] == buy[f] for f in ("nominal", "instrument_reference", "issuer", "currency", "contract_hash")) else "MISMATCH"
-            if client_buy and status == "MATCHED":
-                status = "COMPLETE" if all(client[f] == client_buy[f] for f in ("trade_reference", "instrument_reference", "issuer", "nominal", "currency", "price_traded", "value_date", "contract_hash")) and client["our_side"] == "SELL" and client_buy["our_side"] == "BUY" else "MISMATCH"
-        checks.append({"case_id": case["id"], "status": status, "legs": len(legs),
-            "client_volume": client["nominal"] if status == "COMPLETE" else 0})
-    return checks
+def failure_message(exc, decision, timeout):
+    if isinstance(exc, httpx.TimeoutException):
+        if decision is None:
+            return f"Le modèle IA n’a pas répondu dans le délai de {timeout} secondes. Vérifier Ollama et sa charge ; aucune action métier n’a été exécutée pour cette décision."
+        return "Une requête à Structura a dépassé son délai. Vérifier la disponibilité de l’installation et relire les faits natifs avant de retenter une écriture."
+    return str(exc) or f"Erreur {type(exc).__name__} sans message détaillé. Examiner les journaux de l’installation."
+
+
+PASSIVE_TOOLS = {'mail', 'wait', 'report', 'help', 'browser', 'api'}
+
+
+def workflow_facts(state):
+    """Exclude conversation and diagnostics from evidence of business progress."""
+    fields = ('registered', 'relations', 'crm', 'prices', 'deals', 'last_review', 'risk_runs', 'proposals')
+    return json.dumps({
+        'actors': {key: {field: actor.get(field) for field in fields} for key, actor in state['actors'].items()},
+        **{field: state[field] for field in ('cases', 'quotes', 'accepted', 'client_offers', 'client_acceptances')},
+    }, sort_keys=True, ensure_ascii=False)
+
+
+def context_result(action):
+    """Keep errors and useful identifiers; full native receipts stay in the journal."""
+    result = action['result']
+    if action['status'] != 'SUCCESS':
+        return result
+    if not isinstance(result, dict):
+        serialized = json.dumps(result, ensure_ascii=False)
+        return result if len(serialized)<2600 else {'preview':serialized[:2600], 'complete_evidence_saved':True}
+    if action['tool'] == 'review':
+        return {key: result.get(key) for key in ('date', 'deals')} | {
+            'valuations': len(result.get('valuations', [])), 'fixings': len(result.get('fixings', []))}
+    fields = ('id', 'case_id', 'leg', 'status', 'settlement_status', 'price', 'client_price', 'accepted',
+        'accepted_quote', 'quote_id', 'bank', 'declined', 'settled', 'already_sent', 'rfq_id', 'recipients',
+        'client_id', 'mandate_id', 'run_id', 'party', 'date', 'delivered', 'waiting', 'explanation', 'description')
+    summary = {key: result[key] for key in fields if key in result}
+    summary = summary or {'completed': True, 'complete_evidence_saved': True}
+    serialized = json.dumps(summary, ensure_ascii=False)
+    return summary if len(serialized)<2600 else {'preview':serialized[:2600], 'complete_evidence_saved':True}
+
+
+def context_message(message):
+    result = deepcopy(message)
+    attachment = result.get('attachment')
+    if isinstance(attachment, dict) and 'pricing' in attachment:
+        attachment.pop('pricing')  # The current case exposes the contractual terms below.
+    return result
+
+
+def context_terms(case):
+    """Present percentages in the same units as request/propose arguments."""
+    pricing = case.get('pricing', {})
+    params = pricing.get('user_params', {})
+    terms = {field:pricing.get(field) for field in ('strike_date', 'value_date', 'maturity_date', 'payment_date', 'constats')}
+    for param, field in (('COUPON', 'coupon_percent'), ('M_KI_BAR', 'capital_barrier_percent'),
+                         ('M_AC_BAR', 'autocall_barrier_percent'), ('M_CPN_BAR', 'coupon_barrier_percent')):
+        if param in params:
+            terms[field] = round(float(params[param])*100, 10)
+    terms['percentage_units'] = '8 signifie 8 %, comme les arguments coupon et barrier ; aucune fraction moteur dans ces champs.'
+    terms['capital_risk'] = 'Capital non garanti. La barrière ne plafonne pas la perte ; sous la barrière le capital remboursé peut être proche de zéro.'
+    terms['coupon_conditional'] = case.get('template')=='phoenix'
+    return terms
 
 
 def observation(state, key, tools):
@@ -133,7 +176,9 @@ def observation(state, key, tools):
     visible_offers = state["client_offers"] if key in {"hector", "client"} else {}
     # Like enabled controls in a screen, expose the semantic operations that
     # have work to do. Free mail, browser and public API exploration remain.
-    available = {"mail", "browser", "api", "report", "wait", "help"}
+    available = {"mail", "browser", "report", "wait", "help"}
+    if actor.get('api_capabilities'):
+        available.add('api')
     labels = {"Préparer ma relation":"relationship", "Finaliser la documentation":"relationship", "Créer mon dossier":"crm",
         "Relancer mon pricing":"reprice", "Proposer une structure":"propose",
         "Exprimer un nouveau":"request", "Adresser le besoin":"rfq", "Comparer les réponses":"offer",
@@ -149,13 +194,27 @@ def observation(state, key, tools):
     if key == "hector" and (not actor["crm"] or any(p not in actor["relations"] for p in targets)):
         available.discard("rfq")
     business=available-{'mail','browser','api','report','wait','help'}
-    # Bounded conversational loops: once ready work has been ignored twice,
-    # require an operational decision or an explicit problem report. Choosing
-    # a bank, a margin, a refusal or a client acceptance remains the model's.
+    # Bound conversation/exploration when it does not change any business fact.
+    # A new failure still permits diagnosis. Commercial alternatives stay free.
     tail=actor['history'][-2:]
-    if business and len(tail)==2 and all(a['tool'] in {'mail','wait'} for a in tail):
-        available.discard('mail');available.discard('wait')
+    if business and len(tail)==2 and all(a['status']=='SUCCESS' and a['tool'] in PASSIVE_TOOLS
+            and not a.get('business_progress', False) for a in tail):
+        available -= PASSIVE_TOOLS
+    elif not business and not unread and len(tail)==2 and all(a['status']=='SUCCESS' and a['tool'] in PASSIVE_TOOLS
+            and not a.get('business_progress', False) for a in tail):
+        available = {'wait'}
+    # Portfolio reviews read every native deal. Only live commercial dossiers
+    # and missing bookings need to occupy the model's decision context.
+    context_cases = [c for c in cases if c['month']==state['month'] or c['id'] in book_tasks]
+    if not context_cases and state['month']<state['config']['months']:
+        context_cases = cases[-1:]
+    context_ids = {c['id'] for c in context_cases}
     profile = {k:actor[k] for k in ("id", "name", "role", "goal", "registered", "relations", "crm", "prices")}
+    relation_fields = ('id', 'version', 'status', 'currency', 'effective_date', 'expiry_date',
+        'note_distribution_allowed', 'otc_allowed', 'gross_notional_limit', 'documentation_reference', 'master_agreement_id', 'csa_id')
+    profile['relations'] = {party:{f:relation[f] for f in relation_fields if f in relation}
+        for party,relation in actor['relations'].items()}
+    profile['prices'] = {cid:price for cid,price in actor['prices'].items() if cid in context_ids}
     profile["deals"] = [{f:d[f] for f in ("id","case_id","leg","issuer","our_side","nominal","price_traded","settlement_status")} for d in actor["deals"][-8:]]
     profile["completed_client_notional"] = sum(d["nominal"] for d in actor["deals"] if d["leg"] == "HECTOR_SELL")
     total_bank_volume=sum(d['nominal'] for a in state['actors'].values() for d in a['deals'] if d['leg']=='BANK_SELL')
@@ -164,16 +223,24 @@ def observation(state, key, tools):
     profile['total_bank_market_volume']=total_bank_volume
     recent = []
     for action in actor["history"][-4:]:
-        serialized = json.dumps(action["result"], ensure_ascii=False)
-        recent.append({**action,"result":action["result"] if len(serialized)<2600 else {"preview":serialized[:2600], "complete_evidence_saved":True}})
+        recent.append({**action, 'result': context_result(action)})
+    notes = actor.get('coaching_notes', [])
+    memory = [n['text'][:1000] for n in notes[-5:] if n['type']=='COMMERCIAL'
+        or actor['history'] and actor['history'][-1]['status']=='FAILED' and n['tool']==actor['history'][-1]['tool']]
+    if not notes and actor['history'] and actor['history'][-1]['status']=='FAILED':
+        memory = [m[:1000] for m in actor['memory'][-2:]]
     return {"actor": profile,
         "connected": key in tools.tokens, "contract_mandate":my_mandate, "relation_tasks":relation_tasks, "book_tasks":book_tasks, "correspondents":[k for k in state['actors'] if k!=key], "date": state["business_date"], "month": state["month"]+1,
-        "possible_actions": candidates, "available_tools":sorted(available), "risk_parties":risk_parties, "messages": unread[-8:], "quotes": quotes[-8:],
-        "cases": [{**{k:v for k,v in c.items() if k != "pricing"},
+        "api_capabilities": actor.get('api_capabilities', []),
+        "possible_actions": candidates, "available_tools":sorted(available), "risk_parties":risk_parties, "messages": [context_message(m) for m in unread[-8:]], "quotes": [q for q in quotes if q['case_id'] in context_ids],
+        "cases": [{**{k:v for k,v in c.items() if k != "pricing" and (key in {'hector', 'client'} or k not in {'declines', 'opportunity_id', 'rfq_id'})},
+            "terms": context_terms(c),
+            "my_declined": key in c.get('declines', []) if actor['role']=='bank' else None,
             "client_accepted":c['id'] in state['client_acceptances'] if key in {'hector','client'} else None,
             "accepted_quote_id":state['accepted'].get(c['id']) if key in {'hector','client'} or any(q['id']==state['accepted'].get(c['id']) for q in quotes) else None,
-            "my_booked_legs":[d['leg'] for d in actor['deals'] if d['case_id']==c['id']]} for c in cases[-3:]],
-        "client_offers": {k:v for k,v in visible_offers.items() if k in {c['id'] for c in cases[-3:]}}, "my_last_results": recent, "memory": [m[:1000] for m in actor["memory"][-5:]]}
+            "my_booked_legs":[d['leg'] for d in actor['deals'] if d['case_id']==c['id']]} for c in context_cases],
+        "historical_cases_count": len(cases)-len(context_cases),
+        "client_offers": {k:v for k,v in visible_offers.items() if k in context_ids}, "my_last_results": recent, "memory": memory}
 
 
 class Manager:
@@ -199,6 +266,10 @@ class Manager:
         if command and command['id']!=state.get('last_control_id') and state['status'] in {'RUNNING','PAUSED','PAUSING','STOPPING'}:
             state['status']={'pause':'PAUSING','stop':'STOPPING','resume':'RUNNING'}.get(command['action'],state['status'])
         state['controller_active'] = bool(self.thread and self.thread.is_alive()) if self.key == key else CampaignLease.is_held(store.path(key))
+        state['issue_reviews'] = store.issue_reviews(key)
+        state['elapsed_seconds'] = state.get('usage', {}).get('duration_seconds', 0)
+        if state['controller_active'] is True and state.get('run_started_at'):
+            state['elapsed_seconds'] += max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(state['run_started_at'])).total_seconds())
         return public_state(state)
 
     def start(self, key, model=None):
@@ -213,6 +284,9 @@ class Manager:
                     return
                 raise ValueError("Une campagne tourne déjà ; l'arrêter avant d'en lancer une autre.")
             state = store.load(key)
+            from .consultation import consultations
+            if consultations.active(key):
+                raise ValueError("Fermer les consultations avant de redémarrer les IA.")
             if state["status"] == "COMPLETED":
                 raise ValueError("Cette campagne est terminée. Créer une nouvelle campagne pour un nouvel essai.")
             if state["turns"] >= state["config"]["max_turns"]:
@@ -226,6 +300,7 @@ class Manager:
             state['last_control_id']=previous_command['id'] if previous_command else None
             self.pause.clear(); self.cancel.clear()
             state["status"] = "RUNNING"
+            state['run_started_at'] = datetime.now(timezone.utc).isoformat()
             state.pop('pause_reason', None)
             state.setdefault('run_manifests',[]).append(source_manifest())
             state['clock_reason']='Préparation des installations privées'
@@ -236,12 +311,15 @@ class Manager:
 
     def manage(self, key, owner, action):
         """Retire inactive test data only; do not touch the main Structura DB."""
-        if action not in {'reset', 'delete'}:
+        if action not in {'reset', 'delete', 'replay'}:
             raise ValueError('Commande inconnue.')
         with self.lock, store.lifecycle_guard(key):
             state = store.load(key)
             if state['owner'] != owner:
                 raise FileNotFoundError('Campagne introuvable.')
+            from .consultation import consultations
+            if consultations.active(key):
+                raise ValueError("Fermer les consultations avant de recommencer ou supprimer cette campagne.")
             if self.key == key and self.thread and self.thread.is_alive():
                 raise ValueError('Arrêter les IA et attendre la fermeture des installations avant cette opération.')
             if CampaignLease.is_held(store.path(key)) is not False:
@@ -254,10 +332,10 @@ class Manager:
                 if worker.resolve() != directory.resolve() / 'instances' / actor:
                     raise ValueError('Dossier acteur invalide ; opération annulée.')
                 instances.recover(worker)
-            result = store.restart(key, owner) if action == 'reset' else store.archive(key)
-            if self.key == key:
+            result = store.replay(key, owner) if action == 'replay' else store.restart(key, owner) if action == 'reset' else store.archive(key)
+            if self.key == key and action != 'replay':
                 self.key = self.live = self.published = self.thread = None
-            return result if action == 'reset' else {'id': key, 'deleted': True}
+            return result if action in {'reset', 'replay'} else {'id': key, 'deleted': True}
 
     def control(self, key, action):
         if self.key != key or not self.thread or not self.thread.is_alive():
@@ -330,20 +408,24 @@ class Manager:
         if not self.live["config"]["coaching"] or not actor:
             return
         context = {"connected": True, "mission": "Tu es superviseur, sans compte commercial. Réponds avec mail pour expliquer l'erreur au destinataire indiqué. Ne propose ni faux prix ni contournement d'un contrôle.",
-            "to": key, "correspondents":[key], "error": error, "last_action": self.live["actions"][-1], "available_tools": ["mail"]}
+            "to": key, "correspondents":[key], "error": error, "last_action": {
+                **{f:self.live['actions'][-1].get(f) for f in ('actor', 'tool', 'args', 'reason', 'status')},
+                'result':context_result(self.live['actions'][-1])}, "available_tools": ["mail"]}
         if commercial:
             context['review_type']='COMMERCIAL';context['payoff_script']=commercial['payoff_script']
+            context['payoff_risks']='Reverse convertible/Phoenix : capital non garanti ; la barrière ne plafonne jamais la perte à 100 % moins la barrière. Sous la barrière, le capital remboursé peut être proche de zéro. Le coupon Phoenix est conditionnel.'
             context['available_tools']=['mail','report']
         actor['status']='Analyse en cours'
         try:
             path = re.search(r"/api/[^\s:]+", error)
             if key in tools.tokens:
-                query = "/".join(path.group().split("/")[:3]) if path else ""
-                context["native_capabilities"] = tools.help(key, query)
-                context['native_capabilities']['operations']=context['native_capabilities']['operations'][:3]
                 actual = observation(self.live,key,tools)
                 context['user_tasks']=actual['possible_actions']
                 context['current_tool_signatures']=action_schema(self.live['actors'][key],actual)
+                if not commercial:
+                    query = "/".join(path.group().split("/")[:3]) if path else ""
+                    context["native_capabilities"] = tools.help(key, query, remember=False)
+                    context['native_capabilities']['operations']=context['native_capabilities']['operations'][:3]
             self.live["usage"]["model_calls"] += 1
             self.begin_activity('achille', 'THINKING', tasks=[f"Conseiller {key} à partir du résultat observé."])
             decision, metadata = decide(actor, context, self.live["config"])
@@ -360,6 +442,13 @@ class Manager:
                 self.live["actions"].append({"actor": "achille", "tool": "mail", "args": {}, "reason": decision.reason,
                     "result": result, "status": "SUCCESS", "channel": "MAIL", "date": self.live["business_date"], "model": metadata})
                 self.live["actors"][key]["memory"].append(decision.args.get("body", decision.reason))
+            if decision.tool in {'mail', 'report'}:
+                target = self.live['actors'][key]
+                target.setdefault('coaching_notes', []).append({
+                    'type': 'COMMERCIAL' if commercial else 'ERROR',
+                    'tool': context['last_action']['tool'], 'action_index': len(self.live['actions']),
+                    'text': decision.args.get('body', decision.args.get('description', decision.reason)),
+                })
             actor['status']='Conseil adressé'
         except Exception as exc:
             self.incident("achille", "HARNESS", "Coaching indisponible : " + str(exc)[:500])
@@ -389,6 +478,10 @@ class Manager:
         try:
             from playwright.sync_api import sync_playwright
             state['activity'] = {'phase': 'PREPARING', 'actor': None, 'started_at': datetime.now(timezone.utc).isoformat()}
+            state['clock_reason'] = 'Chargement du modèle local avant les décisions'
+            self.persist()
+            state['model_preparation'] = prepare_model(state['config'])
+            state['clock_reason'] = 'Préparation des installations privées'
             self.persist()
             instances.start(); self.persist()
             with sync_playwright() as playwright:
@@ -411,7 +504,7 @@ class Manager:
                         actor = state["actors"][key]
                         obs = observation(state, key, tools)
                         message_cursor = obs["messages"][-1]["id"] if obs["messages"] else ""
-                        if not obs["possible_actions"] and actor.get("idle_messages") == message_cursor:
+                        if not (set(obs.get('available_tools', []))-PASSIVE_TOOLS) and actor.get("idle_messages") == message_cursor:
                             continue
                         state["active_actor"] = key; state["clock_reason"] = "Décision IA / action Structura"
                         actor["status"] = "Réfléchit"
@@ -419,6 +512,7 @@ class Manager:
                         call_start = time.monotonic()
                         tools.calls = []
                         decision = None
+                        before = workflow_facts(state)
                         try:
                             state["usage"]["model_calls"] += 1
                             decision, metadata = decide(actor, obs, state["config"])
@@ -428,35 +522,34 @@ class Manager:
                             status = "SUCCESS"
                             errors[key] = 0
                             actor["status"] = "En attente" if decision.tool == "wait" else "Action réalisée"
-                            if decision.tool != "wait":
-                                progress = True
-                            else:
+                            if decision.tool == "wait":
                                 actor["idle_messages"] = message_cursor
                         except Exception as exc:
-                            result = {"error": str(exc)[:2600]}; metadata = {"seconds": round(time.monotonic()-call_start, 2)}
+                            result = {"error": failure_message(exc, decision, state['config']['timeout_seconds'])[:2600], "error_detail": str(exc)[:2600]}; metadata = {"seconds": round(time.monotonic()-call_start, 2)}
                             expected = "EXPECTED_REFUSAL" in str(exc)
                             status = "EXPECTED_REFUSAL" if expected else "FAILED"
                             actor["status"] = "Refus attendu" if expected else "Erreur à diagnostiquer"
                             if expected:
                                 state["coverage"]["incomplete_relationship"] = "EXPECTED_REFUSAL"
-                                progress = True
                             else:
                                 errors[key] += 1
-                                self.incident(key, "TO_DIAGNOSE", str(exc)[:2600])
+                                self.incident(key, "TO_DIAGNOSE", result['error'])
                         state["turns"] += 1
+                        business_progress = workflow_facts(state) != before
+                        progress = progress or business_progress
                         action = {"actor": key, "tool": decision.tool if decision else "model", "args": decision.args if decision else {},
                             "reason": decision.reason if decision else "Réponse IA indisponible", "result": result, "status": status,
                             "date": state["business_date"], "channel": "UI" if decision and decision.tool in {"register", "browser"} else "API" if tools.calls else "MAIL",
                             "http_calls": tools.calls[:], "model": metadata,
                             "started_at": (state.get('activity') or {}).get('started_at'),
                             "completed_at": datetime.now(timezone.utc).isoformat(),
-                            "duration_seconds": round(time.monotonic()-call_start, 3)}
+                            "duration_seconds": round(time.monotonic()-call_start, 3), 'business_progress': business_progress}
                         action = safe_record(action)
                         state["actions"].append(action)
                         state['activity'] = None
-                        actor["history"].append({"tool": action["tool"], "status": status, "result": safe_record(result)})
+                        actor["history"].append({"tool": action["tool"], "status": status, "result": safe_record(result), 'business_progress': business_progress})
                         actor["seen_message_ids"] = list(set(actor.get("seen_message_ids", [])) | {m["id"] for m in obs["messages"]})
-                        if status == "FAILED" and errors[key] <= 2:
+                        if status == "FAILED" and decision is not None and errors[key] <= 2:
                             self.coach(key, result["error"], tools)
                         self.persist()
                         if errors[key] >= 4:
@@ -469,6 +562,12 @@ class Manager:
                     self.supervise_messages(tools)
                     current = next((c for c in check_books(state) if state["cases"][c["case_id"]]["month"] == state["month"]), None)
                     current_case = next((c for c in state["cases"].values() if c["month"] == state["month"]), None)
+                    if current and (current['status'] == 'MISMATCH' or current['status'] == 'UNVERIFIED' and current['legs'] >= 4):
+                        self.pause.set(); state['status'] = 'PAUSED'
+                        state['pause_reason'] = 'RECONCILIATION'
+                        incident = self.incident('achille', 'RECONCILIATION', f"Dossier {current['case_id']} : rapprochement à vérifier avant de poursuivre. Les écritures sont conservées.")
+                        incident.update(case_id=current['case_id'], details=current)
+                        self.persist(); continue
                     commercial_closed = current_case and current_case.get("outcome") in {"CLIENT_DECLINED", "NO_QUOTE"}
                     reviewed = all(not a["deals"] or (a.get("last_review", {}).get("date") == state["business_date"] and a.get("last_review", {}).get("deals") == len(a["deals"])
                         and all(d["settlement_status"] == "SETTLED" for d in a["deals"])) for a in state["actors"].values())

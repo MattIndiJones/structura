@@ -3,7 +3,7 @@ export const workshopLabels = {
   DRAFT:'Prête à démarrer', RUNNING:'En cours', PAUSING:'Pause en cours', PAUSED:'En pause',
   STOPPING:'Fermeture en cours', STOPPED:'Arrêtée', COMPLETED:'Terminée', ATTENTION:'Diagnostic nécessaire',
   SUCCESS:'Réussite', FAILED:'Échec', EXPECTED_REFUSAL:'Refus attendu', PENDING:'En attente',
-  NO_TRADE:'Aucun trade — refus', MATCHED:'Rapprochement partiel', COMPLETE:'Quatre écritures rapprochées', MISMATCH:'Écart entre books',
+  NO_TRADE:'Aucun trade — refus', MATCHED:'Rapprochement partiel', COMPLETE:'Quatre écritures rapprochées', MISMATCH:'Écart entre books', UNVERIFIED:'Preuves à compléter',
 }
 const toolLabels = {
   register:'Créer ou reconnecter son compte', relationship:'Préparer les contrats', crm:'Créer le dossier client',
@@ -119,7 +119,7 @@ export function workflowSteps(state, caseId) {
     {title:'Besoin client', done:!!c, detail:c ? `${c.id} · ${money(c.nominal)}` : 'Aucun besoin reçu'},
     {title:'Appel d’offres', done:!!c?.rfq_sent && responded === banks.length, detail:c?.rfq_sent ? `${responded} / ${banks.length} réponses · ${quotes.length} prix` : 'Pas encore envoyé'},
     {title:'Accords', done:!!state?.accepted?.[c?.id], skipped:declined, detail:c?.outcome==='NO_QUOTE' ? 'Aucune banque ne cote' : c?.outcome==='CLIENT_DECLINED' ? 'Le client a refusé' : state?.accepted?.[c?.id] ? 'Client et banque confirmés' : state?.client_acceptances?.includes(c?.id) ? 'Accord client · banque à confirmer' : state?.client_offers?.[c?.id] ? 'Offre client envoyée' : 'Offre client attendue'},
-    {title:'Booking', done:check?.status==='COMPLETE', skipped:declined, warning:check?.status==='MISMATCH', detail:declined ? 'Sans trade' : `${check?.legs || 0} / 4 écritures${check?.status==='MISMATCH' ? ' · écart' : ''}`},
+    {title:'Booking', done:check?.status==='COMPLETE', skipped:declined, warning:['MISMATCH','UNVERIFIED'].includes(check?.status), detail:declined ? 'Sans trade' : `${check?.legs || 0} / 4 écritures${check?.status==='MISMATCH' ? ' · écart' : check?.status==='UNVERIFIED' ? ' · preuve incomplète' : ''}`},
     {title:'Suivi de vie', done:reviewed, skipped:declined && !bookActors.length, detail:reviewed ? `Books revus au ${state.business_date}` : bookActors.length ? 'Règlements / revue en attente' : 'Aucun book à revoir'},
   ]
   const firstPending = steps.findIndex(s=>!s.done && !s.skipped)

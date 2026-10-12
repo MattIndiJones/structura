@@ -216,6 +216,7 @@ def login(
 
 @router.get("/me")
 def me(current: Annotated[User, Depends(get_current_user)]):
+    from ..runtime import consultation_mode, business_today
     return {
         "id": current.id,
         "username": current.username,
@@ -226,6 +227,9 @@ def me(current: Annotated[User, Depends(get_current_user)]):
         # decide whether an amendment must be handed to somebody else or can be
         # carried through by whoever opened it (see core/workflow.py).
         "amendment_four_eyes": amendment_four_eyes_enabled(),
+        "read_only": consultation_mode(),
+        "consultation": {"entity": os.environ.get("STRUCTURA_CONSULTATION_ENTITY", ""),
+                         "date": business_today().isoformat()} if consultation_mode() else None,
     }
 
 

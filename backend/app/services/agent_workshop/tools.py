@@ -37,6 +37,39 @@ class Tools:
             raise ValueError("Intervenant inconnu.")
         return self.state["actors"][key]
 
+    def refresh_native_facts(self, key):
+        """Read native relations and executions after free navigation or API writes."""
+        actor = self.actor(key)
+        try:
+            catalog = {r['id']: r['name'] for r in self.api(key, 'GET', '/api/deals/counterparties')}
+            relations = self.api(key, 'GET', '/api/trading/relationships')
+            executions = self.api(key, 'GET', '/api/trading/executions')
+            entities = {a['entity']: k for k, a in self.state['actors'].items()}
+            local_relations = {entities[catalog[r['counterparty_id']]]: r for r in relations
+                               if catalog.get(r['counterparty_id']) in entities}
+            cases = {c['instrument_reference']: c for c in self.state['cases'].values() if c.get('instrument_reference')}
+            local_deals = []
+            for row in executions:
+                case = cases.get(row['instrument_reference'])
+                leg = 'UNMAPPED'
+                if case:
+                    trade = case['instrument_reference']
+                    if key == 'hector':
+                        leg = 'HECTOR_BUY' if row['trade_reference'] == trade + '-BANK' and row['our_side'] == 'BUY' else 'HECTOR_SELL' if row['trade_reference'] == trade + '-CLIENT' and row['our_side'] == 'SELL' else 'UNEXPECTED'
+                    elif key == 'client':
+                        leg = 'CLIENT_BUY' if row['trade_reference'] == trade + '-CLIENT' and row['our_side'] == 'BUY' else 'UNEXPECTED'
+                    elif actor['role'] == 'bank':
+                        leg = 'BANK_SELL' if row['trade_reference'] == trade + '-BANK' and row['our_side'] == 'SELL' else 'UNEXPECTED'
+                local_deals.append(dict(row, case_id=case['id'] if case else '', leg=leg))
+            actor['relations'], actor['deals'] = local_relations, local_deals
+            actor['native_refreshed_at'] = self.state['business_date']
+            actor.pop('native_sync_error', None)
+            return {'relationships': len(local_relations), 'executions': len(local_deals),
+                    'unmapped_executions': sum(d['leg'] == 'UNMAPPED' for d in local_deals)}
+        except Exception as exc:
+            actor['native_sync_error'] = str(exc)[:1000]
+            raise ValueError('Les faits natifs n’ont pas pu être relus ; le suivi reste à vérifier. ' + str(exc)) from exc
+
     def api(self, key, method, path, body=None):
         if not path.startswith("/api/") or ".." in path or "#" in path or "\\" in path:
             raise ValueError("Une route API locale explicite est requise.")
@@ -144,6 +177,7 @@ class Tools:
         actor["registered"] = True; actor["online"] = True
         actor["username"] = who["username"]; actor["entity_id"] = who["entity_id"]
         actor["status"] = "Connecté"
+        self.refresh_native_facts(key)
         self.state["coverage"]["registration_ui"] = "EXERCISED"
         return {"username": who["username"], "entity_id": who["entity_id"], "account_role": who["role"], "channel": "UI", "screenshot": self.screenshot(key)}
 
@@ -624,7 +658,7 @@ class Tools:
             "fields": page.locator("input,select,textarea").evaluate_all("els=>els.filter(e=>e.offsetParent!==null).map(e=>({tag:e.tagName,type:e.type,placeholder:e.placeholder,name:e.name,id:e.id}))"),
             "screenshot": self.screenshot(key)}
 
-    def help(self, key, query=""):
+    def help(self, key, query="", remember=True):
         """Read current application capabilities from its actual OpenAPI."""
         response = self.http.get(self.actor(key)["url"] + "/openapi.json")
         response.raise_for_status()
@@ -642,8 +676,11 @@ class Tools:
                 matches.append({"path":path,"method":method.upper(),"summary":operation.get("summary"),
                     "description":operation.get("description", "")[:900], "body_schema":schema,
                     "parameters":operation.get("parameters", [])})
+        discovered = matches[:8]
+        if remember:
+            self.actor(key)['api_capabilities'] = discovered
         return {"source":"OpenAPI de l'instance en cours", "total_paths":len(specification.get("paths",{})),
-            "matching_operations":len(matches), "operations":matches[:8]}
+            "matching_operations":len(matches), "operations":discovered}
 
     def execute(self, key, tool, args):
         self.calls = []
@@ -654,11 +691,17 @@ class Tools:
             "client_accept": self.client_accept, "accept_quote": self.accept_quote, "book": self.book,
             "settle": self.settle, "review": self.review, "browser": self.browser_action, "help":self.help, "risk":self.risk}
         if tool in methods:
-            return methods[tool](key, **args)
+            result = methods[tool](key, **args)
+            if tool == 'browser' and args.get('action') == 'click':
+                result['native_refresh'] = self.refresh_native_facts(key)
+            return result
         if tool == "mail":
             return self.mail(key, **args)
         if tool == "api":
-            return self.api(key, args.get("method", "GET"), args["path"], args.get("body"))
+            result = self.api(key, args.get("method", "GET"), args["path"], args.get("body"))
+            if args.get('method', 'GET').upper() != 'GET':
+                self.refresh_native_facts(key)
+            return result
         if tool == "report":
             row = {"id": uuid4().hex, "actor": key, "kind": args.get("kind", "IMPROVEMENT"),
                 "description": args["description"], "date": self.state["business_date"], "source": "AGENT"}

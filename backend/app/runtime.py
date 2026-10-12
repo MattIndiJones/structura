@@ -7,6 +7,10 @@ from pathlib import Path
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
+def consultation_mode() -> bool:
+    return os.environ.get("STRUCTURA_CONSULTATION") == "1"
+
+
 def data_path(*parts: str) -> Path:
     return Path(os.environ.get("STRUCTURA_DATA_DIR", DEFAULT_DATA_DIR)).resolve().joinpath(*parts)
 

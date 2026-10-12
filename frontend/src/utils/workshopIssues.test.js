@@ -37,4 +37,11 @@ describe('workshop problem register',()=>{
     expect(text).toContain('Action 1');expect(text).toContain('Relancer le pricing');expect(text).toContain('/api/retry');expect(text).toContain('HTTP 404')
     expect(text).toContain('pas une liste de bugs confirmés')
   })
+  it('keeps the initial IA report intact while exposing a saved human diagnosis',()=>{
+    const s=state();s.incidents=[{id:'x',actor:'bnp',kind:'BUG',source:'AGENT',description:'Coupon incorrect'}]
+    s.issue_reviews={x:{status:'CLOSED',qualification:'EXPECTED_REFUSAL',note:'Contrôle conforme à la documentation.',history:[{status:'CLOSED'}]}}
+    expect(campaignIssues(s)[0]).toMatchObject({category:'expected',status:'CLOSED',description:'Coupon incorrect'})
+    expect(issueReport(s)).toContain('Contrôle conforme à la documentation.')
+    expect(s.incidents[0].kind).toBe('BUG')
+  })
 })

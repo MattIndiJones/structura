@@ -139,10 +139,10 @@ def test_client_book_is_required_and_price_mismatch_is_detected():
     fields=dict(case_id='CASE-001',trade_reference='BANK',instrument_reference='NOTE',issuer='BNP',nominal=10e6,
         currency='EUR',price_traded=100,value_date='2025-10-08',contract_hash='terms')
     state={'cases':{'CASE-001':{'id':'CASE-001'}},'actors':{
-        'hector':{'deals':[dict(fields,leg='HECTOR_BUY',our_side='BUY'),dict(fields,trade_reference='CLIENT',price_traded=101,leg='HECTOR_SELL',our_side='SELL')]},
-        'bnp':{'deals':[dict(fields,leg='BANK_SELL',our_side='SELL')]},'client':{'deals':[]}}}
+        'hector':{'entity':'Hector','deals':[dict(fields,leg='HECTOR_BUY',our_side='BUY',counterparty='BNP'),dict(fields,trade_reference='CLIENT',price_traded=101,leg='HECTOR_SELL',our_side='SELL',counterparty='Client')]},
+        'bnp':{'role':'bank','entity':'BNP','deals':[dict(fields,leg='BANK_SELL',our_side='SELL',counterparty='Hector')]},'client':{'entity':'Client','deals':[]}}}
     assert check_books(state)[0]['status']=='MATCHED'
-    state['actors']['client']['deals'].append(dict(fields,trade_reference='CLIENT',price_traded=101,leg='CLIENT_BUY',our_side='BUY'))
+    state['actors']['client']['deals'].append(dict(fields,trade_reference='CLIENT',price_traded=101,leg='CLIENT_BUY',our_side='BUY',counterparty='Hector'))
     assert check_books(state)[0]['status']=='COMPLETE'
     state['actors']['client']['deals'][0]['price_traded']=99
     assert check_books(state)[0]['status']=='MISMATCH'
@@ -394,6 +394,7 @@ def test_controller_publishes_decision_execution_and_clears_activity_on_stop(tmp
     monkeypatch.setattr(controller,'Tools',NativeTools)
     monkeypatch.setattr(controller,'observation',lambda *args:{'messages':[],'possible_actions':['Lire mon book']})
     monkeypatch.setattr(controller,'decide',decide)
+    monkeypatch.setattr(controller,'prepare_model',lambda config:{'model':config['model'],'seconds':0})
     monkeypatch.setattr(playwright.sync_api,'sync_playwright',lambda:Playwright())
     runner.run()
     final=runner.snapshot(state['id'])
@@ -402,6 +403,161 @@ def test_controller_publishes_decision_execution_and_clears_activity_on_stop(tmp
     assert final['actions'][0]['http_calls']==[{'method':'GET','path':'/api/deals','status':200}]
     assert final['actions'][0]['started_at'] and final['actions'][0]['completed_at']
     assert final['actions'][0]['duration_seconds']>=0
+
+
+def test_resolved_error_advice_does_not_block_current_work(tmp_path):
+    state=Store(tmp_path).create(CampaignConfig(months=1),1)
+    actor=state['actors']['hector']
+    actor['memory']=['Ancien délai dépassé : attendre le superviseur.']
+    actor['coaching_notes']=[
+        {'type':'ERROR','tool':'model','text':actor['memory'][0]},
+        {'type':'COMMERCIAL','tool':'propose','text':'Le capital n’est pas garanti.'}]
+    actor['history']=[{'tool':'register','status':'SUCCESS','result':{'username':'hector'}}]
+    obs=observation(state,'hector',SimpleNamespace(tokens={'hector':'private'}))
+    assert obs['memory']==['Le capital n’est pas garanti.']
+    assert 'relationship' in obs['available_tools']
+    actor['history'].append({'tool':'book','status':'FAILED','result':{'error':'PRICING_RECEIPT expiré'}})
+    actor['coaching_notes'].append({'type':'ERROR','tool':'book','text':'Reprice avant de retenter.'})
+    obs=observation(state,'hector',SimpleNamespace(tokens={'hector':'private'}))
+    assert 'Reprice avant de retenter.' in obs['memory']
+    assert 'reprice' in obs['available_tools']
+
+
+def test_reports_and_confirmations_do_not_bypass_the_conversation_bound(tmp_path):
+    state=Store(tmp_path).create(CampaignConfig(months=1),1)
+    actor=state['actors']['hector']
+    actor['history']=[{'tool':tool,'status':'SUCCESS','result':{}} for tool in ('report','mail')]
+    obs=observation(state,'hector',SimpleNamespace(tokens={'hector':'private'}))
+    assert set(obs['available_tools'])=={'relationship','crm'}
+    actor['history'][-1]['status']='FAILED'
+    obs=observation(state,'hector',SimpleNamespace(tokens={'hector':'private'}))
+    assert {'report','help','browser'} <= set(obs['available_tools'])
+
+
+def test_free_api_uses_routes_discovered_in_current_native_openapi(tmp_path):
+    import re
+    import httpx
+    from backend.app.services.agent_workshop.tools import Tools
+    state=Store(tmp_path).create(CampaignConfig(months=1),1)
+    state['actors']['client']['url']='http://private.invalid'
+    tools=Tools(tmp_path,state,None)
+    tools.tokens['client']='private'
+    assert 'api' not in observation(state,'client',tools)['available_tools']
+    tools.http.close()
+    tools.http=httpx.Client(transport=httpx.MockTransport(lambda request:httpx.Response(200,json={
+        'paths':{'/api/deals/{deal_id}':{'get':{'summary':'Consulter le deal'}}}})))
+    try:
+        tools.help('client','deals',remember=False)
+        assert 'api' not in observation(state,'client',tools)['available_tools']
+        found=tools.help('client','deals')
+        assert found['operations']==state['actors']['client']['api_capabilities']
+        obs=observation(state,'client',tools)
+        assert 'api' in obs['available_tools']
+        schema=action_schema(state['actors']['client'],obs)
+        branch=next(b for b in schema['anyOf'] if b['properties']['tool']['const']=='api')
+        args=branch['properties']['args']['anyOf'][0]['properties']
+        assert args['method']=={'const':'GET'}
+        pattern=args['path']['pattern']
+        assert re.fullmatch(pattern,'/api/deals/12') and re.fullmatch(pattern,'/api/deals/12?view=detail')
+        assert not re.fullmatch(pattern,'/api/ccr')
+        assert not re.fullmatch(pattern,'/api/deals/12/events')
+    finally:tools.close()
+
+
+def test_business_progress_requires_changed_workflow_facts(tmp_path):
+    from backend.app.services.agent_workshop.engine import workflow_facts
+    state=Store(tmp_path).create(CampaignConfig(months=1),1)
+    before=workflow_facts(state)
+    state['incidents'].append({'description':'Ancien message'})
+    state['messages'].append({'body':'Confirmation de réception'})
+    state['actors']['hector']['history'].append({'tool':'mail','status':'SUCCESS'})
+    assert workflow_facts(state)==before
+    state['actors']['hector']['relations']['bnp']={'status':'ACTIVE'}
+    assert workflow_facts(state)!=before
+
+
+def test_model_context_keeps_terms_without_duplicate_pricing_or_native_receipts(tmp_path):
+    state=Store(tmp_path).create(CampaignConfig(months=1),1)
+    pricing={'script':'FULL_PAYOFF_SCRIPT','user_params':{'COUPON':.08,'M_KI_BAR':.6},'strike_date':'2025-10-13','maturity_date':'2026-04-13'}
+    case={'id':'CASE-001','month':0,'rfq_sent':True,'declines':[],'pricing':pricing}
+    state['cases'][case['id']]=case
+    state['messages'].append({'id':'m1','from':'hector','to':'bnp','case_id':case['id'],'body':'Demande de prix','attachment':deepcopy(case)})
+    state['actors']['bnp']['history'].append({'tool':'review','status':'SUCCESS','result':{'date':'2025-10-13','deals':2,'valuations':[{'receipt':'large'}],'fixings':[]}})
+    obs=observation(state,'bnp',SimpleNamespace(tokens={'bnp':'private'}))
+    assert obs['cases'][0]['terms']['coupon_percent']==8
+    assert obs['cases'][0]['terms']['capital_barrier_percent']==60
+    assert 'user_params' not in obs['cases'][0]['terms']
+    assert 'pricing' not in obs['messages'][0]['attachment']
+    assert obs['my_last_results'][0]['result']['valuations']==1
+    assert state['messages'][0]['attachment']['pricing']==pricing
+
+
+def test_context_percentages_do_not_change_frozen_pricing_units():
+    from backend.app.services.agent_workshop.engine import context_terms
+    case={'template':'phoenix','pricing':{'user_params':{'COUPON':.08,'M_KI_BAR':.6,'M_AC_BAR':1.,'M_CPN_BAR':.7}}}
+    original=deepcopy(case)
+    terms=context_terms(case)
+    assert (terms['coupon_percent'],terms['capital_barrier_percent'],terms['autocall_barrier_percent'],terms['coupon_barrier_percent'])==(8,60,100,70)
+    assert terms['coupon_conditional'] is True
+    assert case==original
+    state=Store().initial_state(CampaignConfig(),1)
+    schema=action_schema(state['actors']['client'],{'connected':True,'available_tools':['request']})
+    coupon=schema['anyOf'][0]['properties']['args']['properties']['coupon']
+    assert 'pourcentage' in coupon['description'] and coupon['maximum']==30
+
+
+def test_large_native_api_result_is_bounded_without_losing_saved_evidence():
+    from backend.app.services.agent_workshop.engine import context_result
+    rows=[{'id':i,'script_snapshot':'Full original contract '*200} for i in range(20)]
+    action={'tool':'api','status':'SUCCESS','result':rows}
+    result=context_result(action)
+    assert result['complete_evidence_saved'] is True and len(result['preview'])==2600
+    assert action['result']==rows and len(action['result'])==20
+
+
+def test_bank_sees_own_decline_without_competitors_responses(tmp_path):
+    state=Store(tmp_path).create(CampaignConfig(),1)
+    state['cases']['CASE-001']={'id':'CASE-001','month':0,'rfq_sent':True,'declines':['ca','sg'], 'rfq_id':123,'opportunity_id':45}
+    state['messages'].append({'id':'rfq','from':'hector','to':'ca','case_id':'CASE-001','body':'Demande de prix'})
+    obs=observation(state,'ca',SimpleNamespace(tokens={'ca':'private'}))
+    assert obs['cases'][0]['my_declined'] is True
+    assert 'declines' not in obs['cases'][0] and 'rfq_id' not in obs['cases'][0]
+    assert 'opportunity_id' not in obs['cases'][0]
+
+
+def test_quiet_actor_waits_until_a_real_message_or_task_arrives(tmp_path):
+    state=Store(tmp_path).create(CampaignConfig(),1)
+    actor=state['actors']['ca']
+    actor['relations']['hector']={'status':'PENDING','otc_allowed':False}
+    actor['history']=[{'tool':tool,'status':'SUCCESS','result':{},'business_progress':False} for tool in ('mail','mail')]
+    tools=SimpleNamespace(tokens={'ca':'private'})
+    assert observation(state,'ca',tools)['available_tools']==['wait']
+    state['messages'].append({'id':'new','from':'hector','to':'ca','case_id':'','body':'Question sur votre documentation'})
+    assert 'mail' in observation(state,'ca',tools)['available_tools']
+    actor['seen_message_ids']=['new']
+    state['cases']['CASE-001']={'id':'CASE-001','month':0,'rfq_sent':True,'declines':[]}
+    state['messages'].append({'id':'rfq','from':'hector','to':'ca','case_id':'CASE-001','body':'Coter ou décliner'})
+    assert {'quote','decline'} <= set(observation(state,'ca',tools)['available_tools'])
+
+
+def test_context_focus_preserves_previous_terms_and_unfinished_bookings(tmp_path):
+    state=Store(tmp_path).create(CampaignConfig(),1)
+    state['month']=1
+    old={'id':'CASE-001','month':0,'rfq_sent':True,'declines':[], 'pricing':{'user_params':{'COUPON':.08}}}
+    state['cases'][old['id']]=old
+    tools=SimpleNamespace(tokens={'client':'private'})
+    assert observation(state,'client',tools)['cases'][0]['terms']['coupon_percent']==8
+    current={'id':'CASE-002','month':1,'rfq_sent':False,'declines':[], 'pricing':{'user_params':{'COUPON':.09}}}
+    state['cases'][current['id']]=current
+    obs=observation(state,'client',tools)
+    assert [c['id'] for c in obs['cases']]==['CASE-002']
+    assert obs['historical_cases_count']==1 and len(state['cases'])==2
+    state['accepted']['CASE-001']='old-quote'
+    state['client_acceptances']=['CASE-001']
+    state['client_offers']['CASE-001']={'quote_id':'old-quote'}
+    obs=observation(state,'client',tools)
+    assert obs['book_tasks']=={'CASE-001':['CLIENT_BUY']}
+    assert [c['id'] for c in obs['cases']]==['CASE-001','CASE-002']
 
 
 def test_snapshot_distinguishes_a_stale_running_record_from_an_external_controller(tmp_path,monkeypatch):

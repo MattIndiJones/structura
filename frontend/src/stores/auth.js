@@ -7,6 +7,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!token.value)
   const isAdmin         = computed(() => user.value?.role === 'admin')
+  const readOnly        = computed(() => user.value?.read_only === true)
 
   function authHeaders() {
     return token.value ? { Authorization: `Bearer ${token.value}` } : {}
@@ -38,11 +39,23 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function openConsultation(accessToken) {
+    const health = await fetch('/health').then(res => res.json())
+    if (health.read_only !== true) throw new Error('Cette installation ne permet pas la consultation protégée.')
+    token.value = accessToken
+    localStorage.setItem('auth_token', accessToken)
+    await fetchMe()
+    if (!readOnly.value) {
+      logout()
+      throw new Error('La session de consultation est indisponible.')
+    }
+  }
+
   function logout() {
     token.value = null
     user.value  = null
     localStorage.removeItem('auth_token')
   }
 
-  return { token, user, isAuthenticated, isAdmin, login, fetchMe, logout, authHeaders }
+  return { token, user, isAuthenticated, isAdmin, readOnly, login, fetchMe, openConsultation, logout, authHeaders }
 })

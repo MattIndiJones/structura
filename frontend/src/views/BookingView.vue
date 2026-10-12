@@ -11,7 +11,7 @@
           </div>
           <div class="page-actions">
             <span v-if="refreshBookStatus" class="text-xs" style="color: var(--muted);">{{ refreshBookStatus }}</span>
-            <button class="btn-secondary text-xs px-3 py-1.5" :disabled="refreshingBook" @click="refreshBook">
+            <button class="btn-secondary text-xs px-3 py-1.5" :disabled="refreshingBook || authStore.readOnly" @click="refreshBook">
               {{ refreshingBook ? '⏳ Rafraîchissement…' : '🔄 Rafraîchir le book' }}
             </button>
             <span v-if="dealsStore.deals.length" class="text-xs" style="color: var(--muted);">
@@ -566,7 +566,7 @@
                 <label v-if="d.status === 'actif'" class="deal-basis">
                   <span class="deal-label">Base du calcul</span>
                   <select class="select deal-panel__select w-full text-xs py-1.5"
-                    :value="mtmModeFor(d.id)" :disabled="mtmLoading[d.id]" @click.stop
+                    :value="mtmModeFor(d.id)" :disabled="mtmLoading[d.id] || authStore.readOnly" @click.stop
                     @change="setMtmMode(d.id, $event.target.value)"
                     title="Choix des hypothèses utilisées pour le prochain calcul">
                     <option value="realized">Marché actuel</option>
@@ -580,7 +580,7 @@
                 <label v-if="['actif', 'en_reglement'].includes(d.status)" class="deal-basis">
                   <span class="deal-label">Date de valorisation</span>
                   <input type="date" class="input deal-panel__select w-full text-xs py-1.5"
-                    :disabled="mtmLoading[d.id]" :value="mtmDateFor(d.id)" :min="mtmMinDate(d)" :max="todayIso"
+                    :disabled="mtmLoading[d.id] || authStore.readOnly" :value="mtmDateFor(d.id)" :min="mtmMinDate(d)" :max="todayIso"
                     @click.stop @change="setMtmDate(d.id, $event.target.value)"
                     title="Date à laquelle le deal et son marché sont valorisés" />
                 </label>
@@ -642,7 +642,7 @@
                     </span>
                     <span v-else-if="!mtmLoading[d.id]">Seuls les calculs du jour sont réaffichés. Les précédents restent dans l’historique.</span>
                     <button class="btn-primary text-xs px-3 py-1.5 mt-1"
-                      :disabled="mtmLoading[d.id]" @click.stop="runMtm(d.id)"
+                      :disabled="mtmLoading[d.id] || authStore.readOnly" @click.stop="runMtm(d.id)"
                       :title="mtmButtonTitle(d)">
                       <span v-if="mtmLoading[d.id]"
                         class="w-3 h-3 border-2 border-slate-200 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -671,7 +671,7 @@
                       <div class="deal-mtm__ci">
                         Valorisation au {{ formatDate(mtmResultDate(d.id)) }}
                         <span v-if="mtmResults[d.id]._runCreatedAt">
-                          · {{ mtmResults[d.id]._restored ? 'calcul du jour restauré, enregistré le' : 'calcul effectué le' }} {{ new Date(mtmResults[d.id]._runCreatedAt).toLocaleString('fr-FR') }}
+                          · {{ mtmResults[d.id]._restored ? (authStore.readOnly ? 'calcul archivé, enregistré le' : 'calcul du jour restauré, enregistré le') : 'calcul effectué le' }} {{ new Date(mtmResults[d.id]._runCreatedAt).toLocaleString('fr-FR') }}
                         </span>
                       </div>
                     </div>
@@ -710,7 +710,7 @@
                   </template>
                   <div class="deal-result-actions">
                     <button v-if="['actif', 'en_reglement'].includes(d.status)" class="btn-primary text-xs px-3 py-1.5"
-                      :disabled="mtmLoading[d.id]" @click.stop="runMtm(d.id)"
+                      :disabled="mtmLoading[d.id] || authStore.readOnly" @click.stop="runMtm(d.id)"
                       :title="mtmButtonTitle(d)">
                       <span v-if="mtmLoading[d.id]"
                         class="w-3 h-3 border-2 border-slate-200 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -1141,7 +1141,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import DataFilterBar from '../components/ui/DataFilterBar.vue'
 import AutoFixingExceptionModal from '../components/AutoFixingExceptionModal.vue'
-import { useBookingMtm } from '../composables/useBookingMtm.js'
+import { useBookingMtm, localDay } from '../composables/useBookingMtm.js'
 import { useDataFilter } from '../composables/useDataFilter.js'
 import { formatInt, formatPercent, formatDate } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel, barrierGauges } from '../utils/barriers.js'
@@ -1323,7 +1323,7 @@ function lifePct(d) {
     if (resolving) return Math.round(_datePct(d, resolving.event_date) ?? 100)
     return 100
   }
-  const p = _datePct(d, new Date().toISOString().split('T')[0])
+  const p = _datePct(d, todayIso.value)
   return p === null ? null : Math.round(p)
 }
 
@@ -1587,11 +1587,12 @@ async function refreshBook() {
 const {
   todayIso, mtmLoading, mtmResults, mtmModeFor, mtmDateFor, setMtmMode, setMtmDate,
   loadSavedMtms, loadSavedMtm, runMtm, mtmProgressLabel, syncDay,
-} = useBookingMtm()
+} = useBookingMtm(() => authStore.readOnly ? authStore.user.consultation.date : localDay(), { archived: authStore.readOnly })
 let dayTimer
 function refreshDay() {
   syncDay()
   clearTimeout(dayTimer)
+  if (authStore.readOnly) return
   const now = new Date()
   const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
   dayTimer = setTimeout(refreshDay, midnight - now + 50)

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlparse
 import json
+import os
 import threading
 
 from fastapi import FastAPI
@@ -25,7 +26,7 @@ from backend.app.services.agent_workshop.lease import CampaignLease
 from backend.app.services.agent_workshop.store import Store, CampaignConfig
 
 ROOT = Path(__file__).resolve().parents[1]
-output = ROOT / 'output/agent-workshop-ui'
+output = Path(os.environ.get('STRUCTURA_TEST_OUTPUT', ROOT / 'output/agent-workshop-ui'))
 output.mkdir(parents=True, exist_ok=True)
 
 with ExitStack() as cleanup:
@@ -76,6 +77,7 @@ with ExitStack() as cleanup:
     page.route('**/api/**',route_api)
     page.goto(f'http://127.0.0.1:{server.server_port}/#/agent-workshop')
     expect(page.get_by_role('heading',name=state['config']['name'],exact=True)).to_be_visible()
+    page.locator('.management summary').click()
 
     page.get_by_role('button',name='+ Nouvelle campagne',exact=True).click()
     page.get_by_label('Nom',exact=True).fill('Brouillon perdu')
@@ -109,13 +111,13 @@ with ExitStack() as cleanup:
     finally: lease.close()
     page.get_by_role('button',name='Recommencer la campagne',exact=True).click()
     page.get_by_role('dialog').get_by_role('button',name='Recommencer à zéro',exact=True).click()
-    expect(page.get_by_role('status')).to_contain_text('Campagne réinitialisée')
+    expect(page.locator('p[role="status"]')).to_contain_text('Nouvel essai prêt')
     expect(page.get_by_role('button',name='Démarrer les IA',exact=True)).to_be_visible()
-    fresh = next(row for row in store.list(3) if row['id'] != other['id'])
+    fresh = next(row for row in store.list(3) if row.get('replay_of') == state['id'])
     assert fresh['id'] != state['id'] and fresh['turns'] == 0
-    assert len(store.list(3)) == 2
-    assert not store.path(state['id']).exists()
-    assert next((store.root/'_archive').glob('*/instances/hector/structura.db')).read_bytes() == b'isolated private book'
+    assert len(store.list(3)) == 3
+    assert store.path(state['id']).exists()
+    assert (store.path(state['id'])/'instances/hector/structura.db').read_bytes() == b'isolated private book'
     expect(page.get_by_role('button',name='Démarrer les IA',exact=True)).to_be_enabled()
     page.screenshot(path=str(output/'management-reset-desktop.png'),full_page=False)
 
@@ -138,9 +140,15 @@ with ExitStack() as cleanup:
     assert page.get_by_role('dialog').evaluate('el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth}'), 'Mobile confirmation overflow'
     page.screenshot(path=str(output/'management-delete-mobile.png'),full_page=False,animations='disabled')
     page.get_by_role('dialog').get_by_role('button',name='Supprimer la campagne',exact=True).click()
-    expect(page.get_by_role('heading',name=other['config']['name'],exact=True)).to_be_visible()
-    assert len(store.list(3)) == 1 and store.list(3)[0]['id'] == other['id']
+    expect(page.get_by_role('heading',name=state['config']['name'],exact=True)).to_be_visible()
+    assert len(store.list(3)) == 2
     expect(page.get_by_role('dialog')).not_to_be_visible()
+    page.locator('.management summary').click()
+    page.get_by_role('button',name='Supprimer la campagne',exact=True).click()
+    page.get_by_role('dialog').get_by_role('button',name='Supprimer la campagne',exact=True).click()
+    expect(page.get_by_role('heading',name=other['config']['name'],exact=True)).to_be_visible()
+    assert len(store.list(3)) == 1
+    page.locator('.management summary').click()
     page.get_by_role('button',name='Supprimer la campagne',exact=True).click()
     page.get_by_role('dialog').get_by_role('button',name='Supprimer la campagne',exact=True).click()
     expect(page.get_by_role('heading',name='Faire utiliser Structura par des IA',exact=True)).to_be_visible()
@@ -148,4 +156,4 @@ with ExitStack() as cleanup:
     assert not store.list(3) and len(list((store.root/'_archive').iterdir())) == 3
     assert not errors, errors
     assert all(not path.endswith('/start') for _,path in writes), writes
-    print('MANAGEMENT_UI_OK view/fields/cancel/reset/delete-last/active-guard/private-backup/390px; real APIs, isolated temporary data')
+    print('MANAGEMENT_UI_OK view/fields/cancel/replay-preserves-history/delete-last/active-guard/private-backup/390px; real APIs, isolated temporary data')
