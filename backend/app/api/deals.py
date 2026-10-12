@@ -15,6 +15,7 @@ from sqlalchemy import or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from ..db.database import get_session
+from ..runtime import business_today, business_now
 from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent,
                           DealPortfolioMembership, Entity, User, Counterparty,
                           Portfolio, LifecycleProposal,
@@ -626,7 +627,7 @@ def _rfq_provenance(rfq, price_traded: float, session: Session,
 
 def _gen_ref(entity_name: str | None, session: Session) -> str:
     prefix = ((entity_name or "DEAL")[:4].upper().replace(" ", "").ljust(4, "X"))
-    return next_reference(session, Deal, f"{prefix}-{date.today().strftime('%Y%m%d')}-")
+    return next_reference(session, Deal, f"{prefix}-{business_today().strftime('%Y%m%d')}-")
 
 
 def _deal_row(
@@ -1366,7 +1367,7 @@ def _fixing_submission_failures(
                 ))
         except (ZoneInfoNotFoundError, ValueError):
             pass
-    if event.event_date > date.today().isoformat():
+    if event.event_date > business_today().isoformat():
         failures.append(_workflow_failure(
             "FIXING_EVENT_IN_FUTURE",
             "event_date",
@@ -1698,6 +1699,7 @@ def _book_deal(
             _counterparty_by_provider(session).get(selected.provider) if selected else None)
         gate_failures = booking_gate_failures(
             source_rfq, selected,
+            now=business_now(),
             expected_counterparty=expected_counterparty,
             requested_counterparty=body.contrepartie,
         )
@@ -2527,7 +2529,7 @@ def watchlist(
     deals = session.exec(statement).all()
     if current_role in {"ops_maker", "checker"}:
         deals = [deal for deal in deals if _can_access_deal(deal, current, session)]
-    today = date.today()
+    today = business_today()
     rows = [build_watchlist_row(deal, session, today) for deal in deals]
 
     rows.sort(key=lambda r: (
@@ -3722,7 +3724,7 @@ def validate_fixing(
             action="Demandez au Maker de soumettre une nouvelle version complète.",
             received=spot_failure.get("value"),
         ))
-    if ev.event_date > date.today().isoformat():
+    if ev.event_date > business_today().isoformat():
         failures.append(_workflow_failure(
             "FIXING_DATE_IN_FUTURE",
             "event_date",
@@ -4257,7 +4259,7 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
     if res is None:
         return None
 
-    today_str = date.today().isoformat()
+    today_str = business_today().isoformat()
     non_strike = [e for e in events if e.t_years > 0]
 
     # Total of every cash flow that actually fired, in both branches below —
@@ -4386,7 +4388,7 @@ def refresh_deal_core(
                 current_deal,
                 "lifecycle_error",
                 f"Erreur de monitoring lifecycle sur {reference}: {exc}",
-                f"lifecycle-error:{deal_id}:{date.today().isoformat()}:{type(exc).__name__}",
+                f"lifecycle-error:{deal_id}:{business_today().isoformat()}:{type(exc).__name__}",
             )
         record_audit_event(
             session,
@@ -4493,7 +4495,7 @@ def _auto_yahoo_event_values(
     used_dates: dict[str, str] = {}
     failures: list[dict] = []
     waiting_for_close = False
-    today = date.today().isoformat()
+    today = business_today().isoformat()
     target = date.fromisoformat(event.event_date)
     for underlying in underlyings:
         name = str(underlying.get("name") or "").strip()
@@ -4660,7 +4662,7 @@ def _user_exception_lifecycle_evaluation(
     session: Session,
 ) -> tuple[dict | None, list[dict]]:
     """Derive a terminal fact only from all reached official observations."""
-    today = date.today().isoformat()
+    today = business_today().isoformat()
     reached = [event for event in _get_events(deal.id, session)
                if event.event_date <= today]
     pending = [event for event in reached if (
@@ -4687,13 +4689,16 @@ def _user_exception_lifecycle_evaluation(
         return official_result, []
     if today >= deal.maturity_date:
         maturity = max(reached, key=lambda row: row.t_years)
-        if abs(maturity.t_years - deal.T) <= 1e-6:
+        # DealEvent stores a rounded display time. The immutable contractual
+        # date identifies maturity; comparing it with an unrounded T can
+        # leave a fully fixed product active forever.
+        if maturity.event_date >= deal.maturity_date:
             return official_result, []
     return {"outcome": "en_cours"}, []
 
 
 def _pending_auto_fixing_exceptions(deal: Deal, session: Session) -> list[DealEvent]:
-    today = date.today().isoformat()
+    today = business_today().isoformat()
     return [event for event in _get_events(deal.id, session) if (
         event.event_date <= today and event.fixing_status in {
             FixingStatus.RECEIVED.value,
@@ -4742,7 +4747,7 @@ def resolve_auto_fixing_exception(
             action="Actualisez le deal pour appliquer la politique automatique.",
             received=deal.fixing_policy,
         ))
-    if event.event_date > date.today().isoformat():
+    if event.event_date > business_today().isoformat():
         failures.append(_workflow_failure(
             "FIXING_EVENT_IN_FUTURE", "event_date",
             "La constatation contractuelle n'est pas encore atteinte.",
@@ -4816,7 +4821,7 @@ def resolve_auto_fixing_exception(
             )
         fetch_start = (date.fromisoformat(event.event_date) - timedelta(days=7)).isoformat()
         reference_data = load_yahoo_reference_closes(
-            tickers, fetch_start, date.today().isoformat())
+            tickers, fetch_start, business_today().isoformat())
         if "error" in reference_data:
             raise HTTPException(422, {
                 "code": "YAHOO_PROVIDER_ERROR",
@@ -5173,6 +5178,15 @@ def _auto_validate_yahoo_event(
         event.indicative_spots_json = json.dumps(
             spots, ensure_ascii=False, sort_keys=True)
         session.add(event)
+    current_version = (
+        session.get(OfficialFixingVersion, event.current_fixing_version_id)
+        if event.current_fixing_version_id else None
+    )
+    # A signed user decision stays authoritative when a later provider fetch
+    # fails. Missing indicative data cannot reopen an official fixing.
+    if (current_version and current_version.capture_actor_type == "USER" and
+            event.fixing_status in {FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value}):
+        return False, None
     if failures:
         return False, _auto_yahoo_exception(
             deal, event, failures, session, actor_user_id,
@@ -5182,23 +5196,8 @@ def _auto_validate_yahoo_event(
         )
 
     before = _event_row(event)
-    current_version = (
-        session.get(OfficialFixingVersion, event.current_fixing_version_id)
-        if event.current_fixing_version_id else None
-    )
     current_spots = json.loads(event.spots_json or "{}")
     if (current_version and current_spots == spots and
-            event.fixing_status in {
-                FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value,
-            }):
-        session.add(event)
-        return False, None
-    # A user-confirmed exception is now the validated contractual fact for this
-    # event. The provider may still be Yahoo: provenance and human decision are
-    # separate dimensions. Keep displaying the latest feed value as indicative,
-    # but do not reopen the same exception at every scheduled refresh.
-    if (current_version and
-            current_version.capture_actor_type == "USER" and
             event.fixing_status in {
                 FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value,
             }):
@@ -5528,7 +5527,7 @@ def _auto_apply_lifecycle(
     before_deal = _deal_row(deal)
     trigger.status = outcome
     deal.status, deal.settlement_amount = _terminal_deal_state(
-        deal, outcome, official_result, date.today())
+        deal, outcome, official_result, business_today())
     deal.realized_payout = official_result.get("realized_payout")
     deal.resolution_outcome = outcome
     deal.updated_at = now
@@ -5625,7 +5624,7 @@ def _refresh_auto_yahoo_deal_core(
             "evaluation": None,
             "proposal": None,
         }
-    today = date.today().isoformat()
+    today = business_today().isoformat()
     events = _get_events(deal.id, session)
     past_events = [event for event in events if event.event_date <= today]
     if not past_events:
@@ -5671,6 +5670,17 @@ def _refresh_auto_yahoo_deal_core(
             break
     dates, prices = _reference_history_arrays(reference_data, tickers)
     if not dates:
+        from ..services.scenario_market import configured_path
+        if configured_path():
+            # Preserve the real missing-source exception for a subsequent
+            # signed manual decision. Synthetic prices never become Yahoo.
+            record_audit_event(session, action="SCENARIO_FIXING_EXCEPTION_OPENED",
+                object_type="DEAL", object_id=deal.id, actor_user_id=actor_user_id,
+                result="PENDING", reason="Scénario synthétique : source Yahoo absente, décision utilisateur sourcée requise.")
+            session.commit()
+            return {"updated":0,"officialized":0,"exceptions":exceptions,"evaluation":None,"proposal":None,
+                "message":"Source Yahoo absente dans ce scénario ; déclarer le fixing synthétique par une décision utilisateur sourcée.",
+                "monitoring_source":"SYNTHETIC_SCENARIO","policy":FixingPolicy.AUTO_YAHOO.value}
         raise ValueError("Les clôtures Yahoo ne permettent pas de construire un historique commun")
 
     # Lifecycle truth comes from the longest contiguous prefix of validated
@@ -6201,7 +6211,7 @@ def apply_lifecycle_proposal(
     all_events = _get_events(deal.id, session)
     trigger.status = outcome
     target_deal_status, settlement_amount = _terminal_deal_state(
-        deal, outcome, result, date.today())
+        deal, outcome, result, business_today())
     deal_cas = session.exec(
         update(Deal)
         .where(Deal.id == deal.id, Deal.status == "actif")
@@ -6316,7 +6326,7 @@ def reprice_inputs(
             "resolution_date": resolved_event.event_date if resolved_event else None,
         }
 
-    today = date.today()
+    today = business_today()
     maturity = date.fromisoformat(deal.maturity_date)
     value_d = date.fromisoformat(deal.value_date)
 
@@ -6426,8 +6436,8 @@ def reinvest_roll_endpoint(
     try:
         compiled = parse_script(deal.script_snapshot)
         from ..core.payscript.bindings import shift_calendars
-        rolled = shift_calendars(market.get("constats") or {}, deal.strike_date, date.today())
-        compiled = resolve_constats(compiled, rolled, anchor=date.today(),
+        rolled = shift_calendars(market.get("constats") or {}, deal.strike_date, business_today())
+        compiled = resolve_constats(compiled, rolled, anchor=business_today(),
                                     currency=(deal.devise or "").strip().upper() or None)
     except ValueError as e:
         raise HTTPException(422, f"Script non exploitable pour la reconduction : {e}")
@@ -6452,7 +6462,7 @@ def reinvest_roll_endpoint(
             corr = [[vol_data["corr"][t1].get(t2, 0.0) for t2 in tickers] for t1 in tickers]
 
     current_spots: dict = {}
-    px_data = load_hist_prices(tickers, date.today().isoformat(), date.today().isoformat())
+    px_data = load_hist_prices(tickers, business_today().isoformat(), business_today().isoformat())
     if "error" not in px_data:
         prices = px_data.get("prices", {})
         for tk in tickers:
@@ -6468,7 +6478,7 @@ def reinvest_roll_endpoint(
     funding_curve, funding_spread = funding_from_market_snapshot(market)
 
     T_new = effective_T_max(compiled, deal.T)
-    value_date_new = date.today()
+    value_date_new = business_today()
     maturity_date_new = value_date_new + timedelta(days=round(T_new * 365.25))
 
     try:
@@ -6570,9 +6580,9 @@ def _reinvest_context(deal: Deal, req_T: float | None):
     try:
         compiled = parse_script(deal.script_snapshot)
         from ..core.payscript.bindings import shift_calendars
-        rolled = shift_calendars(market.get("constats") or {}, deal.strike_date, date.today())
+        rolled = shift_calendars(market.get("constats") or {}, deal.strike_date, business_today())
         if req_T is not None and compiled.initial_fixing_name:
-            terminal = (date.today() + timedelta(days=round(req_T * 365.25))).isoformat()
+            terminal = (business_today() + timedelta(days=round(req_T * 365.25))).isoformat()
             ends = [value if isinstance(value, str) else value.get('end_date') or value.get('date')
                     for declaration in compiled.constats if declaration.role != 'initial_fixing'
                     for value in [rolled.get(declaration.name)] if value]
@@ -6595,7 +6605,7 @@ def _reinvest_context(deal: Deal, req_T: float | None):
                 elif declaration.kind == 'single':
                     if isinstance(value, dict): value['date'] = terminal
                     else: rolled[declaration.name] = terminal
-        compiled = resolve_constats(compiled, rolled, anchor=date.today(),
+        compiled = resolve_constats(compiled, rolled, anchor=business_today(),
                                     currency=(deal.devise or "").strip().upper() or None)
     except ValueError as e:
         raise HTTPException(422, f"Script non exploitable : {e}")
@@ -6676,7 +6686,7 @@ def _reinvest_proposal_data(deal: Deal, req: ReinvestProposalRequest) -> dict:
     if "error" in row:
         raise HTTPException(422, row["error"])
 
-    px_data = load_hist_prices([req.ticker], req.backtest_start, date.today().isoformat())
+    px_data = load_hist_prices([req.ticker], req.backtest_start, business_today().isoformat())
     if "error" in px_data:
         backtest = {"error": px_data["error"]}
     else:
@@ -6730,7 +6740,7 @@ def _reinvest_proposal_data(deal: Deal, req: ReinvestProposalRequest) -> dict:
                         "cash_flows": cash_flows,
                     }
 
-    value_date_new = date.today()
+    value_date_new = business_today()
     maturity_date_new = value_date_new + timedelta(days=round(T * 365.25))
     param_term = next((p for p in compiled.params if p.name == req.param_name), None)
 
@@ -6779,7 +6789,7 @@ def reinvest_proposal_pdf_endpoint(
         pdf_bytes = generate_reinvest_proposal_pdf(data)
     except Exception as e:
         raise HTTPException(500, f"Erreur génération de la note de proposition : {e}")
-    filename = f"Proposition_{deal.reference}_{data['candidate']['ticker']}_{date.today().isoformat()}.pdf"
+    filename = f"Proposition_{deal.reference}_{data['candidate']['ticker']}_{business_today().isoformat()}.pdf"
     return StreamingResponse(
         _io.BytesIO(pdf_bytes),
         media_type="application/pdf",
@@ -7130,7 +7140,7 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
     Returns (payload, ctx1, ctx2) — the ctxs feed the PDF note (greeks at d2)."""
 
     value_d = date.fromisoformat(deal.value_date)
-    today = date.today()
+    today = business_today()
     try:
         d1 = date.fromisoformat(body.date1) if body.date1 else value_d
         d2 = date.fromisoformat(body.date2) if body.date2 else today
@@ -7456,7 +7466,7 @@ def deal_mtm_report(
         session.rollback()
         raise HTTPException(500, f"Erreur génération de la note de valorisation : {e}")
     session.commit()
-    filename = f"Note_valo_{deal.reference}_{date.today().isoformat()}.pdf"
+    filename = f"Note_valo_{deal.reference}_{business_today().isoformat()}.pdf"
     return StreamingResponse(
         _io.BytesIO(pdf_bytes),
         media_type="application/pdf",

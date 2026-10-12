@@ -90,6 +90,23 @@ describe('MtM quotidien du Booking', () => {
     expect(state.mtmResults[2]).toBeNull()
   })
 
+  it('consulte la date figée et conserve son MtM archivé malgré la date réelle du PC', async () => {
+    const fetch = vi.fn(async () => reply([saved({ result: { mtm: 1.02, valuation_date: '2026-03-12' } })]))
+    vi.stubGlobal('fetch', fetch)
+    const state = useBookingMtm(() => '2026-03-12', { archived: true })
+    await state.loadSavedMtm(1)
+    expect(state.todayIso.value).toBe('2026-03-12')
+    expect(state.mtmResults[1]).toMatchObject({ mtm: 1.02, _restored: true })
+    const query = new URL(fetch.mock.calls[0][0], 'http://localhost').searchParams
+    expect(query.get('valuation_date')).toBe('2026-03-12')
+    expect(query.has('created_from')).toBe(false)
+    expect(query.has('created_before')).toBe(false)
+    vi.setSystemTime(new Date(2026, 8, 18, 0, 1))
+    state.syncDay()
+    expect(state.mtmResults[1].mtm).toBe(1.02)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('affiche le chargement immédiatement, bloque le double clic et transmet la sélection', async () => {
     const pending = deferred()
     const fetch = vi.fn(() => pending.promise)

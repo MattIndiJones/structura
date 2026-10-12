@@ -3,7 +3,7 @@ import mimetypes
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 
 # Windows registry can have wrong MIME entries for .js/.css — force correct types
 # so StaticFiles doesn't serve module scripts as text/plain (breaks ES modules).
@@ -11,7 +11,8 @@ mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from .runtime import consultation_mode
 from .api.pricing import router as pricing_router
 from .api.volatility import router as volatility_router
 from .api.ccr import router as ccr_router
@@ -50,6 +51,8 @@ from .api.compute import router as compute_router
 from .api.var import router as var_router
 from .api.products import router as products_router
 from .api.product_optimizer import router as product_optimizer_router
+from .api.trading import router as trading_router
+from .api.agent_workshop import router as agent_workshop_router, admin_router as admin_agent_workshop_router
 from .db.database import init_db
 from .services.lifecycle_alerts import (
     SCHEDULER_TIMEZONE, configure_lifecycle_handlers,
@@ -76,9 +79,26 @@ app.add_middleware(
 
 configure_lifecycle_handlers(refresh_deal_core, build_watchlist_row)
 
+@app.middleware("http")
+async def consultation_read_only(request: Request, call_next):
+    if consultation_mode() and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        allowed = {"/api/auth/login", "/_instance/stop", "/_instance/consultation-session"}
+        if request.url.path not in allowed:
+            return JSONResponse(status_code=403, content={"detail":
+                "Consultation en lecture seule : modification et recalcul désactivés."})
+    return await call_next(request)
+
+
 @app.on_event("startup")
 def on_startup():
     init_db()
+    if consultation_mode():
+        from .services.agent_workshop.lease import CampaignLease
+        directory = os.environ.get("STRUCTURA_CONSULTATION_LOCK_DIR")
+        if not directory:
+            raise RuntimeError("Dossier de verrouillage de consultation absent.")
+        app.state.consultation_lease = CampaignLease(Path(directory))
+        return
     from .services.optimizer_research import recover
     from .db.database import engine
     recover(engine)
@@ -86,8 +106,17 @@ def on_startup():
 
 @app.on_event("shutdown")
 async def stop_optimizer_researches():
+    if consultation_mode():
+        lease = getattr(app.state, "consultation_lease", None)
+        if lease:
+            lease.close()
+        return
     from .services.optimizer_research import shutdown
     await asyncio.to_thread(shutdown)
+    from .services.agent_workshop.engine import manager
+    await asyncio.to_thread(manager.shutdown)
+    from .services.agent_workshop.consultation import consultations
+    await asyncio.to_thread(consultations.shutdown)
 
 
 # Daily lifecycle pass at 23:00 local — after the US close, since deal events
@@ -97,7 +126,7 @@ async def stop_optimizer_researches():
 # with reload disabled, and run_scheduled_refresh() never raises.
 @app.on_event("startup")
 async def start_lifecycle_scheduler():
-    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("STRUCTURA_DISABLE_SCHEDULER") == "1":
+    if consultation_mode() or os.getenv("PYTEST_CURRENT_TEST") or os.getenv("STRUCTURA_DISABLE_SCHEDULER") == "1":
         return
     async def _daily_loop():
         await asyncio.to_thread(run_missed_refresh_if_needed)
@@ -146,6 +175,9 @@ app.include_router(compute_router)
 app.include_router(var_router)
 app.include_router(products_router)
 app.include_router(product_optimizer_router)
+app.include_router(trading_router)
+app.include_router(agent_workshop_router)
+app.include_router(admin_agent_workshop_router)
 app.include_router(pricing_router)
 app.include_router(market_data_router)
 app.include_router(simulation_router)
@@ -157,7 +189,44 @@ DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    result = {"status": "ok", "version": "0.1.0"}
+    if os.environ.get("STRUCTURA_INSTANCE_ID"):
+        result.update(instance_id=os.environ["STRUCTURA_INSTANCE_ID"], process_id=os.getpid())
+    if consultation_mode():
+        result["read_only"] = True
+    return result
+
+
+@app.post("/_instance/stop", include_in_schema=False)
+async def stop_owned_instance(request: Request):
+    import secrets
+    expected = os.environ.get("STRUCTURA_INSTANCE_CONTROL_TOKEN", "")
+    supplied = request.headers.get("X-Instance-Control", "")
+    if not expected or not secrets.compare_digest(expected, supplied):
+        raise HTTPException(404, "Not found")
+    server = getattr(app.state, "instance_server", None)
+    if server is None:
+        raise HTTPException(409, "Instance not managed")
+    server.should_exit = True
+    return {"stopping": True}
+
+
+@app.post("/_instance/consultation-session", include_in_schema=False)
+async def consultation_session(request: Request):
+    import secrets
+    from sqlmodel import Session
+    from .db.database import engine
+    from .db.models import User
+    from .api.auth import _make_token
+    expected = os.environ.get("STRUCTURA_INSTANCE_CONTROL_TOKEN", "")
+    if not consultation_mode() or not expected or not secrets.compare_digest(
+            expected, request.headers.get("X-Instance-Control", "")):
+        raise HTTPException(404, "Not found")
+    with Session(engine) as session:
+        user = session.get(User, int(os.environ["STRUCTURA_CONSULTATION_USER_ID"]))
+        if not user or not user.is_active:
+            raise HTTPException(409, "Le compte sauvegardé de cet acteur est indisponible.")
+        return {"access_token": _make_token(user.id, user.role, user.entity_id), "token_type": "bearer"}
 
 
 if DIST.exists():

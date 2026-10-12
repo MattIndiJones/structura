@@ -29,7 +29,9 @@ from ..db.models import (
 )
 from .audit import commit_rejection
 
-_DOCS_DIR = Path(__file__).parent.parent.parent.parent / "backend" / "data" / "documents"
+from ..runtime import data_path
+
+_DOCS_DIR = data_path("documents")
 
 
 def _cleanup_document_file(row: Document) -> None:

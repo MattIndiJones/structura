@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col gap-5">
 
-    <CcrCreditCheck :counterparty-name="form.contrepartie" :pricing="store.resultIsStale ? null : store.result?.pricing_receipt?.pricing_input"
+    <CcrCreditCheck v-if="!noteExecution.enabled" :counterparty-name="form.contrepartie" :pricing="store.resultIsStale ? null : store.result?.pricing_receipt?.pricing_input"
       :booked-deal="existingDeal"
       :nominal="store.globalParams.nominal" :currency="store.globalParams.deal_ccy" :sens="form.sens"
       :product-type="form.product_type" @netting-set="ccrNettingSetId = $event" />
@@ -142,6 +142,18 @@
           <label class="label">Référence documentaire</label>
           <input v-model="form.documentation_reference" class="input"
                  placeholder="Term sheet / ISDA / confirmation" />
+        </div>
+
+        <div class="col-span-2 rounded-lg border border-slate-700 p-3 flex flex-col gap-3">
+          <label class="flex items-center gap-2 text-xs"><input v-model="noteExecution.enabled" type="checkbox" /> Inscrire une exécution de note dans le journal des relations</label>
+          <template v-if="noteExecution.enabled">
+            <p class="text-xs text-slate-400">Le porteur supporte le risque de l’émetteur. Cette note reste hors des netting sets OTC. <RouterLink to="/trading" class="underline">Préparer la relation</RouterLink></p>
+            <label class="label">Relation active avec la contrepartie<select v-model.number="noteExecution.relationship_id" class="select"><option :value="null">— Choisir —</option><option v-for="r in noteRelations" :key="r.id" :value="r.id">{{r.reference}}</option></select></label>
+            <label class="label">Émetteur juridique<input v-model="noteExecution.issuer" class="input" placeholder="Nom exact de l’entité émettrice" /></label>
+            <label class="label">Référence commune de l’instrument<input v-model="noteExecution.instrument_reference" class="input" placeholder="ISIN ou référence commune aux livres" /></label>
+            <label class="label">Référence commune de la transaction<input v-model="noteExecution.trade_reference" class="input" placeholder="Même référence chez les deux intervenants" /></label>
+            <p v-if="errors.noteExecution" class="text-red-400 text-xs">{{errors.noteExecution}}</p>
+          </template>
         </div>
 
         <div v-if="!store.currentRfqId" class="col-span-2 rounded-lg border p-3 flex flex-col gap-3"
@@ -376,11 +388,19 @@ const today = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
 
 // Eligible counterparties (admin-managed catalog, active only)
 const counterparties = ref([])
+const relationships = ref([])
+const noteExecution = reactive({enabled:false,relationship_id:null,issuer:'',instrument_reference:'',trade_reference:''})
+const noteRelations = computed(() => relationships.value.filter(r => r.status==='ACTIVE' && r.note_distribution_allowed
+  && counterparties.value.find(c=>c.id===r.counterparty_id)?.name===form.contrepartie))
 onMounted(async () => {
   try {
     const res = await apiFetch('/api/deals/counterparties')
     if (res.ok) counterparties.value = await res.json()
   } catch { /* list stays empty — the select just shows the placeholder */ }
+  try {
+    const res=await apiFetch('/api/trading/relationships')
+    if(res.ok) relationships.value=await res.json()
+  } catch { /* Explicit selection is required before using the journal. */ }
 })
 
 const form = reactive({
@@ -599,6 +619,17 @@ function validate() {
     errors.economics = 'Complétez les dates économiques avant le booking'
   }
   if (!form.price_traded) errors.price_traded = 'Prix traité requis'
+  if (noteExecution.enabled) {
+    const relation=noteRelations.value.find(r=>r.id===noteExecution.relationship_id)
+    if (!relation || !noteExecution.issuer.trim() || noteExecution.instrument_reference.trim().length<5 || noteExecution.trade_reference.trim().length<6)
+      errors.noteExecution='Choisissez une relation active et complétez l’émetteur et les deux références communes.'
+    else if (!['EMTN','BMTN','NOTE'].includes(form.transaction_format.toUpperCase()) || form.instrument_family.toUpperCase()!=='NOTE')
+      errors.noteExecution='Choisissez un format EMTN, BMTN ou NOTE et l’instrument Note.'
+    else if (form.documentation_reference.trim()!==relation.documentation_reference)
+      errors.noteExecution='La référence documentaire doit correspondre à celle de la relation : '+relation.documentation_reference
+    else if (!store.result?.pricing_receipt)
+      errors.noteExecution='Lancez le pricing dans cette instance avant d’inscrire la note.'
+  }
   // A zero fair value is never a real product — it means nothing has been
   // priced in this session (the RFQ→booking path arrives with the results
   // cleared). Booking it would set the deal's whole P&L baseline to 0.
@@ -704,8 +735,8 @@ async function book() {
   bookingSubmitting.value = true
 
   try {
-    const deal = await dealsStore.bookDeal({
-      ccr_netting_set_id: ccrNettingSetId.value,
+    const payload = {
+      ccr_netting_set_id: noteExecution.enabled ? null : ccrNettingSetId.value,
       product_id: store.currentProduct?.product_id || null,
       product_terms_version: store.currentProduct?.terms_version || null,
       sens: form.sens,
@@ -734,13 +765,24 @@ async function book() {
       mandate_id: form.mandate_id,
       opportunity_id: form.opportunity_id,
       primary_affiliation_id: form.primary_affiliation_id,
-      transaction_format: form.transaction_format || null,
-      instrument_family: form.instrument_family || null,
+      transaction_format: (noteExecution.enabled ? form.transaction_format.toUpperCase() : form.transaction_format) || null,
+      instrument_family: (noteExecution.enabled ? form.instrument_family.toUpperCase() : form.instrument_family) || null,
       payoff_family: form.payoff_family || null,
       payoff_description: form.payoff_description || null,
       documentation_reference: form.documentation_reference || null,
       commercial_reason: form.commercial_reason || null,
-    })
+    }
+    let deal
+    if (noteExecution.enabled) {
+      const response=await apiFetch('/api/trading/book-note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        trade_reference:noteExecution.trade_reference.trim(),relationship_id:noteExecution.relationship_id,issuer:noteExecution.issuer.trim(),
+        our_side:form.sens==='vente'?'BUY':'SELL',instrument_reference:noteExecution.instrument_reference.trim(),deal:payload})})
+      if(!response.ok) { const data=await response.json(); throw new Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail)) }
+      const execution=await response.json()
+      deal=await dealsStore.selectDeal(execution.deal_id)
+      if(!deal) throw new Error('La note est inscrite, mais son deal ne peut pas être relu.')
+      await dealsStore.loadDeals()
+    } else deal=await dealsStore.bookDeal(payload)
     bookedDeal.value = deal
     showBookingReview.value = false
     if (deal.product_id) {

@@ -18,6 +18,7 @@ so the next observation can alert again without duplicating the current one.
 from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
+from ..runtime import business_today
 import json
 from zoneinfo import ZoneInfo
 from sqlalchemy import update
@@ -74,7 +75,7 @@ def refresh_book(session: Session, user_id: int | None = None) -> dict:
         q = q.where(Deal.user_id == user_id)
     deals = session.exec(q).all()
 
-    today = date.today()
+    today = business_today()
     summary = {"deals": len(deals), "refreshed": 0, "settled": 0,
                "alerts_created": 0,
                "proposed": [], "resolved": [], "errors": []}

@@ -44,13 +44,52 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
-Laboratoire de tests : [plan de simulation du desk du 08/10](projects/platform/DESK_SIMULATION_ACTION_PLAN_2026-10-08.md)
-— **Cadrage avant développement** : Alex émetteur/distributeur, contrats avant
-pricing, agents clients et banques, horloge suspendue pendant les calculs,
-supervision Camille et boucle de correction/rejeu. Matrice des actions,
-interface de recette et huit lots proposés ; capacités d'émission, règlements,
-opérations liées et adaptation des dates métier à qualifier avant le pilote.
-Objectif : tester et améliorer Structura, avec preuves et couverture explicites.
+[Simulation entre agents — tests restants et futur échange RFQ (12/10)](projects/platform/AGENT_SIMULATION_TESTS_RESTANTS_2026-10-12.md)
+— Recette priorisée : cycle jusqu'au paiement, AR produit, discours, audit,
+durée, consultation et année complète. Matrice dédiée à l'échange automatique
+de prix RFQ, prévu dans une autre branche et un autre chat.
+
+[Consultation des installations BNP/Hector après arrêt (12/10)](projects/platform/AGENT_SIMULATION_CONSULTATION_2026-10-12.md)
+— Boutons d'ouverture et de fermeture des books natifs conservés, connexion
+automatique, calendrier figé et lecture seule SQLite/API, sans relance des IA.
+
+[Bilan de l'essai réel arrêté le 12/10](projects/platform/AGENT_SIMULATION_BILAN_2026-10-12.md)
+— Cinq dossiers, 50 M€, vingt écritures réglées et 105 MtM natifs ; limites,
+durées et priorités de reprise. La campagne annuelle n'est pas qualifiée.
+
+[Simulation entre agents — pilotage du 12/10](projects/platform/AGENT_SIMULATION_PILOT_2026-10-12.md)
+— Première consolidation locale : avancement permanent, reprise vierge conservant
+l’ancien essai, suppression sauvegardée, historique intégral paginé, diagnostics
+persistants, books lisibles et rapprochement durci. 47 tests backend ciblés,
+379 tests frontend et build, deux recettes UI isolées et parcours natif Phoenix
+jusqu’à échéance. Horloge événementielle, diversité des acteurs, flux financiers
+et rejeu déterministe restent à développer ; détail et limites dans la note.
+
+Simulation de recette : [livraison multi-Structura du 09/10](projects/platform/MULTI_STRUCTURA_AGENT_IMPLEMENTATION_2026-10-09.md)
+— **Implémentée localement** : utilisateurs IA de leurs installations distinctes,
+inscription UI, contrats, CRM, pricing natif, conversations, quatre books,
+suivi de vie, Achille, horloge suspendue et preuves. Configurations contractuelles
+choisies ou tirées au sort. Accès depuis l'accueil avec un compte utilisateur,
+campagnes privées à leur propriétaire. Recettes natives RC/Phoenix et émission
+Hector par UI réussies ; année autonome terminée en 57 min, 120 M€, 12 opérations
+et 48 écritures rapprochées, sans reprise humaine ni échec technique. Références
+consultables par Philippe ; preuves et limites détaillées dans le rapport. Le
+suivi visuel a été repris le 09/10 au matin : activité courante publiée avant
+exécution, parcours métier, preuves écrans/API, états synchronisés et contrôleur
+actif vérifié. 24 tests workshop, 366 tests frontend et recette UI ; courte
+qualification avec vrais comptes IA et contrats natifs, installations fermées. Le
+registre des problèmes et les aides « ? » ont ensuite été ajoutés : accès direct
+aux signalements, catégories lisibles, action liée et export texte ; 372 tests
+frontend et recette navigateur. Un signalement n'est pas un bug confirmé. Le
+nettoyage des essais est aussi disponible : réinitialiser la vue et les champs,
+recommencer une campagne aux mêmes paramètres avec des installations vierges,
+ou la retirer de la liste avec sauvegarde locale. Opérations réservées aux
+campagnes sans contrôleur actif ; 36 tests backend ciblés et recette UI contre
+les vraies routes avec données temporaires. Le
+[flux RFQ natif entre entités](projects/platform/INTER_ENTITY_RFQ_BACKLOG_2026-10-08.md)
+reste différé. Défauts, appels de marge, réinvestissement et couverture exhaustive
+restent non exercés. Le [plan multi-Structura](projects/platform/MULTI_STRUCTURA_AGENT_ACTION_PLAN_2026-10-08.md)
+conserve le cadrage ; le premier laboratoire a été retiré.
 
 **URGENT — smile actions et ailes basses** : [diagnostic et méthode de reprise
 du 08/10](projects/pricing/SMILE_ACTIONS_URGENT_2026-10-08.md). Profils synthétiques
@@ -404,7 +443,10 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
-| [DESK_SIMULATION_ACTION_PLAN_2026-10-08.md](projects/platform/DESK_SIMULATION_ACTION_PLAN_2026-10-08.md) | 08/10 | Simulation du desk pour tester et améliorer Structura : contrats, agents, horloge, interface, contrôles et rejeu | Cadrage | Inventaire du lot 0, choix du pilote et lots 1 à 7 ; aucune implémentation |
+| [MULTI_STRUCTURA_AGENT_IMPLEMENTATION_2026-10-09.md](projects/platform/MULTI_STRUCTURA_AGENT_IMPLEMENTATION_2026-10-09.md) | 09/10 | Livraison des agents IA utilisateurs, installations séparées, contrats, CRM, livres, lifecycle, interface et qualification | Implémenté localement | Couverture exhaustive, défauts, appels de marge, réinvestissement, historique réel et réseau RFQ différés |
+| [MULTI_STRUCTURA_AGENT_ACTION_PLAN_2026-10-08.md](projects/platform/MULTI_STRUCTURA_AGENT_ACTION_PLAN_2026-10-08.md) | 08/10 | Cadrage des agents utilisateurs de leurs instances Structura : dialogues, contrats, books, vie, risques et preuves | Cadrage initial | État exécuté dans le rapport de livraison du 09/10 |
+| [INTER_ENTITY_RFQ_BACKLOG_2026-10-08.md](projects/platform/INTER_ENTITY_RFQ_BACKLOG_2026-10-08.md) | 08/10 | Futur flux RFQ entre entités ; contexte de recette multi-Structura, bookings, risques et objectifs des agents | Besoin différé | Spécifier les échanges natifs plus tard ; préciser d'abord les parcours agents et la messagerie de recette |
+| [DESK_SIMULATION_ACTION_PLAN_2026-10-08.md](projects/platform/DESK_SIMULATION_ACTION_PLAN_2026-10-08.md) | 08/10 | Premier cadrage de simulation du desk | Historique | À reprendre selon le cadrage multi-Structura ; le laboratoire développé ensuite a été retiré |
 | `PLAN_IMPLEMENTATION_OBJET_PRODUCT.md` | 14/09, suivi 05/10 | Dossier canonique présent sur main : RFQ/indicatif/booking/lifecycle/MtM/VaR/documents ; création interne aux gestes durables | En cours | Reprise historique et consolidation des consommateurs secondaires ; aucun repli MtM/VaR pour un deal sans Product |
 | [ORGANIZATION_ACCESS_DESIGN_2026-09-24.md](projects/platform/ORGANIZATION_ACCESS_DESIGN_2026-09-24.md) | 24/09, suivi 05/10 | Admission, propriété par organisation, habilitations et desks | Cadrage, non implémenté | Invitations, approbations, migration, isolation et recette |
 | `HOME_REDESIGN_DESIGN.md` | 19/07 | Accueil en quatre catégories, drill-down | Fait | — |

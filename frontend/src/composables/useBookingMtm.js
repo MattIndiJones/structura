@@ -46,8 +46,8 @@ export async function readMtmResponse(response, onProgress, interruptedMessage =
   }
 }
 
-export function useBookingMtm() {
-  const todayIso = ref(localDay())
+export function useBookingMtm(dayProvider = localDay, { archived = false } = {}) {
+  const todayIso = ref(dayProvider())
   const mtmLoading = reactive({})
   const mtmResults = reactive({})
   const mtmMode = reactive({})
@@ -59,7 +59,7 @@ export function useBookingMtm() {
   let generation = 0
 
   function syncDay() {
-    const today = localDay()
+    const today = dayProvider()
     if (today === todayIso.value) return
     todayIso.value = today
     generation++
@@ -103,10 +103,11 @@ export function useBookingMtm() {
     const start = new Date(`${day}T00:00:00`)
     const end = new Date(start)
     end.setDate(end.getDate() + 1)
-    const query = new URLSearchParams({
-      deal_ids: pending.join(','), created_from: start.toISOString(),
-      created_before: end.toISOString(), valuation_date: day, recalibrate: 'none',
-    })
+    const query = new URLSearchParams({ deal_ids: pending.join(','), valuation_date: day, recalibrate: 'none' })
+    if (!archived) {
+      query.set('created_from', start.toISOString())
+      query.set('created_before', end.toISOString())
+    }
     try {
       const response = await apiFetch(`/api/deals/valuation-runs/latest-mtm?${query}`)
       if (!response.ok) throw new Error('Historique indisponible')
@@ -120,7 +121,7 @@ export function useBookingMtm() {
         const timestamp = runTimestamp(saved.created_at)
         const valuationDate = result.valuation_date || request.valuation_date
         if (!(id in versions) || versions[id] !== (revisions[id] || 0) || mtmLoading[id] || mtmResults[id]) continue
-        if (!timestamp || localDay(timestamp) !== day || valuationDate !== day) continue
+        if (!timestamp || (!archived && localDay(timestamp) !== day) || valuationDate !== day) continue
         if (request.recalibrate !== 'none' || request.r != null || Object.keys(request.overrides || {}).length || (request.window_days ?? 252) !== 252) continue
         if (mtmModeFor(id) !== 'booking' || mtmDateFor(id) !== day) continue
         if (result.mtm == null && !result.resolved_pending) continue

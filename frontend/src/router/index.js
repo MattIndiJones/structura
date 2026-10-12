@@ -2,6 +2,10 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const routes = [
+  { path: '/consultation', component: () => import('../views/ConsultationView.vue'), meta: { public: true, title: 'Ouverture en consultation' } },
+  { path: '/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { title: 'Simulation entre agents' } },
+  { path: '/admin/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { requiresAdmin: true, title: 'Simulation entre agents' } },
+  { path: '/trading', component: () => import('../views/TradingView.vue'), meta: { title: 'Relations et exécutions' } },
   {
     path: '/structuring',
     component: () => import('../views/StructuringView.vue'),
