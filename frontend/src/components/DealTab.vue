@@ -1,5 +1,13 @@
 <template>
   <div class="flex flex-col gap-5">
+    <div v-if="store.currentRfqExecution" class="card space-y-2 text-xs">
+      <template v-if="store.currentRfqExecution.agreement?.state === 'CONFIRMED'">
+        <p>Traitement confirmé · {{ store.currentRfqExecution.agreement.execution_reference }} · {{ store.currentRfqExecution.agreement.confirmation_source === 'PHONE_DECLARATION' ? 'accord téléphonique déclaré' : 'confirmation reçue de la banque' }}</p>
+        <p>L’accord fixe le prix, le nominal et les parties. Le booking conserve les contrôles Product, pricing local et crédit.</p>
+      </template>
+      <p v-else-if="store.currentRfqExecution.requires_confirmation || store.currentRfqExecution.agreement">Confirmation de traitement attendue. Consignez l’accord depuis la RFQ avant booking.</p>
+      <RouterLink v-if="store.currentRfqId" class="text-accent underline" :to="`/rfq?rfq=${store.currentRfqId}`">Revenir à la RFQ et à son accord</RouterLink>
+    </div>
 
     <CcrCreditCheck v-if="!noteExecution.enabled" :counterparty-name="form.contrepartie" :pricing="store.resultIsStale ? null : store.result?.pricing_receipt?.pricing_input"
       :booked-deal="existingDeal"
@@ -263,7 +271,7 @@
           <label class="label">Prix traité (%) <span class="text-red-400">*</span>
             <HelpTip text="Le prix réellement négocié avec la contrepartie — peut différer de la fair value (commission, négociation, contraintes de cotation). C'est ce prix qui sert de référence pour le suivi de P&L du deal." />
           </label>
-          <input v-model.number="form.price_traded" type="number" step="0.01" class="input" />
+          <input v-model.number="form.price_traded" type="number" step="0.01" class="input" :readonly="store.currentRfqExecution?.agreement?.state === 'CONFIRMED'" />
           <p v-if="errors.price_traded" class="text-red-400 text-xs mt-1">{{ errors.price_traded }}</p>
         </div>
 
@@ -603,6 +611,11 @@ function rearmBooking() {
 }
 
 function validate() {
+  if ((store.currentRfqExecution?.requires_confirmation || store.currentRfqExecution?.agreement)
+      && store.currentRfqExecution?.agreement?.state !== 'CONFIRMED') {
+    bookingError.value = 'Consignez la confirmation du traitement depuis la RFQ avant booking.'
+    return false
+  }
   Object.keys(errors).forEach(k => delete errors[k])
   if (!form.contrepartie.trim()) errors.contrepartie = 'Contrepartie requise'
   if (!form.payoff_family) errors.payoff_family = 'Choisissez la famille de payoff.'
@@ -761,6 +774,7 @@ async function book() {
       pricing_receipt: store.result?.pricing_receipt || null,
       indicative_id: store.currentIndicativeId || null,
       rfq_id: store.currentRfqId || null,
+      execution_agreement_id: store.currentRfqExecution?.agreement?.id || null,
       client_id: form.client_id,
       mandate_id: form.mandate_id,
       opportunity_id: form.opportunity_id,
@@ -786,7 +800,9 @@ async function book() {
     bookedDeal.value = deal
     showBookingReview.value = false
     if (deal.product_id) {
-      const productResponse = await apiFetch(`/api/products/${deal.product_id}`)
+      const productResponse = store.currentRfqId
+        ? await apiFetch(`/api/rfq/${store.currentRfqId}/terms`)
+        : await apiFetch(`/api/products/${deal.product_id}`)
       if (!productResponse.ok) {
         throw new Error(
           'Le deal est booké, mais son Product canonique ne peut pas être relu.')

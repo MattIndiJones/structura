@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import RfqProvider, RfqProviderContact, User, Entity, Counterparty, Underlying
+from ..db.models import RfqProvider, RfqProviderContact, RfqOwnership, User, Entity, Counterparty, Underlying
 from .auth import get_current_admin
 from ..core import admin_registry
 from ..core.amc_prices import fetch_prices as _fetch_prices, price_status as _price_status, _slug
@@ -373,7 +373,15 @@ def browse_table_rows(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    return admin_registry.list_rows(table_key, session)
+    rows = admin_registry.list_rows(table_key, session)
+    if table_key == "rfq_requests":
+        rows = [row for row in rows if session.get(RfqOwnership, row["id"]) is None]
+    return rows
+
+
+def _refuse_scoped_rfq_admin(table_key: str, row_id: int, session: Session) -> None:
+    if table_key == "rfq_requests" and session.get(RfqOwnership, row_id) is not None:
+        raise HTTPException(404, "Enregistrement introuvable")
 
 
 @router.get("/browse/{table_key}/{row_id}")
@@ -383,6 +391,7 @@ def browse_get_row(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    _refuse_scoped_rfq_admin(table_key, row_id, session)
     return admin_registry.get_row(table_key, row_id, session)
 
 
@@ -393,6 +402,7 @@ def browse_delete_row(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    _refuse_scoped_rfq_admin(table_key, row_id, session)
     admin_registry.delete_row(table_key, row_id, session)
 
 
@@ -412,6 +422,13 @@ def browse_delete_rows(
     par ligne — supprimées d'un côté, bloquées avec leur raison de l'autre."""
     if not body.ids:
         raise HTTPException(422, "Aucun enregistrement sélectionné.")
+    if table_key == "rfq_requests":
+        blocked = [row_id for row_id in body.ids if session.get(RfqOwnership, row_id) is not None]
+        result = admin_registry.delete_rows(table_key,
+            [row_id for row_id in body.ids if row_id not in blocked], session)
+        result["blocked"].extend({"id": row_id, "reason": "Enregistrement introuvable"}
+                                 for row_id in blocked)
+        return result
     return admin_registry.delete_rows(table_key, body.ids, session)
 
 
@@ -423,6 +440,7 @@ def browse_update_row(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    _refuse_scoped_rfq_admin(table_key, row_id, session)
     return admin_registry.update_row(table_key, row_id, patch, session, actor_id=admin.id)
 
 

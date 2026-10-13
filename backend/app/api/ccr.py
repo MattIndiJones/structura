@@ -181,12 +181,17 @@ def monitor(current: Current, session: Database, data_scope: Literal["PRODUCTION
 
 
 def rfq_context(rfq_id, quote_id, current, session):
+    from ..services.rfq_access import require_rfq_access
+    require_rfq_access(session, rfq_id, current, 'read')
     rfq = session.get(RfqRequest, rfq_id)
     quote = session.get(RfqQuote, quote_id)
     if not rfq or rfq.entity_id != organization(current) or not quote or quote.rfq_id != rfq.id:
         raise HTTPException(404, "RFQ ou réponse introuvable")
     provider = session.exec(select(RfqProvider).where(RfqProvider.label == quote.provider)).first()
     cpty_id = provider.counterparty_id if provider else None
+    from ..services import rfq_execution, rfq_publication
+    if rfq_publication.publication_for_quote(session, quote.id):
+        cpty_id = rfq_execution._counterparty(session, rfq, quote).id
     if cpty_id is None:
         raise HTTPException(422, "MISSING_DATA : rattachement explicite fournisseur → contrepartie requis")
     return rfq, cpty_id
@@ -203,6 +208,8 @@ def rfq_check(rfq_id: int, quote_id: int, body: CalculationRequest, current: Cur
     if body.data_scope != "PRODUCTION":
         raise HTTPException(422, "Le contrôle RFQ de production ne peut pas utiliser un périmètre de recette")
     rfq, cpty_id = rfq_context(rfq_id, quote_id, current, session)
+    from ..services.rfq_access import require_rfq_access
+    require_rfq_access(session, rfq_id, current, 'price')
     params = json.loads(rfq.params_json)
     # RFQ params are already engine units; use the frozen contract.
     pricing = {**params, "script": rfq.script_snapshot}

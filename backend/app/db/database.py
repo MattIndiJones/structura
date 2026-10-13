@@ -867,6 +867,10 @@ def init_db():
             raise RuntimeError("Le book sauvegardé est introuvable ; consultation annulée.")
         return
     SQLModel.metadata.create_all(engine)
+    from .rfq_transport_integrity import install_transport_guards
+    install_transport_guards(engine)
+    from .rfq_execution_integrity import install_execution_guards
+    install_execution_guards(engine)
     _migrate()
     _retire_four_eyes_fixing_policy()
     _seed()

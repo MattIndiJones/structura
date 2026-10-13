@@ -1,12 +1,14 @@
 from __future__ import annotations
 from typing import Optional
 from datetime import datetime
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, text
 from sqlmodel import SQLModel, Field, Column, Text
 from .ccr_models import (  # register additive CCR tables with the shared metadata
     CCRCreditProfile, CCRMasterAgreement, CCRCSAAgreement, CCRNettingSet,
     CCRCreditLimit, CCRCollateralPosition, CCRCreditOverride, CCRExposureCalculation,
 )
+from .rfq_transport_models import (RfqInstallation, RfqChannel, RfqRemoteLink,
+    RfqTransportOutbox, RfqTransportInbox, RfqTransportAttempt)
 
 
 class ProductRecord(SQLModel, table=True):
@@ -130,6 +132,246 @@ class User(SQLModel, table=True):
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqDesk(SQLModel, table=True):
+    __tablename__ = "rfq_desks"
+    __table_args__ = (UniqueConstraint("entity_id", "name"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entity_id: int = Field(foreign_key="entities.id", index=True)
+    name: str
+    active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqDeskMembership(SQLModel, table=True):
+    __tablename__ = "rfq_desk_memberships"
+    __table_args__ = (UniqueConstraint("desk_id", "user_id"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    desk_id: int = Field(foreign_key="rfq_desks.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    rights_json: str = Field(default="[]", sa_column=Column(Text))
+    active: bool = Field(default=True)
+    expires_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqOwnership(SQLModel, table=True):
+    """New RFQ access scope; rows absent for historical test dossiers."""
+    __tablename__ = "rfq_ownerships"
+    rfq_id: int = Field(primary_key=True, foreign_key="rfq_requests.id")
+    entity_id: int = Field(foreign_key="entities.id", index=True)
+    pilot_desk_id: int = Field(foreign_key="rfq_desks.id", index=True)
+    responsible_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqDeskShare(SQLModel, table=True):
+    __tablename__ = "rfq_desk_shares"
+    __table_args__ = (UniqueConstraint("rfq_id", "desk_id"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rfq_id: int = Field(foreign_key="rfq_requests.id", index=True)
+    desk_id: int = Field(foreign_key="rfq_desks.id", index=True)
+    rights_json: str = Field(default="[]", sa_column=Column(Text))
+    active: bool = Field(default=True)
+    expires_at: Optional[datetime] = None
+    reason: str = Field(default="")
+    actor_user_id: int = Field(foreign_key="users.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqRelationship(SQLModel, table=True):
+    """Directional bilateral permission to request prices from a partner desk."""
+    __tablename__ = "rfq_relationships"
+    __table_args__ = (UniqueConstraint("requester_entity_id", "reference"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    requester_entity_id: int = Field(foreign_key="entities.id", index=True)
+    partner_entity_id: int = Field(foreign_key="entities.id", index=True)
+    receiver_desk_id: int = Field(foreign_key="rfq_desks.id")
+    reference: str
+    version: int = Field(default=1)
+    terms_json: str = Field(sa_column=Column(Text, nullable=False))
+    created_by: int = Field(foreign_key="users.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqRelationshipSide(SQLModel, table=True):
+    """Local legal/booking mapping and explicit recognition by one organization."""
+    __tablename__ = "rfq_relationship_sides"
+    relationship_id: int = Field(primary_key=True, foreign_key="rfq_relationships.id")
+    entity_id: int = Field(primary_key=True, foreign_key="entities.id")
+    counterparty_id: Optional[int] = Field(default=None, foreign_key="counterparties.id")
+    trading_relationship_id: Optional[int] = Field(default=None, foreign_key="trading_relationships.id")
+    contacts_json: str = Field(default="[]", sa_column=Column(Text))
+    recognized_version: Optional[int] = None
+    suspended: bool = Field(default=False)
+    updated_by: int = Field(foreign_key="users.id")
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqExchangeRound(SQLModel, table=True):
+    """Immutable common request; a revised consultation uses a linked RFQ."""
+    __tablename__ = "rfq_exchange_rounds"
+    __table_args__ = (UniqueConstraint("exchange_reference", "number"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rfq_id: int = Field(foreign_key="rfq_requests.id", unique=True)
+    exchange_reference: str = Field(index=True)
+    number: int
+    previous_round_id: Optional[int] = Field(default=None, foreign_key="rfq_exchange_rounds.id")
+    product_id: int = Field(foreign_key="products.id")
+    terms_version: int
+    terms_fingerprint: str
+    request_json: str = Field(sa_column=Column(Text))
+    state: str = Field(default="OPEN")
+    frozen_by: int = Field(foreign_key="users.id")
+    frozen_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqRoundLink(SQLModel, table=True):
+    __tablename__ = "rfq_round_links"
+    rfq_id: int = Field(primary_key=True, foreign_key="rfq_requests.id")
+    previous_round_id: int = Field(foreign_key="rfq_exchange_rounds.id", unique=True)
+
+
+class RfqSolicitation(SQLModel, table=True):
+    """A persisted individually addressed request is the bank's inbox item."""
+    __tablename__ = "rfq_solicitations"
+    __table_args__ = (UniqueConstraint("round_id", "relationship_id"), UniqueConstraint("round_id", "recipient_entity_id"))
+    id: Optional[int] = Field(default=None, primary_key=True)
+    round_id: int = Field(foreign_key="rfq_exchange_rounds.id", index=True)
+    relationship_id: int = Field(foreign_key="rfq_relationships.id")
+    recipient_entity_id: int = Field(foreign_key="entities.id", index=True)
+    recipient_desk_id: int = Field(foreign_key="rfq_desks.id", index=True)
+    message_id: str = Field(unique=True)
+    request_json: str = Field(sa_column=Column(Text))
+    sent_by: int = Field(foreign_key="users.id")
+    sent_at: datetime = Field(default_factory=datetime.utcnow)
+    delivered_at: datetime = Field(default_factory=datetime.utcnow)
+    read_at: Optional[datetime] = None
+    read_by: Optional[int] = Field(default=None, foreign_key="users.id")
+
+
+class RfqBankCase(SQLModel, table=True):
+    """Desk-owned private work on one received immutable request."""
+    __tablename__ = "rfq_bank_cases"
+    solicitation_id: int = Field(primary_key=True, foreign_key="rfq_solicitations.id")
+    product_id: int = Field(foreign_key="products.id", unique=True)
+    responsible_user_id: int = Field(foreign_key="users.id")
+    revision: int = Field(default=1)
+    state: str = Field(default="IN_PROGRESS")
+    private_note: str = Field(default="", sa_column=Column(Text))
+    shared_decline_note: str = Field(default="", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqBankPublicationPolicy(SQLModel, table=True):
+    __tablename__ = "rfq_bank_publication_policies"
+    desk_id: int = Field(primary_key=True, foreign_key="rfq_desks.id")
+    version: int = Field(default=1)
+    second_validation_required: bool
+    max_calculation_age_minutes: int
+    updated_by: int = Field(foreign_key="users.id")
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqBankQuoteDraft(SQLModel, table=True):
+    __tablename__ = "rfq_bank_quote_drafts"
+    solicitation_id: int = Field(primary_key=True, foreign_key="rfq_solicitations.id")
+    revision: int = Field(default=1)
+    case_revision: int
+    calculation_id: int = Field(foreign_key="product_calculation_runs.id")
+    prepared_by: int = Field(foreign_key="users.id")
+    prepared_at: datetime = Field(default_factory=datetime.utcnow)
+    payload_json: str = Field(sa_column=Column(Text))
+    payload_hash: str
+    validated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    validated_at: Optional[datetime] = None
+    validated_hash: Optional[str] = None
+    validated_policy_version: Optional[int] = None
+
+
+class RfqQuotePublication(SQLModel, table=True):
+    """Immutable published commercial response and its local delivery evidence."""
+    __tablename__ = "rfq_quote_publications"
+    __table_args__ = (UniqueConstraint("solicitation_id", "revision"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    solicitation_id: int = Field(foreign_key="rfq_solicitations.id", index=True)
+    revision: int
+    quote_id: int = Field(foreign_key="rfq_quotes.id", unique=True)
+    message_id: str = Field(unique=True)
+    payload_json: str = Field(sa_column=Column(Text))
+    published_by: int = Field(foreign_key="users.id")
+    published_at: datetime = Field(default_factory=datetime.utcnow)
+    delivered_at: datetime = Field(default_factory=datetime.utcnow)
+    withdrawn_at: Optional[datetime] = None
+    withdrawn_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    withdrawal_reason: Optional[str] = None
+    acceptance_received_at: Optional[datetime] = None
+
+
+class RfqExecutionAgreement(SQLModel, table=True):
+    """Local external treatment evidence; never a bank's electronic acceptance."""
+    __tablename__ = "rfq_execution_agreements"
+    __table_args__ = (UniqueConstraint("rfq_id", "command_key"),
+                      UniqueConstraint("entity_id", "execution_reference"),
+                      Index("uq_rfq_active_execution_agreement", "rfq_id", unique=True,
+                            sqlite_where=text("state != 'CANCELLED'"),
+                            postgresql_where=text("state != 'CANCELLED'")))
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rfq_id: int = Field(foreign_key="rfq_requests.id", index=True)
+    entity_id: int = Field(foreign_key="entities.id")
+    quote_id: int = Field(foreign_key="rfq_quotes.id")
+    command_key: str
+    request_hash: str
+    state: str = Field(default="REQUESTED")
+    snapshot_json: str = Field(sa_column=Column(Text))
+    snapshot_hash: str
+    requested_by: int = Field(foreign_key="users.id")
+    requested_at: datetime = Field(default_factory=datetime.utcnow)
+    request_source: str
+    request_reference: str
+    bank_contact: str
+    execution_reference: Optional[str] = None
+    acceptance_received_at: Optional[datetime] = None
+    acceptance_evidence: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+    confirmed_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    confirmation_source: Optional[str] = None
+    confirmation_evidence: Optional[str] = None
+    confirmation_hash: Optional[str] = None
+    written_confirmation_pending: bool = Field(default=False)
+    cancellation_reason: Optional[str] = None
+    booking_block_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+    booking_blocked_at: Optional[datetime] = None
+    review_required_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+
+class RfqExecutionBooking(SQLModel, table=True):
+    """One immutable local booking per confirmed execution and organization."""
+    __tablename__ = "rfq_execution_bookings"
+    __table_args__ = (UniqueConstraint("entity_id", "execution_reference"),)
+    agreement_id: int = Field(primary_key=True, foreign_key="rfq_execution_agreements.id")
+    entity_id: int = Field(foreign_key="entities.id")
+    execution_reference: str
+    rfq_id: int = Field(foreign_key="rfq_requests.id", unique=True)
+    deal_id: int = Field(foreign_key="deals.id", unique=True)
+    request_hash: str
+    booked_by: int = Field(foreign_key="users.id")
+    booked_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqSendCommand(SQLModel, table=True):
+    __tablename__ = "rfq_send_commands"
+    __table_args__ = (UniqueConstraint("rfq_id", "command_key"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rfq_id: int = Field(foreign_key="rfq_requests.id")
+    command_key: str
+    payload_hash: str
+    result_json: str = Field(sa_column=Column(Text))
 
 
 class ReferenceCounter(SQLModel, table=True):

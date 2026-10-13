@@ -298,12 +298,13 @@ def booking_gate_failures(
     expected_counterparty: str | None,
     requested_counterparty: str,
     now: datetime | None = None,
+    acceptance_received_at: datetime | None = None,
 ) -> list[ControlFailure]:
     """Return every independent pre-booking failure in one response."""
     failures = rfq_readiness_failures(rfq)
     now = now or datetime.utcnow()
 
-    if rfq.status != "retenue":
+    if rfq.status != "retenue" and acceptance_received_at is None:
         failures.append(ControlFailure(
             "RFQ_STATUS_INVALID",
             "La RFQ doit être au statut sélectionné avant booking."))
@@ -330,7 +331,7 @@ def booking_gate_failures(
         if selected.valid_until is None:
             failures.append(ControlFailure(
                 "QUOTE_VALIDITY_UNKNOWN", "La validité de la quote sélectionnée est inconnue."))
-        elif selected.valid_until <= now:
+        elif selected.valid_until <= (acceptance_received_at or now):
             failures.append(ControlFailure(
                 "QUOTE_EXPIRED", "La quote sélectionnée a expiré."))
 

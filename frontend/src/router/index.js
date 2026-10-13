@@ -5,7 +5,7 @@ const routes = [
   { path: '/consultation', component: () => import('../views/ConsultationView.vue'), meta: { public: true, title: 'Ouverture en consultation' } },
   { path: '/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { title: 'Simulation entre agents' } },
   { path: '/admin/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { requiresAdmin: true, title: 'Simulation entre agents' } },
-  { path: '/trading', component: () => import('../views/TradingView.vue'), meta: { title: 'Relations et exécutions' } },
+  { path: '/trading', component: () => import('../views/TradingView.vue'), meta: { title: 'Relations et exécutions', fixedViewport: true } },
   {
     path: '/structuring',
     component: () => import('../views/StructuringView.vue'),
@@ -44,12 +44,12 @@ const routes = [
   {
     path: '/pricer',
     component: () => import('../views/PricerView.vue'),
-    meta: { title: 'Pricer' },
+    meta: { title: 'Pricer', fixedViewport: true },
   },
   {
     path: '/pricer/:id',
     component: () => import('../views/PricerView.vue'),
-    meta: { title: 'Pricer' },
+    meta: { title: 'Pricer', fixedViewport: true },
   },
   {
     // Une déclinaison s'ouvre par SON identifiant, pas par celui de son
@@ -57,12 +57,12 @@ const routes = [
     // lien partagé désigne sans ambiguïté ce qu'on voulait montrer.
     path: '/pricer/v/:variantId',
     component: () => import('../views/PricerView.vue'),
-    meta: { title: 'Pricer' },
+    meta: { title: 'Pricer', fixedViewport: true },
   },
   {
     path: '/products/:productId/pricer',
     component: () => import('../views/PricerView.vue'),
-    meta: { title: 'Produit — Pricer' },
+    meta: { title: 'Produit — Pricer', fixedViewport: true },
   },
   {
     path: '/products',
@@ -84,7 +84,7 @@ const routes = [
   {
     path: '/booking',
     component: () => import('../views/BookingView.vue'),
-    meta: { title: 'Booking — produits bookés' },
+    meta: { title: 'Booking — produits bookés', fixedViewport: true },
   },
   {
     path: '/valo-explain',
@@ -161,17 +161,32 @@ const routes = [
   {
     path: '/rfq',
     component: () => import('../views/RfqView.vue'),
-    meta: { title: 'RFQ Fournisseurs' },
+    meta: { title: 'RFQ Fournisseurs', fixedViewport: true },
+  },
+  {
+    path: '/rfq/recues',
+    component: () => import('../views/RfqInboxView.vue'),
+    meta: { title: 'RFQ reçues · banque', fixedViewport: true },
   },
   {
     path: '/rfq/analyse',
     component: () => import('../views/RfqAnalysisView.vue'),
-    meta: { title: 'Analyse Contreparties' },
+    meta: { title: 'Analyse Contreparties', fixedViewport: true },
+  },
+  {
+    path: '/rfq/prototype-reseau',
+    component: () => import('../views/RfqNetworkPrototypeView.vue'),
+    meta: { title: 'RFQ réseau — prototype du lot 0', fixedViewport: true },
   },
   {
     path: '/admin',
     component: () => import('../views/AdminView.vue'),
     meta: { requiresAdmin: true, title: 'Administration' },
+  },
+  {
+    path: '/admin/rfq-relations',
+    component: () => import('../views/AdminRfqRelationsView.vue'),
+    meta: { requiresAdmin: true, title: 'Relations RFQ', fixedViewport: true },
   },
   {
     path: '/admin/rfq-providers',

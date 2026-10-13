@@ -44,6 +44,84 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
+[Reprise SaaS hybride et prompt pour un nouveau chat — 13/10](handoffs/HYBRID_SAAS_HANDOFF_2026-10-13.md)
+— Décisions retenues : données et traitements privés chez le client, six installations
+isolées, super utilisateurs, profils secondaires, accès rapides, supervision et
+simulation réservée à l'admin. Registre RFQ central pour facturation et litiges,
+avec contenu des échanges, droits, reprise et comptage sans doublons ; unité tarifaire
+proposée à valider. Plan en huit étapes, remise à zéro des données fictives sans
+migration et prompt prêt à copier. Cadrage, non implémenté ;
+compilation commerciale et calcul confidentiel différés.
+
+[Atlas de l'application et des comptes — 13/10](projects/platform/STRUCTURA_APPLICATION_OVERVIEW_2026-10-13.md)
+— [Présentation HTML globale](projects/platform/application-map-2026-10-13/index.html),
+inventaire exact des 10 comptes principaux, 3 organisations, droits RFQ et
+53 bases secondaires ; 24 fiches de module, interactions, preuves datées,
+ajustements et plan de reprise. Lecture de base/code uniquement, sans modification
+de l'application ni nouvelles suites de tests. Distingue les lots livrés dans le
+code de leur activation/configuration dans la base principale.
+
+[Réseau RFQ entre organisations — plan de réalisation du 12/10](projects/platform/RFQ_NETWORK_ACTION_PLAN_2026-10-12.md)
+et [spécification complète du lot 0](projects/platform/RFQ_NETWORK_LOT_0_SPECIFICATION_2026-10-12.md)
+— Cadrage fonctionnel consolidé : destinataires propres à l'organisation,
+réception bancaire, pricing privé, publication humaine avec seconde validation
+configurable, retour automatique et maintien du manuel. Fermeté révocable avant
+acceptation valide, confirmation bancaire ou téléphone déclaré et validité à
+l'accord intégrés. Le [lot 1](projects/platform/RFQ_NETWORK_LOT_1_SPECIFICATION_2026-10-12.md)
+est détaillé : nouveaux dossiers appartenant à l'organisation, visibilité au
+desk pilote et partage explicite. Aucune migration des anciens tests n'est
+demandée. Le [premier incrément du lot 1](projects/platform/RFQ_NETWORK_LOT_1_IMPLEMENTATION_2026-10-12.md)
+ajoute la propriété organisationnelle, les habilitations de desk et le partage
+révocable des nouvelles RFQ. Le [lot 2 livré](projects/platform/RFQ_NETWORK_LOT_2_IMPLEMENTATION_2026-10-12.md)
+ajoute relations bilatérales reconnues, périmètres, suspension et destinataires
+autorisés dans la préparation. Affectation et transfert du lot 1 sont codés et
+recettés sur base fictive ; exports et tâches longues restent à qualifier.
+Le [lot 3](projects/platform/RFQ_NETWORK_LOT_3_IMPLEMENTATION_2026-10-12.md)
+ajoute envoi explicite dans la même installation, termes Product figés par tour,
+suivi individuel livré/lu et boîte bancaire par desk. Nouveau tour dans un dossier
+lié, manuel conservé. Recette HTTP authentifiée réussie ; recette visuelle bloquée
+par l’outil. Le pricing/publication bancaire et le transport entre installations
+restent les lots suivants.
+La [tranche bancaire du lot 4](projects/platform/RFQ_NETWORK_LOT_4_IMPLEMENTATION_2026-10-12.md)
+ajoute prise en charge et réaffectation au sein du desk, Product bancaire aux termes
+reçus verrouillés, ouverture dans le Pricer existant et calculs privés conservés.
+La recette HTTP authentifiée passe ; la recette visuelle reste bloquée par l’outil.
+Précisions/déclin restent à compléter ; la publication humaine est ajoutée au lot 5.
+Le [lot 5](projects/platform/RFQ_NETWORK_LOT_5_IMPLEMENTATION_2026-10-12.md)
+ajoute prix commercial, validation exacte, seconde validation configurable par desk,
+publication et réception automatiques dans la même installation, révisions et retrait
+tracés. Les quotes réseau sont non éditables et coexistent avec le manuel ; leur
+booking attend la confirmation du lot 7. Recette API et build réussis, recette visuelle
+bloquée par l’outil.
+Le [lot 6](projects/platform/RFQ_NETWORK_LOT_6_IMPLEMENTATION_2026-10-12.md)
+ajoute l’appairage des installations, des échanges HTTPS signés, files persistantes,
+accusés liés au contenu, reprise après interruption, dédoublonnage et ordre des
+révisions. Demandes, lectures, prix, retraits et clôtures ont un suivi de livraison.
+Recette sur deux vrais serveurs fictifs avec arrêt/redémarrage et contrôle visuel
+réussis ; scroll interne des masques confirmé. Manuel conservé ; confirmation
+avant booking complétée par le lot 7 ci-dessous, déploiement réel et pilote encore à qualifier.
+Le [lot 7](projects/platform/RFQ_NETWORK_LOT_7_IMPLEMENTATION_2026-10-12.md)
+ajoute demande externe déclarée, confirmation identifiée avant booking réseau,
+accord Product figé, conservation des refus et booking local unique par exécution.
+Le manuel et les masques à défilement interne sont conservés. Les messages natifs
+de traitement, le rapprochement des réponses et la résolution des contestations
+restent des compléments. 19 scénarios backend ciblés réussis, build frontend réussi
+et masque de confirmation vérifié sur base fictive ; page fixe et scroll interne confirmés.
+Le [lot 8 — recette clôturée le 13/10](projects/platform/RFQ_NETWORK_LOT_8_ACCEPTANCE_2026-10-13.md)
+qualifie la tranche V1 sur trois installations fictives : 16 scénarios API,
+booking unique, deux banques et manuel, droits, reprise, retrait et suspension.
+Scroll interne mesuré à 1 280 × 720 et 760 × 600 ; deux corrections et 19 tests
+ciblés réussis. La [procédure d'exploitation et de reprise](projects/platform/RFQ_NETWORK_OPERATIONS_2026-10-12.md)
+et le script de recette sont livrés. La vraie BNP exige encore une installation
+compatible, les accords, les accès HTTPS et l'appairage bilatéral.
+Le [lot 0 implémenté](projects/platform/RFQ_NETWORK_LOT_0_IMPLEMENTATION_2026-10-12.md)
+est livré sur `codex/rfq-network-lot-0` : prototype demandeur/banque et préparation
+intégrée aux RFQ existantes depuis Product, calcul privé par les moteurs actuels
+et reprise dans le Pricer. Écrans et modales à défilement interne, hauteur bornée.
+154 tests backend ciblés, 424 tests frontend et build réussis ; recette bureau,
+mobile et écran bas sur base temporaire. L’envoi et la réception minimale sont
+désormais ajoutés au lot 3 ; la publication et le transport restent à réaliser.
+
 [Simulation entre agents — tests restants et futur échange RFQ (12/10)](projects/platform/AGENT_SIMULATION_TESTS_RESTANTS_2026-10-12.md)
 — Recette priorisée : cycle jusqu'au paiement, AR produit, discours, audit,
 durée, consultation et année complète. Matrice dédiée à l'échange automatique
@@ -86,8 +164,8 @@ recommencer une campagne aux mêmes paramètres avec des installations vierges,
 ou la retirer de la liste avec sauvegarde locale. Opérations réservées aux
 campagnes sans contrôleur actif ; 36 tests backend ciblés et recette UI contre
 les vraies routes avec données temporaires. Le
-[flux RFQ natif entre entités](projects/platform/INTER_ENTITY_RFQ_BACKLOG_2026-10-08.md)
-reste différé. Défauts, appels de marge, réinvestissement et couverture exhaustive
+[flux RFQ natif entre entités](projects/platform/RFQ_NETWORK_ACTION_PLAN_2026-10-12.md)
+est cadré au 12/10, sans implémentation du réseau. Défauts, appels de marge, réinvestissement et couverture exhaustive
 restent non exercés. Le [plan multi-Structura](projects/platform/MULTI_STRUCTURA_AGENT_ACTION_PLAN_2026-10-08.md)
 conserve le cadrage ; le premier laboratoire a été retiré.
 
@@ -443,9 +521,13 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [RFQ_NETWORK_ACTION_PLAN_2026-10-12.md](projects/platform/RFQ_NETWORK_ACTION_PLAN_2026-10-12.md) | 12/10 | Destinataires par organisation, réception bancaire, publication contrôlée, retour automatique et manuel ; lots 0 à 8 | Lot 0 cadré avec premier prototype ; lot 1 cadré | Compléments d'écran, choix du pilote, réalisation des lots 1 à 8 et recette réseau ; aucune reprise des anciens tests |
+| [RFQ_NETWORK_LOT_0_IMPLEMENTATION_2026-10-12.md](projects/platform/RFQ_NETWORK_LOT_0_IMPLEMENTATION_2026-10-12.md) | 12/10 | Prototype demandeur/banque ; préparation RFQ depuis Product, moteurs actuels, Pricer et scroll interne | Raccordement livré sur branche ; 154 tests backend ciblés, 424 frontend et build ; recette isolée | Propriété, droits, partenaires, réception bancaire, transport et booking réseau dans les lots suivants |
+| [RFQ_NETWORK_LOT_0_SPECIFICATION_2026-10-12.md](projects/platform/RFQ_NETWORK_LOT_0_SPECIFICATION_2026-10-12.md) | 12/10 | Parcours, demandes/réponses, droits, transitions, confidentialité, fermeté, retrait et confirmation avant booking | Règles fonctionnelles actées, non implémentées | Maquettes, paramètres opérationnels et transport ; confirmation native et rapprochement ultérieurs |
+| [RFQ_NETWORK_LOT_1_SPECIFICATION_2026-10-12.md](projects/platform/RFQ_NETWORK_LOT_1_SPECIFICATION_2026-10-12.md) | 12/10 | Propriété organisationnelle, desks, droits détaillés, profils, partage, affectation et révocation | Cadrage détaillé ; desk pilote et absence de migration actés | Réalisation et recette sur nouveaux dossiers fictifs, sans reprise des anciens tests |
 | [MULTI_STRUCTURA_AGENT_IMPLEMENTATION_2026-10-09.md](projects/platform/MULTI_STRUCTURA_AGENT_IMPLEMENTATION_2026-10-09.md) | 09/10 | Livraison des agents IA utilisateurs, installations séparées, contrats, CRM, livres, lifecycle, interface et qualification | Implémenté localement | Couverture exhaustive, défauts, appels de marge, réinvestissement, historique réel et réseau RFQ différés |
 | [MULTI_STRUCTURA_AGENT_ACTION_PLAN_2026-10-08.md](projects/platform/MULTI_STRUCTURA_AGENT_ACTION_PLAN_2026-10-08.md) | 08/10 | Cadrage des agents utilisateurs de leurs instances Structura : dialogues, contrats, books, vie, risques et preuves | Cadrage initial | État exécuté dans le rapport de livraison du 09/10 |
-| [INTER_ENTITY_RFQ_BACKLOG_2026-10-08.md](projects/platform/INTER_ENTITY_RFQ_BACKLOG_2026-10-08.md) | 08/10 | Futur flux RFQ entre entités ; contexte de recette multi-Structura, bookings, risques et objectifs des agents | Besoin différé | Spécifier les échanges natifs plus tard ; préciser d'abord les parcours agents et la messagerie de recette |
+| [INTER_ENTITY_RFQ_BACKLOG_2026-10-08.md](projects/platform/INTER_ENTITY_RFQ_BACKLOG_2026-10-08.md) | 08/10, suivi 12/10 | Contexte initial du futur flux RFQ et de la recette multi-Structura | Cadrage initial prolongé | Réalisation selon le plan et la spécification du lot 0 du 12/10 ; contexte de simulation conservé |
 | [DESK_SIMULATION_ACTION_PLAN_2026-10-08.md](projects/platform/DESK_SIMULATION_ACTION_PLAN_2026-10-08.md) | 08/10 | Premier cadrage de simulation du desk | Historique | À reprendre selon le cadrage multi-Structura ; le laboratoire développé ensuite a été retiré |
 | `PLAN_IMPLEMENTATION_OBJET_PRODUCT.md` | 14/09, suivi 05/10 | Dossier canonique présent sur main : RFQ/indicatif/booking/lifecycle/MtM/VaR/documents ; création interne aux gestes durables | En cours | Reprise historique et consolidation des consommateurs secondaires ; aucun repli MtM/VaR pour un deal sans Product |
 | [ORGANIZATION_ACCESS_DESIGN_2026-09-24.md](projects/platform/ORGANIZATION_ACCESS_DESIGN_2026-09-24.md) | 24/09, suivi 05/10 | Admission, propriété par organisation, habilitations et desks | Cadrage, non implémenté | Invitations, approbations, migration, isolation et recette |

@@ -10,6 +10,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import { useAuthStore } from './auth.js'
+import { usePricingStore } from './pricing.js'
+import { useProductsStore } from './products.js'
+import { useRfqStore } from './rfq.js'
 
 describe('la déconnexion ne laisse rien derrière', () => {
   beforeEach(() => {
@@ -36,5 +39,36 @@ describe('la déconnexion ne laisse rien derrière', () => {
     expect(auth.token).toBeNull()
     expect(auth.user).toBeNull()
     expect(auth.isAuthenticated).toBe(false)
+  })
+})
+
+describe('confidentialité des sessions RFQ bancaires', () => {
+  beforeEach(() => { setActivePinia(createPinia()); localStorage.clear() })
+  it('ne conserve pas le produit bancaire, ses marchés ou son prix après déconnexion', () => {
+    const auth = useAuthStore()
+    const pricing = usePricingStore()
+    const products = useProductsStore()
+    const rfqs = useRfqStore()
+    auth.user = { id: 2, entity_id: 2 }
+    auth.token = 'fictitious-bank-session'
+    pricing.currentProduct = { product_id: 9, name: 'Calcul BNP privé' }
+    pricing.result = { price: .9876 }
+    pricing.globalParams.r = 8
+    pricing.sessionRouteKey = 'product:9:'
+    products.current = pricing.currentProduct
+    products.items = [{ id: 9 }]
+    rfqs.current = { id: 8, model_price: 98.76 }
+    rfqs.history = [{ model_price: 98.76 }]
+    auth.logout()
+    expect(auth.user).toBeNull()
+    expect(auth.token).toBeNull()
+    expect(pricing.currentProduct).toBeNull()
+    expect(pricing.result).toBeNull()
+    expect(pricing.globalParams.r).toBe(3)
+    expect(pricing.sessionRouteKey).toBeNull()
+    expect(products.current).toBeNull()
+    expect(products.items).toEqual([])
+    expect(rfqs.current).toBeNull()
+    expect(rfqs.history).toEqual([])
   })
 })

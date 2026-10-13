@@ -2,6 +2,8 @@
 
 Date : 24/09/2026.
 
+Complément RFQ du 12/10/2026 : la [spécification du lot 1 RFQ](RFQ_NETWORK_LOT_1_SPECIFICATION_2026-10-12.md) détaille les nouveaux dossiers et leurs habilitations. Philippe a retenu le desk pilote avec partage explicite et exclu la migration des anciens dossiers, qui sont des tests. Les considérations générales de reprise historique de cette note ne sont donc pas un préalable au chantier RFQ actuel. Aucun code de ce lot n'est implémenté.
+
 **Statut : cadrage pour un développement ultérieur. Aucun code de ce chantier
 n'est implémenté dans cette session.** Cette note conserve la discussion avec
 Philippe ; elle distingue les décisions explicites des propositions à arbitrer.

@@ -16,7 +16,7 @@ from ..core.references import next_reference
 from ..core.valuation_context import canonical_fingerprint, canonical_json
 from ..db.models import (
     ProductRecord, ProductTermsVersion, ProductRevision, ProductCalculationRun,
-    ProductCommand, User,
+    ProductCommand, RfqOwnership, RfqRequest, User,
 )
 
 
@@ -28,7 +28,29 @@ class ProductError(ValueError):
 
 def owned_record(session: Session, product_id: int, user: User) -> ProductRecord:
     row = session.get(ProductRecord, product_id)
-    if row is None or (row.user_id != user.id and user.role != "admin"):
+    if row is None:
+        raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
+    owner = session.get(User, row.user_id)
+    if owner and owner.username == "__rfq_transport__":
+        raise ProductError("PRODUCT_NOT_FOUND", "Projection technique de réception inaccessible.", 404)
+    from .rfq_bank import case_for_product, private_product_access
+    bank_case = case_for_product(session, product_id)
+    if bank_case:
+        from fastapi import HTTPException
+        try:
+            private_product_access(session, bank_case, user)
+        except HTTPException as exc:
+            raise ProductError("PRODUCT_NOT_FOUND", "Produit privé bancaire introuvable.", 404) from exc
+        return row
+    scoped_rfqs = session.exec(select(RfqRequest).join(
+        RfqOwnership, RfqOwnership.rfq_id == RfqRequest.id).where(
+            RfqRequest.product_id == product_id)).all()
+    if scoped_rfqs:
+        from .rfq_access import effective_rights
+        if row.user_id != user.id or row.entity_id != user.entity_id or any(
+                "price" not in effective_rights(session, rfq, user) for rfq in scoped_rfqs):
+            raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
+    elif row.user_id != user.id and user.role != "admin":
         raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
     return row
 
@@ -146,6 +168,9 @@ def stage_internal_product(
 
 def stage_terms(session: Session, product: Product, terms: ProductTerms, *,
                 actor_id: int, reason: str) -> Product:
+    from .rfq_bank import case_for_product
+    if case_for_product(session, product.product_id):
+        raise ProductError("RFQ_BANK_TERMS_LOCKED", "Les termes reçus sont figés ; demandez un nouveau tour au demandeur.")
     if product.execution:
         raise ProductError("PRODUCT_BOOKED", "Les termes sont bookés. Utilisez le workflow d’amendement.")
     if terms.fingerprint == product.terms_fingerprint:

@@ -1,0 +1,15 @@
+# Lot 1 RFQ — propriété et accès par desk, premier incrément
+
+Date : 12/10/2026. Branche : `codex/rfq-network-lot-0`.
+
+Ce premier incrément rend les nouvelles RFQ persistantes propriétaires d'une organisation et d'un desk pilote explicitement choisi. Le serveur exige que le créateur appartienne à l'organisation du desk et dispose du droit `prepare`. Le Product associé est créé ou repris dans la même organisation. Aucun dossier historique n'est repris ou modifié : sans ligne `rfq_ownerships`, il conserve son contrôle d'accès antérieur par créateur.
+
+Les nouveaux objets sont `rfq_desks`, `rfq_desk_memberships`, `rfq_ownerships` et `rfq_desk_shares`. Une habilitation individuelle active et le périmètre du desk sont nécessaires à chaque lecture ou action. Le rôle technique `admin` et le champ créateur ne donnent aucun accès métier à une nouvelle RFQ. Le desk pilote a les droits de ses membres ; un desk partagé reçoit l'intersection de ses droits individuels et des capacités du partage. Un retrait ou une expiration coupe les requêtes suivantes. Les créations, habilitations, partages et retraits sont audités.
+
+L'administration des desks et des membres se fait dans **Administration → Utilisateurs → Desks RFQ**. La page RFQ propose les desks sur lesquels l'utilisateur peut préparer, montre l'organisation et le desk pilote, et offre un masque de partage aux membres dotés du droit `organize`. Les écrans existants gardent leur défilement interne. Le prix manuel et la préparation du lot 0 restent disponibles pour les membres autorisés.
+
+Les endpoints RFQ contrôlent lecture, préparation, pricing interne, sélection, sollicitation, organisation et booking. La projection `/api/rfq/{id}/terms` expose uniquement les termes du Product liés à cette RFQ ; elle alimente le passage au Pricer sans ouvrir le Product complet ni les autres RFQ de ce Product. La lecture RFQ sans droit `price` masque les hypothèses de modèle et le prix interne. Le partage hors desk pilote masque le contexte CRM. Les accès directs au Product et à l'explorateur admin sont fermés pour les nouveaux dossiers hors périmètre.
+
+Les tests ciblés de ce lot couvrent la création autorisée, la reprise par un collègue, le refus inter-desk et inter-organisation, le partage plafonné, le retrait, la perte d'accès du créateur et l'absence d'accès métier implicite de l'administrateur. Les tests historiques RFQ sont conservés comme cas sans ligne d'ownership ; ils ne déclenchent aucune migration de données.
+
+Le complément livré avec le [lot 2](RFQ_NETWORK_LOT_2_IMPLEMENTATION_2026-10-12.md) ajoute l'affectation et le transfert explicites du responsable et du desk pilote, avec revue des partages, motif, contrôle de version du périmètre et coupure des accès futurs. Une recette multi-utilisateur isolée confirme le retrait du dossier du desk source après transfert. Restent à qualifier l'ensemble des exports, pièces et tâches longues. Les droits de validation et publication bancaire appartiennent aux lots réseau suivants. Le lot 1 ne transporte encore aucune demande vers une banque.

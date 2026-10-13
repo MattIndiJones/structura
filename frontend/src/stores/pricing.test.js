@@ -1489,3 +1489,32 @@ describe('la date de valorisation pilote le marché et le moteur', () => {
     expect(store.result).toBeNull()
   })
 })
+
+describe('le Pricer reprend le contrat de la RFQ liée', () => {
+  it('demande les termes épinglés au serveur RFQ et conserve les hypothèses privées', async () => {
+    const store = await storeRenseigne()
+    store.currentRfqId = 17
+    store.currentProduct = { product_id: 12, terms_version: 2 }
+    const canonical = { ...store.pricingBody(), script: 'AT MATURITY:\n  PAY 1\n', seed: 42 }
+    const parseFetch = globalThis.fetch
+    const fetchMock = vi.fn(async (url, opts) => {
+      if (String(url).includes('/api/parse')) return parseFetch(url, opts)
+      if (url === '/api/rfq/17/pricing-input') return { ok: true, json: async () => ({ pricing_input: canonical }) }
+      if (url === '/api/price') return { ok: true, json: async () => ({ price: .99 }) }
+      return { ok: false, json: async () => ({}) }
+    })
+    globalThis.fetch = fetchMock
+
+    await store.runPricing()
+
+    expect(store.error).toBeNull()
+    expect(store.result.price).toBe(.99)
+    const composition = JSON.parse(fetchMock.mock.calls.find(([url]) => url === '/api/rfq/17/pricing-input')[1].body)
+    expect(composition.expected_terms_version).toBe(2)
+    expect(composition.context.r).toBe(canonical.r)
+    expect(composition.context).not.toHaveProperty('script')
+    expect(composition.context.underlyings[0]).not.toHaveProperty('ticker')
+    const engine = JSON.parse(fetchMock.mock.calls.find(([url]) => url === '/api/price')[1].body)
+    expect(engine.script).toBe(canonical.script)
+  })
+})

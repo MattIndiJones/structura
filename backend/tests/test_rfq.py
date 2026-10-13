@@ -39,6 +39,12 @@ from backend.app.services.product_repository import load_product
 USER = SimpleNamespace(id=1, entity_id=1)
 
 
+@pytest.fixture(autouse=True)
+def historical_rfq_cases(monkeypatch):
+    """Existing RFQ tests exercise rows without the new desk-ownership record."""
+    monkeypatch.setattr(rfq_api, "require_create_desk", lambda *_: None)
+
+
 def _make_session() -> Session:
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
@@ -170,6 +176,22 @@ def test_to_trade_calendar_is_rejected_before_the_rfq_is_created():
     assert exc.value.status_code == 422
     assert exc.value.detail["code"] == "CONTRACT_CALENDAR_INVALID"
     assert s.exec(select(RfqRequest)).all() == []
+
+
+@pytest.mark.parametrize("malformed", [["2027-10-12"], "2027-10-12", 42])
+def test_to_trade_schedule_shape_is_rejected_before_persistence(malformed):
+    s = _make_session()
+    with pytest.raises(HTTPException) as exc:
+        rfq_api.create_rfq(rfq_api.RfqCreate(
+            name="Calendrier mal formé", kind="to_trade",
+            script_snapshot="CONSTAT() OBS\nAT OBS:\n  PAY 1",
+            params=_rfq_params(constats={"OBS": malformed}),
+        ), USER, s)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "CONTRACT_CALENDAR_INVALID"
+    assert "configuration de calendrier" in exc.value.detail["message"]
+    assert not s.exec(select(RfqRequest)).all()
+    assert not s.exec(select(ProductRecord)).all()
 
 
 def test_multi_underlying_rfq_requires_a_complete_correlation_matrix():

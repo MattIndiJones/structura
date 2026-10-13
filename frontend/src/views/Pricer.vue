@@ -86,7 +86,7 @@
     <main class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-0 items-stretch">
 
       <!-- LEFT: définition produit, marché, booking et cycle de vie -->
-      <div class="border-r border-slate-800 flex flex-col">
+      <div class="border-r border-slate-800 flex flex-col min-h-0 overflow-hidden">
         <div class="flex gap-1 border-b border-slate-800 bg-slate-900/50 px-2 py-1.5 overflow-x-auto">
           <button
             v-for="tab in leftTabs" :key="tab.id"
@@ -95,7 +95,7 @@
             {{ tab.label }}
           </button>
         </div>
-        <div class="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 flex flex-col gap-5">
           <PayScriptEditor v-show="store.leftTab === 'script'" />
           <EconomicsTab    v-show="store.leftTab === 'economics'" />
           <MarketParams    v-show="store.leftTab === 'params'" />
@@ -109,7 +109,7 @@
       </div>
 
       <!-- RIGHT: Results tabs -->
-      <div class="flex flex-col">
+      <div class="flex flex-col min-h-0 overflow-hidden">
         <div class="flex gap-1 border-b border-slate-800 bg-slate-900/50 overflow-x-auto px-2 py-1.5">
           <button
             v-for="tab in rightTabs" :key="tab.id"
@@ -118,7 +118,7 @@
             {{ tab.label }}
           </button>
         </div>
-        <div class="flex-1 overflow-y-auto p-5">
+        <div class="flex-1 min-h-0 overflow-y-auto p-5">
           <ResultsPanel v-show="store.rightTab !== 'kid' && store.rightTab !== 'emt'" />
           <KidPanel     v-if="store.rightTab === 'kid'" />
           <EmtPanel     v-if="store.rightTab === 'emt'" />

@@ -1,0 +1,18 @@
+{
+  "moduleFilter": "4 modules Échanges affichés",
+  "accountFilter": "2 comptes BNP affichés",
+  "accountTabs": "Bascule des trois vues disponible",
+  "desktop": {
+    "width": 1280,
+    "height": 720,
+    "documentHeight": 720
+  },
+  "narrow": {
+    "width": 760,
+    "height": 600,
+    "documentWidth": 760,
+    "documentHeight": 600,
+    "mainHeight": 550,
+    "mainContent": 2397
+  }
+}

@@ -357,7 +357,10 @@ def test_frozen_object_ne_partage_pas_ses_structures_internes():
     assert frozen.to_dict()["rows"][0]["date"] == "2027-01-01"
 
 
-def test_rfq_consomme_les_termes_du_product_et_l_enrichit(product_client):
+def test_rfq_consomme_les_termes_du_product_et_l_enrichit(product_client, monkeypatch):
+    # This legacy Product-only fixture deliberately has no organization or desk.
+    from backend.app.api import rfq as rfq_api
+    monkeypatch.setattr(rfq_api, "require_create_desk", lambda *_: None)
     product = _create(product_client, key="product-for-rfq")
     response = product_client.post("/api/rfq", json={
         "product_id": product["product_id"],
@@ -383,7 +386,9 @@ def test_rfq_consomme_les_termes_du_product_et_l_enrichit(product_client):
     assert refreshed["rfqs"][0]["reference"] == rfq["reference"]
 
 
-def test_rfq_depuis_pricer_conserve_tout_le_panier_du_product(product_client):
+def test_rfq_depuis_pricer_conserve_tout_le_panier_du_product(product_client, monkeypatch):
+    from backend.app.api import rfq as rfq_api
+    monkeypatch.setattr(rfq_api, "require_create_desk", lambda *_: None)
     underlyings = [
         {"name": "LVMH", "ticker": "MC.PA", "ccy": "EUR",
          "s0": 1.0, "sigma": 0.21, "q": 0.018},

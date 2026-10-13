@@ -1,5 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { usePricingStore } from './pricing.js'
+import { useProductsStore } from './products.js'
+import { useRfqStore } from './rfq.js'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('auth_token') || null)
@@ -55,6 +58,16 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     user.value  = null
     localStorage.removeItem('auth_token')
+    usePricingStore().releaseSession()
+    const products = useProductsStore()
+    products.release()
+    products.items = []
+    products.error = ''
+    const rfqs = useRfqStore()
+    rfqs.list = []
+    rfqs.current = null
+    rfqs.lastPricing = null
+    rfqs.history = []
   }
 
   return { token, user, isAuthenticated, isAdmin, readOnly, login, fetchMe, openConsultation, logout, authHeaders }

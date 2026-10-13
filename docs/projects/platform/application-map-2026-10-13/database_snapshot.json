@@ -1,0 +1,6007 @@
+{
+  "observed_at": "2026-10-13T06:32:09.213984+00:00",
+  "database": "C:\\Users\\admin\\GitHub\\structura\\backend\\data\\structura.db",
+  "users": [
+    {
+      "id": 1,
+      "username": "admin",
+      "email": "admin@structura.local",
+      "role": "admin",
+      "entity_id": 1,
+      "is_active": 1,
+      "created_at": "2026-08-01 10:16:34.754382"
+    },
+    {
+      "id": 2,
+      "username": "test",
+      "email": "test@structura.local",
+      "role": "user",
+      "entity_id": 1,
+      "is_active": 1,
+      "created_at": "2026-08-01 10:16:34.996356"
+    },
+    {
+      "id": 3,
+      "username": "uat.ops.maker",
+      "email": "uat.ops.maker@structura.local",
+      "role": "ops_maker",
+      "entity_id": 1,
+      "is_active": 1,
+      "created_at": "2026-08-01 10:16:35.340358"
+    },
+    {
+      "id": 4,
+      "username": "uat.ops.checker",
+      "email": "uat.ops.checker@structura.local",
+      "role": "checker",
+      "entity_id": 1,
+      "is_active": 1,
+      "created_at": "2026-08-01 10:16:35.582007"
+    },
+    {
+      "id": 5,
+      "username": "rc_independent_scope_20261002",
+      "email": "rc-scope-20261002@example.invalid",
+      "role": "user",
+      "entity_id": 2,
+      "is_active": 1,
+      "created_at": "2026-10-02 12:27:43.000326"
+    },
+    {
+      "id": 6,
+      "username": "rc_20261002_ops_maker",
+      "email": "rc_20261002_ops_maker@uat.invalid",
+      "role": "ops_maker",
+      "entity_id": 1,
+      "is_active": 1,
+      "created_at": "2026-10-02 12:29:18.989255"
+    },
+    {
+      "id": 7,
+      "username": "rc_20261002_checker",
+      "email": "rc_20261002_checker@uat.invalid",
+      "role": "checker",
+      "entity_id": 1,
+      "is_active": 1,
+      "created_at": "2026-10-02 12:29:19.234141"
+    },
+    {
+      "id": 8,
+      "username": "rc_independent_deal_scope_20261002",
+      "email": "rc-deal-scope-20261002@example.invalid",
+      "role": "user",
+      "entity_id": 2,
+      "is_active": 1,
+      "created_at": "2026-10-02 13:17:59.547696"
+    },
+    {
+      "id": 9,
+      "username": "bnp.admin",
+      "email": "bnp.admin@structura.invalid",
+      "role": "admin",
+      "entity_id": 3,
+      "is_active": 1,
+      "created_at": "2026-10-12 19:05:59.933170"
+    },
+    {
+      "id": 10,
+      "username": "bnp.pricing",
+      "email": "bnp.pricing@structura.invalid",
+      "role": "user",
+      "entity_id": 3,
+      "is_active": 1,
+      "created_at": "2026-10-12 19:06:00.154211"
+    }
+  ],
+  "entities": [
+    {
+      "id": 1,
+      "name": "Demo",
+      "created_at": "2026-08-01 10:16:34.526125"
+    },
+    {
+      "id": 2,
+      "name": "RC Independent Access Control Entity 20261002",
+      "created_at": "2026-10-02 12:27:42.743313"
+    },
+    {
+      "id": 3,
+      "name": "BNP",
+      "created_at": "2026-10-12 19:05:59.710172"
+    }
+  ],
+  "counts": {
+    "admin_audit_logs": 46,
+    "affiliations": 15,
+    "alerts": 13,
+    "amc_studies": 1,
+    "app_migrations": 3,
+    "audit_events": 3814,
+    "ccr_collateral_positions": 3,
+    "ccr_credit_limits": 15,
+    "ccr_credit_overrides": 0,
+    "ccr_credit_profiles": 7,
+    "ccr_csa_agreements": 2,
+    "ccr_exposure_calculations": 15,
+    "ccr_master_agreements": 4,
+    "ccr_netting_sets": 5,
+    "client_coverage": 11,
+    "client_documentation_refs": 0,
+    "client_import_batches": 1,
+    "client_mandates": 3,
+    "client_preference_statements": 4,
+    "client_trade_history": 81,
+    "client_trading_preferences": 0,
+    "clients": 11,
+    "compute_batches": 5,
+    "compute_jobs": 1201,
+    "constraint_definitions": 0,
+    "contact_coverage": 3,
+    "counterparties": 21,
+    "deal_contract_versions": 0,
+    "deal_events": 322,
+    "deal_portfolio_memberships": 10,
+    "deals": 38,
+    "documents": 0,
+    "emt_records": 1,
+    "entities": 3,
+    "folders": 0,
+    "indicatives": 0,
+    "interaction_follow_ups": 2,
+    "interaction_participants": 6,
+    "interactions": 5,
+    "kid_records": 1,
+    "lifecycle_proposals": 10,
+    "official_fixing_versions": 70,
+    "opportunities": 13,
+    "opportunity_participants": 2,
+    "optimizer_researches": 0,
+    "persons": 13,
+    "portfolios": 7,
+    "product_calculation_runs": 126,
+    "product_commands": 153,
+    "product_revisions": 1050,
+    "product_terms_versions": 85,
+    "products": 76,
+    "reference_counters": 149,
+    "rfq_bank_cases": 0,
+    "rfq_bank_publication_policies": 0,
+    "rfq_bank_quote_drafts": 0,
+    "rfq_channels": 0,
+    "rfq_desk_memberships": 2,
+    "rfq_desk_shares": 0,
+    "rfq_desks": 2,
+    "rfq_exchange_rounds": 1,
+    "rfq_installation": 1,
+    "rfq_ownerships": 1,
+    "rfq_provider_contacts": 0,
+    "rfq_providers": 10,
+    "rfq_quote_publications": 0,
+    "rfq_quotes": 116,
+    "rfq_relationship_sides": 2,
+    "rfq_relationships": 1,
+    "rfq_remote_links": 0,
+    "rfq_requests": 43,
+    "rfq_round_links": 0,
+    "rfq_send_commands": 1,
+    "rfq_solicitations": 1,
+    "rfq_transport_attempts": 0,
+    "rfq_transport_inbox": 0,
+    "rfq_transport_outbox": 0,
+    "scheduler_runs": 12,
+    "scripts": 0,
+    "shock_runs": 21,
+    "trade_amendment_requests": 1,
+    "trading_executions": 0,
+    "trading_relationships": 1,
+    "uat_generation_batches": 28,
+    "underlyings": 65,
+    "users": 10,
+    "valuation_note_versions": 10,
+    "valuation_notes": 21,
+    "valuation_runs": 47
+  },
+  "per_user": {
+    "deals": [
+      {
+        "user_id": 2,
+        "count": 38
+      }
+    ],
+    "contact_coverage": [
+      {
+        "user_id": 2,
+        "count": 3
+      }
+    ],
+    "alerts": [
+      {
+        "user_id": 2,
+        "count": 13
+      }
+    ],
+    "valuation_notes": [
+      {
+        "user_id": 2,
+        "count": 21
+      }
+    ],
+    "documents": [],
+    "trading_executions": [],
+    "indicatives": [],
+    "valuation_runs": [
+      {
+        "user_id": 1,
+        "count": 3
+      },
+      {
+        "user_id": 2,
+        "count": 44
+      }
+    ],
+    "amc_studies": [
+      {
+        "user_id": 1,
+        "count": 1
+      }
+    ],
+    "compute_batches": [
+      {
+        "user_id": 2,
+        "count": 5
+      }
+    ],
+    "product_calculation_runs": [
+      {
+        "user_id": 1,
+        "count": 8
+      },
+      {
+        "user_id": 2,
+        "count": 118
+      }
+    ],
+    "product_commands": [
+      {
+        "user_id": 1,
+        "count": 8
+      },
+      {
+        "user_id": 2,
+        "count": 145
+      }
+    ],
+    "rfq_requests": [
+      {
+        "user_id": 1,
+        "count": 1
+      },
+      {
+        "user_id": 2,
+        "count": 42
+      }
+    ],
+    "kid_records": [
+      {
+        "user_id": 2,
+        "count": 1
+      }
+    ],
+    "interactions": [
+      {
+        "user_id": 1,
+        "count": 4
+      },
+      {
+        "user_id": 2,
+        "count": 1
+      }
+    ],
+    "products": [
+      {
+        "user_id": 1,
+        "count": 4
+      },
+      {
+        "user_id": 2,
+        "count": 72
+      }
+    ],
+    "rfq_desk_memberships": [
+      {
+        "user_id": 2,
+        "count": 1
+      },
+      {
+        "user_id": 10,
+        "count": 1
+      }
+    ],
+    "folders": [],
+    "portfolios": [
+      {
+        "user_id": 1,
+        "count": 2
+      },
+      {
+        "user_id": 2,
+        "count": 5
+      }
+    ],
+    "valuation_note_versions": [
+      {
+        "user_id": 2,
+        "count": 10
+      }
+    ],
+    "scripts": [],
+    "optimizer_researches": [],
+    "client_coverage": [
+      {
+        "user_id": 1,
+        "count": 9
+      },
+      {
+        "user_id": 2,
+        "count": 2
+      }
+    ],
+    "shock_runs": [
+      {
+        "user_id": 2,
+        "count": 21
+      }
+    ],
+    "client_import_batches": [
+      {
+        "user_id": 1,
+        "count": 1
+      }
+    ],
+    "emt_records": [
+      {
+        "user_id": 2,
+        "count": 1
+      }
+    ]
+  },
+  "desks": [
+    {
+      "id": 1,
+      "entity_id": 1,
+      "name": "Sales",
+      "active": 1,
+      "created_at": "2026-10-12 19:05:59.696171"
+    },
+    {
+      "id": 2,
+      "entity_id": 3,
+      "name": "Pricing",
+      "active": 1,
+      "created_at": "2026-10-12 19:06:00.172204"
+    }
+  ],
+  "memberships": [
+    {
+      "id": 1,
+      "desk_id": 2,
+      "user_id": 10,
+      "rights_json": "[\"prepare\", \"price\", \"publish_quote\", \"read\", \"validate_quote\"]",
+      "active": 1,
+      "expires_at": null,
+      "updated_at": "2026-10-12 19:06:00.184205"
+    },
+    {
+      "id": 2,
+      "desk_id": 1,
+      "user_id": 2,
+      "rights_json": "[\"prepare\", \"price\", \"read\", \"solicit\"]",
+      "active": 1,
+      "expires_at": null,
+      "updated_at": "2026-10-12 19:10:29.870718"
+    }
+  ],
+  "ownership": [
+    {
+      "rfq_id": 91,
+      "entity_id": 1,
+      "pilot_desk_id": 1,
+      "responsible_user_id": 2
+    }
+  ],
+  "rfqs": [
+    {
+      "id": 48,
+      "reference": "UAT-RFQ-20261002-083841-01B76C-001",
+      "name": "UAT 001 — Autocall Athena — Trade récent — actif [20261002-083841-01B76C]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 27,
+      "selected_quote_id": 111
+    },
+    {
+      "id": 49,
+      "reference": "UAT-RFQ-20261002-083841-01B76C-002",
+      "name": "UAT 002 — Phoenix Mémoire — Forward start à 3 mois [20261002-083841-01B76C]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 28,
+      "selected_quote_id": 115
+    },
+    {
+      "id": 50,
+      "reference": "UAT-RFQ-20261002-083841-01B76C-003",
+      "name": "UAT 003 — Autocall Athena — Trade ancien 1 an — fixings en attente [20261002-083841-01B76C]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 29,
+      "selected_quote_id": 118
+    },
+    {
+      "id": 51,
+      "reference": "UAT-RFQ-20261002-083841-01B76C-004",
+      "name": "UAT 004 — Phoenix Mémoire — Trade ancien 2 ans — fixings officialisés [20261002-083841-01B76C]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 30,
+      "selected_quote_id": 119
+    },
+    {
+      "id": 52,
+      "reference": "UAT-RFQ-20261002-083841-01B76C-005",
+      "name": "UAT 005 — Capital Garanti — Maturité passée — traitement en attente [20261002-083841-01B76C]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 31,
+      "selected_quote_id": 124
+    },
+    {
+      "id": 53,
+      "reference": "UAT-RFQ-20261002-083841-01B76C-006",
+      "name": "UAT 006 — Autocall Athena — Rappel anticipé appliqué [20261002-083841-01B76C]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 32,
+      "selected_quote_id": 127
+    },
+    {
+      "id": 54,
+      "reference": "UAT-RFQ-20261002-083841-01B76C-007",
+      "name": "UAT 007 — Reverse Convertible — Maturité remboursée sans KI [20261002-083841-01B76C]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 33,
+      "selected_quote_id": 128
+    },
+    {
+      "id": 55,
+      "reference": "UAT-RFQ-20261002-083841-01B76C-008",
+      "name": "UAT 008 — Phoenix Mémoire — Maturité avec perte KI [20261002-083841-01B76C]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 34,
+      "selected_quote_id": 132
+    },
+    {
+      "id": 56,
+      "reference": "UAT-RFQ-20261002-AUDIT-SEVEN-001",
+      "name": "UAT AUDIT D01 — Autocall mono annuel memoire [20261002-AUDIT-SEVEN]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 35,
+      "selected_quote_id": 135
+    },
+    {
+      "id": 57,
+      "reference": "UAT-RFQ-20261002-AUDIT-SEVEN-002",
+      "name": "UAT AUDIT D02 — Phoenix Memory trimestriel [20261002-AUDIT-SEVEN]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 36,
+      "selected_quote_id": 139
+    },
+    {
+      "id": 58,
+      "reference": "UAT-RFQ-20261002-AUDIT-SEVEN-003",
+      "name": "UAT AUDIT D03 — Worst-of trois indices quanto [20261002-AUDIT-SEVEN]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 37,
+      "selected_quote_id": 140
+    },
+    {
+      "id": 59,
+      "reference": "UAT-RFQ-20261002-AUDIT-SEVEN-004",
+      "name": "UAT AUDIT D05 — Custom coupon performance cappe [20261002-AUDIT-SEVEN]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 39,
+      "selected_quote_id": 145
+    },
+    {
+      "id": 60,
+      "reference": "UAT-RFQ-20261002-AUDIT-SEVEN-005",
+      "name": "UAT AUDIT D06 — Phoenix proximite barriere 100 [20261002-AUDIT-SEVEN]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 40,
+      "selected_quote_id": 148
+    },
+    {
+      "id": 61,
+      "reference": "UAT-RFQ-20261002-AUDIT-SEVEN-006",
+      "name": "UAT AUDIT D07 — Worst-of dix ans volatilite stressee [20261002-AUDIT-SEVEN]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 41,
+      "selected_quote_id": 149
+    },
+    {
+      "id": 62,
+      "reference": "UAT-RFQ-20261002-AUDIT-SEVEN-007",
+      "name": "UAT AUDIT D04 — Capital protege participation cappee [20261002-AUDIT-SEVEN]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 38,
+      "selected_quote_id": 152
+    },
+    {
+      "id": 63,
+      "reference": "UAT-RFQ-20261002-AUDIT-FINAL-001",
+      "name": "UAT AUDIT D01 — Autocall mono annuel memoire [20261002-AUDIT-FINAL]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 42,
+      "selected_quote_id": 156
+    },
+    {
+      "id": 64,
+      "reference": "UAT-RFQ-20261002-AUDIT-FINAL-002",
+      "name": "UAT AUDIT D02 — Phoenix Memory trimestriel [20261002-AUDIT-FINAL]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 43,
+      "selected_quote_id": 160
+    },
+    {
+      "id": 65,
+      "reference": "UAT-RFQ-20261002-AUDIT-FINAL-003",
+      "name": "UAT AUDIT D03 — Worst-of trois indices quanto [20261002-AUDIT-FINAL]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 44,
+      "selected_quote_id": 161
+    },
+    {
+      "id": 66,
+      "reference": "UAT-RFQ-20261002-AUDIT-FINAL-004",
+      "name": "UAT AUDIT D05 — Custom coupon performance cappe [20261002-AUDIT-FINAL]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 45,
+      "selected_quote_id": 166
+    },
+    {
+      "id": 67,
+      "reference": "UAT-RFQ-20261002-AUDIT-FINAL-005",
+      "name": "UAT AUDIT D06 — Phoenix proximite barriere 100 [20261002-AUDIT-FINAL]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 46,
+      "selected_quote_id": 169
+    },
+    {
+      "id": 68,
+      "reference": "UAT-RFQ-20261002-AUDIT-FINAL-006",
+      "name": "UAT AUDIT D07 — Worst-of dix ans volatilite stressee [20261002-AUDIT-FINAL]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 47,
+      "selected_quote_id": 170
+    },
+    {
+      "id": 69,
+      "reference": "UAT-RFQ-20261002-103510-55F4A6-001",
+      "name": "UAT 001 — Autocall Athena — Trade récent — actif [20261002-103510-55F4A6]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 48,
+      "selected_quote_id": 173
+    },
+    {
+      "id": 70,
+      "reference": "UAT-RFQ-20261002-103515-854463-001",
+      "name": "UAT 001 — Phoenix Mémoire — Trade récent — actif [20261002-103515-854463]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 49,
+      "selected_quote_id": 175
+    },
+    {
+      "id": 71,
+      "reference": "UAT-RFQ-20261002-103521-BC6554-001",
+      "name": "UAT 001 — Autocall Athena — Trade récent — actif [20261002-103521-BC6554]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 50,
+      "selected_quote_id": 177
+    },
+    {
+      "id": 72,
+      "reference": "UAT-RFQ-20261002-103526-1DA164-001",
+      "name": "UAT 001 — Capital Garanti — Trade récent — actif [20261002-103526-1DA164]",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 51,
+      "selected_quote_id": 179
+    },
+    {
+      "id": 73,
+      "reference": "RFQ-20261002-001",
+      "name": "RC netting +10/-8 vente nominal 10",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 53,
+      "selected_quote_id": 181
+    },
+    {
+      "id": 74,
+      "reference": "RFQ-20261002-002",
+      "name": "RC netting +10/-8 achat nominal 8",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 54,
+      "selected_quote_id": 184
+    },
+    {
+      "id": 75,
+      "reference": "RFQ-20261002-003",
+      "name": "UAT RC 20261002 A consultation neuve",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 55,
+      "selected_quote_id": 187
+    },
+    {
+      "id": 76,
+      "reference": "RFQ-20261002-004",
+      "name": "UAT RC 20261002 B consultation neuve",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 56,
+      "selected_quote_id": 190
+    },
+    {
+      "id": 77,
+      "reference": "RFQ-20261002-005",
+      "name": "UAT RC 20261002 C consultation neuve",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 57,
+      "selected_quote_id": 194
+    },
+    {
+      "id": 78,
+      "reference": "RFQ-20261002-006",
+      "name": "RC crédit limit dépassement vente nominal 2000",
+      "kind": "to_trade",
+      "status": "retenue",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 59,
+      "selected_quote_id": 196
+    },
+    {
+      "id": 79,
+      "reference": "RFQ-20261002-007",
+      "name": "UAT RC 20261002 D consultation neuve",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 58,
+      "selected_quote_id": 199
+    },
+    {
+      "id": 80,
+      "reference": "RFQ-20261002-008",
+      "name": "UAT RC 20261002 H consultation neuve",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 60,
+      "selected_quote_id": 204
+    },
+    {
+      "id": 81,
+      "reference": "RFQ-20261002-009",
+      "name": "UAT RC 20261002 E consultation neuve",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 61,
+      "selected_quote_id": 207
+    },
+    {
+      "id": 82,
+      "reference": "RFQ-20261002-010",
+      "name": "UAT RC 20261002 F consultation neuve",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 62,
+      "selected_quote_id": 210
+    },
+    {
+      "id": 83,
+      "reference": "RFQ-20261002-011",
+      "name": "UAT RC 20261002 G consultation neuve",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 63,
+      "selected_quote_id": 213
+    },
+    {
+      "id": 84,
+      "reference": "RFQ-20261002-012",
+      "name": "UAT RC 20261002 B-CALL",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 64,
+      "selected_quote_id": 215
+    },
+    {
+      "id": 85,
+      "reference": "RFQ-20261002-013",
+      "name": "UAT RC 20261002 B-MAT-KI",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 65,
+      "selected_quote_id": 218
+    },
+    {
+      "id": 86,
+      "reference": "RFQ-20261002-014",
+      "name": "UAT RC 20261002 C-EDGE",
+      "kind": "to_trade",
+      "status": "clos",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 66,
+      "selected_quote_id": 221
+    },
+    {
+      "id": 87,
+      "reference": "RFQ-20261002-015",
+      "name": "UAT RC consultation cas limites autonome",
+      "kind": "to_trade",
+      "status": "sans_suite",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 55,
+      "selected_quote_id": 224
+    },
+    {
+      "id": 88,
+      "reference": "RFQ-20261002-016",
+      "name": "UAT RC duplicate consultation autonome",
+      "kind": "to_trade",
+      "status": "draft",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 55,
+      "selected_quote_id": null
+    },
+    {
+      "id": 89,
+      "reference": "RFQ-20261012-001",
+      "name": "Autocall Test",
+      "kind": "to_trade",
+      "status": "draft",
+      "user_id": 1,
+      "entity_id": 1,
+      "product_id": 75,
+      "selected_quote_id": null
+    },
+    {
+      "id": 91,
+      "reference": "RFQ-20261012-003",
+      "name": "Autocall Test · BNP",
+      "kind": "to_trade",
+      "status": "envoye",
+      "user_id": 2,
+      "entity_id": 1,
+      "product_id": 76,
+      "selected_quote_id": null
+    }
+  ],
+  "rounds": [
+    {
+      "id": 1,
+      "rfq_id": 91,
+      "number": 1,
+      "state": "OPEN",
+      "terms_version": 1,
+      "terms_fingerprint": "d8113f18dd5643dac8205edefe9ae8676a56f5dc682dc6c23487749cb7cc79ea"
+    }
+  ],
+  "solicitations": [
+    {
+      "id": 1,
+      "round_id": 1,
+      "relationship_id": 1,
+      "recipient_entity_id": 3,
+      "recipient_desk_id": 2,
+      "sent_at": "2026-10-12 19:18:38.336450",
+      "delivered_at": "2026-10-12 19:18:38.336450",
+      "read_at": null
+    }
+  ],
+  "trading": [
+    {
+      "id": 1,
+      "entity_id": 1,
+      "counterparty_id": 10,
+      "reference": "Test BNP",
+      "version": 1,
+      "terms_json": "{\"counterparty_id\":10,\"reference\":\"Test BNP\",\"status\":\"ACTIVE\",\"effective_date\":\"2026-10-12\",\"expiry_date\":null,\"currency\":\"EUR\",\"note_distribution_allowed\":true,\"otc_allowed\":false,\"documentation_reference\":\"TOTO\",\"gross_notional_limit\":100000000.0,\"master_agreement_id\":null,\"csa_id\":null,\"csa_required\":false,\"settlement\":\"DVP\",\"notes\":\"\"}"
+    }
+  ],
+  "relationships": [
+    {
+      "id": 1,
+      "requester_entity_id": 1,
+      "partner_entity_id": 3,
+      "receiver_desk_id": 2,
+      "reference": "DEMO-BNP-RFQ",
+      "version": 2,
+      "terms_json": "{\"formats\":[\"EMTN\"],\"instruments\":[\"NOTE\"],\"payoff_families\":[\"Autocall\"],\"currencies\":[\"CHF\"],\"min_notional\":1000000.0,\"max_notional\":1000000.0,\"effective_date\":\"2026-10-12\",\"expiry_date\":null,\"solicitation_allowed\":true,\"indicative_allowed\":false,\"to_trade_allowed\":true,\"treatment_allowed\":false,\"documentation_reference\":\"\",\"policy\":\"RFQ_V1\"}"
+    }
+  ],
+  "relation_sides": [
+    {
+      "relationship_id": 1,
+      "entity_id": 1,
+      "counterparty_id": 10,
+      "trading_relationship_id": null,
+      "recognized_version": 2,
+      "suspended": 0
+    },
+    {
+      "relationship_id": 1,
+      "entity_id": 3,
+      "counterparty_id": 21,
+      "trading_relationship_id": null,
+      "recognized_version": 2,
+      "suspended": 0
+    }
+  ],
+  "providers": [
+    {
+      "id": 1,
+      "label": "Saisie manuelle",
+      "counterparty_id": null,
+      "active": 1
+    },
+    {
+      "id": 2,
+      "label": "UBS",
+      "counterparty_id": null,
+      "active": 1
+    },
+    {
+      "id": 3,
+      "label": "Vontobel (deritrade)",
+      "counterparty_id": null,
+      "active": 1
+    },
+    {
+      "id": 4,
+      "label": "Leonteq",
+      "counterparty_id": null,
+      "active": 1
+    },
+    {
+      "id": 5,
+      "label": "BNP Paribas",
+      "counterparty_id": null,
+      "active": 1
+    },
+    {
+      "id": 6,
+      "label": "Société Générale",
+      "counterparty_id": null,
+      "active": 1
+    },
+    {
+      "id": 7,
+      "label": "RC CTP1 fournisseur fictif",
+      "counterparty_id": 17,
+      "active": 1
+    },
+    {
+      "id": 8,
+      "label": "RC CTP2 fournisseur fictif",
+      "counterparty_id": 18,
+      "active": 1
+    },
+    {
+      "id": 9,
+      "label": "RC CTP3 fournisseur fictif",
+      "counterparty_id": 19,
+      "active": 1
+    },
+    {
+      "id": 10,
+      "label": "RC CTP4 fournisseur fictif",
+      "counterparty_id": 20,
+      "active": 1
+    }
+  ],
+  "counterparties": [
+    {
+      "id": 1,
+      "name": "JP Morgan",
+      "active": 1
+    },
+    {
+      "id": 2,
+      "name": "Goldman Sachs",
+      "active": 1
+    },
+    {
+      "id": 3,
+      "name": "Morgan Stanley",
+      "active": 1
+    },
+    {
+      "id": 4,
+      "name": "Bank of America",
+      "active": 1
+    },
+    {
+      "id": 5,
+      "name": "Citigroup",
+      "active": 1
+    },
+    {
+      "id": 6,
+      "name": "UBS",
+      "active": 1
+    },
+    {
+      "id": 7,
+      "name": "Barclays",
+      "active": 1
+    },
+    {
+      "id": 8,
+      "name": "HSBC",
+      "active": 1
+    },
+    {
+      "id": 9,
+      "name": "Deutsche Bank",
+      "active": 1
+    },
+    {
+      "id": 10,
+      "name": "BNP Paribas",
+      "active": 1
+    },
+    {
+      "id": 11,
+      "name": "Société Générale",
+      "active": 1
+    },
+    {
+      "id": 12,
+      "name": "Crédit Agricole CIB",
+      "active": 1
+    },
+    {
+      "id": 13,
+      "name": "Natixis",
+      "active": 1
+    },
+    {
+      "id": 14,
+      "name": "Santander",
+      "active": 1
+    },
+    {
+      "id": 15,
+      "name": "Nomura",
+      "active": 1
+    },
+    {
+      "id": 16,
+      "name": "Mizuho",
+      "active": 1
+    },
+    {
+      "id": 17,
+      "name": "RC 20261002 CTP1 fictive",
+      "active": 1
+    },
+    {
+      "id": 18,
+      "name": "RC 20261002 CTP2 fictive",
+      "active": 1
+    },
+    {
+      "id": 19,
+      "name": "RC 20261002 CTP3 fictive",
+      "active": 1
+    },
+    {
+      "id": 20,
+      "name": "RC 20261002 CTP4 fictive",
+      "active": 1
+    },
+    {
+      "id": 21,
+      "name": "Demo",
+      "active": 1
+    }
+  ],
+  "campaigns": [],
+  "source_branch": "codex/rfq-network-lot-0",
+  "source_head": "e5b17c8",
+  "api_routes": [
+    {
+      "module": "admin",
+      "function": "uat_generator_config",
+      "method": "GET",
+      "path": "/uat-generator/config",
+      "line": 93
+    },
+    {
+      "module": "admin",
+      "function": "uat_generator_batches",
+      "method": "GET",
+      "path": "/uat-generator/batches",
+      "line": 101
+    },
+    {
+      "module": "admin",
+      "function": "uat_generator_preview",
+      "method": "POST",
+      "path": "/uat-generator/preview",
+      "line": 109
+    },
+    {
+      "module": "admin",
+      "function": "uat_generator_create",
+      "method": "POST",
+      "path": "/uat-generator/batches",
+      "line": 118
+    },
+    {
+      "module": "admin",
+      "function": "uat_generator_delete",
+      "method": "DELETE",
+      "path": "/uat-generator/batches/{batch_id}",
+      "line": 127
+    },
+    {
+      "module": "admin",
+      "function": "list_rfq_providers",
+      "method": "GET",
+      "path": "/rfq-providers",
+      "line": 138
+    },
+    {
+      "module": "admin",
+      "function": "create_rfq_provider",
+      "method": "POST",
+      "path": "/rfq-providers",
+      "line": 148
+    },
+    {
+      "module": "admin",
+      "function": "update_rfq_provider",
+      "method": "PATCH",
+      "path": "/rfq-providers/{provider_id}",
+      "line": 164
+    },
+    {
+      "module": "admin",
+      "function": "delete_rfq_provider",
+      "method": "DELETE",
+      "path": "/rfq-providers/{provider_id}",
+      "line": 182
+    },
+    {
+      "module": "admin",
+      "function": "list_rfq_provider_contacts",
+      "method": "GET",
+      "path": "/rfq-providers/{provider_id}/contacts",
+      "line": 198
+    },
+    {
+      "module": "admin",
+      "function": "create_rfq_provider_contact",
+      "method": "POST",
+      "path": "/rfq-providers/{provider_id}/contacts",
+      "line": 211
+    },
+    {
+      "module": "admin",
+      "function": "update_rfq_provider_contact",
+      "method": "PATCH",
+      "path": "/rfq-providers/{provider_id}/contacts/{contact_id}",
+      "line": 234
+    },
+    {
+      "module": "admin",
+      "function": "list_counterparties",
+      "method": "GET",
+      "path": "/counterparties",
+      "line": 291
+    },
+    {
+      "module": "admin",
+      "function": "create_counterparty",
+      "method": "POST",
+      "path": "/counterparties",
+      "line": 300
+    },
+    {
+      "module": "admin",
+      "function": "update_counterparty",
+      "method": "PATCH",
+      "path": "/counterparties/{cpty_id}",
+      "line": 318
+    },
+    {
+      "module": "admin",
+      "function": "delete_counterparty",
+      "method": "DELETE",
+      "path": "/counterparties/{cpty_id}",
+      "line": 351
+    },
+    {
+      "module": "admin",
+      "function": "browse_tables",
+      "method": "GET",
+      "path": "/browse",
+      "line": 366
+    },
+    {
+      "module": "admin",
+      "function": "browse_table_rows",
+      "method": "GET",
+      "path": "/browse/{table_key}",
+      "line": 371
+    },
+    {
+      "module": "admin",
+      "function": "browse_get_row",
+      "method": "GET",
+      "path": "/browse/{table_key}/{row_id}",
+      "line": 388
+    },
+    {
+      "module": "admin",
+      "function": "browse_delete_row",
+      "method": "DELETE",
+      "path": "/browse/{table_key}/{row_id}",
+      "line": 399
+    },
+    {
+      "module": "admin",
+      "function": "browse_delete_rows",
+      "method": "POST",
+      "path": "/browse/{table_key}/delete",
+      "line": 414
+    },
+    {
+      "module": "admin",
+      "function": "browse_update_row",
+      "method": "PATCH",
+      "path": "/browse/{table_key}/{row_id}",
+      "line": 436
+    },
+    {
+      "module": "admin",
+      "function": "list_users",
+      "method": "GET",
+      "path": "/users",
+      "line": 473
+    },
+    {
+      "module": "admin",
+      "function": "create_user",
+      "method": "POST",
+      "path": "/users",
+      "line": 482
+    },
+    {
+      "module": "admin",
+      "function": "update_user",
+      "method": "PATCH",
+      "path": "/users/{user_id}",
+      "line": 503
+    },
+    {
+      "module": "admin",
+      "function": "list_entities",
+      "method": "GET",
+      "path": "/entities",
+      "line": 534
+    },
+    {
+      "module": "admin",
+      "function": "create_entity",
+      "method": "POST",
+      "path": "/entities",
+      "line": 543
+    },
+    {
+      "module": "admin",
+      "function": "update_entity",
+      "method": "PATCH",
+      "path": "/entities/{entity_id}",
+      "line": 559
+    },
+    {
+      "module": "admin",
+      "function": "market_data_catalog",
+      "method": "GET",
+      "path": "/market-data",
+      "line": 656
+    },
+    {
+      "module": "admin",
+      "function": "market_data_fetch",
+      "method": "POST",
+      "path": "/market-data/fetch",
+      "line": 689
+    },
+    {
+      "module": "admin",
+      "function": "list_underlyings",
+      "method": "GET",
+      "path": "/underlyings",
+      "line": 732
+    },
+    {
+      "module": "admin",
+      "function": "search_underlyings",
+      "method": "GET",
+      "path": "/underlyings/search",
+      "line": 744
+    },
+    {
+      "module": "admin",
+      "function": "create_underlying",
+      "method": "POST",
+      "path": "/underlyings",
+      "line": 756
+    },
+    {
+      "module": "admin",
+      "function": "update_underlying",
+      "method": "PATCH",
+      "path": "/underlyings/{underlying_id}",
+      "line": 792
+    },
+    {
+      "module": "admin",
+      "function": "delete_underlying",
+      "method": "DELETE",
+      "path": "/underlyings/{underlying_id}",
+      "line": 814
+    },
+    {
+      "module": "agent_workshop",
+      "function": "listing",
+      "method": "GET",
+      "path": "",
+      "line": 33
+    },
+    {
+      "module": "agent_workshop",
+      "function": "models",
+      "method": "GET",
+      "path": "/models",
+      "line": 43
+    },
+    {
+      "module": "agent_workshop",
+      "function": "create",
+      "method": "POST",
+      "path": "",
+      "line": 54
+    },
+    {
+      "module": "agent_workshop",
+      "function": "detail",
+      "method": "GET",
+      "path": "/{key}",
+      "line": 60
+    },
+    {
+      "module": "agent_workshop",
+      "function": "command",
+      "method": "POST",
+      "path": "/{key}/{action}",
+      "line": 65
+    },
+    {
+      "module": "agent_workshop",
+      "function": "open_consultation",
+      "method": "POST",
+      "path": "/{key}/consultations/{actor}",
+      "line": 97
+    },
+    {
+      "module": "agent_workshop",
+      "function": "close_consultation",
+      "method": "DELETE",
+      "path": "/{key}/consultations/{actor}",
+      "line": 108
+    },
+    {
+      "module": "agent_workshop",
+      "function": "review_issue",
+      "method": "PATCH",
+      "path": "/{key}/issues/{issue_id}",
+      "line": 119
+    },
+    {
+      "module": "agent_workshop",
+      "function": "delete",
+      "method": "DELETE",
+      "path": "/{key}",
+      "line": 132
+    },
+    {
+      "module": "agent_workshop",
+      "function": "export",
+      "method": "GET",
+      "path": "/{key}/export",
+      "line": 142
+    },
+    {
+      "module": "agent_workshop",
+      "function": "screenshot",
+      "method": "GET",
+      "path": "/{key}/screenshots/{filename}",
+      "line": 149
+    },
+    {
+      "module": "alerts",
+      "function": "list_scheduler_runs",
+      "method": "GET",
+      "path": "/scheduler-runs",
+      "line": 38
+    },
+    {
+      "module": "alerts",
+      "function": "list_alerts",
+      "method": "GET",
+      "path": "",
+      "line": 59
+    },
+    {
+      "module": "alerts",
+      "function": "mark_read",
+      "method": "POST",
+      "path": "/{alert_id}/read",
+      "line": 76
+    },
+    {
+      "module": "alerts",
+      "function": "mark_all_read",
+      "method": "POST",
+      "path": "/read-all",
+      "line": 91
+    },
+    {
+      "module": "alerts",
+      "function": "refresh_whole_book",
+      "method": "POST",
+      "path": "/refresh-book",
+      "line": 106
+    },
+    {
+      "module": "amc",
+      "function": "list_ff_series",
+      "method": "GET",
+      "path": "/ff-series",
+      "line": 39
+    },
+    {
+      "module": "amc",
+      "function": "get_ff_status",
+      "method": "GET",
+      "path": "/ff-status",
+      "line": 44
+    },
+    {
+      "module": "amc",
+      "function": "refresh_ff",
+      "method": "POST",
+      "path": "/ff-refresh",
+      "line": 50
+    },
+    {
+      "module": "amc",
+      "function": "list_benchmarks",
+      "method": "GET",
+      "path": "/benchmarks",
+      "line": 66
+    },
+    {
+      "module": "amc",
+      "function": "upload_amc",
+      "method": "POST",
+      "path": "/upload",
+      "line": 71
+    },
+    {
+      "module": "amc",
+      "function": "analyze",
+      "method": "POST",
+      "path": "/analyze",
+      "line": 104
+    },
+    {
+      "module": "amc",
+      "function": "export_pdf",
+      "method": "POST",
+      "path": "/export-pdf",
+      "line": 130
+    },
+    {
+      "module": "amc",
+      "function": "get_synthesis_payload",
+      "method": "POST",
+      "path": "/synthesize/payload",
+      "line": 170
+    },
+    {
+      "module": "amc",
+      "function": "preview_synthesis",
+      "method": "POST",
+      "path": "/synthesize/prompt",
+      "line": 194
+    },
+    {
+      "module": "amc",
+      "function": "synthesize_study",
+      "method": "POST",
+      "path": "/synthesize",
+      "line": 199
+    },
+    {
+      "module": "amc",
+      "function": "get_ollama_models",
+      "method": "GET",
+      "path": "/synthesize/ollama-models",
+      "line": 211
+    },
+    {
+      "module": "amc",
+      "function": "study_doc",
+      "method": "GET",
+      "path": "/study/doc",
+      "line": 246
+    },
+    {
+      "module": "amc",
+      "function": "study_template",
+      "method": "GET",
+      "path": "/study/template",
+      "line": 252
+    },
+    {
+      "module": "amc",
+      "function": "study_detect",
+      "method": "POST",
+      "path": "/study/detect",
+      "line": 258
+    },
+    {
+      "module": "amc",
+      "function": "compute_manager_skill",
+      "method": "POST",
+      "path": "/manager-skill",
+      "line": 285
+    },
+    {
+      "module": "amc",
+      "function": "compute_market_shocks_endpoint",
+      "method": "POST",
+      "path": "/marketshocks",
+      "line": 306
+    },
+    {
+      "module": "amc",
+      "function": "study_run",
+      "method": "POST",
+      "path": "/study/run",
+      "line": 334
+    },
+    {
+      "module": "amc",
+      "function": "study_export_pdf",
+      "method": "POST",
+      "path": "/study/export-pdf",
+      "line": 356
+    },
+    {
+      "module": "amc_prices",
+      "function": "get_price_status",
+      "method": "GET",
+      "path": "/status",
+      "line": 26
+    },
+    {
+      "module": "amc_prices",
+      "function": "get_spot_on_date",
+      "method": "GET",
+      "path": "/spot",
+      "line": 34
+    },
+    {
+      "module": "amc_prices",
+      "function": "get_price_status_for_study",
+      "method": "POST",
+      "path": "/status-for-study",
+      "line": 47
+    },
+    {
+      "module": "amc_prices",
+      "function": "resolve_tickers_endpoint",
+      "method": "POST",
+      "path": "/resolve-tickers",
+      "line": 65
+    },
+    {
+      "module": "amc_prices",
+      "function": "fetch_underlying",
+      "method": "POST",
+      "path": "/fetch",
+      "line": 94
+    },
+    {
+      "module": "amc_prices",
+      "function": "upload_underlying",
+      "method": "POST",
+      "path": "/upload",
+      "line": 110
+    },
+    {
+      "module": "amc_prices",
+      "function": "delete_underlying",
+      "method": "DELETE",
+      "path": "/{key}",
+      "line": 131
+    },
+    {
+      "module": "amc_prices",
+      "function": "compute_attribution_endpoint",
+      "method": "POST",
+      "path": "/attribution",
+      "line": 164
+    },
+    {
+      "module": "amc_prices",
+      "function": "compute_brinson_endpoint",
+      "method": "POST",
+      "path": "/brinson",
+      "line": 193
+    },
+    {
+      "module": "amc_studies",
+      "function": "list_studies",
+      "method": "GET",
+      "path": "",
+      "line": 53
+    },
+    {
+      "module": "amc_studies",
+      "function": "get_study",
+      "method": "GET",
+      "path": "/{study_id}",
+      "line": 67
+    },
+    {
+      "module": "amc_studies",
+      "function": "create_study",
+      "method": "POST",
+      "path": "",
+      "line": 79
+    },
+    {
+      "module": "amc_studies",
+      "function": "delete_study",
+      "method": "DELETE",
+      "path": "/{study_id}",
+      "line": 112
+    },
+    {
+      "module": "amc_studies",
+      "function": "export_study_archive",
+      "method": "GET",
+      "path": "/{study_id}/archive",
+      "line": 126
+    },
+    {
+      "module": "amc_studies",
+      "function": "compare_studies",
+      "method": "GET",
+      "path": "/{study_id}/compare/{other_id}",
+      "line": 137
+    },
+    {
+      "module": "auth",
+      "function": "login",
+      "method": "POST",
+      "path": "/login",
+      "line": 187
+    },
+    {
+      "module": "auth",
+      "function": "me",
+      "method": "GET",
+      "path": "/me",
+      "line": 218
+    },
+    {
+      "module": "auth",
+      "function": "register",
+      "method": "POST",
+      "path": "/register",
+      "line": 244
+    },
+    {
+      "module": "ccr",
+      "function": "schemas",
+      "method": "GET",
+      "path": "/schemas",
+      "line": 22
+    },
+    {
+      "module": "ccr",
+      "function": "counterparties",
+      "method": "GET",
+      "path": "/counterparties",
+      "line": 33
+    },
+    {
+      "module": "ccr",
+      "function": "configuration",
+      "method": "GET",
+      "path": "/counterparties/{cpty_id}/configuration",
+      "line": 40
+    },
+    {
+      "module": "ccr",
+      "function": "create_configuration",
+      "method": "POST",
+      "path": "/counterparties/{cpty_id}/{kind}",
+      "line": 45
+    },
+    {
+      "module": "ccr",
+      "function": "update_configuration",
+      "method": "PUT",
+      "path": "/counterparties/{cpty_id}/{kind}/{row_id}",
+      "line": 53
+    },
+    {
+      "module": "ccr",
+      "function": "deals",
+      "method": "GET",
+      "path": "/deals",
+      "line": 61
+    },
+    {
+      "module": "ccr",
+      "function": "uat_batches",
+      "method": "GET",
+      "path": "/uat-batches",
+      "line": 76
+    },
+    {
+      "module": "ccr",
+      "function": "diagnostic",
+      "method": "POST",
+      "path": "/diagnostic",
+      "line": 83
+    },
+    {
+      "module": "ccr",
+      "function": "portfolios",
+      "method": "GET",
+      "path": "/portfolios",
+      "line": 88
+    },
+    {
+      "module": "ccr",
+      "function": "assign_deal",
+      "method": "PUT",
+      "path": "/deals/{deal_id}/assignment",
+      "line": 100
+    },
+    {
+      "module": "ccr",
+      "function": "run_calculation",
+      "method": "POST",
+      "path": "/calculate",
+      "line": 120
+    },
+    {
+      "module": "ccr",
+      "function": "get_run",
+      "method": "GET",
+      "path": "/runs/{run_id}",
+      "line": 141
+    },
+    {
+      "module": "ccr",
+      "function": "replay",
+      "method": "POST",
+      "path": "/runs/{run_id}/replay",
+      "line": 150
+    },
+    {
+      "module": "ccr",
+      "function": "monitor",
+      "method": "GET",
+      "path": "/monitor",
+      "line": 157
+    },
+    {
+      "module": "ccr",
+      "function": "rfq_credit_context",
+      "method": "GET",
+      "path": "/rfq/{rfq_id}/quotes/{quote_id}/context",
+      "line": 201
+    },
+    {
+      "module": "ccr",
+      "function": "rfq_check",
+      "method": "POST",
+      "path": "/rfq/{rfq_id}/quotes/{quote_id}/check",
+      "line": 207
+    },
+    {
+      "module": "client_import",
+      "function": "modele_excel",
+      "method": "GET",
+      "path": "/template.xlsx",
+      "line": 60
+    },
+    {
+      "module": "client_import",
+      "function": "modele_json_",
+      "method": "GET",
+      "path": "/template.json",
+      "line": 71
+    },
+    {
+      "module": "client_import",
+      "function": "schema",
+      "method": "GET",
+      "path": "/schema",
+      "line": 80
+    },
+    {
+      "module": "client_import",
+      "function": "apercu",
+      "method": "POST",
+      "path": "/preview",
+      "line": 96
+    },
+    {
+      "module": "client_import",
+      "function": "verser",
+      "method": "POST",
+      "path": "/apply",
+      "line": 114
+    },
+    {
+      "module": "client_import",
+      "function": "lots",
+      "method": "GET",
+      "path": "/batches",
+      "line": 155
+    },
+    {
+      "module": "client_import",
+      "function": "annuler_lot",
+      "method": "POST",
+      "path": "/batches/{batch_id}/revert",
+      "line": 174
+    },
+    {
+      "module": "client_intelligence",
+      "function": "lecture_client",
+      "method": "GET",
+      "path": "/clients/{client_id}",
+      "line": 42
+    },
+    {
+      "module": "client_intelligence",
+      "function": "lecture_personne",
+      "method": "GET",
+      "path": "/persons/{person_id}",
+      "line": 68
+    },
+    {
+      "module": "client_intelligence",
+      "function": "lecture_affiliation",
+      "method": "GET",
+      "path": "/affiliations/{affiliation_id}",
+      "line": 81
+    },
+    {
+      "module": "client_intelligence",
+      "function": "signaux",
+      "method": "GET",
+      "path": "/signals",
+      "line": 110
+    },
+    {
+      "module": "client_intelligence",
+      "function": "analytiques",
+      "method": "GET",
+      "path": "/analytics",
+      "line": 135
+    },
+    {
+      "module": "client_intelligence",
+      "function": "apercu",
+      "method": "GET",
+      "path": "/overview",
+      "line": 249
+    },
+    {
+      "module": "clients",
+      "function": "list_clients",
+      "method": "GET",
+      "path": "",
+      "line": 345
+    },
+    {
+      "module": "clients",
+      "function": "get_client",
+      "method": "GET",
+      "path": "/{client_id}",
+      "line": 400
+    },
+    {
+      "module": "clients",
+      "function": "list_client_contacts",
+      "method": "GET",
+      "path": "/{client_id}/contacts",
+      "line": 409
+    },
+    {
+      "module": "clients",
+      "function": "list_client_mandates",
+      "method": "GET",
+      "path": "/{client_id}/mandates",
+      "line": 447
+    },
+    {
+      "module": "clients",
+      "function": "create_client_mandate",
+      "method": "POST",
+      "path": "/{client_id}/mandates",
+      "line": 472
+    },
+    {
+      "module": "clients",
+      "function": "update_client_mandate",
+      "method": "PATCH",
+      "path": "/{client_id}/mandates/{mandate_id}",
+      "line": 511
+    },
+    {
+      "module": "clients",
+      "function": "check_client_duplicates",
+      "method": "GET",
+      "path": "/{client_id}/duplicates",
+      "line": 560
+    },
+    {
+      "module": "clients",
+      "function": "create_client",
+      "method": "POST",
+      "path": "",
+      "line": 575
+    },
+    {
+      "module": "clients",
+      "function": "update_client",
+      "method": "PATCH",
+      "path": "/{client_id}",
+      "line": 630
+    },
+    {
+      "module": "clients",
+      "function": "update_scalar_constraints",
+      "method": "PATCH",
+      "path": "/{client_id}/scalar-constraints",
+      "line": 694
+    },
+    {
+      "module": "clients",
+      "function": "constraints_schema",
+      "method": "GET",
+      "path": "/{client_id}/constraints/schema",
+      "line": 746
+    },
+    {
+      "module": "clients",
+      "function": "scoped_preferences_schema",
+      "method": "GET",
+      "path": "/{client_id}/scoped-preferences/schema",
+      "line": 791
+    },
+    {
+      "module": "clients",
+      "function": "replace_scoped_preferences",
+      "method": "PUT",
+      "path": "/{client_id}/scoped-preferences",
+      "line": 834
+    },
+    {
+      "module": "clients",
+      "function": "get_preference_history",
+      "method": "GET",
+      "path": "/{client_id}/preference-history",
+      "line": 910
+    },
+    {
+      "module": "clients",
+      "function": "replace_constraints",
+      "method": "PUT",
+      "path": "/{client_id}/constraints",
+      "line": 926
+    },
+    {
+      "module": "clients",
+      "function": "upsert_coverage",
+      "method": "PUT",
+      "path": "/{client_id}/coverage",
+      "line": 986
+    },
+    {
+      "module": "clients",
+      "function": "remove_coverage",
+      "method": "DELETE",
+      "path": "/{client_id}/coverage/{user_id}",
+      "line": 1021
+    },
+    {
+      "module": "clients",
+      "function": "archive_client",
+      "method": "POST",
+      "path": "/{client_id}/archive",
+      "line": 1044
+    },
+    {
+      "module": "clients",
+      "function": "reactivate_client",
+      "method": "POST",
+      "path": "/{client_id}/reactivate",
+      "line": 1064
+    },
+    {
+      "module": "clients",
+      "function": "delete_client",
+      "method": "DELETE",
+      "path": "/{client_id}",
+      "line": 1085
+    },
+    {
+      "module": "compute",
+      "function": "create_batch",
+      "method": "POST",
+      "path": "/batches",
+      "line": 73
+    },
+    {
+      "module": "compute",
+      "function": "list_batches",
+      "method": "GET",
+      "path": "/batches",
+      "line": 94
+    },
+    {
+      "module": "compute",
+      "function": "get_batch",
+      "method": "GET",
+      "path": "/batches/{batch_id}",
+      "line": 106
+    },
+    {
+      "module": "compute",
+      "function": "admin_list_batches",
+      "method": "GET",
+      "path": "/admin/batches",
+      "line": 130
+    },
+    {
+      "module": "compute",
+      "function": "admin_delete_batch",
+      "method": "DELETE",
+      "path": "/admin/batches/{batch_id}",
+      "line": 147
+    },
+    {
+      "module": "compute",
+      "function": "admin_stop_batch",
+      "method": "POST",
+      "path": "/admin/batches/{batch_id}/stop",
+      "line": 157
+    },
+    {
+      "module": "compute",
+      "function": "admin_relaunch_batch",
+      "method": "POST",
+      "path": "/admin/batches/{batch_id}/relaunch",
+      "line": 172
+    },
+    {
+      "module": "constraint_definitions",
+      "function": "meta",
+      "method": "GET",
+      "path": "/meta",
+      "line": 104
+    },
+    {
+      "module": "constraint_definitions",
+      "function": "list_definitions",
+      "method": "GET",
+      "path": "",
+      "line": 120
+    },
+    {
+      "module": "constraint_definitions",
+      "function": "create_definition",
+      "method": "POST",
+      "path": "",
+      "line": 143
+    },
+    {
+      "module": "constraint_definitions",
+      "function": "update_definition",
+      "method": "PATCH",
+      "path": "/{definition_id}",
+      "line": 175
+    },
+    {
+      "module": "constraint_definitions",
+      "function": "archive_definition",
+      "method": "DELETE",
+      "path": "/{definition_id}",
+      "line": 211
+    },
+    {
+      "module": "constraint_definitions",
+      "function": "restore_definition",
+      "method": "POST",
+      "path": "/{definition_id}/restore",
+      "line": 238
+    },
+    {
+      "module": "constraint_definitions",
+      "function": "read_catalog",
+      "method": "GET",
+      "path": "/catalog/{catalog}",
+      "line": 261
+    },
+    {
+      "module": "deals",
+      "function": "next_ref",
+      "method": "GET",
+      "path": "/next-ref",
+      "line": 1634
+    },
+    {
+      "module": "deals",
+      "function": "book_deal",
+      "method": "POST",
+      "path": "",
+      "line": 2392
+    },
+    {
+      "module": "deals",
+      "function": "set_deal_portfolios",
+      "method": "PUT",
+      "path": "/{deal_id}/portfolios",
+      "line": 2432
+    },
+    {
+      "module": "deals",
+      "function": "assign_deal_portfolio",
+      "method": "PATCH",
+      "path": "/{deal_id}/portfolio",
+      "line": 2472
+    },
+    {
+      "module": "deals",
+      "function": "list_deals",
+      "method": "GET",
+      "path": "",
+      "line": 2500
+    },
+    {
+      "module": "deals",
+      "function": "eligible_counterparties",
+      "method": "GET",
+      "path": "/counterparties",
+      "line": 2531
+    },
+    {
+      "module": "deals",
+      "function": "watchlist",
+      "method": "GET",
+      "path": "/watchlist",
+      "line": 2545
+    },
+    {
+      "module": "deals",
+      "function": "pending_amendment_requests",
+      "method": "GET",
+      "path": "/amendment-requests/pending",
+      "line": 2842
+    },
+    {
+      "module": "deals",
+      "function": "get_deal",
+      "method": "GET",
+      "path": "/{deal_id}",
+      "line": 2870
+    },
+    {
+      "module": "deals",
+      "function": "get_deal_audit",
+      "method": "GET",
+      "path": "/{deal_id}/audit",
+      "line": 2908
+    },
+    {
+      "module": "deals",
+      "function": "update_deal",
+      "method": "PATCH",
+      "path": "/{deal_id}",
+      "line": 2981
+    },
+    {
+      "module": "deals",
+      "function": "request_amendment",
+      "method": "POST",
+      "path": "/{deal_id}/amendment-requests",
+      "line": 3029
+    },
+    {
+      "module": "deals",
+      "function": "approve_amendment",
+      "method": "POST",
+      "path": "/{deal_id}/amendment-requests/{request_id}/approve",
+      "line": 3130
+    },
+    {
+      "module": "deals",
+      "function": "reject_amendment",
+      "method": "POST",
+      "path": "/{deal_id}/amendment-requests/{request_id}/reject",
+      "line": 3198
+    },
+    {
+      "module": "deals",
+      "function": "apply_amendment",
+      "method": "POST",
+      "path": "/{deal_id}/amendment-requests/{request_id}/apply",
+      "line": 3236
+    },
+    {
+      "module": "deals",
+      "function": "update_event",
+      "method": "PATCH",
+      "path": "/{deal_id}/events/{event_id}",
+      "line": 3433
+    },
+    {
+      "module": "deals",
+      "function": "validate_fixing",
+      "method": "POST",
+      "path": "/{deal_id}/events/{event_id}/validate",
+      "line": 3709
+    },
+    {
+      "module": "deals",
+      "function": "download_fixing_evidence",
+      "method": "GET",
+      "path": "/{deal_id}/events/{event_id}/fixing-versions/{version_id}/evidence",
+      "line": 3962
+    },
+    {
+      "module": "deals",
+      "function": "reject_fixing",
+      "method": "POST",
+      "path": "/{deal_id}/events/{event_id}/reject",
+      "line": 4019
+    },
+    {
+      "module": "deals",
+      "function": "refresh_events",
+      "method": "POST",
+      "path": "/{deal_id}/events/refresh",
+      "line": 4341
+    },
+    {
+      "module": "deals",
+      "function": "resolve_auto_fixing_exception",
+      "method": "POST",
+      "path": "/{deal_id}/events/{event_id}/resolve-auto-exception",
+      "line": 4754
+    },
+    {
+      "module": "deals",
+      "function": "validate_lifecycle_proposal",
+      "method": "POST",
+      "path": "/{deal_id}/lifecycle-proposals/{proposal_id}/validate",
+      "line": 5977
+    },
+    {
+      "module": "deals",
+      "function": "apply_lifecycle_proposal",
+      "method": "POST",
+      "path": "/{deal_id}/lifecycle-proposals/{proposal_id}/apply",
+      "line": 6152
+    },
+    {
+      "module": "deals",
+      "function": "reprice_inputs",
+      "method": "GET",
+      "path": "/{deal_id}/reprice",
+      "line": 6340
+    },
+    {
+      "module": "deals",
+      "function": "reinvest_roll_endpoint",
+      "method": "POST",
+      "path": "/{deal_id}/reinvest/roll",
+      "line": 6455
+    },
+    {
+      "module": "deals",
+      "function": "reinvest_scan_endpoint",
+      "method": "POST",
+      "path": "/{deal_id}/reinvest/scan",
+      "line": 6659
+    },
+    {
+      "module": "deals",
+      "function": "reinvest_proposal_endpoint",
+      "method": "POST",
+      "path": "/{deal_id}/reinvest/proposal",
+      "line": 6800
+    },
+    {
+      "module": "deals",
+      "function": "reinvest_proposal_pdf_endpoint",
+      "method": "POST",
+      "path": "/{deal_id}/reinvest/proposal/pdf",
+      "line": 6813
+    },
+    {
+      "module": "deals",
+      "function": "deal_mtm",
+      "method": "POST",
+      "path": "/{deal_id}/mtm",
+      "line": 6858
+    },
+    {
+      "module": "deals",
+      "function": "deal_greeks",
+      "method": "POST",
+      "path": "/{deal_id}/greeks",
+      "line": 6906
+    },
+    {
+      "module": "deals",
+      "function": "deal_mtm_explain",
+      "method": "POST",
+      "path": "/{deal_id}/mtm/explain",
+      "line": 7334
+    },
+    {
+      "module": "deals",
+      "function": "deal_mtm_explain_report",
+      "method": "POST",
+      "path": "/{deal_id}/mtm/explain/report",
+      "line": 7351
+    },
+    {
+      "module": "deals",
+      "function": "deal_mtm_report",
+      "method": "POST",
+      "path": "/{deal_id}/mtm/report",
+      "line": 7435
+    },
+    {
+      "module": "deals",
+      "function": "latest_mtm_runs",
+      "method": "GET",
+      "path": "/valuation-runs/latest-mtm",
+      "line": 7538
+    },
+    {
+      "module": "deals",
+      "function": "list_valuation_runs",
+      "method": "GET",
+      "path": "/{deal_id}/valuation-runs",
+      "line": 7608
+    },
+    {
+      "module": "deals",
+      "function": "get_valuation_run",
+      "method": "GET",
+      "path": "/valuation-runs/{run_id}",
+      "line": 7631
+    },
+    {
+      "module": "deals",
+      "function": "replay_saved_valuation_run",
+      "method": "POST",
+      "path": "/valuation-runs/{run_id}/replay",
+      "line": 7644
+    },
+    {
+      "module": "documents",
+      "function": "list_documents",
+      "method": "GET",
+      "path": "",
+      "line": 60
+    },
+    {
+      "module": "documents",
+      "function": "upload_document",
+      "method": "POST",
+      "path": "",
+      "line": 76
+    },
+    {
+      "module": "documents",
+      "function": "download_document",
+      "method": "GET",
+      "path": "/{doc_id}/download",
+      "line": 166
+    },
+    {
+      "module": "documents",
+      "function": "delete_document",
+      "method": "DELETE",
+      "path": "/{doc_id}",
+      "line": 181
+    },
+    {
+      "module": "emt",
+      "function": "emt_compute",
+      "method": "POST",
+      "path": "/compute",
+      "line": 157
+    },
+    {
+      "module": "emt",
+      "function": "get_emt_synthesis_payload",
+      "method": "POST",
+      "path": "/synthesize/payload",
+      "line": 260
+    },
+    {
+      "module": "emt",
+      "function": "preview_synthesis",
+      "method": "POST",
+      "path": "/synthesize/prompt",
+      "line": 277
+    },
+    {
+      "module": "emt",
+      "function": "synthesize_emt",
+      "method": "POST",
+      "path": "/synthesize",
+      "line": 282
+    },
+    {
+      "module": "emt",
+      "function": "save_emt",
+      "method": "POST",
+      "path": "/save",
+      "line": 339
+    },
+    {
+      "module": "emt",
+      "function": "list_emt_records",
+      "method": "GET",
+      "path": "/records",
+      "line": 412
+    },
+    {
+      "module": "fifo",
+      "function": "fifo_run",
+      "method": "POST",
+      "path": "/run",
+      "line": 103
+    },
+    {
+      "module": "fifo",
+      "function": "fifo_detect",
+      "method": "POST",
+      "path": "/detect",
+      "line": 135
+    },
+    {
+      "module": "folders",
+      "function": "list_folders",
+      "method": "GET",
+      "path": "",
+      "line": 48
+    },
+    {
+      "module": "folders",
+      "function": "create_folder",
+      "method": "POST",
+      "path": "",
+      "line": 57
+    },
+    {
+      "module": "folders",
+      "function": "rename_folder",
+      "method": "PUT",
+      "path": "/{folder_id}",
+      "line": 74
+    },
+    {
+      "module": "folders",
+      "function": "delete_folder",
+      "method": "DELETE",
+      "path": "/{folder_id}",
+      "line": 90
+    },
+    {
+      "module": "indicatives",
+      "function": "create_indicative",
+      "method": "POST",
+      "path": "",
+      "line": 108
+    },
+    {
+      "module": "indicatives",
+      "function": "list_indicatives",
+      "method": "GET",
+      "path": "",
+      "line": 190
+    },
+    {
+      "module": "indicatives",
+      "function": "get_indicative",
+      "method": "GET",
+      "path": "/{indicative_id}",
+      "line": 202
+    },
+    {
+      "module": "indicatives",
+      "function": "update_indicative",
+      "method": "PATCH",
+      "path": "/{indicative_id}",
+      "line": 214
+    },
+    {
+      "module": "indicatives",
+      "function": "get_linked_deal",
+      "method": "GET",
+      "path": "/{indicative_id}/deal",
+      "line": 256
+    },
+    {
+      "module": "inlife",
+      "function": "price_in_life",
+      "method": "POST",
+      "path": "/price/in-life",
+      "line": 405
+    },
+    {
+      "module": "inlife",
+      "function": "implied_funding",
+      "method": "POST",
+      "path": "/price/implied-funding",
+      "line": 592
+    },
+    {
+      "module": "interactions",
+      "function": "list_interactions",
+      "method": "GET",
+      "path": "",
+      "line": 220
+    },
+    {
+      "module": "interactions",
+      "function": "list_types",
+      "method": "GET",
+      "path": "/types",
+      "line": 254
+    },
+    {
+      "module": "interactions",
+      "function": "get_interaction",
+      "method": "GET",
+      "path": "/{interaction_id}",
+      "line": 259
+    },
+    {
+      "module": "interactions",
+      "function": "create_interaction",
+      "method": "POST",
+      "path": "",
+      "line": 268
+    },
+    {
+      "module": "interactions",
+      "function": "update_interaction",
+      "method": "PATCH",
+      "path": "/{interaction_id}",
+      "line": 328
+    },
+    {
+      "module": "interactions",
+      "function": "close_follow_up",
+      "method": "POST",
+      "path": "/follow-ups/{follow_up_id}/close",
+      "line": 386
+    },
+    {
+      "module": "interactions",
+      "function": "reschedule_follow_up",
+      "method": "PATCH",
+      "path": "/follow-ups/{follow_up_id}",
+      "line": 420
+    },
+    {
+      "module": "interactions",
+      "function": "reopen_follow_up",
+      "method": "POST",
+      "path": "/follow-ups/{follow_up_id}/reopen",
+      "line": 450
+    },
+    {
+      "module": "interactions",
+      "function": "delete_interaction",
+      "method": "DELETE",
+      "path": "/{interaction_id}",
+      "line": 478
+    },
+    {
+      "module": "kid",
+      "function": "kid_compute",
+      "method": "POST",
+      "path": "/compute",
+      "line": 306
+    },
+    {
+      "module": "kid",
+      "function": "save_kid",
+      "method": "POST",
+      "path": "/save",
+      "line": 467
+    },
+    {
+      "module": "kid",
+      "function": "list_kid_records",
+      "method": "GET",
+      "path": "/records",
+      "line": 535
+    },
+    {
+      "module": "market_data",
+      "function": "hist_vol_endpoint",
+      "method": "GET",
+      "path": "/hist_vol",
+      "line": 17
+    },
+    {
+      "module": "market_data",
+      "function": "hist_prices_endpoint",
+      "method": "GET",
+      "path": "/hist_prices",
+      "line": 31
+    },
+    {
+      "module": "market_data",
+      "function": "list_underlyings_endpoint",
+      "method": "GET",
+      "path": "/underlyings",
+      "line": 42
+    },
+    {
+      "module": "market_data",
+      "function": "dividend_profile_endpoint",
+      "method": "GET",
+      "path": "/dividends",
+      "line": 65
+    },
+    {
+      "module": "opportunities",
+      "function": "list_opportunities",
+      "method": "GET",
+      "path": "",
+      "line": 252
+    },
+    {
+      "module": "opportunities",
+      "function": "list_lost_reasons",
+      "method": "GET",
+      "path": "/lost-reasons",
+      "line": 297
+    },
+    {
+      "module": "opportunities",
+      "function": "get_opportunity",
+      "method": "GET",
+      "path": "/{opportunity_id}",
+      "line": 304
+    },
+    {
+      "module": "opportunities",
+      "function": "create_opportunity",
+      "method": "POST",
+      "path": "",
+      "line": 315
+    },
+    {
+      "module": "opportunities",
+      "function": "update_opportunity",
+      "method": "PATCH",
+      "path": "/{opportunity_id}",
+      "line": 377
+    },
+    {
+      "module": "opportunities",
+      "function": "change_status",
+      "method": "POST",
+      "path": "/{opportunity_id}/status",
+      "line": 519
+    },
+    {
+      "module": "opportunities",
+      "function": "delete_opportunity",
+      "method": "DELETE",
+      "path": "/{opportunity_id}",
+      "line": 576
+    },
+    {
+      "module": "persons",
+      "function": "list_persons",
+      "method": "GET",
+      "path": "",
+      "line": 165
+    },
+    {
+      "module": "persons",
+      "function": "search_duplicates",
+      "method": "GET",
+      "path": "/duplicates",
+      "line": 201
+    },
+    {
+      "module": "persons",
+      "function": "get_person",
+      "method": "GET",
+      "path": "/{person_id}",
+      "line": 217
+    },
+    {
+      "module": "persons",
+      "function": "create_person",
+      "method": "POST",
+      "path": "",
+      "line": 228
+    },
+    {
+      "module": "persons",
+      "function": "update_person",
+      "method": "PATCH",
+      "path": "/{person_id}",
+      "line": 285
+    },
+    {
+      "module": "persons",
+      "function": "deactivate_person",
+      "method": "POST",
+      "path": "/{person_id}/deactivate",
+      "line": 307
+    },
+    {
+      "module": "persons",
+      "function": "reactivate_person",
+      "method": "POST",
+      "path": "/{person_id}/reactivate",
+      "line": 325
+    },
+    {
+      "module": "persons",
+      "function": "delete_person",
+      "method": "DELETE",
+      "path": "/{person_id}",
+      "line": 343
+    },
+    {
+      "module": "persons",
+      "function": "list_affiliations",
+      "method": "GET",
+      "path": "/{person_id}/affiliations",
+      "line": 368
+    },
+    {
+      "module": "persons",
+      "function": "create_affiliation",
+      "method": "POST",
+      "path": "/{person_id}/affiliations",
+      "line": 382
+    },
+    {
+      "module": "persons",
+      "function": "update_affiliation",
+      "method": "PATCH",
+      "path": "/{person_id}/affiliations/{affiliation_id}",
+      "line": 419
+    },
+    {
+      "module": "persons",
+      "function": "close_person_affiliation",
+      "method": "POST",
+      "path": "/{person_id}/affiliations/{affiliation_id}/close",
+      "line": 457
+    },
+    {
+      "module": "persons",
+      "function": "delete_affiliation",
+      "method": "DELETE",
+      "path": "/{person_id}/affiliations/{affiliation_id}",
+      "line": 484
+    },
+    {
+      "module": "persons",
+      "function": "change_person_company",
+      "method": "POST",
+      "path": "/{person_id}/change-company",
+      "line": 539
+    },
+    {
+      "module": "persons",
+      "function": "upsert_contact_coverage",
+      "method": "PUT",
+      "path": "/{person_id}/affiliations/{affiliation_id}/coverage",
+      "line": 587
+    },
+    {
+      "module": "portfolios",
+      "function": "list_portfolios",
+      "method": "GET",
+      "path": "",
+      "line": 129
+    },
+    {
+      "module": "portfolios",
+      "function": "create_portfolio",
+      "method": "POST",
+      "path": "",
+      "line": 157
+    },
+    {
+      "module": "portfolios",
+      "function": "rename_portfolio",
+      "method": "PUT",
+      "path": "/{portfolio_id}",
+      "line": 180
+    },
+    {
+      "module": "portfolios",
+      "function": "delete_portfolio",
+      "method": "DELETE",
+      "path": "/{portfolio_id}",
+      "line": 196
+    },
+    {
+      "module": "portfolios",
+      "function": "risk_global",
+      "method": "GET",
+      "path": "/risk-global",
+      "line": 499
+    },
+    {
+      "module": "portfolios",
+      "function": "pnl_explain_global",
+      "method": "POST",
+      "path": "/pnl-explain-global",
+      "line": 614
+    },
+    {
+      "module": "portfolios",
+      "function": "pnl_explain_portfolio",
+      "method": "POST",
+      "path": "/{portfolio_id}/pnl-explain",
+      "line": 631
+    },
+    {
+      "module": "portfolios",
+      "function": "portfolio_risk",
+      "method": "GET",
+      "path": "/{portfolio_id}/risk",
+      "line": 651
+    },
+    {
+      "module": "portfolios",
+      "function": "barriers_global",
+      "method": "GET",
+      "path": "/barriers-global",
+      "line": 831
+    },
+    {
+      "module": "portfolios",
+      "function": "portfolio_barriers",
+      "method": "GET",
+      "path": "/{portfolio_id}/barriers",
+      "line": 845
+    },
+    {
+      "module": "portfolios",
+      "function": "exposure_by_counterparty_global",
+      "method": "GET",
+      "path": "/exposure-by-counterparty",
+      "line": 862
+    },
+    {
+      "module": "portfolios",
+      "function": "exposure_by_counterparty_portfolio",
+      "method": "GET",
+      "path": "/{portfolio_id}/exposure-by-counterparty",
+      "line": 879
+    },
+    {
+      "module": "pricing",
+      "function": "parse_endpoint",
+      "method": "POST",
+      "path": "/parse",
+      "line": 68
+    },
+    {
+      "module": "pricing",
+      "function": "price_endpoint",
+      "method": "POST",
+      "path": "/price",
+      "line": 105
+    },
+    {
+      "module": "pricing",
+      "function": "profile_endpoint",
+      "method": "POST",
+      "path": "/profile",
+      "line": 232
+    },
+    {
+      "module": "pricing",
+      "function": "paths_endpoint",
+      "method": "POST",
+      "path": "/paths",
+      "line": 308
+    },
+    {
+      "module": "pricing",
+      "function": "proba_endpoint",
+      "method": "POST",
+      "path": "/proba",
+      "line": 363
+    },
+    {
+      "module": "pricing",
+      "function": "mtf_endpoint",
+      "method": "POST",
+      "path": "/mtf",
+      "line": 419
+    },
+    {
+      "module": "pricing",
+      "function": "script_providers_endpoint",
+      "method": "GET",
+      "path": "/ai/providers",
+      "line": 493
+    },
+    {
+      "module": "pricing",
+      "function": "script_providers_endpoint",
+      "method": "GET",
+      "path": "/script/providers",
+      "line": 493
+    },
+    {
+      "module": "pricing",
+      "function": "script_prompt_endpoint",
+      "method": "POST",
+      "path": "/script/prompt",
+      "line": 503
+    },
+    {
+      "module": "pricing",
+      "function": "product_analyse_endpoint",
+      "method": "POST",
+      "path": "/product/analyse",
+      "line": 529
+    },
+    {
+      "module": "pricing",
+      "function": "product_analyse_prompt_endpoint",
+      "method": "POST",
+      "path": "/product/analyse/prompt",
+      "line": 550
+    },
+    {
+      "module": "pricing",
+      "function": "product_intentions_endpoint",
+      "method": "GET",
+      "path": "/product/analyse/intentions",
+      "line": 568
+    },
+    {
+      "module": "pricing",
+      "function": "script_generate_endpoint",
+      "method": "POST",
+      "path": "/script/generate",
+      "line": 575
+    },
+    {
+      "module": "pricing",
+      "function": "script_transcribe_engines_endpoint",
+      "method": "GET",
+      "path": "/script/transcribe/engines",
+      "line": 613
+    },
+    {
+      "module": "pricing",
+      "function": "script_transcribe_prepare_endpoint",
+      "method": "POST",
+      "path": "/script/transcribe/prepare",
+      "line": 625
+    },
+    {
+      "module": "pricing",
+      "function": "script_transcribe_endpoint",
+      "method": "POST",
+      "path": "/script/transcribe",
+      "line": 645
+    },
+    {
+      "module": "pricing",
+      "function": "mtf_drilldown_endpoint",
+      "method": "POST",
+      "path": "/mtf/drilldown",
+      "line": 691
+    },
+    {
+      "module": "pricing",
+      "function": "backtest_endpoint",
+      "method": "POST",
+      "path": "/backtest",
+      "line": 765
+    },
+    {
+      "module": "pricing",
+      "function": "backtest_compare_endpoint",
+      "method": "POST",
+      "path": "/backtest/compare",
+      "line": 969
+    },
+    {
+      "module": "product_optimizer",
+      "function": "market_reference",
+      "method": "POST",
+      "path": "/market-reference",
+      "line": 63
+    },
+    {
+      "module": "product_optimizer",
+      "function": "cancel_run",
+      "method": "POST",
+      "path": "/cancel/{run_id}",
+      "line": 80
+    },
+    {
+      "module": "product_optimizer",
+      "function": "get_capabilities",
+      "method": "GET",
+      "path": "/capabilities",
+      "line": 90
+    },
+    {
+      "module": "product_optimizer",
+      "function": "create_research",
+      "method": "POST",
+      "path": "/researches",
+      "line": 95
+    },
+    {
+      "module": "product_optimizer",
+      "function": "list_researches",
+      "method": "GET",
+      "path": "/researches",
+      "line": 119
+    },
+    {
+      "module": "product_optimizer",
+      "function": "read_research",
+      "method": "GET",
+      "path": "/researches/{research_id}",
+      "line": 136
+    },
+    {
+      "module": "product_optimizer",
+      "function": "archive_research",
+      "method": "PATCH",
+      "path": "/researches/{research_id}",
+      "line": 142
+    },
+    {
+      "module": "product_optimizer",
+      "function": "cancel_research",
+      "method": "POST",
+      "path": "/researches/{research_id}/cancel",
+      "line": 150
+    },
+    {
+      "module": "product_optimizer",
+      "function": "estimate",
+      "method": "POST",
+      "path": "/estimate-search",
+      "line": 157
+    },
+    {
+      "module": "product_optimizer",
+      "function": "run",
+      "method": "POST",
+      "path": "/run",
+      "line": 163
+    },
+    {
+      "module": "products",
+      "function": "create_product",
+      "method": "POST",
+      "path": "",
+      "line": 127
+    },
+    {
+      "module": "products",
+      "function": "list_products",
+      "method": "GET",
+      "path": "",
+      "line": 194
+    },
+    {
+      "module": "products",
+      "function": "get_product",
+      "method": "GET",
+      "path": "/{product_id}",
+      "line": 217
+    },
+    {
+      "module": "products",
+      "function": "update_product",
+      "method": "PATCH",
+      "path": "/{product_id}",
+      "line": 233
+    },
+    {
+      "module": "products",
+      "function": "revise_product_terms",
+      "method": "POST",
+      "path": "/{product_id}/terms",
+      "line": 271
+    },
+    {
+      "module": "products",
+      "function": "archive_product",
+      "method": "POST",
+      "path": "/{product_id}/archive",
+      "line": 311
+    },
+    {
+      "module": "products",
+      "function": "compose_product_pricing_input",
+      "method": "POST",
+      "path": "/{product_id}/pricing-input",
+      "line": 333
+    },
+    {
+      "module": "products",
+      "function": "retain_product_calculation",
+      "method": "POST",
+      "path": "/{product_id}/calculations",
+      "line": 358
+    },
+    {
+      "module": "products",
+      "function": "get_product_calculation",
+      "method": "GET",
+      "path": "/{product_id}/calculations/{calculation_id}",
+      "line": 421
+    },
+    {
+      "module": "rfq",
+      "function": "list_providers",
+      "method": "GET",
+      "path": "/providers",
+      "line": 671
+    },
+    {
+      "module": "rfq",
+      "function": "create_rfq",
+      "method": "POST",
+      "path": "",
+      "line": 1074
+    },
+    {
+      "module": "rfq",
+      "function": "list_rfqs",
+      "method": "GET",
+      "path": "",
+      "line": 1083
+    },
+    {
+      "module": "rfq",
+      "function": "rfq_history",
+      "method": "GET",
+      "path": "/history",
+      "line": 1100
+    },
+    {
+      "module": "rfq",
+      "function": "get_rfq",
+      "method": "GET",
+      "path": "/{rfq_id}",
+      "line": 1164
+    },
+    {
+      "module": "rfq",
+      "function": "rfq_terms",
+      "method": "GET",
+      "path": "/{rfq_id}/terms",
+      "line": 1175
+    },
+    {
+      "module": "rfq",
+      "function": "declare_treatment",
+      "method": "POST",
+      "path": "/{rfq_id}/treatment",
+      "line": 1190
+    },
+    {
+      "module": "rfq",
+      "function": "confirm_treatment",
+      "method": "POST",
+      "path": "/{rfq_id}/treatment/{agreement_id}/confirm",
+      "line": 1197
+    },
+    {
+      "module": "rfq",
+      "function": "cancel_treatment",
+      "method": "POST",
+      "path": "/{rfq_id}/treatment/{agreement_id}/cancel",
+      "line": 1208
+    },
+    {
+      "module": "rfq",
+      "function": "list_rfq_shares",
+      "method": "GET",
+      "path": "/{rfq_id}/shares",
+      "line": 1215
+    },
+    {
+      "module": "rfq",
+      "function": "change_rfq_assignment",
+      "method": "PUT",
+      "path": "/{rfq_id}/assignment",
+      "line": 1232
+    },
+    {
+      "module": "rfq",
+      "function": "share_rfq",
+      "method": "PUT",
+      "path": "/{rfq_id}/shares/{desk_id}",
+      "line": 1242
+    },
+    {
+      "module": "rfq",
+      "function": "revoke_rfq_share",
+      "method": "DELETE",
+      "path": "/{rfq_id}/shares/{desk_id}",
+      "line": 1287
+    },
+    {
+      "module": "rfq",
+      "function": "compose_rfq_pricing_input",
+      "method": "POST",
+      "path": "/{rfq_id}/pricing-input",
+      "line": 1329
+    },
+    {
+      "module": "rfq",
+      "function": "authorized_rfq_recipients",
+      "method": "GET",
+      "path": "/{rfq_id}/recipients",
+      "line": 1392
+    },
+    {
+      "module": "rfq",
+      "function": "preview_rfq_exchange",
+      "method": "POST",
+      "path": "/{rfq_id}/exchange-preview",
+      "line": 1470
+    },
+    {
+      "module": "rfq",
+      "function": "rfq_exchange_tracking",
+      "method": "GET",
+      "path": "/{rfq_id}/exchange",
+      "line": 1539
+    },
+    {
+      "module": "rfq",
+      "function": "send_rfq_exchange",
+      "method": "POST",
+      "path": "/{rfq_id}/send",
+      "line": 1546
+    },
+    {
+      "module": "rfq",
+      "function": "update_rfq",
+      "method": "PATCH",
+      "path": "/{rfq_id}",
+      "line": 1569
+    },
+    {
+      "module": "rfq",
+      "function": "delete_rfq",
+      "method": "DELETE",
+      "path": "/{rfq_id}",
+      "line": 1847
+    },
+    {
+      "module": "rfq",
+      "function": "add_quote",
+      "method": "POST",
+      "path": "/{rfq_id}/quotes",
+      "line": 1892
+    },
+    {
+      "module": "rfq",
+      "function": "update_quote",
+      "method": "PATCH",
+      "path": "/{rfq_id}/quotes/{quote_id}",
+      "line": 1959
+    },
+    {
+      "module": "rfq",
+      "function": "delete_quote",
+      "method": "DELETE",
+      "path": "/{rfq_id}/quotes/{quote_id}",
+      "line": 2071
+    },
+    {
+      "module": "rfq_desks",
+      "function": "my_desks",
+      "method": "GET",
+      "path": "",
+      "line": 50
+    },
+    {
+      "module": "rfq_desks",
+      "function": "organization_desks",
+      "method": "GET",
+      "path": "/organization",
+      "line": 64
+    },
+    {
+      "module": "rfq_desks",
+      "function": "desk_members",
+      "method": "GET",
+      "path": "/{desk_id}/members",
+      "line": 76
+    },
+    {
+      "module": "rfq_desks",
+      "function": "admin_desks",
+      "method": "GET",
+      "path": "/admin",
+      "line": 96
+    },
+    {
+      "module": "rfq_desks",
+      "function": "create_desk",
+      "method": "POST",
+      "path": "/admin",
+      "line": 115
+    },
+    {
+      "module": "rfq_desks",
+      "function": "put_membership",
+      "method": "PUT",
+      "path": "/admin/{desk_id}/members/{user_id}",
+      "line": 141
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "list_received",
+      "method": "GET",
+      "path": "",
+      "line": 21
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "received_request",
+      "method": "GET",
+      "path": "/{item_id}",
+      "line": 40
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "set_publication_policy",
+      "method": "PUT",
+      "path": "/{item_id}/publication-policy",
+      "line": 49
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "prepare_quote",
+      "method": "PUT",
+      "path": "/{item_id}/quote-draft",
+      "line": 56
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "validate_quote",
+      "method": "POST",
+      "path": "/{item_id}/validate",
+      "line": 63
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "publish_quote",
+      "method": "POST",
+      "path": "/{item_id}/publish",
+      "line": 70
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "withdraw_quote",
+      "method": "POST",
+      "path": "/{item_id}/withdraw",
+      "line": 82
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "claim_request",
+      "method": "POST",
+      "path": "/{item_id}/claim",
+      "line": 95
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "assign_request",
+      "method": "PUT",
+      "path": "/{item_id}/assignment",
+      "line": 102
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "pricing_members",
+      "method": "GET",
+      "path": "/{item_id}/members",
+      "line": 109
+    },
+    {
+      "module": "rfq_inbox",
+      "function": "acknowledge_read",
+      "method": "POST",
+      "path": "/{item_id}/read",
+      "line": 118
+    },
+    {
+      "module": "rfq_relations",
+      "function": "relation_catalog",
+      "method": "GET",
+      "path": "/catalog",
+      "line": 20
+    },
+    {
+      "module": "rfq_relations",
+      "function": "list_relations",
+      "method": "GET",
+      "path": "",
+      "line": 35
+    },
+    {
+      "module": "rfq_relations",
+      "function": "get_relation",
+      "method": "GET",
+      "path": "/{relation_id}",
+      "line": 44
+    },
+    {
+      "module": "rfq_relations",
+      "function": "create_relation",
+      "method": "POST",
+      "path": "",
+      "line": 50
+    },
+    {
+      "module": "rfq_relations",
+      "function": "update_relation",
+      "method": "PUT",
+      "path": "/{relation_id}",
+      "line": 55
+    },
+    {
+      "module": "rfq_relations",
+      "function": "recognize_relation",
+      "method": "POST",
+      "path": "/{relation_id}/recognize",
+      "line": 60
+    },
+    {
+      "module": "rfq_relations",
+      "function": "suspend_relation",
+      "method": "POST",
+      "path": "/{relation_id}/suspension",
+      "line": 65
+    },
+    {
+      "module": "rfq_relations",
+      "function": "relation_history",
+      "method": "GET",
+      "path": "/{relation_id}/history",
+      "line": 70
+    },
+    {
+      "module": "rfq_transport",
+      "function": "retry",
+      "method": "POST",
+      "path": "/messages/{message_id}/retry",
+      "line": 25
+    },
+    {
+      "module": "rfq_transport",
+      "function": "channels",
+      "method": "GET",
+      "path": "/channels",
+      "line": 84
+    },
+    {
+      "module": "rfq_transport",
+      "function": "configure",
+      "method": "POST",
+      "path": "/channels",
+      "line": 93
+    },
+    {
+      "module": "rfq_transport",
+      "function": "state",
+      "method": "PUT",
+      "path": "/channels/{channel_id}",
+      "line": 133
+    },
+    {
+      "module": "rfq_transport",
+      "function": "probe",
+      "method": "POST",
+      "path": "/channels/{channel_id}/probe",
+      "line": 152
+    },
+    {
+      "module": "rfq_transport",
+      "function": "receive",
+      "method": "POST",
+      "path": "/receive",
+      "line": 163
+    },
+    {
+      "module": "scenarios",
+      "function": "scenarios_endpoint",
+      "method": "POST",
+      "path": "/scenarios",
+      "line": 22
+    },
+    {
+      "module": "schedule",
+      "function": "generate_schedule_endpoint",
+      "method": "POST",
+      "path": "/schedule/generate",
+      "line": 24
+    },
+    {
+      "module": "schedule",
+      "function": "resolve_business_day",
+      "method": "POST",
+      "path": "/calendar/resolve",
+      "line": 54
+    },
+    {
+      "module": "schedule",
+      "function": "window_preview_endpoint",
+      "method": "POST",
+      "path": "/schedule/window",
+      "line": 69
+    },
+    {
+      "module": "schedule",
+      "function": "period_window_preview_endpoint",
+      "method": "POST",
+      "path": "/schedule/period-window",
+      "line": 93
+    },
+    {
+      "module": "scripts_db",
+      "function": "list_scripts",
+      "method": "GET",
+      "path": "",
+      "line": 97
+    },
+    {
+      "module": "scripts_db",
+      "function": "create_script",
+      "method": "POST",
+      "path": "",
+      "line": 147
+    },
+    {
+      "module": "scripts_db",
+      "function": "get_script",
+      "method": "GET",
+      "path": "/{script_id}",
+      "line": 181
+    },
+    {
+      "module": "scripts_db",
+      "function": "update_script",
+      "method": "PUT",
+      "path": "/{script_id}",
+      "line": 200
+    },
+    {
+      "module": "scripts_db",
+      "function": "delete_script",
+      "method": "DELETE",
+      "path": "/{script_id}",
+      "line": 236
+    },
+    {
+      "module": "scripts_db",
+      "function": "list_variants",
+      "method": "GET",
+      "path": "/{script_id}/variants",
+      "line": 402
+    },
+    {
+      "module": "scripts_db",
+      "function": "create_variant",
+      "method": "POST",
+      "path": "/{script_id}/variants",
+      "line": 425
+    },
+    {
+      "module": "scripts_db",
+      "function": "update_variant",
+      "method": "PUT",
+      "path": "/variants/{variant_id}",
+      "line": 467
+    },
+    {
+      "module": "scripts_db",
+      "function": "resolve_variant",
+      "method": "GET",
+      "path": "/variants/{variant_id}/resolved",
+      "line": 499
+    },
+    {
+      "module": "shocks",
+      "function": "shock_deal",
+      "method": "POST",
+      "path": "/api/deals/{deal_id}/shock",
+      "line": 521
+    },
+    {
+      "module": "shocks",
+      "function": "shock_portfolio",
+      "method": "POST",
+      "path": "/api/portfolios/{portfolio_id}/shock",
+      "line": 537
+    },
+    {
+      "module": "shocks",
+      "function": "shock_global",
+      "method": "POST",
+      "path": "/api/portfolios/shock-global",
+      "line": 555
+    },
+    {
+      "module": "shocks",
+      "function": "smile_risk_portfolio",
+      "method": "POST",
+      "path": "/api/portfolios/{portfolio_id}/smile-risk",
+      "line": 593
+    },
+    {
+      "module": "shocks",
+      "function": "smile_risk_global",
+      "method": "POST",
+      "path": "/api/portfolios/smile-risk-global",
+      "line": 614
+    },
+    {
+      "module": "shocks",
+      "function": "list_shocks",
+      "method": "GET",
+      "path": "/api/shocks",
+      "line": 630
+    },
+    {
+      "module": "simulation",
+      "function": "solve_endpoint",
+      "method": "POST",
+      "path": "/solve",
+      "line": 77
+    },
+    {
+      "module": "simulation",
+      "function": "grid_endpoint",
+      "method": "POST",
+      "path": "/grid",
+      "line": 121
+    },
+    {
+      "module": "trading",
+      "function": "relationships",
+      "method": "GET",
+      "path": "/relationships",
+      "line": 67
+    },
+    {
+      "module": "trading",
+      "function": "create_relationship",
+      "method": "POST",
+      "path": "/relationships",
+      "line": 97
+    },
+    {
+      "module": "trading",
+      "function": "update_relationship",
+      "method": "PUT",
+      "path": "/relationships/{row_id}",
+      "line": 114
+    },
+    {
+      "module": "trading",
+      "function": "executions",
+      "method": "GET",
+      "path": "/executions",
+      "line": 159
+    },
+    {
+      "module": "trading",
+      "function": "book_note",
+      "method": "POST",
+      "path": "/book-note",
+      "line": 165
+    },
+    {
+      "module": "trading",
+      "function": "settle",
+      "method": "POST",
+      "path": "/executions/{row_id}/settle",
+      "line": 247
+    },
+    {
+      "module": "trading",
+      "function": "positions",
+      "method": "GET",
+      "path": "/positions",
+      "line": 266
+    },
+    {
+      "module": "valuation_notes",
+      "function": "create_note",
+      "method": "POST",
+      "path": "",
+      "line": 131
+    },
+    {
+      "module": "valuation_notes",
+      "function": "list_notes",
+      "method": "GET",
+      "path": "",
+      "line": 147
+    },
+    {
+      "module": "valuation_notes",
+      "function": "note_sources",
+      "method": "GET",
+      "path": "/sources/{deal_id}",
+      "line": 157
+    },
+    {
+      "module": "valuation_notes",
+      "function": "get_note",
+      "method": "GET",
+      "path": "/{note_id}",
+      "line": 176
+    },
+    {
+      "module": "valuation_notes",
+      "function": "save_note",
+      "method": "PATCH",
+      "path": "/{note_id}",
+      "line": 181
+    },
+    {
+      "module": "valuation_notes",
+      "function": "freeze_note",
+      "method": "POST",
+      "path": "/{note_id}/versions",
+      "line": 197
+    },
+    {
+      "module": "valuation_notes",
+      "function": "versions",
+      "method": "GET",
+      "path": "/{note_id}/versions",
+      "line": 221
+    },
+    {
+      "module": "valuation_notes",
+      "function": "note_pdf",
+      "method": "GET",
+      "path": "/{note_id}/pdf",
+      "line": 230
+    },
+    {
+      "module": "valuation_notes",
+      "function": "preview_assist_note",
+      "method": "POST",
+      "path": "/{note_id}/assist/prompt",
+      "line": 274
+    },
+    {
+      "module": "valuation_notes",
+      "function": "assist_note",
+      "method": "POST",
+      "path": "/{note_id}/assist",
+      "line": 279
+    },
+    {
+      "module": "var",
+      "function": "launch_var_global",
+      "method": "POST",
+      "path": "/var-global",
+      "line": 421
+    },
+    {
+      "module": "var",
+      "function": "launch_var_portfolio",
+      "method": "POST",
+      "path": "/{portfolio_id}/var",
+      "line": 436
+    },
+    {
+      "module": "var",
+      "function": "get_var_result",
+      "method": "GET",
+      "path": "/var/{batch_id}",
+      "line": 454
+    },
+    {
+      "module": "variants",
+      "function": "compare_variants",
+      "method": "POST",
+      "path": "/compare",
+      "line": 194
+    },
+    {
+      "module": "volatility",
+      "function": "validate_surface",
+      "method": "POST",
+      "path": "/validate",
+      "line": 26
+    },
+    {
+      "module": "volatility",
+      "function": "calibrate",
+      "method": "POST",
+      "path": "/calibrate",
+      "line": 32
+    }
+  ],
+  "secondary_databases": [
+    {
+      "path": "backend\\data\\agent_workshop\\1aaff58632464e2295ca1d4139522ccc\\instances\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_bnp",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP Paribas"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\1aaff58632464e2295ca1d4139522ccc\\instances\\ca\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_ca",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "Crédit Agricole CIB"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\1aaff58632464e2295ca1d4139522ccc\\instances\\client\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_client",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Gestion Élodie"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\1aaff58632464e2295ca1d4139522ccc\\instances\\hector\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_hector",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Maison Hector"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\1aaff58632464e2295ca1d4139522ccc\\instances\\sg\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_sg",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Société Générale"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\2c09009e5b984e43aaabef795ba26561\\instances\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_bnp",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP Paribas"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\2c09009e5b984e43aaabef795ba26561\\instances\\ca\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_ca",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "Crédit Agricole CIB"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\2c09009e5b984e43aaabef795ba26561\\instances\\client\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_client",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Gestion Élodie"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\2c09009e5b984e43aaabef795ba26561\\instances\\hector\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_hector",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Maison Hector"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\2c09009e5b984e43aaabef795ba26561\\instances\\sg\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_sg",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Société Générale"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\52d4087a34e74074b805e992af5e5aa0\\instances\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_bnp",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP Paribas"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\52d4087a34e74074b805e992af5e5aa0\\instances\\ca\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_ca",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "Crédit Agricole CIB"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\52d4087a34e74074b805e992af5e5aa0\\instances\\client\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_client",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Gestion Élodie"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\52d4087a34e74074b805e992af5e5aa0\\instances\\hector\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_hector",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Maison Hector"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\52d4087a34e74074b805e992af5e5aa0\\instances\\sg\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_sg",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Société Générale"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\6006f0db80d947ddb9e68477b3e6f1d1\\instances\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_bnp",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP Paribas"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\6006f0db80d947ddb9e68477b3e6f1d1\\instances\\ca\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_ca",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "Crédit Agricole CIB"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\6006f0db80d947ddb9e68477b3e6f1d1\\instances\\client\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_client",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Gestion Élodie"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\6006f0db80d947ddb9e68477b3e6f1d1\\instances\\hector\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_hector",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Maison Hector"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\6006f0db80d947ddb9e68477b3e6f1d1\\instances\\sg\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_sg",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Société Générale"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\8c6376d9ae5a432586e362f54512cdb7\\instances\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_bnp",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP Paribas"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\8c6376d9ae5a432586e362f54512cdb7\\instances\\ca\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_ca",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "Crédit Agricole CIB"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\8c6376d9ae5a432586e362f54512cdb7\\instances\\client\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_client",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Gestion Élodie"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\8c6376d9ae5a432586e362f54512cdb7\\instances\\hector\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_hector",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Maison Hector"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\8c6376d9ae5a432586e362f54512cdb7\\instances\\sg\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_sg",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Société Générale"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\f6d2d6e4e3e14e62bcbefd70c7ce7417\\instances\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_bnp",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP Paribas"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\f6d2d6e4e3e14e62bcbefd70c7ce7417\\instances\\ca\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_ca",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "Crédit Agricole CIB"
+        },
+        {
+          "id": 1,
+          "name": "Demo"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\f6d2d6e4e3e14e62bcbefd70c7ce7417\\instances\\client\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_client",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Gestion Élodie"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\f6d2d6e4e3e14e62bcbefd70c7ce7417\\instances\\hector\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_hector",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Maison Hector"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "backend\\data\\agent_workshop\\f6d2d6e4e3e14e62bcbefd70c7ce7417\\instances\\sg\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "admin",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "test",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "agent_sg",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 1,
+          "name": "Demo"
+        },
+        {
+          "id": 2,
+          "name": "Société Générale"
+        }
+      ],
+      "category": "simulation"
+    },
+    {
+      "path": "tmp\\rfq-lot2-uat\\data\\structura.db",
+      "accounts": [
+        {
+          "id": 901,
+          "username": "qa_requester",
+          "role": "admin",
+          "entity_id": 901,
+          "is_active": 1
+        },
+        {
+          "id": 902,
+          "username": "qa_bank",
+          "role": "admin",
+          "entity_id": 902,
+          "is_active": 1
+        },
+        {
+          "id": 903,
+          "username": "qa_structurer",
+          "role": "user",
+          "entity_id": 901,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 902,
+          "name": "QA BNP"
+        },
+        {
+          "id": 901,
+          "name": "QA ClientTech"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot2-uat\\data2\\structura.db",
+      "accounts": [
+        {
+          "id": 901,
+          "username": "qa_requester",
+          "role": "admin",
+          "entity_id": 901,
+          "is_active": 1
+        },
+        {
+          "id": 902,
+          "username": "qa_bank",
+          "role": "admin",
+          "entity_id": 902,
+          "is_active": 1
+        },
+        {
+          "id": 903,
+          "username": "qa_structurer",
+          "role": "user",
+          "entity_id": 901,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 902,
+          "name": "QA BNP"
+        },
+        {
+          "id": 901,
+          "name": "QA ClientTech"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot3-uat\\data\\structura.db",
+      "accounts": [
+        {
+          "id": 901,
+          "username": "qa_requester",
+          "role": "admin",
+          "entity_id": 901,
+          "is_active": 1
+        },
+        {
+          "id": 902,
+          "username": "qa_bank",
+          "role": "admin",
+          "entity_id": 902,
+          "is_active": 1
+        },
+        {
+          "id": 903,
+          "username": "qa_structurer",
+          "role": "user",
+          "entity_id": 901,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 902,
+          "name": "QA BNP"
+        },
+        {
+          "id": 901,
+          "name": "QA ClientTech"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot4-uat\\data\\structura.db",
+      "accounts": [
+        {
+          "id": 901,
+          "username": "qa_requester",
+          "role": "admin",
+          "entity_id": 901,
+          "is_active": 1
+        },
+        {
+          "id": 902,
+          "username": "qa_bank",
+          "role": "admin",
+          "entity_id": 902,
+          "is_active": 1
+        },
+        {
+          "id": 903,
+          "username": "qa_structurer",
+          "role": "user",
+          "entity_id": 901,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 902,
+          "name": "QA BNP"
+        },
+        {
+          "id": 901,
+          "name": "QA ClientTech"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot5-uat\\data\\structura.db",
+      "accounts": [
+        {
+          "id": 901,
+          "username": "qa_requester",
+          "role": "admin",
+          "entity_id": 901,
+          "is_active": 1
+        },
+        {
+          "id": 902,
+          "username": "qa_bank",
+          "role": "admin",
+          "entity_id": 902,
+          "is_active": 1
+        },
+        {
+          "id": 903,
+          "username": "qa_structurer",
+          "role": "user",
+          "entity_id": 901,
+          "is_active": 1
+        },
+        {
+          "id": 904,
+          "username": "qa_bank_reviewer",
+          "role": "user",
+          "entity_id": 902,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 902,
+          "name": "QA BNP"
+        },
+        {
+          "id": 901,
+          "name": "QA ClientTech"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot6-uat\\bank\\structura.db",
+      "accounts": [
+        {
+          "id": 502,
+          "username": "bank-local",
+          "role": "admin",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 503,
+          "username": "__rfq_transport__",
+          "role": "user",
+          "entity_id": null,
+          "is_active": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": 202,
+          "name": "BNP"
+        },
+        {
+          "id": 101,
+          "name": "ClientTech"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot6-uat\\requester\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "org-1",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "org-2",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        },
+        {
+          "id": 3,
+          "username": "org-3",
+          "role": "admin",
+          "entity_id": 3,
+          "is_active": 1
+        },
+        {
+          "id": 4,
+          "username": "org-4",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 5,
+          "username": "__rfq_transport__",
+          "role": "user",
+          "entity_id": null,
+          "is_active": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP"
+        },
+        {
+          "id": 3,
+          "name": "Citi"
+        },
+        {
+          "id": 1,
+          "name": "ClientTech"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot7-uat\\data\\structura.db",
+      "accounts": [
+        {
+          "id": 1,
+          "username": "qa.sales",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 2,
+          "username": "bank",
+          "role": "admin",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP"
+        },
+        {
+          "id": 1,
+          "name": "ClientTech"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-221648-af7520\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 502,
+          "username": "qa.bnp",
+          "role": "admin",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 503,
+          "username": "qa.bnp.checker",
+          "role": "user",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 504,
+          "username": "qa.bnp.outsider",
+          "role": "user",
+          "entity_id": 101,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 202,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 101,
+          "name": "ClientTech fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-221648-af7520\\requester\\structura.db",
+      "accounts": [
+        {
+          "id": 51,
+          "username": "qa.requester",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 52,
+          "username": "qa.requester.checker",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 53,
+          "username": "qa.requester.outsider",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 1,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 3,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-221648-af7520\\socgen\\structura.db",
+      "accounts": [
+        {
+          "id": 803,
+          "username": "qa.socgen",
+          "role": "admin",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 804,
+          "username": "qa.socgen.checker",
+          "role": "user",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 805,
+          "username": "qa.socgen.outsider",
+          "role": "user",
+          "entity_id": 301,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 301,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 303,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-221905-63143f\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 502,
+          "username": "qa.bnp",
+          "role": "admin",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 503,
+          "username": "qa.bnp.checker",
+          "role": "user",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 504,
+          "username": "qa.bnp.outsider",
+          "role": "user",
+          "entity_id": 101,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 202,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 101,
+          "name": "ClientTech fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-221905-63143f\\requester\\structura.db",
+      "accounts": [
+        {
+          "id": 51,
+          "username": "qa.requester",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 52,
+          "username": "qa.requester.checker",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 53,
+          "username": "qa.requester.outsider",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 1,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 3,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-221905-63143f\\socgen\\structura.db",
+      "accounts": [
+        {
+          "id": 803,
+          "username": "qa.socgen",
+          "role": "admin",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 804,
+          "username": "qa.socgen.checker",
+          "role": "user",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 805,
+          "username": "qa.socgen.outsider",
+          "role": "user",
+          "entity_id": 301,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 301,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 303,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-222014-0052a2\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 502,
+          "username": "qa.bnp",
+          "role": "admin",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 503,
+          "username": "qa.bnp.checker",
+          "role": "user",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 504,
+          "username": "qa.bnp.outsider",
+          "role": "user",
+          "entity_id": 101,
+          "is_active": 1
+        },
+        {
+          "id": 505,
+          "username": "__rfq_transport__",
+          "role": "user",
+          "entity_id": null,
+          "is_active": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": 202,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 101,
+          "name": "ClientTech fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-222014-0052a2\\requester\\structura.db",
+      "accounts": [
+        {
+          "id": 51,
+          "username": "qa.requester",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 52,
+          "username": "qa.requester.checker",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 53,
+          "username": "qa.requester.outsider",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        },
+        {
+          "id": 54,
+          "username": "__rfq_transport__",
+          "role": "user",
+          "entity_id": null,
+          "is_active": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 1,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 3,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-222014-0052a2\\socgen\\structura.db",
+      "accounts": [
+        {
+          "id": 803,
+          "username": "qa.socgen",
+          "role": "admin",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 804,
+          "username": "qa.socgen.checker",
+          "role": "user",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 805,
+          "username": "qa.socgen.outsider",
+          "role": "user",
+          "entity_id": 301,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 301,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 303,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-222240-40d92e\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 502,
+          "username": "qa.bnp",
+          "role": "admin",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 503,
+          "username": "qa.bnp.checker",
+          "role": "user",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 504,
+          "username": "qa.bnp.outsider",
+          "role": "user",
+          "entity_id": 101,
+          "is_active": 1
+        },
+        {
+          "id": 505,
+          "username": "__rfq_transport__",
+          "role": "user",
+          "entity_id": null,
+          "is_active": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": 202,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 101,
+          "name": "ClientTech fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-222240-40d92e\\requester\\structura.db",
+      "accounts": [
+        {
+          "id": 51,
+          "username": "qa.requester",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 52,
+          "username": "qa.requester.checker",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 53,
+          "username": "qa.requester.outsider",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        },
+        {
+          "id": 54,
+          "username": "__rfq_transport__",
+          "role": "user",
+          "entity_id": null,
+          "is_active": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 1,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 3,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-222240-40d92e\\socgen\\structura.db",
+      "accounts": [
+        {
+          "id": 803,
+          "username": "qa.socgen",
+          "role": "admin",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 804,
+          "username": "qa.socgen.checker",
+          "role": "user",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 805,
+          "username": "qa.socgen.outsider",
+          "role": "user",
+          "entity_id": 301,
+          "is_active": 1
+        }
+      ],
+      "entities": [
+        {
+          "id": 301,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 303,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-222512-8143dd\\bnp\\structura.db",
+      "accounts": [
+        {
+          "id": 502,
+          "username": "qa.bnp",
+          "role": "admin",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 503,
+          "username": "qa.bnp.checker",
+          "role": "user",
+          "entity_id": 202,
+          "is_active": 1
+        },
+        {
+          "id": 504,
+          "username": "qa.bnp.outsider",
+          "role": "user",
+          "entity_id": 101,
+          "is_active": 1
+        },
+        {
+          "id": 505,
+          "username": "__rfq_transport__",
+          "role": "user",
+          "entity_id": null,
+          "is_active": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": 202,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 101,
+          "name": "ClientTech fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-222512-8143dd\\requester\\structura.db",
+      "accounts": [
+        {
+          "id": 51,
+          "username": "qa.requester",
+          "role": "admin",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 52,
+          "username": "qa.requester.checker",
+          "role": "user",
+          "entity_id": 1,
+          "is_active": 1
+        },
+        {
+          "id": 53,
+          "username": "qa.requester.outsider",
+          "role": "user",
+          "entity_id": 2,
+          "is_active": 1
+        },
+        {
+          "id": 54,
+          "username": "__rfq_transport__",
+          "role": "user",
+          "entity_id": null,
+          "is_active": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": 2,
+          "name": "BNP fictif"
+        },
+        {
+          "id": 1,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 3,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    },
+    {
+      "path": "tmp\\rfq-lot8\\20261012-222512-8143dd\\socgen\\structura.db",
+      "accounts": [
+        {
+          "id": 803,
+          "username": "qa.socgen",
+          "role": "admin",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 804,
+          "username": "qa.socgen.checker",
+          "role": "user",
+          "entity_id": 303,
+          "is_active": 1
+        },
+        {
+          "id": 805,
+          "username": "qa.socgen.outsider",
+          "role": "user",
+          "entity_id": 301,
+          "is_active": 1
+        },
+        {
+          "id": 806,
+          "username": "__rfq_transport__",
+          "role": "user",
+          "entity_id": null,
+          "is_active": 0
+        }
+      ],
+      "entities": [
+        {
+          "id": 301,
+          "name": "ClientTech fictif"
+        },
+        {
+          "id": 303,
+          "name": "SocGen fictif"
+        }
+      ],
+      "category": "rfq_qa"
+    }
+  ],
+  "campaign_files": [
+    {
+      "id": "1aaff58632464e2295ca1d4139522ccc",
+      "status": "STOPPED",
+      "business_date": "2025-10-13",
+      "created_at": "2026-10-12T10:33:19.342803",
+      "updated_at": "2026-10-12T10:37:29.794701",
+      "directory": "backend\\data\\agent_workshop\\1aaff58632464e2295ca1d4139522ccc",
+      "owner_user_id": 1,
+      "name": "Campagne autonome complète — unités corrigées"
+    },
+    {
+      "id": "2c09009e5b984e43aaabef795ba26561",
+      "status": "STOPPED",
+      "business_date": "2026-03-12",
+      "created_at": "2026-10-12T11:18:46.450405",
+      "updated_at": "2026-10-12T12:28:55.609712",
+      "directory": "backend\\data\\agent_workshop\\2c09009e5b984e43aaabef795ba26561",
+      "owner_user_id": 1,
+      "name": "Campagne annuelle autonome — pilotage consolidé"
+    },
+    {
+      "id": "52d4087a34e74074b805e992af5e5aa0",
+      "status": "STOPPED",
+      "business_date": "2025-10-13",
+      "created_at": "2026-10-12T09:57:36.465431",
+      "updated_at": "2026-10-12T10:09:46.371547",
+      "directory": "backend\\data\\agent_workshop\\52d4087a34e74074b805e992af5e5aa0",
+      "owner_user_id": 1,
+      "name": "Année autonome — qualification booking et cycle de vie"
+    },
+    {
+      "id": "6006f0db80d947ddb9e68477b3e6f1d1",
+      "status": "STOPPED",
+      "business_date": "2025-10-13",
+      "created_at": "2026-10-12T09:47:58.839450",
+      "updated_at": "2026-10-12T09:55:45.528144",
+      "directory": "backend\\data\\agent_workshop\\6006f0db80d947ddb9e68477b3e6f1d1",
+      "owner_user_id": 1,
+      "name": "Année autonome — booking et suivi de vie"
+    },
+    {
+      "id": "8c6376d9ae5a432586e362f54512cdb7",
+      "status": "STOPPED",
+      "business_date": "2025-12-12",
+      "created_at": "2026-10-12T10:38:08.911685",
+      "updated_at": "2026-10-12T11:17:32.760180",
+      "directory": "backend\\data\\agent_workshop\\8c6376d9ae5a432586e362f54512cdb7",
+      "owner_user_id": 1,
+      "name": "Campagne annuelle autonome — booking et suivi de vie"
+    },
+    {
+      "id": "f6d2d6e4e3e14e62bcbefd70c7ce7417",
+      "status": "STOPPED",
+      "business_date": "2025-11-12",
+      "created_at": "2026-10-12T10:10:12.094504",
+      "updated_at": "2026-10-12T10:32:06.221398",
+      "directory": "backend\\data\\agent_workshop\\f6d2d6e4e3e14e62bcbefd70c7ce7417",
+      "owner_user_id": 1,
+      "name": "Qualification autonome — 12 mois, booking et suivi de vie"
+    }
+  ],
+  "current_rfq_deadline": "2026-10-12T19:33:00Z"
+}

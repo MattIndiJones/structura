@@ -20,7 +20,7 @@ from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent
                           DealPortfolioMembership, Entity, User, Counterparty,
                           Portfolio, LifecycleProposal,
                           Indicative, OfficialFixingVersion, Opportunity,
-                          RfqQuote, RfqRequest, Script,
+                          ProductRecord, RfqQuote, RfqRequest, Script,
                           TradeAmendmentRequest, ValuationRun)
 from .auth import get_current_user, receipt_signing_secret
 from .valuation_progress import valuation_progress_response
@@ -112,6 +112,7 @@ class DealCreate(BaseModel):
     # Winning RFQ response this deal was booked from, if any — see
     # db/models.py:Deal.rfq_id.
     rfq_id: Optional[int] = None
+    execution_agreement_id: Optional[int] = None
     # ── Rattachement commercial (Client Intelligence) ──────────────────
     # À QUI le produit est vendu. Le reste du modèle décrit l'offre —
     # contrepartie est l'émetteur qui fait face au trade. Les trois sont
@@ -1470,6 +1471,7 @@ def _checker_request(
 def _booking_request_summary(body: DealCreate) -> dict:
     return {
         "rfq_id": body.rfq_id,
+        "execution_agreement_id": body.execution_agreement_id,
         "sens": body.sens,
         "contrepartie": body.contrepartie,
         "devise": body.devise,
@@ -1621,6 +1623,8 @@ def _reject_booking(session: Session, current: User, body: DealCreate,
         reason=reason,
         metadata={"http_status": status_code},
     )
+    from ..services.rfq_execution import record_booking_block
+    record_booking_block(session, body, current, reason)
     raise HTTPException(status_code, detail)
 
 
@@ -1643,7 +1647,13 @@ def _book_deal(
     reference_prefix: str | None = None,
     uat_batch_id: int | None = None,
 ):
+    from ..services import rfq_execution
+    execution_request_hash = rfq_execution.booking_request_hash(body)
     try:
+        agreement, replayed = rfq_execution.booking_context(session, body, current)
+        if replayed is not None:
+            session.rollback()
+            return _deal_row(replayed, _get_events(replayed.id, session), session)
         _validate_economics(body)
         ai_provenance = _ai_script_provenance(body)
         _apply_pricing_receipt(body, ai_provenance)
@@ -1677,8 +1687,18 @@ def _book_deal(
     quote_to_qualify = None
     if body.rfq_id:
         source_rfq = session.get(RfqRequest, body.rfq_id)
-        if not source_rfq or source_rfq.user_id != current.id:
+        if not source_rfq:
             _reject_booking(session, current, body, 404, "RFQ introuvable")
+        from ..services.rfq_access import require_rfq_access
+        from ..services.rfq_exchange import round_for
+        from ..services.rfq_publication import publication_for_quote
+        try:
+            require_rfq_access(session, source_rfq.id, current, "book")
+            exchange_round = round_for(session, source_rfq.id)
+            if exchange_round and exchange_round.state != "OPEN" and agreement is None:
+                raise HTTPException(409, "Le tour RFQ a été remplacé ; utilisez le nouveau dossier")
+        except HTTPException as exc:
+            _reject_booking(session, current, body, exc.status_code, exc.detail)
         # Booking a tender closes it as "Bookée" — doing that without a
         # retained response would record a trade won by nobody, and leave the
         # analysis unable to tell who actually won (see api/rfq.py:/history).
@@ -1697,11 +1717,14 @@ def _book_deal(
         from .rfq import _counterparty_by_provider
         expected_counterparty = (
             _counterparty_by_provider(session).get(selected.provider) if selected else None)
+        if agreement:
+            expected_counterparty = json.loads(agreement.snapshot_json)["counterparty_name"]
         gate_failures = booking_gate_failures(
             source_rfq, selected,
             now=business_now(),
             expected_counterparty=expected_counterparty,
             requested_counterparty=body.contrepartie,
+            acceptance_received_at=agreement.acceptance_received_at if agreement else None,
         )
         if gate_failures:
             _reject_booking(
@@ -1798,6 +1821,7 @@ def _book_deal(
         fermete_avant = selected.firmness if selected is not None else None
         qualifiee_au_booking = (
             selected is not None
+            and not publication_for_quote(session, selected.id)
             and selected.firmness != QuoteFirmness.FIRM.value)
         if qualifiee_au_booking:
             quote_to_qualify = selected
@@ -1806,6 +1830,10 @@ def _book_deal(
             source_rfq, body.price_traded, session,
             fermete_avant=fermete_avant,
             firmness_affirmee_au_booking=qualifiee_au_booking)
+        if agreement:
+            provenance = json.loads(rfq_provenance)
+            provenance["execution_agreement"] = rfq_execution.row(session, agreement)
+            rfq_provenance = json.dumps(provenance, ensure_ascii=False)
 
     if legal_context["payoff_family"]:
         try:
@@ -1897,7 +1925,17 @@ def _book_deal(
 
     if source_product_id is not None:
         try:
-            owned_record(session, source_product_id, current)
+            if source_rfq is not None:
+                from ..services.rfq_access import ownership
+                rfq_scope = ownership(session, source_rfq.id)
+            else:
+                rfq_scope = None
+            if rfq_scope is None:
+                owned_record(session, source_product_id, current)
+            else:
+                product_row = session.get(ProductRecord, source_product_id)
+                if product_row is None or product_row.entity_id != rfq_scope.entity_id:
+                    raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
             source_product = load_product(session, source_product_id)
         except ProductError as exc:
             _reject_booking(session, current, body, exc.status, {
@@ -2102,6 +2140,7 @@ def _book_deal(
     )
     session.add(deal)
     session.flush()
+    rfq_execution.attach_booking(session, agreement, deal, current, execution_request_hash)
 
     if quote_to_qualify is not None:
         quote_to_qualify.firmness = QuoteFirmness.FIRM.value
@@ -2275,7 +2314,7 @@ def _book_deal(
             current_rfq = FrozenObject(_rfq_row(
                 source_rfq, _get_quotes(source_rfq.id, session),
                 _counterparty_by_provider(session),
-                _booked_deals_by_rfq(session, current.id)))
+                _booked_deals_by_rfq(session, current.id), session=session))
             product_rfqs = tuple(
                 item for item in product_rfqs
                 if item.to_dict().get("id") != source_rfq.id

@@ -420,6 +420,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // sent as Deal.rfq_id at booking time so the winning quote's RFQ can be
   // traced back from the deal, and so book_deal can close out that RFQ.
   const currentRfqId = ref(null)
+  const currentRfqExecution = ref(null)
   // One-shot handoff to DealTab.vue's commercial form. Les economics sont
   // déjà autoritatifs dans globalParams/underlyings/overrides ; dates et
   // nominal restent aussi dans ce handoff pour fermer les courses de
@@ -858,7 +859,9 @@ export const usePricingStore = defineStore('pricing', () => {
       const { name, ticker, ccy, ...market } = underlying
       return market
     })
-    const res = await apiFetch(`/api/products/${product.product_id}/pricing-input`, {
+    const rfqId = currentRfqId.value
+    const endpoint = rfqId ? `/api/rfq/${rfqId}/pricing-input` : `/api/products/${product.product_id}/pricing-input`
+    const res = await apiFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -872,7 +875,7 @@ export const usePricingStore = defineStore('pricing', () => {
         ? data.detail : data?.detail?.message
       throw new Error(detail || 'Les termes du Product n’ont pas pu être chargés.')
     }
-    return data
+    return rfqId ? data.pricing_input : data
   }
 
   const resultIsStale = computed(() => {
@@ -2210,6 +2213,7 @@ export const usePricingStore = defineStore('pricing', () => {
     currentIndicativeId.value = null
     currentProduct.value = null
     currentRfqId.value = null
+    currentRfqExecution.value = null
     openedDeal.value = null
     bookedContractTerms.value = null
     // An unconsumed prefill must die with the session it belonged to: it is
@@ -2286,6 +2290,12 @@ export const usePricingStore = defineStore('pricing', () => {
     _resetInputState()
     _clearResults()
     parseScript().then(_markSessionBaseline)
+  }
+
+  function releaseSession() {
+    _resetInputState()
+    _clearResults()
+    sessionRouteKey.value = null
   }
 
   // ── Session: unsaved changes ──────────────────────────────────────
@@ -2769,6 +2779,10 @@ export const usePricingStore = defineStore('pricing', () => {
     _restoreConstats(p.constats || {})
 
     const selected = (rfqObj.quotes || []).find(q => q.id === rfqObj.selected_quote_id)
+    currentRfqExecution.value = {
+      requires_confirmation: selected?.origin === 'NETWORK',
+      agreement: rfqObj.execution_agreements?.find(item => item.state !== 'CANCELLED') || null,
+    }
     pendingDealPrefill.value = {
       // quote.counterparty is the ELIGIBLE counterparty the server resolved
       // from the provider (explicit link or identical name — see api/rfq.py
@@ -3170,7 +3184,7 @@ export const usePricingStore = defineStore('pricing', () => {
     // que l'écran ne price pas.
     inLifeBody: _inLifeBody,
     currentIndicativeId, currentProduct, productTitle, ensureIndicative,
-    currentRfqId, pendingDealPrefill, openedDeal, contractTermsLocked,
+    currentRfqId, currentRfqExecution, pendingDealPrefill, openedDeal, contractTermsLocked,
     initialFixingName, startDate, saveConfiguration,
     draftProductBody: () => _baseBody({ allowMissing: true }),
     parseScript, runPricing, runGreeks,
@@ -3188,7 +3202,7 @@ export const usePricingStore = defineStore('pricing', () => {
     loadYfOne, loadYfAll, onValuationDateChange, loadStrikeCloses,
     setMaturityDate, syncTenorFromMaturity, maturityError,
     addUnderlying, removeUnderlying,
-    resetToDefaults, sessionRouteKey, loadFromDb, loadVariant, saveVariant, variantInfo,
+    resetToDefaults, releaseSession, sessionRouteKey, loadFromDb, loadVariant, saveVariant, variantInfo,
     relacherVariante,
     variantDirty,
     loadFromDeal, loadFromRfq, loadFromProduct, saveScript, updateScript,

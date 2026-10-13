@@ -11,6 +11,12 @@ lors des RFQ entre les installations Structura**. Il sera développé dans une
 autre branche, à partir d'un autre chat. Les tests RFQ décrits ci-dessous restent
 à réaliser après cette implémentation ; ils ne sont pas présentés comme livrés.
 
+Actualisation du chantier RFQ : le [lot 6](RFQ_NETWORK_LOT_6_IMPLEMENTATION_2026-10-12.md)
+sur `codex/rfq-network-lot-0` réalise désormais les échanges signés et la reprise,
+avec recette sur deux serveurs fictifs indépendants. Leur utilisation par les agents
+de campagne n’est pas intégrée à ce stade ; les scénarios de simulation ci-dessous
+restent à qualifier après la confirmation de traitement du lot 7.
+
 ## Acquis à conserver
 
 | Validation déjà réalisée | Résultat et portée |
@@ -83,6 +89,13 @@ les références locales et la version/empreinte des termes. Les hypothèses de
 pricing et les marges internes restent privées ; elles ne sont pas des termes
 contractuels à transmettre automatiquement.
 
+Le [plan de réalisation du 12/10](RFQ_NETWORK_ACTION_PLAN_2026-10-12.md) et la
+[spécification du lot 0](RFQ_NETWORK_LOT_0_SPECIFICATION_2026-10-12.md) précisent
+désormais la cible et les règles actées de fermeté, retrait et confirmation.
+La matrice ci-dessous couvre aussi la confirmation native et le rapprochement
+bilatéral ultérieurs ; la V1 de retour automatique des prix peut consigner une
+confirmation externe ou un accord téléphonique déclaré avant booking local.
+
 | Test | Priorité | Scénario et validation attendue |
 | --- | --- | --- |
 | RFQ-01 — Aller-retour natif | P0 | Hector envoie depuis sa RFQ ; BNP reçoit un dossier local, utilise son Pricer et répond. Hector reçoit automatiquement une cotation liée à sa RFQ, sans recopie de prix. Preuves persistées dans les deux installations. |
@@ -91,7 +104,7 @@ contractuels à transmettre automatiquement.
 | RFQ-04 — Droits et confidentialité | P0 | Seules les parties destinataires autorisées voient la demande et la réponse. Une banque ne voit ni le book d'Hector, ni sa marge de revente, ni les cotations concurrentes. Mauvaise identité, session et autre campagne refusées. Aucun secret dans payload, journal ou export. |
 | RFQ-05 — Relation et refus | P0 | Relation complète, relation incomplète, limite/périmètre/document requis manquant et refus volontaire. Appliquer les mêmes contrôles qu'en UI et distinguer refus commercial/légal d'une panne réseau. Les autres banques peuvent poursuivre. |
 | RFQ-06 — Idempotence | P0 | Répéter demande, réception et réponse, y compris après timeout et redémarrage. Une référence de message traitée ne crée ni doublon de RFQ/cotation ni deal supplémentaire. Un retry conserve la preuve originale et son résultat. |
-| RFQ-07 — Péremption et révision | P0 | Réponse expirée, retirée, retardée ou calculée sur une ancienne version. Empêcher sa sélection ou son booking ; afficher le motif et la version attendue. Tester nouvelle cotation et renégociation sans perdre les anciennes preuves. |
+| RFQ-07 — Péremption et révision | P0 | Réponse expirée avant acceptation, retirée, retardée ou calculée sur une ancienne version : empêcher une nouvelle acceptation et afficher le motif. Une acceptation valide reçue avant expiration et retrait réserve le prix ; un accord confirmé peut être booké après expiration sans proroger la quote. Tester retrait/acceptation concurrents, nouvelle cotation et renégociation en conservant les preuves. |
 | RFQ-08 — Acceptation et booking | P0 | La sélection/acceptation est explicite. Confirmer la version et la cotation retenues dans les deux parties ; rapprocher banque SELL/Hector BUY puis Hector SELL/client BUY. Aucun booking déclenché par une simple réponse de prix. Refuser tout changement des termes acceptés. |
 | RFQ-09 — Plusieurs banques | P1 | BNP, SG et CA répondent/refusent indépendamment, dans un ordre variable. Conserver toutes les réponses autorisées et le statut par destinataire ; permettre un choix motivé sans imposer un gagnant ni atteindre artificiellement les objectifs de marché. |
 | RFQ-10 — Pannes et reprise | P1 | Banque hors ligne, arrêt pendant envoi/pricing/réponse, interruption du contrôleur et reprise. Afficher reçu/en cours/en échec/à reprendre ; les accusés techniques et la réponse métier restent distincts. Réconcilier une réponse déjà traitée mais dont l'accusé s'est perdu. |

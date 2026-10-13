@@ -11,13 +11,17 @@
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl">
+        <RouterLink to="/admin/rfq-relations" class="card border-t-2 border-t-blue-500 hover:bg-blue-950/20 transition-colors">
+          <div class="font-bold text-slate-100">Relations RFQ</div>
+          <p class="text-xs text-slate-400 mt-2">Reconnaître les partenaires autorisés, leurs desks de réception et le périmètre des demandes de prix.</p>
+        </RouterLink>
         <RouterLink to="/admin/agent-workshop" class="card border-t-2 border-t-blue-500 hover:bg-blue-950/20 transition-colors">
           <div class="font-bold text-slate-100">Simulation entre agents</div>
           <p class="text-xs text-slate-400 mt-2">Créer et suivre une partie avec Hector, les banques, le client et Achille. Avancement, opérations et erreurs observées.</p>
         </RouterLink>
         <RouterLink to="/trading" class="card border-t-2 border-t-cyan-500 hover:bg-cyan-950/20 transition-colors">
           <div class="font-bold text-slate-100">Relations et exécutions</div>
-          <p class="text-xs text-slate-400 mt-2">Documentation bilatérale, journal des notes, positions et preuves de règlement.</p>
+          <p class="text-xs text-slate-400 mt-2">Définir les accords par contrepartie, suivre les notes bookées et enregistrer leur règlement.</p>
         </RouterLink>
         <RouterLink to="/admin/rfq-providers"
           class="card flex flex-col gap-3 hover:border-amber-700 hover:bg-amber-950/20 hover:shadow-xl hover:shadow-black/30 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
