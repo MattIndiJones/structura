@@ -45,10 +45,12 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 ## Ce qui reste à faire
 
 [Reprise SaaS hybride et prompt pour un nouveau chat — 13/10](handoffs/HYBRID_SAAS_HANDOFF_2026-10-13.md)
-— Décisions retenues : données et traitements chez le client, six installations
+— Décisions retenues : données et traitements privés chez le client, six installations
 isolées, super utilisateurs, profils secondaires, accès rapides, supervision et
-simulation réservée à l'admin. Plan en sept étapes, remise à zéro des données
-fictives sans migration et prompt prêt à copier. Cadrage, non implémenté ;
+simulation réservée à l'admin. Registre RFQ central pour facturation et litiges,
+avec contenu des échanges, droits, reprise et comptage sans doublons ; unité tarifaire
+proposée à valider. Plan en huit étapes, remise à zéro des données fictives sans
+migration et prompt prêt à copier. Cadrage, non implémenté ;
 compilation commerciale et calcul confidentiel différés.
 
 [Atlas de l'application et des comptes — 13/10](projects/platform/STRUCTURA_APPLICATION_OVERVIEW_2026-10-13.md)
