@@ -1,6 +1,9 @@
 <template>
   <!-- Resume the in-memory session unless another product was requested. -->
-  <Pricer v-if="ready" />
+  <Pricer v-if="ready && !loadError" />
+  <div v-else-if="loadError" class="flex-1 min-h-0 overflow-auto p-6 space-y-3">
+    <AlertMessage kind="error">{{ loadError }}</AlertMessage><RouterLink to="/rfq/recues" class="btn-secondary">Revenir aux RFQ reçues</RouterLink>
+  </div>
   <div v-else class="flex-1 flex items-center justify-center text-slate-500 text-sm">
     Chargement…
   </div>
@@ -18,6 +21,7 @@ import { useRfqStore } from '../stores/rfq.js'
 import { findProductModel } from '../utils/productModels.js'
 import { openPricingSession } from '../utils/pricingSession.js'
 import { apiFetch } from '../utils/api.js'
+import AlertMessage from '../components/ui/AlertMessage.vue'
 
 const route  = useRoute()
 const store  = usePricingStore()
@@ -26,9 +30,21 @@ const products = useProductsStore()
 const deals = useDealsStore()
 const rfqs = useRfqStore()
 const ready  = ref(false)
+const loadError = ref('')
 
 async function charger() {
   if (!/^\/(pricer(?:\/|$)|products\/[^/]+\/pricer$)/.test(route.path)) return
+  loadError.value = ''
+  if (route.query.receivedRfq) {
+    try {
+      const response = await apiFetch(`/api/rfq-inbox/${Number(route.query.receivedRfq)}`)
+      const received = await response.json()
+      if (!response.ok) throw new Error(received.detail?.message || received.detail || 'Demande bancaire inaccessible.')
+      if (received.case?.product_id !== Number(route.params.productId) || !received.rights.includes('price')) {
+        throw new Error('Ce Product ne correspond pas à la demande bancaire habilitée.')
+      }
+    } catch (error) { loadError.value = error.message; ready.value = true; return }
+  }
   await openPricingSession(store, route, async () => {
   const { id, variantId, productId } = route.params
   if (productId) {
@@ -56,8 +72,9 @@ async function charger() {
       await store.loadFromRfq(rfq)
       if (!rfq.product_id) store.error = 'Cette RFQ ne possède pas de Product canonique.'
       else {
-        const loaded = await products.fetchOne(rfq.product_id)
-        if (loaded) store.currentProduct = loaded.product
+        const termsResponse = await apiFetch(`/api/rfq/${rfq.id}/terms`)
+        if (termsResponse.ok) store.currentProduct = await termsResponse.json()
+        else store.error = 'Les termes Product de cette RFQ ne peuvent pas être chargés.'
       }
     }
     store.leftTab = 'deal'
@@ -71,6 +88,8 @@ async function charger() {
     store.resetToDefaults()
   }
   })
+  if (route.query.fromRfq && route.query.tab === 'economics') store.leftTab = 'economics'
+  if (route.query.receivedRfq) store.leftTab = 'params'
   ready.value = true
 }
 
@@ -82,7 +101,7 @@ onMounted(charger)
 // laissait l'écran sur le produit précédent — et créer une variante n'ouvrait
 // jamais la variante créée.
 watch(() => [route.params.id, route.params.variantId, route.params.productId,
-             route.query.calculation, route.query.dealId, route.query.fromRfq,
+             route.query.calculation, route.query.dealId, route.query.fromRfq, route.query.receivedRfq, route.query.tab,
              route.query.modele, route.query.sousJacents, route.query.tenor], async () => {
   if (!/^\/(pricer(?:\/|$)|products\/[^/]+\/pricer$)/.test(route.path)) return
   ready.value = false
@@ -94,7 +113,11 @@ async function loadProductFromDb(id, requestedCalculationId = null) {
   const loaded = await products.fetchOne(id, {
     calculationId: Number.isFinite(parsedCalculationId) ? parsedCalculationId : null,
   })
-  if (!loaded) { store.resetToDefaults(); return }
+  if (!loaded) {
+    store.resetToDefaults()
+    if (route.query.receivedRfq) loadError.value = products.error || 'Le Product bancaire ne peut pas être chargé.'
+    return
+  }
   await store.loadFromProduct(loaded.product, loaded.calculationInput)
 }
 

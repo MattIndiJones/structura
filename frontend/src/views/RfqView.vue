@@ -1,12 +1,15 @@
 <template>
   <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
 
-    <div class="page-header px-6 pt-6 pb-0 mb-0">
+    <div class="page-header px-4 sm:px-6 pt-4 pb-3 mb-0 shrink-0 flex-wrap gap-2">
       <div class="flex items-center gap-3">
         <BackLink :fallback="{ path: '/', query: { category: 'competitive_bidding' } }" />
         <h1 class="page-title">RFQ Fournisseurs</h1>
       </div>
-      <div class="page-actions">
+      <div class="page-actions flex-wrap">
+        <button class="btn-ghost btn-sm md:hidden" @click="mobilePanel = mobilePanel === 'list' ? 'detail' : 'list'">{{ mobilePanel === 'list' ? 'Dossier' : 'Liste des RFQ' }}</button>
+        <RouterLink to="/rfq/prototype-reseau" class="btn-ghost btn-sm">Parcours réseau · prototype</RouterLink>
+        <RouterLink to="/rfq/recues" class="btn-secondary btn-sm">RFQ reçues · banque</RouterLink>
         <RouterLink to="/rfq/analyse" class="btn-ghost btn-sm">📈 Analyse</RouterLink>
         <button class="btn-primary text-xs px-3 py-1.5" @click="openCreateForm">+ Nouvelle RFQ</button>
       </div>
@@ -35,7 +38,7 @@
     <div class="flex flex-1 min-h-0">
 
       <!-- ── Liste RFQ ──────────────────────────────────────────── -->
-      <aside class="w-80 shrink-0 border-r border-slate-800 overflow-y-auto p-3 flex flex-col gap-2">
+      <aside :class="['w-full md:w-64 lg:w-80 min-h-0 shrink-0 border-r border-slate-800 overflow-y-auto overscroll-contain p-3 flex-col gap-2', mobilePanel === 'list' ? 'flex' : 'hidden md:flex']">
         <LoadingSpinner v-if="loadingList" class="py-4" />
         <EmptyState v-else-if="!rfq.list.length" icon="📨" title="Aucune RFQ pour l'instant" />
         <template v-else>
@@ -62,7 +65,7 @@
               <span :class="['text-[9px] rounded px-1.5 py-0.5 border', sensBadge(r.sens)]" :title="sensHint(r.sens)">{{ sensLabel(r.sens) }}</span>
               <span :class="['text-[9px] rounded px-1.5 py-0.5 border', kindBadge(r.kind)]">{{ kindLabel(r.kind) }}</span>
               <span :class="['text-[9px] rounded px-1.5 py-0.5 border', statusBadge(r.status)]">{{ statusLabel(r.status) }}</span>
-              <button class="icon-btn-danger" title="Supprimer" aria-label="Supprimer la RFQ" @click.stop="deleteRfq(r.id)">🗑</button>
+              <button v-if="can(r, 'organize')" class="icon-btn-danger" title="Supprimer" aria-label="Supprimer la RFQ" @click.stop="deleteRfq(r.id)">🗑</button>
             </div>
           </div>
           <div class="text-[10px] text-slate-600 font-mono">{{ r.reference }} · AO {{ fmtDateOnly(r.ao_date) }}</div>
@@ -74,7 +77,7 @@
       </aside>
 
       <!-- ── Panneau principal ──────────────────────────────────── -->
-      <main class="flex-1 overflow-y-auto p-6">
+      <main :class="['flex-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain p-4 sm:p-6', mobilePanel === 'list' ? 'hidden md:block' : '']">
 
         <!-- Formulaire de création -->
         <div v-if="showCreateForm" class="flex flex-col gap-4 max-w-2xl xl:max-w-[1500px]">
@@ -94,13 +97,23 @@
             </span>
             <div class="ml-auto flex gap-2">
               <button class="btn-secondary text-sm" @click="showCreateForm = false">Annuler</button>
-              <button class="btn-primary text-sm" :disabled="creating" @click="submitCreate">
+              <button class="btn-primary text-sm" :disabled="creating || !pilotDeskOptions.length" @click="submitCreate">
                 {{ creating ? 'Création…' : 'Créer la RFQ' }}
               </button>
             </div>
           </div>
 
           <AlertMessage v-if="createError" kind="error">{{ createError }}</AlertMessage>
+          <AlertMessage v-if="!pilotDeskOptions.length" kind="info">
+            Aucun desk ne vous autorise à créer une RFQ. Demandez une habilitation dans Administration → Utilisateurs → Desks RFQ.
+          </AlertMessage>
+          <div v-else class="card flex flex-col gap-1 max-w-md">
+            <label class="label">Desk pilote *</label>
+            <select v-model.number="form.pilot_desk_id" class="select">
+              <option v-for="desk in pilotDeskOptions" :key="desk.id" :value="desk.id">{{ desk.name }}</option>
+            </select>
+            <p class="text-[10px] text-slate-500">Ce desk possède le dossier. Les autres desks n'y accèdent que par partage explicite.</p>
+          </div>
           <AlertMessage v-if="sourceProduct" kind="info">
             Cette RFQ utilise le Product <span class="font-mono font-semibold">{{ sourceProduct.reference }}</span>
             en termes v{{ sourceProduct.terms_version }}. Le serveur reprend ses termes et son calendrier comme source faisant autorité.
@@ -504,7 +517,7 @@
 
         <!-- Détail RFQ -->
         <div v-else-if="rfq.current" class="flex flex-col gap-4 max-w-[1900px]">
-          <div class="flex items-start justify-between">
+          <div class="flex items-start justify-between gap-2 flex-wrap">
             <div>
               <div class="flex items-center gap-2">
                 <h2 class="text-lg font-bold text-slate-100">{{ rfq.current.name || rfq.current.reference }}</h2>
@@ -512,15 +525,24 @@
                 <span :class="['text-[9px] rounded px-1.5 py-0.5 border', kindBadge(rfq.current.kind)]">{{ kindLabel(rfq.current.kind) }}</span>
               </div>
               <div class="text-xs text-slate-500 font-mono">{{ rfq.current.reference }} · {{ rfq.current.template_type || 'script personnalisé' }}</div>
+              <div v-if="rfq.current.pilot_desk_id" class="text-xs text-slate-500">
+                {{ rfq.current.organization_name }} · Desk pilote {{ rfq.current.pilot_desk_name }} · Responsable {{ rfq.current.responsible_user_name }} · Créateur {{ rfq.current.creator_name }}
+              </div>
             </div>
-            <div class="flex items-center gap-2 shrink-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <button v-if="rfq.current.access_rights?.includes('organize')" class="btn-secondary btn-sm" @click="openShares">Partager entre desks</button>
+              <button v-if="rfq.current.access_rights?.includes('organize')" class="btn-secondary btn-sm" @click="openAssignment">Affecter / transférer</button>
+              <button v-if="can(rfq.current, 'solicit')" class="btn-secondary btn-sm" :disabled="!rfq.current.product_id || detailTermsDirty" @click="showExchange = true">Préparer la demande partagée</button>
               <button v-if="rfq.current.kind === 'indicatif'" class="btn-secondary text-xs px-3 py-1.5" title="Créer une RFQ 'to trade' à partir de celle-ci, avec un script précis"
                       @click="convertToTrade(rfq.current)">📐 Convertir en RFQ to trade</button>
               <button class="btn-secondary text-xs px-3 py-1.5" title="Créer une nouvelle RFQ à partir de celle-ci"
                       @click="duplicateRfq(rfq.current)">⎘ Dupliquer</button>
-              <button class="icon-btn-danger" title="Supprimer" aria-label="Supprimer la RFQ" @click="deleteRfq(rfq.current.id)">🗑</button>
+              <button v-if="can(rfq.current, 'organize')" class="icon-btn-danger" title="Supprimer" aria-label="Supprimer la RFQ" @click="deleteRfq(rfq.current.id)">🗑</button>
             </div>
           </div>
+          <AlertMessage v-if="rfq.current.pilot_desk_id && !can(rfq.current, 'prepare')" kind="info">
+            Dossier en consultation : les modifications nécessitent une habilitation du desk.
+          </AlertMessage>
           <div v-if="rfq.current.commercial_context || rfq.current.transaction_format
                      || rfq.current.instrument_family || rfq.current.payoff_family"
                class="card py-2.5 px-3 flex items-center gap-2 flex-wrap text-xs">
@@ -641,7 +663,7 @@
                   <div class="label mb-0.5">Statut</div>
                   <div class="flex items-center gap-2">
                     <span class="text-xs text-slate-200">{{ statusLabel(rfq.current.status) }}</span>
-                    <button v-if="rfq.current.status !== 'clos'"
+                    <button v-if="rfq.current.status !== 'clos' && can(rfq.current, 'prepare')"
                             class="text-[10px] underline text-slate-500 hover:text-slate-300"
                             :title="rfq.current.status === 'sans_suite'
                                     ? 'Rendre l\'AO au statut déduit de ses cotations'
@@ -654,7 +676,7 @@
                 <div>
                   <div class="label mb-0.5">Sens (notre côté)</div>
                   <select class="select py-1 px-2 text-xs" :value="rfq.current.sens || 'achat'"
-                          :disabled="!!rfq.current.quotes?.length"
+                          :disabled="!!rfq.current.quotes?.length || !can(rfq.current, 'prepare')"
                           :title="rfq.current.quotes?.length ? 'Sens figé dès la première sollicitation' : sensHint(rfq.current.sens)"
                           @change="updateSens($event.target.value)">
                     <option value="achat">↓ Achat (nous achetons)</option>
@@ -679,13 +701,13 @@
                        bouton se dimensionne sur le plus long et ne bouge plus en
                        passant à « Calcul… ». Une largeur en dur serait à refaire à
                        chaque changement de libellé ou de police. -->
-                  <button class="btn-price-model grid shrink-0" :disabled="computing || !!rfq.current.booked_deal" @click="computeModelPrice">
+                  <button v-if="can(rfq.current, 'price')" class="btn-price-model grid shrink-0" :disabled="computing || !!rfq.current.booked_deal" @click="computeModelPrice">
                     <span class="col-start-1 row-start-1" :class="computing ? 'invisible' : ''">Calculer prix modèle</span>
                     <span class="col-start-1 row-start-1" :class="computing ? '' : 'invisible'">Calcul…</span>
                   </button>
                 </div>
 
-                <details class="border-t border-slate-800 pt-3">
+                <details v-if="can(rfq.current, 'price')" class="border-t border-slate-800 pt-3">
                   <summary class="label mb-0 cursor-pointer select-none">▸ Paramètres de pricing (modifiables)</summary>
                   <div class="mt-2 flex flex-col gap-3">
                     <fieldset :disabled="!!rfq.current.quotes?.length">
@@ -835,7 +857,7 @@
                       <span class="text-slate-300 font-semibold">{{ fmtPrice(bestQuote.price) }}</span>
                       ({{ providerLabel(bestQuote.provider) }})
                     </span>
-                    <button v-if="!rfq.current.booked_deal" class="btn-secondary text-xs" @click="openAddQuote">+ Ajouter un fournisseur</button>
+                    <button v-if="!rfq.current.booked_deal && can(rfq.current, 'prepare')" class="btn-secondary text-xs" @click="openAddQuote">+ Ajouter un fournisseur</button>
                   </div>
                 </div>
 
@@ -878,6 +900,7 @@
                 <div v-else-if="rfq.current.selected_quote_id" class="flex items-center justify-between gap-3 rounded-lg border border-amber-800/60 bg-amber-950/20 px-3 py-2">
                   <span class="text-xs text-amber-300">
                     ⭐ Réponse retenue —
+                    <span v-if="selectedQuote?.origin === 'NETWORK'">{{ confirmedExecution ? 'accord de traitement confirmé ; ' : 'cotation réseau publiée ; confirmation de traitement requise avant booking. ' }}</span>
                     {{ modelPriceRecorded
                       ? 'prix modèle enregistré, prête à contrôler dans le Pricer.'
                       : 'calculez le prix modèle Structura avant le booking.' }}
@@ -888,16 +911,18 @@
                   <div class="flex items-center gap-2 shrink-0">
                     <button v-if="rfq.current.kind === 'indicatif'" class="btn-secondary text-xs px-3 py-1.5"
                             @click="convertToTrade(rfq.current)">📐 Convertir en RFQ to trade</button>
-                    <button v-if="!modelPriceRecorded" class="btn-price-model"
+                    <button v-if="!modelPriceRecorded && can(rfq.current, 'price')" class="btn-price-model"
                             :disabled="computing" @click="computeModelPrice">
                       {{ computing ? 'Calcul…' : 'Calculer prix modèle' }}
                     </button>
-                    <button v-else class="btn-primary text-xs px-3 py-1.5"
+                    <button v-else-if="can(rfq.current, 'book') && (confirmedExecution || (selectedQuote?.origin !== 'NETWORK' && !activeExecution))" class="btn-primary text-xs px-3 py-1.5"
                             @click="bookFromRfq">📋 Booker cette réponse</button>
                   </div>
                 </div>
 
-                <div v-if="rfq.current.selected_quote_id && !rfq.current.booked_deal"
+                <RfqExecutionPanel :rfq="rfq.current" />
+
+                <div v-if="rfq.current.selected_quote_id && !rfq.current.booked_deal && can(rfq.current, 'select')"
                      class="flex items-end gap-3 flex-wrap rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
                   <div class="min-w-0">
                     <div class="text-xs font-bold text-slate-300">
@@ -956,19 +981,21 @@
                         <span v-if="q.parent_quote_id" class="text-slate-600 mr-1">↳</span>
                         <span :class="q.parent_quote_id ? 'text-slate-400 italic' : ''">
                           {{ q.parent_quote_id ? 'Last look' : providerLabel(q.provider) }}
+                          <span v-if="q.origin === 'NETWORK'" class="badge badge-accent ml-1">Réseau · v{{ q.publication.revision }} · {{ publicationStateLabel(q.publication.state) }}</span>
+                          <details v-if="q.origin === 'NETWORK'" class="text-xs mt-1"><summary class="cursor-pointer">Réponse publiée et conditions</summary><div class="max-w-sm whitespace-normal space-y-1"><p>{{ q.publication.response.counterparty_name }} · émetteur {{ q.publication.response.issuer_name || 'Sans objet' }}</p><p>{{ q.publication.response.documentation_reference }}</p><p>{{ q.publication.response.conditions_type === 'NONE' ? 'Sans condition supplémentaire' : 'Réponse conditionnelle' }}</p><p v-for="(condition, i) in q.publication.response.conditions" :key="i">{{ quoteConditionLabel(condition.code) }} : {{ condition.description }}</p><p v-if="q.publication.withdrawal_reason">Retrait : {{ q.publication.withdrawal_reason }}</p></div></details>
                         </span>
                       </td>
                       <td class="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{{ q.contact || '—' }}</td>
                       <td class="py-1.5 pr-2">
                         <input type="number" class="input py-1 px-2 w-24"
-                               :disabled="!!rfq.current.booked_deal"
+                               :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
                                :value="q.price ?? ''"
                                @change="onQuotePriceChange(q, $event.target.value)" />
                       </td>
                       <td class="py-1.5 pr-2 num whitespace-nowrap" :class="spreadClass(q)">{{ spreadBps(q) }}</td>
                       <td class="py-1.5 pr-2">
                         <select class="select py-1 px-2 min-w-[125px]" :value="q.status"
-                                :disabled="!!rfq.current.booked_deal" @change="updateQuoteField(q, 'status', $event.target.value)">
+                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')" @change="updateQuoteField(q, 'status', $event.target.value)">
                           <option value="en_attente">En attente</option>
                           <option value="recu">Reçu</option>
                           <option value="decline">Décliné</option>
@@ -977,7 +1004,7 @@
                       </td>
                       <td class="py-1.5 pr-2">
                         <select class="select py-1 px-2 min-w-[125px]" :value="q.firmness || 'UNKNOWN'"
-                                :disabled="!!rfq.current.booked_deal"
+                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
                                 @change="updateQuoteField(q, 'firmness', $event.target.value)">
                           <option value="UNKNOWN">À qualifier</option>
                           <option value="INDICATIVE">Indicative</option>
@@ -986,19 +1013,19 @@
                       </td>
                       <td class="py-1.5 pr-2">
                         <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
-                               :disabled="!!rfq.current.booked_deal"
+                               :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
                                :value="toDatetimeLocal(q.quoted_at)"
                                @change="onQuoteDateChange(q, $event.target.value)" />
                       </td>
                       <td class="py-1.5 pr-2">
                         <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
-                               :disabled="!!rfq.current.booked_deal"
+                               :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
                                :value="toDatetimeLocal(q.valid_until)"
                                @change="onQuoteValidityChange(q, $event.target.value)" />
                       </td>
                       <td class="py-1.5 pr-2">
                         <select v-if="!q.parent_quote_id" class="select py-1 px-2 min-w-[80px]"
-                                :disabled="!!rfq.current.booked_deal || q.price == null"
+                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || q.price == null || !can(rfq.current, 'prepare')"
                                 :value="q.last_look ? 'oui' : 'non'"
                                 @change="onLastLookToggle(q, $event.target.value === 'oui')">
                           <option value="non">Non</option>
@@ -1007,12 +1034,12 @@
                       </td>
                       <td class="py-1.5 pr-2 text-right whitespace-nowrap">
                         <button :class="['text-xs mr-2', q.id === rfq.current.selected_quote_id ? 'text-amber-400 font-semibold' : 'text-slate-600 hover:text-amber-400']"
-                                :disabled="!!rfq.current.booked_deal || !q.comparable"
+                                :disabled="!!rfq.current.booked_deal || !!activeExecution || !q.comparable || !can(rfq.current, 'select')"
                                 :title="!q.comparable ? 'Seule une cotation finale, active et non remplacée peut être retenue' : (q.id === rfq.current.selected_quote_id ? 'Réponse retenue — cliquer pour désélectionner' : 'Retenir cette réponse')"
                                 @click="onSelectQuote(q)">
                           {{ q.id === rfq.current.selected_quote_id ? '★ Retenue' : '☆ Retenir' }}
                         </button>
-                        <button v-if="!rfq.current.booked_deal" class="text-slate-600 hover:text-red-400" @click="removeQuote(q.id)">✕</button>
+                        <button v-if="q.origin !== 'NETWORK' && !rfq.current.booked_deal && can(rfq.current, 'prepare')" class="text-slate-600 hover:text-red-400" @click="removeQuote(q.id)">✕</button>
                       </td>
                     </tr>
                     </template>
@@ -1064,6 +1091,59 @@
       </main>
     </div>
 
+    <BaseModal v-model="showExchange" title="Demande partagée et contrôle du prix" fullscreen>
+      <RfqExchangePanel v-if="showExchange && rfq.current" :rfq="rfq.current" :providers="rfq.providers" :pricing="rfq.lastPricing"
+        :calculating="computing" :can-price="can(rfq.current, 'price')" :can-prepare="can(rfq.current, 'prepare')" :pricing-error="computeError" @calculate="computeModelPrice" @pricer="openRfqPricer" @new-round="openNewRound" />
+      <template #footer><button class="btn-secondary" @click="showExchange = false">Revenir à la RFQ</button></template>
+    </BaseModal>
+    <BaseModal v-model="showShares" title="Partage de la RFQ" max-width="620px">
+      <div class="flex flex-col gap-3 text-sm">
+        <p class="text-xs text-slate-500">Le desk destinataire doit déjà avoir ses propres habilitations. Le partage en limite les droits sur ce dossier.</p>
+        <AlertMessage v-if="shareError" kind="error">{{ shareError }}</AlertMessage>
+        <label class="flex flex-col gap-1">Desk destinataire
+          <select v-model.number="shareDraft.desk_id" class="select">
+            <option :value="null">— Choisir —</option>
+            <option v-for="desk in organizationDesks.filter(d => d.id !== rfq.current?.pilot_desk_id)"
+                    :key="desk.id" :value="desk.id">{{ desk.name }}</option>
+          </select>
+        </label>
+        <div class="flex flex-wrap gap-3 text-xs">
+          <label v-for="right in shareRights" :key="right.key" class="flex items-center gap-1">
+            <input v-model="shareDraft.rights" type="checkbox" :value="right.key" /> {{ right.label }}
+          </label>
+        </div>
+        <label class="flex flex-col gap-1">Motif du partage
+          <input v-model="shareDraft.reason" class="input" placeholder="Intervention Structuration sur le pricing…" />
+        </label>
+        <label class="flex flex-col gap-1">Échéance éventuelle
+          <input v-model="shareDraft.expires_at" type="datetime-local" class="input" />
+        </label>
+        <div v-if="rfqShares.length" class="border-t border-slate-700 pt-2 text-xs">
+          <div class="font-semibold mb-1">Partages enregistrés</div>
+          <div v-for="share in rfqShares.filter(s => s.active)" :key="share.desk_id" class="flex items-center justify-between gap-2 py-1">
+            <span>{{ share.desk_name }} · {{ share.rights.join(', ') }}</span>
+            <button class="btn-danger btn-sm" @click="revokeShare(share)">Retirer</button>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <button class="btn-secondary" @click="showShares = false">Fermer</button>
+        <button class="btn-primary" :disabled="!shareDraft.desk_id || !shareDraft.reason.trim()" @click="saveShare">Partager</button>
+      </template>
+    </BaseModal>
+    <BaseModal v-model="showAssignment" title="Responsable et desk pilote" max-width="620px">
+      <div class="space-y-3">
+        <AlertMessage v-if="assignmentError" kind="error">{{ assignmentError }}</AlertMessage>
+        <p class="text-xs text-slate-500">L'organisation et les termes restent ceux du dossier. Un transfert ne partage pas automatiquement la RFQ avec le desk source.</p>
+        <label class="block"><span class="label">Desk pilote</span><select v-model.number="assignmentDraft.pilot_desk_id" class="select w-full" @change="loadAssignmentMembers"><option v-for="desk in organizationDesks" :key="desk.id" :value="desk.id">{{ desk.name }}</option></select></label>
+        <label class="block"><span class="label">Responsable habilité dans ce desk</span><select v-model.number="assignmentDraft.responsible_user_id" class="select w-full" :disabled="assignmentLoading"><option :value="null">— Choisir —</option><option v-for="member in assignmentMembers" :key="member.id" :value="member.id">{{ member.username }}</option></select></label>
+        <fieldset class="space-y-2"><legend class="label">Partages existants à conserver explicitement</legend>
+          <label v-for="share in rfqShares.filter(s => s.active && s.desk_id !== assignmentDraft.pilot_desk_id)" :key="share.desk_id" class="flex items-center gap-2 text-xs"><input v-model="assignmentDraft.retained_share_desk_ids" type="checkbox" :value="share.desk_id" />{{ share.desk_name }} · {{ share.rights.join(', ') }}</label>
+          <p v-if="!rfqShares.some(s => s.active && s.desk_id !== assignmentDraft.pilot_desk_id)" class="text-xs text-slate-500">Aucun partage supplémentaire.</p>
+        </fieldset>
+        <label class="block"><span class="label">Motif de l'affectation ou du transfert</span><input v-model="assignmentDraft.reason" class="input w-full" /></label>
+      </div><template #footer><button class="btn-secondary" @click="showAssignment = false">Annuler</button><button class="btn-primary" :disabled="assignmentSaving || assignmentLoading || !assignmentDraft.responsible_user_id || assignmentDraft.reason.trim().length < 3" @click="saveAssignment">{{ assignmentSaving ? 'Enregistrement…' : 'Appliquer l’affectation' }}</button></template>
+    </BaseModal>
     <BaseModal v-model="showDeleteConfirm" title="Supprimer la RFQ" max-width="380px">
       <p class="text-sm text-slate-300">
         Supprimer « {{ deleteTargetLabel }} » ? Les réponses fournisseurs associées seront supprimées aussi. Cette action est irréversible.
@@ -1078,8 +1158,10 @@
 
 <script setup>
 import BackLink from '../components/ui/BackLink.vue'
+import RfqExecutionPanel from '../components/RfqExecutionPanel.vue'
+import { publicationStateLabel, quoteConditionLabel } from '../utils/rfqQuoteStates.js'
 import DealReferenceLink from '../components/DealReferenceLink.vue'
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useRfqStore } from '../stores/rfq.js'
 import { useProductsStore } from '../stores/products.js'
@@ -1111,6 +1193,7 @@ import { useDataFilter } from '../composables/useDataFilter.js'
 import RfqParamsEditor from '../components/RfqParamsEditor.vue'
 import PayScriptPresetPicker from '../components/PayScriptPresetPicker.vue'
 import RfqPricingPanel from '../components/RfqPricingPanel.vue'
+import RfqExchangePanel from '../components/RfqExchangePanel.vue'
 import CcrCreditCheck from '../components/CcrCreditCheck.vue'
 import { formatDate, formatDateTime, formatPercent, formatInt, formatBps } from '../utils/format.js'
 
@@ -1136,6 +1219,107 @@ function restoreConstatOverrides(constats, values, saved) {
 }
 
 const rfq = useRfqStore()
+const can = (row, right) => !row?.pilot_desk_id || row.access_rights?.includes(right)
+const myDesks = ref([])
+const organizationDesks = ref([])
+const pilotDeskOptions = computed(() => myDesks.value.filter(d => d.rights.includes('prepare')))
+const showShares = ref(false)
+const rfqShares = ref([])
+const shareError = ref('')
+const shareRights = [
+  { key: 'read', label: 'Lire' }, { key: 'prepare', label: 'Contribuer / manuel' },
+  { key: 'price', label: 'Pricing interne' }, { key: 'select', label: 'Sélectionner' },
+  { key: 'solicit', label: 'Solliciter' },
+]
+const shareDraft = reactive({ desk_id: null, rights: ['read'], reason: '', expires_at: '' })
+const showAssignment = ref(false)
+const assignmentMembers = ref([])
+const assignmentError = ref('')
+const assignmentLoading = ref(false)
+const assignmentSaving = ref(false)
+const assignmentSnapshot = ref(null)
+const assignmentDraft = reactive({ pilot_desk_id: null, responsible_user_id: null, retained_share_desk_ids: [], reason: '' })
+let assignmentGeneration = 0
+
+async function openAssignment() {
+  assignmentError.value = ''
+  const source = rfq.current
+  assignmentSnapshot.value = { id: source.id, pilot_desk_id: source.pilot_desk_id, responsible_user_id: source.responsible_user_id }
+  const res = await apiFetch(`/api/rfq/${source.id}/shares`)
+  if (!res.ok) { listError.value = 'Les partages du dossier n’ont pas pu être relus.'; return }
+  rfqShares.value = await res.json()
+  Object.assign(assignmentDraft, { pilot_desk_id: source.pilot_desk_id, responsible_user_id: source.responsible_user_id,
+    retained_share_desk_ids: rfqShares.value.filter(s => s.active).map(s => s.desk_id), reason: '' })
+  showAssignment.value = true
+  await loadAssignmentMembers()
+}
+
+async function loadAssignmentMembers() {
+  const ticket = ++assignmentGeneration
+  assignmentLoading.value = true
+  assignmentDraft.retained_share_desk_ids = assignmentDraft.retained_share_desk_ids.filter(id => id !== assignmentDraft.pilot_desk_id)
+  try {
+    const res = await apiFetch(`/api/rfq-desks/${assignmentDraft.pilot_desk_id}/members`)
+    if (!res.ok) throw new Error('Les responsables habilités ne peuvent pas être chargés.')
+    const members = await res.json()
+    if (ticket !== assignmentGeneration) return
+    assignmentMembers.value = members
+    if (!members.some(m => m.id === assignmentDraft.responsible_user_id)) assignmentDraft.responsible_user_id = null
+  } catch (failure) { if (ticket === assignmentGeneration) assignmentError.value = failure.message }
+  finally { if (ticket === assignmentGeneration) assignmentLoading.value = false }
+}
+
+async function saveAssignment() {
+  assignmentSaving.value = true
+  assignmentError.value = ''
+  const snapshot = assignmentSnapshot.value
+  try {
+    const res = await apiFetch(`/api/rfq/${snapshot.id}/assignment`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...assignmentDraft, expected_pilot_desk_id: snapshot.pilot_desk_id,
+        expected_responsible_user_id: snapshot.responsible_user_id,
+        expected_share_desk_ids: rfqShares.value.filter(s => s.active).map(s => s.desk_id) }) })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Affectation refusée')
+    showAssignment.value = false
+    await rfq.fetchList()
+    if (rfq.list.some(row => row.id === snapshot.id)) {
+      await rfq.fetchOne(snapshot.id)
+      await refreshDetailParams()
+    } else { rfq.current = null; selectedId.value = null }
+    notice.value = 'Affectation enregistrée. Les accès ont été recalculés selon le desk et les partages conservés.'
+  } catch (failure) { assignmentError.value = failure.message }
+  finally { assignmentSaving.value = false }
+}
+
+async function openShares() {
+  shareError.value = ''
+  const res = await apiFetch(`/api/rfq/${rfq.current.id}/shares`)
+  if (!res.ok) { shareError.value = 'Partages indisponibles'; return }
+  rfqShares.value = await res.json()
+  showShares.value = true
+}
+
+async function saveShare() {
+  shareError.value = ''
+  const res = await apiFetch(`/api/rfq/${rfq.current.id}/shares/${shareDraft.desk_id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rights: shareDraft.rights, reason: shareDraft.reason,
+      expires_at: shareDraft.expires_at ? new Date(shareDraft.expires_at).toISOString() : null }),
+  })
+  if (!res.ok) { shareError.value = (await res.json().catch(() => ({}))).detail || 'Partage refusé'; return }
+  rfqShares.value = await (await apiFetch(`/api/rfq/${rfq.current.id}/shares`)).json()
+  shareDraft.reason = ''
+  notice.value = 'Partage enregistré'
+}
+
+async function revokeShare(share) {
+  shareError.value = ''
+  const res = await apiFetch(`/api/rfq/${rfq.current.id}/shares/${share.desk_id}`, { method: 'DELETE' })
+  if (!res.ok) { shareError.value = (await res.json().catch(() => ({}))).detail || 'Retrait refusé'; return }
+  rfqShares.value = rfqShares.value.filter(s => s.desk_id !== share.desk_id)
+  notice.value = 'Partage retiré'
+}
+const mobilePanel = ref(rfq.current ? 'detail' : 'list')
+const showExchange = ref(false)
 const products = useProductsStore()
 const router = useRouter()
 const route = useRoute()
@@ -1162,6 +1346,19 @@ const loadingList    = ref(true)
 const listError      = ref('')
 const notice         = ref('')
 const selectedId     = ref(null)
+let responseTimer = null
+let responseRefreshRunning = false
+onMounted(() => {
+  responseTimer = setInterval(async () => {
+    if (responseRefreshRunning || !rfq.current?.exchange_round || rfq.current.booked_deal || document.hidden
+        || document.activeElement?.matches('input,select,textarea')) return
+    responseRefreshRunning = true
+    try { await rfq.refreshNetworkQuotes(rfq.current.id) } catch { /* Retain the last received snapshot during a temporary interruption. */ }
+    finally { responseRefreshRunning = false }
+  }, 5000)
+})
+onUnmounted(() => clearInterval(responseTimer))
+
 const showCreateForm = ref(false)
 const creating       = ref(false)
 const createError    = ref('')
@@ -1213,6 +1410,8 @@ function fmtTenor(t) {
 }
 
 const form = reactive({
+  pilot_desk_id: null,
+  previous_round_id: null,
   name: '',
   ao_date: todayIso(),
   pricing_date: todayIso(),
@@ -1504,7 +1703,13 @@ onMounted(async () => {
     // conservé peut donc dater d'avant le booking alors que la liste, elle,
     // vient d'être relue. On recharge explicitement l'AO courant pour ne pas
     // laisser apparaître une seconde fois le bouton de booking.
-    const currentId = rfq.current?.id || null
+    const currentId = Number(route.query.rfq) || rfq.current?.id || null
+    const [desksRes, organizationRes] = await Promise.all([
+      apiFetch('/api/rfq-desks'), apiFetch('/api/rfq-desks/organization'),
+    ])
+    if (desksRes.ok) myDesks.value = await desksRes.json()
+    if (organizationRes.ok) organizationDesks.value = await organizationRes.json()
+    form.pilot_desk_id = pilotDeskOptions.value[0]?.id ?? null
     await Promise.all([rfq.fetchList(), rfq.fetchProviders(), fetchScripts(), fetchDealsForScripts()])
     if (currentId && rfq.list.some(item => item.id === currentId)) {
       selectedId.value = currentId
@@ -1532,6 +1737,8 @@ async function fetchDealsForScripts() {
 }
 
 function openCreateForm() {
+  form.previous_round_id = null
+  mobilePanel.value = 'detail'
   lastSuggestedFamily = ''
   showCreateForm.value = true
   selectedId.value = null
@@ -1543,6 +1750,7 @@ function openCreateForm() {
   sourceProductPricingInput.value = null
   commercialLinkEnabled.value = false
   Object.assign(form, {
+    pilot_desk_id: pilotDeskOptions.value[0]?.id ?? null,
     name: '', ao_date: todayIso(), pricing_date: todayIso(), kind: 'indicatif', sens: 'achat', source: 'template', template_type: '',
     script_id: null, source_deal_id: null,
     transaction_format: opportuniteContexte.value?.transaction_format || '',
@@ -1662,6 +1870,7 @@ function onDirectOpportunityChange() {
 // Pre-fills the create form from an existing RFQ (new tender round on the
 // same product, params free to adjust before submitting as a new RFQ).
 async function duplicateRfq(source) {
+  form.previous_round_id = null
   sourceProduct.value = null
   sourceProductPricingInput.value = null
   showCreateForm.value = true
@@ -1670,6 +1879,7 @@ async function duplicateRfq(source) {
   const p = source.params || {}
   Object.assign(form, {
     name: `${source.name || source.reference} (copie)`,
+    pilot_desk_id: source.pilot_desk_id ?? pilotDeskOptions.value[0]?.id ?? null,
     ao_date: todayIso(),
     pricing_date: todayIso(),
     kind: source.kind || 'indicatif',
@@ -1720,6 +1930,15 @@ async function duplicateRfq(source) {
   form.strike_date = fixingDate(scriptConstats.value, constatOverrides) || ''
 }
 
+async function openNewRound() {
+  const source = rfq.current
+  if (!source?.exchange_round || !can(source, 'prepare')) return
+  showExchange.value = false
+  await duplicateRfq(source)
+  form.previous_round_id = source.exchange_round.id
+  form.name = `${source.name || source.reference} · nouveau tour`
+}
+
 // Conversion preserves the quoted script, required values and explicit calendars.
 async function convertToTrade(source) {
   await duplicateRfq(source)
@@ -1728,6 +1947,7 @@ async function convertToTrade(source) {
 }
 
 async function selectRfq(id) {
+  mobilePanel.value = 'detail'
   showCreateForm.value = false
   selectedId.value = id
   computeError.value = ''
@@ -2130,6 +2350,8 @@ async function submitCreate() {
       rfqUnderlyingToParams(
         underlying, ao.dividendeDuSousJacent(index, horizon)))
     const rfqObj = await rfq.create({
+      pilot_desk_id: form.pilot_desk_id,
+      previous_round_id: form.previous_round_id,
       product_id: sourceProduct.value?.product_id || null,
       product_terms_version: sourceProduct.value?.terms_version || null,
       name: form.name,
@@ -2458,6 +2680,8 @@ const bestQuote = computed(() => {
 })
 const selectedQuote = computed(() => (rfq.current?.quotes || []).find(
   q => q.id === rfq.current?.selected_quote_id) || null)
+const activeExecution = computed(() => rfq.current?.execution_agreements?.find(item => item.state !== 'CANCELLED'))
+const confirmedExecution = computed(() => activeExecution.value?.state === 'CONFIRMED' && !activeExecution.value.review_required_reason)
 const selectedIsBest = computed(
   () => !!selectedQuote.value && !!bestQuote.value
         && Math.abs(selectedQuote.value.price - bestQuote.value.price) <= 1e-9)
@@ -2526,6 +2750,11 @@ async function onSelectQuote(q) {
 
 function bookFromRfq() {
   router.push({ path: '/pricer', query: { fromRfq: rfq.current.id } })
+}
+
+function openRfqPricer() {
+  showExchange.value = false
+  router.push({ path: '/pricer', query: { fromRfq: rfq.current.id, tab: 'economics' } })
 }
 
 // Deep link vers la fiche du deal dans la liste des deals bookés

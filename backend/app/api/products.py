@@ -203,7 +203,14 @@ def list_products(
     if current.role != "admin":
         query = query.where(ProductRecord.user_id == current.id)
     rows = session.exec(query.order_by(ProductRecord.updated_at.desc())).all()
-    return [_row_summary(row, load_product(session, row.id)) for row in rows]
+    visible = []
+    for row in rows:
+        try:
+            owned_record(session, row.id, current)
+        except ProductError:
+            continue
+        visible.append(_row_summary(row, load_product(session, row.id)))
+    return visible
 
 
 @router.get("/{product_id}")
@@ -212,10 +219,11 @@ def get_product(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
     revision: int | None = None,
+    terms_version: int | None = None,
 ):
     try:
         owned_record(session, product_id, current)
-        product = load_product(session, product_id, revision=revision)
+        product = load_product(session, product_id, revision=revision, terms_version=terms_version)
         return {**product.to_dict(), "description": describe_product(product)}
     except ProductError as exc:
         _fail(exc)
@@ -230,6 +238,9 @@ def update_product(
 ):
     try:
         owned_record(session, product_id, current)
+        from ..services.rfq_bank import case_for_product
+        if case_for_product(session, product_id) and (body.intent is not None or body.commercial is not None):
+            raise ProductError("RFQ_BANK_INTENT_LOCKED", "Le nominal, le sens et la demande reçue sont figés.")
         product = load_product(session, product_id)
         if product.revision != body.expected_revision:
             raise ProductError("PRODUCT_REVISION_STALE", "Le produit a changé. Rechargez le dossier.")
@@ -327,6 +338,10 @@ def compose_product_pricing_input(
 ):
     try:
         owned_record(session, product_id, current)
+        from ..services.rfq_bank import case_for_product, require_pricing
+        bank_case = case_for_product(session, product_id)
+        if bank_case:
+            require_pricing(session, bank_case, current)
         product = load_product(session, product_id)
         if product.terms_version != body.expected_terms_version:
             raise ProductError(
@@ -349,6 +364,11 @@ def retain_product_calculation(
     """Append one server-produced calculation without changing product terms."""
     command_payload = body.model_dump(mode="json", exclude={"command_key"})
     try:
+        owned_record(session, product_id, current)
+        from ..services.rfq_bank import case_for_product, require_pricing
+        bank_case = case_for_product(session, product_id)
+        if bank_case:
+            require_pricing(session, bank_case, current)
         prior = previous_command(session, current, body.command_key, command_payload)
         if prior is not None:
             if prior.product_id != product_id:

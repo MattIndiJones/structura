@@ -207,6 +207,9 @@ strike est portée exclusivement par StartDate, jamais par le début d’un
 saisie distincte, c’est StartDate. Les périodes suivantes commencent à
 l’observation précédente. Aucun coupon n’est dû au début de période.
 
+Dans les entrées API, un `CONSTAT()` reçoit un objet de configuration de calendrier ;
+une liste de dates ou une valeur simple est refusée avant de figer la RFQ.
+
 `PARAM COUPON` n’a aucun défaut. 8 dans Economics signifie 8 %, soit 0,08 dans
 le moteur. `COUPON * 100` fournit 8 si le calcul attend une quantité brute.
 `PARAM MULTIPLIER = 1.5` déclare au contraire une valeur brute avec un défaut

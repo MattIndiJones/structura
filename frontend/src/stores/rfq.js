@@ -57,6 +57,48 @@ export const useRfqStore = defineStore('rfq', () => {
     return current.value
   }
 
+  async function fetchRecipients(id) {
+    return _json(await apiFetch(`/api/rfq/${id}/recipients`), 'Les partenaires RFQ n’ont pas pu être chargés.')
+  }
+
+  async function refreshNetworkQuotes(id) {
+    const previous = current.value
+    const res = await apiFetch(`/api/rfq/${id}`)
+    if (res.status === 403 || res.status === 404) {
+      if (current.value === previous && previous?.id === id) current.value = null
+      return
+    }
+    const data = await _json(res, 'Le suivi des réponses est indisponible.')
+    if (current.value !== previous || previous?.id !== id || quoteUpdateQueues.size) return
+    current.value = { ...previous, quotes: data.quotes, status: data.status, business_status: data.business_status,
+      selected_quote_id: data.selected_quote_id, selection_reason_code: data.selection_reason_code,
+      selection_reason_note: data.selection_reason_note, execution_agreements: data.execution_agreements,
+      booked_deal: data.booked_deal }
+    list.value = list.value.map(item => item.id === id ? { ...item, status: data.status, business_status: data.business_status,
+      selected_quote_id: data.selected_quote_id } : item)
+  }
+
+  async function previewExchange(rfq, { sharedTitle, deadline, providerIds = [], relationshipIds = [] }) {
+    const res = await apiFetch(`/api/rfq/${rfq.id}/exchange-preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expected_terms_version: rfq.product_terms_version,
+        shared_title: sharedTitle, response_deadline: deadline, provider_ids: providerIds,
+        ...(relationshipIds.length ? { relationship_ids: relationshipIds } : {}) }),
+    })
+    return _json(res, 'La demande partagée n’a pas pu être préparée.')
+  }
+
+  async function fetchExchange(id) {
+    return _json(await apiFetch(`/api/rfq/${id}/exchange`), 'Le suivi des envois est indisponible.')
+  }
+
+  async function sendExchange(id, payload) {
+    return _json(await apiFetch(`/api/rfq/${id}/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    }), 'La RFQ n’a pas pu être envoyée.')
+  }
+
   async function create(payload) {
     const res = await apiFetch('/api/rfq', {
       method: 'POST',
@@ -149,6 +191,19 @@ export const useRfqStore = defineStore('rfq', () => {
     return update(rfqId, { selected_quote_id: quoteId })
   }
 
+  async function treatmentCommand(rfqId, suffix, payload) {
+    const result = await _json(await apiFetch(`/api/rfq/${rfqId}/treatment${suffix}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    }), 'Le traitement n’a pas pu être consigné.')
+    const response = await _json(await apiFetch(`/api/rfq/${rfqId}`), 'Le dossier doit être rechargé.')
+    if (current.value?.id === rfqId) current.value = response
+    list.value = list.value.map(item => item.id === rfqId ? response : item)
+    return result
+  }
+  const declareTreatment = (id, body) => treatmentCommand(id, '', body)
+  const confirmTreatment = (id, agreementId, body) => treatmentCommand(id, `/${agreementId}/confirm`, body)
+  const cancelTreatment = (id, agreementId, reason) => treatmentCommand(id, `/${agreementId}/cancel`, { reason })
+
   function addDaysIso(isoDate, days) {
     const date = new Date(`${isoDate}T00:00:00Z`)
     date.setUTCDate(date.getUTCDate() + Math.round(days))
@@ -175,12 +230,12 @@ export const useRfqStore = defineStore('rfq', () => {
     const now = new Date()
     const today = new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
     const valuationDate = p.valuation_date || today
-    const dated = !!(p.strike_date && valuationDate !== p.strike_date)
+    let dated = !!(p.strike_date && valuationDate !== p.strike_date)
     const maturityDate = rfqMaturityDate(p)
-    if (dated && !maturityDate) {
+    if (!rfq.product_id && dated && !maturityDate) {
       throw new Error('La maturité contractuelle est requise pour valoriser cette RFQ à sa date.')
     }
-    const payload = {
+    let payload = {
       script: rfq.script_snapshot,
       underlyings: p.underlyings || [],
       corr_matrix: normaliseCorrelation(p.corr_matrix, (p.underlyings || []).length),
@@ -206,6 +261,18 @@ export const useRfqStore = defineStore('rfq', () => {
       anchor: p.strike_date || p.value_date || null,
       ...(dated ? { valuation_date: valuationDate } : {}),
     }
+    let inputHash = null
+    if (rfq.product_id) {
+      const composition = await apiFetch(`/api/rfq/${rfq.id}/pricing-input`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected_terms_version: rfq.product_terms_version, valuation_date: valuationDate }),
+      })
+      const canonical = await _json(composition, 'Les termes Product de la RFQ n’ont pas pu être chargés.')
+      payload = canonical.pricing_input
+      inputHash = canonical.input_hash
+      dated = !!(payload.strike_date && payload.valuation_date !== payload.strike_date)
+      if (!dated) delete payload.valuation_date
+    }
     const res = await apiFetch(dated ? '/api/price/in-life' : '/api/price', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -219,34 +286,37 @@ export const useRfqStore = defineStore('rfq', () => {
     // On garde la réponse entière, pas seulement le prix : c'est elle qui
     // permet au détail de l'AO d'expliquer le chiffre qu'on oppose au
     // fournisseur, ligne de flux par ligne de flux.
-    lastPricing.value = {
+    const saved = await update(rfq.id, { model_price: data.price * 100,
+      ...(inputHash ? { expected_model_input_hash: inputHash } : {}) })
+    if (!current.value || current.value.id === rfq.id) lastPricing.value = {
       rfqId: rfq.id,
       result: data,
       // Le strike ancre l'axe des temps du moteur : c'est lui qui reconvertit
       // un t en date. La value date ne reste que comme repli.
-      strikeDate: p.strike_date || null,
-      valueDate: p.value_date || null,
+      strikeDate: payload.strike_date || null,
+      valueDate: payload.value_date || null,
       hypotheses: {
-        model: p.model || 'constant',
-        r: p.r ?? null,
-        N: p.N ?? null,
-        underlyings: (p.underlyings || []).map(underlying => ({
+        model: payload.model || 'constant',
+        r: payload.r ?? null,
+        N: payload.N ?? null,
+        underlyings: (payload.underlyings || []).map(underlying => ({
           name: underlying.name, ticker: underlying.ticker,
           sigma: underlying.sigma ?? null, q: underlying.q ?? null,
         })),
-        corr_matrix: normaliseCorrelation(p.corr_matrix, (p.underlyings || []).length),
+        corr_matrix: payload.corr_matrix,
       },
       at: new Date().toISOString(),
     }
     // /api/price returns a 0–1 fraction of nominal; quotes are entered in
     // percentage points (e.g. 98.5), so scale to match before comparing.
-    return update(rfq.id, { model_price: data.price * 100 })
+    return saved
   }
 
   return {
     list, current, providers, history, lastPricing,
-    fetchProviders, fetchList, fetchOne, create, update, remove,
+    fetchProviders, fetchList, fetchOne, fetchRecipients, refreshNetworkQuotes, previewExchange, fetchExchange, sendExchange, create, update, remove,
     addQuote, updateQuote, removeQuote, computeModelPrice, fetchHistory,
     toggleLastLook, selectQuote,
+    declareTreatment, confirmTreatment, cancelTreatment,
   }
 })

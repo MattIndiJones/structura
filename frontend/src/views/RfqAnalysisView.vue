@@ -164,6 +164,7 @@ const filteredHistory = computed(() => {
     // une réponse de plus : la compter mettrait la banque deux fois dans
     // l'AO et tirerait sa moyenne vers sa cotation améliorée.
     if (h.superseded) return false
+    if (h.origin === 'NETWORK' && !h.comparable) return false
     if (filters.templateType && h.template_type !== filters.templateType) return false
     if (!filters.providers.includes(h.provider)) return false
     if (filters.from && h.date.slice(0, 10) < filters.from) return false

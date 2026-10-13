@@ -21,8 +21,8 @@ export const useProductsStore = defineStore('products', () => {
   const saving = ref(false)
   const error = ref('')
 
-  async function getProduct(id) {
-    const res = await apiFetch(`/api/products/${id}`)
+  async function getProduct(id, { termsVersion = null } = {}) {
+    const res = await apiFetch(`/api/products/${id}${termsVersion == null ? '' : `?terms_version=${termsVersion}`}`)
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(message(data, 'Produit introuvable.'))
     return data
@@ -59,15 +59,14 @@ export const useProductsStore = defineStore('products', () => {
     }
   }
 
-  async function fetchOne(id, { calculationId = null } = {}) {
+  async function fetchOne(id, { calculationId = null, termsVersion = null, withCalculation = true } = {}) {
     loading.value = true
     error.value = ''
     try {
-      const data = await getProduct(id)
+      const data = await getProduct(id, { termsVersion })
       let calculationInput = null
-      const calculation = calculationId == null
-        ? data.calculations?.at(-1)
-        : data.calculations?.find(item => item.id === Number(calculationId))
+      const calculation = !withCalculation ? null : calculationId == null
+        ? data.calculations?.at(-1) : data.calculations?.find(item => item.id === Number(calculationId))
       if (calculationId != null && !calculation) {
         throw new Error('Ce calcul n’appartient pas au produit ou n’existe plus.')
       }

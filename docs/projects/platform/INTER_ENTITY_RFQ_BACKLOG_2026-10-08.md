@@ -2,6 +2,18 @@
 
 Date : 08/10/2026. Statut : besoin exprimé, développement différé.
 
+Actualisation fonctionnelle du 12/10/2026 : le [plan de réalisation du réseau RFQ](RFQ_NETWORK_ACTION_PLAN_2026-10-12.md)
+et la [spécification complète du lot 0](RFQ_NETWORK_LOT_0_SPECIFICATION_2026-10-12.md)
+consolident les parcours et les règles actées avec Philippe. Ils font foi pour
+les destinataires par organisation, la publication bancaire humaine, le retour
+automatique, le maintien du manuel, la fermeté, le retrait et la confirmation
+avant booking. Le [lot 6 du 12/10](RFQ_NETWORK_LOT_6_IMPLEMENTATION_2026-10-12.md)
+réalise le transport signé et la reprise entre installations sur la branche RFQ,
+avec recette de deux serveurs fictifs. Le pilote réel et la confirmation avant
+booking restent à réaliser. Le contexte de simulation et la
+messagerie au format mail décrits ci-dessous restent historiques ; cette
+messagerie de recette n'est pas un préalable imposé au réseau RFQ natif.
+
 Cette note conserve le futur besoin d'échange entre entités. Elle ne décrit
 aucune fonctionnalité livrée. Le laboratoire précédent a été retiré ; les
 spécifications de la nouvelle simulation sont développées dans le

@@ -27,7 +27,8 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onUnmounted } from 'vue'
+import { lockDocumentScroll } from '../../composables/useDocumentScrollLock.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, required: true },
@@ -39,6 +40,7 @@ const emit = defineEmits(['update:modelValue', 'close'])
 
 const panelEl = ref(null)
 let previousFocus
+let releaseScroll
 
 function close() {
   emit('update:modelValue', false)
@@ -65,12 +67,17 @@ function onTab(e) {
 }
 
 watch(() => props.modelValue, async (open) => {
-  if (!open) { if (props.fullscreen) previousFocus?.focus?.(); return }
-  if (props.fullscreen) previousFocus = document.activeElement
+  releaseScroll?.()
+  releaseScroll = null
+  if (!open) { previousFocus?.focus?.(); return }
+  if (typeof document !== 'undefined') previousFocus = document.activeElement
+  releaseScroll = lockDocumentScroll()
   await nextTick()
+  if (!props.modelValue) return
   const els = focusableEls()
   ;(els[0] || panelEl.value)?.focus()
-})
+}, { immediate: true })
+onUnmounted(() => { releaseScroll?.(); previousFocus?.focus?.() })
 </script>
 
 <style scoped>
@@ -92,13 +99,15 @@ watch(() => props.modelValue, async (open) => {
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
   padding: 1.5rem;
-  max-height: 88vh;
-  overflow-y: auto;
+  max-height: calc(100dvh - 2rem);
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 .modal-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -122,7 +131,8 @@ watch(() => props.modelValue, async (open) => {
   transition: all .15s;
 }
 .modal-close:hover { background: var(--negative-light); border-color: var(--negative); color: var(--negative); }
-.modal-footer { display: flex; gap: .5rem; justify-content: flex-end; }
+.modal-body { flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.modal-footer { display: flex; flex-shrink: 0; flex-wrap: wrap; gap: .5rem; justify-content: flex-end; }
 .modal-fullscreen { height: calc(100dvh - 2rem); max-height: none; min-height: 0; overflow: hidden; }
 .modal-fullscreen > .modal-header, .modal-fullscreen > .modal-footer { flex-shrink: 0; min-width: 0; }
 .modal-fullscreen > .modal-body { flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }

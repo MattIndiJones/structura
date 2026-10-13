@@ -1,5 +1,6 @@
 <template>
   <div class="product-context px-5 py-2 border-b flex flex-wrap items-center gap-3">
+    <div v-if="receivedRfq" class="w-full text-xs flex flex-wrap items-center gap-2"><strong>RFQ reçue · pricing privé bancaire</strong><span>Termes reçus figés. Marchés et modèle propres à la banque.</span><RouterLink :to="{ path: '/rfq/recues', query: { open: receivedRfq } }" class="btn-secondary btn-sm ml-auto">Revenir à la RFQ reçue</RouterLink><p class="w-full text-[11px]" style="color: var(--muted)">Le dernier calcul privé est réutilisé à la réouverture. Au premier calcul, contrôlez les hypothèses initiales dans Marché. « Conserver ce calcul privé » l’enregistre pour le desk ; la publication du prix sera une action distincte.</p></div>
     <template v-if="pricing.currentProduct">
       <span class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--muted);">
         {{ pricing.currentProduct.listed ? 'Produit conservé' : 'Produit interne' }}
@@ -13,18 +14,18 @@
       </span>
       <button v-if="canRetainCalculation" class="btn-secondary text-xs ml-auto"
               :disabled="products.saving" @click="retainCalculation">
-        {{ products.saving ? 'Conservation…' : 'Conserver ce calcul' }}
+        {{ products.saving ? 'Conservation…' : receivedRfq ? 'Conserver ce calcul privé' : 'Conserver ce calcul' }}
       </button>
-      <button v-if="!pricing.currentProduct.listed" class="btn-secondary text-xs"
+      <button v-if="!receivedRfq && !pricing.currentProduct.listed" class="btn-secondary text-xs"
               :class="canRetainCalculation ? '' : 'ml-auto'"
               :disabled="products.saving" @click="openRetention">
         Conserver le produit
       </button>
-      <RouterLink :to="{ path: '/rfq', query: { product: pricing.currentProduct.product_id } }"
+      <RouterLink v-if="!receivedRfq" :to="{ path: '/rfq', query: { product: pricing.currentProduct.product_id } }"
                   :class="['btn-secondary text-xs', canRetainCalculation || !pricing.currentProduct.listed ? '' : 'ml-auto']">
         Ouvrir une RFQ
       </RouterLink>
-      <RouterLink to="/products" class="text-xs font-semibold" style="color: var(--accent);">
+      <RouterLink v-if="!receivedRfq" to="/products" class="text-xs font-semibold" style="color: var(--accent);">
         Bibliothèque
       </RouterLink>
     </template>
@@ -78,7 +79,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useProductsStore } from '../stores/products.js'
 import BaseModal from './ui/BaseModal.vue'
@@ -87,6 +88,8 @@ import AlertMessage from './ui/AlertMessage.vue'
 const pricing = usePricingStore()
 const products = useProductsStore()
 const router = useRouter()
+const route = useRoute()
+const receivedRfq = computed(() => Number(route.query.receivedRfq) || null)
 const modal = ref(false)
 const name = ref('')
 

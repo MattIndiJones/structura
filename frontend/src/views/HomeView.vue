@@ -413,7 +413,7 @@
 
             <RouterLink to="/trading" class="card border-t-2 border-t-cyan-500 hover:bg-cyan-950/20 transition-colors">
               <div class="font-bold text-slate-100">Relations et exécutions</div>
-              <p class="text-xs text-slate-400 mt-2">Préparez la documentation bilatérale, consultez les positions de notes et enregistrez les preuves de règlement.</p>
+              <p class="text-xs text-slate-400 mt-2">Définissez les accords avec les contreparties, puis suivez les notes bookées et leur règlement.</p>
             </RouterLink>
             <!-- RFQ Fournisseurs -->
             <RouterLink to="/rfq"

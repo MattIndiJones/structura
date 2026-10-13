@@ -45,6 +45,10 @@ from .api.amc_prices import router as amc_prices_router
 from .api.amc_studies import router as amc_studies_router
 from .api.fifo import router as fifo_router
 from .api.rfq import router as rfq_router
+from .api.rfq_desks import router as rfq_desks_router
+from .api.rfq_relations import router as rfq_relations_router
+from .api.rfq_inbox import router as rfq_inbox_router
+from .api.rfq_transport import router as rfq_transport_router
 from .api.admin import router as admin_router
 from .api.alerts import router as alerts_router
 from .api.compute import router as compute_router
@@ -169,6 +173,10 @@ app.include_router(amc_prices_router)
 app.include_router(amc_studies_router)
 app.include_router(fifo_router)
 app.include_router(rfq_router)
+app.include_router(rfq_desks_router)
+app.include_router(rfq_relations_router)
+app.include_router(rfq_inbox_router)
+app.include_router(rfq_transport_router)
 app.include_router(admin_router)
 app.include_router(alerts_router)
 app.include_router(compute_router)
@@ -183,6 +191,35 @@ app.include_router(market_data_router)
 app.include_router(simulation_router)
 app.include_router(scenarios_router)
 app.include_router(schedule_router)
+
+
+@app.on_event("startup")
+async def start_rfq_transport():
+    if consultation_mode() or os.getenv("PYTEST_CURRENT_TEST") or os.getenv("STRUCTURA_DISABLE_RFQ_TRANSPORT") == "1":
+        return
+    from .db.database import engine
+    from .services.rfq_transport import process_pending
+    app.state.rfq_transport_stop = asyncio.Event()
+    async def run():
+        while not app.state.rfq_transport_stop.is_set():
+            try:
+                await asyncio.to_thread(process_pending, engine, app.state.rfq_transport_stop.is_set)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).error("Cycle de transport RFQ interrompu ; reprise au cycle suivant")
+            try:
+                await asyncio.wait_for(app.state.rfq_transport_stop.wait(), timeout=2)
+            except asyncio.TimeoutError:
+                pass
+    app.state.rfq_transport_task = asyncio.create_task(run())
+
+
+@app.on_event("shutdown")
+async def stop_rfq_transport():
+    task = getattr(app.state, "rfq_transport_task", None)
+    if task:
+        app.state.rfq_transport_stop.set()
+        await task
 
 DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 

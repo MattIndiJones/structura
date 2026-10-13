@@ -74,4 +74,19 @@ describe('chargement des calculs conservés', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledWith('/api/products/12', { headers: {} })
   })
+
+  it('reprend les termes de la RFQ sans importer les hypothèses du dernier calcul Product', async () => {
+    const fetchMock = vi.fn(async () => response({
+      product_id: 12, terms_version: 2,
+      calculations: [{ id: 32, terms_version: 3 }],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const loaded = await useProductsStore().fetchOne(12, { termsVersion: 2, withCalculation: false })
+
+    expect(loaded.product.terms_version).toBe(2)
+    expect(loaded.calculationInput).toBeNull()
+    expect(loaded.calculationId).toBeNull()
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/products/12?terms_version=2'])
+  })
 })

@@ -1153,6 +1153,10 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
             raise ValueError(f"Valeurs manquantes pour le CONSTAT '{name}'.")
         kind = constat_by_name[name].kind
         v = constat_values[name]
+        if kind != 'single' and not isinstance(v, dict):
+            raise ValueError(
+                f"CONSTAT {name}: un échéancier exige une configuration de calendrier "
+                "(dates, fréquence et roll), pas une liste de dates ni une valeur simple.")
 
         lag = int(v.get('settlement_lag') or 0) if isinstance(v, dict) else 0
         conv = _convention(name, v)

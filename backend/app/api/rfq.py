@@ -6,12 +6,13 @@ from datetime import date, datetime, timezone
 from ..runtime import business_now, business_today
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import (
     Deal, Opportunity, RfqRequest, RfqQuote, RfqProvider, RfqProviderContact,
-    Counterparty, User,
+    Counterparty, Entity, ProductRecord, RfqDesk, RfqDeskShare, RfqOwnership, RfqRelationship,
+    RfqExchangeRound, RfqRoundLink, User,
 )
 from ..core.client_controls import (
     ClientRuleError, OPPORTUNITY_TERMINAL, client_provenance_snapshot,
@@ -24,15 +25,20 @@ from ..core.rfq_controls import (
     contract_calendar_failures, maturity_iso, pricing_input_hash, product_terms, product_terms_hash,
     rfq_readiness_failures,
 )
-from ..core.schemas import validate_correlation_matrix
+from ..core.schemas import PricingRequest, validate_correlation_matrix
 from ..core.payscript.parser import parse_script
-from ..core.product.inputs import terms_from_input
+from ..core.product.inputs import IDENTITY_FIELDS, TERM_FIELDS, pricing_input, terms_from_input
 from ..core.product.models import CommercialContext, FrozenObject, TradeIntent
 from ..core.workflow import RfqBusinessStatus, derive_rfq_status, rfq_business_status
 from ..services.product_repository import (
     ProductError, load_product, owned_record, stage_internal_product,
     stage_revision, stage_terms,
 )
+from ..services.rfq_access import (
+    RIGHTS, assign_rfq, effective_rights, lock_rfq_organization, membership_rights, ownership, require_create_desk,
+    require_rfq_access, visible_rfqs,
+)
+from ..services import rfq_relationships, rfq_exchange, rfq_publication, rfq_execution
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api/rfq", tags=["rfq"])
@@ -41,6 +47,8 @@ router = APIRouter(prefix="/api/rfq", tags=["rfq"])
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
 class RfqCreate(BaseModel):
+    pilot_desk_id: Optional[int] = None
+    previous_round_id: Optional[int] = None
     product_id: Optional[int] = None
     product_terms_version: Optional[int] = None
     name: str
@@ -84,6 +92,7 @@ class RfqUpdate(BaseModel):
     pricing_params: Optional[dict] = None
     status: Optional[str] = None
     model_price: Optional[float] = None
+    expected_model_input_hash: Optional[str] = Field(default=None, min_length=64, max_length=64)
     selected_quote_id: Optional[int] = None
     selection_reason_code: Optional[str] = Field(
         default=None,
@@ -98,6 +107,47 @@ class RfqUpdate(BaseModel):
     payoff_family: Optional[str] = None
     payoff_description: Optional[str] = None
     documentation_reference: Optional[str] = None
+
+
+class RfqPricingInput(BaseModel):
+    expected_terms_version: int = Field(gt=0)
+    valuation_date: Optional[date] = None
+    context: Optional[dict] = None
+
+
+class RfqExchangePreview(BaseModel):
+    expected_terms_version: int = Field(gt=0)
+    shared_title: str = Field(min_length=1, max_length=200)
+    response_deadline: datetime
+    provider_ids: list[int] = Field(default_factory=list, max_length=50)
+    relationship_ids: list[int] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def recipients(self):
+        if not 1 <= len(self.provider_ids) + len(self.relationship_ids) <= 50:
+            raise ValueError("Choisissez entre un et cinquante destinataires")
+        return self
+
+
+class RfqExchangeSend(RfqExchangePreview):
+    command_key: str = Field(min_length=16, max_length=100)
+    expected_preview_hash: str = Field(min_length=64, max_length=64)
+
+
+class RfqSharePut(BaseModel):
+    rights: list[str] = Field(min_length=1)
+    reason: str = Field(min_length=3, max_length=500)
+    expires_at: Optional[datetime] = None
+
+
+class RfqAssignmentPut(BaseModel):
+    pilot_desk_id: int
+    responsible_user_id: int
+    expected_pilot_desk_id: int
+    expected_responsible_user_id: Optional[int] = None
+    expected_share_desk_ids: list[int]
+    retained_share_desk_ids: list[int]
+    reason: str = Field(min_length=3, max_length=500)
 
 
 class QuoteCreate(BaseModel):
@@ -179,7 +229,8 @@ def _booked_deals_by_rfq(session: Session, user_id: int) -> dict:
 
 
 def _rfq_row(r: RfqRequest, quotes: list | None = None, cpty_map: dict | None = None,
-             booked_by_rfq: dict | None = None) -> dict:
+             booked_by_rfq: dict | None = None, session: Session | None = None,
+             current: User | None = None) -> dict:
     business_status = rfq_business_status(
         r.status, ready=not rfq_readiness_failures(r))
     if r.status == "retenue" and quotes:
@@ -230,8 +281,51 @@ def _rfq_row(r: RfqRequest, quotes: list | None = None, cpty_map: dict | None = 
     if quotes is not None:
         superseded = superseded_quote_ids(quotes)
         row["quotes"] = [
-            _quote_row(q, cpty_map, superseded=q.id in superseded)
+            _quote_row(q, cpty_map, superseded=q.id in superseded, session=session)
             for q in quotes]
+    if session is not None:
+        exchange_round = rfq_exchange.round_for(session, r.id)
+        row["execution_agreements"] = rfq_execution.workspace(session, r.id)
+        round_link = session.get(RfqRoundLink, r.id)
+        row["exchange_round"] = ({"id": exchange_round.id, "number": exchange_round.number,
+            "state": exchange_round.state, "exchange_reference": exchange_round.exchange_reference,
+            "previous_round_id": exchange_round.previous_round_id} if exchange_round else None)
+        row["previous_round_id"] = round_link.previous_round_id if round_link else None
+        if row["booked_deal"] is None:
+            deal = session.exec(select(Deal).where(Deal.rfq_id == r.id)).first()
+            if deal is not None:
+                row["booked_deal"] = {"id": deal.id, "reference": deal.reference}
+        scope = ownership(session, r.id)
+        if scope is not None:
+            desk = session.get(RfqDesk, scope.pilot_desk_id)
+            entity = session.get(Entity, scope.entity_id)
+            responsible = session.get(User, scope.responsible_user_id) if scope.responsible_user_id else None
+            creator = session.get(User, r.user_id)
+            row.update({"pilot_desk_id": scope.pilot_desk_id,
+                        "pilot_desk_name": desk.name if desk else None,
+                        "organization_name": entity.name if entity else None,
+                        "responsible_user_id": scope.responsible_user_id,
+                        "responsible_user_name": responsible.username if responsible else None,
+                        "creator_name": creator.username if creator else None,
+                        "access_rights": sorted(effective_rights(session, r, current)) if current else []})
+            if current is not None and "price" not in row["access_rights"]:
+                private_params = row["params"]
+                contractual = {"T", "notional", "currency", "strike_date", "value_date",
+                               "maturity_date", "payment_date", "user_params", "constats",
+                               "frozen_schedule", "date_conventions"}
+                row["params"] = {key: value for key, value in private_params.items()
+                                 if key in contractual}
+                row["params"]["underlyings"] = [
+                    {key: value for key, value in underlying.items()
+                     if key in IDENTITY_FIELDS}
+                    for underlying in private_params.get("underlyings", [])]
+                row["model_price"] = None
+                row["model_price_at"] = None
+            if current is not None and "read" not in membership_rights(
+                    session, scope.pilot_desk_id, current):
+                row["commercial_context"] = None
+                for field in ("client_id", "mandate_id", "opportunity_id", "primary_affiliation_id"):
+                    row[field] = None
     return row
 
 
@@ -252,7 +346,7 @@ def _sync_product_rfq(
     product = product or load_product(session, rfq.product_id)
     snapshot = FrozenObject(_rfq_row(
         rfq, _get_quotes(rfq.id, session), _counterparty_by_provider(session),
-        _booked_deals_by_rfq(session, current.id)))
+        _booked_deals_by_rfq(session, current.id), session=session))
     rfqs = [item for item in product.rfqs if item.to_dict().get("id") != rfq.id]
     product = product.model_copy(update={
         "name": rfq.name if not product.listed else product.name,
@@ -315,13 +409,13 @@ def _counterparty_by_provider(session: Session) -> dict:
 
 
 def _quote_row(q: RfqQuote, cpty_map: dict | None = None, *,
-               superseded: bool = False) -> dict:
+               superseded: bool = False, session: Session | None = None) -> dict:
     comparable = (
         not superseded and q.price is not None
         and q.status not in {"decline", "expire"}
         and (q.valid_until is None or q.valid_until > business_now())
     )
-    return {
+    row = {
         "id": q.id,
         "rfq_id": q.rfq_id,
         "provider": q.provider,
@@ -343,6 +437,15 @@ def _quote_row(q: RfqQuote, cpty_map: dict | None = None, *,
         "superseded": superseded,
         "comparable": comparable,
     }
+    if session is not None:
+        publication = rfq_publication.publication_for_quote(session, q.id)
+        if publication:
+            public = rfq_publication.public_row(session, publication)
+            row.update(origin="NETWORK", publication=public,
+                counterparty=public["response"]["counterparty_name"],
+                comparable=comparable and public["state"] == "ACTIVE"
+                    and public["response"]["conditions_type"] == "NONE")
+    return row
 
 
 def _rfq_audit_state(rfq: RfqRequest) -> dict:
@@ -424,8 +527,8 @@ def _derive_status(rfq: RfqRequest, quotes: list) -> str:
     five prices in hand still displayed "Brouillon" until it jumped straight
     to "Retenue".
 
-    Note the app has no explicit "send the tender" action: adding a provider
-    IS the act of soliciting it, so that's what "envoyée" keys off."""
+    Manual provider rows remain facts of solicitation. Network rounds are
+    accounted for by _sync_status, independently of received prices."""
     return derive_rfq_status(rfq.status, rfq.selected_quote_id, quotes)
 
 
@@ -435,6 +538,8 @@ def _sync_status(rfq: RfqRequest, session: Session) -> None:
     closes the hole that left a de-selected RFQ displaying "Retenue" with
     nothing retained."""
     new_status = _derive_status(rfq, _get_quotes(rfq.id, session))
+    if new_status == "draft" and rfq_exchange.round_for(session, rfq.id):
+        new_status = "envoye"
     if new_status != rfq.status:
         rfq.status = new_status
         session.add(rfq)
@@ -555,11 +660,9 @@ def _refuse_if_booked(rfq: RfqRequest, session: Session, what: str) -> None:
              f"de ce trade et ne peut plus être modifié.")
 
 
-def _get_owned(rfq_id: int, current: User, session: Session) -> RfqRequest:
-    r = session.get(RfqRequest, rfq_id)
-    if not r or r.user_id != current.id:
-        raise HTTPException(404, "RFQ introuvable")
-    return r
+def _get_owned(rfq_id: int, current: User, session: Session,
+               right: str = "read") -> RfqRequest:
+    return require_rfq_access(session, rfq_id, current, right)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────
@@ -758,10 +861,26 @@ def _create_rfq(
     reference_prefix: str | None = None,
     uat_batch_id: int | None = None,
 ):
+    desk = (require_create_desk(session, body.pilot_desk_id, current)
+            if uat_batch_id is None else None)
+    previous_round = None
+    if body.previous_round_id is not None:
+        previous_round = session.get(RfqExchangeRound, body.previous_round_id)
+        if previous_round is None:
+            raise HTTPException(404, "Tour précédent introuvable")
+        previous_rfq = lock_rfq_organization(session, previous_round.rfq_id, current, "prepare")
+        if desk is None or previous_rfq.entity_id != desk.entity_id:
+            raise HTTPException(403, "Le nouveau tour doit appartenir à la même organisation")
+        if previous_round.state != "OPEN" or session.exec(select(RfqRoundLink).where(
+                RfqRoundLink.previous_round_id == previous_round.id)).first():
+            raise HTTPException(409, "Un nouveau tour existe déjà pour cette consultation")
+        _refuse_if_booked(previous_rfq, session, "l’ouverture d’un nouveau tour")
     product = None
     if body.product_id is not None:
         try:
-            owned_record(session, body.product_id, current)
+            product_row = owned_record(session, body.product_id, current)
+            if desk is not None and product_row.entity_id != desk.entity_id:
+                raise HTTPException(404, "Produit introuvable dans cette organisation")
             product = load_product(session, body.product_id)
         except ProductError as exc:
             raise HTTPException(exc.status, detail={"code": exc.code, "message": str(exc)})
@@ -922,6 +1041,14 @@ def _create_rfq(
     )
     session.add(rfq)
     session.flush()
+    if desk is not None:
+        session.add(RfqOwnership(
+            rfq_id=rfq.id, entity_id=desk.entity_id,
+            pilot_desk_id=desk.id, responsible_user_id=current.id))
+        session.flush()
+    if previous_round is not None:
+        session.add(RfqRoundLink(rfq_id=rfq.id, previous_round_id=previous_round.id))
+        session.flush()
     record_audit_event(
         session,
         action="RFQ_CREATED",
@@ -940,7 +1067,7 @@ def _create_rfq(
         reason=f"Création de {rfq.reference} depuis le produit.")
     session.commit()
     session.refresh(rfq)
-    return _rfq_row(rfq, [])
+    return _rfq_row(rfq, [], session=session, current=current)
 
 
 @router.post("", status_code=201)
@@ -957,17 +1084,15 @@ def list_rfqs(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    rfqs = session.exec(
-        select(RfqRequest).where(RfqRequest.user_id == current.id)
-        .order_by(RfqRequest.created_at.desc())
-    ).all()
+    rfqs = visible_rfqs(session, current)
     booked = _booked_deals_by_rfq(session, current.id)
     quotes_by_rfq: dict[int, list[RfqQuote]] = {}
     if rfqs:
         for quote in session.exec(select(RfqQuote).where(
                 RfqQuote.rfq_id.in_([rfq.id for rfq in rfqs]))).all():
             quotes_by_rfq.setdefault(quote.rfq_id, []).append(quote)
-    return [_rfq_row(r, quotes_by_rfq.get(r.id, []), booked_by_rfq=booked)
+    return [_rfq_row(r, quotes_by_rfq.get(r.id, []), booked_by_rfq=booked,
+                     session=session, current=current)
             for r in rfqs]
 
 
@@ -981,10 +1106,14 @@ def rfq_history(
     frontend filters/groups by provider and product type. It does need to be
     told which rows are a provider's FINAL answer and which tender each row
     won, though: neither is derivable from a quote in isolation."""
+    visible_ids = {rfq.id for rfq in visible_rfqs(session, current)
+                   if "price" in effective_rights(session, rfq, current)}
+    if not visible_ids:
+        return []
     rows = session.exec(
         select(RfqQuote, RfqRequest)
         .join(RfqRequest, RfqQuote.rfq_id == RfqRequest.id)
-        .where(RfqRequest.user_id == current.id)
+        .where(RfqRequest.id.in_(visible_ids))
         .where(RfqQuote.price.is_not(None))
     ).all()
     # Superseded parents are computed over ALL quotes, not just the priced
@@ -992,7 +1121,7 @@ def rfq_history(
     # filtered set, but that is not something to rely on silently.
     superseded = superseded_quote_ids(session.exec(
         select(RfqQuote).join(RfqRequest, RfqQuote.rfq_id == RfqRequest.id)
-        .where(RfqRequest.user_id == current.id)
+        .where(RfqRequest.id.in_(visible_ids))
     ).all())
     return [
         {
@@ -1011,6 +1140,8 @@ def rfq_history(
             "edge_bps": _edge_bps(q.price, rfq.model_price, rfq.sens),
             "date": _utc_iso(q.quoted_at or q.created_at),
             "status": q.status,
+            **({"origin": "NETWORK", "comparable": _quote_row(q, session=session)["comparable"]}
+               if rfq_publication.publication_for_quote(session, q.id) else {}),
             # This row is a last-look counter-quote…
             "is_last_look": q.parent_quote_id is not None,
             # …and this one is the original it replaced. Superseded rows are
@@ -1025,7 +1156,7 @@ def rfq_history(
             # AOs still in progress would punish whoever quotes on live ones.
             "rfq_status": rfq.status,
         }
-        for q, rfq in rows
+        for q, rfq in rows if rfq.id in visible_ids
     ]
 
 
@@ -1037,7 +1168,401 @@ def get_rfq(
 ):
     rfq = _get_owned(rfq_id, current, session)
     return _rfq_row(rfq, _get_quotes(rfq_id, session), _counterparty_by_provider(session),
-                    _booked_deals_by_rfq(session, current.id))
+                    _booked_deals_by_rfq(session, current.id), session=session, current=current)
+
+
+@router.get("/{rfq_id}/terms")
+def rfq_terms(
+    rfq_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Only this RFQ's contractual Product terms; no sibling RFQs or private calculations."""
+    rfq = _get_owned(rfq_id, current, session)
+    product = _rfq_product(rfq, rfq.product_terms_version, current, session)
+    return {"product_id": product.product_id, "reference": product.reference,
+            "terms_version": product.terms_version,
+            "terms_fingerprint": product.terms_fingerprint,
+            "terms": product.terms.model_dump(mode="json", exclude={"schedule_error"})}
+
+
+@router.post("/{rfq_id}/treatment")
+def declare_treatment(rfq_id: int, body: rfq_execution.TreatmentRequest,
+                      current: Annotated[User, Depends(get_current_user)],
+                      session: Annotated[Session, Depends(get_session)]):
+    return rfq_execution.request_treatment(session, rfq_id, current, body)
+
+
+@router.post("/{rfq_id}/treatment/{agreement_id}/confirm")
+def confirm_treatment(rfq_id: int, agreement_id: int, body: rfq_execution.TreatmentConfirmation,
+                      current: Annotated[User, Depends(get_current_user)],
+                      session: Annotated[Session, Depends(get_session)]):
+    return rfq_execution.confirm_treatment(session, rfq_id, agreement_id, current, body)
+
+
+class TreatmentCancellation(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/{rfq_id}/treatment/{agreement_id}/cancel")
+def cancel_treatment(rfq_id: int, agreement_id: int, body: TreatmentCancellation,
+                     current: Annotated[User, Depends(get_current_user)],
+                     session: Annotated[Session, Depends(get_session)]):
+    return rfq_execution.cancel_request(session, rfq_id, agreement_id, current, body.reason)
+
+
+@router.get("/{rfq_id}/shares")
+def list_rfq_shares(
+    rfq_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    rfq = _get_owned(rfq_id, current, session, "organize")
+    if ownership(session, rfq.id) is None:
+        return []
+    rows = session.exec(select(RfqDeskShare).where(
+        RfqDeskShare.rfq_id == rfq_id).order_by(RfqDeskShare.created_at)).all()
+    return [{"desk_id": row.desk_id, "desk_name": session.get(RfqDesk, row.desk_id).name,
+             "rights": json.loads(row.rights_json), "active": row.active,
+             "expires_at": _utc_iso(row.expires_at), "reason": row.reason}
+            for row in rows]
+
+
+@router.put("/{rfq_id}/assignment")
+def change_rfq_assignment(
+    rfq_id: int,
+    body: RfqAssignmentPut,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    return assign_rfq(session, rfq_id, current, **body.model_dump())
+
+
+@router.put("/{rfq_id}/shares/{desk_id}")
+def share_rfq(
+    rfq_id: int,
+    desk_id: int,
+    body: RfqSharePut,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    rfq = lock_rfq_organization(session, rfq_id, current)
+    scope = ownership(session, rfq.id)
+    desk = session.get(RfqDesk, desk_id)
+    if scope is None or not desk or not desk.active or desk.entity_id != scope.entity_id \
+            or desk_id == scope.pilot_desk_id:
+        raise HTTPException(422, "Desk de partage invalide")
+    rights = set(body.rights)
+    if not rights <= (RIGHTS - {"organize", "book"}) or "read" not in rights:
+        raise HTTPException(422, "Le partage exige la lecture et ne délègue ni organisation ni booking")
+    if len(body.reason.strip()) < 3:
+        raise HTTPException(422, "Le motif du partage est requis")
+    expiry = (body.expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+              if body.expires_at and body.expires_at.tzinfo else body.expires_at)
+    if expiry and expiry <= datetime.utcnow():
+        raise HTTPException(422, "L'échéance doit être future")
+    existing = session.exec(select(RfqDeskShare).where(
+        RfqDeskShare.rfq_id == rfq_id, RfqDeskShare.desk_id == desk_id)).first()
+    before = ({"rights": json.loads(existing.rights_json), "active": existing.active}
+              if existing else None)
+    share = existing or RfqDeskShare(rfq_id=rfq_id, desk_id=desk_id, actor_user_id=current.id)
+    share.rights_json = json.dumps(sorted(rights))
+    share.active = True
+    share.reason = body.reason.strip()
+    share.expires_at = expiry
+    share.actor_user_id = current.id
+    share.updated_at = datetime.utcnow()
+    session.add(share)
+    session.flush()
+    after = {"desk_id": desk_id, "rights": sorted(rights), "active": True,
+             "reason": share.reason, "expires_at": _utc_iso(share.expires_at)}
+    record_audit_event(session, action="RFQ_DESK_SHARED", object_type="RFQ",
+                       object_id=rfq_id, actor_user_id=current.id, result="SUCCESS",
+                       before=before, after=after, reason=share.reason)
+    session.commit()
+    return after
+
+
+@router.delete("/{rfq_id}/shares/{desk_id}", status_code=204)
+def revoke_rfq_share(
+    rfq_id: int,
+    desk_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    lock_rfq_organization(session, rfq_id, current)
+    share = session.exec(select(RfqDeskShare).where(
+        RfqDeskShare.rfq_id == rfq_id, RfqDeskShare.desk_id == desk_id,
+        RfqDeskShare.active == True,  # noqa: E712
+    )).first()
+    if not share:
+        raise HTTPException(404, "Partage introuvable")
+    share.active = False
+    share.updated_at = datetime.utcnow()
+    session.add(share)
+    record_audit_event(session, action="RFQ_DESK_SHARE_REVOKED", object_type="RFQ",
+                       object_id=rfq_id, actor_user_id=current.id, result="SUCCESS",
+                       before={"desk_id": desk_id, "rights": json.loads(share.rights_json)},
+                       after={"desk_id": desk_id, "active": False})
+    session.commit()
+
+
+def _rfq_product(rfq: RfqRequest, expected_version: int, current: User, session: Session):
+    if not rfq.product_id or not rfq.product_terms_version:
+        raise HTTPException(409, detail={"code": "RFQ_PRODUCT_MISSING", "message": "Cette RFQ ne possède pas de version Product exploitable."})
+    if rfq.product_terms_version != expected_version:
+        raise HTTPException(409, detail={"code": "RFQ_TERMS_STALE", "message": "Les termes de la RFQ ont changé. Rechargez le dossier."})
+    try:
+        scope = ownership(session, rfq.id)
+        if scope is None:
+            owned_record(session, rfq.product_id, current)
+        else:
+            product_row = session.get(ProductRecord, rfq.product_id)
+            if product_row is None or product_row.entity_id != scope.entity_id:
+                raise HTTPException(404, "Produit introuvable dans cette organisation")
+        return load_product(session, rfq.product_id, terms_version=rfq.product_terms_version)
+    except ProductError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.post("/{rfq_id}/pricing-input")
+def compose_rfq_pricing_input(
+    rfq_id: int,
+    body: RfqPricingInput,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Compose the linked terms with the RFQ's persisted private assumptions."""
+    rfq = _get_owned(rfq_id, current, session, "price")
+    product = _rfq_product(rfq, body.expected_terms_version, current, session)
+    params = json.loads(rfq.params_json or "{}")
+    valuation_date = params.get("valuation_date") or business_today().isoformat()
+    if body.context is None and body.valuation_date and body.valuation_date.isoformat() != valuation_date:
+        raise HTTPException(409, detail={"code": "RFQ_PRICING_DATE_STALE", "message": "La date de calcul diffère des hypothèses enregistrées. Enregistrez les hypothèses RFQ avant le calcul."})
+    context = {key: value for key, value in params.items()
+               if key in PricingRequest.model_fields and key not in TERM_FIELDS}
+    context["underlyings"] = [
+        {key: value for key, value in item.items() if key not in IDENTITY_FIELDS}
+        for item in params.get("underlyings", [])
+    ]
+    count = len(product.terms.underlyings)
+    if count == 1:
+        context.setdefault("corr_matrix", [[1.0]])
+    if body.context is not None:
+        # Pricer analyses keep their own market context without changing RFQ.
+        context = body.context
+        valuation_date = context.get("valuation_date") or valuation_date
+    try:
+        request = PricingRequest(**pricing_input(product, context)).model_dump(mode="json")
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    return {
+        "pricing_input": {**request, "valuation_date": valuation_date},
+        "input_hash": pricing_input_hash(rfq.script_snapshot, params) if body.context is None else None,
+        "product_id": product.product_id,
+        "terms_version": product.terms_version,
+        "terms_fingerprint": product.terms_fingerprint,
+    }
+
+
+def _network_recipient(session: Session, relation: RfqRelationship) -> dict:
+    partner = session.get(Entity, relation.partner_entity_id)
+    desk = session.get(RfqDesk, relation.receiver_desk_id)
+    terms = json.loads(relation.terms_json)
+    return {"id": relation.id, "version": relation.version, "label": partner.name,
+            "partner_entity_id": relation.partner_entity_id, "desk_id": relation.receiver_desk_id,
+            "desk_name": desk.name if desk else None, "reference": relation.reference,
+            "treatment_allowed": terms["treatment_allowed"]}
+
+
+def _transport_issues(session, relation):
+    from ..services.rfq_transport import channel_for_relation, channel_current
+    channel = channel_for_relation(session, relation.id)
+    if channel:
+        try:
+            channel_current(session, channel)
+            if channel.role != "REQUESTER" or channel.entity_id != relation.requester_entity_id:
+                return ["Canal distant configuré dans une autre direction"]
+        except HTTPException as exc:
+            return [str(exc.detail)]
+    return []
+
+
+@router.get("/{rfq_id}/recipients")
+def authorized_rfq_recipients(
+    rfq_id: int,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    rfq = _get_owned(rfq_id, current, session, "solicit")
+    if ownership(session, rfq_id) is None:
+        return {"eligible": [], "excluded": [], "network_enabled": False}
+    product = _rfq_product(rfq, rfq.product_terms_version, current, session)
+    params = json.loads(rfq.params_json)
+    rows = session.exec(select(RfqRelationship).where(
+        RfqRelationship.requester_entity_id == rfq.entity_id).order_by(RfqRelationship.reference)).all()
+    eligible, excluded = [], []
+    for relation in rows:
+        issues = rfq_relationships.eligibility(session, relation, rfq,
+            currency=product.terms.settlement_ccy, nominal=params.get("notional"))
+        issues += _transport_issues(session, relation)
+        recipient = _network_recipient(session, relation)
+        (excluded if issues else eligible).append({**recipient, "issues": issues})
+    return {"eligible": eligible, "excluded": excluded, "network_enabled": True}
+
+
+
+def _shared_rfq_request(rfq, product, title, deadline, current, session):
+    issues = []
+    try:
+        product.terms.require_complete()
+    except ValueError as exc:
+        issues.append(str(exc))
+    params = json.loads(rfq.params_json or "{}")
+    nominal = params.get("notional")
+    if not isinstance(nominal, (float, int)) or isinstance(nominal, bool) or not (0 < nominal < float("inf")):
+        issues.append("Le nominal enregistré doit être positif et fini.")
+        nominal = None
+    if not product.terms.settlement_ccy:
+        issues.append("La devise contractuelle de règlement est manquante.")
+    if rfq.kind == "to_trade":
+        for field, label in (("strike_date", "strike"), ("value_date", "valeur"), ("maturity_date", "maturité"), ("payment_date", "paiement")):
+            if getattr(product.terms, field) is None:
+                issues.append(f"La date de {label} est manquante.")
+    if rfq.status in {"clos", "sans_suite"}:
+        issues.append("La consultation est clôturée ; dupliquez la RFQ pour une nouvelle demande.")
+    entity = session.get(Entity, rfq.entity_id) if rfq.entity_id else None
+    if entity is None:
+        issues.append("L’organisation du dossier doit être renseignée.")
+    scope = ownership(session, rfq.id)
+    desk = session.get(RfqDesk, scope.pilot_desk_id) if scope else None
+    shared = {
+        "format_version": 1,
+        **rfq_exchange.identity(session, rfq),
+        "product_reference": product.reference,
+        "product_model": {"template_type": rfq.template_type or None, "payscript_semantics_version": 1},
+        "rfq_reference": rfq.reference,
+        "title": title.strip(),
+        "kind": rfq.kind,
+        "requester": {"organization": entity.name if entity else None, "organization_id": rfq.entity_id,
+            "legal_entity": entity.name if entity else None, "desk_id": scope.pilot_desk_id if scope else None,
+            "desk": desk.name if desk else None,
+            "contact": {"name": current.username, "email": current.email}},
+        "side": "BUY" if rfq.sens == "achat" else "SELL",
+        "nominal": nominal,
+        "currency": product.terms.settlement_ccy,
+        "requested_metric": "PRICE",
+        "price_unit": "PERCENT_OF_NOTIONAL",
+        "price_convention": "ALL_IN",
+        "response_deadline": _utc_iso(deadline) if deadline else None,
+        "transaction_format": rfq.transaction_format,
+        "instrument_family": rfq.instrument_family,
+        "payoff_family": rfq.payoff_family,
+        "documentation_reference": rfq.documentation_reference,
+        "terms_version": product.terms_version,
+        "terms_fingerprint": product.terms_fingerprint,
+        "terms": product.terms.model_dump(mode="json", exclude={"schedule_error"}),
+    }
+    return shared, issues
+
+
+@router.post("/{rfq_id}/exchange-preview")
+def preview_rfq_exchange(
+    rfq_id: int,
+    body: RfqExchangePreview,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Read-only recipient projections. No solicitation or delivery is created."""
+    rfq = _get_owned(rfq_id, current, session, "solicit")
+    product = _rfq_product(rfq, body.expected_terms_version, current, session)
+    if not body.shared_title.strip():
+        raise HTTPException(422, "L’intitulé partagé est obligatoire.")
+    if body.response_deadline.tzinfo is None:
+        raise HTTPException(422, "La limite de réponse doit préciser son fuseau horaire.")
+    deadline = _parse_utc_datetime(body.response_deadline, "response_deadline")
+    if deadline <= business_now():
+        raise HTTPException(422, "La limite de réponse doit être dans le futur.")
+    if len(set(body.provider_ids)) != len(body.provider_ids):
+        raise HTTPException(422, "Un fournisseur ne peut pas figurer deux fois dans la demande.")
+    providers = [session.get(RfqProvider, provider_id) for provider_id in body.provider_ids]
+    if any(provider is None or not provider.active for provider in providers):
+        raise HTTPException(422, "Un destinataire est inconnu ou désactivé.")
+    if len(set(body.relationship_ids)) != len(body.relationship_ids):
+        raise HTTPException(422, "Une relation ne peut pas figurer deux fois dans la demande")
+    network_recipients = []
+    if body.relationship_ids and ownership(session, rfq_id) is None:
+        raise HTTPException(409, "Créez une RFQ avec un desk pilote pour préparer un destinataire réseau")
+    for relation_id in body.relationship_ids:
+        relation = rfq_relationships.require_relation(session, relation_id, current.entity_id)
+        if relation.requester_entity_id != rfq.entity_id:
+            raise HTTPException(404, "Relation RFQ introuvable")
+        failures = rfq_relationships.eligibility(session, relation, rfq,
+            currency=product.terms.settlement_ccy, nominal=json.loads(rfq.params_json).get("notional"))
+        failures += _transport_issues(session, relation)
+        if failures:
+            raise HTTPException(422, {"code": "RFQ_RELATIONSHIP_NOT_ELIGIBLE",
+                "message": "Destinataire réseau non autorisé", "failures": [
+                    {"code": "RELATION", "message": issue} for issue in failures]})
+        network_recipients.append(_network_recipient(session, relation))
+    shared, issues = _shared_rfq_request(rfq, product, body.shared_title, deadline, current, session)
+    frozen = rfq_exchange.round_for(session, rfq.id)
+    if frozen:
+        old = json.loads(frozen.request_json)
+        if frozen.state != "OPEN":
+            raise HTTPException(409, "Ce tour est clôturé ; ouvrez un nouveau tour lié")
+        if old["response_deadline"] != shared["response_deadline"] or old["title"] != shared["title"]:
+            raise HTTPException(409, "L’intitulé et le délai du tour sont figés ; ouvrez un nouveau tour")
+        shared = old
+    if len({item["partner_entity_id"] for item in network_recipients}) != len(network_recipients):
+        raise HTTPException(422, "Une organisation ne peut être sollicitée deux fois dans le même envoi")
+    packet = {
+        "source": {"rfq_id": rfq.id, "product_id": product.product_id, "product_reference": product.reference,
+                   "terms_version": product.terms_version, "terms_fingerprint": product.terms_fingerprint},
+        "request": shared,
+        "messages": [{"recipient_id": provider.id, "recipient_type": "MANUAL",
+                      "request": {**shared, "recipient": {"provider": provider.label}}} for provider in providers]
+                    + [{"recipient_id": recipient["id"], "recipient_type": "NETWORK",
+                        "request": {**shared, "recipient": {"organization": recipient["label"],
+                            "organization_id": recipient["partner_entity_id"], "desk": recipient["desk_name"],
+                            "desk_id": recipient["desk_id"], "relationship_id": recipient["id"],
+                            "relationship_version": recipient["version"], "relationship_reference": recipient["reference"]}}}
+                       for recipient in network_recipients],
+        "issues": issues,
+        "delivery_available": bool(network_recipients) and not issues,
+    }
+    packet["preview_hash"] = rfq_exchange.digest({"request": packet["request"], "messages": packet["messages"]})
+    return packet
+
+
+@router.get("/{rfq_id}/exchange")
+def rfq_exchange_tracking(rfq_id: int, current: Annotated[User, Depends(get_current_user)],
+                          session: Annotated[Session, Depends(get_session)]):
+    _get_owned(rfq_id, current, session)
+    return rfq_exchange.tracking(session, rfq_id)
+
+
+@router.post("/{rfq_id}/send")
+def send_rfq_exchange(rfq_id: int, body: RfqExchangeSend,
+                      current: Annotated[User, Depends(get_current_user)],
+                      session: Annotated[Session, Depends(get_session)]):
+    rfq = lock_rfq_organization(session, rfq_id, current, "solicit")
+    if ownership(session, rfq_id) is None:
+        raise HTTPException(409, "Créez une RFQ avec un desk pilote pour l’envoi réseau")
+    payload_hash = rfq_exchange.digest(body.model_dump(mode="json"))
+    previous = rfq_exchange.replay(session, rfq_id, body.command_key, payload_hash)
+    if previous:
+        return {**previous, "replayed": True, "tracking": rfq_exchange.tracking(session, rfq_id)}
+    packet = preview_rfq_exchange(rfq_id, body, current, session)
+    if packet["preview_hash"] != body.expected_preview_hash:
+        raise HTTPException(409, "Le contenu ou la relation a changé ; préparez à nouveau le récapitulatif")
+    if body.provider_ids:
+        raise HTTPException(422, "L’envoi réseau concerne les partenaires ; ajoutez les fournisseurs manuels séparément")
+    result = rfq_exchange.deliver(session, rfq, packet, current, body.command_key, payload_hash)
+    _sync_status(rfq, session)
+    _sync_product_rfq(session, rfq, current, action="PRODUCT_RFQ_NETWORK_SENT")
+    session.commit()
+    return {**result, "replayed": False, "tracking": rfq_exchange.tracking(session, rfq_id)}
 
 
 @router.patch("/{rfq_id}")
@@ -1047,24 +1572,49 @@ def update_rfq(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    requested = body.model_dump(exclude_unset=True)
+    selection_fields = {"selected_quote_id", "selection_reason_code", "selection_reason_note"}
+    price_fields = {"pricing_params", "model_price", "expected_model_input_hash"}
+    required_rights = set()
+    if requested.keys() & selection_fields:
+        required_rights.add("select")
+    if requested.keys() & price_fields:
+        required_rights.add("price")
+    if not requested or requested.keys() - selection_fields - price_fields:
+        required_rights.add("prepare")
     rfq = _get_owned(rfq_id, current, session)
+    # Scoped mutations serialize with sends, assignments and sharing changes.
+    if ownership(session, rfq_id):
+        rfq = lock_rfq_organization(session, rfq_id, current, next(iter(required_rights)))
+    for right in required_rights:
+        _get_owned(rfq_id, current, session, right)
+    rfq_execution.protect_mutation(session, rfq_id, set(requested) & {
+        "selected_quote_id", "sens", "status", "transaction_format", "instrument_family",
+        "payoff_family", "payoff_description", "documentation_reference",
+        "client_id", "mandate_id", "opportunity_id", "primary_affiliation_id"})
     if rfq.product_id is None:
         raise HTTPException(409, detail={
             "code": "RFQ_PRODUCT_MISSING",
             "message": "Cette RFQ ne possède pas de Product canonique.",
         })
-    product = load_product(session, rfq.product_id)
+    exchange_round = rfq_exchange.round_for(session, rfq_id)
+    if exchange_round and exchange_round.state != "OPEN" and (requested.keys() & selection_fields or requested.get("status") == "auto"):
+        raise HTTPException(409, "Un tour remplacé ne peut plus être sélectionné ou rouvert")
+    product = load_product(session, rfq.product_id, terms_version=rfq.product_terms_version)
     before_audit = _rfq_audit_state(rfq)
     data = body.model_dump(exclude_unset=True)
     requested_fields = set(data)
     context_changes = requested_fields & _COMMERCIAL_CONTEXT_FIELDS
     if context_changes:
+        scope = ownership(session, rfq.id)
+        if scope is not None and "read" not in membership_rights(
+                session, scope.pilot_desk_id, current):
+            raise HTTPException(403, "Le contexte Client reste réservé au desk pilote")
         _refuse_if_booked(rfq, session, "le contexte Client")
-        if _get_quotes(rfq_id, session):
+        if _get_quotes(rfq_id, session) or rfq_exchange.round_for(session, rfq_id):
             raise HTTPException(
                 409, "Le contexte Client d'une RFQ est figé dès qu'un fournisseur "
-                     "est sollicité. Créez une nouvelle RFQ ou retirez les "
-                     "sollicitations avant de le corriger.")
+                     "est sollicité. Ouvrez un nouveau tour pour le corriger.")
         candidate = {
             "opportunity_id": data.get("opportunity_id", rfq.opportunity_id),
             "client_id": data.get("client_id", rfq.client_id),
@@ -1084,7 +1634,7 @@ def update_rfq(
     legal_changes = requested_fields & _LEGAL_CONTEXT_FIELDS
     if legal_changes:
         _refuse_if_booked(rfq, session, "la structure juridique du produit")
-        if _get_quotes(rfq_id, session):
+        if _get_quotes(rfq_id, session) or rfq_exchange.round_for(session, rfq_id):
             raise HTTPException(
                 409, "La structure juridique et produit est figée dès qu'un "
                      "fournisseur est sollicité. Créez une nouvelle RFQ pour la modifier.")
@@ -1117,11 +1667,29 @@ def update_rfq(
     if "params" in data:
         _refuse_if_booked(rfq, session, "les termes et paramètres de l'AO")
         new_params = data.pop("params") or {}
+        if ownership(session, rfq.id) is not None and "price" not in effective_rights(
+                session, rfq, current):
+            stored = json.loads(rfq.params_json)
+            allowed = {"T", "notional", "currency", "strike_date", "value_date",
+                       "maturity_date", "payment_date", "user_params", "constats",
+                       "frozen_schedule", "date_conventions"}
+            combined = {**stored, **{key: value for key, value in new_params.items()
+                                     if key in allowed}}
+            if "underlyings" in new_params:
+                incoming = new_params["underlyings"]
+                originals = stored.get("underlyings", [])
+                if len(incoming) != len(originals):
+                    raise HTTPException(422, "Le panier de la RFQ doit conserver le même nombre de sous-jacents")
+                combined["underlyings"] = [
+                    {**old, **{key: value for key, value in new.items()
+                              if key in IDENTITY_FIELDS}}
+                    for old, new in zip(originals, incoming)]
+            new_params = combined
         _refuser_reglement_avant_maturite(new_params)
         _validate_rfq_correlation(new_params)
         existing_terms = product_terms(rfq.script_snapshot, json.loads(rfq.params_json))
         new_terms = product_terms(rfq.script_snapshot, new_params)
-        if _get_quotes(rfq_id, session) and new_terms != existing_terms:
+        if (_get_quotes(rfq_id, session) or rfq_exchange.round_for(session, rfq_id)) and new_terms != existing_terms:
             changed = sorted(k for k in set(existing_terms) | set(new_terms)
                              if existing_terms.get(k) != new_terms.get(k))
             raise HTTPException(
@@ -1131,6 +1699,8 @@ def update_rfq(
         try:
             canonical_terms = _product_terms_from_payload(
                 rfq.script_snapshot, new_params, kind=rfq.kind)
+            if (_get_quotes(rfq_id, session) or rfq_exchange.round_for(session, rfq_id)) and canonical_terms.fingerprint != product.terms_fingerprint:
+                raise HTTPException(409, "Les termes Product sont figés ; ouvrez un nouveau tour")
             product = stage_terms(
                 session, product, canonical_terms, actor_id=current.id,
                 reason=f"Mise à jour des termes depuis {rfq.reference}.")
@@ -1152,6 +1722,9 @@ def update_rfq(
         rfq.params_json = json.dumps(new_params)
     if "model_price" in data:
         _refuse_if_booked(rfq, session, "le prix modèle")
+        expected_hash = data.pop("expected_model_input_hash", None)
+        if expected_hash is not None and expected_hash != pricing_input_hash(rfq.script_snapshot, json.loads(rfq.params_json or "{}")):
+            raise HTTPException(409, detail={"code": "RFQ_PRICING_INPUTS_STALE", "message": "Les hypothèses de la RFQ ont changé pendant le calcul. Relancez le pricing."})
         mp = data.pop("model_price")
         if mp is not None and mp < 0:
             raise HTTPException(
@@ -1162,9 +1735,10 @@ def update_rfq(
         rfq.model_input_hash = (
             pricing_input_hash(rfq.script_snapshot, json.loads(rfq.params_json or "{}"))
             if mp is not None else None)
+    data.pop("expected_model_input_hash", None)
     if data.get("sens") is not None and data["sens"] != rfq.sens:
         _refuse_if_booked(rfq, session, "le sens de l'AO")
-        if _get_quotes(rfq_id, session):
+        if _get_quotes(rfq_id, session) or rfq_exchange.round_for(session, rfq_id):
             raise HTTPException(
                 409, "Le sens d'une RFQ est figé dès qu'un fournisseur est sollicité. "
                      "Créez une nouvelle RFQ pour inverser le sens du trade.")
@@ -1175,6 +1749,8 @@ def update_rfq(
             q = session.get(RfqQuote, qid)
             if not q or q.rfq_id != rfq_id:
                 raise HTTPException(404, "Quote introuvable pour cette RFQ")
+            if rfq_publication.publication_for_quote(session, q.id) and not _quote_row(q, session=session)["comparable"]:
+                raise HTTPException(422, "Cette cotation est inactive, remplacée ou conditionnelle")
             if q.price is None:
                 raise HTTPException(
                     422, "Une réponse sans prix ne peut pas être retenue. Saisissez la "
@@ -1264,7 +1840,7 @@ def update_rfq(
         session, rfq, current, action="PRODUCT_RFQ_UPDATED", product=product)
     session.commit()
     return _rfq_row(rfq, _get_quotes(rfq_id, session), _counterparty_by_provider(session),
-                    _booked_deals_by_rfq(session, current.id))
+                    _booked_deals_by_rfq(session, current.id), session=session, current=current)
 
 
 @router.delete("/{rfq_id}", status_code=204)
@@ -1273,7 +1849,7 @@ def delete_rfq(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    rfq = _get_owned(rfq_id, current, session)
+    rfq = _get_owned(rfq_id, current, session, "organize")
     # The tender a trade came out of is a best-execution record: which banks
     # were put in competition, at what prices, and why this one won. Once a
     # deal points at it, that trail must survive — deleting the RFQ would
@@ -1284,9 +1860,20 @@ def delete_rfq(
         raise HTTPException(
             409, f"Suppression impossible : le deal {booked.reference} a été booké depuis "
                  f"cette RFQ, qui documente sa best execution.")
+    if rfq_exchange.round_for(session, rfq_id):
+        raise HTTPException(409, "Un tour figé conserve sa preuve et ne peut pas être supprimé")
+    if rfq_execution.workspace(session, rfq_id):
+        raise HTTPException(409, "La RFQ conserve ses preuves de traitement et ne peut pas être supprimée")
+    link = session.get(RfqRoundLink, rfq_id)
+    if link:
+        session.delete(link)
     product = load_product(session, rfq.product_id) if rfq.product_id else None
     for q in _get_quotes(rfq_id, session):
         session.delete(q)
+    if ownership(session, rfq_id) is not None:
+        for share in session.exec(select(RfqDeskShare).where(RfqDeskShare.rfq_id == rfq_id)).all():
+            session.delete(share)
+        session.delete(ownership(session, rfq_id))
     session.delete(rfq)
     session.flush()
     if product is not None:
@@ -1308,7 +1895,12 @@ def add_quote(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    rfq = _get_owned(rfq_id, current, session)
+    rfq = _get_owned(rfq_id, current, session, "prepare")
+    if ownership(session, rfq_id):
+        rfq = lock_rfq_organization(session, rfq_id, current, "prepare")
+        existing_round = rfq_exchange.round_for(session, rfq_id)
+        if existing_round and existing_round.state != "OPEN":
+            raise HTTPException(409, "Ce tour est clôturé")
     _refuse_if_booked(rfq, session, "l'ajout d'un fournisseur")
     if rfq.kind == "to_trade":
         readiness = rfq_readiness_failures(rfq)
@@ -1333,6 +1925,10 @@ def add_quote(
             409, f"« {body.provider} » est déjà sollicité sur cet AO. Saisissez son prix sur "
                  f"la ligne existante, ou utilisez le last look pour enregistrer une seconde "
                  f"cotation de sa part.")
+    if ownership(session, rfq_id):
+        product = _rfq_product(rfq, rfq.product_terms_version, current, session)
+        shared, _ = _shared_rfq_request(rfq, product, rfq.payoff_family or "Produit structuré", None, current, session)
+        rfq_exchange.freeze(session, rfq, shared, current)
     q = RfqQuote(
         id=next_audited_id(session, RfqQuote, "RFQ_QUOTE"),
         rfq_id=rfq_id,
@@ -1367,12 +1963,15 @@ def update_quote(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    rfq = _get_owned(rfq_id, current, session)
+    rfq = _get_owned(rfq_id, current, session, "prepare")
     q = session.get(RfqQuote, quote_id)
     if not q or q.rfq_id != rfq_id:
         raise HTTPException(404, "Quote introuvable")
+    if rfq_publication.publication_for_quote(session, quote_id):
+        raise HTTPException(409, "La cotation réseau publiée est immuable ; demandez une révision à la banque")
     before_audit = _quote_row(q, _counterparty_by_provider(session))
     data = body.model_dump(exclude_unset=True)
+    rfq_execution.protect_mutation(session, rfq_id, set(data) - {"note"}, quote_id)
     audited_fields = set(data) & {"price", "currency", "status", "quoted_at",
                                   "firmness", "valid_until", "last_look"}
     # A note annotates, it doesn't evidence — everything else on a quote is
@@ -1475,11 +2074,14 @@ def delete_quote(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    rfq = _get_owned(rfq_id, current, session)
+    rfq = _get_owned(rfq_id, current, session, "prepare")
     q = session.get(RfqQuote, quote_id)
     if not q or q.rfq_id != rfq_id:
         raise HTTPException(404, "Quote introuvable")
+    if rfq_publication.publication_for_quote(session, quote_id):
+        raise HTTPException(409, "Une publication réseau conserve son historique ; la banque peut la retirer")
     _refuse_if_booked(rfq, session, "la suppression d'une cotation")
+    rfq_execution.protect_mutation(session, rfq_id, {"delete"}, quote_id)
     child = session.exec(select(RfqQuote).where(RfqQuote.parent_quote_id == quote_id)).first()
     ids_removed = {quote_id} | ({child.id} if child else set())
     if child:
