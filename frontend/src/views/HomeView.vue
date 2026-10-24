@@ -97,11 +97,11 @@
               <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-lg bg-pink-900/50 flex items-center justify-center text-xl">📨</div>
                 <div>
-                  <div class="font-bold text-slate-100 group-hover:text-pink-300 transition-colors">Competitive Bidding</div>
-                  <div class="text-xs text-slate-500">RFQ · Analyse contreparties</div>
+                  <div class="font-bold text-slate-100 group-hover:text-pink-300 transition-colors">RFQ</div>
+                  <div class="text-xs text-slate-500">Demandes aux fournisseurs · RFQ reçues · Analyse</div>
                 </div>
               </div>
-              <p class="text-xs text-slate-600">Comparez les prix reçus des banques au prix modèle Structura.</p>
+              <p class="text-xs text-slate-600">Envoyez vos demandes de prix, répondez aux RFQ reçues et analysez les cotations.</p>
             </div>
 
             <div class="card flex flex-col gap-3
@@ -119,7 +119,7 @@
               <p class="text-xs text-slate-600">Qui vous couvrez, qui y travaille et ce qu'ils achètent réellement.</p>
             </div>
 
-            <RouterLink to="/agent-workshop" class="card flex flex-col gap-3 hover:shadow-lg transition-all">
+            <RouterLink v-if="auth.isAdmin" to="/agent-workshop" class="card flex flex-col gap-3 hover:shadow-lg transition-all">
               <strong>🧪 Simulation entre agents</strong>
               <p class="text-xs text-slate-600">Hector, les banques, les clients et Achille utilisent leurs Structura et remontent les difficultés. Lancer une partie ou consulter ses preuves.</p>
             </RouterLink>
@@ -411,10 +411,6 @@
 
           <div v-else-if="selectedCategory === 'competitive_bidding'" class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl">
 
-            <RouterLink to="/trading" class="card border-t-2 border-t-cyan-500 hover:bg-cyan-950/20 transition-colors">
-              <div class="font-bold text-slate-100">Relations et exécutions</div>
-              <p class="text-xs text-slate-400 mt-2">Définissez les accords avec les contreparties, puis suivez les notes bookées et leur règlement.</p>
-            </RouterLink>
             <!-- RFQ Fournisseurs -->
             <RouterLink to="/rfq"
               class="card flex flex-col gap-3
@@ -424,10 +420,24 @@
                 <div class="w-10 h-10 rounded-lg bg-pink-900/50 flex items-center justify-center text-xl">📨</div>
                 <div>
                   <div class="font-bold text-slate-100 group-hover:text-pink-300 transition-colors">RFQ Fournisseurs</div>
-                  <div class="text-xs text-slate-500">Comparer les prix des contreparties</div>
+                  <div class="text-xs text-slate-500">Créer et envoyer une demande de prix</div>
                 </div>
               </div>
-              <p class="text-xs text-slate-600">Collectez les prix reçus des banques pour un produit et comparez-les au prix modèle Structura.</p>
+              <p class="text-xs text-slate-600">Préparez vos demandes aux fournisseurs et comparez leurs cotations au prix modèle Structura.</p>
+            </RouterLink>
+
+            <RouterLink to="/rfq/recues"
+              class="card flex flex-col gap-3
+                     hover:border-blue-700 hover:bg-blue-950/20 hover:shadow-xl hover:shadow-black/30
+                     hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-blue-900/50 flex items-center justify-center text-xl">📥</div>
+                <div>
+                  <div class="font-bold text-slate-100 group-hover:text-blue-300 transition-colors">RFQ reçues</div>
+                  <div class="text-xs text-slate-500">Prendre en charge et répondre à une demande</div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600">Consultez les demandes adressées à vos desks, calculez votre prix privé et préparez votre cotation commerciale.</p>
             </RouterLink>
 
             <!-- Analyse Contreparties -->
@@ -443,6 +453,11 @@
                 </div>
               </div>
               <p class="text-xs text-slate-600">Suivez dans le temps comment chaque contrepartie se positionne, par type de produit, vs le prix modèle Structura.</p>
+            </RouterLink>
+
+            <RouterLink to="/trading" class="card border-t-2 border-t-cyan-500 hover:bg-cyan-950/20 transition-colors">
+              <div class="font-bold text-slate-100">Relations et exécutions</div>
+              <p class="text-xs text-slate-400 mt-2">Définissez les accords avec les contreparties, puis suivez les notes bookées et leur règlement.</p>
             </RouterLink>
 
           </div>
@@ -607,7 +622,7 @@ const CATEGORY_TITLES = {
   life_cycle: 'Life Cycle',
   risk_management: 'Risk Management',
   studies: 'Studies',
-  competitive_bidding: 'Competitive Bidding',
+  competitive_bidding: 'RFQ',
   clients: 'Clients',
 }
 const selectedCategory = ref(route.query.category || null)

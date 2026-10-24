@@ -39,7 +39,26 @@ from ..services.rfq_access import (
     require_rfq_access, visible_rfqs,
 )
 from ..services import rfq_relationships, rfq_exchange, rfq_publication, rfq_execution
+from ..services import rfq_quote_integrity
 from .auth import get_current_user
+from ..services.rfq_state import (
+    RfqPricingInput,
+    _booked_deals_by_rfq,
+    _counterparty_by_provider,
+    _derive_status,
+    _get_owned,
+    _get_quotes,
+    _quote_row,
+    _rfq_product,
+    _rfq_row,
+    _sync_product_rfq,
+    _sync_status,
+    _utc_iso,
+    superseded_quote_ids,
+    _TERMINAL_STATUSES,
+    _LEGAL_CONTEXT_FIELDS,
+    compose_rfq_pricing_input as _compose_rfq_pricing_input,
+)
 
 router = APIRouter(prefix="/api/rfq", tags=["rfq"])
 
@@ -92,8 +111,10 @@ class RfqUpdate(BaseModel):
     pricing_params: Optional[dict] = None
     status: Optional[str] = None
     model_price: Optional[float] = None
+    pricing_receipt: Optional[dict] = None
     expected_model_input_hash: Optional[str] = Field(default=None, min_length=64, max_length=64)
     selected_quote_id: Optional[int] = None
+    expected_quote_revision: Optional[int] = Field(default=None, ge=1)
     selection_reason_code: Optional[str] = Field(
         default=None,
         pattern="^(price|client_request|documentation|credit|concentration|relationship|execution_quality|other)$")
@@ -109,10 +130,6 @@ class RfqUpdate(BaseModel):
     documentation_reference: Optional[str] = None
 
 
-class RfqPricingInput(BaseModel):
-    expected_terms_version: int = Field(gt=0)
-    valuation_date: Optional[date] = None
-    context: Optional[dict] = None
 
 
 class RfqExchangePreview(BaseModel):
@@ -154,10 +171,15 @@ class QuoteCreate(BaseModel):
     provider: str = Field(default="manuel", min_length=1)
     contact: Optional[str] = None
     note: Optional[str] = None
+    provider_id: Optional[int] = None
+    counterparty_id: Optional[int] = None
 
 
 class QuoteUpdate(BaseModel):
-    price: Optional[float] = None
+    expected_revision: Optional[int] = Field(default=None, ge=1)
+    counterparty_id: Optional[int] = None
+    identity_reason: Optional[str] = Field(default=None, min_length=3, max_length=500)
+    price: Optional[float] = Field(default=None, allow_inf_nan=False)
     currency: Optional[str] = None
     status: Optional[str] = Field(
         default=None, pattern="^(en_attente|recu|decline|expire)$")
@@ -175,18 +197,6 @@ def _gen_ref(session: Session) -> str:
     return next_reference(session, RfqRequest, f"RFQ-{date.today().strftime('%Y%m%d')}-")
 
 
-def _utc_iso(dt: datetime | None) -> str | None:
-    """Every datetime column in this module is written as datetime.utcnow()
-    (naive) or a value explicitly normalized to naive-UTC (see update_quote)
-    — SQLite's DATETIME type drops tzinfo silently on write regardless, so a
-    value read back is always naive-but-actually-UTC. Re-attach the 'Z' on
-    the way out; without it, `new Date(iso)` on the frontend parses the
-    string as LOCAL time instead of UTC, silently shifting displayed times
-    by the browser's UTC offset (the bug that made 13:05 redisplay as
-    11:05 for a UTC+2 user)."""
-    if dt is None:
-        return None
-    return dt.isoformat() + "Z" if dt.tzinfo is None else dt.isoformat()
 
 
 def _parse_utc_datetime(raw, field_name: str) -> datetime | None:
@@ -217,235 +227,14 @@ def _edge_bps(price: float | None, model: float | None, sens: str) -> float | No
     return round(diff / model * 10000, 1)
 
 
-def _booked_deals_by_rfq(session: Session, user_id: int) -> dict:
-    """rfq id → the deal booked out of it. A tender executes once: the UI
-    needs this to offer "see the booking" instead of a second "book this
-    response" button, and api/deals.py:book_deal refuses the duplicate
-    outright."""
-    rows = session.exec(
-        select(Deal).where(Deal.user_id == user_id, Deal.rfq_id.is_not(None))
-    ).all()
-    return {d.rfq_id: {"id": d.id, "reference": d.reference} for d in rows}
 
 
-def _rfq_row(r: RfqRequest, quotes: list | None = None, cpty_map: dict | None = None,
-             booked_by_rfq: dict | None = None, session: Session | None = None,
-             current: User | None = None) -> dict:
-    business_status = rfq_business_status(
-        r.status, ready=not rfq_readiness_failures(r))
-    if r.status == "retenue" and quotes:
-        selected = next((quote for quote in quotes if quote.id == r.selected_quote_id), None)
-        if selected and selected.valid_until and selected.valid_until <= business_now():
-            business_status = RfqBusinessStatus.EXPIRED.value
-    row = {
-        "id": r.id,
-        "product_id": r.product_id,
-        "product_terms_version": r.product_terms_version,
-        "reference": r.reference,
-        "entity_id": r.entity_id,
-        "user_id": r.user_id,
-        "name": r.name,
-        "ao_date": r.ao_date,
-        "kind": r.kind,
-        "sens": r.sens,
-        "template_type": r.template_type,
-        "script_id": r.script_id,
-        # Le besoin client à l'origine de l'appel d'offres, quand il y en a un.
-        # Exposé pour que l'écran puisse remonter à l'opportunité ; None sur une
-        # RFQ créée hors parcours client, ce qui reste le cas courant.
-        "opportunity_id": r.opportunity_id,
-        "client_id": r.client_id,
-        "mandate_id": r.mandate_id,
-        "primary_affiliation_id": r.primary_affiliation_id,
-        "commercial_context": (json.loads(r.commercial_context_json)
-                               if r.commercial_context_json else None),
-        "transaction_format": r.transaction_format,
-        "instrument_family": r.instrument_family,
-        "payoff_family": r.payoff_family,
-        "payoff_description": r.payoff_description,
-        "documentation_reference": r.documentation_reference,
-        "script_snapshot": r.script_snapshot,
-        "params": json.loads(r.params_json),
-        "model_price": r.model_price,
-        "model_price_at": _utc_iso(r.model_price_at),
-        "status": r.status,
-        "business_status": business_status,
-        "selected_quote_id": r.selected_quote_id,
-        "selection_reason_code": r.selection_reason_code,
-        "selection_reason_note": r.selection_reason_note,
-        # {id, reference} of the deal already booked from this tender, or None.
-        "booked_deal": (booked_by_rfq or {}).get(r.id),
-        "created_at": _utc_iso(r.created_at),
-        "updated_at": _utc_iso(r.updated_at),
-    }
-    if quotes is not None:
-        superseded = superseded_quote_ids(quotes)
-        row["quotes"] = [
-            _quote_row(q, cpty_map, superseded=q.id in superseded, session=session)
-            for q in quotes]
-    if session is not None:
-        exchange_round = rfq_exchange.round_for(session, r.id)
-        row["execution_agreements"] = rfq_execution.workspace(session, r.id)
-        round_link = session.get(RfqRoundLink, r.id)
-        row["exchange_round"] = ({"id": exchange_round.id, "number": exchange_round.number,
-            "state": exchange_round.state, "exchange_reference": exchange_round.exchange_reference,
-            "previous_round_id": exchange_round.previous_round_id} if exchange_round else None)
-        row["previous_round_id"] = round_link.previous_round_id if round_link else None
-        if row["booked_deal"] is None:
-            deal = session.exec(select(Deal).where(Deal.rfq_id == r.id)).first()
-            if deal is not None:
-                row["booked_deal"] = {"id": deal.id, "reference": deal.reference}
-        scope = ownership(session, r.id)
-        if scope is not None:
-            desk = session.get(RfqDesk, scope.pilot_desk_id)
-            entity = session.get(Entity, scope.entity_id)
-            responsible = session.get(User, scope.responsible_user_id) if scope.responsible_user_id else None
-            creator = session.get(User, r.user_id)
-            row.update({"pilot_desk_id": scope.pilot_desk_id,
-                        "pilot_desk_name": desk.name if desk else None,
-                        "organization_name": entity.name if entity else None,
-                        "responsible_user_id": scope.responsible_user_id,
-                        "responsible_user_name": responsible.username if responsible else None,
-                        "creator_name": creator.username if creator else None,
-                        "access_rights": sorted(effective_rights(session, r, current)) if current else []})
-            if current is not None and "price" not in row["access_rights"]:
-                private_params = row["params"]
-                contractual = {"T", "notional", "currency", "strike_date", "value_date",
-                               "maturity_date", "payment_date", "user_params", "constats",
-                               "frozen_schedule", "date_conventions"}
-                row["params"] = {key: value for key, value in private_params.items()
-                                 if key in contractual}
-                row["params"]["underlyings"] = [
-                    {key: value for key, value in underlying.items()
-                     if key in IDENTITY_FIELDS}
-                    for underlying in private_params.get("underlyings", [])]
-                row["model_price"] = None
-                row["model_price_at"] = None
-            if current is not None and "read" not in membership_rights(
-                    session, scope.pilot_desk_id, current):
-                row["commercial_context"] = None
-                for field in ("client_id", "mandate_id", "opportunity_id", "primary_affiliation_id"):
-                    row[field] = None
-    return row
 
 
-def _sync_product_rfq(
-    session: Session,
-    rfq: RfqRequest,
-    current: User,
-    *,
-    action: str,
-    product=None,
-):
-    """Replace the RFQ projection and its business context in one revision."""
-    if rfq.product_id is None:
-        raise HTTPException(409, detail={
-            "code": "RFQ_PRODUCT_MISSING",
-            "message": "Cette RFQ ne possède pas de Product canonique.",
-        })
-    product = product or load_product(session, rfq.product_id)
-    snapshot = FrozenObject(_rfq_row(
-        rfq, _get_quotes(rfq.id, session), _counterparty_by_provider(session),
-        _booked_deals_by_rfq(session, current.id), session=session))
-    rfqs = [item for item in product.rfqs if item.to_dict().get("id") != rfq.id]
-    product = product.model_copy(update={
-        "name": rfq.name if not product.listed else product.name,
-        "commercial": CommercialContext(
-            client_id=rfq.client_id,
-            mandate_id=rfq.mandate_id,
-            opportunity_id=rfq.opportunity_id,
-            primary_affiliation_id=rfq.primary_affiliation_id,
-        ),
-        "intent": TradeIntent(**{
-            **product.intent.model_dump(mode="json"),
-            "nominal": (json.loads(rfq.params_json or "{}").get("notional")
-                        or product.intent.nominal),
-            "side": "BUY" if rfq.sens == "achat" else "SELL",
-            "product_type": rfq.template_type or product.intent.product_type,
-            "transaction_format": (
-                rfq.transaction_format or product.intent.transaction_format),
-            "instrument_family": (
-                rfq.instrument_family or product.intent.instrument_family),
-            "payoff_family": rfq.payoff_family or product.intent.payoff_family,
-            "payoff_description": (
-                rfq.payoff_description or product.intent.payoff_description),
-            "documentation_reference": (
-                rfq.documentation_reference
-                or product.intent.documentation_reference),
-        }),
-        "rfqs": (*rfqs, snapshot),
-    })
-    stage_revision(
-        session, product, expected_revision=product.revision,
-        actor_id=current.id, action=action,
-        reason=f"Synchronisation de {rfq.reference} dans le Product.")
 
 
-def _counterparty_by_provider(session: Session) -> dict:
-    """Provider label → the eligible counterparty a deal booked out of that
-    provider's quote actually faces. Two admin catalogs with no relation used
-    to leave the booking prefill writing an RfqProvider label straight into a
-    <select> fed by Counterparty: when the labels diverged ("Vontobel
-    (deritrade)" vs "Vontobel"), the select showed empty, validate() still
-    passed on the non-empty value, and the deal booked against a counterparty
-    absent from the catalog and invisible on screen.
-
-    Resolution order: the explicit link (RfqProvider.counterparty_id) first,
-    then an exact name match for the many providers that ARE their own
-    counterparty. Inactive counterparties are excluded — the booking form only
-    offers active ones, so proposing one would recreate the same mismatch."""
-    active = {c.name: c for c in session.exec(
-        select(Counterparty).where(Counterparty.active == True)  # noqa: E712
-    ).all()}
-    by_id = {c.id: c for c in active.values()}
-    mapping = {}
-    for p in session.exec(select(RfqProvider)).all():
-        linked = by_id.get(p.counterparty_id) if p.counterparty_id else None
-        if linked:
-            mapping[p.label] = linked.name
-        elif p.label in active:
-            mapping[p.label] = p.label
-    return mapping
 
 
-def _quote_row(q: RfqQuote, cpty_map: dict | None = None, *,
-               superseded: bool = False, session: Session | None = None) -> dict:
-    comparable = (
-        not superseded and q.price is not None
-        and q.status not in {"decline", "expire"}
-        and (q.valid_until is None or q.valid_until > business_now())
-    )
-    row = {
-        "id": q.id,
-        "rfq_id": q.rfq_id,
-        "provider": q.provider,
-        # None = no eligible counterparty could be resolved; the booking
-        # prefill must then leave the field empty rather than inject a value
-        # the <select> can't display (see DealTab.vue).
-        "counterparty": (cpty_map or {}).get(q.provider),
-        "contact": q.contact,
-        "price": q.price,
-        "currency": q.currency,
-        "status": q.status,
-        "note": q.note,
-        "quoted_at": _utc_iso(q.quoted_at),
-        "firmness": q.firmness,
-        "valid_until": _utc_iso(q.valid_until),
-        "created_at": _utc_iso(q.created_at),
-        "last_look": q.last_look,
-        "parent_quote_id": q.parent_quote_id,
-        "superseded": superseded,
-        "comparable": comparable,
-    }
-    if session is not None:
-        publication = rfq_publication.publication_for_quote(session, q.id)
-        if publication:
-            public = rfq_publication.public_row(session, publication)
-            row.update(origin="NETWORK", publication=public,
-                counterparty=public["response"]["counterparty_name"],
-                comparable=comparable and public["state"] == "ACTIVE"
-                    and public["response"]["conditions_type"] == "NONE")
-    return row
 
 
 def _rfq_audit_state(rfq: RfqRequest) -> dict:
@@ -454,6 +243,7 @@ def _rfq_audit_state(rfq: RfqRequest) -> dict:
         "kind": rfq.kind,
         "status": rfq.status,
         "selected_quote_id": rfq.selected_quote_id,
+        "selected_quote_revision": rfq.selected_quote_revision,
         "model_price": rfq.model_price,
         "model_price_at": _utc_iso(rfq.model_price_at),
         "model_input_hash": rfq.model_input_hash,
@@ -469,43 +259,6 @@ def _rfq_audit_state(rfq: RfqRequest) -> dict:
     }
 
 
-def _get_quotes(rfq_id: int, session: Session) -> list:
-    """Top-level quotes (one per solicited provider) ordered by actual
-    response time — quoted_at when known, oldest first, unanswered quotes
-    pushed to the end rather than jumbled in with answered ones by
-    created_at (the previous behavior: sorted by created_at alone, so
-    editing a quote's response time never moved it in the list at all).
-    A last-look counter-quote (parent_quote_id set) is always placed
-    directly under its parent regardless of its own time, since it's a
-    continuation of that same provider's response, not a separate slot in
-    the competitive timeline."""
-    rows = session.exec(select(RfqQuote).where(RfqQuote.rfq_id == rfq_id)).all()
-    children_by_parent: dict[int, list] = {}
-    parents = []
-    for q in rows:
-        if q.parent_quote_id is not None:
-            children_by_parent.setdefault(q.parent_quote_id, []).append(q)
-        else:
-            parents.append(q)
-    parents.sort(key=lambda q: (q.quoted_at is None, q.quoted_at or q.created_at))
-    ordered = []
-    seen: set[int] = set()
-
-    def append_tree(q):
-        if q.id in seen:
-            return
-        seen.add(q.id)
-        ordered.append(q)
-        for child in sorted(children_by_parent.get(q.id, []), key=lambda x: x.created_at):
-            append_tree(child)
-
-    for p in parents:
-        append_tree(p)
-    # Historical malformed/orphan chains must remain visible to the desk even
-    # though new nested last looks are now refused.
-    for q in sorted(rows, key=lambda x: x.created_at):
-        append_tree(q)
-    return ordered
 
 
 # Statuses the desk poses by hand; everything else is deduced from what has
@@ -513,49 +266,15 @@ def _get_quotes(rfq_id: int, session: Session) -> list:
 # "sans_suite" by the user (an AO that led nowhere — the majority of them, and
 # the denominator of any hit-ratio statistic). Both are terminal: a booked or
 # abandoned tender never falls back to an earlier stage on its own.
-_TERMINAL_STATUSES = {"clos", "sans_suite"}
 # The only status a PATCH may pose directly, plus the sentinel that hands the
 # RFQ back to the derivation.
 _SETTABLE_STATUSES = {"sans_suite", "auto"}
 
 
-def _derive_status(rfq: RfqRequest, quotes: list) -> str:
-    """The tender's stage, read off the facts rather than trusted from the
-    caller: a provider solicited makes it "envoyée", a first price received
-    "cotée", a retained response "retenue". Left to the caller (the historic
-    behaviour), "envoye"/"quote" were never posed by anything and an RFQ with
-    five prices in hand still displayed "Brouillon" until it jumped straight
-    to "Retenue".
-
-    Manual provider rows remain facts of solicitation. Network rounds are
-    accounted for by _sync_status, independently of received prices."""
-    return derive_rfq_status(rfq.status, rfq.selected_quote_id, quotes)
 
 
-def _sync_status(rfq: RfqRequest, session: Session) -> None:
-    """Recompute after any mutation that can move the tender: a quote added,
-    priced, unpriced or deleted, a response retained or un-retained. Also
-    closes the hole that left a de-selected RFQ displaying "Retenue" with
-    nothing retained."""
-    new_status = _derive_status(rfq, _get_quotes(rfq.id, session))
-    if new_status == "draft" and rfq_exchange.round_for(session, rfq.id):
-        new_status = "envoye"
-    if new_status != rfq.status:
-        rfq.status = new_status
-        session.add(rfq)
 
 
-def superseded_quote_ids(quotes: list) -> set:
-    """Ids of the quotes a last look has replaced — a parent whose counter-quote
-    came back with a price. Both rows stay on screen (the original response is
-    part of the record), but only ONE of them is that provider's answer to the
-    tender: counting both puts the same bank in twice and drags every spread
-    statistic toward its improved price. A last look still awaiting an answer
-    supersedes nothing — the original is still the live response."""
-    return {
-        q.parent_quote_id for q in quotes
-        if q.parent_quote_id is not None and q.price is not None
-    }
 
 
 # Une cotation est un pourcentage du nominal. La borne haute n'est pas une
@@ -588,51 +307,36 @@ def _improves(new_price: float, old_price: float, sens: str) -> bool:
 # Keys that define WHAT is being tendered. They are frozen once a provider has
 # been solicited, and a re-pricing must never be able to reach them — not even
 # by resubmitting an identical-looking value.
-_CONTRACTUAL_KEYS = {"underlyings", "user_params", "constats", "notional",
-                     "currency", "strike_date", "value_date", "T"}
-# Inside an underlying, the same split: identity on one side, model on the other.
-_CONTRACTUAL_UL_KEYS = {"name", "ticker", "ccy"}
+_CONTRACTUAL_KEYS = set(TERM_FIELDS) | {'notional', 'currency', 'date_conventions',
+    'product_id', 'product_terms_version', 'script_snapshot'}
+_CONTRACTUAL_UL_KEYS = set(IDENTITY_FIELDS)
+_RFQ_MODEL_KEYS = {'r', 'corr_matrix', 'N', 'seed', 'model', 'antithetic',
+    'yield_curve', 'funding_curve', 'funding_spread', 'sigma_r', 'a_r',
+    'barrier_monitoring', 'valuation_date', 'compute_greeks', 'selected_greeks'}
 
 
 def _merge_pricing_params(rfq: RfqRequest, incoming: dict) -> dict:
-    """Overlay model assumptions on the stored params, contractual terms intact.
-
-    "Calculer prix modèle" used to PATCH the whole params blob, rebuilt from
-    the form: constats regenerated from the script, dates re-read from the
-    inputs, user_params re-derived with a /100 conversion, and `underlyings`
-    reduced to a single entry. None of that was an edit the user had made, but
-    the re-serialisation did not round-trip to the stored value, so the freeze
-    control fired on five contractual terms nobody had touched — and a tender
-    with quotes in hand could no longer be re-priced at all. On a worst-of, the
-    same rebuild also silently dropped every underlying but the first.
-
-    Merging server-side removes the whole class of problem: the contractual
-    half is never transmitted, so it cannot drift, and re-pricing stays open
-    for the entire life of the tender."""
-    stored = json.loads(rfq.params_json or "{}")
-    merged = dict(stored)
-
-    for key, value in incoming.items():
-        if key in _CONTRACTUAL_KEYS and key != "underlyings":
-            continue                      # silently ignored: not ours to move
-        if key != "underlyings":
-            merged[key] = value
-
-    incoming_uls = incoming.get("underlyings")
-    if incoming_uls is not None:
-        stored_uls = stored.get("underlyings") or []
-        out = []
-        # Zip against the STORED list: the basket's size and composition come
-        # from the tender, never from what the pricing form happens to send.
-        for i, stored_ul in enumerate(stored_uls):
-            ul = dict(stored_ul)
-            if i < len(incoming_uls) and isinstance(incoming_uls[i], dict):
-                for k, v in incoming_uls[i].items():
-                    if k not in _CONTRACTUAL_UL_KEYS:
-                        ul[k] = v
-            out.append(ul)
-        merged["underlyings"] = out
-
+    """Only explicit calculation assumptions may cross this boundary."""
+    from ..core.schemas import UnderlyingParams
+    forbidden = set(incoming) - _RFQ_MODEL_KEYS - {'underlyings'}
+    if forbidden:
+        raise HTTPException(422, detail={'code': 'RFQ_PRICING_FIELDS_FORBIDDEN',
+            'message': 'Le pricing ne modifie pas les termes contractuels ni les champs inconnus : '
+                       + ', '.join(sorted(forbidden))})
+    stored = json.loads(rfq.params_json or '{}')
+    merged = {**stored, **{key: value for key, value in incoming.items() if key != 'underlyings'}}
+    if 'underlyings' in incoming:
+        rows = incoming['underlyings']
+        originals = stored.get('underlyings') or []
+        if not isinstance(rows, list) or len(rows) > len(originals):
+            raise HTTPException(422, 'Les hypothèses doivent respecter le panier stocké.')
+        allowed = set(UnderlyingParams.model_fields) - IDENTITY_FIELDS
+        out = [dict(item) for item in originals]
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict) or set(row) - allowed:
+                raise HTTPException(422, 'Les hypothèses de sous-jacent ne modifient pas son identité ; champ inconnu ou contractuel.')
+            out[i].update(row)
+        merged['underlyings'] = out
     return merged
 
 
@@ -660,9 +364,6 @@ def _refuse_if_booked(rfq: RfqRequest, session: Session, what: str) -> None:
              f"de ce trade et ne peut plus être modifié.")
 
 
-def _get_owned(rfq_id: int, current: User, session: Session,
-               right: str = "read") -> RfqRequest:
-    return require_rfq_access(session, rfq_id, current, right)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────
@@ -723,10 +424,6 @@ def _refuser_reglement_avant_maturite(params: dict) -> None:
 
 _COMMERCIAL_CONTEXT_FIELDS = {
     "client_id", "mandate_id", "primary_affiliation_id", "opportunity_id",
-}
-_LEGAL_CONTEXT_FIELDS = {
-    "transaction_format", "instrument_family", "payoff_family",
-    "payoff_description", "documentation_reference",
 }
 
 
@@ -871,10 +568,13 @@ def _create_rfq(
         previous_rfq = lock_rfq_organization(session, previous_round.rfq_id, current, "prepare")
         if desk is None or previous_rfq.entity_id != desk.entity_id:
             raise HTTPException(403, "Le nouveau tour doit appartenir à la même organisation")
-        if previous_round.state != "OPEN" or session.exec(select(RfqRoundLink).where(
+        if previous_round.state not in {"OPEN", "CLOSED"} or session.exec(select(RfqRoundLink).where(
                 RfqRoundLink.previous_round_id == previous_round.id)).first():
             raise HTTPException(409, "Un nouveau tour existe déjà pour cette consultation")
         _refuse_if_booked(previous_rfq, session, "l’ouverture d’un nouveau tour")
+        if previous_rfq.status == 'sans_suite' and previous_round.state == 'OPEN':
+            rfq_exchange.close_round(session, previous_rfq, current)
+            _sync_product_rfq(session, previous_rfq, current, action='PRODUCT_RFQ_LEGACY_ROUND_CLOSED')
     product = None
     if body.product_id is not None:
         try:
@@ -890,8 +590,21 @@ def _create_rfq(
                 "code": "PRODUCT_TERMS_STALE",
                 "message": "La version des termes du produit a changé. Rechargez le produit.",
             })
+        if product.execution:
+            raise HTTPException(409, detail={'code': 'PRODUCT_BOOKED',
+                'message': 'Ce Product est booké ; conservez un nouveau Product pour une autre demande.'})
+        # Omitted RFQ fields inherit the retained intent. Explicit empty/null
+        # fields remain user decisions and pass normal commercial validation.
+        inherited = {'sens': 'achat' if product.intent.side == 'BUY' else 'vente',
+                     'template_type': product.intent.product_type,
+                     **{field: getattr(product.intent, field) for field in _LEGAL_CONTEXT_FIELDS},
+                     **product.commercial.model_dump(mode='json')}
+        body = body.model_copy(update={field: value for field, value in inherited.items()
+                                       if field not in body.model_fields_set})
         terms = product.terms
         params = dict(body.params or {})
+        if 'notional' not in params and product.intent.nominal is not None:
+            params['notional'] = product.intent.nominal
         market_underlyings = params.get("underlyings") or [{} for _ in terms.underlyings]
         if len(market_underlyings) != len(terms.underlyings):
             raise HTTPException(422, detail={
@@ -1008,8 +721,7 @@ def _create_rfq(
         product = product.model_copy(update={
             "intent": TradeIntent(**{
                 **product.intent.model_dump(mode="json"),
-                **{key: value for key, value in intent_values.items()
-                   if value not in (None, "")},
+                **intent_values,
             }),
             "commercial": commercial,
         })
@@ -1131,17 +843,18 @@ def rfq_history(
             "template_type": rfq.template_type,
             "provider": q.provider,
             "price": q.price,
-            "model_price": rfq.model_price,
+            "model_price": (json.loads(q.model_reference_json).get("price") if q.model_reference_json else None),
+            "model_reference": json.loads(q.model_reference_json) if q.model_reference_json else None,
             "sens": rfq.sens,
             # Raw signed price difference, kept as the factual number; edge_bps
             # is the one to aggregate on (see _edge_bps).
-            "spread_bps": round((q.price - rfq.model_price) / rfq.model_price * 10000, 1)
-                          if rfq.model_price else None,
-            "edge_bps": _edge_bps(q.price, rfq.model_price, rfq.sens),
+            "spread_bps": round((q.price - json.loads(q.model_reference_json)["price"]) / json.loads(q.model_reference_json)["price"] * 10000, 1)
+                          if q.model_reference_json and json.loads(q.model_reference_json).get("price") else None,
+            "edge_bps": _edge_bps(q.price, json.loads(q.model_reference_json).get("price") if q.model_reference_json else None, rfq.sens),
             "date": _utc_iso(q.quoted_at or q.created_at),
             "status": q.status,
-            **({"origin": "NETWORK", "comparable": _quote_row(q, session=session)["comparable"]}
-               if rfq_publication.publication_for_quote(session, q.id) else {}),
+            **{key: value for key, value in _quote_row(q, superseded=q.id in superseded, session=session).items()
+               if key in {'origin', 'comparable', 'history_eligible', 'currency', 'revision'}},
             # This row is a last-look counter-quote…
             "is_last_look": q.parent_quote_id is not None,
             # …and this one is the original it replaced. Superseded rows are
@@ -1184,6 +897,16 @@ def rfq_terms(
             "terms_version": product.terms_version,
             "terms_fingerprint": product.terms_fingerprint,
             "terms": product.terms.model_dump(mode="json", exclude={"schedule_error"})}
+
+
+from ..services import rfq_electronic
+
+
+@router.post('/{rfq_id}/electronic-execution')
+def request_electronic_execution(rfq_id: int, body: rfq_electronic.ElectronicRequest,
+                                current: Annotated[User, Depends(get_current_user)],
+                                session: Annotated[Session, Depends(get_session)]):
+    return rfq_electronic.request(session, rfq_id, current, body)
 
 
 @router.post("/{rfq_id}/treatment")
@@ -1307,22 +1030,6 @@ def revoke_rfq_share(
     session.commit()
 
 
-def _rfq_product(rfq: RfqRequest, expected_version: int, current: User, session: Session):
-    if not rfq.product_id or not rfq.product_terms_version:
-        raise HTTPException(409, detail={"code": "RFQ_PRODUCT_MISSING", "message": "Cette RFQ ne possède pas de version Product exploitable."})
-    if rfq.product_terms_version != expected_version:
-        raise HTTPException(409, detail={"code": "RFQ_TERMS_STALE", "message": "Les termes de la RFQ ont changé. Rechargez le dossier."})
-    try:
-        scope = ownership(session, rfq.id)
-        if scope is None:
-            owned_record(session, rfq.product_id, current)
-        else:
-            product_row = session.get(ProductRecord, rfq.product_id)
-            if product_row is None or product_row.entity_id != scope.entity_id:
-                raise HTTPException(404, "Produit introuvable dans cette organisation")
-        return load_product(session, rfq.product_id, terms_version=rfq.product_terms_version)
-    except ProductError as exc:
-        raise HTTPException(exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
 
 
 @router.post("/{rfq_id}/pricing-input")
@@ -1332,37 +1039,8 @@ def compose_rfq_pricing_input(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    """Compose the linked terms with the RFQ's persisted private assumptions."""
-    rfq = _get_owned(rfq_id, current, session, "price")
-    product = _rfq_product(rfq, body.expected_terms_version, current, session)
-    params = json.loads(rfq.params_json or "{}")
-    valuation_date = params.get("valuation_date") or business_today().isoformat()
-    if body.context is None and body.valuation_date and body.valuation_date.isoformat() != valuation_date:
-        raise HTTPException(409, detail={"code": "RFQ_PRICING_DATE_STALE", "message": "La date de calcul diffère des hypothèses enregistrées. Enregistrez les hypothèses RFQ avant le calcul."})
-    context = {key: value for key, value in params.items()
-               if key in PricingRequest.model_fields and key not in TERM_FIELDS}
-    context["underlyings"] = [
-        {key: value for key, value in item.items() if key not in IDENTITY_FIELDS}
-        for item in params.get("underlyings", [])
-    ]
-    count = len(product.terms.underlyings)
-    if count == 1:
-        context.setdefault("corr_matrix", [[1.0]])
-    if body.context is not None:
-        # Pricer analyses keep their own market context without changing RFQ.
-        context = body.context
-        valuation_date = context.get("valuation_date") or valuation_date
-    try:
-        request = PricingRequest(**pricing_input(product, context)).model_dump(mode="json")
-    except ValueError as exc:
-        raise HTTPException(422, detail=str(exc)) from exc
-    return {
-        "pricing_input": {**request, "valuation_date": valuation_date},
-        "input_hash": pricing_input_hash(rfq.script_snapshot, params) if body.context is None else None,
-        "product_id": product.product_id,
-        "terms_version": product.terms_version,
-        "terms_fingerprint": product.terms_fingerprint,
-    }
+    """Compose the canonical RFQ pricing input through its shared service."""
+    return _compose_rfq_pricing_input(rfq_id, body, current, session)
 
 
 def _network_recipient(session: Session, relation: RfqRelationship) -> dict:
@@ -1572,9 +1250,23 @@ def update_rfq(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    try:
+        return _update_rfq(rfq_id, body, current, session)
+    except HTTPException:
+        session.rollback()
+        raise
+    except ProductError as exc:
+        session.rollback()
+        raise HTTPException(exc.status, detail={'code': exc.code, 'message': str(exc)}) from exc
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _update_rfq(rfq_id: int, body: RfqUpdate, current: User, session: Session):
     requested = body.model_dump(exclude_unset=True)
-    selection_fields = {"selected_quote_id", "selection_reason_code", "selection_reason_note"}
-    price_fields = {"pricing_params", "model_price", "expected_model_input_hash"}
+    selection_fields = {"selected_quote_id", "expected_quote_revision", "selection_reason_code", "selection_reason_note"}
+    price_fields = {"pricing_params", "model_price", "expected_model_input_hash", "pricing_receipt"}
     required_rights = set()
     if requested.keys() & selection_fields:
         required_rights.add("select")
@@ -1592,7 +1284,7 @@ def update_rfq(
         "selected_quote_id", "sens", "status", "transaction_format", "instrument_family",
         "payoff_family", "payoff_description", "documentation_reference",
         "client_id", "mandate_id", "opportunity_id", "primary_affiliation_id"})
-    if rfq.product_id is None:
+    if rfq.product_id is None or rfq.product_terms_version is None:
         raise HTTPException(409, detail={
             "code": "RFQ_PRODUCT_MISSING",
             "message": "Cette RFQ ne possède pas de Product canonique.",
@@ -1603,7 +1295,23 @@ def update_rfq(
     product = load_product(session, rfq.product_id, terms_version=rfq.product_terms_version)
     before_audit = _rfq_audit_state(rfq)
     data = body.model_dump(exclude_unset=True)
+    pricing_evidence = data.pop("pricing_receipt", None)
+    if pricing_evidence is not None and "model_price" not in data:
+        raise HTTPException(422, "La preuve de calcul doit accompagner le prix modèle.")
     requested_fields = set(data)
+    if 'params' in data and 'pricing_params' in data:
+        raise HTTPException(422, 'Séparez la modification des termes et les hypothèses de pricing.')
+    merged_pricing = (_merge_pricing_params(rfq, data.get('pricing_params') or {})
+                      if 'pricing_params' in data else None)
+    old_params = json.loads(rfq.params_json or '{}')
+    changes_terms = ('params' in data and product_terms(rfq.script_snapshot, data['params'] or {})
+                     != product_terms(rfq.script_snapshot, old_params))
+    context_requested = bool(requested_fields & (_COMMERCIAL_CONTEXT_FIELDS | _LEGAL_CONTEXT_FIELDS | {'sens'}))
+    nominal_changed = ('params' in data and (data['params'] or {}).get('notional') != old_params.get('notional'))
+    latest = load_product(session, rfq.product_id)
+    if (context_requested or changes_terms) and latest.terms_version != rfq.product_terms_version:
+        raise HTTPException(409, detail={'code': 'PRODUCT_TERMS_STALE',
+            'message': 'La RFQ utilise des termes historiques ; ouvrez le Product courant avant de les modifier.'})
     context_changes = requested_fields & _COMMERCIAL_CONTEXT_FIELDS
     if context_changes:
         scope = ownership(session, rfq.id)
@@ -1656,7 +1364,8 @@ def update_rfq(
                 setattr(rfq, field, _clean_optional(data.pop(field)))
     if "pricing_params" in data:
         _refuse_if_booked(rfq, session, "les hypothèses de pricing")
-        merged = _merge_pricing_params(rfq, data.pop("pricing_params") or {})
+        data.pop("pricing_params")
+        merged = merged_pricing
         _validate_rfq_correlation(merged)
         new_hash = pricing_input_hash(rfq.script_snapshot, merged)
         if rfq.model_price is not None and rfq.model_input_hash != new_hash:
@@ -1736,6 +1445,13 @@ def update_rfq(
             pricing_input_hash(rfq.script_snapshot, json.loads(rfq.params_json or "{}"))
             if mp is not None else None)
     data.pop("expected_model_input_hash", None)
+    if pricing_evidence is not None:
+        from ..services.rfq_booking import retain_evidence
+        try:
+            retain_evidence(session, rfq, current, pricing_evidence)
+        except HTTPException:
+            session.rollback()
+            raise
     if data.get("sens") is not None and data["sens"] != rfq.sens:
         _refuse_if_booked(rfq, session, "le sens de l'AO")
         if _get_quotes(rfq_id, session) or rfq_exchange.round_for(session, rfq_id):
@@ -1749,6 +1465,15 @@ def update_rfq(
             q = session.get(RfqQuote, qid)
             if not q or q.rfq_id != rfq_id:
                 raise HTTPException(404, "Quote introuvable pour cette RFQ")
+            expected_quote_revision = data.get('expected_quote_revision')
+            if expected_quote_revision is not None and expected_quote_revision != q.revision:
+                raise HTTPException(409, "La cotation a changé ; rechargez la révision à retenir.")
+            from ..services.rfq_quote_integrity import same_currency
+            if not same_currency(session, rfq, q):
+                raise HTTPException(422, "La devise de la cotation diffère des termes Product ; ouvrez un nouveau tour pour une contre-proposition.")
+            exchange_round = rfq_exchange.round_for(session, rfq_id)
+            if rfq.status in _TERMINAL_STATUSES or (exchange_round and exchange_round.state != 'OPEN'):
+                raise HTTPException(409, "Ce tour est clôturé ; ouvrez un nouveau tour lié.")
             if rfq_publication.publication_for_quote(session, q.id) and not _quote_row(q, session=session)["comparable"]:
                 raise HTTPException(422, "Cette cotation est inactive, remplacée ou conditionnelle")
             if q.price is None:
@@ -1776,6 +1501,7 @@ def update_rfq(
             rfq.selection_reason_code = None
             rfq.selection_reason_note = None
         rfq.selected_quote_id = qid
+        rfq.selected_quote_revision = q.revision if qid is not None else None
         if qid is None:
             rfq.selection_reason_code = None
             rfq.selection_reason_note = None
@@ -1797,9 +1523,14 @@ def update_rfq(
             raise HTTPException(
                 422, "Le statut se déduit du déroulé de l'AO — seul « sans_suite » se pose "
                      "à la main, « auto » le rend à la déduction.")
-        # "auto" reopens by clearing the terminal flag; _sync_status then
-        # puts the tender back at the stage its quotes actually justify.
+        exchange_round = rfq_exchange.round_for(session, rfq_id)
+        if want == 'auto' and exchange_round and (
+                exchange_round.state != 'OPEN' or rfq.status in _TERMINAL_STATUSES):
+            raise HTTPException(409, "Ce tour est clôturé ; ouvrez un nouveau tour lié.")
+        if want == 'sans_suite':
+            rfq_exchange.close_round(session, rfq, current)
         rfq.status = "sans_suite" if want == "sans_suite" else "draft"
+    data.pop('expected_quote_revision', None)
     for field, value in data.items():
         if value is not None:
             setattr(rfq, field, value)
@@ -1837,7 +1568,8 @@ def update_rfq(
             reason="Transition RFQ explicite.",
         )
     _sync_product_rfq(
-        session, rfq, current, action="PRODUCT_RFQ_UPDATED", product=product)
+        session, rfq, current, action="PRODUCT_RFQ_UPDATED", product=product,
+        update_context=context_requested or nominal_changed)
     session.commit()
     return _rfq_row(rfq, _get_quotes(rfq_id, session), _counterparty_by_provider(session),
                     _booked_deals_by_rfq(session, current.id), session=session, current=current)
@@ -1874,6 +1606,11 @@ def delete_rfq(
         for share in session.exec(select(RfqDeskShare).where(RfqDeskShare.rfq_id == rfq_id)).all():
             session.delete(share)
         session.delete(ownership(session, rfq_id))
+    from ..db.models import RfqBookingEvidence
+    evidence = session.get(RfqBookingEvidence, rfq_id)
+    if evidence:
+        session.delete(evidence)
+    session.flush()
     session.delete(rfq)
     session.flush()
     if product is not None:
@@ -1929,10 +1666,22 @@ def add_quote(
         product = _rfq_product(rfq, rfq.product_terms_version, current, session)
         shared, _ = _shared_rfq_request(rfq, product, rfq.payoff_family or "Produit structuré", None, current, session)
         rfq_exchange.freeze(session, rfq, shared, current)
+    from ..services.legal_identity import provider_identity, active_counterparty
+    directory_provider, legal = provider_identity(session, provider, body.provider_id)
+    if body.counterparty_id is not None:
+        requested = active_counterparty(session, body.counterparty_id)
+        if directory_provider and directory_provider.counterparty_id is not None and directory_provider.counterparty_id != requested.id:
+            raise HTTPException(422, "La contrepartie diffère du rattachement explicite du fournisseur.")
+        legal = requested
     q = RfqQuote(
         id=next_audited_id(session, RfqQuote, "RFQ_QUOTE"),
         rfq_id=rfq_id,
+        currency=rfq_quote_integrity.request_currency(session, rfq),
         provider=provider,
+        provider_id=directory_provider.id if directory_provider else None,
+        counterparty_id=legal.id if legal else None,
+        counterparty_name=legal.name if legal else None,
+        identity_frozen=True,
         contact=body.contact,
         note=body.note,
     )
@@ -1963,15 +1712,45 @@ def update_quote(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    rfq = _get_owned(rfq_id, current, session, "prepare")
+    rfq = lock_rfq_organization(session, rfq_id, current, "prepare")
     q = session.get(RfqQuote, quote_id)
     if not q or q.rfq_id != rfq_id:
         raise HTTPException(404, "Quote introuvable")
     if rfq_publication.publication_for_quote(session, quote_id):
         raise HTTPException(409, "La cotation réseau publiée est immuable ; demandez une révision à la banque")
+    from ..services.rfq_quote_integrity import clear_selection, request_currency, effective_currency
     before_audit = _quote_row(q, _counterparty_by_provider(session))
+    before_audit["model_reference"] = json.loads(q.model_reference_json) if q.model_reference_json else None
+    before_decision = _rfq_audit_state(rfq)
     data = body.model_dump(exclude_unset=True)
+    expected_revision = data.pop('expected_revision', None)
+    if expected_revision is not None and expected_revision != q.revision:
+        raise HTTPException(409, "La cotation a changé ; rechargez sa révision avant de la modifier.")
+    exchange_round = rfq_exchange.round_for(session, rfq_id)
+    if set(data) - {'note'} and (rfq.status in _TERMINAL_STATUSES or (
+            exchange_round and exchange_round.state != 'OPEN')):
+        raise HTTPException(409, "Ce tour est clôturé ; ouvrez un nouveau tour lié.")
     rfq_execution.protect_mutation(session, rfq_id, set(data) - {"note"}, quote_id)
+    if "counterparty_id" in data:
+        from ..services.legal_identity import active_counterparty
+        legal = active_counterparty(session, data.pop("counterparty_id"))
+        if q.identity_frozen and q.counterparty_id is not None and q.counterparty_id != legal.id:
+            raise HTTPException(409, "Une cotation historisée ne peut pas changer de banque ; ouvrez une nouvelle cotation.")
+        if not (body.identity_reason or "").strip() or len(body.identity_reason.strip()) < 3:
+            raise HTTPException(422, "Motif explicite requis pour qualifier l'identité juridique.")
+        _refuse_if_booked(rfq, session, "l'identité juridique")
+        if not q.identity_frozen or q.counterparty_id is None:
+            q.counterparty_id, q.counterparty_name = legal.id, legal.name
+        q.identity_frozen = True
+        record_audit_event(session, action="QUOTE_LEGAL_IDENTITY_QUALIFIED", object_type="RFQ_QUOTE", object_id=q.id,
+                           actor_user_id=current.id, result="SUCCESS", before=before_audit,
+                           after=_quote_row(q), reason=body.identity_reason.strip())
+    data.pop("identity_reason", None)
+    if 'currency' in data or 'price' in data:
+        raw_currency = data['currency'] if 'currency' in data else q.currency
+        data['currency'] = str(raw_currency or '').strip().upper() or request_currency(session, rfq)
+        if len(data['currency']) != 3 or not data['currency'].isascii() or not data['currency'].isalpha():
+            raise HTTPException(422, "La devise doit être un code de trois lettres.")
     audited_fields = set(data) & {"price", "currency", "status", "quoted_at",
                                   "firmness", "valid_until", "last_look"}
     # A note annotates, it doesn't evidence — everything else on a quote is
@@ -1984,29 +1763,26 @@ def update_quote(
             data["status"] = "recu" if data["price"] is not None else "en_attente"
         if data["price"] is not None and q.quoted_at is None and "quoted_at" not in data:
             data["quoted_at"] = business_now()
-        # Contre-cote de last look : elle doit améliorer la cotation qu'elle
-        # remplace. Sinon elle sortait la meilleure réponse du fournisseur de
-        # ses propres statistiques — un UBS à +102 bps en notre faveur devenu
-        # -102 bps à l'écran, sans que personne ne l'ait décidé.
-        if q.parent_quote_id is not None and data["price"] is not None:
-            parent = session.get(RfqQuote, q.parent_quote_id)
-            if parent and parent.price is not None and not _improves(
-                    data["price"], parent.price, rfq.sens):
-                sense = "plus bas" if rfq.sens == "achat" else "plus haut"
-                raise HTTPException(
-                    422, f"Un last look s'aligne ou garde son prix : la contre-cote "
-                         f"({data['price']}) doit être {sense} que la cotation d'origine "
-                         f"({parent.price}). Si le fournisseur revient moins bien, sa cotation "
-                         f"initiale reste sa réponse — annulez le last look.")
     if "quoted_at" in data:
         data["quoted_at"] = _parse_utc_datetime(data["quoted_at"], "quoted_at")
     if "valid_until" in data:
         data["valid_until"] = _parse_utc_datetime(data["valid_until"], "valid_until")
-        received_at = data.get("quoted_at", q.quoted_at)
-        if data["valid_until"] is not None and received_at is not None \
-                and data["valid_until"] <= received_at:
-            raise HTTPException(
-                422, "valid_until doit être postérieure à l'heure de réception de la quote.")
+    received_at = data.get("quoted_at", q.quoted_at)
+    valid_until = data.get('valid_until', q.valid_until)
+    if valid_until is not None and received_at is not None and valid_until <= received_at:
+        raise HTTPException(422, "valid_until doit être postérieure à l'heure de la cotation.")
+    if q.parent_quote_id is not None and data.get('status', q.status) == 'recu':
+        parent = session.get(RfqQuote, q.parent_quote_id)
+        price = data.get('price', q.price)
+        currency = data.get('currency', effective_currency(session, rfq, q))
+        if not parent or parent.price is None or price is None or not _improves(price, parent.price, rfq.sens) \
+                or currency != effective_currency(session, rfq, parent):
+            raise HTTPException(422, "Le last look doit améliorer l'originale dans la même devise ; requalifiez son prix.")
+    material_changed = any(getattr(q, key) != value for key, value in data.items() if key != 'note')
+    material_changed = material_changed or ('last_look' in data and data['last_look'] != q.last_look)
+    identity_changed = (before_audit['counterparty_id'], before_audit['identity_status']) != (
+        q.counterparty_id if q.identity_frozen else None, 'FROZEN' if q.identity_frozen and q.counterparty_id else 'TO_QUALIFY')
+    material_changed = material_changed or identity_changed
 
     if "last_look" in data:
         want = data.pop("last_look")
@@ -2014,7 +1790,7 @@ def update_quote(
             raise HTTPException(
                 422, "Un last look est une contre-cotation finale et ne peut pas "
                      "engendrer un nouveau last look.")
-        if want and q.price is None:
+        if want and data.get('price', q.price) is None:
             raise HTTPException(
                 422, "Un last look ne peut être demandé qu'après réception d'un prix initial.")
         child = session.exec(
@@ -2023,6 +1799,9 @@ def update_quote(
         if want and not child:
             child = RfqQuote(id=next_audited_id(session, RfqQuote, "RFQ_QUOTE"),
                              rfq_id=rfq_id, provider=q.provider, contact=q.contact,
+                             provider_id=q.provider_id, counterparty_id=q.counterparty_id,
+                             counterparty_name=q.counterparty_name, identity_frozen=q.identity_frozen,
+                             currency=data.get('currency', effective_currency(session, rfq, q)),
                               parent_quote_id=quote_id)
             session.add(child)
         elif not want and child:
@@ -2035,21 +1814,39 @@ def update_quote(
 
     for field, value in data.items():
         setattr(q, field, value)
-    if rfq.selected_quote_id == q.id and (
-            q.price is None or q.status in {"decline", "expire"}):
-        rfq.selected_quote_id = None
+    if "price" in data and before_audit['price'] != q.price:
+        from ..services.rfq_model_reference import snapshot
+        q.model_reference_json = snapshot(session, rfq) if q.price is not None else None
+    if material_changed:
+        q.revision += 1
+    if rfq.selected_quote_id == q.id and material_changed:
+        clear_selection(rfq)
         session.add(rfq)
     if q.parent_quote_id is not None and q.price is not None \
             and rfq.selected_quote_id == q.parent_quote_id:
         # The answered counter-quote replaces its parent.  Never leave the
         # tender pointing at a response that its own history marks superseded.
-        rfq.selected_quote_id = None
+        clear_selection(rfq)
         session.add(rfq)
+    if q.parent_quote_id is None and material_changed:
+        for child in session.exec(select(RfqQuote).where(RfqQuote.parent_quote_id == q.id)).all():
+            if child.status == 'recu' and child.price is not None and (
+                    q.price is None or not _improves(child.price, q.price, rfq.sens)
+                    or effective_currency(session, rfq, child) != effective_currency(session, rfq, q)):
+                old = _quote_row(child)
+                child.status = 'expire'
+                child.revision += 1
+                if rfq.selected_quote_id == child.id:
+                    clear_selection(rfq)
+                session.add(child)
+                record_audit_event(session, action='QUOTE_LAST_LOOK_INVALIDATED', object_type='RFQ_QUOTE',
+                    object_id=child.id, actor_user_id=current.id, result='SUCCESS', before=old,
+                    after=_quote_row(child), reason="La révision de l'originale exige une nouvelle contre-cotation.")
     session.add(q)
     # A price arriving (or being cleared) is what moves the tender from
     # "envoyée" to "cotée" and back.
     _sync_status(rfq, session)
-    if audited_fields:
+    if material_changed:
         record_audit_event(
             session,
             action="QUOTE_UPDATED",
@@ -2058,13 +1855,30 @@ def update_quote(
             actor_user_id=current.id,
             result="SUCCESS",
             before=before_audit,
-            after=_quote_row(q, _counterparty_by_provider(session)),
+            after={**_quote_row(q, _counterparty_by_provider(session)),
+                   "model_reference": json.loads(q.model_reference_json) if q.model_reference_json else None},
             reason="Mise à jour d'une donnée de cotation.",
-            metadata={"fields": sorted(audited_fields)},
+            metadata={"fields": sorted(audited_fields), "revision":q.revision},
         )
-    _sync_product_rfq(session, rfq, current, action="PRODUCT_RFQ_QUOTE_UPDATED")
+    if before_decision['selected_quote_id'] is not None and rfq.selected_quote_id is None:
+        record_audit_event(session, action='QUOTE_SELECTION_INVALIDATED', object_type='RFQ', object_id=rfq.id,
+            actor_user_id=current.id, result='SUCCESS', before=before_decision, after=_rfq_audit_state(rfq),
+            reason='La révision de la cotation ou de son last look exige une nouvelle décision explicite.')
+    if material_changed or ('note' in data and before_audit['note'] != q.note):
+        _sync_product_rfq(session, rfq, current, action="PRODUCT_RFQ_QUOTE_UPDATED")
     session.commit()
-    return _quote_row(q, _counterparty_by_provider(session))
+    result = _quote_row(q, _counterparty_by_provider(session), session=session)
+    quotes = _get_quotes(rfq_id, session)
+    superseded = superseded_quote_ids(quotes)
+    result['rfq_state'] = {
+        'id':rfq.id, 'status':rfq.status, 'selected_quote_id':rfq.selected_quote_id,
+        'business_status':_rfq_row(rfq, quotes, session=session, current=current)['business_status'],
+        'selected_quote_revision':rfq.selected_quote_revision,
+        'selection_reason_code':rfq.selection_reason_code, 'selection_reason_note':rfq.selection_reason_note,
+        'quotes':[{key:value for key,value in _quote_row(item, superseded=item.id in superseded, session=session).items()
+                   if key in {'id','revision','status','superseded','comparable'}} for item in quotes],
+    }
+    return result
 
 
 @router.delete("/{rfq_id}/quotes/{quote_id}", status_code=204)
@@ -2074,22 +1888,51 @@ def delete_quote(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    rfq = _get_owned(rfq_id, current, session, "prepare")
+    rfq = lock_rfq_organization(session, rfq_id, current, "prepare")
     q = session.get(RfqQuote, quote_id)
     if not q or q.rfq_id != rfq_id:
         raise HTTPException(404, "Quote introuvable")
     if rfq_publication.publication_for_quote(session, quote_id):
         raise HTTPException(409, "Une publication réseau conserve son historique ; la banque peut la retirer")
     _refuse_if_booked(rfq, session, "la suppression d'une cotation")
+    exchange_round = rfq_exchange.round_for(session, rfq_id)
+    if rfq.status in _TERMINAL_STATUSES or (exchange_round and exchange_round.state != "OPEN"):
+        raise HTTPException(409, "Ce tour est clôturé ; ouvrez un nouveau tour lié.")
     rfq_execution.protect_mutation(session, rfq_id, {"delete"}, quote_id)
     child = session.exec(select(RfqQuote).where(RfqQuote.parent_quote_id == quote_id)).first()
     ids_removed = {quote_id} | ({child.id} if child else set())
-    if child:
-        session.delete(child)
     if rfq.selected_quote_id in ids_removed:
-        rfq.selected_quote_id = None
+        rfq_quote_integrity.clear_selection(rfq)
         session.add(rfq)
+        session.flush()
+    if child:
+        # SQLite checks the self-reference immediately, before parent deletion.
+        session.delete(child)
+        session.flush()
     session.delete(q)
     _sync_status(rfq, session)
     _sync_product_rfq(session, rfq, current, action="PRODUCT_RFQ_QUOTE_REMOVED")
     session.commit()
+
+
+from ..services.rfq_booking import ReviewBooking
+
+
+@router.get("/{rfq_id}/booking-review")
+def review_rfq_booking(rfq_id: int, current: Annotated[User, Depends(get_current_user)],
+                       session: Annotated[Session, Depends(get_session)]):
+    from ..services.rfq_booking import review
+    return review(session, rfq_id, current)
+
+
+@router.post("/{rfq_id}/book", status_code=201)
+def book_reviewed_rfq(rfq_id: int, body: ReviewBooking,
+                      current: Annotated[User, Depends(get_current_user)],
+                      session: Annotated[Session, Depends(get_session)]):
+    from ..services.rfq_booking import book
+    from .deals import _book_deal
+    try:
+        return book(session, rfq_id, current, body, book_deal=_book_deal)
+    except HTTPException:
+        session.rollback()
+        raise

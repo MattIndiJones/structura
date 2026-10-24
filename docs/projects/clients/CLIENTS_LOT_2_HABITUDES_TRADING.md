@@ -516,3 +516,38 @@ Deux défauts de restitution découverts pendant cette recette ont été corrig�
 les composants existants : conservation involontaire de la provenance entre deux
 portées, et détail RFQ périmé au retour du Pricer. Aucune nouvelle route d'écran n'a
 été introduite.
+
+## Complément C24 — date, devise et provenance, 22/10/2026
+
+Les profils Client, personne, affiliation, cycles, analytiques et projections de
+transactions vers les signaux utilisent uniquement les transactions datées au
+plus tard à l'`asof` demandé. Une transaction future ou non datée n'alimente pas
+les habitudes à cette date ; la fiche Client rend les deux exclusions séparément.
+La personne est comparée à son affiliation en vigueur à cette date.
+
+Il s'agit d'une sélection par **date économique de transaction**, pas d'une
+reconstitution de ce que la base connaissait historiquement. Les statuts des
+opportunités, RFQ et suivis commerciaux restent des états courants : la réponse
+expose cette base temporelle et l'interface la nomme. Le pipeline et la conversion
+ne doivent pas être présentés comme leurs états passés. C24 n'invente pas un
+historique de statuts manquant.
+
+Le pipeline, les médianes et les fourchettes de ticket sont restitués **par
+devise**, sans FX implicite. Les anciennes clés scalaires restent utilisables
+pour une seule devise qualifiée ; elles valent `null` lorsque plusieurs unités
+ou des montants non qualifiés empêchent une valeur commune. Une borne déclarée
+de ticket ne s'applique qu'à sa devise déclarée ; elle n'est pas comparée à un
+montant JPY si elle est exprimée en EUR. Les bornes déclarées restent visibles
+même sans observation.
+
+Les imports héritent aussi de la provenance du mandat : une ligne importée sur
+un mandat Demo d'un Client natif reste Demo et est exclue du profil réel. Les
+analytiques du portefeuille sont réelles par défaut, même lorsque toutes les
+transactions présentes sont Demo. Leur inclusion demande `include_demo=true` et
+reste signalée ; une fiche Client explicitement Demo conserve son contexte Demo.
+Ce complément traite M16-05, prérequis CRM de C27, sans clôturer les autres
+agrégats et historiques de C27.
+
+Voir le [rapport C24](../../audits/REMEDIATION_C24_2026-10-22.md). Les recettes
+graphiques, la qualification déployée et l'ensemble de C27 restent distincts des
+preuves locales publiées ici.

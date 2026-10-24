@@ -29,8 +29,22 @@ def membership_rights(session: Session, desk_id: int, user: User) -> set[str]:
         RfqDeskMembership.desk_id == desk_id,
         RfqDeskMembership.user_id == user.id,
     )).first()
-    return set(json.loads(membership.rights_json)) & RIGHTS \
+    rights = set(json.loads(membership.rights_json)) & RIGHTS \
         if membership and _valid(membership, datetime.utcnow()) else set()
+    return profile_rights(rights, user)
+
+
+def profile_rights(rights, user):
+    rights = set(rights)
+    from ..core.access import has_capability
+    if not has_capability(user, "business.price"):
+        rights.discard("price")
+    if not has_capability(user, "business.prepare"):
+        rights -= {"prepare", "select", "solicit", "organize"}
+    from ..hybrid.config import current_config
+    if current_config() and not has_capability(user, "book"):
+        rights.discard("book")
+    return rights
 
 
 def ownership(session: Session, rfq_id: int) -> RfqOwnership | None:
@@ -43,7 +57,9 @@ def effective_rights(session: Session, rfq: RfqRequest, user: User) -> set[str]:
         return set()
     scope = ownership(session, rfq.id)
     if scope is None:
-        return RIGHTS if getattr(user, "is_active", True) and rfq.user_id == user.id else set()
+        if rfq.entity_id is not None and rfq.entity_id != user.entity_id:
+            return set()
+        return profile_rights(RIGHTS, user) if getattr(user, "is_active", True) and rfq.user_id == user.id else set()
     if not user.is_active or scope.entity_id != user.entity_id or rfq.entity_id != scope.entity_id:
         return set()
     rights = membership_rights(session, scope.pilot_desk_id, user)

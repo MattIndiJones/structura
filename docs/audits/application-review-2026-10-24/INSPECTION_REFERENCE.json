@@ -1,0 +1,238 @@
+{
+  "inspection": "Static source parsing only; no application imports, data access, tests, runtime or network",
+  "date": "2026-10-24",
+  "timezone": "Europe/Berlin",
+  "branch": "codex/hybrid-saas-foundation",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "git_status_initial": "M .gitignore\n M backend/app/api/admin.py\n M backend/app/api/agent_workshop.py\n M backend/app/api/alerts.py\n M backend/app/api/amc_access.py\n M backend/app/api/amc_prices.py\n M backend/app/api/amc_studies.py\n M backend/app/api/auth.py\n M backend/app/api/ccr.py\n M backend/app/api/client_intelligence.py\n M backend/app/api/compute.py\n M backend/app/api/deals.py\n M backend/app/api/documents.py\n M backend/app/api/inlife.py\n M backend/app/api/market_data.py\n M backend/app/api/opportunities.py\n M backend/app/api/portfolios.py\n M backend/app/api/pricing.py\n M backend/app/api/product_optimizer.py\n M backend/app/api/products.py\n M backend/app/api/rfq.py\n M backend/app/api/rfq_inbox.py\n M backend/app/api/rfq_transport.py\n M backend/app/api/scenarios.py\n M backend/app/api/schedule.py\n M backend/app/api/scripts_db.py\n M backend/app/api/shocks.py\n M backend/app/api/simulation.py\n M backend/app/api/trading.py\n M backend/app/api/valuation_notes.py\n M backend/app/api/var.py\n M backend/app/api/variants.py\n M backend/app/api/volatility.py\n M backend/app/core/admin_registry.py\n M backend/app/core/amc_engine.py\n M backend/app/core/amc_prices.py\n M backend/app/core/calendars.py\n M backend/app/core/ccr/cache.py\n M backend/app/core/ccr/exposure.py\n M backend/app/core/ccr/service.py\n M backend/app/core/client_controls.py\n M backend/app/core/client_cycle.py\n M backend/app/core/client_intelligence.py\n M backend/app/core/client_signals.py\n M backend/app/core/compute/pricers/var_scenario.py\n M backend/app/core/compute_budget.py\n M backend/app/core/deal_valuation.py\n M backend/app/core/deal_valuation_pdf.py\n M backend/app/core/inlife_valuation.py\n M backend/app/core/lifecycle_controls.py\n M backend/app/core/payscript/bindings.py\n M backend/app/core/payscript/engine.py\n M backend/app/core/payscript/parser.py\n M backend/app/core/payscript/simulation.py\n M backend/app/core/product/models.py\n M backend/app/core/product_optimizer/capabilities.py\n M backend/app/core/product_optimizer/contracts.py\n M backend/app/core/product_optimizer/families.py\n M backend/app/core/product_optimizer/service.py\n M backend/app/core/product_optimizer/statistics.py\n M backend/app/core/product_optimizer/validation.py\n M backend/app/core/schedule.py\n M backend/app/core/schemas.py\n M backend/app/core/smile_calibration.py\n M backend/app/core/valuation_context.py\n M backend/app/core/valuation_notes.py\n M backend/app/core/valuation_runs.py\n M backend/app/core/var_engine.py\n M backend/app/db/database.py\n M backend/app/db/models.py\n M backend/app/db/product_migrations.py\n M backend/app/db/rfq_execution_integrity.py\n M backend/app/db/trading_models.py\n M backend/app/main.py\n M backend/app/runtime.py\n M backend/app/services/agent_workshop/brain.py\n M backend/app/services/agent_workshop/consultation.py\n M backend/app/services/agent_workshop/engine.py\n M backend/app/services/agent_workshop/instances.py\n M backend/app/services/agent_workshop/reconciliation.py\n M backend/app/services/agent_workshop/store.py\n M backend/app/services/agent_workshop/tools.py\n M backend/app/services/lifecycle_alerts.py\n M backend/app/services/llm/validate.py\n M backend/app/services/market_data.py\n M backend/app/services/optimizer_research.py\n M backend/app/services/product_lifecycle.py\n M backend/app/services/product_receipts.py\n M backend/app/services/product_repository.py\n M backend/app/services/rfq_access.py\n M backend/app/services/rfq_bank.py\n M backend/app/services/rfq_exchange.py\n M backend/app/services/rfq_execution.py\n M backend/app/services/rfq_publication.py\n M backend/app/services/rfq_relationships.py\n M backend/app/services/rfq_transport.py\n M backend/app/services/scenario_market.py\n M backend/app/services/transcription/engines.py\n M backend/app/services/uat_generation.py\n M backend/run.py\n M backend/tests/conftest.py\n M backend/tests/test_agent_workshop.py\n M backend/tests/test_amc_studies.py\n M backend/tests/test_backtest_oracle.py\n M backend/tests/test_cache_prix.py\n M backend/tests/test_caracterisation_echeancier.py\n M backend/tests/test_ccr.py\n M backend/tests/test_ccr_api.py\n M backend/tests/test_chaine_pricing_booking_mtm.py\n M backend/tests/test_client_analytics.py\n M backend/tests/test_client_chain.py\n M backend/tests/test_client_coherence.py\n M backend/tests/test_client_cycle.py\n M backend/tests/test_client_demo_seed.py\n M backend/tests/test_client_intelligence.py\n M backend/tests/test_client_migration.py\n M backend/tests/test_constatations_periode.py\n M backend/tests/test_dividend_profile.py\n M backend/tests/test_engine.py\n M backend/tests/test_fixings_releves.py\n M backend/tests/test_garde_fous.py\n M backend/tests/test_inlife_pricing.py\n M backend/tests/test_lifecycle_alerts.py\n M backend/tests/test_lot7_operational.py\n M backend/tests/test_market_snapshot_rate.py\n M backend/tests/test_mtm_explain.py\n M backend/tests/test_payscript_binding.py\n M backend/tests/test_portfolio_barriers.py\n M backend/tests/test_portfolio_corr_greek.py\n M backend/tests/test_portfolio_pnl.py\n M backend/tests/test_portfolios_crud.py\n M backend/tests/test_position_sign.py\n M backend/tests/test_prestrike_mtm.py\n M backend/tests/test_pricing_validation_lot5.py\n M backend/tests/test_product_analysis.py\n M backend/tests/test_products.py\n M backend/tests/test_raw_vs_adjusted_prices.py\n M backend/tests/test_releves_consommateurs.py\n M backend/tests/test_remediation_2026_08_02.py\n M backend/tests/test_rfq.py\n M backend/tests/test_rfq_bank_publication.py\n M backend/tests/test_rfq_desk_access.py\n M backend/tests/test_rfq_execution.py\n M backend/tests/test_rfq_product_exchange.py\n M backend/tests/test_scenario_cut_lot4.py\n M backend/tests/test_scenarios.py\n M backend/tests/test_schedule_settlement.py\n M backend/tests/test_shocks.py\n M backend/tests/test_studies_market_bundle.py\n M backend/tests/test_transcription.py\n M backend/tests/test_uat_generation.py\n M backend/tests/test_underlyings_catalog.py\n M backend/tests/test_valuation_notes.py\n M backend/tests/test_var_engine.py\n M backend/tests/test_variantes_comparaison.py\n M backend/tests/test_workflow_controls.py\n M backend/tests/test_workflow_phase2.py\n M backend/tests/test_workshop_consultation.py\n M backend/tests/test_workshop_management.py\n M docs/README.md\n M docs/handoffs/HYBRID_SAAS_HANDOFF_2026-10-13.md\n M docs/projects/clients/CLIENTS_LOT_1_CHAINE_COMMERCIALE.md\n M docs/projects/clients/CLIENTS_LOT_2_HABITUDES_TRADING.md\n M docs/projects/lifecycle/DECLINAISONS_POINTS_OUVERTS.md\n M docs/projects/lifecycle/EXPLICATION_VALO_DESIGN.md\n M docs/projects/lifecycle/VALO_EXPLAIN_2026-09-17.md\n M docs/projects/platform/RFQ_NETWORK_OPERATIONS_2026-10-12.md\n M docs/projects/pricing/CCR_IMPLEMENTATION_2026-09-28.md\n M docs/reference/PAYSCRIPT_REFERENCE.md\n D frontend/dist/assets/AdminBrowseView-BP7wemPu.js\n D frontend/dist/assets/AdminComputeView-C4S1oICo.js\n D frontend/dist/assets/AdminCounterpartiesView-D4tmUE8i.js\n D frontend/dist/assets/AdminEntitiesView-DI95IU73.js\n D frontend/dist/assets/AdminMarketDataView-DdlhwAul.js\n D frontend/dist/assets/AdminRfqProvidersView-DtyA9HZU.js\n D frontend/dist/assets/AdminRfqRelationsView-CyBj-lzC.js\n D frontend/dist/assets/AdminUatGeneratorView-BB27D33o.js\n D frontend/dist/assets/AdminUnderlyingsView-jYuv485x.js\n D frontend/dist/assets/AdminUsersView-Cr5Yg7x9.js\n D frontend/dist/assets/AdminView-OT63Gimm.js\n D frontend/dist/assets/AgentWorkshopView-C2bsufnG.js\n D frontend/dist/assets/AgentWorkshopView-CPwgftXB.css\n D frontend/dist/assets/AiWorkbench-CSJhGzZA.js\n D frontend/dist/assets/AlertMessage-B4XlnwPg.css\n D frontend/dist/assets/AlertMessage-BE2rgIT3.js\n D frontend/dist/assets/AmcView-CP53Jy_l.js\n D frontend/dist/assets/AmcView-n7Ic_tWG.css\n D frontend/dist/assets/BackLink-YFZS3q9y.js\n D frontend/dist/assets/BookingView-CebGYfm9.js\n D frontend/dist/assets/BookingView-DbDRnNkN.css\n D frontend/dist/assets/CcrResult-uL9bgyG9.js\n D frontend/dist/assets/CcrView-CQdqI8a1.css\n D frontend/dist/assets/CcrView-QWRR8n0u.js\n D frontend/dist/assets/ClientDetailView-BNIPn8at.css\n D frontend/dist/assets/ClientDetailView-DEn_qZ7r.js\n D frontend/dist/assets/ClientsView-CC6VVMmf.js\n D frontend/dist/assets/ConsultationView-XEIVYm2x.js\n D frontend/dist/assets/CyclePanel-B5kaNCx2.js\n D frontend/dist/assets/DealReferenceLink-dDUT-HMm.js\n D frontend/dist/assets/DealValuationsView-BZxnp1_P.css\n D frontend/dist/assets/DealValuationsView-CActdP69.js\n D frontend/dist/assets/DocumentationView-D6NO1dxg.js\n D frontend/dist/assets/EmptyState-DLkbiG5f.js\n D frontend/dist/assets/FifoView-DKbYesAI.js\n D frontend/dist/assets/FluxDecomposition-BFDXMHck.css\n D frontend/dist/assets/FluxDecomposition-DEiQjl5t.js\n D frontend/dist/assets/HelpTip-BPE2nntW.js\n D frontend/dist/assets/HomeView-BfuLelAO.js\n D frontend/dist/assets/InteractionFormModal-CdJTF0Lx.js\n D frontend/dist/assets/LoadingSpinner-Dyu9B_Mp.js\n D frontend/dist/assets/LoginView-CExn4vjX.js\n D frontend/dist/assets/OpportunityDetailView-B_w7rENx.js\n D frontend/dist/assets/OpportunityFormModal-DQOn7Oo6.js\n D frontend/dist/assets/OptimizerResearchListView-BadOlrjW.js\n D frontend/dist/assets/OptimizerResultsView-Bc357OEY.js\n D frontend/dist/assets/PersonDetailView-Ce52ebUA.js\n D frontend/dist/assets/PersonFormModal-PyEhTH8S.js\n D frontend/dist/assets/PriceComparisonPanel-BRFGdKVW.js\n D frontend/dist/assets/PriceComparisonPanel-Cu28oTNR.css\n D frontend/dist/assets/PricerView-C97bWtVU.js\n D frontend/dist/assets/PricerView-Cp7fz82s.css\n D frontend/dist/assets/ProductModelsView-CCtNzfUJ.js\n D frontend/dist/assets/ProductOptimizerView-BOYmcrR3.css\n D frontend/dist/assets/ProductOptimizerView-Bf5Xad1o.js\n D frontend/dist/assets/ProductsView-BREJ2fp7.js\n D frontend/dist/assets/ProductsView-BkF9Cl2E.css\n D frontend/dist/assets/ReinvestView-BDMIxtFB.js\n D frontend/dist/assets/RfqAnalysisView-Wyzmx3s6.js\n D frontend/dist/assets/RfqInboxView-BlgRoj_s.js\n D frontend/dist/assets/RfqInboxView-D4qx044H.css\n D frontend/dist/assets/RfqNetworkPrototypeView-C273sx3Y.css\n D frontend/dist/assets/RfqNetworkPrototypeView-DFCrhG3b.js\n D frontend/dist/assets/RfqTransportStatus-ChICwtYi.js\n M frontend/dist/assets/RfqView-DO9iKyz4.css\n D frontend/dist/assets/RfqView-dL1yhBQW.js\n D frontend/dist/assets/RiskManagementView-DyWWt8Gp.js\n D frontend/dist/assets/RiskManagementView-pnATlip4.css\n D frontend/dist/assets/ScriptsView-CjQqQ0Ui.js\n D frontend/dist/assets/SensitiveValue-DHgn3_wv.js\n D frontend/dist/assets/StructuringView-CflnXIMF.js\n D frontend/dist/assets/TradingView-6L2qx-fr.css\n D frontend/dist/assets/TradingView-zZltTypg.js\n D frontend/dist/assets/ValoExplainView-B7owuwry.js\n D frontend/dist/assets/ValoExplainView-FTRlH_th.css\n D frontend/dist/assets/barriers-CwMtjpP1.js\n D frontend/dist/assets/barriers-ddfFbG7b.css\n D frontend/dist/assets/clients-DLyzqdEP.js\n D frontend/dist/assets/dealEvents-DvOwjjAK.js\n D frontend/dist/assets/deals-C3qZcq3R.js\n M frontend/dist/assets/format-DTcMLInZ.js\n D frontend/dist/assets/index-B-xbyoTF.js\n D frontend/dist/assets/index-iIH_-FFg.css\n D frontend/dist/assets/optimizerPayoff-DS5MH3yU.js\n D frontend/dist/assets/optimizerResearch-LcFMpgp2.js\n D frontend/dist/assets/useBookingMtm-BYqVXDpG.js\n D frontend/dist/assets/useDataFilter-BJSTEqz9.js\n M frontend/dist/assets/useSensitiveChart-CLCGRjBs.js\n D frontend/dist/assets/valuationComparison-CBPCD7Ek.js\n M frontend/dist/index.html\n M frontend/src/App.vue\n M frontend/src/components/AppHeader.vue\n M frontend/src/components/ComparatorTab.vue\n M frontend/src/components/DealTab.vue\n M frontend/src/components/EconomicsTab.vue\n M frontend/src/components/EventsTab.vue\n M frontend/src/components/FluxDecomposition.vue\n M frontend/src/components/ObservationSchedule.vue\n M frontend/src/components/OptimizerCurveInput.vue\n M frontend/src/components/PayScriptCalendars.vue\n M frontend/src/components/PayScriptConfigurations.vue\n M frontend/src/components/PriceComparisonPanel.vue\n M frontend/src/components/ProbaTab.vue\n M frontend/src/components/ProductContextBar.vue\n M frontend/src/components/ResultsPanel.vue\n M frontend/src/components/RfqBankQuotePanel.vue\n M frontend/src/components/RfqExecutionPanel.vue\n M frontend/src/components/RfqPricingPanel.vue\n M frontend/src/components/ScriptAssistantModal.vue\n M frontend/src/components/UnderlyingVolFields.vue\n M frontend/src/components/VariantCompareTab.vue\n M frontend/src/components/VolSurfaceEditor.vue\n M frontend/src/components/WorkshopBooks.vue\n M frontend/src/components/WorkshopMonitor.vue\n M frontend/src/components/clients/ClientCard.vue\n M frontend/src/composables/useAiSettings.js\n M frontend/src/composables/useAiWorkbench.test.js\n M frontend/src/composables/useBookingMtm.js\n M frontend/src/composables/useBookingMtm.test.js\n M frontend/src/composables/useObservationPreview.js\n M frontend/src/data/commonUnderlyings.js\n M frontend/src/main.js\n M frontend/src/router/index.js\n M frontend/src/stores/auth.js\n M frontend/src/stores/auth.test.js\n M frontend/src/stores/deals.js\n M frontend/src/stores/portfolios.js\n M frontend/src/stores/portfolios.test.js\n M frontend/src/stores/pricing.js\n M frontend/src/stores/pricing.test.js\n M frontend/src/stores/products.js\n M frontend/src/stores/products.test.js\n M frontend/src/stores/rfq.js\n M frontend/src/stores/rfq.test.js\n M frontend/src/test/setup.js\n M frontend/src/utils/__fixtures__/optimizerFamilies.json\n M frontend/src/utils/api.js\n M frontend/src/utils/api.test.js\n M frontend/src/utils/barriers.js\n M frontend/src/utils/barriers.test.js\n M frontend/src/utils/optimizerOutcome.js\n M frontend/src/utils/optimizerOutcome.test.js\n M frontend/src/utils/optimizerResearch.js\n M frontend/src/utils/optimizerResume.js\n M frontend/src/utils/payscriptEconomics.js\n M frontend/src/utils/productCalculations.js\n M frontend/src/utils/productOptimizer.test.js\n M frontend/src/utils/rfqBasket.js\n M frontend/src/utils/rfqBasket.test.js\n M frontend/src/utils/smileCalibration.js\n M frontend/src/utils/smileCalibration.test.js\n M frontend/src/utils/underlyingDefaults.js\n M frontend/src/utils/volSurface.js\n M frontend/src/utils/workshopHelp.js\n M frontend/src/utils/workshopPilot.js\n M frontend/src/utils/workshopPilot.test.js\n M frontend/src/utils/workshopProgress.js\n M frontend/src/utils/workshopProgress.test.js\n M frontend/src/views/AdminCounterpartiesView.vue\n M frontend/src/views/AdminEntitiesView.vue\n M frontend/src/views/AdminMarketDataView.vue\n M frontend/src/views/AdminRfqProvidersView.vue\n M frontend/src/views/AdminUatGeneratorView.vue\n M frontend/src/views/AdminUnderlyingsView.vue\n M frontend/src/views/AdminUsersView.vue\n M frontend/src/views/AdminView.vue\n M frontend/src/views/AgentWorkshopView.vue\n M frontend/src/views/AmcView.vue\n M frontend/src/views/BookingView.vue\n M frontend/src/views/CcrView.vue\n M frontend/src/views/ClientDetailView.vue\n M frontend/src/views/ClientsView.vue\n M frontend/src/views/DealValuationsView.vue\n M frontend/src/views/HomeView.vue\n M frontend/src/views/LoginView.vue\n M frontend/src/views/PricerView.vue\n M frontend/src/views/ProductOptimizerView.vue\n M frontend/src/views/ProductsView.vue\n M frontend/src/views/ReinvestView.vue\n M frontend/src/views/RfqAnalysisView.vue\n M frontend/src/views/RfqInboxView.vue\n M frontend/src/views/RfqView.vue\n M frontend/src/views/RiskManagementView.vue\n M frontend/src/views/TradingView.vue\n M frontend/src/views/ValoExplainView.vue\n M frontend/vite.config.js\n M lancer_structura.bat\n M requirements.lock.txt\n M requirements.txt\n M scripts/studies_reference/install_e_prices.py\n?? backend/app/api/rfq_reconciliation.py\n?? backend/app/core/access.py\n?? backend/app/core/booking_contract.py\n?? backend/app/core/calendar_budget.py\n?? backend/app/core/client_analysis.py\n?? backend/app/core/consultation_sessions.py\n?? backend/app/core/fixing_finality.py\n?? backend/app/core/instance_signing.py\n?? backend/app/core/market_policy.py\n?? backend/app/core/market_storage.py\n?? backend/app/core/official_history.py\n?? backend/app/core/opportunity_integrity.py\n?? backend/app/core/payscript/bridge.py\n?? backend/app/core/payscript/qualification.py\n?? backend/app/core/reference_data.py\n?? backend/app/core/risk_scope.py\n?? backend/app/core/roll_economics.py\n?? backend/app/core/session_security.py\n?? backend/app/core/valuation_attribution.py\n?? backend/app/core/watchlist_observations.py\n?? backend/app/db/archive_integrity.py\n?? backend/app/db/organization_scope_migrations.py\n?? backend/app/db/rfq_electronic_models.py\n?? backend/app/db/rfq_quote_migrations.py\n?? backend/app/db/rfq_reconciliation_models.py\n?? backend/app/db/trading_migrations.py\n?? backend/app/hybrid/\n?? backend/app/services/agent_workshop/configuration.py\n?? backend/app/services/agent_workshop/coverage.py\n?? backend/app/services/agent_workshop/diagnostic.py\n?? backend/app/services/agent_workshop/historical_market.py\n?? backend/app/services/agent_workshop/native_rfq.py\n?? backend/app/services/agent_workshop/openai_model.py\n?? backend/app/services/archived_documents.py\n?? backend/app/services/booking_commands.py\n?? backend/app/services/business_access.py\n?? backend/app/services/calibration_evidence.py\n?? backend/app/services/legal_identity.py\n?? backend/app/services/market_history.py\n?? backend/app/services/rfq_booking.py\n?? backend/app/services/rfq_electronic.py\n?? backend/app/services/rfq_model_reference.py\n?? backend/app/services/rfq_quote_integrity.py\n?? backend/app/services/rfq_reconciliation.py\n?? backend/app/services/rfq_state.py\n?? backend/tests/test_admin_workbench_adoption.py\n?? backend/tests/test_booking_legal_exception.py\n?? backend/tests/test_bridge_dependence.py\n?? backend/tests/test_business_permissions.py\n?? backend/tests/test_c19_archives.py\n?? backend/tests/test_central_simulation.py\n?? backend/tests/test_client_c24.py\n?? backend/tests/test_commands_c08.py\n?? backend/tests/test_contractual_calendars.py\n?? backend/tests/test_contractual_timeline.py\n?? backend/tests/test_economic_amendments.py\n?? backend/tests/test_fixing_finality_registry.py\n?? backend/tests/test_hybrid_bootstrap.py\n?? backend/tests/test_hybrid_development.py\n?? backend/tests/test_hybrid_installations.py\n?? backend/tests/test_hybrid_reset.py\n?? backend/tests/test_input_retention.py\n?? backend/tests/test_installation_identity_security.py\n?? backend/tests/test_legal_identity_workflows.py\n?? backend/tests/test_lifecycle_c26.py\n?? backend/tests/test_market_data_governance.py\n?? backend/tests/test_market_storage_integrity.py\n?? backend/tests/test_optimizer_c20.py\n?? backend/tests/test_payoff_qualification.py\n?? backend/tests/test_pnl_c22.py\n?? backend/tests/test_portal_account_start.py\n?? backend/tests/test_product_transition_integrity.py\n?? backend/tests/test_public_registration.py\n?? backend/tests/test_reference_governance.py\n?? backend/tests/test_rfq_c23.py\n?? backend/tests/test_rfq_electronic_execution.py\n?? backend/tests/test_rfq_reconciliation.py\n?? backend/tests/test_risk_c21.py\n?? backend/tests/test_risk_scope_c27.py\n?? backend/tests/test_roll_c25.py\n?? backend/tests/test_session_security.py\n?? backend/tests/test_stochastic_rate_integrity.py\n?? backend/tests/test_structura_launcher.py\n?? backend/tests/test_surface_calibration_integrity.py\n?? backend/tests/test_valuation_semantics.py\n?? backend/tests/test_workshop_diagnostic.py\n?? backend/tests/test_workshop_historical.py\n?? backend/tests/test_workshop_openai.py\n?? docs/audits/ADMIN_ACCOUNT_SWITCH_2026-10-24.md\n?? docs/audits/APPLICATION_REVIEW_2026-10-24.md\n?? docs/audits/BACKEND_FULL_VALIDATION_2026-10-23.md\n?? docs/audits/BILATERAL_RFQ_ACCEPTANCE_2026-10-24.md\n?? docs/audits/CAMPAIGN_CORRECTIONS_PILOT_2026-10-13.md\n?? docs/audits/CAMPAIGN_DIAGNOSTIC_5Y_BILAN_2026-10-14.md\n?? docs/audits/CAMPAIGN_HISTORICAL_PREPARATION_2026-10-14.md\n?? docs/audits/CAMPAIGN_LIFECYCLE_SHORT_2026-10-14.md\n?? docs/audits/CAMPAIGN_MULTI_PRODUCT_MULTI_UNDERLYING_2026-10-14.md\n?? docs/audits/CAMPAIGN_MULTI_PRODUCT_RESUME_2026-10-15.md\n?? docs/audits/CAMPAIGN_NATIVE_RFQ_FULL_2026-10-13.md\n?? docs/audits/CAMPAIGN_OPENAI_PILOT_2026-10-14.md\n?? docs/audits/CAMPAIGN_PILOT_2026-10-13.md\n?? docs/audits/ELECTRONIC_RFQ_EXECUTION_2026-10-24.md\n?? docs/audits/GRAPHICAL_ACCEPTANCE_2026-10-23.md\n?? docs/audits/LAUNCHER_ACCESS_ACCEPTANCE_2026-10-24.md\n?? docs/audits/LAUNCHER_RECOVERY_2026-10-24.md\n?? docs/audits/RECETTE_DETERMINISTE_SANS_IA_2026-10-15.md\n?? docs/audits/REFERENCE_CONSOLIDATION_2026-10-23.md\n?? docs/audits/REMEDIATION_C01_2026-10-20.md\n?? docs/audits/REMEDIATION_C02_2026-10-20.md\n?? docs/audits/REMEDIATION_C03_2026-10-20.md\n?? docs/audits/REMEDIATION_C04_2026-10-20.md\n?? docs/audits/REMEDIATION_C05_2026-10-20.md\n?? docs/audits/REMEDIATION_C06_2026-10-20.md\n?? docs/audits/REMEDIATION_C07_2026-10-21.md\n?? docs/audits/REMEDIATION_C08_2026-10-22.md\n?? docs/audits/REMEDIATION_C09_2026-10-21.md\n?? docs/audits/REMEDIATION_C10_2026-10-21.md\n?? docs/audits/REMEDIATION_C11_2026-10-21.md\n?? docs/audits/REMEDIATION_C12_2026-10-21.md\n?? docs/audits/REMEDIATION_C13_2026-10-21.md\n?? docs/audits/REMEDIATION_C14_2026-10-21.md\n?? docs/audits/REMEDIATION_C15_2026-10-21.md\n?? docs/audits/REMEDIATION_C16_2026-10-21.md\n?? docs/audits/REMEDIATION_C17_2026-10-21.md\n?? docs/audits/REMEDIATION_C18_2026-10-21.md\n?? docs/audits/REMEDIATION_C19_2026-10-21.md\n?? docs/audits/REMEDIATION_C20_2026-10-22.md\n?? docs/audits/REMEDIATION_C21_2026-10-22.md\n?? docs/audits/REMEDIATION_C22_2026-10-22.md\n?? docs/audits/REMEDIATION_C23_2026-10-22.md\n?? docs/audits/REMEDIATION_C24_2026-10-22.md\n?? docs/audits/REMEDIATION_C25_2026-10-22.md\n?? docs/audits/REMEDIATION_C26_2026-10-22.md\n?? docs/audits/REMEDIATION_C27_2026-10-22.md\n?? docs/audits/REMEDIATION_F01_2026-10-23.md\n?? docs/audits/REMEDIATION_F02_2026-10-23.md\n?? docs/audits/REMEDIATION_F03_2026-10-23.md\n?? docs/audits/REMEDIATION_F04_2026-10-23.md\n?? docs/audits/REMEDIATION_F05_2026-10-23.md\n?? docs/audits/REMEDIATION_F06_2026-10-23.md\n?? docs/audits/REMEDIATION_F07_2026-10-23.md\n?? docs/audits/REMEDIATION_LOT_0_2026-10-20.md\n?? docs/audits/RFQ_RECONCILIATION_2026-10-24.md\n?? docs/audits/application-review-2026-10-24/\n?? docs/audits/reference-consolidation-2026-10-23/\n?? docs/audits/remediation-lot-0-2026-10-20/\n?? docs/projects/platform/AGENT_WORKSHOP_NATIVE_RFQ_2026-10-13.md\n?? docs/projects/platform/HYBRID_SAAS_ACCESS_2026-10-13.md\n?? docs/projects/platform/HYBRID_SAAS_FOUNDATION_2026-10-13.md\n?? docs/projects/platform/RFQ_NAVIGATION_2026-10-13.md\n?? docs/projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md\n?? docs/projects/platform/WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md\n?? frontend/dist/assets/AccountSecurityView-Bm6eev5B.js\n?? frontend/dist/assets/AdminBrowseView-B_3kfWcE.js\n?? frontend/dist/assets/AdminComputeView-Dblkz6RC.js\n?? frontend/dist/assets/AdminCounterpartiesView-XuIYwHcb.js\n?? frontend/dist/assets/AdminEntitiesView-Da11wEJw.js\n?? frontend/dist/assets/AdminMarketDataView-CjnMAuTs.js\n?? frontend/dist/assets/AdminRfqProvidersView-B5QwUXZJ.js\n?? frontend/dist/assets/AdminRfqRelationsView-BEbonltI.js\n?? frontend/dist/assets/AdminUatGeneratorView-BfRB5eHP.js\n?? frontend/dist/assets/AdminUnderlyingsView-N-Z_gyA5.js\n?? frontend/dist/assets/AdminUsersView-BZcuMJtB.js\n?? frontend/dist/assets/AdminView-D0_q6eCb.js\n?? frontend/dist/assets/AgentWorkshopView-C1OsPshU.js\n?? frontend/dist/assets/AgentWorkshopView-NmyrwG8c.css\n?? frontend/dist/assets/AiWorkbench-Dpxu-Xf9.js\n?? frontend/dist/assets/AmcView-Cikp6p38.css\n?? frontend/dist/assets/AmcView-lUdrgxG2.js\n?? frontend/dist/assets/BackLink-DfakcVMZ.js\n?? frontend/dist/assets/BookingView-DecUY48E.js\n?? frontend/dist/assets/BookingView-QS5I6QcC.css\n?? frontend/dist/assets/CcrResult-ChAd0HkO.js\n?? frontend/dist/assets/CcrView-BD1zHaQs.js\n?? frontend/dist/assets/CcrView-DmIB6yQA.css\n?? frontend/dist/assets/ClientDetailView-BaCwVTXh.css\n?? frontend/dist/assets/ClientDetailView-DKSaPUBh.js\n?? frontend/dist/assets/ClientsView-CTZIKjoN.js\n?? frontend/dist/assets/ConsultationView-CFxigDIR.js\n?? frontend/dist/assets/CyclePanel-DO-Ze5UW.js\n?? frontend/dist/assets/DealReferenceLink-DR-nG_bQ.js\n?? frontend/dist/assets/DealValuationsView-Zrj4LYtC.js\n?? frontend/dist/assets/DealValuationsView-j8tNWrEa.css\n?? frontend/dist/assets/DocumentationView-CQwzDaXu.js\n?? frontend/dist/assets/EmptyState-BrOku19b.js\n?? frontend/dist/assets/FifoView-C7bo-S91.js\n?? frontend/dist/assets/FluxDecomposition-Bl4GW4Zp.css\n?? frontend/dist/assets/FluxDecomposition-th66gQlc.js\n?? frontend/dist/assets/HelpTip-kg3GHh87.js\n?? frontend/dist/assets/HomeView-DYdYNiP9.js\n?? frontend/dist/assets/InteractionFormModal-CrRxeocr.js\n?? frontend/dist/assets/LoadingSpinner-wzRQDTaC.js\n?? frontend/dist/assets/LoginView-BRQ6M45q.css\n?? frontend/dist/assets/LoginView-DSGFFFHH.js\n?? frontend/dist/assets/OpportunityDetailView-kT9WuRw1.js\n?? frontend/dist/assets/OpportunityFormModal-DRP8RFc-.js\n?? frontend/dist/assets/OptimizerCurveInput-C--yjPKe.css\n?? frontend/dist/assets/OptimizerCurveInput-DNwKOSis.js\n?? frontend/dist/assets/OptimizerResearchListView-DyIADhik.js\n?? frontend/dist/assets/OptimizerResultsView-CdpS_VjM.js\n?? frontend/dist/assets/PersonDetailView-B9is0tdw.js\n?? frontend/dist/assets/PlatformView-cRajJteZ.js\n?? frontend/dist/assets/PlatformView-wDAygylX.css\n?? frontend/dist/assets/PriceComparisonPanel-CdjYy-VM.js\n?? frontend/dist/assets/PriceComparisonPanel-DnLNTzGI.css\n?? frontend/dist/assets/PricerView-BOVfoeYL.js\n?? frontend/dist/assets/PricerView-Dy-fKwS5.css\n?? frontend/dist/assets/ProductModelsView-9UmILv8t.js\n?? frontend/dist/assets/ProductOptimizerView-BAFHC-i9.css\n?? frontend/dist/assets/ProductOptimizerView-DiVWEvtu.js\n?? frontend/dist/assets/ProductsView-9ES4-kbN.js\n?? frontend/dist/assets/ProductsView-Co21JI0w.css\n?? frontend/dist/assets/ReinvestView-CWjXXfMn.js\n?? frontend/dist/assets/RfqAnalysisView-CpShftIE.js\n?? frontend/dist/assets/RfqBookingView-Bmd0YIUd.js\n?? frontend/dist/assets/RfqBookingView-SixlPN2z.css\n?? frontend/dist/assets/RfqInboxView-0Mm04Tsp.css\n?? frontend/dist/assets/RfqInboxView-Cj_w5OK0.js\n?? frontend/dist/assets/RfqNetworkPrototypeView-DCZA5GOG.js\n?? frontend/dist/assets/RfqNetworkPrototypeView-dPDR1DqT.css\n?? frontend/dist/assets/RfqView-_Dzwc3D2.js\n?? frontend/dist/assets/RiskManagementView-C9naATpH.css\n?? frontend/dist/assets/RiskManagementView-DfyvZaJZ.js\n?? frontend/dist/assets/ScriptsView-4CgXAsAQ.js\n?? frontend/dist/assets/SensitiveValue-BQ0gfNa7.js\n?? frontend/dist/assets/StructuringView-BjZLtB9J.js\n?? frontend/dist/assets/TradingView-CGVLd-8m.css\n?? frontend/dist/assets/TradingView-CakBJYZc.js\n?? frontend/dist/assets/ValoExplainView-DNqOLXxU.css\n?? frontend/dist/assets/ValoExplainView-DceJIk7S.js\n?? frontend/dist/assets/clientAmounts-CLmyvGk1.js\n?? frontend/dist/assets/clients-CU4sPvvB.js\n?? frontend/dist/assets/dealEvents-CBCFuVKw.js\n?? frontend/dist/assets/deals-v1q5iGoV.js\n?? frontend/dist/assets/index-Cno3sLlx.js\n?? frontend/dist/assets/index-D__NMeKF.css\n?? frontend/dist/assets/optimizerPayoff-C6mp9uwn.js\n?? frontend/dist/assets/optimizerResearch-C9lEYvf2.js\n?? frontend/dist/assets/rfqQuoteStates-C3qlK8x7.js\n?? frontend/dist/assets/riskScope-5pTATNue.js\n?? frontend/dist/assets/riskScope-ddfFbG7b.css\n?? frontend/dist/assets/useBookingMtm-a7r9Q7yM.js\n?? frontend/dist/assets/useDataFilter-CyAuGWqX.js\n?? frontend/dist/assets/valuationComparison-CdnL-859.js\n?? frontend/src/components/CalendarPolicyFields.vue\n?? frontend/src/components/ContextSelector.test.js\n?? frontend/src/components/ContextSelector.vue\n?? frontend/src/components/DealTab.test.js\n?? frontend/src/components/EconomicsCalendars.test.js\n?? frontend/src/components/EventsTab.test.js\n?? frontend/src/components/InputRetentionUi.test.js\n?? frontend/src/components/LifecycleRefreshSummary.test.js\n?? frontend/src/components/LifecycleRefreshSummary.vue\n?? frontend/src/components/MarketDataProvenance.vue\n?? frontend/src/components/PriceSeriesImport.test.js\n?? frontend/src/components/PriceSeriesImport.vue\n?? frontend/src/components/RfqElectronicExecutionPanel.test.js\n?? frontend/src/components/RfqElectronicExecutionPanel.vue\n?? frontend/src/components/RfqPricingPanel.test.js\n?? frontend/src/components/RfqReconciliationPanel.test.js\n?? frontend/src/components/RfqReconciliationPanel.vue\n?? frontend/src/components/ScriptAssistantModal.test.js\n?? frontend/src/components/VariantCompareTab.test.js\n?? frontend/src/components/WorkshopConfiguration.vue\n?? frontend/src/composables/useContextChanges.js\n?? frontend/src/data/commonUnderlyings.test.js\n?? frontend/src/stores/asyncContext.test.js\n?? frontend/src/stores/authSecurity.test.js\n?? frontend/src/stores/inputRetention.test.js\n?? frontend/src/stores/portfoliosScope.test.js\n?? frontend/src/stores/valuationContext.test.js\n?? frontend/src/utils/accessErrors.js\n?? frontend/src/utils/clientAmounts.js\n?? frontend/src/utils/clientAmounts.test.js\n?? frontend/src/utils/commands.js\n?? frontend/src/utils/commands.test.js\n?? frontend/src/utils/contextSwitch.js\n?? frontend/src/utils/marketProvenance.js\n?? frontend/src/utils/pricingConfiguration.js\n?? frontend/src/utils/rfqAnalysis.js\n?? frontend/src/utils/rfqAnalysis.test.js\n?? frontend/src/utils/rfqReconciliationLabels.js\n?? frontend/src/utils/riskScope.js\n?? frontend/src/utils/rollEconomics.js\n?? frontend/src/utils/rollEconomics.test.js\n?? frontend/src/utils/session.js\n?? frontend/src/utils/session.test.js\n?? frontend/src/utils/valuationSource.js\n?? frontend/src/utils/valuationSource.test.js\n?? frontend/src/views/AccountSecurityView.vue\n?? frontend/src/views/LoginView.test.js\n?? frontend/src/views/PlatformView.vue\n?? frontend/src/views/RfqBookingView.vue\n?? frontend/src/views/RfqProductTransition.test.js\n?? frontend/src/views/RiskManagementView.test.js\n?? frontend/src/views/archiveDocuments.test.js\n?? frontend/src/views/asyncInterfaces.test.js\n?? frontend/src/views/marketDataGovernance.test.js\n?? scripts/adopt_admin_workbench.py\n?? scripts/check_hybrid_access.py\n?? scripts/check_hybrid_foundation.py\n?? scripts/check_structura_launcher.py\n?? scripts/check_workshop_diagnostic.py\n?? scripts/launch_structura.py\n?? scripts/manage_hybrid_dev.py\n?? scripts/reset_hybrid_legacy.py\n?? scripts/run_workshop_campaign.py",
+  "source_files": 1147,
+  "python_files_parsed": 512,
+  "python_syntax_errors": [],
+  "backend_app_files": 266,
+  "backend_app_lines": 88780,
+  "frontend_source_files": 316,
+  "frontend_source_lines": 66097,
+  "route_declarations": 458,
+  "backend_test_files": 187,
+  "backend_test_definitions": 2545,
+  "frontend_test_files": 86,
+  "manifest_exclusions": [
+    "ignored files",
+    "binary files",
+    "frontend/dist",
+    "historical HTML atlas",
+    "this report directory"
+  ],
+  "top_backend_modules": [
+    {
+      "path": "backend/app/api/deals.py",
+      "sha256": "1b72b12bf73b2e4de27e22861c9dd1291a2129be562fbf7a5f7858c8953a5763",
+      "bytes": 369148,
+      "lines": 7899
+    },
+    {
+      "path": "backend/app/core/payscript/engine.py",
+      "sha256": "37e62be348a68ad494888ae7cdeb801376d21adeccd94bb585cce10660b2edf1",
+      "bytes": 264669,
+      "lines": 5068
+    },
+    {
+      "path": "backend/app/core/amc_pdf.py",
+      "sha256": "0c62aa943a541103c9b46c4146bd45dcaaac33d3a89c6b0da41ecbb19fdd8989",
+      "bytes": 209777,
+      "lines": 4123
+    },
+    {
+      "path": "backend/app/db/models.py",
+      "sha256": "7b0a5e8999660f6ea8740c329319d0085e0702c28e0818084e78f62f2f285d4a",
+      "bytes": 111785,
+      "lines": 2046
+    },
+    {
+      "path": "backend/app/api/rfq.py",
+      "sha256": "30e8439ef4bc7708034024ce756232b1b8c97c5a856dd2c12be54c6104546ea0",
+      "bytes": 97841,
+      "lines": 1938
+    },
+    {
+      "path": "backend/app/core/client_intelligence.py",
+      "sha256": "3612c2339b1a4c103f1466edf81accb714224c20cf60e8248a1e84c87fb8bbeb",
+      "bytes": 81634,
+      "lines": 1715
+    },
+    {
+      "path": "backend/app/services/uat_generation.py",
+      "sha256": "3dba3c9471423acfd4d978035e0f3a46099b9e9bd1897f2ca3e159be6e6e9aa0",
+      "bytes": 73548,
+      "lines": 1616
+    },
+    {
+      "path": "backend/app/core/payscript/parser.py",
+      "sha256": "9061ef23e7bc6943bfd37231f294fd4748b6fb5f753772463b22e9e9155c3f98",
+      "bytes": 75739,
+      "lines": 1465
+    },
+    {
+      "path": "backend/app/api/clients.py",
+      "sha256": "81f354fa5a899ab71eee63f0d2f056e34e7619e7c2170a48ac268d9552870283",
+      "bytes": 47795,
+      "lines": 1115
+    },
+    {
+      "path": "backend/app/services/agent_workshop/tools.py",
+      "sha256": "0a5860d6e9260e9de40a9a4306bda0cea41970a65d9c58e78a88327448317b9a",
+      "bytes": 77809,
+      "lines": 1094
+    },
+    {
+      "path": "backend/app/core/client_import.py",
+      "sha256": "5a71a20f65435258d2820c8a7b99b27d30e726d5c86495aeabf18e31352b03f6",
+      "bytes": 51872,
+      "lines": 1090
+    },
+    {
+      "path": "backend/app/core/amc_synthesize.py",
+      "sha256": "fe907a416d238197a803ba07f0ffb6ff2c7b118bf250a4a304465c179dde62ef",
+      "bytes": 55574,
+      "lines": 1059
+    },
+    {
+      "path": "backend/app/api/portfolios.py",
+      "sha256": "8fb2ace688c028f055390d8e2a8d95079568576525623fa69d1972e31bd891bb",
+      "bytes": 48707,
+      "lines": 1047
+    },
+    {
+      "path": "backend/app/db/database.py",
+      "sha256": "78c4572ff65efa43bfa07910fd5cdf8dd76c9bb3335f5ced997829ab1d53f854",
+      "bytes": 50589,
+      "lines": 1044
+    },
+    {
+      "path": "backend/app/api/admin.py",
+      "sha256": "f576230c427582fcbfc89cf36939f3e81793aa6619e17d636b49f50d60e98a60",
+      "bytes": 45004,
+      "lines": 1017
+    },
+    {
+      "path": "backend/app/api/pricing.py",
+      "sha256": "bc2e9e79fa3799da2f1dabd1cdfc1910edda7422318af19bab2b50c95d6541d9",
+      "bytes": 45294,
+      "lines": 1011
+    },
+    {
+      "path": "backend/app/core/amc_engine.py",
+      "sha256": "f13c44ad289846506962d37efc1195b0a4d8fd761399b3ea1aa5e04374e8a438",
+      "bytes": 47489,
+      "lines": 987
+    },
+    {
+      "path": "backend/app/core/client_controls.py",
+      "sha256": "d1add3cd791b4ad7207a3c615a8f51d686e7669ec4948e50045ff24d992a72ee",
+      "bytes": 43344,
+      "lines": 935
+    },
+    {
+      "path": "backend/app/core/ccr/service.py",
+      "sha256": "e7c87c2f4417f4de4622295d5f6ebd8e6ebbe17fd2f10233256562294e7d6be1",
+      "bytes": 59256,
+      "lines": 906
+    },
+    {
+      "path": "backend/app/core/deal_valuation_pdf.py",
+      "sha256": "7170789f29ff4255cc47ed5bcd18268f088e2ceb6f258165613a38acdfb3a86d",
+      "bytes": 41581,
+      "lines": 846
+    },
+    {
+      "path": "backend/app/services/agent_workshop/engine.py",
+      "sha256": "57bf910fa19ab7faa07594ec7e9e956036196bcb698b177f3bd0a832c0f9ecf8",
+      "bytes": 52951,
+      "lines": 779
+    },
+    {
+      "path": "backend/app/core/deal_valuation.py",
+      "sha256": "a10e45705486fb69eeceb047ea87af44ada69603aee62748c0f867ac91e189a6",
+      "bytes": 34915,
+      "lines": 715
+    },
+    {
+      "path": "backend/app/core/amc_prices.py",
+      "sha256": "687cee5dd5f78ab7efa3fc6001371203d331c2c4eff5782553a930cdffd12664",
+      "bytes": 33957,
+      "lines": 711
+    },
+    {
+      "path": "backend/app/core/schemas.py",
+      "sha256": "6aa7ebf1afe42c558e0dbf2692bb32692494cd5ac63f50a9483cdf343ba8a404",
+      "bytes": 33116,
+      "lines": 711
+    },
+    {
+      "path": "backend/app/core/amc_orderbook.py",
+      "sha256": "d6ab3c481cf8fa79d3210d6a16f5fef1f43d75c20657d479febc47bc8a63b799",
+      "bytes": 33409,
+      "lines": 702
+    },
+    {
+      "path": "backend/app/api/shocks.py",
+      "sha256": "0eea7ed6b752f2f30abee2c979e249ff80451bbb1e78ef8c4d99a7b5784dc61a",
+      "bytes": 29722,
+      "lines": 683
+    },
+    {
+      "path": "backend/app/services/rfq_transport.py",
+      "sha256": "9885d1ab628967885b4df0380a4208142df1e64d1ac657a29fc2c78b9ceabc6d",
+      "bytes": 41063,
+      "lines": 662
+    },
+    {
+      "path": "backend/app/api/inlife.py",
+      "sha256": "1b56513955859c73af3949a3c09f0999be027fd00475ab7b5d4297616d73f384",
+      "bytes": 31383,
+      "lines": 654
+    },
+    {
+      "path": "backend/app/api/opportunities.py",
+      "sha256": "9ff323f10f3404cc023f8ab287006aee81a5091ab8ea6241aa279de8d038fdf2",
+      "bytes": 30064,
+      "lines": 641
+    },
+    {
+      "path": "backend/app/core/amc_brinson.py",
+      "sha256": "d09fff2892a2cc713f60b184485035c13e86030e6ff2eea7154dd1ed99c41c15",
+      "bytes": 29080,
+      "lines": 632
+    },
+    {
+      "path": "backend/app/core/payscript/catalogue.py",
+      "sha256": "907fe1ac7284f65e28067f7c88354c065095b59634784261a86e2ec5d13d177a",
+      "bytes": 39612,
+      "lines": 632
+    },
+    {
+      "path": "backend/app/services/market_data.py",
+      "sha256": "7f42c98fe2b70678360ecb968cd914d8ad43c8414897a7bc08f3fa4a1c18e273",
+      "bytes": 32559,
+      "lines": 625
+    },
+    {
+      "path": "backend/app/api/persons.py",
+      "sha256": "16e9f7e6527768418a6dbdaaff1a4469e97108f6030c39cb10b2a2481e460b4b",
+      "bytes": 25432,
+      "lines": 622
+    },
+    {
+      "path": "backend/app/core/amc_riskmanagement.py",
+      "sha256": "6ff1feb9bf1af318d2c5cf56bdf49f358f41143812f620fa3274e39457a84879",
+      "bytes": 24249,
+      "lines": 606
+    },
+    {
+      "path": "backend/app/api/products.py",
+      "sha256": "d53deee92aa2c349bd843b88d1c298d2f36d2cbbc13f1f9fa4e426438474ce9c",
+      "bytes": 26959,
+      "lines": 593
+    }
+  ]
+}

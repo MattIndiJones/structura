@@ -7,7 +7,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.api import rfq as rfq_api, rfq_desks as desks_api
 from backend.app.db.models import (
-    Entity, RfqDesk, RfqDeskMembership, RfqOwnership, User,
+    Entity, RfqDesk, RfqDeskMembership, RfqOwnership, RfqRequest, User,
 )
 from backend.app.services.product_repository import ProductError, owned_record
 from backend.tests.test_rfq import _rfq_params
@@ -74,6 +74,23 @@ def test_same_desk_reprises_but_other_desks_and_admin_cannot_read(desk_case):
     assert len(rfq_api.list_rfqs(users[1], session)) == 1
 
 
+def test_model_input_identity_is_private_to_pricing_right(desk_case):
+    from datetime import datetime
+    session, users = desk_case
+    created = _create(session, users[0])
+    row = session.get(RfqRequest, created['id'])
+    row.model_input_hash = 'a' * 64
+    row.model_price = 101.
+    row.model_price_at = datetime(2026, 10, 21, 8)
+    session.add(row)
+    session.commit()
+    priced = rfq_api.get_rfq(row.id, users[0], session)
+    assert priced['model_input_hash'] == 'a' * 64 and priced['model_price'] == 101.
+    reader = rfq_api.get_rfq(row.id, users[1], session)
+    assert reader['model_input_hash'] is None
+    assert reader['model_price'] is None and reader['model_price_at'] is None
+
+
 def test_share_is_capped_by_member_rights_and_revoke_cuts_open_links(desk_case):
     session, users = desk_case
     rfq = _create(session, users[0])
@@ -84,8 +101,9 @@ def test_share_is_capped_by_member_rights_and_revoke_cuts_open_links(desk_case):
     with pytest.raises(HTTPException) as failure:
         rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=42), colleague, session)
     assert failure.value.status_code == 403
+    assert owned_record(session, rfq["product_id"], colleague).id == rfq["product_id"]
     with pytest.raises(ProductError):
-        owned_record(session, rfq["product_id"], colleague)
+        owned_record(session, rfq["product_id"], colleague, right="prepare")
     assert rfq_api.rfq_terms(rfq["id"], colleague, session)["terms_version"] == 1
     rfq_api.revoke_rfq_share(rfq["id"], 12, users[0], session)
     with pytest.raises(HTTPException) as failure:

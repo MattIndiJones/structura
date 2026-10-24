@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import event as sql_event, text
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.core.rfq_controls import booking_gate_failures
@@ -21,13 +22,73 @@ from backend.app.services.uat_generation import (
     generate_batch, preview_generation,
 )
 from backend.app.services.product_repository import load_product
+from backend.app.core import fixing_finality
+from backend.tests.product_helpers import attach_product_to_deal
 
 
 configure_uat_workflows(deals_api, rfq_api, products_api)
+UAT_TEST_DATE = date(2026, 10, 23)
 
 
-def _session_and_users() -> tuple[Session, User, User]:
+@pytest.fixture(autouse=True)
+def published_closes(monkeypatch):
+    """Inject dated provider bars; keep finality, official replay and pricing real."""
+    import backend.app.services.uat_generation as generator
+
+    today = UAT_TEST_DATE
+    clock = datetime(2026, 10, 23, 23, tzinfo=timezone.utc)
+
+    class GenerationDate(date):
+        @classmethod
+        def today(cls):
+            return today
+
+    monkeypatch.setattr(generator, "date", GenerationDate)
+    monkeypatch.setattr(deals_api, "business_today", lambda: today)
+    monkeypatch.setattr(fixing_finality, "utc_now", lambda: clock)
+    responses = []
+
+    def close(ticker, day):
+        offset = sum(map(ord, ticker)) % 100
+        return round(100 + offset + (day - date(2020, 1, 1)).days * 0.01, 8)
+
+    def feed(tickers, start, end=None):
+        sources, series = {}, {}
+        end = end or today.isoformat()
+        for ticker in tickers:
+            exchange, zone = (("GER", "Europe/Berlin") if ticker == "^STOXX50E"
+                              else ("PAR", "Europe/Paris") if ticker.endswith(".PA")
+                              else ("NYQ", "America/New_York"))
+            sources[ticker] = {
+                "exchange": exchange, "timezone": zone, "fetched_at": clock.isoformat(),
+            }
+            values = {}
+            day = date.fromisoformat(start)
+            while day <= date.fromisoformat(end):
+                calendar = fixing_finality.session_calendar(
+                    fixing_finality.VENUES[exchange], day.year)
+                if calendar.is_session(day.isoformat()):
+                    values[day.isoformat()] = close(ticker, day)
+                day += timedelta(days=1)
+            series[ticker] = values
+        payload = {
+            "provider": "YAHOO_FINANCE", "price_type": "UNADJUSTED_CLOSE",
+            "fetched_at": clock.isoformat(), "sources": sources, "series": series,
+            "splits": {ticker: {} for ticker in tickers}, "missing": [],
+        }
+        responses.append(payload)
+        return payload
+
+    monkeypatch.setattr(deals_api, "load_yahoo_reference_closes", feed)
+    return {"close": close, "responses": responses}
+
+
+def _session_and_users(*, integrity=False) -> tuple[Session, User, User]:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    if integrity:
+        @sql_event.listens_for(engine, "connect")
+        def foreign_keys_on(connection, _record):
+            connection.execute("PRAGMA foreign_keys=ON")
     SQLModel.metadata.create_all(engine)
     session = Session(engine)
     entity = Entity(name="UAT tests")
@@ -84,27 +145,27 @@ def test_preview_is_deterministic_and_read_only():
 def test_full_chain_uses_uat_references_and_batch_cleanup_is_isolated():
     from backend.app.db.product_migrations import migrate_product_links
 
-    session, admin, target = _session_and_users()
+    session, admin, target = _session_and_users(integrity=True)
     migrate_product_links(session.connection())
     session.commit()
-    ordinary_product = ProductRecord(
-        reference="PRD-LIVE-DO-NOT-DELETE", name="Produit hors lot",
-        user_id=target.id, entity_id=target.entity_id, data_origin="native",
-        listed=True,
-    )
-    session.add(ordinary_product)
-    session.flush()
     ordinary = Deal(
-        product_id=ordinary_product.id, product_terms_version=1,
         reference="LIVE-DO-NOT-DELETE", user_id=target.id,
+        entity_id=target.entity_id,
+        counterparty_id=session.exec(select(Counterparty.id).where(Counterparty.name == "UBS")).one(),
         script_snapshot="AT MATURITY\n  PAY 1", sens="vente",
         contrepartie="UBS", devise="EUR", nominal=100_000,
         fair_value=99.0, price_traded=99.2,
-        trade_date=date.today().isoformat(), strike_date=date.today().isoformat(),
-        value_date=date.today().isoformat(), maturity_date="2030-01-01", T=3.0,
-        underlyings_json="[]", market_snapshot_json="{}")
+        trade_date=UAT_TEST_DATE.isoformat(), strike_date=UAT_TEST_DATE.isoformat(),
+        value_date=UAT_TEST_DATE.isoformat(), maturity_date="2029-10-23", T=3.0,
+        underlyings_json=json.dumps([{"name": "Euro Stoxx 50", "ticker": "^STOXX50E", "ccy": "EUR"}]),
+        market_snapshot_json="{}")
+    attach_product_to_deal(session, ordinary, entity_id=target.entity_id)
     session.add(ordinary)
     session.commit()
+    ordinary_id = ordinary.id
+    ordinary_product_id = ordinary.product_id
+    ordinary_before = ordinary.model_dump()
+    product_before = load_product(session, ordinary_product_id)
 
     batch = generate_batch(_request(target), admin, session)
     rfqs = session.exec(select(RfqRequest).where(
@@ -146,6 +207,10 @@ def test_full_chain_uses_uat_references_and_batch_cleanup_is_isolated():
     assert not session.exec(select(ProductRecord).where(
         ProductRecord.uat_batch_id == batch["id"])).first()
     assert session.get(UatGenerationBatch, batch["id"]).status == "DELETED"
+    assert session.get(Deal, ordinary_id).model_dump() == ordinary_before
+    assert load_product(session, ordinary_product_id) == product_before
+    assert session.exec(text("PRAGMA foreign_keys")).one()[0] == 1
+    assert session.exec(text("PRAGMA foreign_key_check")).all() == []
 
 
 def test_full_chain_retains_product_history_basket_and_provider_competition():
@@ -426,7 +491,7 @@ def test_every_offered_product_family_completes_the_full_chain(family):
     ("MATURED_FINAL", "CAPITAL_GUARANTEED"),
     ("MATURED_KI", "REVERSE_CONVERTIBLE"),
 ])
-def test_every_reached_observation_carries_its_real_close(profile, family):
+def test_every_reached_observation_carries_its_real_close(profile, family, published_closes):
     """One observation, one date, that underlying's actual close on that date.
 
     The generator used to attach a constant ratio instead — a flat 0.80, or
@@ -454,7 +519,7 @@ def test_every_reached_observation_carries_its_real_close(profile, family):
     deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).one()
     events = session.exec(select(DealEvent).where(
         DealEvent.deal_id == deal.id).order_by(DealEvent.event_index)).all()
-    today = date.today().isoformat()
+    today = UAT_TEST_DATE.isoformat()
     reached = [e for e in events if e.event_date <= today and e.status != "annulé"]
     assert reached, f"{profile} devrait avoir au moins la constatation de strike"
 
@@ -471,6 +536,14 @@ def test_every_reached_observation_carries_its_real_close(profile, family):
         spots = json.loads(event.spots_json or "{}")
         assert spots, f"{event.label} atteinte mais sans cours"
         assert all(v > 0 for v in spots.values())
+        for underlying in json.loads(deal.underlyings_json):
+            history = published_closes["responses"][0]["series"][underlying["ticker"]]
+            source_day = max(day for day in history if day <= event.event_date)
+            assert spots[underlying["name"]] == published_closes["close"](
+                underlying["ticker"], date.fromisoformat(source_day))
+        version = session.get(OfficialFixingVersion, event.current_fixing_version_id)
+        assert version is not None and json.loads(version.spots_json) == spots
+        assert event.data_category == "FIXING_OFFICIAL"
 
     # No cloned values: a ratio applied to S0 gave the exact same number at
     # every date, which no underlying ever does.
@@ -490,8 +563,8 @@ def test_forward_start_has_nothing_to_fix_yet():
     events = session.exec(select(DealEvent).where(
         DealEvent.deal_id == deal.id)).all()
 
-    assert date.fromisoformat(deal.strike_date) > date.today()
-    assert all(date.fromisoformat(e.event_date) > date.today() for e in events)
+    assert date.fromisoformat(deal.strike_date) > UAT_TEST_DATE
+    assert all(date.fromisoformat(e.event_date) > UAT_TEST_DATE for e in events)
     assert all(not json.loads(e.spots_json or "{}") for e in events)
     assert batch["result"]["scenarios"][0]["official_fixings"] == 0
 
@@ -504,7 +577,7 @@ def test_uat_generator_refuses_retired_fixing_policies(retired_policy):
 
 
 def test_complete_mix_covers_all_eight_profiles_and_cleans_terminal_dependencies():
-    session, admin, target = _session_and_users()
+    session, admin, target = _session_and_users(integrity=True)
     body = _request(
         target,
         mode="FULL_CHAIN",
@@ -532,7 +605,7 @@ def test_complete_mix_covers_all_eight_profiles_and_cleans_terminal_dependencies
         RfqRequest.uat_batch_id == batch["id"])).all()
     assert len(rfqs) == 8
     assert all(rfq.status == "clos" for rfq in rfqs)
-    assert any(date.fromisoformat(rfq.ao_date) < date.today() for rfq in rfqs)
+    assert any(date.fromisoformat(rfq.ao_date) < UAT_TEST_DATE for rfq in rfqs)
 
     deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).first()
     valuation = ValuationRun(
@@ -550,6 +623,7 @@ def test_complete_mix_covers_all_eight_profiles_and_cleans_terminal_dependencies
     assert not session.exec(select(ValuationRun)).first()
     assert not session.exec(select(RfqRequest).where(
         RfqRequest.uat_batch_id == batch["id"])).first()
+    assert session.exec(text("PRAGMA foreign_key_check")).all() == []
 
 
 def test_periodic_historical_profile_rejects_non_periodic_product_selection():
@@ -562,6 +636,109 @@ def test_periodic_historical_profile_rejects_non_periodic_product_selection():
         ), session)
     assert exc.value.status_code == 422
     assert "Athena ou Phoenix" in str(exc.value.detail)
+
+
+def test_provider_outage_reports_unfilled_fixings_without_inventing_s0(monkeypatch):
+    session, admin, target = _session_and_users(integrity=True)
+    monkeypatch.setattr(deals_api, "load_yahoo_reference_closes",
+                        lambda *_args: {"error": "Provider unavailable"})
+    batch = generate_batch(_request(
+        target, mode="BOOKED_ONLY", count=1, product_types=["ATHENA"],
+        underlying_tickers=["^STOXX50E"], max_underlyings=1,
+    ), admin, session)
+    scenario = batch["result"]["scenarios"][0]
+    assert batch["status"] == "COMPLETED"  # Objects exist, fixing coverage is separate.
+    assert scenario["missing_fixings"] == scenario["reached_events"] > 0
+    assert scenario["fixings_status"] == "FAILED"
+    assert "Provider unavailable" in scenario["fixings_error"]
+    assert not session.exec(select(OfficialFixingVersion)).all()
+    assert all(row.spots_json == "{}" for row in session.exec(select(DealEvent)).all())
+    audit = session.exec(select(AuditEvent).where(
+        AuditEvent.action == "UAT_LIFECYCLE_SCENARIO_MATERIALIZED")).one()
+    assert audit.result == "ERROR" and audit.data_source != "FIXING_OFFICIAL"
+
+
+def test_partial_history_keeps_the_official_prefix_and_reports_the_gap(monkeypatch):
+    import backend.app.services.uat_generation as generator
+
+    session, admin, target = _session_and_users(integrity=True)
+    body = _request(target, mode="BOOKED_ONLY", count=1,
+                    product_types=["PHOENIX"], lifecycle_profile="ACTIVE_2Y_OFFICIAL")
+    strike = generator._build_specs(body)[0]["params"]["strike_date"]
+    feed = deals_api.load_yahoo_reference_closes
+
+    def prefix_only(*args):
+        payload = feed(*args)
+        payload["series"] = {ticker: {day: price for day, price in rows.items() if day <= strike}
+                             for ticker, rows in payload["series"].items()}
+        return payload
+
+    monkeypatch.setattr(deals_api, "load_yahoo_reference_closes", prefix_only)
+    batch = generate_batch(body, admin, session)
+    scenario = batch["result"]["scenarios"][0]
+    assert scenario["missing_fixings"] > 0
+    assert scenario["fixings_status"] == "PARTIAL"
+    assert scenario["available_fixings"] == 1
+    assert session.exec(select(OfficialFixingVersion)).first()
+    audit = session.exec(select(AuditEvent).where(
+        AuditEvent.action == "UAT_LIFECYCLE_SCENARIO_MATERIALIZED")).one()
+    assert audit.result == "PARTIAL"
+
+
+def test_refresh_failure_does_not_commit_a_half_applied_fixing(monkeypatch):
+    session, admin, target = _session_and_users(integrity=True)
+    validate = deals_api._auto_validate_yahoo_event
+
+    def fail_after_staging(*args, **kwargs):
+        validate(*args, **kwargs)
+        args[4].flush()
+        raise RuntimeError("Injected failure after fixing staging")
+
+    monkeypatch.setattr(deals_api, "_auto_validate_yahoo_event", fail_after_staging)
+    batch = generate_batch(_request(
+        target, mode="BOOKED_ONLY", count=1, product_types=["ATHENA"],
+        underlying_tickers=["^STOXX50E"], max_underlyings=1,
+    ), admin, session)
+    assert not session.exec(select(OfficialFixingVersion)).all()
+    assert all(row.current_fixing_version_id is None
+               for row in session.exec(select(DealEvent)).all())
+    scenario = batch["result"]["scenarios"][0]
+    assert scenario["fixings_status"] == "FAILED"
+    assert scenario["missing_fixings"] > 0 and scenario["fixings_error"]
+    assert session.exec(select(ProductRecord)).one().uat_batch_id == batch["id"]
+    assert session.exec(select(Deal)).one().status == "actif"
+
+
+def test_usd_observation_keeps_its_frozen_date_on_a_target_holiday(monkeypatch):
+    import backend.app.services.uat_generation as generator
+    from backend.app.core.calendars import add_business_days
+
+    session, admin, target = _session_and_users(integrity=True)
+    build = generator._build_specs
+
+    def specs_with_usd_easter_monday(body):
+        specs = build(body)
+        spec = specs[0]
+        maturity = date(2027, 3, 29)  # US business day, TARGET Easter Monday.
+        spec["maturity_date"] = maturity.isoformat()
+        spec["payment_date"] = add_business_days(maturity, 3, "USD").isoformat()
+        spec["params"]["payment_date"] = spec["payment_date"]
+        spec["params"]["T"] = (maturity - date.fromisoformat(
+            spec["params"]["strike_date"])).days / 365.25
+        spec["params"]["constats"]["MATURITYDATE"]["date"] = maturity.isoformat()
+        return specs
+
+    monkeypatch.setattr(generator, "_build_specs", specs_with_usd_easter_monday)
+    batch = generate_batch(_request(
+        target, mode="BOOKED_ONLY", count=1, product_types=["CAPITAL_GUARANTEED"],
+        currencies=["USD"], underlying_tickers=["^GSPC"], max_underlyings=1,
+    ), admin, session)
+    deal = session.exec(select(Deal).where(Deal.uat_batch_id == batch["id"])).one()
+    frozen_dates = {row["date"] for row in json.loads(deal.schedule_json)["constatations"]}
+    events = session.exec(select(DealEvent).where(
+        DealEvent.deal_id == deal.id, DealEvent.t_years > 0)).all()
+    assert frozen_dates == {"2027-03-29"}
+    assert {row.event_date for row in events} == frozen_dates
 
 
 @pytest.mark.parametrize("jour", [

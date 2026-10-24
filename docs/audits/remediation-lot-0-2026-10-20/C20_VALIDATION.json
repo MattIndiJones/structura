@@ -1,0 +1,115 @@
+{
+  "workstream": "C20",
+  "validated_on": "2026-10-22",
+  "global_closure": false,
+  "production_qualified": false,
+  "scope": [
+    "M08-01",
+    "M08-02",
+    "M08-05",
+    "M08-07"
+  ],
+  "backend": {
+    "unique_passed": 219,
+    "files": 10,
+    "new_c20_cases": 28,
+    "offered_family_objective_modes": 20,
+    "batches": [
+      {
+        "junit": "c20-core.xml",
+        "tests": 25,
+        "failures": 0
+      },
+      {
+        "junit": "targeted.xml",
+        "tests": 74,
+        "failures": 1
+      },
+      {
+        "junit": "rounding-final.xml",
+        "tests": 1,
+        "failures": 0
+      },
+      {
+        "junit": "families.xml",
+        "tests": 136,
+        "failures": 4
+      },
+      {
+        "junit": "coupon-dates-final.xml",
+        "tests": 44,
+        "failures": 1
+      },
+      {
+        "junit": "coupon-unit-final.xml",
+        "tests": 1,
+        "failures": 0
+      },
+      {
+        "junit": "c19-integrity.xml",
+        "tests": 8,
+        "failures": 0
+      },
+      {
+        "junit": "persistence-final.xml",
+        "tests": 1,
+        "failures": 0
+      }
+    ],
+    "final_unresolved_failures": 0
+  },
+  "frontend": {
+    "passed": 28,
+    "files": 5,
+    "new_cases": 2,
+    "build": "PASS; temporary output outside frontend/dist"
+  },
+  "baseline_reproductions": {
+    "junit": "baseline-reproductions.xml",
+    "tests": 25,
+    "expected_failures": 9,
+    "phoenix_junit": "baseline-families.xml",
+    "phoenix_preexisting_failures": 4,
+    "phoenix_correction": "Coupon entitlements use C14 contractual observation times, without weekly re-rounding."
+  },
+  "method_version": "optimizer-v2-resolution-budget",
+  "budget_policy": {
+    "default_seconds": 120,
+    "min_seconds": 30,
+    "max_seconds": 3600,
+    "sequential": "Soft deadline between calculations; in-flight work may finish later, with explicit partial result and overrun.",
+    "parallel": "Existing worker cancellation/cleanup retained; final elapsed-time overrun is still explicit.",
+    "new_business_limit_approved": false
+  },
+  "unchanged_financial_controls": [
+    "Monte Carlo sizes and seeds",
+    "Independent frozen N/2N holdout",
+    "Economic price tolerance",
+    "Qualified payoff scripts",
+    "Funding outside underlying drift"
+  ],
+  "boundaries": [
+    "No full backend suite",
+    "No browser UAT or production qualification",
+    "No business database access/migration",
+    "No server launch, commit or push"
+  ],
+  "runtime_artifacts": ".runtime/diagnostic-acceptance/c20-2026-10-22",
+  "preservation": {
+    "initial_files": 2370,
+    "unchanged": 2356,
+    "expected_changed": 14,
+    "original_source_hashes_verified": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "business_db_before": false,
+    "business_db_after": false,
+    "prior_runtime_and_dist_unchanged": true,
+    "scoped_diff_check": "PASS"
+  },
+  "network_guard": {
+    "external_http_disabled": true,
+    "blocked_attempts": []
+  },
+  "baseline_path": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c20-baseline-xatrotfj"
+}

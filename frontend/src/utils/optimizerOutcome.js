@@ -32,7 +32,15 @@ export function researchOutcome(record) {
     text=`${admissible} admissible(s) en exploration ; ${checked.length} testée(s) indépendamment ; ${untested} autre(s) admissible(s) non validée(s). Consultez les motifs de rejet ou de non-calcul.`
   }
   if(record.status!=='RUNNING' && (record.status==='PARTIAL' || record.status==='INTERRUPTED' || result?.complete===false))
-    text+=' Couverture partielle : les calculs ou validations restants ne sont pas terminés.'
+    text+=result?.interruption==='TIME_BUDGET'?' Couverture partielle : budget temps atteint.':
+      ' Couverture partielle : les calculs ou validations restants ne sont pas terminés.'
+  if(record.status!=='RUNNING' && (result?.interruption==='TIME_BUDGET' || result?.time_budget?.exceeded_seconds>0)) {
+    const budget=result.time_budget
+    if(budget && Number.isFinite(result.elapsed_seconds)) {
+      text+=` ${result.elapsed_seconds.toLocaleString('fr-FR')} s écoulées pour ${budget.limit_seconds.toLocaleString('fr-FR')} s prévues.`
+      if(budget.exceeded_seconds>0) text+=` Dépassement de ${budget.exceeded_seconds.toLocaleString('fr-FR')} s ; les calculs terminés restent conservés.`
+    }
+  }
   const example=precisionOnly?checked.find(c=>c.rejection_details.some(d=>d.metric==='fair_value')):null
   const finding=example?diagnosticFindings(example,result).find(f=>f.reason.startsWith('Prix ')):null
   return {title,text,tone,admissible,confirmed,checked:checked.length,untested,precisionOnly,

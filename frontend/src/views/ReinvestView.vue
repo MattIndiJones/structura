@@ -31,6 +31,19 @@
         </div>
 
         <template v-if="deal">
+          <div v-if="proposalArchives.length" class="card flex flex-wrap items-center gap-2">
+            <span class="text-xs text-slate-400">Propositions figées</span>
+            <button v-for="archive in proposalArchives" :key="archive.archive_id" class="btn-secondary text-xs"
+              @click="openArchivedProposal(archive)">
+              {{ archive.data.proposal.candidate.ticker }} · {{ formatDate(archive.created_at) }}
+            </button>
+            <div v-if="proposalArchiveId && proposalData" class="w-full flex items-center gap-3 text-xs">
+              <span>{{ proposalData.candidate.ticker }} · {{ proposalData.param_desc || proposalData.candidate.param_name }}
+                {{ (proposalData.candidate.solved_param * (proposalData.param_is_pct ? 100 : 1)).toFixed(4) }}{{ proposalData.param_is_pct ? '%' : '' }}
+                · volatilité {{ (proposalData.candidate.sigma * 100).toFixed(2) }} %</span>
+              <button class="btn-secondary text-xs" :disabled="pdfLoading" @click="downloadProposalPdf(proposalData.candidate)">Télécharger le PDF figé</button>
+            </div>
+          </div>
           <!-- ── 2. Économique ──────────────────────────────────── -->
           <div class="card">
             <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">2. Économique</div>
@@ -51,6 +64,13 @@
               </div>
               <template v-else>
                 <!-- Hypothèses économiques du scan -->
+                <label class="label">Modèle du scan
+                  <select v-model="form.model" class="select">
+                    <option value="">Hériter du modèle du booking</option>
+                    <option value="constant">GBM explicite, volatilité réalisée</option>
+                  </select>
+                </label>
+                <p class="text-xs text-slate-500 mb-2">Taux, funding et conventions sont repris du booking. La calibration d'un autre sous-jacent n'est pas transférable au candidat.</p>
                 <div class="grid grid-cols-2 gap-3 text-xs mb-3">
                   <div>
                     <label class="label">Maturité du scan (an(s))
@@ -256,7 +276,11 @@
                               · value date <span class="font-mono text-slate-200">{{ proposalData.value_date }}</span>
                               · échéance <span class="font-mono text-slate-200">{{ proposalData.maturity_date }}</span>
                             </div>
-                            <button class="btn-secondary text-[10px] px-2 py-1" :disabled="pdfLoading" @click="downloadProposalPdf(r)">
+                            <button v-if="!proposalArchiveId" class="btn-secondary text-[10px] px-2 py-1" :disabled="pdfLoading" @click="freezeProposal">
+                              Figer la proposition
+                            </button>
+                            <span v-else class="text-xs text-green-400">Proposition figée</span>
+                            <button class="btn-secondary text-[10px] px-2 py-1" :disabled="pdfLoading || !proposalArchiveId" @click="downloadProposalPdf(r)">
                               <span v-if="pdfLoading" class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
                               📄 Télécharger le PDF
                             </button>
@@ -389,6 +413,7 @@ const overrides = reactive({})
 const overridableTerms = computed(() => allTerms.value.filter(t => t.name !== form.param_name))
 
 const form = reactive({
+  model: '',
   param_name: '',
   target_price_pct: 100,
   lo_display: 0,
@@ -397,6 +422,11 @@ const form = reactive({
 })
 
 async function onSelectDeal() {
+  proposalRequestVersion++
+  proposalData.value = null
+  proposalArchiveId.value = null
+  proposalArchives.value = []
+  proposalFor.value = null
   deal.value = null
   form.param_name = ''
   advancedMode.value = false
@@ -404,7 +434,11 @@ async function onSelectDeal() {
   scanResult.value = null
   scanError.value = ''
   if (!selectedDealId.value) return
-  deal.value = await dealsStore.selectDeal(selectedDealId.value)
+  const dealId = selectedDealId.value
+  const selected = await dealsStore.selectDeal(dealId)
+  if (selectedDealId.value !== dealId) return
+  deal.value = selected
+  loadProposalArchives(dealId)
   form.T_years = deal.value.T
   // Prix cible ancré sur le prix réel du produit (fair value au booking) —
   // 100% (par) n'a de sens que pour les structures conçues pour ça
@@ -494,6 +528,9 @@ function buildParamOverrides() {
 }
 
 async function launchScan() {
+  proposalRequestVersion++
+  proposalData.value = null
+  proposalArchiveId.value = null
   scanLoading.value = true
   scanError.value = ''
   scanResult.value = null
@@ -511,6 +548,7 @@ async function launchScan() {
         .filter(m => filters[m.key].active)
         .map(m => ({ metric: m.key, threshold: filters[m.key].threshold, direction: filters[m.key].direction })),
       param_overrides: buildParamOverrides(),
+      model: form.model || null,
     }
     const res = await apiFetch(`/api/deals/${deal.value.id}/reinvest/scan`, {
       method: 'POST',
@@ -548,9 +586,12 @@ function buildProposalPayload(row) {
     hi: toStored(t, form.hi_display),
     T: form.T_years,
     param_overrides: buildParamOverrides(),
+    model: form.model || null,
     backtest_start: btForm.start,
     backtest_freq: btForm.freq,
     backtest_invest_pct: btForm.invest_pct,
+    study_preview: scanResult.value?.study_preview || null,
+    parent_archive_id: proposalArchiveId.value,
   }
 }
 
@@ -558,12 +599,36 @@ const proposalFor = ref(null)
 const proposalLoading = ref(false)
 const proposalError = ref('')
 const proposalData = ref(null)
+const proposalArchiveId = ref(null)
+const proposalArchives = ref([])
+let proposalRequestVersion = 0
+
+async function loadProposalArchives(dealId) {
+  try {
+    const res = await apiFetch(`/api/deals/${dealId}/archives`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || 'Erreur de chargement des archives')
+    if (deal.value?.id === dealId) proposalArchives.value = data.filter(row => row.kind === 'REINVEST')
+  } catch (e) {
+    if (deal.value?.id === dealId) proposalError.value = e.message
+  }
+}
+
+function openArchivedProposal(archive) {
+  proposalRequestVersion++
+  proposalData.value = archive.data.proposal
+  proposalArchiveId.value = archive.archive_id
+  proposalFor.value = archive.data.proposal.candidate.ticker
+  proposalError.value = ''
+}
 const proposalCanvas = ref(null)
 const proposalWindowsCanvas = ref(null)
 let proposalChart = null
 let proposalWindowsChart = null
 
 async function fetchProposal(row) {
+  const version = ++proposalRequestVersion
+  const dealId = deal.value.id
   proposalLoading.value = true
   proposalError.value = ''
   proposalData.value = null
@@ -574,12 +639,14 @@ async function fetchProposal(row) {
       body: JSON.stringify(buildProposalPayload(row)),
     })
     const data = await res.json()
+    if (version !== proposalRequestVersion || deal.value?.id !== dealId) return
     if (!res.ok) throw new Error(data.detail || 'Erreur proposition')
     proposalData.value = data
+    proposalArchiveId.value = null
   } catch (e) {
-    proposalError.value = e.message
+    if (version === proposalRequestVersion && deal.value?.id === dealId) proposalError.value = e.message
   } finally {
-    proposalLoading.value = false
+    if (version === proposalRequestVersion) proposalLoading.value = false
   }
 }
 
@@ -675,13 +742,36 @@ watch(proposalData, async () => {
 })
 
 const pdfLoading = ref(false)
+async function freezeProposal() {
+  if (!proposalData.value?.preview) return
+  const preview = proposalData.value.preview
+  const dealId = deal.value.id
+  pdfLoading.value = true
+  proposalError.value = ''
+  try {
+    const res = await apiFetch(`/api/deals/${deal.value.id}/reinvest/proposal/freeze`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preview: proposalData.value.preview }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || 'Erreur de gel de la proposition')
+    if (deal.value?.id !== dealId || proposalData.value?.preview !== preview) return
+    proposalArchiveId.value = data.archive_id
+    await loadProposalArchives(dealId)
+  } catch (e) {
+    if (deal.value?.id === dealId && proposalData.value?.preview === preview) proposalError.value = e.message
+  } finally {
+    pdfLoading.value = false
+  }
+}
 async function downloadProposalPdf(row) {
+  if (!proposalArchiveId.value) return
   pdfLoading.value = true
   try {
     const res = await apiFetch(`/api/deals/${deal.value.id}/reinvest/proposal/pdf`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildProposalPayload(row)),
+      body: JSON.stringify({ archive_id: proposalArchiveId.value }),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))

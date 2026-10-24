@@ -74,6 +74,39 @@ def migrate_product_links(conn):
             BEGIN
                 SELECT RAISE(ABORT, 'Lien Product immuable');
             END"""))
+        # Validate the PAIR, including historical versions. Existing unqualified
+        # rows are preserved; no version is guessed during migration.
+        for operation, suffix in (("INSERT", "insert"),
+                                  ("UPDATE OF product_id, product_terms_version", "update")):
+            conn.execute(text(f"""CREATE TRIGGER IF NOT EXISTS require_{table}_product_version_{suffix}
+                BEFORE {operation} ON {table}
+                WHEN NEW.product_id IS NULL OR NEW.product_terms_version IS NULL
+                  OR NOT EXISTS (SELECT 1 FROM product_terms_versions v
+                                 JOIN products p ON p.id = v.product_id
+                                 WHERE v.product_id = NEW.product_id
+                                   AND v.version = NEW.product_terms_version)
+                BEGIN
+                    SELECT RAISE(ABORT, 'Version Product canonique valide requise');
+                END"""))
+    conn.execute(text("""CREATE TRIGGER IF NOT EXISTS protect_products_terms_pointer
+        BEFORE UPDATE OF terms_version ON products
+        WHEN NEW.terms_version < OLD.terms_version
+          OR NOT EXISTS (SELECT 1 FROM product_terms_versions
+                         WHERE product_id = NEW.id AND version = NEW.terms_version)
+        BEGIN
+            SELECT RAISE(ABORT, 'Version courante Product invalide ou rétrograde');
+        END"""))
+    conn.execute(text("""CREATE TRIGGER IF NOT EXISTS require_product_revisions_version_insert
+        BEFORE INSERT ON product_revisions
+        WHEN NOT EXISTS (SELECT 1 FROM products p JOIN product_terms_versions v ON v.product_id=p.id
+                         WHERE p.id=NEW.product_id AND v.version=NEW.terms_version
+                           AND p.revision=NEW.revision AND p.terms_version=NEW.terms_version)
+        BEGIN SELECT RAISE(ABORT, 'Révision et version Product incohérentes'); END"""))
+    conn.execute(text("""CREATE TRIGGER IF NOT EXISTS require_product_calculation_runs_version_insert
+        BEFORE INSERT ON product_calculation_runs
+        WHEN NOT EXISTS (SELECT 1 FROM products p JOIN product_terms_versions v ON v.product_id=p.id
+                         WHERE p.id=NEW.product_id AND v.version=NEW.terms_version)
+        BEGIN SELECT RAISE(ABORT, 'Version Product du calcul invalide'); END"""))
     # Immutable evidence must also survive accidental writes outside services.
     for table in ("product_terms_versions", "product_revisions", "product_calculation_runs"):
         exists = conn.execute(text(

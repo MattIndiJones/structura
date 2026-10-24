@@ -8,9 +8,29 @@
           <div class="flex items-center gap-3">
             <BackLink :fallback="{ path: '/', query: { category: 'risk_management' } }" />
             <h1 class="page-title">Risk Management</h1>
-            <a href="/risk/ccr" class="btn-secondary btn-sm">Risque de contrepartie — CCR</a>
+            <RouterLink to="/risk/ccr" class="btn-secondary btn-sm">Risque de contrepartie — CCR</RouterLink>
+          </div>
+          <div class="page-actions flex flex-wrap gap-3">
+            <label class="text-xs">Périmètre des calculs
+              <select :value="pf.dataScope" :disabled="calculationActive" class="select text-xs ml-2"
+                @change="pf.setDataScope($event.target.value)">
+                <option value="PRODUCTION">Production</option>
+                <option value="UAT">Recette UAT</option>
+              </select>
+            </label>
+            <label class="text-xs">Historiques affichés
+              <select :value="pf.historyMode" :disabled="calculationActive" class="select text-xs ml-2"
+                @change="pf.setHistoryMode($event.target.value)">
+                <option value="CURRENT">{{ pf.scopeLabel }} · vue sélectionnée</option>
+                <option value="ALL_VIEWS">{{ pf.scopeLabel }} · toutes vues et archives</option>
+                <option value="LEGACY_UNQUALIFIED">Historique non qualifié</option>
+              </select>
+            </label>
           </div>
         </div>
+
+        <p v-if="pf.scopeError" role="alert" class="text-xs text-amber-500">{{ pf.scopeError }}</p>
+        <p class="text-xs text-slate-500">Calculs : {{ pf.scopeLabel }} · Historiques : {{ pf.historyLabel }}.</p>
 
         <div class="flex gap-4 flex-wrap items-start">
 
@@ -130,7 +150,7 @@
             <!-- ══ Onglet Greeks agrégés ═════════════════════════ -->
             <template v-if="activeTab === 'greeks'">
                 <div class="text-[10px] text-slate-500 -mt-1">
-                  Somme des Greeks calculés à la date d’analyse (nominal × sensibilité % × taux de change vers EUR), regroupés par sous-jacent. Créer un portefeuille ne lance aucun calcul ; le générateur UAT peut en revanche calculer les Greeks au booking lorsque l’option « Calculer les Greeks pour Risk » est cochée.
+                  Périmètre {{ pf.scopeLabel }}. Somme des Greeks calculés à la date d’analyse (nominal × sensibilité % × taux de change vers EUR), regroupés par sous-jacent. Créer un portefeuille ne lance aucun calcul.
                   <HelpTip text="La lecture de cet onglet ne lance aucun Monte Carlo. Recalculer produit et conserve un calcul daté pour chaque deal actif à la date choisie." />
                 </div>
 
@@ -150,6 +170,14 @@
                     class="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
                     ⚠ {{ pf.risk.deals_missing_greeks.length }} deal(s) sans Greeks calculés — chiffres incomplets
                     ({{ pf.risk.deals_missing_greeks.map(d => d.reference).join(', ') }})
+                  </div>
+                  <div v-if="riskMetricRows.length" class="flex flex-wrap gap-2 text-[11px]" data-testid="risk-metric-coverage">
+                    <span v-for="row in riskMetricRows" :key="row.key" :title="row.detail"
+                      class="rounded border px-2 py-1"
+                      :class="row.complete ? 'border-slate-700 text-slate-400' : 'border-amber-800 text-amber-400'">
+                      {{ row.label }} : {{ row.available }}/{{ row.required }}
+                      · {{ row.complete ? 'complet' : 'indisponible pour le périmètre' }}
+                    </span>
                   </div>
                   <div v-if="pf.risk.deals_stale.length"
                     class="text-xs text-slate-400 bg-slate-800/40 border border-slate-700/60 rounded-lg px-3 py-2">
@@ -299,7 +327,7 @@
                         <div class="text-[10px] text-slate-600">EUR / jour</div>
                         <div v-if="pf.risk.deals_missing_theta?.length"
                           class="text-[10px] text-amber-400/80 mt-0.5">
-                          somme partielle — {{ pf.risk.deals_missing_theta.length }} deal(s) sans theta
+                          total indisponible — {{ pf.risk.deals_missing_theta.length }} deal(s) sans theta
                           <HelpTip text="Ces deals n'ont pas de theta calculable : la semaine franchit une transition contractuelle ou un état réalisé qui ne peut pas être inventé exactement (observation, fixing, mémoire ou volatilité réalisée). Ils sont exclus de la somme plutôt que comptés à zéro." />
                         </div>
                       </div>
@@ -336,6 +364,14 @@
                 <div v-if="pf.exposureLoading" class="text-xs text-slate-500">Chargement…</div>
 
                 <template v-else-if="pf.exposure">
+                  <p v-if="pf.exposure.deals_missing_fx?.length" class="text-xs text-amber-300">
+                    {{ pf.exposure.deals_missing_fx.length }} dossier(s) sans conversion FX : total EUR partiel,
+                    indicateurs de concentration incomplets et limites concernées à contrôler.
+                  </p>
+                  <p v-if="pf.exposure.deals_requiring_qualification?.length" class="text-xs text-amber-300">
+                    {{ pf.exposure.deals_requiring_qualification.length }} dossier(s) à qualifier juridiquement,
+                    y compris les exceptions administrateur. Leur exposition reste affichée ; limites non évaluées et indicateurs de concentration incomplets.
+                  </p>
                   <div v-if="!pf.exposure.by_counterparty.length" class="text-xs text-slate-500">
                     Aucun deal actif ou en attente de règlement dans cette sélection.
                   </div>
@@ -349,8 +385,8 @@
                         <div class="text-[10px] text-slate-600">EUR</div>
                       </div>
                       <div class="stat-box">
-                        <div class="text-xs text-slate-500 mb-1">Contreparties
-                          <HelpTip text="Nombre de contreparties distinctes portant au moins un deal actif de cette sélection." /></div>
+                        <div class="text-xs text-slate-500 mb-1">Groupes de contreparties
+                          <HelpTip text="Regroupement par identifiant juridique. Les dossiers sans identifiant restent dans des groupes descriptifs à qualifier ; ils ne certifient pas un nombre de banques distinctes." /></div>
                         <div class="text-lg font-bold font-mono text-slate-200">{{ pf.exposure.by_counterparty.length }}</div>
                       </div>
                       <div class="stat-box">
@@ -379,16 +415,17 @@
                             <th class="text-right py-1.5 pr-3 font-semibold">% du book</th>
                             <th class="text-right py-1.5 pr-3 font-semibold">Deals</th>
                             <th class="text-right py-1.5 pr-3 font-semibold">Limite (EUR)
-                              <HelpTip align="right" text="Configurée par un admin dans Administration → Contreparties. Vide = pas de limite définie, jamais de dépassement signalé." /></th>
+                              <HelpTip align="right" text="Limite de suivi du nominal EUR, configurée dans Administration → Contreparties. Ce suivi est distinct des limites CCR bloquantes. Sans identité qualifiée, la limite n’est pas évaluée." /></th>
                             <th class="text-left py-1.5 font-semibold"></th>
                           </tr>
                         </thead>
                         <tbody>
-                          <template v-for="c in pf.exposure.by_counterparty" :key="c.contrepartie">
+                          <template v-for="c in pf.exposure.by_counterparty" :key="c.identity_key">
                             <tr class="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors cursor-pointer"
-                              @click="expandedCounterparty = expandedCounterparty === c.contrepartie ? null : c.contrepartie">
+                              @click="expandedCounterparty = expandedCounterparty === c.identity_key ? null : c.identity_key">
                               <td class="py-1.5 pr-3 text-slate-300 font-semibold">
-                                <span class="text-slate-600 mr-1">{{ expandedCounterparty === c.contrepartie ? '▾' : '▸' }}</span>{{ c.contrepartie }}
+                                <span class="text-slate-600 mr-1">{{ expandedCounterparty === c.identity_key ? '▾' : '▸' }}</span>{{ c.contrepartie }}
+                                <span v-if="c.identity_status === 'INACTIVE'" class="ml-1 text-[10px] text-amber-300">inactive · exposition conservée</span>
                               </td>
                               <td class="py-1.5 pr-3 text-right font-mono text-slate-200">{{ formatNominal(c.nominal_eur) }}</td>
                               <td class="py-1.5 pr-3 text-right font-mono text-slate-400">{{ c.pct_of_book != null ? Math.round(c.pct_of_book * 100) + '%' : '—' }}</td>
@@ -398,9 +435,11 @@
                               </td>
                               <td class="py-1.5 text-right">
                                 <span v-if="c.limit_breached" class="text-[10px] text-red-400 bg-red-950/40 border border-red-900/50 rounded-full px-2 py-0.5">⚠ limite dépassée</span>
+                                <span v-else-if="c.limit_status === 'UNQUALIFIED'" class="text-[10px] text-amber-300">juridique à qualifier · limite non évaluée</span>
+                                <span v-else-if="c.limit_status === 'INCOMPLETE'" class="text-[10px] text-amber-300">conversion FX manquante · contrôle incomplet</span>
                               </td>
                             </tr>
-                            <tr v-if="expandedCounterparty === c.contrepartie" class="bg-slate-900/60">
+                            <tr v-if="expandedCounterparty === c.identity_key" class="bg-slate-900/60">
                               <td colspan="6" class="py-2 pl-6 pr-3">
                                 <table class="w-full text-[11px] border-collapse">
                                   <thead>
@@ -412,7 +451,9 @@
                                   <tbody>
                                     <tr v-for="dl in c.deals" :key="dl.id"
                                       class="hover:bg-slate-800/40 cursor-pointer" @click.stop="openDealDetail(dl.id)">
-                                      <td class="py-1 pr-3 font-mono font-semibold text-blue-400"><DealReferenceLink :deal-id="dl.id" :reference="dl.reference" /></td>
+                                      <td class="py-1 pr-3 font-mono font-semibold text-blue-400"><DealReferenceLink :deal-id="dl.id" :reference="dl.reference" />
+                                        <span v-if="dl.contrepartie !== c.contrepartie" class="ml-2 text-slate-500">{{ dl.contrepartie }} au contrat</span>
+                                      </td>
                                       <td class="py-1 text-right font-mono text-slate-400">{{ formatNominal(dl.nominal_eur) }}</td>
                                     </tr>
                                   </tbody>
@@ -527,14 +568,14 @@
 
                 <!-- Historique -->
                 <div class="pt-2 border-t border-slate-800">
-                  <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Historique</div>
+                  <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Historique · {{ pf.historyLabel }}</div>
                   <div v-if="!pf.currentShockHistory.length" class="text-xs text-slate-500">Aucun choc joué sur cette sélection.</div>
                   <div v-else class="overflow-x-auto table-shell" tabindex="0" role="region">
                   <table class="w-full text-xs border-collapse">
                     <tbody>
                       <tr v-for="h in pf.currentShockHistory" :key="h.id" class="border-b border-slate-800/50">
-                        <td class="py-1 pr-3 text-slate-500 whitespace-nowrap">{{ formatDateTime(h.created_at) }}</td>
-                        <td class="py-1 pr-3 text-slate-300">{{ h.label }}</td>
+                        <td class="py-1 pr-3 text-slate-500 whitespace-nowrap">{{ formatDateTime(runTimestamp(h.created_at)) }}</td>
+                        <td class="py-1 pr-3 text-slate-300">{{ h.label }} · {{ riskScopeLabel(h.data_scope) }} · {{ h.params?.portfolio_name || h.scope }}</td>
                         <td class="py-1 pr-3 text-right font-mono" :class="(h.result.total_delta_eur ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-500'">
                           {{ formatNominal(h.result.total_delta_eur) }} EUR
                         </td>
@@ -610,6 +651,7 @@
                 </div>
 
                 <template v-if="pf.varStudy">
+                  <p class="text-xs text-slate-400">Étude conservée : {{ riskScopeLabel(pf.varStudy.data_scope) }}.</p>
                   <div v-if="pf.varStudy.status === 'queued' || pf.varStudy.status === 'running'"
                     class="flex flex-col gap-1.5">
                     <div class="text-xs text-slate-400">
@@ -716,8 +758,8 @@
                       <tbody>
                         <tr v-for="b in pf.varHistory" :key="b.id" class="border-b border-slate-800/50 hover:bg-slate-800/20 cursor-pointer"
                           @click="pf.openVarBatch(b.id)">
-                          <td class="py-1 pr-3 text-slate-500 whitespace-nowrap">{{ formatDateTime(b.created_at) }}</td>
-                          <td class="py-1 pr-3 text-slate-300">{{ b.label }}</td>
+                          <td class="py-1 pr-3 text-slate-500 whitespace-nowrap">{{ formatDateTime(runTimestamp(b.created_at)) }}</td>
+                          <td class="py-1 pr-3 text-slate-300">{{ b.label }} · {{ riskScopeLabel(b.data_scope) }}</td>
                           <td class="py-1 pr-3 text-slate-500">{{ b.completed_jobs }}/{{ b.total_jobs }}</td>
                           <td class="py-1 text-right"
                             :class="{ completed: 'text-emerald-500', completed_with_failures: 'text-amber-500', failed: 'text-red-500', running: 'text-blue-400', queued: 'text-slate-500' }[b.status]">
@@ -734,7 +776,7 @@
             <template v-else-if="activeTab === 'pnl'">
               <div class="text-sm font-bold text-slate-100">
                 P&L explain — {{ pf.view === 'global' ? 'Tous portefeuilles' : pf.label }}
-                <HelpTip width="w-72" text="Waterfall temps / spot / vol / corrélation entre deux dates, calculé deal par deal (réévaluations séquentielles à graine identique — CRN) puis agrégé en EUR sur la sélection. Full reprice Monte Carlo : comptez plusieurs secondes par deal." />
+                <HelpTip width="w-72" text="Waterfall temps et état réalisé / spot / dividendes / volatilité / corrélation entre deux dates, calculé deal par deal à graine identique puis agrégé en EUR sur la sélection. Comptez plusieurs secondes par deal." />
               </div>
 
               <div class="flex flex-wrap gap-3 items-end">
@@ -762,7 +804,7 @@
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div class="stat-box">
                       <div class="text-xs text-slate-500 mb-1">P&L total
-                        <HelpTip text="Variation de valeur (ΔMtM) + flux détachés sur la période, en EUR, sommés sur tous les deals expliqués." /></div>
+                        <HelpTip text="Variation de valeur (ΔMtM) + cash contractuel à échéance sur la période, en EUR, sommés sur les deals expliqués. Les dates contractuelles ne prouvent pas un virement bancaire." /></div>
                       <div class="text-lg font-bold font-mono" :class="pnlResult.pnl_total_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">
                         {{ formatNominal(pnlResult.pnl_total_eur) }}
                       </div>
@@ -812,11 +854,11 @@
                         </tr>
                         <tr class="border-b border-slate-800/50">
                           <td class="py-1.5 pr-3 text-slate-500">Résidu
-                            <HelpTip text="Ce qui échappe à la chaîne temps/spot/vol/corr (effet taux, croisements…) — doit rester petit devant le ΔMtM ; un résidu élevé signale un facteur non capturé." /></td>
+                            <HelpTip text="Ce qui échappe à la chaîne temps/état, spot, dividendes, volatilité et corrélation reste non attribué. Un résidu élevé signale un facteur non capturé." /></td>
                           <td class="py-1.5 text-right font-mono text-slate-400">{{ formatNominal(pnlResult.residual_eur) }} EUR</td>
                         </tr>
                         <tr class="border-b border-slate-800/50">
-                          <td class="py-1.5 pr-3 text-slate-500">Flux détachés</td>
+                          <td class="py-1.5 pr-3 text-slate-500">{{ pnlResult.cash_basis === 'CONTRACTUAL_PAYMENT_DATE' ? 'Cash contractuel à échéance' : 'Flux détachés — ancien calcul' }}</td>
                           <td class="py-1.5 text-right font-mono text-slate-400">{{ formatNominal(pnlResult.flows_total_eur) }} EUR</td>
                         </tr>
                         <tr>
@@ -830,6 +872,9 @@
                   </div>
 
                   <!-- Contributions par deal -->
+                  <p v-if="pnlResult.cash_basis === 'CONTRACTUAL_PAYMENT_DATE'" class="text-[10px] text-slate-500">
+                    Cash selon les dates contractuelles de paiement sur ]date 1, date 2] ; aucune preuve de virement bancaire.
+                  </p>
                   <div class="overflow-x-auto table-shell" tabindex="0" role="region">
                     <table class="w-full text-xs border-collapse">
                       <thead>
@@ -1030,8 +1075,8 @@
                   <div v-for="run in pf.currentSmileHistory" :key="run.id"
                     class="rounded-lg border border-slate-800 px-3 py-2 flex items-center gap-3">
                     <div class="min-w-0 flex-1">
-                      <div class="text-xs text-slate-300 truncate">{{ run.label }}</div>
-                      <div class="text-[9px] text-slate-600">{{ formatDateTime(run.created_at) }}</div>
+                      <div class="text-xs text-slate-300 truncate">{{ run.label }} · {{ riskScopeLabel(run.data_scope) }} · {{ run.params?.portfolio_name || run.scope }}</div>
+                      <div class="text-[9px] text-slate-600">{{ formatDateTime(runTimestamp(run.created_at)) }}</div>
                     </div>
                     <div class="font-mono text-xs font-semibold"
                       :class="run.result.total_delta_eur >= 0 ? 'text-emerald-400' : 'text-red-400'">
@@ -1281,9 +1326,11 @@
 </template>
 
 <script setup>
+import { runTimestamp } from '../composables/useBookingMtm.js'
 import ActionMenu from '../components/ui/ActionMenu.vue'
 import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { riskScopeLabel } from '../utils/riskScope.js'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
 import { usePortfoliosStore, shockPresets, blankShockForm, blankVarForm } from '../stores/portfolios.js'
@@ -1399,9 +1446,22 @@ const hasMixedVegaScopes = computed(() =>
   Object.values(pf.risk?.per_underlying || {}).some(bucket => bucket.vega_scope_mixed)
 )
 
+const riskMetricRows = computed(() => {
+  const labels = { delta: 'Delta', gamma: 'Gamma', vega: 'Vega', theta: 'Theta', rho: 'Rho', corr: 'Corrélation' }
+  return Object.entries(pf.risk?.metric_coverage || {}).filter(([, row]) => row.required > 0).map(([key, row]) => ({
+    key, label: labels[key] || key, available: row.available, required: row.required,
+    complete: row.status === 'COMPLETE',
+    detail: [
+      ...(row.missing || []).map(x => `${x.reference} : ${x.reason}`),
+      ...(row.sources || []).map(x => `${x.reference} · ${x.run_id ? `calcul #${x.run_id}` : 'cache ancien sans référence de calcul'} · ${x.valuation_date} · ${x.computed_at || 'date de calcul inconnue'}`),
+    ].join('\n'),
+  }))
+})
+
 const VEGA_SCOPE_LABELS = {
   total: 'vol totale',
   leg_independante: 'jambe indépendante',
+  effective_local_vol: 'vol locale effective, variance figée',
   non_documente: 'périmètre non documenté',
 }
 
@@ -1762,6 +1822,12 @@ watch(() => calculationProgress.value?.key || null, key => {
     }, 1000)
   }
 }, { immediate: true })
+
+watch(() => [pf.dataScope, pf.view], () => {
+  shockResult.value = null
+  pnlResult.value = null
+  if (activeTab.value === 'barrieres') pf.loadBarriers().catch(e => { pf.scopeError = e.message })
+})
 
 onMounted(() => {
   const rememberedVarBatchId = pf.varStudy?.batch_id

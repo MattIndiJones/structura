@@ -1,5 +1,11 @@
 # CCR — intégration STRUCTURA
 
+> **Correction du 24/10/2026 — CCR 1.5** : dates contractuelles intégrées à la
+> diffusion, date métier propagée aux contrôles et booking OTC soumis à un accord
+> effectif. Les descriptions historiques d'arrondi hebdomadaire ci-dessous sont
+> remplacées par cette politique pour les nouveaux calculs. Voir la
+> [recette ciblée et ses limites](../../audits/INSTITUTIONAL_MAJOR_FIXES_2026-10-24.md).
+
 > **Revue documentaire du 05/10/2026** : socle et extensions CCR 1.2 présents
 > sur `main` (`15d7ccf`) : préparation MtM, marché commun, cache/progression et
 > contrôle d'un deal booké. Les paragraphes initiaux décrivent la V1 du 28/09 ;
@@ -128,8 +134,16 @@ puis le collatéral est retranché, puis la partie positive est prise. Les
 expositions des sets sont ensuite additionnées scénario par scénario. EE est
 la moyenne des scénarios ; PFE95/99 sont les quantiles interpolés linéairement.
 Les métriques de limite PFE sont les maxima sur les horizons. EPE est la moyenne
-temporelle de l'EE par intégration trapézoïdale. Les incréments sont signés :
+temporelle de l'EE par rectangles à gauche, avec exposition ex-paiement aux
+frontières de règlement. Les incréments sont signés :
 `après - avant`. Un hedge peut donc réduire PFE et CVA.
+
+Depuis `ccr-1.4-explicit-exposure-metrics` (24/10/2026), les nouveaux résultats
+exposent `current_exposure = EE(0)`, `profile[].ee = EE(t)` et `epe` pour la
+moyenne temporelle. Le scalaire ambigu `ee`, ancien alias d'`epe`, est retiré
+de toutes les sorties nouvelles, y compris FAST et les résultats incomplets.
+Un consommateur de cet ancien alias doit lire `epe`. Les analyses archivées
+ne sont pas réécrites ; leur version méthodologique conserve leur sémantique.
 
 Le budget impose `nombre de dates × outer × inner × nombre de trades ≤ 10 000 000`.
 Les valeurs par défaut sont 256 scénarios extérieurs, 128 intérieurs, 8 horizons
@@ -659,3 +673,31 @@ utilise un taux de 2,2 % et le CCR le taux commun provisoire de 3 % ; les deux
 MtM peuvent donc différer. Le profil de crédit, la courbe de défaut et le
 recouvrement sont absents : CVA/risque de perte au défaut non chiffrables.
 Le build frontend et ses 228 tests passent après l'aiguillage du deal booké.
+
+## Mise à jour C21 — 22/10/2026
+
+Cette mise à jour remplace les anciennes indications d'intégration aux extrémités
+droites et d'EPE trapézoïdale : méthode `ccr-1.3-payment-exposure`. Les portefeuilles
+de créances déterministes utilisent leurs dates exactes de paiement, sans minimum
+d'une semaine. Le profil est après paiement à la frontière ; la CVA conserve
+l'EE actualisée du bord gauche sur l'intervalle précédent. L'EPE utilise aussi
+le bord gauche, pour ne pas effacer l'exposition avant paiement. Une créance
+1 M€, payable à deux jours, r=0, LGD=60 %, PD linéaire 20 %/an donne
+657,0841889 € de CVA et une EPE de 1 M€. Une limite CVA dure de 100 € bloque.
+
+Cette intégration reste une approximation discrète pour les expositions
+optionnelles ; leur replay reste hebdomadaire. Une option à moins d'une semaine
+ou un portefeuille mixte comportant une créance dont le paiement est hors de
+cette grille reçoit des mesures futures indisponibles et un diagnostic explicite.
+Les limites contraignantes reçoivent alors MISSING_DATA. Aucun déplacement de
+paiement ou allongement de maturité n'est qualifié silencieusement. Les domaines
+SA-CCR, WWR joint, IM dynamique et MPOR ne sont pas étendus.
+
+Le moniteur et le cache de préparation utilisent désormais la même empreinte
+des contrats, Product, événements/fixings, sources, paramètres et implémentations.
+Une correction de fixing invalide l'actualité sans supprimer l'ancien run. Les
+archives sans cette preuve restent lisibles mais obsolètes pour le moniteur.
+La sélection d'un ancien MtM incompatible avec les fixings courants est refusée.
+
+[Rapport C21](../../audits/REMEDIATION_C21_2026-10-22.md) et
+[preuves ciblées](../../audits/remediation-lot-0-2026-10-20/C21_VALIDATION.json).

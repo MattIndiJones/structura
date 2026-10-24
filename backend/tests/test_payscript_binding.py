@@ -205,10 +205,14 @@ def test_reinvestment_moves_initial_and_observation_dates_together(with_interim)
         market['constats']['INTERIM'] = '2028-04-06'
     deal = SimpleNamespace(script_snapshot=script, strike_date='2026-10-06',
         market_snapshot_json=json.dumps(market), underlyings_json=json.dumps([{'name':'U1','ticker':'TEST'}]), devise='EUR', T=3.)
-    rolled, _, _, _, horizon = _reinvest_context(deal, 2.)
+    from fastapi import HTTPException
+    # A changed maturity must not partially resize just the terminal calendar.
+    with pytest.raises(HTTPException, match='reconstruire'):
+        _reinvest_context(deal, 2.)
+    rolled, _, _, _, horizon = _reinvest_context(deal, None)
     assert rolled.origine == date.today()
-    assert horizon == pytest.approx(round(2*365.25)/365.25, abs=1e-6)
-    assert len(rolled.events[0].dates) == 2
+    assert horizon == pytest.approx(3., abs=.003)
+    assert len(rolled.events[0].dates) == 3
     if with_interim:
         interim = next(event for event in rolled.events if event.constat_ref == 'INTERIM')
         assert interim.dates == pytest.approx([(date(2028, 4, 6)-date(2026, 10, 6)).days/365.25])

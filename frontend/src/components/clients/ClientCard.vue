@@ -13,6 +13,12 @@
 -->
 <template>
   <div v-if="fiche" class="flex flex-col gap-5">
+    <p v-if="fiche.temporal_basis" class="text-xs" style="color: var(--muted)">
+      Transactions observées au {{ fiche.asof }}. Opportunités et RFQ dans leur état courant au
+      {{ fiche.temporal_basis.reference_asof }} ; leurs statuts passés ne sont pas reconstitués.
+      <span v-if="fiche.excluded_future_count"> {{ fiche.excluded_future_count }} transaction(s) future(s) exclue(s).</span>
+      <span v-if="fiche.excluded_undated_count"> {{ fiche.excluded_undated_count }} transaction(s) sans date exclue(s).</span>
+    </p>
 
     <!-- ── Carte d'identité ─────────────────────────────────── -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -282,8 +288,13 @@
         <!-- Bornes -->
         <div class="card flex flex-col gap-4">
           <div class="card-title mb-0">L'observé face aux repères déclarés</div>
-          <RangeRail titre="Ticket" :borne="fiche.ranges.ticket"
-                     :format="montantCourt" />
+          <RangeRail v-for="[currency, range] in ticketRanges" :key="currency"
+                     :titre="`Ticket ${currency}`" :borne="range"
+                     :format="v => `${montantCourt(v)} ${currency}`" />
+          <p v-if="!ticketRanges.length" class="card-hint">Aucun ticket qualifié par devise.</p>
+          <p v-if="fiche.ranges.unqualified_ticket_count" class="card-hint">
+            {{ fiche.ranges.unqualified_ticket_count }} montant(s) non qualifié(s), exclus des statistiques de ticket.
+          </p>
           <RangeRail titre="Maturité" :borne="fiche.ranges.maturity_months"
                      :format="v => Math.round(v) + ' mois'" />
         </div>
@@ -302,7 +313,7 @@
     <!-- ── Conversion et refus ───────────────────────────────── -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
       <div class="card flex flex-col gap-3">
-        <div class="card-title mb-0">Pourquoi ça n'aboutit pas</div>
+        <div class="card-title mb-0">Motifs de perte — état courant</div>
         <EmptyState v-if="!fiche.lost_reasons.length" icon="—"
                     title="Aucun dossier perdu documenté"
                     hint="Le motif est demandé à la clôture d'une opportunité perdue." />
@@ -321,7 +332,7 @@
       </div>
 
       <div class="card flex flex-col gap-3">
-        <div class="card-title mb-0">Conversion</div>
+        <div class="card-title mb-0">Conversion — état courant</div>
         <div class="flex items-baseline gap-3">
           <span class="text-3xl font-extrabold tracking-tight tabular-nums"
                 :style="conversion.rate === null ? 'color: var(--subtle)' : ''">
@@ -380,6 +391,7 @@ import CyclePanel from './CyclePanel.vue'
 import DimensionGrid from './DimensionGrid.vue'
 import RangeRail from './RangeRail.vue'
 import { formatInt, formatNumber } from '../../utils/format.js'
+import { ticketObservationText, ticketRangeEntries } from '../../utils/clientAmounts.js'
 
 // En dessous de ce nombre, une frise et des proportions mentiraient : on liste.
 const SEUIL_FRISE = 5
@@ -421,17 +433,12 @@ const sousCadence = computed(() => {
 
 // Sur peu d'observations, les montants eux-mêmes plutôt que leur milieu.
 const ticketTexte = computed(() => {
-  const t = props.fiche?.ranges?.ticket
-  if (!t || !t.n) return null
-  if (t.points.length) {
-    const uniques = [...new Set(t.points.map(montantCourt))]
-    return uniques.length === 1 ? uniques[0]
-      : `${uniques[0]} – ${uniques[uniques.length - 1]}`
-  }
-  return montantCourt(t.median)
+  return ticketObservationText(props.fiche?.ranges, montantCourt)
 })
+const ticketRanges = computed(() => ticketRangeEntries(props.fiche?.ranges))
 
 const sousTicket = computed(() => {
+  if (ticketRanges.value.filter(([, range]) => range.n > 0).length > 1) return 'montants séparés par devise'
   const t = props.fiche?.ranges?.ticket
   if (!t || !t.n) return 'aucune transaction'
   if (t.points.length) return `les ${t.n} montants, pas une médiane`

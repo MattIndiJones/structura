@@ -82,7 +82,7 @@
       <section v-else-if="tab === 'trades'" class="ccr-panel" aria-label="Rattachement des trades">
         <p class="text-xs text-slate-500">Rattachement juridique distinct des termes du payoff ; chaque modification exige un motif et reste auditée.</p>
         <div class="ccr-panel-body ccr-scroll ccr-trades" tabindex="0" aria-label="Liste des trades">
-        <div v-for="d in scopedDeals" :key="d.id" class="card ccr-trade-row"><span class="text-sm">{{ d.reference }} · {{ d.product_type }}</span><select v-model="d.netting_set_id" class="select" :aria-label="`Netting set de ${d.reference}`" :disabled="!auth.isAdmin"><option :value="null">Aucun set</option><option v-for="s in configuration['netting-sets'] || []" :key="s.id" :value="s.id">{{ s.data.netting_set_id }}</option></select><input v-model="d.reason" class="input" :aria-label="`Motif pour ${d.reference}`" placeholder="Motif du rattachement" :disabled="!auth.isAdmin" /><button class="btn-secondary btn-sm" :disabled="busy || !auth.isAdmin || !d.reason" @click="assign(d)">Enregistrer</button></div>
+        <div v-for="d in scopedDeals" :key="d.id" class="card ccr-trade-row"><span class="text-sm">{{ d.reference }} · {{ d.product_type }}</span><select v-model="d.netting_set_id" class="select" :aria-label="`Netting set de ${d.reference}`" :disabled="!auth.canAdministerOrganization"><option :value="null">Aucun set</option><option v-for="s in configuration['netting-sets'] || []" :key="s.id" :value="s.id">{{ s.data.netting_set_id }}</option></select><input v-model="d.reason" class="input" :aria-label="`Motif pour ${d.reference}`" placeholder="Motif du rattachement" :disabled="!auth.canAdministerOrganization" /><button class="btn-secondary btn-sm" :disabled="busy || !auth.canAdministerOrganization || !d.reason" @click="assign(d)">Enregistrer</button></div>
         </div>
       </section>
       <section v-else-if="tab === 'stress'" class="ccr-panel" aria-label="Stress de crédit">
@@ -116,16 +116,16 @@
             <label v-for="(raw,key) in schemas[tab].properties" :key="key" class="text-xs" :class="shape(raw).type === 'array' ? 'sm:col-span-2' : ''">
               <span class="ccr-field-label">{{ fieldLabels[key] || raw.title }} <HelpTip v-if="ccrHelp[key]" :text="ccrHelp[key]" /><span v-if="schemas[tab].required?.includes(key)"> *</span></span>
               <SensitiveValue mode="input">
-                <select v-if="relation(key)" v-model="draft[key]" class="select mt-1" :disabled="!auth.isAdmin"><option :value="null">— Aucun / inconnu —</option><option v-for="r in configuration[relation(key)] || []" :key="r.id" :value="r.id">#{{ r.id }} · {{ recordLabel(r) }}</option></select>
-                <select v-else-if="shape(raw).enum" v-model="draft[key]" class="select mt-1" :disabled="!auth.isAdmin"><option v-for="v in shape(raw).enum" :key="v" :value="v">{{ v }}</option></select>
-                <select v-else-if="shape(raw).type === 'boolean'" v-model="draft[key]" class="select mt-1" :disabled="!auth.isAdmin"><option v-if="raw.anyOf" :value="null">UNKNOWN — inconnu</option><option :value="true">Oui</option><option :value="false">Non</option></select>
-                <textarea v-else-if="shape(raw).type === 'array'" v-model="draft[key]" class="input mt-1 font-mono" rows="2" :disabled="!auth.isAdmin" />
-                <input v-else v-model="draft[key]" class="input mt-1" :type="shape(raw).format === 'date' ? 'date' : ['number','integer'].includes(shape(raw).type) ? 'number' : 'text'" :step="shape(raw).type === 'integer' ? 1 : 'any'" :required="schemas[tab].required?.includes(key)" :disabled="!auth.isAdmin" />
+                <select v-if="relation(key)" v-model="draft[key]" class="select mt-1" :disabled="!auth.canAdministerOrganization"><option :value="null">— Aucun / inconnu —</option><option v-for="r in configuration[relation(key)] || []" :key="r.id" :value="r.id">#{{ r.id }} · {{ recordLabel(r) }}</option></select>
+                <select v-else-if="shape(raw).enum" v-model="draft[key]" class="select mt-1" :disabled="!auth.canAdministerOrganization"><option v-for="v in shape(raw).enum" :key="v" :value="v">{{ v }}</option></select>
+                <select v-else-if="shape(raw).type === 'boolean'" v-model="draft[key]" class="select mt-1" :disabled="!auth.canAdministerOrganization"><option v-if="raw.anyOf" :value="null">UNKNOWN — inconnu</option><option :value="true">Oui</option><option :value="false">Non</option></select>
+                <textarea v-else-if="shape(raw).type === 'array'" v-model="draft[key]" class="input mt-1 font-mono" rows="2" :disabled="!auth.canAdministerOrganization" />
+                <input v-else v-model="draft[key]" class="input mt-1" :type="shape(raw).format === 'date' ? 'date' : ['number','integer'].includes(shape(raw).type) ? 'number' : 'text'" :step="shape(raw).type === 'integer' ? 1 : 'any'" :required="schemas[tab].required?.includes(key)" :disabled="!auth.canAdministerOrganization" />
                 <small v-if="['amount','held','posted','im_held','mta','threshold_counterparty','threshold_our_side','independent_amount','im_amount','previous_limit','temporary_limit'].includes(key) && draft[key] !== '' && draft[key] != null" class="block mt-1 text-slate-500">{{ money(draft[key]) }} {{ draft.currency || draft.base_currency || currency }}</small>
               </SensitiveValue>
             </label>
             </div>
-            <div class="ccr-actions ccr-editor-footer"><button class="btn-primary btn-sm" :disabled="busy || !auth.isAdmin">{{ busy ? 'Enregistrement…' : 'Enregistrer et auditer' }}</button></div>
+            <div class="ccr-actions ccr-editor-footer"><button class="btn-primary btn-sm" :disabled="busy || !auth.canAdministerOrganization">{{ busy ? 'Enregistrement…' : 'Enregistrer et auditer' }}</button></div>
           </form>
         </div>
       </section>
@@ -163,7 +163,7 @@ import { ccrApi, ccrCalculate, metricLabels, fieldLabels, statusLabels, money, p
 const auth = useAuthStore(), route = useRoute()
 const tabs = { exposure: 'Exposition / CVA', monitor: 'Monitor contreparties', profiles: 'Profil crédit', agreements: 'Accords ISDA', csas: 'CSA', 'netting-sets': 'Netting sets', collateral: 'Collatéral', limits: 'Limites', trades: 'Trades', overrides: 'Demandes de dérogation', stress: 'Stress / WWR' }
 const tab = ref('exposure'), cptyId = ref(Number(route.query.counterparty) || null), counterparties = ref([]), configuration = ref({}), schemas = ref({}), allDeals = ref([]), monitor = ref([])
-const now = new Date(); const asOf = ref(new Date(now - now.getTimezoneOffset() * 60000).toISOString().slice(0,10))
+const asOf = ref('')
 const currency = ref('EUR'), analysisSet = ref(null), analysisDeal = ref(null), nOuter = ref(256), nInner = ref(128), nDates = ref(8), seed = ref(42), correlations = ref('{}')
 const refreshMtm = ref(false)
 const commonMarket = ref(true)
@@ -288,7 +288,7 @@ async function loadMonitor() { const scope = dataScope.value; await guarded(asyn
 async function assign(d) { await guarded(async () => { await ccrApi(`/deals/${d.id}/assignment`, { netting_set_id: d.netting_set_id, reason: d.reason }, 'PUT'); d.reason = ''; uiRevision++; result.value = null; stressResult.value = null }) }
 async function replay() { await guarded(async () => { const r = await ccrApi(`/runs/${displayResult.value.run_id}/replay`, {}); replayMessage.value = r.identical ? 'Résultat reproduit à l’identique.' : 'Résultat différent — vérifier la version du moteur.' }) }
 async function download() { await guarded(async () => { const archive = await ccrApi(`/runs/${displayResult.value.run_id}`); const url = URL.createObjectURL(new Blob([JSON.stringify(archive,null,2)], {type:'application/json'})); const a = document.createElement('a'); a.href = url; a.download = `CCR-${displayResult.value.run_id}.json`; a.click(); URL.revokeObjectURL(url) }) }
-onMounted(() => guarded(async () => { const [c,s,p,b] = await Promise.all([ccrApi('/counterparties'),ccrApi('/schemas'),ccrApi('/portfolios'),ccrApi('/uat-batches')]); counterparties.value=c; schemas.value=s; portfolios.value=p; uatBatches.value=b; await loadDeals(); await loadConfiguration(); await loadDiagnostic() }))
+onMounted(() => guarded(async () => { const [c,s,p,b,context] = await Promise.all([ccrApi('/counterparties'),ccrApi('/schemas'),ccrApi('/portfolios'),ccrApi('/uat-batches'),ccrApi('/context')]); asOf.value=context.business_date; counterparties.value=c; schemas.value=s; portfolios.value=p; uatBatches.value=b; await loadDeals(); await loadConfiguration(); await loadDiagnostic() }))
 </script>
 
 <style scoped>

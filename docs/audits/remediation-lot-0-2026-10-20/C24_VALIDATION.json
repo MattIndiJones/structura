@@ -1,0 +1,236 @@
+{
+  "correction": "C24",
+  "date": "2026-10-22",
+  "status": "Implemented and validated locally",
+  "issues": [
+    "M16-02",
+    "M16-03",
+    "M16-04",
+    "M16-05"
+  ],
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "production_qualified": false,
+  "backend": {
+    "qualified_distinct_passed": 342,
+    "new_cases": 29,
+    "files": 12,
+    "results": [
+      "core-final.xml",
+      "dependencies-first.xml",
+      "c24-final.xml"
+    ],
+    "aggregate": "latest-distinct.xml",
+    "per_file": {
+      "backend.tests.test_business_permissions": 35,
+      "backend.tests.test_client_analytics": 12,
+      "backend.tests.test_client_api": 37,
+      "backend.tests.test_client_c24": 29,
+      "backend.tests.test_client_cycle": 26,
+      "backend.tests.test_client_import": 29,
+      "backend.tests.test_client_intelligence": 26,
+      "backend.tests.test_client_lot2": 4,
+      "backend.tests.test_economic_amendments": 30,
+      "backend.tests.test_legal_identity_workflows": 10,
+      "backend.tests.test_product_transition_integrity": 72,
+      "backend.tests.test_rfq_c23": 32
+    },
+    "legacy_chain": {
+      "unchanged_failures": 14,
+      "passed": 2,
+      "same_nodes_and_messages": true,
+      "file": "backend/tests/test_client_chain.py",
+      "nodes": [
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_l_opportunite_liee_a_un_trade_refuse_la_suppression",
+          "message_sha256": "a282674094d5cd5016735ec34070fbe3256970b4377ac95bdad04fd25a2f6ed9"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_la_chaine_se_remonte_du_trade_jusqu_a_la_personne",
+          "message_sha256": "e9f8fea01f083a02dc0ec39cf8e60898bda049ff23ac8baa1160069b9cf2e7ec"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_le_refus_de_rattachement_n_alloue_pas_de_reference",
+          "message_sha256": "92256b2d562d92ef4d5a0102450b9ca7f2c678ce21cf1e6a03d94df6f919c4b4"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_le_trade_reste_chez_l_ancien_employeur_apres_un_depart",
+          "message_sha256": "12ba05af0f1c3288db458d072c20a65e283b3525a5a994516483191a361e365a"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_un_deal_booke_depuis_une_opportunite_porte_son_rattachement",
+          "message_sha256": "cf42e6264c76a6876ae2b5a6f2af449ca8e0cbc49825c186d71109e409d83f6a"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_un_deal_direct_client_exige_un_motif",
+          "message_sha256": "df42020ab60a2348c65528fd77711b4e55f237d65d94521a126e32028ec9b505"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_un_deal_produit_peut_porter_une_structure_juridique_sans_client",
+          "message_sha256": "cf42e6264c76a6876ae2b5a6f2af449ca8e0cbc49825c186d71109e409d83f6a"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_un_deal_sans_client_se_booke_comme_avant",
+          "message_sha256": "cf42e6264c76a6876ae2b5a6f2af449ca8e0cbc49825c186d71109e409d83f6a"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_un_trade_ne_peut_pas_melanger_deux_clients",
+          "message_sha256": "94fc4abcb34e7b90e34241699c9bfc8ade3e85bf01a3a40a2879481febba2e47"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_une_opportunite_d_une_autre_entite_est_refusee",
+          "message_sha256": "2635eab009a1946c1fcd934c52224dac7f8b4cca05c86ef259d98846205e3433"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_une_rfq_client_sans_mandat_est_refusee",
+          "message_sha256": "df42020ab60a2348c65528fd77711b4e55f237d65d94521a126e32028ec9b505"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_une_rfq_creee_depuis_une_opportunite_garde_le_lien",
+          "message_sha256": "91b5e219ae7147d7927940d116e05f7903a35d2c41c3346164b9927bf71dfc77"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_une_rfq_directe_peut_etre_rattachee_au_client_et_au_mandat",
+          "message_sha256": "91b5e219ae7147d7927940d116e05f7903a35d2c41c3346164b9927bf71dfc77"
+        },
+        {
+          "classname": "backend.tests.test_client_chain",
+          "name": "test_une_rfq_sans_opportunite_fonctionne_comme_avant",
+          "message_sha256": "91b5e219ae7147d7927940d116e05f7903a35d2c41c3346164b9927bf71dfc77"
+        }
+      ]
+    }
+  },
+  "frontend": {
+    "passed": 681,
+    "files": 77,
+    "new_cases": 7,
+    "build_passed": true,
+    "log": "frontend-final.log",
+    "out_dir": "C:/Users/phili/AppData/Local/Temp/structura-c24-vite-build-final"
+  },
+  "baseline": {
+    "existing_passed": 40,
+    "existing_failed": 14,
+    "valid_reproductions_failed": 5,
+    "results": "baseline-existing.xml",
+    "reproductions": "baseline-valid-reproductions.xml",
+    "snapshot": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c24-baseline-3qamm21g"
+  },
+  "acceptance_tests": {
+    "M16-02": [
+      "test_client_move_revalidates_persisted_participants_when_patch_omits_them",
+      "test_linked_opportunity_cannot_move_client_or_mandate",
+      "test_move_and_product_creation_cannot_commit_conflicting_attributions"
+    ],
+    "M16-03": [
+      "test_historical_profile_excludes_future_transactions_from_every_observation",
+      "test_all_dated_entrypoints_exclude_future_observations",
+      "test_pipeline_current_state_is_distinct_from_dated_transactions",
+      "test_cycle_rejects_future_dates_as_observed_history"
+    ],
+    "M16-04": [
+      "test_pipeline_and_ticket_never_sum_or_median_different_currency_units",
+      "test_same_currency_medians_and_declared_bounds_keep_their_unit",
+      "frontend/src/utils/clientAmounts.test.js"
+    ],
+    "M16-05": [
+      "test_real_import_engine_excludes_demo_mandate_from_real_profile",
+      "test_real_mode_does_not_implicitly_include_a_demo_only_dataset",
+      "test_t14_attribution_dates_currencies_and_imported_demo_interact_coherently"
+    ]
+  },
+  "dependencies": {
+    "C01": "targeted pass",
+    "C03": "targeted pass",
+    "C04": "targeted pass",
+    "C06": "targeted pass with concurrent attribution check",
+    "C23": "all 32 C23 cases pass",
+    "C27": "M16-05 CRM subset implemented; other aggregates and histories remain open",
+    "C11_to_C24": "not activated: per-currency display without FX",
+    "T14": "combined deterministic local scenario passed; graphical/deployed qualification remains partial"
+  },
+  "semantics": {
+    "opportunities": "CURRENT_STATE",
+    "trades": "TRADE_DATE_ON_OR_BEFORE_ASOF",
+    "historical_opportunity_state_reconstructed": false,
+    "knowledge_time_reconstructed": false,
+    "money": "PER_CURRENCY_NO_IMPLICIT_FX",
+    "portfolio_default": "REAL",
+    "demo_inclusion": "explicit include_demo=true; demo Client page keeps its explicit context"
+  },
+  "network": {
+    "requests_and_curl_disabled": true,
+    "final_blocked_attempts": 0
+  },
+  "preservation": {
+    "initial_files": 2549,
+    "unchanged_files": 2530,
+    "expected_changed_existing_files": [
+      "backend/app/api/client_intelligence.py",
+      "backend/app/api/opportunities.py",
+      "backend/app/core/client_controls.py",
+      "backend/app/core/client_cycle.py",
+      "backend/app/core/client_intelligence.py",
+      "backend/app/core/client_signals.py",
+      "backend/app/services/product_repository.py",
+      "backend/tests/test_client_analytics.py",
+      "backend/tests/test_client_cycle.py",
+      "backend/tests/test_client_intelligence.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/projects/clients/CLIENTS_LOT_1_CHAINE_COMMERCIALE.md",
+      "docs/projects/clients/CLIENTS_LOT_2_HABITUDES_TRADING.md",
+      "frontend/src/components/clients/ClientCard.vue",
+      "frontend/src/views/ClientDetailView.vue",
+      "frontend/src/views/ClientsView.vue"
+    ],
+    "unexpected_changes": [],
+    "original_source_copies_verified": 967,
+    "prior_runtime_artifacts_unchanged": true,
+    "frontend_dist_unchanged": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "real_db_present_before": false,
+    "real_db_present_after": false
+  },
+  "services_started": false,
+  "real_database_touched": false,
+  "commit": false,
+  "push": false,
+  "source_sha256": {
+    "backend/app/api/client_intelligence.py": "dbac5ead4fdecb09431a385a95197e110d5ed09b300cca76ed5ff218292cc3cf",
+    "backend/app/api/opportunities.py": "9ff323f10f3404cc023f8ab287006aee81a5091ab8ea6241aa279de8d038fdf2",
+    "backend/app/core/client_analysis.py": "16fca8a89169441d1c12bf6067a1672bf41f9d748a4d4d7715db036b6c401e8c",
+    "backend/app/core/client_controls.py": "d1add3cd791b4ad7207a3c615a8f51d686e7669ec4948e50045ff24d992a72ee",
+    "backend/app/core/client_cycle.py": "3c52d7f630b3bb09aedf652da6c33ba847c4fb38365acd2baa210bb18e3ea0ba",
+    "backend/app/core/client_intelligence.py": "3612c2339b1a4c103f1466edf81accb714224c20cf60e8248a1e84c87fb8bbeb",
+    "backend/app/core/client_signals.py": "51b71d1c64818a4b3b8db38cc0e45ff1a2ce2f6a9dc39b301c7a7146d510bf20",
+    "backend/app/core/opportunity_integrity.py": "62674690bf7ca7a6e1de7f9e6cc1a67b5dd3075c8ce600373a3d2ad1e4c870f7",
+    "backend/app/services/product_repository.py": "3b6cc2af4a59bedc2802c7853136f5d06d7be502d7d57f59941d94663256c317",
+    "backend/tests/test_client_analytics.py": "33e40a94a2bb9e13227fd49c6a04e8e2c9deb3bafd8646b27578015f7d5156f9",
+    "backend/tests/test_client_c24.py": "7863a2fd57a29ae4c328e42cbf3da3613f1f2472ecf1243482b4f982b5ce4b28",
+    "backend/tests/test_client_cycle.py": "7b49a5f6875fccf47ee97e4ae6c6b62512fc862e4689df9c075d7353ad27cee4",
+    "backend/tests/test_client_intelligence.py": "1a2fd09031302419d16f63f855a8541581a09518b5b5972ee302e1316d0a9b33",
+    "frontend/src/components/clients/ClientCard.vue": "5517cabcc13d2a8134cdf7c4772b82ccde36ff8d2607377f46b1263e39f50cd4",
+    "frontend/src/utils/clientAmounts.js": "211705f60e5669a7480ad60f765f5856b23cc568cc1e63a97817aeae3ff1b4fc",
+    "frontend/src/utils/clientAmounts.test.js": "d15ca86b9084499b3fb34f7c2b7cc78ce084e10ecee3c85bd50cd222bf015237",
+    "frontend/src/views/ClientDetailView.vue": "4d9e64beeffad84e7b9da835982ff41e5cfc17dfe6d6d727b897178ad2c793d9",
+    "frontend/src/views/ClientsView.vue": "dc91f42079f88c50584cca4b4fc3a157003e8ac15f8311757a98d77916e69881"
+  }
+}

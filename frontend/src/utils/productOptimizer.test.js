@@ -21,7 +21,7 @@ describe('Product Optimizer', () => {
     ]})).toEqual([confirmed])
   })
   it('handles fragmented UTF-8 streams and requires a final result', async () => {
-    vi.stubGlobal('localStorage', {getItem:()=> 'token'})
+    sessionStorage.setItem('auth_token', 'token')
     const bytes=new TextEncoder().encode('{"type":"progress","message":"évaluation"}\n{"type":"result","result":{}}\n')
     vi.stubGlobal('fetch',vi.fn(async()=>new Response(new ReadableStream({start(controller){controller.enqueue(bytes.slice(0,33));controller.enqueue(bytes.slice(33));controller.close()}}))))
     const events=[]

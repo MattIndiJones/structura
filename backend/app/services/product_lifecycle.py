@@ -108,6 +108,18 @@ def stage_product_lifecycle(
     lifecycle = lifecycle_snapshot(session, deal)
     if product.lifecycle == lifecycle:
         return product
+    previous = product.lifecycle.to_dict() if hasattr(product.lifecycle, "to_dict") else dict(product.lifecycle or {})
+    def fixing_versions(snapshot):
+        return [(e.get("id"), e.get("current_fixing_version_id"), e.get("fixing_version"),
+                 e.get("fixing_record_sha256"), e.get("fixing_status")) for e in snapshot.get("events", [])]
+    current = lifecycle.to_dict() if hasattr(lifecycle, "to_dict") else dict(lifecycle)
+    if fixing_versions(previous) != fixing_versions(current):
+        # Archived runs remain immutable. Only the current display caches are
+        # invalidated by a changed contractual fact or pending correction.
+        deal.latest_valuation_run_id = None
+        deal.greeks_json = "{}"
+        deal.greeks_computed_at = None
+        session.add(deal)
     return stage_revision(
         session,
         product.model_copy(update={"lifecycle": lifecycle}),

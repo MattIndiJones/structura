@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "corrective": "C27",
+  "date": "2026-10-22",
+  "findings": [
+    "M15-03",
+    "M16-05"
+  ],
+  "status": "locally_validated",
+  "production_qualified": false,
+  "report": "../REMEDIATION_C27_2026-10-22.md",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "backend": {
+    "passed": 65,
+    "new_cases": 26,
+    "distinct": true,
+    "files": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "cases_by_file": {
+      "backend.tests.test_risk_scope_c27": 26,
+      "backend.tests.test_risk_dates": 2,
+      "backend.tests.test_portfolios_crud": 7,
+      "backend.tests.test_portfolio_pnl": 3,
+      "backend.tests.test_shocks": 9,
+      "backend.tests.test_portfolio_barriers": 6,
+      "backend.tests.test_risk_c21": 3,
+      "backend.tests.test_client_c24": 2,
+      "backend.tests.test_ccr_scope": 5,
+      "backend.tests.test_lifecycle_c26": 2
+    },
+    "baseline_passed": 27,
+    "reproduction_failures": 4,
+    "manifest": "final-backend.xml"
+  },
+  "frontend": {
+    "passed": 731,
+    "new_cases": 11,
+    "files": 82,
+    "build_succeeded": true,
+    "vite_seconds": 10.36,
+    "out_dir": "C:/Users/phili/AppData/Local/Temp/structura-c27-vite-build",
+    "log": "frontend-final.log"
+  },
+  "acceptance": {
+    "tests": [
+      "test_default_exposure_excludes_uat_and_other_organization",
+      "test_all_portfolio_consumers_share_origin_and_c01_visibility",
+      "test_shock_persists_the_selected_scope_and_frozen_universe",
+      "test_history_filters_before_limiting_and_never_reclassifies_from_live_deals",
+      "test_var_history_is_frozen_per_origin_and_portfolio_and_keeps_legacy_separate",
+      "test_var_creation_freezes_origin_and_view_without_reusing_a_current_book_later",
+      "test_deleted_portfolio_archives_keep_their_frozen_view_and_are_still_browsable",
+      "test_one_million_production_and_one_million_uat_never_make_a_two_million_default",
+      "frontend/src/stores/portfoliosScope.test.js",
+      "frontend/src/views/RiskManagementView.test.js"
+    ],
+    "production_default": true,
+    "uat_explicit": true,
+    "mixed_implicit": false,
+    "consumers": [
+      "risk",
+      "exposure",
+      "barriers",
+      "portfolio_count",
+      "shock",
+      "smile",
+      "pnl",
+      "var",
+      "histories"
+    ],
+    "risk_origin": "Deal.uat_batch_id absent=PRODUCTION; present=UAT",
+    "c01_visibility_before_origin_filter": true,
+    "private_calculation_history": true,
+    "frozen_deal_universe_and_view": true,
+    "history_filter_before_limit": true,
+    "legacy_not_relabelled": true,
+    "unknown_var_view_is_unqualified": true,
+    "archived_portfolio_views_browsable": true,
+    "archived_json_preserved": true,
+    "per_deal_shock_uses_its_own_origin": true,
+    "explicit_mismatch_rejected": true,
+    "context_generation_and_polling_guards": true,
+    "demo_real_import_c24_revalidated": true,
+    "c21_var_factor_coverage_revalidated": true,
+    "c26_official_and_alert_retry_revalidated": true,
+    "example": {
+      "production_nominal": 1000000,
+      "uat_nominal": 1000000,
+      "default_exposure": 1000000,
+      "default_shock_universe": 1000000
+    }
+  },
+  "network": {
+    "external_http_disabled": true,
+    "blocked_attempts": 0
+  },
+  "limits": [
+    "No full backend suite",
+    "New selection tests simulate quantitative boundaries; existing shock/P&L tests rerun",
+    "No interactive GUI or deployed qualification",
+    "T10 and T14 transverse deployed qualification remains partial",
+    "No historical provenance inferred when origin or portfolio view is absent",
+    "No volumetric benchmark"
+  ],
+  "artifact_root": ".runtime/diagnostic-acceptance/c27-2026-10-22",
+  "commit": false,
+  "push": false,
+  "server_started": false,
+  "preservation": {
+    "initial_files": 1276,
+    "unchanged": 1264,
+    "expected_changed": [
+      "backend/app/api/portfolios.py",
+      "backend/app/api/shocks.py",
+      "backend/app/api/var.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "frontend/src/stores/portfolios.js",
+      "frontend/src/stores/portfolios.test.js",
+      "frontend/src/views/BookingView.vue",
+      "frontend/src/views/RiskManagementView.test.js",
+      "frontend/src/views/RiskManagementView.vue"
+    ],
+    "new": [
+      "backend/app/core/risk_scope.py",
+      "backend/tests/test_risk_scope_c27.py",
+      "docs/audits/REMEDIATION_C27_2026-10-22.md",
+      "docs/audits/remediation-lot-0-2026-10-20/C27_VALIDATION.json",
+      "frontend/src/stores/portfoliosScope.test.js",
+      "frontend/src/utils/riskScope.js"
+    ],
+    "all_other_versioned_and_untracked_files_unchanged": true,
+    "previous_audit_evidence_unchanged": true,
+    "dist_unchanged": true,
+    "real_db_absent": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "unrelated_registry_entries_unchanged": true,
+    "incremental_whitespace_errors": 0
+  },
+  "source_sha256": {
+    "backend/app/api/portfolios.py": "8fb2ace688c028f055390d8e2a8d95079568576525623fa69d1972e31bd891bb",
+    "backend/app/api/shocks.py": "0eea7ed6b752f2f30abee2c979e249ff80451bbb1e78ef8c4d99a7b5784dc61a",
+    "backend/app/api/var.py": "0d1383757ece216c9aebfeb6da9853088e64fd9ef2dcae9c5d60ce94ef6e05b4",
+    "backend/app/core/risk_scope.py": "3e332f263f963bb5462c6f2288d9249a0e43eb4e7c6c8a5f2bf00cf56659fe00",
+    "backend/tests/test_risk_scope_c27.py": "69eb9a716973a8fe931b38c13a608151edf5df84fb5ded0a0b1e178c38cd1897",
+    "frontend/src/stores/portfolios.js": "50b63a95db1925ae78f5d095b368f01405f220c8cd80e6f1bc71ea830ef536c5",
+    "frontend/src/stores/portfolios.test.js": "40807a44c30a29d20e341045020b724a04bed4821c0b5b5778e11b78f78cb48f",
+    "frontend/src/stores/portfoliosScope.test.js": "33454457c1bf6fea25f5c095500d23099d7fe88199f0e89a42fd73bb32fccddb",
+    "frontend/src/utils/riskScope.js": "d674a05c4ebfa7850849be0063af6e6166d74e226ff2da1b88e3fa152fba6dc5",
+    "frontend/src/views/BookingView.vue": "a02f41bb2cf50205e9f21f2d4219d2b161d9d0f9f06d0e74ad17ec982cfcb841",
+    "frontend/src/views/RiskManagementView.test.js": "621ea4ef796625aa95addd8939453a8104e0550ce22c3455463319c9fae3a697",
+    "frontend/src/views/RiskManagementView.vue": "02ae33de5cb35082feeb71405a05e0092d43bab0ef47c5bc4e5f1f20b5004865"
+  }
+}

@@ -20,6 +20,7 @@
       <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
       <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
+      <label class="card label">Motif de la modification du référentiel<input v-model="changeReason" class="input" minlength="3" maxlength="500" placeholder="Motif explicite, conservé dans l’audit" /></label>
       <div class="card overflow-x-auto">
         <LoadingSpinner v-if="loading" class="py-6" />
         <table v-else class="w-full text-xs">
@@ -54,7 +55,7 @@
                        @change="updateCpty(c, { limit_eur: $event.target.value === '' ? null : Number($event.target.value) })" />
               </td>
               <td class="py-1.5 pr-3 text-right">
-                <button class="icon-btn-danger" title="Supprimer" aria-label="Supprimer la contrepartie" @click="deleteCpty(c)">🗑</button>
+                <button class="icon-btn-danger" title="Désactiver" aria-label="Supprimer la contrepartie" @click="deleteCpty(c)">🗑</button>
               </td>
             </tr>
           </tbody>
@@ -85,6 +86,7 @@ import AlertMessage from '../components/ui/AlertMessage.vue'
 
 const counterparties = ref([])
 const loading    = ref(true)
+const changeReason = ref('')
 const error      = ref('')
 const notice     = ref('')
 const creating   = ref(false)
@@ -107,6 +109,7 @@ async function fetchCptys() {
 onMounted(fetchCptys)
 
 async function createCpty() {
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite (3 caractères minimum).'; return }
   const name = newName.value.trim()
   if (!name) return
   creating.value = true
@@ -116,7 +119,7 @@ async function createCpty() {
     const res = await apiFetch('/api/admin/counterparties', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, country: newCountry.value.trim().toUpperCase() }),
+      body: JSON.stringify({ reason: changeReason.value, name, country: newCountry.value.trim().toUpperCase() }),
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur création')
     counterparties.value.push(await res.json())
@@ -132,13 +135,14 @@ async function createCpty() {
 }
 
 async function updateCpty(c, payload) {
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite (3 caractères minimum).'; return }
   error.value = ''
   notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/counterparties/${c.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, reason: changeReason.value }),
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur mise à jour')
     Object.assign(c, await res.json())
@@ -148,15 +152,16 @@ async function updateCpty(c, payload) {
 }
 
 async function deleteCpty(c) {
-  if (!await confirmer({ titre: `Supprimer « ${c.name} » ?`,
-                       message: 'Les deals existants gardent leur contrepartie en texte.',
-                       confirmer: 'Supprimer', danger: true })) return
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite (3 caractères minimum).'; return }
+  if (!await confirmer({ titre: `Désactiver « ${c.name} » ?`,
+                       message: 'L’identité et les liens historiques sont conservés. Les nouveaux bookings seront refusés.',
+                       confirmer: 'Désactiver', danger: true })) return
   error.value = ''
   notice.value = ''
   try {
-    const res = await apiFetch(`/api/admin/counterparties/${c.id}`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/admin/counterparties/${c.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: changeReason.value }) })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')
-    counterparties.value = counterparties.value.filter(x => x.id !== c.id)
+    c.active = false
   } catch (e) {
     error.value = e.message
   }

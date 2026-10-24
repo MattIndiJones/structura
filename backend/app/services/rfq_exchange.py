@@ -27,6 +27,15 @@ def round_for(session: Session, rfq_id: int):
     return session.exec(select(RfqExchangeRound).where(RfqExchangeRound.rfq_id == rfq_id)).first()
 
 
+def close_round(session, rfq, actor):
+    row = round_for(session, rfq.id)
+    if row and row.state == 'OPEN':
+        row.state = 'CLOSED'
+        session.add(row)
+        record_audit_event(session, result='SUCCESS', action='RFQ_ROUND_CLOSED', object_type='RFQ_ROUND',
+                           object_id=row.id, actor_user_id=actor.id, after={'state':row.state})
+
+
 def identity(session: Session, rfq) -> dict:
     existing = round_for(session, rfq.id)
     link = session.get(RfqRoundLink, rfq.id)
@@ -46,14 +55,15 @@ def freeze(session: Session, rfq, request: dict, actor) -> RfqExchangeRound:
     round_identity = identity(session, rfq)
     previous = session.get(RfqExchangeRound, round_identity["previous_round_id"]) if round_identity["previous_round_id"] else None
     if previous:
-        if previous.state != "OPEN":
-            raise HTTPException(409, "Le tour précédent est déjà clôturé")
+        if previous.state not in {"OPEN", "CLOSED"}:
+            raise HTTPException(409, "Le tour précédent a déjà un successeur")
         if session.exec(select(Deal).where(Deal.rfq_id == previous.rfq_id)).first():
             raise HTTPException(409, "Le tour précédent a été booké")
-        previous.state = "SUPERSEDED"
-        session.add(previous)
-        record_audit_event(session, result="SUCCESS", action="RFQ_ROUND_SUPERSEDED", object_type="RFQ_ROUND",
-                           object_id=previous.id, actor_user_id=actor.id, after={"state": previous.state})
+        if previous.state == 'OPEN':
+            previous.state = "SUPERSEDED"
+            session.add(previous)
+            record_audit_event(session, result="SUCCESS", action="RFQ_ROUND_SUPERSEDED", object_type="RFQ_ROUND",
+                               object_id=previous.id, actor_user_id=actor.id, after={"state": previous.state})
     row = RfqExchangeRound(rfq_id=rfq.id, exchange_reference=round_identity["exchange_reference"],
         number=round_identity["round_number"], previous_round_id=round_identity["previous_round_id"],
         product_id=rfq.product_id, terms_version=request["terms_version"],

@@ -16,27 +16,26 @@ import pandas as pd
 import pytest
 
 import backend.app.services.market_data as md
+from backend.app.core import market_policy
+
+
+@pytest.fixture(autouse=True)
+def isolated_store(monkeypatch, tmp_path):
+    monkeypatch.setenv('STRUCTURA_DATA_DIR', str(tmp_path))
+    monkeypatch.setattr(market_policy, 'HISTORY_MAX_AGE_DAYS', 3)
 
 
 @pytest.fixture
 def source(monkeypatch):
     """Une source qui compte ses interrogations."""
     compteur = {"n": 0}
-    index = pd.to_datetime(["2024-06-14", "2024-06-17", "2024-06-18"])
-
-    class _Hist:
-        empty = False
-        columns = ["Close"]
-        def __init__(self): self._i = index
-        def __getitem__(self, k): return pd.Series([100.0, 101.0, 99.0], index=self._i)
-        @property
-        def index(self): return self._i
-        @index.setter
-        def index(self, v): self._i = v
+    index = pd.bdate_range('2024-01-01', '2026-06-14')
 
     class _Ticker:
         def __init__(self, tk): compteur["n"] += 1
-        def history(self, **kw): return _Hist()
+        def history(self, **kw):
+            days = index[(index >= pd.Timestamp(kw['start'])) & (index < pd.Timestamp(kw['end']))]
+            return pd.DataFrame({'Close':100.0}, index=days)
 
     monkeypatch.setattr(md, "yf", type("YF", (), {"Ticker": _Ticker}))
     monkeypatch.setattr(md, "_HAS_YF", True)
@@ -66,26 +65,31 @@ def test_l_ordre_des_tickers_ne_cree_pas_deux_entrees(source):
     {"end": "2025-01-01"},
     {"adjusted": True},
 ])
-def test_une_demande_differente_retelecharge(source, variation):
+def test_une_demande_differente_revalide_sa_couverture(source, variation):
     """Le cache ne doit jamais rendre l'historique d'une AUTRE demande. Un cours
     ajusté n'est pas un cours nu, et une fenêtre plus longue n'est pas la même
     série — les confondre donnerait des fixings faux."""
     base = dict(tickers=["A.PA", "B.MI"], start="2024-06-14", end="2026-06-14")
     md.load_hist_prices(**base)
     avant = source["n"]
-    md.load_hist_prices(**{**base, **variation})
-    assert source["n"] > avant
+    result = md.load_hist_prices(**{**base, **variation})
+    assert not result.get('error')
+    assert result['requested_start'] == variation.get('start', base['start'])
+    assert result['requested_end'] == variation.get('end', base['end'])
+    if 'end' in variation:
+        assert source['n'] == avant  # Existing observations cover this shorter window.
+    else:
+        assert source['n'] > avant
 
 
-def test_le_cache_expire(source, monkeypatch):
-    """TTL court plutôt que cache de session : en séance, un cours doit pouvoir
-    bouger."""
+def test_le_cache_expire_mais_le_stock_qualifie_est_reutilise(source, monkeypatch):
+    """Memory expiry revalidates the dated local stock before another fetch."""
     md.load_hist_prices(["A.PA"], "2024-06-14", "2026-06-14")
     assert source["n"] == 1
     faux_temps = md.time.monotonic() + md._TTL_PRIX + 1
     monkeypatch.setattr(md.time, "monotonic", lambda: faux_temps)
     md.load_hist_prices(["A.PA"], "2024-06-14", "2026-06-14")
-    assert source["n"] == 2
+    assert source["n"] == 1
 
 
 def test_l_appelant_ne_peut_pas_muter_le_cache(source):

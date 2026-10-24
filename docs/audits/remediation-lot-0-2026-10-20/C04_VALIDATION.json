@@ -1,0 +1,403 @@
+{
+  "date": "2026-10-20",
+  "timezone": "Europe/Berlin",
+  "workstream": "C04",
+  "status": "Validated locally; no global, graphical or production closure",
+  "depends_on": [
+    "C01",
+    "C03"
+  ],
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "baseline": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c04-baseline-c5d4c0b670d84fe5b7e932eeb8cff2ee",
+  "authorization": {
+    "code_and_targeted_tests": true,
+    "commit": false,
+    "push": false,
+    "live_business_database_mutation": false
+  },
+  "scope": {
+    "findings": [
+      "M02-07",
+      "M11-02",
+      "M15-06"
+    ],
+    "decisions_changed": [],
+    "partial_numeric_guard": "M11-06 remains open under C07; numeric amendments now finite"
+  },
+  "backend": {
+    "passed": 164,
+    "failed": 0,
+    "duration_seconds": 76.7,
+    "new_c04_cases": 30,
+    "distinct_files": 13,
+    "full_backend_suite_run": false,
+    "log": ".runtime/diagnostic-acceptance/c04-2026-10-20/backend-final.log",
+    "test_ids": [
+      "backend/tests/test_economic_amendments.py::test_limit_blocks_two_million_atomically_but_accepts_replacement_at_1_4m",
+      "backend/tests/test_economic_amendments.py::test_current_policy_and_other_positions_are_reread_at_application",
+      "backend/tests/test_economic_amendments.py::test_concentration_and_limit_survive_rename_inactive_bank_and_historical_labels",
+      "backend/tests/test_economic_amendments.py::test_unknown_same_name_exception_and_missing_fx_remain_explicit",
+      "backend/tests/test_economic_amendments.py::test_measured_limit_missing_data_blocks_then_qualified_current_value_is_used",
+      "backend/tests/test_economic_amendments.py::test_qualified_native_measures_drive_replacement_decision[1400000-True-current_exposure-1500000]",
+      "backend/tests/test_economic_amendments.py::test_qualified_native_measures_drive_replacement_decision[1400000-True-pfe95-1500000]",
+      "backend/tests/test_economic_amendments.py::test_qualified_native_measures_drive_replacement_decision[1400000-True-pfe99-1500000]",
+      "backend/tests/test_economic_amendments.py::test_qualified_native_measures_drive_replacement_decision[1400000-True-cva-60000]",
+      "backend/tests/test_economic_amendments.py::test_qualified_native_measures_drive_replacement_decision[2000000-False-current_exposure-1500000]",
+      "backend/tests/test_economic_amendments.py::test_qualified_native_measures_drive_replacement_decision[2000000-False-pfe95-1500000]",
+      "backend/tests/test_economic_amendments.py::test_qualified_native_measures_drive_replacement_decision[2000000-False-pfe99-1500000]",
+      "backend/tests/test_economic_amendments.py::test_qualified_native_measures_drive_replacement_decision[2000000-False-cva-60000]",
+      "backend/tests/test_economic_amendments.py::test_changed_payment_horizon_cannot_reuse_old_measured_value",
+      "backend/tests/test_economic_amendments.py::test_d01_attestation_does_not_authorize_later_nominal_change",
+      "backend/tests/test_economic_amendments.py::test_full_measured_limits_are_never_cleared_by_nominal_only_data[pfe95]",
+      "backend/tests/test_economic_amendments.py::test_full_measured_limits_are_never_cleared_by_nominal_only_data[pfe99]",
+      "backend/tests/test_economic_amendments.py::test_full_measured_limits_are_never_cleared_by_nominal_only_data[ead]",
+      "backend/tests/test_economic_amendments.py::test_full_measured_limits_are_never_cleared_by_nominal_only_data[cva]",
+      "backend/tests/test_economic_amendments.py::test_full_measured_limits_are_never_cleared_by_nominal_only_data[stressed_exposure]",
+      "backend/tests/test_economic_amendments.py::test_http_c01_permissions_and_shared_operations_amendment[standalone]",
+      "backend/tests/test_economic_amendments.py::test_http_c01_permissions_and_shared_operations_amendment[organization]",
+      "backend/tests/test_economic_amendments.py::test_non_finite_numeric_amendments_are_rejected[inf]",
+      "backend/tests/test_economic_amendments.py::test_non_finite_numeric_amendments_are_rejected[nan]",
+      "backend/tests/test_economic_amendments.py::test_non_finite_numeric_amendments_are_rejected[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+      "backend/tests/test_economic_amendments.py::test_credit_evidence_migration_is_additive_and_idempotent",
+      "backend/tests/test_economic_amendments.py::test_read_scope_and_strict_checker_scope_remain_identical_to_c01[standalone]",
+      "backend/tests/test_economic_amendments.py::test_read_scope_and_strict_checker_scope_remain_identical_to_c01[organization]",
+      "backend/tests/test_economic_amendments.py::test_replacement_uat_is_scoped_to_its_batch_without_production_consumption",
+      "backend/tests/test_economic_amendments.py::test_two_concurrent_amendments_cannot_both_consume_the_same_remaining_limit",
+      "backend/tests/test_legal_identity_workflows.py::test_provider_rename_and_reassignment_never_reassign_historical_quotes",
+      "backend/tests/test_legal_identity_workflows.py::test_unfrozen_quote_requires_explicit_audited_qualification",
+      "backend/tests/test_legal_identity_workflows.py::test_network_mapping_accepts_different_local_name_and_refuses_inactive_id",
+      "backend/tests/test_legal_identity_workflows.py::test_direct_booking_rejects_missing_unknown_or_inconsistent_legal_identity[changes0]",
+      "backend/tests/test_legal_identity_workflows.py::test_direct_booking_rejects_missing_unknown_or_inconsistent_legal_identity[changes1]",
+      "backend/tests/test_legal_identity_workflows.py::test_direct_booking_rejects_missing_unknown_or_inconsistent_legal_identity[changes2]",
+      "backend/tests/test_legal_identity_workflows.py::test_legal_amendment_updates_deal_product_and_keeps_original_snapshot",
+      "backend/tests/test_legal_identity_workflows.py::test_legal_amendment_credit_refusal_has_no_partial_mutation",
+      "backend/tests/test_legal_identity_workflows.py::test_real_credit_limit_blocks_bank_transfer_without_rewriting_contract",
+      "backend/tests/test_legal_identity_workflows.py::test_trailing_space_cannot_bypass_a_real_booking_credit_limit",
+      "backend/tests/test_booking_legal_exception.py::test_http_permissions_default_refusal_and_admin_atomic_acceptance[standalone]",
+      "backend/tests/test_booking_legal_exception.py::test_http_permissions_default_refusal_and_admin_atomic_acceptance[organization]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes0]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes1]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes2]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes3]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes4]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes5]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes6]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes7]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes8]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_cannot_reactivate_inactive_bank_or_skip_known_credit_limit",
+      "backend/tests/test_booking_legal_exception.py::test_exception_never_replaces_rfq_or_pricing_or_economics[changes0]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_never_replaces_rfq_or_pricing_or_economics[changes1]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_never_replaces_rfq_or_pricing_or_economics[changes2]",
+      "backend/tests/test_booking_legal_exception.py::test_regularization_checks_credit_preserves_exception_and_original_contract",
+      "backend/tests/test_booking_legal_exception.py::test_exception_column_migration_is_additive_idempotent_and_does_not_qualify_legacy",
+      "backend/tests/test_booking_legal_exception.py::test_audit_failure_rolls_back_deal_product_and_exception",
+      "backend/tests/test_workflow_phase2.py::test_maturity_label_is_semantic_not_a_payout_threshold",
+      "backend/tests/test_workflow_phase2.py::test_explicit_script_ki_state_drives_the_label",
+      "backend/tests/test_workflow_phase2.py::test_path_dependent_official_replay_fails_closed",
+      "backend/tests/test_workflow_phase2.py::test_partial_official_fixing_prefix_cannot_manufacture_maturity",
+      "backend/tests/test_workflow_phase2.py::test_auto_yahoo_refresh_uses_official_replay_as_lifecycle_truth",
+      "backend/tests/test_workflow_phase2.py::test_auto_yahoo_stops_before_observations_after_an_autocall",
+      "backend/tests/test_workflow_phase2.py::test_admin_can_run_mtm_and_greeks_on_a_foreign_uat_deal",
+      "backend/tests/test_workflow_phase2.py::test_admin_refresh_uses_current_scope_without_foreign_unbound_alerts",
+      "backend/tests/test_workflow_phase2.py::test_admin_watchlist_includes_foreign_uat_deals",
+      "backend/tests/test_workflow_phase2.py::test_watchlist_filters_on_commercial_ids_without_requiring_them",
+      "backend/tests/test_workflow_phase2.py::test_watchlist_row_exposes_commercial_ids_without_changing_counterparty",
+      "backend/tests/test_workflow_phase2.py::test_validation_freezes_official_replay_and_application_uses_it",
+      "backend/tests/test_workflow_phase2.py::test_payout_difference_above_currency_tolerance_blocks_authorization",
+      "backend/tests/test_workflow_phase2.py::test_deal_owner_cannot_authorize_own_lifecycle_resolution",
+      "backend/tests/test_workflow_phase2.py::test_fixing_maker_cannot_authorize_resolution_that_consumes_own_fixing",
+      "backend/tests/test_workflow_phase2.py::test_official_indicative_outcome_mismatch_blocks_validation",
+      "backend/tests/test_workflow_phase2.py::test_amendment_requires_four_eyes_and_applies_exactly_once",
+      "backend/tests/test_workflow_phase2.py::test_payment_amendment_versions_the_product_terms_and_execution",
+      "backend/tests/test_workflow_phase2.py::test_commercial_attribution_always_requires_four_eyes",
+      "backend/tests/test_workflow_phase2.py::test_amendment_is_carried_through_by_its_own_maker_by_default",
+      "backend/tests/test_workflow_phase2.py::test_single_signature_mode_still_refuses_a_foreign_user",
+      "backend/tests/test_workflow_phase2.py::test_amendment_checker_is_entity_scoped",
+      "backend/tests/test_workflow_phase2.py::test_pricing_or_calendar_amendment_requires_rebooking",
+      "backend/tests/test_workflow_phase2.py::test_deal_audit_timeline_is_owner_scoped_and_filterable",
+      "backend/tests/test_workflow_phase2.py::test_deal_audit_timeline_excludes_rows_from_a_recycled_legacy_id",
+      "backend/tests/test_ccr_api.py::test_http_configuration_calculation_replay_and_scope",
+      "backend/tests/test_ccr_api.py::test_anonymous_ccr_is_not_accessible",
+      "backend/tests/test_ccr_api.py::test_rfq_uses_explicit_provider_mapping_and_frozen_engine_units",
+      "backend/tests/test_ccr_scope.py::test_scopes_batch_portfolio_and_entity_are_intersected",
+      "backend/tests/test_ccr_scope.py::test_uat_uses_identical_engine_and_cannot_replace_production_monitor",
+      "backend/tests/test_ccr_scope.py::test_empty_scope_and_missing_mtm_are_explained",
+      "backend/tests/test_ccr_scope.py::test_suggested_dates_account_for_historical_deal_scope",
+      "backend/tests/test_ccr_scope.py::test_historical_scope_excludes_paid_early_call_despite_original_payment_date",
+      "backend/tests/test_ccr.py::test_limit_boundaries[70-OK]",
+      "backend/tests/test_ccr.py::test_limit_boundaries[80-WARNING]",
+      "backend/tests/test_ccr.py::test_limit_boundaries[90-WARNING]",
+      "backend/tests/test_ccr.py::test_limit_boundaries[100-LIMIT_REACHED]",
+      "backend/tests/test_ccr.py::test_limit_boundaries[110-BREACH]",
+      "backend/tests/test_ccr.py::test_limit_boundaries[None-MISSING_DATA]",
+      "backend/tests/test_ccr.py::test_no_limit_never_ok_and_currency_not_assumed",
+      "backend/tests/test_ccr.py::test_isda_alone_never_nets_and_different_sets_never_net",
+      "backend/tests/test_ccr.py::test_actual_mc_standalone_and_incremental_hedge_reproducible",
+      "backend/tests/test_ccr.py::test_standalone_without_counterparty_and_new_trade_increases_pfe",
+      "backend/tests/test_ccr.py::test_collateral_sign_im_haircut_and_unknown_mpor",
+      "backend/tests/test_ccr.py::test_cva_analytic_and_historical_pd_not_labelled_cva",
+      "backend/tests/test_ccr.py::test_unsupported_model_and_missing_valuation_never_zero_pfe",
+      "backend/tests/test_ccr.py::test_schema_and_tenant_audit_optimistic_lock",
+      "backend/tests/test_ccr.py::test_matured_cash_is_exposed_until_payment_then_zero",
+      "backend/tests/test_ccr.py::test_autocall_does_not_erase_unpaid_receivable",
+      "backend/tests/test_ccr.py::test_separate_sets_and_non_enforceable_agreements_do_not_offset",
+      "backend/tests/test_ccr.py::test_market_and_credit_stress_reuses_pricer_without_overwriting_base",
+      "backend/tests/test_ccr.py::test_hard_block_at_real_booking_boundary_keeps_pricing_available",
+      "backend/tests/test_ccr.py::test_additive_migration_preserves_old_unknown_data",
+      "backend/tests/test_ccr.py::test_settlement_only_horizon_covers_payment_and_credit_stress",
+      "backend/tests/test_ccr.py::test_legacy_user_cannot_bypass_configured_credit_policy",
+      "backend/tests/test_ccr.py::test_credit_adjusted_price_does_not_clear_current_exposure_limit",
+      "backend/tests/test_ccr.py::test_posted_collateral_outside_eligible_sets_is_not_silently_omitted",
+      "backend/tests/test_risk_dates.py::test_risk_uses_the_snapshot_for_the_selected_date_and_grays_outside_life",
+      "backend/tests/test_risk_dates.py::test_risk_does_not_reuse_greeks_from_another_date",
+      "backend/tests/test_portfolios_crud.py::test_portfolio_count_uses_the_live_risk_perimeter",
+      "backend/tests/test_portfolios_crud.py::test_legacy_pointer_is_backfilled_once_and_default_lock_is_retired",
+      "backend/tests/test_portfolios_crud.py::test_admin_lists_every_owners_portfolios_while_user_stays_scoped",
+      "backend/tests/test_portfolios_crud.py::test_admin_assigns_a_deal_only_to_a_portfolio_of_its_owner",
+      "backend/tests/test_portfolios_crud.py::test_same_deal_can_belong_to_multiple_portfolios",
+      "backend/tests/test_portfolios_crud.py::test_admin_deletes_portfolio_without_deleting_deal_or_other_membership",
+      "backend/tests/test_portfolios_crud.py::test_admin_creates_a_portfolio_for_the_selected_account",
+      "backend/tests/test_business_permissions.py::test_agreement_permission_matrix_and_audited_denials[standalone]",
+      "backend/tests/test_business_permissions.py::test_agreement_permission_matrix_and_audited_denials[organization]",
+      "backend/tests/test_business_permissions.py::test_settlement_is_operations_only_idempotent_and_dates_are_distinct[standalone]",
+      "backend/tests/test_business_permissions.py::test_settlement_is_operations_only_idempotent_and_dates_are_distinct[organization]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price/in-life]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price/implied-funding]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/solve]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/grid]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/scenarios]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/product-optimizer/run]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/compute/batches]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price/in-life]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price/implied-funding]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/solve]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/grid]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/scenarios]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/product-optimizer/run]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/compute/batches]",
+      "backend/tests/test_business_permissions.py::test_front_colleague_operations_controller_handoff_and_revocation[standalone]",
+      "backend/tests/test_business_permissions.py::test_front_colleague_operations_controller_handoff_and_revocation[organization]",
+      "backend/tests/test_business_permissions.py::test_manual_refresh_only_processes_the_shared_visible_book[standalone]",
+      "backend/tests/test_business_permissions.py::test_manual_refresh_only_processes_the_shared_visible_book[organization]",
+      "backend/tests/test_business_permissions.py::test_booking_review_refuses_stale_or_missing_evidence[standalone]",
+      "backend/tests/test_business_permissions.py::test_booking_review_refuses_stale_or_missing_evidence[organization]",
+      "backend/tests/test_business_permissions.py::test_historical_rfq_without_desk_keeps_personal_access[standalone]",
+      "backend/tests/test_business_permissions.py::test_historical_rfq_without_desk_keeps_personal_access[organization]",
+      "backend/tests/test_business_permissions.py::test_operational_valuation_keeps_contract_scope[standalone]",
+      "backend/tests/test_business_permissions.py::test_operational_valuation_keeps_contract_scope[organization]",
+      "backend/tests/test_business_permissions.py::test_shared_collections_and_documents_keep_contract_authorization[standalone]",
+      "backend/tests/test_business_permissions.py::test_shared_collections_and_documents_keep_contract_authorization[organization]",
+      "backend/tests/test_business_permissions.py::test_crm_details_aggregates_signals_and_alerts_follow_deal_scope[standalone]",
+      "backend/tests/test_business_permissions.py::test_crm_details_aggregates_signals_and_alerts_follow_deal_scope[organization]",
+      "backend/tests/test_business_permissions.py::test_scope_migration_freezes_owner_and_keeps_unknown_settlement_dates",
+      "backend/tests/test_market_data_lot4.py::test_known_maturity_cashflow_is_valued_until_payment_and_kept_in_var",
+      "backend/tests/test_ccr_cache.py::test_cached_base_keeps_fresh_limits_and_credit_stress",
+      "backend/tests/test_ccr_cache.py::test_cache_invalidates_contract_events_market_scope_and_engine",
+      "backend/tests/test_ccr_preparation.py::test_stream_prepares_settlement_and_archives_without_changing_booking",
+      "backend/tests/test_ccr_preparation.py::test_missing_mtm_is_built_with_actual_residual_engine_and_manual_history"
+    ],
+    "latest_audit_assertion_run": ".runtime/diagnostic-acceptance/c04-2026-10-20/backend-audit-recheck.log"
+  },
+  "frontend": {
+    "passed": 475,
+    "failed": 0,
+    "files": 63,
+    "new_cases": 5,
+    "vite_build_succeeded": true,
+    "build_seconds": 16.03,
+    "command": "npm.cmd run build -- --outDir <temporary directory>",
+    "output_directory": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c04-final-build-ca2d8bb7fb4041b58cdbfa53fa021edf",
+    "log": ".runtime/diagnostic-acceptance/c04-2026-10-20/frontend-final.log"
+  },
+  "operational_impact": [
+    "Concentration and monitoring limits keyed by legal ID; unknown identities and FX gaps explicitly incomplete",
+    "Risk-changing amendments require active local legal ID; D01 booking exception not reused",
+    "Current policy evaluates resulting portfolio by replacing original Deal once, under write lock",
+    "Measured limits require dated, version-compatible frozen valuations; booking receipt never substituted",
+    "Credit proof stored on amendment, new contract snapshot, Product execution and audit transaction",
+    "Managed preparation/mono-signature: operations.prepare; strict decisions: operations.validate and distinct actor; readable contract required",
+    "Additive nullable credit_check_json migration; no invented proof for existing requests"
+  ],
+  "coverage_limits": [
+    "No manual graphical acceptance or real installation restart/migration",
+    "T05 partial on C03/C04; general numerical PFE/CVA qualification remains in C21",
+    "Changed payment horizon under measured limit fails closed; new pre-amendment qualification workflow not supplied",
+    "Global historical Production/UAT filtering remains C27",
+    "Local amendment is not external RFQ reconfirmation or bilateral reconciliation",
+    "Initial collection attempt selected an incorrect node; two old CCR fixtures required C01 role/C03 ID alignment; earlier attempts are not final acceptance"
+  ],
+  "integrity": {
+    "prior_changes_preserved": true,
+    "no_preexisting_files_removed": true,
+    "dist_unchanged": true,
+    "business_database_hash_unchanged": true,
+    "prior_c01_c02_c03_reports_and_evidence_unchanged": true,
+    "incremental_whitespace_checks_passed": true,
+    "head_unchanged": true,
+    "preexisting_global_whitespace_issue": "backend/app/api/opportunities.py:625 extra blank line at EOF; unchanged from C04 baseline",
+    "cleanup_path": ".runtime/diagnostic-acceptance/c04-2026-10-20/process-cleanup.json",
+    "cleanup_sha256": "b67032d1341560ebf037fef63218495782436d79b128ee3d582cecb1091f5570",
+    "remaining_python_processes": 0
+  },
+  "logs": [
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/backend-audit-recheck.log",
+      "sha256": "a6e033e659faf43c2431895429e5fbcfdb18147dd7be203675ca1faa7dc0b4cf",
+      "primary_positive_evidence": true
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/backend-collection-attempt.log",
+      "sha256": "786c45e70345047074261d24d6444f0df2b1b85875ac96bed263091278817dc1",
+      "primary_positive_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/backend-credit-final.log",
+      "sha256": "608fa4ff27df0f1aa5da889eddbb36cc75cd4c4a043e87df5964e50d1332ad80",
+      "primary_positive_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/backend-final.log",
+      "sha256": "6a6bf0953da10907013c52a493c7066cb9699d07a55444bc07a2590878857cf4",
+      "primary_positive_evidence": true
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/backend-initial.log",
+      "sha256": "604cf3e0c9b131e33be83421020daae5c6305ead8bcf0e3467b94569cfd35b29",
+      "primary_positive_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/backend-targeted.log",
+      "sha256": "f6f5b1ed4e807993a689c38095685834f05e6a7e9e019a0afcbb50e7751099c5",
+      "primary_positive_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/collected-tests.log",
+      "sha256": "5a618e7c26c41f3e8dc66644b535fa509b54af858ed5774661c821275f87dd98",
+      "primary_positive_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/frontend-build.log",
+      "sha256": "927d41a46f3f92fe026c19f32c4f9de7eb6d41737014de7ab54dd0cb51d14166",
+      "primary_positive_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/frontend-final.log",
+      "sha256": "099209386e2455dd8fcf379ef41203a20c5c343ed901976e5f5c969325f39aef",
+      "primary_positive_evidence": true
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/frontend-initial.log",
+      "sha256": "c1cdfeb8e39bf461a90bd418ccbbd6299246c0f24c9b25f147f9a64645237561",
+      "primary_positive_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/frontend-targeted.log",
+      "sha256": "4df45d4085da4834cf741fdfca8cb094e8fcb6f20e33f816d504649d4fbc311f",
+      "primary_positive_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/global-diff-check.log",
+      "sha256": "19020c46dd6ea2b46165eb1c66819d64b37bd294dbffc56a8863f9a381752a47",
+      "primary_positive_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c04-2026-10-20/incremental-diff-check.log",
+      "sha256": "b5881c2fc6171b02a0ba30840c4b0e807676c059438aaf24223ee1a41391acd2",
+      "primary_positive_evidence": false
+    }
+  ],
+  "source_and_document_files": [
+    {
+      "path": "backend/app/api/deals.py",
+      "sha256": "42366e4a46ce3fc622b4d675d4fcb7c5d899a787af61c76cba35326a452de0e0",
+      "status": "changed"
+    },
+    {
+      "path": "backend/app/api/portfolios.py",
+      "sha256": "3bc146a82adc42a4621802c4f5babd977ebf4622078480c6a7750cd66c683ff6",
+      "status": "changed"
+    },
+    {
+      "path": "backend/app/core/ccr/service.py",
+      "sha256": "e77639f6a34db624db8b706b259f418c3e65f527ab204fd7679d8ecb8ca19e60",
+      "status": "changed"
+    },
+    {
+      "path": "backend/app/db/database.py",
+      "sha256": "a03a3e15bdc78a2f5e2bc2224f8937d028be09011cc6f7485c338bfcc7b1ce03",
+      "status": "changed"
+    },
+    {
+      "path": "backend/app/db/models.py",
+      "sha256": "558f6573064ca251b09e70c3583e7876cc6a7bbc88b44bf52bbfa34e28c0d652",
+      "status": "changed"
+    },
+    {
+      "path": "backend/tests/test_ccr.py",
+      "sha256": "33c9487955d30d81cb763279fe8d0fc67f6ab031675624b9e96380b4cc5998c2",
+      "status": "changed"
+    },
+    {
+      "path": "backend/tests/test_economic_amendments.py",
+      "sha256": "6b32fb2b5f06289d6ce7930ec7de69f5d2c7790ab534c797ecfad34fb13bed8d",
+      "status": "added"
+    },
+    {
+      "path": "backend/tests/test_legal_identity_workflows.py",
+      "sha256": "07fbcc93d478303967eb0ae4bc346d8da4df2a37788a388661d62dc23007e72f",
+      "status": "changed"
+    },
+    {
+      "path": "backend/tests/test_workflow_phase2.py",
+      "sha256": "9f6320576a0b2caf4b5f8b34eb9880c9b28a5f32eaa5253e4af5dfdc2a3f0326",
+      "status": "changed"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "d0fc93fccef217a0dd11b88739cf86a84ca8552d0a75dd7f37d4827d9d1d1b0c",
+      "status": "changed"
+    },
+    {
+      "path": "docs/audits/REMEDIATION_C04_2026-10-20.md",
+      "sha256": "61ce36835ce4da23bc4f119691f1494a6c4de50ce582df8a96b665c3c1be6c8e",
+      "status": "added"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "sha256": "7b141acd20c4fe06d501bedda69f773e694a3f0a536edba8770b91535de70f3c",
+      "status": "changed"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "sha256": "2ab98caee52c84a858a47ab15b4b7aa36fa3506a1f1bb6265c7966189d8265e2",
+      "status": "changed"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "sha256": "79664486ff2dc6d2e870dac3a100ecf5f33c608e62bb96a3813321d975c7c96e",
+      "status": "changed"
+    },
+    {
+      "path": "frontend/src/components/EventsTab.test.js",
+      "sha256": "d284e7793ef5ea242e498c4d4825dd13f50ee2c874853399a6c56153d714de8f",
+      "status": "added"
+    },
+    {
+      "path": "frontend/src/components/EventsTab.vue",
+      "sha256": "76f5141e8a8bccf62221e2771fc34f3a56c3c14c55d8101d55588493829dee55",
+      "status": "changed"
+    },
+    {
+      "path": "frontend/src/views/RiskManagementView.test.js",
+      "sha256": "c6328ee06571e46859313e405ee66c77dd8977c0f3768ce9c4c0045331c00064",
+      "status": "added"
+    },
+    {
+      "path": "frontend/src/views/RiskManagementView.vue",
+      "sha256": "adcb2b010c72eb4d289fccf0a724b99b6efb8b8a7ba6247efa136d54370f206a",
+      "status": "changed"
+    }
+  ]
+}

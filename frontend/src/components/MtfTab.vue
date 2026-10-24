@@ -40,10 +40,10 @@
           <SensitiveValue mode="input"><input v-model.number="form.n_dates" type="number" step="1" min="2" max="12" class="input" /></SensitiveValue>
         </div>
         <div>
-          <label class="label">Seed
-            <HelpTip text="Graine du générateur aléatoire pour les scénarios outer. Fixe le résultat pour permettre la reproductibilité — changer la seed déplace le bruit d'échantillonnage mais pas la distribution théorique sous-jacente." />
+          <label class="label">Graine fixe
+            <HelpTip text="Graine Monte Carlo imposée à 42 pour la reproductibilité des calculs de desk. Elle ne se modifie pas ici ; ces calculs ne constituent pas des réplications statistiques indépendantes." />
           </label>
-          <SensitiveValue mode="input"><input v-model.number="form.seed" type="number" class="input" /></SensitiveValue>
+          <SensitiveValue mode="input"><input :value="42" type="number" readonly aria-label="Graine Monte Carlo fixe" class="input" /></SensitiveValue>
         </div>
       </div>
       <div class="text-xs text-slate-600">
@@ -258,7 +258,7 @@ const histCanvas = ref(null)
 let fanChart = null
 let histChart = null
 
-const form = ref({ n_outer: 200, n_inner: 500, n_dates: 5, seed: 42 })
+const form = ref({ n_outer: 200, n_inner: 500, n_dates: 5 })
 const drillOpen = ref(false)
 const drillFocus = ref(null)
 const tileDateIdx = ref(0)

@@ -6,6 +6,18 @@
     "description": "Rappel au pair avec coupons cumulés dès que le worst-of atteint la barrière de rappel. À défaut, la protection du capital se juge à la dernière constatation.",
     "script": "UNDERLYING Basket\n\n# Autocall Athena — barrière de protection observée à maturité\nPARAM COUPON\nPARAM M_AC_BAR\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  SET PERF = WORSTOF(Basket.yield)\n  IF PERF >= M_AC_BAR:\n    PAY COUPON * INDEX \"Coupons cumulés\"\n    PAY 1 \"Capital — remboursement au rappel\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
     "script_hash": "e072633239f8e58d37ee96ec7bd716a76c7152fff8d5de7f141a6d97a104f9eb",
+    "payoff_qualification": {
+      "status": "REFERENCE_PATHS_PASSED",
+      "family": "autocall_athena",
+      "source_hash": "e072633239f8e58d37ee96ec7bd716a76c7152fff8d5de7f141a6d97a104f9eb",
+      "panel_version": "C09-v1",
+      "reference_panel_hash": "aac377c785a93baff011bbd4560678adab906e77ed5074df2a9cc9dd127d1d28",
+      "case_count": 78,
+      "parameter_affinity": {
+        "coupon": "AFFINE"
+      },
+      "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+    },
     "script_parameters": [
       {
         "name": "COUPON",
@@ -447,6 +459,18 @@
     "description": "Coupon versé à chaque constatation où le worst-of dépasse la barrière de coupon, rappel au pair au-dessus de la barrière de rappel. Protection du capital jugée à la dernière constatation.",
     "script": "UNDERLYING Basket\n\n# Phoenix — coupon conditionnel, barrière de protection observée à maturité\nPARAM COUPON\nPARAM M_AC_BAR\nPARAM M_CPN_BAR\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  SET CALL = INDIC(WORSTOF(Basket.yield) >= M_AC_BAR)\n  SET CPN = INDIC(WORSTOF(Basket.yield) >= M_CPN_BAR)\n  PAY CPN * COUPON \"Coupon conditionnel\"\n  IF CALL = 1:\n    PAY 1 \"Capital — remboursement au rappel\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
     "script_hash": "f7e3ef898dd55e1491279e486714bb8e10c3007e118e3acc1989de9c85a2ccab",
+    "payoff_qualification": {
+      "status": "REFERENCE_PATHS_PASSED",
+      "family": "phoenix",
+      "source_hash": "f7e3ef898dd55e1491279e486714bb8e10c3007e118e3acc1989de9c85a2ccab",
+      "panel_version": "C09-v1",
+      "reference_panel_hash": "5870449607ab7742f89ef5e2243b6d1a47453bafa54753e30535f98649602e5c",
+      "case_count": 78,
+      "parameter_affinity": {
+        "coupon": "AFFINE"
+      },
+      "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+    },
     "script_parameters": [
       {
         "name": "COUPON",
@@ -968,6 +992,18 @@
     "description": "Phoenix dont les coupons manqués sont rattrapés à la première constatation où le worst-of repasse la barrière de coupon. Protection du capital jugée à la dernière constatation.",
     "script": "UNDERLYING Basket\n\n# Phoenix à coupon mémoire — les coupons manqués sont rattrapés\nPARAM COUPON\nPARAM M_AC_BAR\nPARAM M_CPN_BAR\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  IF WORSTOF(Basket.yield) >= M_CPN_BAR:\n    PAY COUPON * (INDEX - MEMO) \"Coupon et rattrapage\"\n    SET MEMO = INDEX\n  IF WORSTOF(Basket.yield) >= M_AC_BAR:\n    PAY 1 \"Remboursement anticipé\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
     "script_hash": "8a33f01e5db1a6824ccb57e427f7797da294b4050435f152c673569633af6d60",
+    "payoff_qualification": {
+      "status": "REFERENCE_PATHS_PASSED",
+      "family": "phoenix_memoire",
+      "source_hash": "8a33f01e5db1a6824ccb57e427f7797da294b4050435f152c673569633af6d60",
+      "panel_version": "C09-v1",
+      "reference_panel_hash": "1dd5e899f62939e29292cc83ef846beb8f564bec7cbcf10f6568a67e0a9a429f",
+      "case_count": 78,
+      "parameter_affinity": {
+        "coupon": "AFFINE"
+      },
+      "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+    },
     "script_parameters": [
       {
         "name": "COUPON",
@@ -1489,6 +1525,18 @@
     "description": "Athena dont la barrière de rappel change à chaque constatation : une ligne par constatation dans Economics, la dernière s'étend aux suivantes.",
     "script": "UNDERLYING Basket\n\n# Autocall à barrière de rappel dégressive — une barrière par constatation\nPARAM COUPON\nPARAM() M_AC_BAR\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  SET PERF = WORSTOF(Basket.yield)\n  IF PERF >= M_AC_BAR:\n    PAY COUPON * INDEX \"Coupons cumulés\"\n    PAY 1 \"Capital — remboursement au rappel\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
     "script_hash": "0b50f698da4235ee42159b9b874bb79dcecdb78d918ccca1242dfef6c1615474",
+    "payoff_qualification": {
+      "status": "REFERENCE_PATHS_PASSED",
+      "family": "autocall_barriere_degressive",
+      "source_hash": "0b50f698da4235ee42159b9b874bb79dcecdb78d918ccca1242dfef6c1615474",
+      "panel_version": "C09-v1",
+      "reference_panel_hash": "836ad8e8e271ce9fc87d266d6bfc768ce319a5430a643c1cdb898f863963c524",
+      "case_count": 78,
+      "parameter_affinity": {
+        "coupon": "AFFINE"
+      },
+      "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+    },
     "script_parameters": [
       {
         "name": "COUPON",
@@ -2054,6 +2102,18 @@
     "description": "Coupon garanti. Le capital est remboursé au pair si le worst-of est au-dessus de la barrière à la date de maturité, sinon il suit sa performance.",
     "script": "UNDERLYING Basket\n\n# Reverse convertible à barrière — coupon garanti, barrière observée à maturité\nPARAM COUPON\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  PAY COUPON \"Coupon\"\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_KI_BAR)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY -KI * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\"",
     "script_hash": "0f7b287e28377314587981c7fd5eea6f6d7621812ecc789ab3a6c2c04ad2ec7e",
+    "payoff_qualification": {
+      "status": "REFERENCE_PATHS_PASSED",
+      "family": "reverse_convertible",
+      "source_hash": "0f7b287e28377314587981c7fd5eea6f6d7621812ecc789ab3a6c2c04ad2ec7e",
+      "panel_version": "C09-v1",
+      "reference_panel_hash": "06ad2d2d7c6ef845d90dbce1911da937fa35296eec2da0b6d97a0c896eafe24c",
+      "case_count": 54,
+      "parameter_affinity": {
+        "coupon": "AFFINE"
+      },
+      "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+    },
     "script_parameters": [
       {
         "name": "COUPON",
@@ -2406,6 +2466,18 @@
     "description": "Capital remboursé au pair à maturité, plus une participation à la hausse du worst-of au-dessus du strike.",
     "script": "UNDERLYING Basket\n\n# Capital garanti — participation à la hausse au-dessus du strike\nPARAM PART\nPARAM STRIKE\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  PAY 1 \"Capital garanti\"\n  PAY MAX(0, WORSTOF(Basket.yield) - STRIKE) * PART \"Participation à la hausse\"",
     "script_hash": "8e6b78e68e0789ca8b9d1b3ad0c440f57201405aeafdd0ab82f25ab5828cf651",
+    "payoff_qualification": {
+      "status": "REFERENCE_PATHS_PASSED",
+      "family": "capital_garanti",
+      "source_hash": "8e6b78e68e0789ca8b9d1b3ad0c440f57201405aeafdd0ab82f25ab5828cf651",
+      "panel_version": "C09-v1",
+      "reference_panel_hash": "815eb8c6a3926eac5bc11d9f1926d4139cd8194303b2848d6bb9c90a211e58c9",
+      "case_count": 54,
+      "parameter_affinity": {
+        "participation": "AFFINE"
+      },
+      "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+    },
     "script_parameters": [
       {
         "name": "PART",
@@ -2594,6 +2666,19 @@
     "description": "Hausse du worst-of démultipliée et plafonnée ; baisse subie une pour une, sans protection.",
     "script": "UNDERLYING Basket\n\n# Booster — hausse démultipliée et plafonnée, baisse subie une pour une\nPARAM PART\nPARAM CAP\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  SET PERF = WORSTOF(Basket.yield)\n  PAY 1 \"Capital — remboursement à maturité\"\n  PAY INDIC(PERF >= 1) * (MIN(CAP, 1 + (PERF - 1) * PART) - 1) \"Participation plafonnée\"\n  PAY -MAX(1 - PERF, 0) \"Put vendu — perte en capital\"",
     "script_hash": "2ee5adb2581170bc3f4949cc55576e6dc89e61bfbacb980c9303e1380460e787",
+    "payoff_qualification": {
+      "status": "REFERENCE_PATHS_PASSED",
+      "family": "booster",
+      "source_hash": "2ee5adb2581170bc3f4949cc55576e6dc89e61bfbacb980c9303e1380460e787",
+      "panel_version": "C09-v1",
+      "reference_panel_hash": "6cb4a39a37bb3318c4e7e3605c4e5b57c3511808ea61d0bc665d0c144eb95ae6",
+      "case_count": 54,
+      "parameter_affinity": {
+        "participation": "PIECEWISE_AFFINE",
+        "redemption_cap": "PIECEWISE_AFFINE"
+      },
+      "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+    },
     "script_parameters": [
       {
         "name": "PART",
@@ -2864,6 +2949,18 @@
     "description": "Rappel au pair avec coupon au-dessus de la barrière de rappel. Sans rappel, perte démultipliée sous le strike du put, plafonnée au capital.",
     "script": "UNDERLYING Basket\n\n# Autocall gear put — perte avec levier sous le strike du put\nPARAM COUPON\nPARAM M_AC_BAR\nPARAM M_PUT_STRIKE\nPARAM GEARING\n\nCONSTAT StartDate\nCONSTAT() ObservationDates\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT Date FROM ObservationDates:\n  SET PERF = WORSTOF(Basket.yield)\n  IF PERF >= M_AC_BAR:\n    PAY COUPON \"Coupon\"\n    PAY 1 \"Capital — remboursement au rappel\"\n    STOP\n\nAT ObservationDates.last:\n  SET KI = INDIC(WORSTOF(Basket.yield) < M_PUT_STRIKE)\n  PAY 1 \"Remboursement nominal\"\n  PAY -1 * KI * MIN(1, GEARING * (1 - WORSTOF(Basket.yield) / M_PUT_STRIKE)) \"Put vendu avec levier, perte plafonnée au capital\"",
     "script_hash": "24eab56a2f920661dc44c1cbae44f3356c09916c1065313f526b2e7736003e3b",
+    "payoff_qualification": {
+      "status": "REFERENCE_PATHS_PASSED",
+      "family": "autocall_gear_put",
+      "source_hash": "24eab56a2f920661dc44c1cbae44f3356c09916c1065313f526b2e7736003e3b",
+      "panel_version": "C09-v1",
+      "reference_panel_hash": "8874f62d9952ee29ba2a4ac22017b294b43b2b015f82221dc3dd6499f29724fc",
+      "case_count": 78,
+      "parameter_affinity": {
+        "coupon": "AFFINE"
+      },
+      "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+    },
     "script_parameters": [
       {
         "name": "COUPON",

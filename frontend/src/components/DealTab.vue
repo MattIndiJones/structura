@@ -9,7 +9,26 @@
       <RouterLink v-if="store.currentRfqId" class="text-accent underline" :to="`/rfq?rfq=${store.currentRfqId}`">Revenir à la RFQ et à son accord</RouterLink>
     </div>
 
-    <CcrCreditCheck v-if="!noteExecution.enabled" :counterparty-name="form.contrepartie" :pricing="store.resultIsStale ? null : store.result?.pricing_receipt?.pricing_input"
+    <div v-if="existingDeal?.legal_identity_exception" class="card text-xs text-amber-300">
+      Exception juridique au booking : {{ existingDeal.legal_identity_exception.reason }}
+      <p v-if="!existingDeal.counterparty_id">Contrepartie à qualifier · contrôle crédit non évalué.</p>
+    </div>
+    <div v-if="canUseLegalException" class="card space-y-2 text-xs">
+      <label class="flex items-center gap-2 text-amber-300">
+        <input v-model="legalException.enabled" type="checkbox" />
+        Autoriser une exception administrateur pour une contrepartie hors référentiel
+      </label>
+      <template v-if="legalException.enabled">
+        <p class="text-amber-300">Le contrôle crédit ne sera pas évalué. Votre identité, le motif et les conditions du trade seront conservés. La contrepartie restera à qualifier.</p>
+        <label class="label" for="legal-exception-name">Nom juridique de la contrepartie</label>
+        <input id="legal-exception-name" v-model="form.contrepartie" class="input" maxlength="200" />
+        <label class="label" for="legal-exception-reason">Motif de l’exception</label>
+        <textarea id="legal-exception-reason" v-model="legalException.reason" class="input" rows="3" maxlength="2000" />
+        <p v-if="errors.legal_exception" class="text-red-400">{{ errors.legal_exception }}</p>
+        <p v-if="errors.contrepartie" class="text-red-400">{{ errors.contrepartie }}</p>
+      </template>
+    </div>
+    <CcrCreditCheck v-if="!noteExecution.enabled && !legalException.enabled && !(existingDeal?.legal_identity_exception && !existingDeal.counterparty_id)" :counterparty-name="form.contrepartie" :pricing="store.resultIsStale ? null : store.result?.pricing_receipt?.pricing_input"
       :booked-deal="existingDeal"
       :nominal="store.globalParams.nominal" :currency="store.globalParams.deal_ccy" :sens="form.sens"
       :product-type="form.product_type" @netting-set="ccrNettingSetId = $event" />
@@ -53,13 +72,14 @@
     </div>
 
     <!-- ── Identité du deal ─────────────────────────────────── -->
-    <fieldset class="card" :disabled="store.contractTermsLocked">
+    <fieldset class="card" :disabled="!!existingDeal">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Identité</h2>
       <div class="grid grid-cols-2 gap-3">
         <div class="col-span-2">
           <label class="label">Sens du deal</label>
           <div class="flex gap-2">
             <button v-for="s in ['vente', 'achat']" :key="s"
+              :disabled="!!store.currentProduct"
               @click="form.sens = s"
               :class="[
                 'flex-1 py-2 rounded-lg text-xs font-bold border transition-colors',
@@ -82,11 +102,11 @@
 
         <div class="col-span-2">
           <label class="label">Contrepartie <span class="text-red-400">*</span>
-            <HelpTip text="Liste des contreparties éligibles, gérée dans Administration → Contreparties deals. Seules les banques actives de ce catalogue peuvent faire face à un deal." />
+            <HelpTip text="Choisissez un identifiant actif dans Administration → Contreparties deals. Hors référentiel, un administrateur peut autoriser explicitement un booking direct motivé ; le contrôle crédit reste non évalué." />
           </label>
-          <select v-model="form.contrepartie" class="select">
-            <option value="">— Choisir une contrepartie —</option>
-            <option v-for="c in counterparties" :key="c.id" :value="c.name">
+          <select v-model="form.counterparty_id" class="select" :disabled="legalException.enabled || !!store.currentProduct?.intent?.counterparty_id || store.currentRfqExecution?.agreement?.state === 'CONFIRMED'">
+            <option :value="null">— Choisir une contrepartie —</option>
+            <option v-for="c in counterparties" :key="c.id" :value="c.id">
               {{ c.name }}{{ c.country ? ` (${c.country})` : '' }}
             </option>
           </select>
@@ -98,6 +118,7 @@
             <HelpTip text="Nom commercial libre (Athena, coupon mémoire, worst-of…). La famille de payoff normalisée se choisit séparément ci-dessous." />
           </label>
           <input v-model="form.product_type" type="text" class="input" list="product-type-suggestions"
+            :disabled="!!store.currentProduct"
             placeholder="ex: Autocall Athena, Reverse Convertible…" />
           <datalist id="product-type-suggestions">
             <option value="Autocall" /><option value="Options" />
@@ -108,6 +129,7 @@
         <div>
           <label class="label">Format juridique</label>
           <input v-model="form.transaction_format" class="input" list="deal-formats"
+                 :disabled="!!store.currentProduct"
                  placeholder="EMTN, BMTN, OTC…" />
           <datalist id="deal-formats">
             <option value="EMTN" /><option value="BMTN" /><option value="OTC" />
@@ -116,6 +138,7 @@
         <div>
           <label class="label">Instrument</label>
           <input v-model="form.instrument_family" class="input" list="deal-instruments"
+                 :disabled="!!store.currentProduct"
                  placeholder="Note, Swap…" />
           <datalist id="deal-instruments">
             <option value="Note" /><option value="Certificat" />
@@ -126,7 +149,7 @@
           <label class="label">Famille de payoff <span class="text-red-400">*</span>
             <HelpTip text="Famille principale normalisée, distincte du format juridique (EMTN/OTC), de l’instrument (Note/Swap) et de la variante commerciale." />
           </label>
-          <select v-model="form.payoff_family" class="select">
+          <select v-model="form.payoff_family" class="select" :disabled="!!store.currentProduct">
             <option value="">— Choisir une famille —</option>
             <option v-if="legacyPayoffFamily" :value="legacyPayoffFamily">
               Ancien libellé : {{ legacyPayoffFamily }} — à classer
@@ -134,7 +157,7 @@
             <option v-for="family in PAYOFF_FAMILIES" :key="family.code"
                     :value="family.label">{{ family.label }}</option>
           </select>
-          <button v-if="modelFamilyHint && !form.payoff_family" type="button"
+          <button v-if="modelFamilyHint && !form.payoff_family && !store.currentProduct" type="button"
                   class="text-xs underline mt-1" style="color: var(--accent);"
                   @click="form.payoff_family = modelFamilyHint">
             Le modèle suggère {{ modelFamilyHint }} — appliquer
@@ -144,11 +167,13 @@
         <div class="col-span-2">
           <label class="label">Description du payoff</label>
           <textarea v-model="form.payoff_description" class="input" rows="2"
+                    :disabled="!!store.currentProduct"
                     placeholder="Précisions contractuelles utiles"></textarea>
         </div>
         <div class="col-span-2">
           <label class="label">Référence documentaire</label>
           <input v-model="form.documentation_reference" class="input"
+                 :disabled="!!store.currentProduct"
                  placeholder="Term sheet / ISDA / confirmation" />
         </div>
 
@@ -164,7 +189,7 @@
           </template>
         </div>
 
-        <div v-if="!store.currentRfqId" class="col-span-2 rounded-lg border p-3 flex flex-col gap-3"
+        <fieldset v-if="!store.currentRfqId" :disabled="!!store.currentProduct" class="col-span-2 rounded-lg border p-3 flex flex-col gap-3"
              style="border-color: var(--border); background: var(--surface2)">
           <div class="flex items-center justify-between gap-3">
             <div>
@@ -224,7 +249,7 @@
             </div>
           </div>
           <p v-if="errors.commercial" class="text-red-400 text-xs">{{ errors.commercial }}</p>
-        </div>
+        </fieldset>
 
         <div class="col-span-2">
           <label class="label">Source des constatations</label>
@@ -246,7 +271,7 @@
       </div>
     </fieldset>
     <!-- ── Conditions de transaction ───────────────────────── -->
-    <fieldset class="card" :disabled="store.contractTermsLocked">
+    <fieldset class="card" :disabled="!!existingDeal">
       <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Conditions de transaction</h2>
       <div class="grid grid-cols-2 gap-3">
         <div class="col-span-2">
@@ -335,9 +360,11 @@
           📋 Voir le deal {{ existingDeal.reference }}
         </RouterLink>
         <button class="text-[11px] text-slate-500 hover:text-slate-300 underline mt-2 w-full text-center"
+          :disabled="preparingBookingFork"
           @click="rearmBooking">
-          Booker un autre deal à partir de ce pricing
+          {{ preparingBookingFork ? 'Préparation de la nouvelle opération…' : 'Booker un autre deal à partir de ce pricing' }}
         </button>
+        <p class="text-[11px] text-slate-500 mt-1">Nouveau dossier relié à l’origine, sans lien RFQ ou indicatif actif. Nouveau calcul et contexte commercial à confirmer.</p>
       </template>
       <button v-else class="btn-primary w-full py-3 text-sm font-bold"
         :disabled="dealsStore.loading || store.resultIsStale"
@@ -349,6 +376,10 @@
     </div>
 
     <BaseModal v-model="showBookingReview" title="Paramètres de pricing figés au booking" max-width="760px">
+      <p v-if="legalException.enabled" class="mb-3 text-xs text-amber-300">
+        Exception administrateur pour {{ form.contrepartie }} · crédit non évalué.<br />
+        Motif : {{ legalException.reason }}
+      </p>
       <BookingPricingReview v-if="reviewSnapshot" :snapshot="reviewSnapshot"
         :has-receipt="!!store.result?.pricing_receipt"
         :pricing-date="store.result?.pricing_receipt?.pricing_input?.valuation_date || ''" />
@@ -357,7 +388,7 @@
           Modifier dans Marché & Paramètres
         </button>
         <button class="btn-primary" :disabled="bookingSubmitting" @click="book">
-          {{ bookingSubmitting ? 'Booking en cours…' : 'Confirmer le booking' }}
+          {{ bookingSubmitting ? 'Booking en cours…' : legalException.enabled ? 'Autoriser l’exception et confirmer le booking' : 'Confirmer le booking' }}
         </button>
       </template>
     </BaseModal>
@@ -371,6 +402,7 @@ import { RouterLink } from 'vue-router'
 import { useRoute } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDealsStore } from '../stores/deals.js'
+import { useProductsStore } from '../stores/products.js'
 import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
 import HelpTip from './HelpTip.vue'
@@ -412,6 +444,7 @@ onMounted(async () => {
 })
 
 const form = reactive({
+  counterparty_id: null,
   sens: 'vente',
   contrepartie: '',
   product_type: '',
@@ -433,6 +466,10 @@ const form = reactive({
 })
 const legacyPayoffFamily = computed(() => form.payoff_family
   && !canonicalPayoffFamily(form.payoff_family) ? form.payoff_family : '')
+watch(() => [form.counterparty_id, counterparties.value], () => {
+  const legal = counterparties.value.find(item => item.id === form.counterparty_id)
+  if (legal) form.contrepartie = legal.name
+}, { immediate: true })
 const modelFamilyHint = computed(() => {
   const model = findProductModel(route.query.modele)
   return model && store.script.trim() === model.script.trim()
@@ -499,7 +536,7 @@ function onDirectDealOpportunityChange() {
 }
 
 watch(() => store.result, (r) => {
-  if (r && !store.contractTermsLocked) {
+  if (r && !store.openedDeal && !store.currentProduct?.execution) {
     form.fair_value = parseFloat((r.price * 100).toFixed(4))
     if (!form.price_traded) form.price_traded = form.fair_value
   }
@@ -533,7 +570,10 @@ watch(() => store.pendingDealPrefill, (prefill) => {
     nominal, strike_date, value_date, payment_date,
     fair_value_at, rfq_provider_label, ...formFields
   } = prefill
+  Object.assign(noteExecution, { enabled: false, relationship_id: null, issuer: '', instrument_reference: '', trade_reference: '' })
+  ccrNettingSetId.value = null
   Object.assign(form, formFields)
+  directClientEnabled.value = !!formFields.client_id
   form.payoff_family = canonicalPayoffFamily(form.payoff_family)
     || form.payoff_family
   Object.assign(store.globalParams, {
@@ -596,18 +636,67 @@ const showBookingReview = ref(false)
 const reviewSnapshot = ref(null)
 const reviewSnapshotJson = ref('')
 const bookingSubmitting = ref(false)
+const preparingBookingFork = ref(false)
 
 // Le deal existe déjà — soit on vient de le booker, soit on a rouvert un deal
 // booké (store.openedDeal, voir pricing.js:loadFromDeal). Dans les deux cas le
 // bouton de booking créerait un doublon sous une nouvelle référence.
-const existingDeal = computed(() => bookedDeal.value || store.openedDeal)
+const existingDeal = computed(() => bookedDeal.value || store.openedDeal
+  || (store.currentProduct?.execution?.deal_id
+    ? { ...store.currentProduct.execution, id: store.currentProduct.execution.deal_id }
+    : null))
+const legalException = reactive({ enabled: false, reason: '' })
+const canUseLegalException = computed(() => auth.canAdministerOrganization && auth.canBook
+  && !existingDeal.value && !store.currentRfqId && !store.currentRfqExecution && !noteExecution.enabled)
+function resetLegalException() {
+  if (legalException.enabled) form.contrepartie = ''
+  legalException.enabled = false
+  legalException.reason = ''
+}
+watch(() => legalException.enabled, enabled => {
+  ccrNettingSetId.value = null
+  form.counterparty_id = !enabled && existingDeal.value ? existingDeal.value.counterparty_id : null
+  form.contrepartie = !enabled && existingDeal.value ? existingDeal.value.contrepartie : ''
+  if (!enabled) legalException.reason = ''
+}, { flush: 'sync' })
+watch(canUseLegalException, allowed => { if (!allowed) resetLegalException() }, { flush: 'sync' })
+watch(() => [auth.user?.id, store.currentProduct?.product_id, store.currentRfqId, store.openedDeal?.id], resetLegalException, { flush: 'sync' })
 
 // Rebooker le même produit reste légitime (deux clients, deux trades) — mais
 // ça doit être un geste explicite.
-function rearmBooking() {
-  bookedDeal.value = null
-  store.openedDeal = null
-  if (store.result) form.fair_value = parseFloat((store.result.price * 100).toFixed(4))
+async function rearmBooking() {
+  if (preparingBookingFork.value || bookingSubmitting.value) return
+  const originalDealId = existingDeal.value?.id
+  const productId = existingDeal.value?.product_id || store.currentProduct?.product_id
+  if (!productId) {
+    bookingError.value = 'Le dossier source est indisponible ; rechargez le deal.'
+    return
+  }
+  preparingBookingFork.value = true
+  bookingError.value = null
+  try {
+    const products = useProductsStore()
+    const source = store.currentProduct?.product_id === productId ? store.currentProduct
+      : (await products.fetchOne(productId, { withCalculation: false,
+        termsVersion: existingDeal.value?.product_terms_version ?? null }))?.product
+    if (!source) throw new Error('Le dossier source ne peut pas être relu.')
+    const child = await products.forkForBooking(source)
+    if (existingDeal.value?.id !== originalDealId
+        || (store.currentProduct?.product_id && store.currentProduct.product_id !== productId)) return
+    store.prepareBookingFork(child)
+    bookedDeal.value = null
+    showBookingReview.value = false
+    reviewSnapshot.value = null; reviewSnapshotJson.value = ''
+    rfqPrefillAt.value = null; rfqUnmatchedProvider.value = ''
+    resetLegalException()
+    Object.assign(noteExecution, { enabled: false, relationship_id: null, issuer: '', instrument_reference: '', trade_reference: '' })
+    ccrNettingSetId.value = null
+    directClientEnabled.value = false
+    Object.assign(form, { counterparty_id: null, contrepartie: '', fair_value: 0, price_traded: 0,
+      trade_date: today, client_id: null, mandate_id: null, opportunity_id: null,
+      primary_affiliation_id: null, commercial_context: null, commercial_reason: '' })
+  } catch (e) { bookingError.value = e.message }
+  finally { preparingBookingFork.value = false }
 }
 
 function validate() {
@@ -617,7 +706,11 @@ function validate() {
     return false
   }
   Object.keys(errors).forEach(k => delete errors[k])
-  if (!form.contrepartie.trim()) errors.contrepartie = 'Contrepartie requise'
+  if (legalException.enabled) {
+    if (!canUseLegalException.value) errors.legal_exception = 'Exception réservée à l’administrateur pour un booking direct.'
+    if (legalException.reason.trim().length < 10) errors.legal_exception = 'Motivez l’exception (10 caractères minimum).'
+    if (form.contrepartie.trim().length < 2) errors.contrepartie = 'Nom juridique requis.'
+  } else if (!form.counterparty_id || !counterparties.value.some(c => c.id === form.counterparty_id)) errors.contrepartie = 'Contrepartie juridique active requise'
   if (!form.payoff_family) errors.payoff_family = 'Choisissez la famille de payoff.'
   else if (legacyPayoffFamily.value) {
     errors.payoff_family = 'Reclassez cet ancien libellé dans une famille du catalogue.'
@@ -749,11 +842,13 @@ async function book() {
 
   try {
     const payload = {
-      ccr_netting_set_id: noteExecution.enabled ? null : ccrNettingSetId.value,
+      ccr_netting_set_id: noteExecution.enabled || legalException.enabled ? null : ccrNettingSetId.value,
+      legal_identity_exception: legalException.enabled ? { reason: legalException.reason.trim() } : null,
       product_id: store.currentProduct?.product_id || null,
       product_terms_version: store.currentProduct?.terms_version || null,
       sens: form.sens,
       contrepartie: form.contrepartie.trim(),
+      counterparty_id: form.counterparty_id,
       devise: store.globalParams.deal_ccy,
       product_type: form.product_type.trim(),
       fixing_policy: form.fixing_policy,

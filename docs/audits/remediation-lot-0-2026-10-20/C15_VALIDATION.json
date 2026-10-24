@@ -1,0 +1,1396 @@
+{
+  "workstream": "C15",
+  "validated_on": "2026-10-21",
+  "scope": [
+    "M06-01",
+    "M06-02",
+    "M06-04"
+  ],
+  "global_closure": false,
+  "production_qualified": false,
+  "confirmed_business_rule": "Le funding est exclu des taux stochastiques et du drift ; actualisation seule, une fois.",
+  "backend": {
+    "unique_passed": 231,
+    "files": 10,
+    "new_c15_cases": 105,
+    "batches": [
+      {
+        "junit": ".runtime/diagnostic-acceptance/c15-2026-10-21/final.xml",
+        "passed": 229,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time_seconds": 47.727
+      },
+      {
+        "junit": ".runtime/diagnostic-acceptance/c15-2026-10-21/horizons.xml",
+        "passed": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time_seconds": 1.233
+      }
+    ],
+    "test_files": [
+      "backend/tests/test_contractual_timeline.py",
+      "backend/tests/test_curve_consistency.py",
+      "backend/tests/test_engine.py",
+      "backend/tests/test_engine_golden.py",
+      "backend/tests/test_inlife_pricing.py",
+      "backend/tests/test_market_snapshot_rate.py",
+      "backend/tests/test_product_optimizer_market.py",
+      "backend/tests/test_stochastic_rate_integrity.py",
+      "backend/tests/test_valuation_context.py",
+      "backend/tests/test_var_engine.py"
+    ],
+    "successful_cases": [
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_payment_rebase_and_parallel_shocks_do_not_double_count_funding[funding0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_payment_rebase_and_parallel_shocks_do_not_double_count_funding[funding1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_leaves_stochastic_rates_and_risk_free_factors_identical",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_joint_basket_covariance_is_preserved",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_incompatible_joint_correlations_are_refused",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_prepaid_forward_martingale_on_independent_replications",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0-0.0027378507871321013]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0-1.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0-30.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0001-0.0027378507871321013]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0001-1.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0001-30.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-06-0.0027378507871321013]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-06-1.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-06-30.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-08-0.0027378507871321013]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-08-1.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-08-30.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.3-0.0027378507871321013]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.3-1.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.3-30.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_paths_and_factors_are_continuous_at_zero_reversion[0.0027378507871321013]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_paths_and_factors_are_continuous_at_zero_reversion[1.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_paths_and_factors_are_continuous_at_zero_reversion[30.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_zero_coupon_price_is_finite_and_continuous_near_zero[0.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_zero_coupon_price_is_finite_and_continuous_near_zero[0.0001]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_zero_coupon_price_is_finite_and_continuous_near_zero[1e-06]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_zero_coupon_price_is_finite_and_continuous_near_zero[1e-08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_invalid_rate_parameters_fail_closed[sigma_r-nan]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_invalid_rate_parameters_fail_closed[sigma_r--0.01]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_invalid_rate_parameters_fail_closed[a_r-nan]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_invalid_rate_parameters_fail_closed[a_r--0.01]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_nonfinite_or_underflowed_factors_are_refused",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[constant-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[constant-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[heston-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[heston-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[localvol-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[localvol-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[lsv-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[lsv-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[sabr-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[sabr-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_produit_a_barriere",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_produit_a_barriere_heston",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_autocall",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[curve-0.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[curve-0.3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[flat-0.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[flat-0.3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_etat_residuel_complet",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_fenetre_strike_fix",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_barriere_continue",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_barriere_continue_heston",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_greeks_pretrade_inchanges",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_vaut_exp_moins_qt_sous_courbe_plate",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_vaut_exp_moins_qt_sous_courbe_pentue",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_sigma_nulle_sur_maturite_non_ronde_est_exact",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_theta_zero_coupon_est_le_portage_quotidien_du_df",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_sous_modeles_a_vol_locale[localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_sous_modeles_a_vol_locale[lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_courbe_plate_au_niveau_r_equivaut_au_taux_plat",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_parite_call_put_sous_courbe",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_rho_du_zero_coupon_vaut_moins_t_fois_le_df",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_le_taux_stochastique_reprice_sa_propre_courbe[0.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_le_taux_stochastique_reprice_sa_propre_courbe[0.3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_rho_non_nul_sous_courbe_et_taux_stochastiques",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_les_forwards_reconstituent_exactement_les_facteurs_d_actualisation",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_dr_decale_la_courbe_entiere_en_parallele",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_absence_de_courbe_se_reconnait_a_step_fwd_none",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_la_grille_de_vol_locale_suit_la_courbe",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_les_probabilites_utilisent_la_courbe_pour_la_derive",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[price]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[probabilities]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[paths]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[profile]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_same_date_retains_explicit_source_order",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_frozen_calendar_january_31_then_february_1_matches_historical_replay",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_dated_blocks_precede_maturity_even_if_declared_after_it",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_occurrences_keep_their_rank_window_and_payment_without_mutating_terms",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_flow_times_are_contractual_and_stop_prevents_later_cashflows",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_calendar_rounding_is_admitted_without_executing_a_future_date",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.0027378507871321013]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.0054757015742642025]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.037]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.37]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_realvol_annualization_matches_dated_and_maturity_blocks[0.0027378507871321013]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_realvol_annualization_matches_dated_and_maturity_blocks[0.037]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_realvol_annualization_matches_dated_and_maturity_blocks[0.37]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_one_day_mtm_uses_contractual_horizon_and_converges",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_one_day_horizon_reaches_var_worker_and_offline_run",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_unbooked_inlife_pricing_keeps_the_same_one_day_horizon",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_preuve_pricing_fige_funding_seed_globale_monitoring_et_unites",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_preuve_modifiee_est_refusee",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_ancien_deal_sans_funding_devient_explicitement_zero",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_courbe_funding_prolonge_son_dernier_niveau_apres_son_dernier_pilier",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_run_valuation_transmet_tout_le_contexte",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_un_scenario_ne_peut_pas_remplacer_le_calendrier_du_contexte",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_scenario_smile_changes_only_the_named_underlying",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_booking_utilise_le_snapshot_serveur_identifie",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_booking_refuse_un_script_different_du_pricing",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_booking_refuse_une_maturite_numerique_differente_du_pricing",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_var_request_refuse_un_nombre_de_paths_inferieur_au_plancher_moteur",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_historical_scenarios_carry_real_dates_and_moves",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_historical_scenarios_worst_day_matches_biggest_realized_drop",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_historical_scenarios_single_ticker_has_no_corr_shock",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_historical_lookback_does_not_shrink_with_return_horizon",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_calibrate_comovement_signs_match_crisis_dynamics",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_parametric_scenarios_shape_and_reproducibility",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_parametric_worst_draws_have_positive_vol_shock",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_apply_scenario_neutral_shock_for_untouched_ticker",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_aggregate_var_matches_hand_computed_percentile",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_aggregate_var_queue_fractionnaire",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_aggregate_var_empty_input",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_un_job_echoue_interdit_la_var_globale_et_produit_la_var_hors_deal",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_tous_les_jobs_en_echec_ne_publient_ni_zero_ni_var_reduite",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_un_deal_ecarte_au_preflight_reste_visible_et_declenche_le_scope_reduit",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_univers_complet_publie_la_var_globale_sans_scope_reduit",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_api_var_marque_le_global_incomplet_en_echec_et_publie_le_scope_reduit",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_build_deal_scenario_base_is_json_serializable_and_matches_mtm",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_build_deal_scenario_base_skips_matured_deal",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_var_scenario_pricer_reacts_to_spot_shock",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[0-0.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[0.0-0.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[3.0-0.03]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[2.5-0.025]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[-0.5--0.005]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_falls_back_only_when_the_key_is_absent",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_is_default_distinguishes_a_substitution",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_refuses_an_unreadable_value",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_no_call_site_reintroduces_the_or_fallback",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_zero_rate_deal_is_not_discounted",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_three_percent_deal_still_discounts",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_zero_and_three_percent_no_longer_price_identically",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_legacy_snapshot_without_rate_is_flagged",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_marche_actuel_rafraichit_le_niveau_de_dividende_et_garde_le_decay",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_sigma_r_zero_matches_deterministic_rate",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_sigma_r_refits_the_curve_on_zcb",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_sigma_r_runs_on_every_model[constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_sigma_r_runs_on_every_model[heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_sigma_r_runs_on_every_model[sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_sigma_r_runs_on_every_model[localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_rho_rS_inert_when_sigma_r_zero",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_a_r_zero_is_default_and_matches_abm",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_hull_white_zero_coupon_matches_curve_within_sampling_error",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_hull_white_stationary_variance",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_hull_white_runs_on_every_model[constant]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_hull_white_runs_on_every_model[heston]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_hull_white_runs_on_every_model[sabr]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_hull_white_runs_on_every_model[localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_inlife_pricing",
+        "name": "test_le_funding_fait_BAISSER_le_prix",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_inlife_pricing",
+        "name": "test_funding_et_taux_agissent_en_sens_OPPOSES",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_inlife_pricing",
+        "name": "test_le_funding_ne_touche_pas_le_drift",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_product_optimizer_market",
+        "name": "test_funding_changes_pv_without_changing_diffusion_or_cash_flows",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_short_and_long_zero_coupon_prices_have_a_continuous_zero_limit[0.0027378507871321013]",
+        "junit": "horizons.xml"
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_short_and_long_zero_coupon_prices_have_a_continuous_zero_limit[30.0]",
+        "junit": "horizons.xml"
+      }
+    ],
+    "full_suite_executed": false
+  },
+  "red_reproduction": {
+    "junit": ".runtime/diagnostic-acceptance/c15-2026-10-21/baseline-final.xml",
+    "tested": 103,
+    "failed": 89,
+    "already_passed": 14,
+    "source": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c15-baseline-n43l3si2\\sources\\backend\\app\\core\\payscript\\engine.py",
+    "method": "Saved source loaded into the engine module in memory by c15_baseline_engine; no source checkout/replacement."
+  },
+  "measurements": {
+    "before": {
+      "funded_zcb": 0.932394,
+      "near_zero_zcb": [
+        {
+          "a_r": 0.0,
+          "price": 0.970452,
+          "finite": true
+        },
+        {
+          "a_r": 0.0001,
+          "price": 0.970451,
+          "finite": true
+        },
+        {
+          "a_r": 1e-06,
+          "price": 1.484111,
+          "finite": true
+        },
+        {
+          "a_r": 1e-08,
+          "price": null,
+          "finite": false
+        }
+      ],
+      "mono_drivers": [
+        {
+          "rho_rS": -0.8,
+          "driver_variance": 1.6634532322468503,
+          "realized_correlation": -0.6284435846020361
+        },
+        {
+          "rho_rS": 0.0,
+          "driver_variance": 1.0065427469974952,
+          "realized_correlation": -0.007456402652006183
+        },
+        {
+          "rho_rS": 0.8,
+          "driver_variance": 1.6394234321808863,
+          "realized_correlation": 0.621347495165497
+        }
+      ]
+    },
+    "after": {
+      "funded_zcb": 0.951229,
+      "near_zero_zcb": [
+        {
+          "a_r": 0.0,
+          "price": 0.970452,
+          "finite": true
+        },
+        {
+          "a_r": 0.0001,
+          "price": 0.970452,
+          "finite": true
+        },
+        {
+          "a_r": 1e-06,
+          "price": 0.970452,
+          "finite": true
+        },
+        {
+          "a_r": 1e-08,
+          "price": 0.970452,
+          "finite": true
+        }
+      ],
+      "mono_drivers": [
+        {
+          "rho_rS": -0.8,
+          "driver_variance": 1.0144599141552606,
+          "realized_correlation": -0.8017664331440209
+        },
+        {
+          "rho_rS": 0.0,
+          "driver_variance": 1.0065427469974952,
+          "realized_correlation": -0.007456402652006183
+        },
+        {
+          "rho_rS": 0.8,
+          "driver_variance": 1.000042034115682,
+          "realized_correlation": 0.7985486754704402
+        }
+      ]
+    },
+    "warnings": [
+      "invalid value encountered in subtract",
+      "overflow encountered in exp"
+    ],
+    "targets": {
+      "funded_zcb": 0.951229424500714,
+      "risk_free_zcb": 0.9704455335485082
+    }
+  },
+  "prepaid_forward_replications": [
+    {
+      "seed": 7,
+      "price": 0.990513,
+      "standard_error": 0.00031836734693878235,
+      "target": 0.9900498337491681
+    },
+    {
+      "seed": 19,
+      "price": 0.989959,
+      "standard_error": 0.0003099489795918281,
+      "target": 0.9900498337491681
+    },
+    {
+      "seed": 41,
+      "price": 0.990567,
+      "standard_error": 0.000322704081632643,
+      "target": 0.9900498337491681
+    },
+    {
+      "seed": 101,
+      "price": 0.989762,
+      "standard_error": 0.00030969387755103275,
+      "target": 0.9900498337491681
+    }
+  ],
+  "prepaid_forward_average": 0.99020025,
+  "prepaid_forward_combined_standard_error": 0.00015761391904782238,
+  "preservation": {
+    "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+    "branch": "codex/hybrid-saas-foundation",
+    "baseline_files": 1319,
+    "unchanged_files": 1312,
+    "expected_changed_files": [
+      "backend/app/core/payscript/engine.py",
+      "backend/tests/test_engine.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/reference/PAYSCRIPT_REFERENCE.md"
+    ],
+    "missing_or_unexpected_files": [],
+    "baseline_directory": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c15-baseline-n43l3si2",
+    "prior_runtime_evidence_preserved": true,
+    "business_database_present_before": false,
+    "business_database_present_after": false,
+    "business_database_opened": false,
+    "decisions_unchanged": true,
+    "counts_unchanged": true,
+    "conditional_dependencies_unchanged": true
+  },
+  "network": {
+    "external_http_disabled": true,
+    "blocked_attempts": []
+  },
+  "frontend": {
+    "modified": false,
+    "build_required": false
+  },
+  "server_started": false,
+  "remaining": [
+    "T06: equal price/probability/solver contexts and downstream routing in C18",
+    "D04: model domains, tolerances and production qualification",
+    "C16: continuous barrier dependence",
+    "C17: calibration qualification"
+  ],
+  "sha256": {
+    "backend/app/core/payscript/engine.py": "bec4314ce289e3a47e83cd1fec30afe4f15b91e0a8446deed3ae2506afbf34a2",
+    "backend/tests/test_engine.py": "5ac80340b5bf0c743aa4e16861774098bb1d6333d4ee6c39fdc106597751a157",
+    "backend/tests/test_stochastic_rate_integrity.py": "29cefb745e75d4305a999399e5f11ddb88e9d971e2575b842365fa19e3e6a4e7",
+    "docs/README.md": "5e7e1a619d4b215006b352a044d1c393143ff8304d8ca74c09e320aeef27fc8a",
+    "docs/audits/REMEDIATION_C15_2026-10-21.md": "df7950744dcbd3f1d5a09f4baa527ea09a4c5cc316c25788f102afe92bc8bc24",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md": "50b0fe13a1bd9315f11b8017ff24774fa1118804474c53e861c62ca1d92cbe39",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md": "4946718c0487eb72eb29764f1bdb167bdc1b104f23815e225d05619b0b691757",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json": "ed08249a42aa75c3e1eb8d7426d88269e9d5d45f1cbe3b407f80c55e6f79cca7",
+    "docs/reference/PAYSCRIPT_REFERENCE.md": "83488726e761d2cbeca106ef602bfd6516fa99016317419c82c54ceaca6fd948"
+  },
+  "commands": {
+    "main": ".venv/Scripts/python.exe -X utf8 -m pytest backend/tests/test_stochastic_rate_integrity.py backend/tests/test_engine_golden.py backend/tests/test_curve_consistency.py backend/tests/test_contractual_timeline.py backend/tests/test_valuation_context.py backend/tests/test_var_engine.py backend/tests/test_market_snapshot_rate.py backend/tests/test_engine.py::test_sigma_r_zero_matches_deterministic_rate backend/tests/test_engine.py::test_sigma_r_refits_the_curve_on_zcb backend/tests/test_engine.py::test_sigma_r_runs_on_every_model backend/tests/test_engine.py::test_rho_rS_inert_when_sigma_r_zero backend/tests/test_engine.py::test_a_r_zero_is_default_and_matches_abm backend/tests/test_engine.py::test_hull_white_zero_coupon_matches_curve_within_sampling_error backend/tests/test_engine.py::test_hull_white_stationary_variance backend/tests/test_engine.py::test_hull_white_runs_on_every_model backend/tests/test_inlife_pricing.py::test_le_funding_fait_BAISSER_le_prix backend/tests/test_inlife_pricing.py::test_funding_et_taux_agissent_en_sens_OPPOSES backend/tests/test_inlife_pricing.py::test_le_funding_ne_touche_pas_le_drift backend/tests/test_product_optimizer_market.py::test_funding_changes_pv_without_changing_diffusion_or_cash_flows -q -p c15_network_guard -o junit_family=xunit1 --junitxml=.runtime/diagnostic-acceptance/c15-2026-10-21/final.xml (229-case execution before the two horizon cases were added)",
+    "short_long": ".venv/Scripts/python.exe -X utf8 -m pytest backend/tests/test_stochastic_rate_integrity.py::test_short_and_long_zero_coupon_prices_have_a_continuous_zero_limit -q -p c15_network_guard -o junit_family=xunit1 --junitxml=.runtime/diagnostic-acceptance/c15-2026-10-21/horizons.xml",
+    "red": ".venv/Scripts/python.exe -X utf8 -m pytest backend/tests/test_stochastic_rate_integrity.py -q -p c15_network_guard -p c15_baseline_engine -o junit_family=xunit1 --junitxml=.runtime/diagnostic-acceptance/c15-2026-10-21/baseline-final.xml (103-case file at red execution; two later horizon cases not included)",
+    "metrics": ".venv/Scripts/python.exe -X utf8 .runtime/diagnostic-acceptance/c15-2026-10-21/measure_integrity.py",
+    "environment": {
+      "STRUCTURA_DATA_DIR": "<TEMP>/structura-c15-tests",
+      "PYTHONPATH": "<ROOT>/.runtime/diagnostic-acceptance/c15-2026-10-21;<ROOT>",
+      "cwd": "C:\\Users\\admin\\GitHub\\structura"
+    }
+  }
+}

@@ -30,7 +30,7 @@ def test_sans_devise_les_dates_restent_calendaires():
 
 
 def test_avec_devise_les_observations_tombent_un_jour_ouvre():
-    res = _schedule(currency="EUR")
+    res = _schedule(currency="EUR", convention=BusinessDayConvention.MODIFIED_FOLLOWING)
     assert all(d.weekday() < 5 for d in res["dates"])
     # Les deux sens de Modified Following, sur le même calendrier :
     #  - 28/02/2026 (samedi) : avancer mènerait au 2 mars, donc on recule au 27.

@@ -1,0 +1,181 @@
+{
+  "workstream": "C18",
+  "validated_on": "2026-10-21",
+  "scope": [
+    "M06-07",
+    "M06-08",
+    "M06-09",
+    "M13-07",
+    "M14-05",
+    "M15-07",
+    "M17-01"
+  ],
+  "global_closure": false,
+  "production_qualified": false,
+  "backend": {
+    "unique_passed": 479,
+    "files": 17,
+    "new_c18_cases": 35,
+    "batches": [
+      {
+        "junit": "targeted.xml",
+        "tests": 92,
+        "failures": 2
+      },
+      {
+        "junit": "semantics-final.xml",
+        "tests": 25,
+        "failures": 0
+      },
+      {
+        "junit": "consumers.xml",
+        "tests": 157,
+        "failures": 14
+      },
+      {
+        "junit": "fixtures-final.xml",
+        "tests": 35,
+        "failures": 0
+      },
+      {
+        "junit": "dependencies-final.xml",
+        "tests": 240,
+        "failures": 0
+      },
+      {
+        "junit": "residual-final.xml",
+        "tests": 68,
+        "failures": 0
+      },
+      {
+        "junit": "solver-final.xml",
+        "tests": 41,
+        "failures": 0
+      }
+    ],
+    "initial_implementation_failures": "Event schedule metadata shape and unsupported batch-budget correlation argument corrected; affected tests rerun successfully.",
+    "fixture_changes": "Valid C01 users; admissible C17 smiles or SSVI targets; C14 effective horizon includes rolled last observation. Assertions and golden prices retained.",
+    "baseline_reproductions": {
+      "junit": "baseline-reproductions.xml",
+      "expected_failed": 3,
+      "engine_source_sha256": "65b990b29a4b5d124f6def1fef0b3aa91fbb7c512d6365288dd79fedfafa400d"
+    }
+  },
+  "frontend": {
+    "passed": 652,
+    "files": 74,
+    "build_passed": true,
+    "log": "frontend-release.log",
+    "build_output": "C:/Users/phili/AppData/Local/Temp/structura-c18-vite-build"
+  },
+  "measurements": {
+    "discounted_unit_payment": {
+      "price": 0.740818,
+      "proba": 0.740818,
+      "paths": 0.740818
+    },
+    "independent_reference": 0.7408182206817179,
+    "detached_coupon": {
+      "amount_eur": 100000,
+      "days_to_payment": 6,
+      "risk_free_rate": 0.03,
+      "funding_spread": 0.02,
+      "shock_bp": 100,
+      "pv_before_eur": 99917.89819837402,
+      "pv_after_eur": 99901.48592866743,
+      "delta_eur": -16.41226970659045
+    }
+  },
+  "coverage": {
+    "same_monte_carlo_for_price_and_analyses": true,
+    "five_models_antithetic_on_off_stochastic_rate_identity": true,
+    "prestrike_api_identity": true,
+    "continuous_bridge_domain_preserved": true,
+    "signed_admissible_correlation_bump": true,
+    "lsv_vega_scope_preserved_in_portfolio": true,
+    "effective_sources_persisted_and_shared": true,
+    "active_deal_detached_coupon_rate_shock": true,
+    "reinvestment_solver_and_probability_funding_context": true,
+    "pricer_solver_and_grid_full_context": true
+  },
+  "limits": [
+    "No blanket model or production qualification",
+    "Probability sample capped at 10000 independent draws with metadata; visual sample dedicated",
+    "Payoff profile remains a deterministic nominal diagram, not Monte Carlo pricing",
+    "Contractual KI is not inferred from below-par legacy ki classification",
+    "C17 automatic calibration domains and 5/10 bp thresholds unchanged; no transferable fit to a different candidate",
+    "C19 replay/archives/PDF, C21 risk coverage/CVA, C22 payments/P&L and C25 reinvestment costs/recovery remain open",
+    "No browser UAT, actual portfolio impact inventory, historical backfill or business-data mutation"
+  ],
+  "preserved_dependencies": [
+    "C01",
+    "C06",
+    "C10",
+    "C11",
+    "C13",
+    "C14",
+    "C15",
+    "C16",
+    "C17"
+  ],
+  "preservation": {
+    "baseline_files": 1455,
+    "unchanged_files": 1427,
+    "expected_changed_files": [
+      "backend/app/api/deals.py",
+      "backend/app/api/inlife.py",
+      "backend/app/api/portfolios.py",
+      "backend/app/api/pricing.py",
+      "backend/app/api/shocks.py",
+      "backend/app/api/simulation.py",
+      "backend/app/core/deal_valuation.py",
+      "backend/app/core/payscript/engine.py",
+      "backend/app/core/payscript/simulation.py",
+      "backend/app/core/schemas.py",
+      "backend/app/core/valuation_context.py",
+      "backend/app/core/valuation_runs.py",
+      "backend/tests/test_engine.py",
+      "backend/tests/test_portfolio_corr_greek.py",
+      "backend/tests/test_prestrike_mtm.py",
+      "backend/tests/test_shocks.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/reference/PAYSCRIPT_REFERENCE.md",
+      "frontend/src/components/ProbaTab.vue",
+      "frontend/src/components/ResultsPanel.vue",
+      "frontend/src/stores/pricing.js",
+      "frontend/src/views/DealValuationsView.vue",
+      "frontend/src/views/ReinvestView.vue",
+      "frontend/src/views/RiskManagementView.vue",
+      "frontend/src/views/ValoExplainView.vue"
+    ],
+    "new_files": [
+      "backend/tests/test_valuation_semantics.py",
+      "frontend/src/utils/valuationSource.js",
+      "frontend/src/utils/valuationSource.test.js",
+      "frontend/src/stores/valuationContext.test.js",
+      "docs/audits/REMEDIATION_C18_2026-10-21.md",
+      "docs/audits/remediation-lot-0-2026-10-20/C18_VALIDATION.json"
+    ],
+    "original_sources_sha256_verified": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "business_db_absent": true,
+    "previous_deliveries_and_d04_preserved": true,
+    "baseline_path": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c18-baseline-5l6v7alu"
+  },
+  "safety": {
+    "commit": false,
+    "push": false,
+    "server_started": false,
+    "business_data_mutated": false,
+    "external_http_guard": {
+      "external_http_disabled": true,
+      "blocked_attempts": []
+    }
+  },
+  "local_artifacts": "C:\\Users\\admin\\GitHub\\structura\\.runtime\\diagnostic-acceptance\\c18-2026-10-21",
+  "report": "../REMEDIATION_C18_2026-10-21.md"
+}

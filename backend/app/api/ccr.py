@@ -12,10 +12,18 @@ from ..db.models import User, Counterparty, CCRExposureCalculation, Deal, Portfo
 from ..core.ccr.contracts import CalculationRequest
 from ..core.ccr.service import (records, save_record, calculate, organization, evaluate_inputs, legal_assignment, scope_diagnostic)
 from ..core.audit import record_audit_event
+from ..core.access import is_local_admin
 
 router = APIRouter(prefix="/api/ccr", tags=["CCR"])
 Current = Annotated[User, Depends(get_current_user)]
 Database = Annotated[Session, Depends(get_session)]
+
+
+@router.get("/context")
+def business_context(current: Current):
+    from ..runtime import business_today
+    organization(current)
+    return {"business_date": business_today().isoformat()}
 
 
 @router.get("/schemas")
@@ -98,7 +106,7 @@ class Assignment(BaseModel):
 
 @router.put("/deals/{deal_id}/assignment")
 def assign_deal(deal_id: int, body: Assignment, current: Current, session: Database):
-    if current.role != "admin":
+    if not is_local_admin(current):
         raise HTTPException(403, "Rattachement juridique réservé aux administrateurs")
     deal = session.get(Deal, deal_id)
     if not deal or deal.entity_id != organization(current):
@@ -175,6 +183,11 @@ def monitor(current: Current, session: Database, data_scope: Literal["PRODUCTION
             now_scope = {(d.id, d.contract_version, d.ccr_netting_set_id) for d in scope}
             old_scope = {(t["deal_id"], t.get("contract_version"), t.get("netting_set_id")) for t in saved["trades"]}
             stale = stale or now_scope != old_scope or not saved["trades"]
+            from ..core.ccr.cache import preparation_key, implementation_identity
+            _, engine, ccr = implementation_identity()
+            saved_request = CalculationRequest.model_validate(saved["request"])
+            current_key = preparation_key(session, organization(current), scope, saved_request, engine + ccr)
+            stale = stale or saved.get("dependency_key") != current_key
         rows.append({"counterparty_id": cpty.id, "name": cpty.name, "data_scope": data_scope, "stale": stale, "as_of_date": row.as_of_date if row else None,
                      "run_id": row.id if row else None, "result": json.loads(row.results_json) if row else None})
     return rows
@@ -187,13 +200,8 @@ def rfq_context(rfq_id, quote_id, current, session):
     quote = session.get(RfqQuote, quote_id)
     if not rfq or rfq.entity_id != organization(current) or not quote or quote.rfq_id != rfq.id:
         raise HTTPException(404, "RFQ ou réponse introuvable")
-    provider = session.exec(select(RfqProvider).where(RfqProvider.label == quote.provider)).first()
-    cpty_id = provider.counterparty_id if provider else None
-    from ..services import rfq_execution, rfq_publication
-    if rfq_publication.publication_for_quote(session, quote.id):
-        cpty_id = rfq_execution._counterparty(session, rfq, quote).id
-    if cpty_id is None:
-        raise HTTPException(422, "MISSING_DATA : rattachement explicite fournisseur → contrepartie requis")
+    from ..services import rfq_execution
+    cpty_id = rfq_execution._counterparty(session, rfq, quote).id
     return rfq, cpty_id
 
 

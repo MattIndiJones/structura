@@ -15,6 +15,8 @@ d'autre de la même maison — on n'en fait pas une opportunité chez le nouvel
 employeur (§30).
 """
 from __future__ import annotations
+from ..services.business_access import can_read_deal
+from ..services.rfq_access import effective_rights
 
 from datetime import date, datetime
 from typing import Annotated, Optional
@@ -142,7 +144,7 @@ def _contact_rendu(session: Session, affiliation_id: Optional[int]) -> Optional[
     }
 
 
-def _rendu(session: Session, opportunite: Opportunity, *, detail: bool = False) -> dict:
+def _rendu(session: Session, opportunite: Opportunity, *, detail: bool = False, viewer=None) -> dict:
     client = session.get(Client, opportunite.client_id)
     mandate = (session.get(ClientMandate, opportunite.mandate_id)
                if opportunite.mandate_id is not None else None)
@@ -207,12 +209,14 @@ def _rendu(session: Session, opportunite: Opportunity, *, detail: bool = False) 
             for r in session.exec(
                 select(RfqRequest).where(
                     RfqRequest.opportunity_id == opportunite.id)).all()
+            if viewer is None or "read" in effective_rights(session, r, viewer)
         ]
         base["deals"] = [
             {"id": d.id, "reference": d.reference, "nominal": d.nominal,
              "devise": d.devise}
             for d in session.exec(
                 select(Deal).where(Deal.opportunity_id == opportunite.id)).all()
+            if viewer is None or can_read_deal(d, viewer, session)
         ]
     return base
 
@@ -306,7 +310,7 @@ def get_opportunity(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    return _rendu(session, _scoped(session, opportunity_id, current), detail=True)
+    return _rendu(session, _scoped(session, opportunity_id, current), detail=True, viewer=current)
 
 
 # ── Écriture ──────────────────────────────────────────────────────────
@@ -370,7 +374,7 @@ def create_opportunity(
                "data_origin": data_origin})
     session.commit()
     session.refresh(opportunite)
-    return _rendu(session, opportunite, detail=True)
+    return _rendu(session, opportunite, detail=True, viewer=current)
 
 
 @router.patch("/{opportunity_id}")
@@ -389,6 +393,15 @@ def update_opportunity(
     """
     opportunite = _scoped(session, opportunity_id, current)
     payoff_family = None
+    from ..core.opportunity_integrity import lock_opportunity, has_attribution_evidence
+    opportunite = lock_opportunity(session, opportunite.id)
+    attribution_changed = ((body.client_id is not None and body.client_id != opportunite.client_id)
+        or ('mandate_id' in body.model_fields_set and body.mandate_id != opportunite.mandate_id))
+    if attribution_changed and has_attribution_evidence(session, opportunite.id):
+        commit_rejection(session, action='OPPORTUNITY_ATTRIBUTION_CHANGE_REJECTED', object_type='opportunity',
+            object_id=opportunite.id, actor_user_id=current.id, reason='OPPORTUNITY_ATTRIBUTION_FROZEN')
+        raise HTTPException(409, detail={'code':'OPPORTUNITY_ATTRIBUTION_FROZEN',
+            'message':'Un dossier ou un fait commercial est lié : conservez cette attribution et ouvrez une nouvelle opportunité ; toute rectification doit être gouvernée.'})
     if body.payoff_family is not None or (
         body.payoff_description is not None
         and canonical_payoff_family(opportunite.payoff_family) == "Autre"
@@ -404,12 +417,16 @@ def update_opportunity(
             raise HTTPException(422, str(erreur)) from erreur
     avant = {"client_id": opportunite.client_id,
              "mandate_id": opportunite.mandate_id,
+             'primary_affiliation_id':opportunite.primary_affiliation_id,
+             'participants':[{'affiliation_id':p.affiliation_id,'role':p.role} for p in session.exec(
+                 select(OpportunityParticipant).where(OpportunityParticipant.opportunity_id==opportunite.id)).all()],
              "status": opportunite.status,
              "owner_user_id": opportunite.owner_user_id}
 
     if body.client_id is not None and body.client_id != opportunite.client_id:
         new_client = _scoped_client(session, body.client_id, current)
-        participants_fournis = body.participants if body.participants is not None else []
+        participants_fournis = (body.participants if body.participants is not None else session.exec(
+            select(OpportunityParticipant).where(OpportunityParticipant.opportunity_id==opportunite.id)).all())
         contact_fourni = (body.primary_affiliation_id
                           if "primary_affiliation_id" in body.model_fields_set
                           else opportunite.primary_affiliation_id)
@@ -495,8 +512,11 @@ def update_opportunity(
             session, action="OPPORTUNITY_CLIENT_CHANGED",
             object_type="opportunity", object_id=opportunite.id,
             actor_user_id=current.id, result="SUCCESS",
-            before={"client_id": avant["client_id"]},
-            after={"client_id": opportunite.client_id})
+            before={key:avant[key] for key in ('client_id','mandate_id','primary_affiliation_id','participants')},
+            after={'client_id':opportunite.client_id,'mandate_id':opportunite.mandate_id,
+                'primary_affiliation_id':opportunite.primary_affiliation_id,
+                'participants':[{'affiliation_id':p.affiliation_id,'role':p.role} for p in session.exec(
+                    select(OpportunityParticipant).where(OpportunityParticipant.opportunity_id==opportunite.id)).all()]})
     if avant["owner_user_id"] != opportunite.owner_user_id:
         record_audit_event(
             session, action="OPPORTUNITY_REASSIGNED", object_type="opportunity",
@@ -512,7 +532,7 @@ def update_opportunity(
             after={"mandate_id": opportunite.mandate_id})
     session.commit()
     session.refresh(opportunite)
-    return _rendu(session, opportunite, detail=True)
+    return _rendu(session, opportunite, detail=True, viewer=current)
 
 
 @router.post("/{opportunity_id}/status")
@@ -569,7 +589,7 @@ def change_status(
         reason=body.lost_comment)
     session.commit()
     session.refresh(opportunite)
-    return _rendu(session, opportunite, detail=True)
+    return _rendu(session, opportunite, detail=True, viewer=current)
 
 
 @router.delete("/{opportunity_id}", status_code=204)

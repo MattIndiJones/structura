@@ -36,6 +36,8 @@ def test_gateways_use_only_declared_inputs(tmp_path, data, monkeypatch):
     monkeypatch.setattr(amc_prices.yf, "Ticker", forbidden)
     with market_bundle(str(tmp_path), write(tmp_path, data)):
         assert amc_prices.load_prices("Asset").close.iloc[-1] == 121
+        assert amc_prices.load_prices(amc_prices._slug('Asset')).close.iloc[-1] == 121
+        assert amc_prices.get_currency(amc_prices._slug('Asset')) == 'EUR'
         assert amc_prices.get_currency("TEST") == "EUR"
         assert amc_prices.get_fx_series("USD", "EUR").iloc[-1] == pytest.approx(1 / 1.3)
         assert amc_prices.execution_series("TEST", "Asset", "2025-01-03").iloc[-1] == 59

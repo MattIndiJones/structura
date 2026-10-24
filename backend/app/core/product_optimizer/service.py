@@ -15,27 +15,40 @@ from ..payscript.engine import run_mc
 from ..payscript.parser import parse_script, resolve_constats
 from ..payscript.simulation import solve_for_param
 from .capabilities import capabilities
-from .contracts import (OptimizationRequest, OptimizationCandidate, MAX_SECONDS,
-                        MAX_WORK, SOLVER_ITERATIONS, MAX_PARALLEL_MEMORY_BYTES, VALIDATION_CANDIDATES)
+from .contracts import (OptimizationRequest, OptimizationCandidate,
+                        MAX_WORK, SOLVER_TOLERANCE, OPTIMIZER_METHOD_VERSION, MAX_PARALLEL_MEMORY_BYTES, VALIDATION_CANDIDATES)
 from .parallel import iter_parallel_candidates
 from .statistics import apply_summary, summarize_paths
 from .validation import evaluate_validation
 from .market import freeze_market, market_engine_kwargs
-from .families import family_schema, autocall_levels, solution_definition, solution_scale, solved_value
+from .families import (family_schema, autocall_levels, solution_definition, solution_scale,
+                       solution_scale_for_period, solved_value)
 
 logger = logging.getLogger(__name__)
+
+
+def solver_configuration(req, scale):
+    """Bisection budget in script units; no relaxation of the price tolerance."""
+    definition = solution_definition(req)
+    low, high = (getattr(req.constraints, definition[key])*scale for key in ("minimum_key", "maximum_key"))
+    tolerance = min(SOLVER_TOLERANCE, req.constraints.price_tolerance/10)
+    # One extra halving guarantees the strict interval stopping condition.
+    iterations = max(1, math.ceil(math.log2((high-low)/tolerance)) + 1)
+    return {"lo": low, "hi": high, "tol": tolerance, "max_iter": iterations}
 
 
 def estimate_search(req: OptimizationRequest):
     r = req.ranges
     family = family_schema(req.product_family, req.objective)
+    longest_period = max(r.observation_months) if family["has_autocall"] else r.maturity_months.maximum
+    solver = solver_configuration(req, solution_scale_for_period(req.product_family, longest_period))
     count = math.prod(getattr(r,field["key"]).count for field in family["range_fields"])
     count *= len(r.observation_months) if family["has_autocall"] else 1
     date_count = math.ceil(r.maturity_months.maximum / min(r.observation_months)) if family["has_autocall"] else 1
     budget_args = dict(
         operation="product_optimizer", maturity_years=r.maturity_months.maximum / 12 + .02,
         underlyings=len(req.market.underlyings), paths_per_run=req.search.simulations,
-        total_runs=count * (SOLVER_ITERATIONS + 3) + 3*min(count, VALIDATION_CANDIDATES), model="constant", antithetic=True,
+        total_runs=count * (solver["max_iter"] + 3) + 3*min(count, VALIDATION_CANDIDATES), model="constant", antithetic=True,
         expanded_dates=3 * date_count)
     # Holdout uses up to 2N pairs. Count all runs in N equivalents for work,
     # while reserving memory for the largest individual (2N) computation.
@@ -56,7 +69,8 @@ def estimate_search(req: OptimizationRequest):
         reasons.append(f"{count} structures, plafond {req.search.max_candidates} : augmentez le plafond (256 maximum) ou ajustez explicitement la grille.")
     combined_peak = peak_budget.estimated_peak_bytes+workers*flow_memory
     # Total work is advisory: it cannot predict wall time across machines.
-    # Admission is bounded by grid size, individual memory and a hard deadline;
+    # Admission is bounded by grid size and individual memory; deadline overruns
+    # are reported even when an in-flight sequential computation must finish.
     # the executor queues at most one window of workers at a time.
     work_warning = (["Volume de calcul important : la grille est conservée. Ajustez le budget temps ; un dépassement rendra la couverture partielle."]
                     if budget.work_units > MAX_WORK else [])
@@ -70,6 +84,7 @@ def estimate_search(req: OptimizationRequest):
     return {"candidate_count": count, "contractually_excluded": pruned,
             "pricing_count": count-pruned if pruned is not None else None, "allowed": not reasons, "reasons": reasons,
             "budget": budget_data, "max_seconds": req.search.max_seconds, "warnings":work_warning,
+            "solver": {"max_iterations_per_candidate": solver["max_iter"], "tolerance": solver["tol"]},
             "validation": {"max_candidates": min(count, VALIDATION_CANDIDATES),
                            "pairs": [req.search.simulations, 2*req.search.simulations]},
             "execution": {"mode": "processes" if workers > 1 else "sequential",
@@ -152,12 +167,14 @@ def price_candidate(req, candidate):
     fraction = solution_scale(candidate)
     c = req.constraints
     definition = solution_definition(req)
-    low, high = (getattr(c,definition[key])*fraction for key in ("minimum_key", "maximum_key"))
+    solver = solver_configuration(req, fraction)
+    low, high = solver["lo"], solver["hi"]
     solved = solve_for_param(
         script, inputs["underlyings"], inputs["corr_matrix"], inputs["r"], inputs["T"],
         "constant", req.search.seed, inputs["user_params"], definition["script_param"], req.pricing_target, low, high,
-        N=req.search.simulations, tol=min(1e-6, c.price_tolerance/10), max_iter=SOLVER_ITERATIONS,
+        N=req.search.simulations, tol=solver["tol"], max_iter=solver["max_iter"],
         **market_engine_kwargs(inputs))
+    candidate.solver_diagnostics = {"settings": solver, "result": solved}
     if not solved["converged"]:
         candidate.pricing_status = "SKIPPED"
         candidate.rejection_reasons.append(solved["message"] or "Paramètre non résolu.")
@@ -183,6 +200,14 @@ def price_candidate(req, candidate):
                     req.search.simulations, "constant", req.search.seed, antithetic=True,
                     user_params=inputs["user_params"], per_path_flows=True, per_path_flow_labels=True, **market_engine_kwargs(inputs))
     candidate.pricing_status = "PRICED"
+    residual = float(result["price"]) - req.pricing_target
+    candidate.solver_diagnostics.update(rounded_parameter=value, repriced_residual=residual,
+                                        economic_tolerance=c.price_tolerance)
+    if abs(residual) > c.price_tolerance:
+        candidate.rejection_reasons.append("Prix après arrondi du paramètre hors tolérance du prix cible.")
+        candidate.rejection_details.append({"category":"NUMERICAL_SOLVER", "metric":"rounded_price", "actual":result["price"],
+            "target":req.pricing_target, "residual":residual, "tolerance":c.price_tolerance,
+            "label":"Écart économique après arrondi du paramètre résolu"})
     candidate.pricing_input = inputs
     summary = summarize_paths(result, req.search.simulations, inputs["T"], c.target_price, candidate=candidate,
                               observation_times=sorted({t for event in script.events for t in event.dates}))
@@ -214,7 +239,8 @@ def filter_candidate(req, candidate):
     if c.max_expected_capital_loss is not None and candidate.expected_capital_loss_ic95[1] > c.max_expected_capital_loss:
         reasons.append("Borne haute de perte en capital moyenne supérieure au plafond.")
     candidate.constraint_status = "REJECTED" if reasons else "PASS"
-    candidate.rejection_details = [d for d in candidate.rejection_details if d.get("metric") is None]
+    candidate.rejection_details = [d for d in candidate.rejection_details
+                                   if d.get("metric") is None or d.get("category") == "NUMERICAL_SOLVER"]
     if req.objective == "target_coupon" and abs(candidate.coupon-c.target_coupon) > c.coupon_tolerance:
         candidate.rejection_details.append({"category":"CONTRACT_OR_BOUNDS","metric":"coupon","label":"Coupon hors tolérance du coupon cible", "estimate":candidate.coupon,"target":c.target_coupon,"tolerance":c.coupon_tolerance,"unit":"fraction"})
     for metric, mean, bound, limit, relation, label in (
@@ -278,11 +304,10 @@ def run_events(req: OptimizationRequest, adapter=None, validation_adapter=None, 
     if not estimate["allowed"]:
         raise ValueError(" ".join(estimate["reasons"]))
     start = time.monotonic()
-    # Keep the historical default overridable by deterministic test clocks.
-    seconds = MAX_SECONDS if req.search.max_seconds == 120 else req.search.max_seconds
+    seconds = req.search.max_seconds
     deadline = start + seconds
     def stopped():
-        return bool(should_cancel and should_cancel()) or time.monotonic() > deadline
+        return bool(should_cancel and should_cancel()) or time.monotonic() >= deadline
     candidates = []
     yield {"type": "started", "estimate": estimate, "market_hash": market_snapshot["hash"]}
     complete = True
@@ -337,7 +362,7 @@ def run_events(req: OptimizationRequest, adapter=None, validation_adapter=None, 
     for candidate in shortlist:
         candidate.validation_status = "PENDING"
     validated = {}
-    if shortlist and not (should_cancel and should_cancel()):
+    if shortlist and not stopped():
         yield {"type": "validation_started", "total": len(shortlist),
                "candidate_ids": [c.candidate_id for c in shortlist]}
         if workers > 1 and adapter is None and validation_adapter is None:
@@ -382,7 +407,9 @@ def run_events(req: OptimizationRequest, adapter=None, validation_adapter=None, 
         if req.product_family == "autocall_gear_put" and req.objective == "target_coupon": explanation = "Perte en capital moyenne la plus faible au coupon cible"
         explanation += " parmi la sélection figée satisfaisant les contraintes sur tirages indépendants et les contrôles N/2N."
     request_json = req.model_dump_json()
-    interruption = "USER_STOP" if should_cancel and should_cancel() else "TIME_BUDGET" if not complete or not validation_complete else None
+    elapsed = time.monotonic()-start
+    interruption = ("USER_STOP" if should_cancel and should_cancel() else
+                    "TIME_BUDGET" if elapsed > seconds or not complete or not validation_complete else None)
     categories = {}
     for candidate in candidates:
         labels = {d["category"] for d in candidate.rejection_details}
@@ -390,7 +417,7 @@ def run_events(req: OptimizationRequest, adapter=None, validation_adapter=None, 
         if candidate.rejection_reasons and not labels: labels.add("MC_UNCERTAINTY" if candidate.validation_status=="REJECTED" else "CONTRACT_OR_BOUNDS")
         for label in labels: categories[label] = categories.get(label,0)+1
     yield {"type": "result", "result": {
-        "schema_version": 1, "engine_version": "optimizer-v1-market-search", "complete": complete and validation_complete and interruption is None,
+        "schema_version": 1, "engine_version": OPTIMIZER_METHOD_VERSION, "complete": complete and validation_complete and interruption is None,
         "interruption":interruption, "rejection_categories":categories,
         "request": req.model_dump(mode="json"), "request_hash": hashlib.sha256(request_json.encode()).hexdigest(),
         "model": "constant", "method": "grid", "seed": req.search.seed,
@@ -415,5 +442,7 @@ def run_events(req: OptimizationRequest, adapter=None, validation_adapter=None, 
                        "ranking_stability": ranking_stability},
         "candidates": [c.model_dump(mode="json") for c in candidates],
         "warnings": capabilities()["limitations"] + market_snapshot["warnings"] + ([] if interruption is None else [("Arrêt demandé" if interruption=="USER_STOP" else "Budget temps atteint") + " ; recherche ou validation partielle. Seuls les candidats confirmés sont recommandables."]),
-        "elapsed_seconds": round(time.monotonic()-start, 3),
+        "elapsed_seconds": round(elapsed, 3),
+        "time_budget": {"limit_seconds":seconds, "exceeded_seconds":round(max(0.,elapsed-seconds),3),
+                        "policy":"between_calculations" if workers == 1 or adapter is not None else "interruptible_workers"},
     }}

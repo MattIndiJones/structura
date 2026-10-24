@@ -17,6 +17,11 @@ import pytest
 from backend.app.services import market_data
 
 
+@pytest.fixture(autouse=True)
+def isolated_provider_observations(monkeypatch, tmp_path):
+    monkeypatch.setenv('STRUCTURA_DATA_DIR', str(tmp_path))
+
+
 class _FauxTitre:
     """Un titre qui verse un dividende connu, avec ses deux séries de cours.
 

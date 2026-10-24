@@ -74,7 +74,7 @@ def _fake_prices(price_at):
     return fake
 
 
-USER = SimpleNamespace(id=1)
+USER = SimpleNamespace(id=1, role="user", entity_id=None)
 BODY = deals_api.MtmExplainRequest(recalibrate="none")   # σ booking aux 2 dates
 
 
@@ -211,10 +211,15 @@ def test_explain_report_returns_pdf(monkeypatch):
     s, deal = _make_session()
     monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices(lambda d: 100.0))
     try:
-        resp = deals_api.deal_mtm_explain_report(deal.id, USER, s, n_paths=4000,
-                                                 body=BODY)
+        result = deals_api.deal_mtm_explain(deal.id, USER, s, n_paths=4000, body=BODY)
+        def no_repricing(*args, **kwargs): raise AssertionError("Export must not reprice")
+        monkeypatch.setattr(deals_api, "_explain_core", no_repricing)
+        resp = deals_api.deal_mtm_explain_report(deal.id, USER, s,
+            body=deals_api.DocumentSelection(archive_id=result["archive_id"]))
         assert resp.media_type == "application/pdf"
-        assert "Explication_valo_EXPL-1" in resp.headers["content-disposition"]
+        assert result["archive_id"] in resp.headers["content-disposition"]
+        assert resp.body == deals_api.deal_mtm_explain_report(deal.id, USER, s,
+            body=deals_api.DocumentSelection(archive_id=result["archive_id"])).body
     finally:
         s.close()
 

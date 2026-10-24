@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from sqlalchemy import update
+from sqlalchemy import update, func
 from sqlmodel import Session, select
 
 from ..core.audit import record_audit_event
@@ -26,13 +26,23 @@ class ProductError(ValueError):
         self.code, self.status = code, status
 
 
-def owned_record(session: Session, product_id: int, user: User) -> ProductRecord:
+def owned_record(session: Session, product_id: int, user: User, *, right: str = "price",
+                 _lineage: frozenset[int] = frozenset()) -> ProductRecord:
     row = session.get(ProductRecord, product_id)
     if row is None:
         raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
     owner = session.get(User, row.user_id)
     if owner and owner.username == "__rfq_transport__":
         raise ProductError("PRODUCT_NOT_FOUND", "Projection technique de réception inaccessible.", 404)
+    if product_id in _lineage:
+        raise ProductError("PRODUCT_NOT_FOUND", "Filiation produit invalide.", 404)
+    if row.origin_product_id is not None:
+        # A derivative must not declassify desk-restricted or private inputs.
+        owned_record(session, row.origin_product_id, user,
+                     _lineage=_lineage | {product_id})
+    from ..core.access import has_capability
+    if not has_capability(user, "business.price") or (right == "prepare" and not has_capability(user, "business.prepare")):
+        raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
     from .rfq_bank import case_for_product, private_product_access
     bank_case = case_for_product(session, product_id)
     if bank_case:
@@ -45,10 +55,19 @@ def owned_record(session: Session, product_id: int, user: User) -> ProductRecord
     scoped_rfqs = session.exec(select(RfqRequest).join(
         RfqOwnership, RfqOwnership.rfq_id == RfqRequest.id).where(
             RfqRequest.product_id == product_id)).all()
+    all_rfqs = session.exec(select(RfqRequest).where(RfqRequest.product_id == product_id)).all()
+    from .rfq_access import effective_rights
+    from ..hybrid.config import current_config
+    for rfq in all_rfqs:
+        if rfq not in scoped_rfqs and not (user.role == "admin" and current_config() is None):
+            if not {"read", "price", right} <= effective_rights(session, rfq, user):
+                raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
     if scoped_rfqs:
-        from .rfq_access import effective_rights
-        if row.user_id != user.id or row.entity_id != user.entity_id or any(
-                "price" not in effective_rights(session, rfq, user) for rfq in scoped_rfqs):
+        if row.entity_id != user.entity_id or any(
+                not {"read", "price", right} <= effective_rights(session, rfq, user) for rfq in scoped_rfqs):
+            raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
+    elif row.entity_id is not None:
+        if row.entity_id != user.entity_id and not (user.role == "admin" and current_config() is None):
             raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
     elif row.user_id != user.id and user.role != "admin":
         raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
@@ -56,24 +75,41 @@ def owned_record(session: Session, product_id: int, user: User) -> ProductRecord
 
 
 def load_product(session: Session, product_id: int, *, revision: int | None = None,
-                 terms_version: int | None = None) -> Product:
+                 terms_version: int | None = None, calculation_page: tuple[int, int] | None = None) -> Product:
     row = session.get(ProductRecord, product_id)
     if row is None:
         raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
-    rev = session.exec(select(ProductRevision).where(
+    projection = select(ProductRevision) if calculation_page is None else select(
+        ProductRevision.terms_version, func.json_remove(ProductRevision.snapshot_json, '$.calculations').label('snapshot_json'))
+    rev = session.exec(projection.where(
         ProductRevision.product_id == product_id,
         ProductRevision.revision == (row.revision if revision is None else revision),
     )).first()
     if rev is None:
         raise ProductError("PRODUCT_REVISION_NOT_FOUND", "Révision produit introuvable.", 404)
+    if revision is None and terms_version is None and rev.terms_version != row.terms_version:
+        raise ProductError('PRODUCT_REVISION_INCONSISTENT',
+                           'La révision courante et sa version de termes sont incohérentes ; requalification requise.')
     version = rev.terms_version if terms_version is None else terms_version
     terms = session.exec(select(ProductTermsVersion).where(
         ProductTermsVersion.product_id == product_id, ProductTermsVersion.version == version,
     )).first()
     if terms is None:
         raise ProductError("PRODUCT_TERMS_NOT_FOUND", "Version des termes introuvable.", 404)
+    snapshot = json.loads(rev.snapshot_json)
+    if calculation_page is not None:
+        offset, limit = calculation_page
+        calculations = session.exec(select(
+            ProductCalculationRun.id, ProductCalculationRun.terms_version, ProductCalculationRun.kind,
+            ProductCalculationRun.calculated_at, ProductCalculationRun.valuation_date,
+            ProductCalculationRun.source, (func.json_extract(ProductCalculationRun.result_json, '$.price') * 100).label('price'),
+        ).where(ProductCalculationRun.product_id == product_id,
+                ProductCalculationRun.input_revision < snapshot['revision'])
+          .order_by(ProductCalculationRun.id.desc()).offset(offset).limit(limit)).all()
+        snapshot['calculations'] = [dict(c._mapping) for c in reversed(calculations)]
+        for c in snapshot['calculations']: c['calculated_at'] = c['calculated_at'].isoformat()
     return Product.model_validate({
-        **json.loads(rev.snapshot_json), "terms": json.loads(terms.terms_json),
+        **snapshot, "terms": json.loads(terms.terms_json),
         "terms_version": version,
     })
 
@@ -81,6 +117,16 @@ def load_product(session: Session, product_id: int, *, revision: int | None = No
 def stage_revision(session: Session, product: Product, *, expected_revision: int,
                    actor_id: int | None, action: str, reason: str = "") -> Product:
     """Compare-and-swap the current pointer and append one coherent snapshot."""
+    current = session.exec(select(ProductRecord.terms_version).where(
+        ProductRecord.id == product.product_id)).first()
+    if current is not None and product.terms_version < current:
+        raise ProductError('PRODUCT_TERMS_STALE',
+                           'La version des termes est historique ; elle ne peut pas remplacer la version courante.')
+    version = session.exec(select(ProductTermsVersion).where(
+        ProductTermsVersion.product_id == product.product_id,
+        ProductTermsVersion.version == product.terms_version)).first()
+    if version is None or version.fingerprint != product.terms_fingerprint:
+        raise ProductError('PRODUCT_TERMS_INVALID', 'La version des termes ne correspond pas au Product.')
     revision = expected_revision + 1
     now = datetime.utcnow()
     result = session.execute(update(ProductRecord).where(
@@ -91,6 +137,15 @@ def stage_revision(session: Session, product: Product, *, expected_revision: int
       .execution_options(synchronize_session=False))
     if result.rowcount != 1:
         raise ProductError("PRODUCT_REVISION_STALE", "Le produit a changé. Rechargez le dossier avant de réessayer.")
+    if product.commercial.opportunity_id is not None:
+        from ..core.opportunity_integrity import lock_opportunity
+        opportunity = lock_opportunity(session, product.commercial.opportunity_id)
+        record = session.get(ProductRecord, product.product_id)
+        if opportunity is None or opportunity.entity_id != record.entity_id or (
+                opportunity.client_id, opportunity.mandate_id) != (
+                    product.commercial.client_id, product.commercial.mandate_id):
+            raise ProductError('PRODUCT_OPPORTUNITY_ATTRIBUTION_CHANGED',
+                               'Le rattachement de cette opportunité a changé ; rechargez le contexte commercial.',422)
     saved = product.model_copy(update={"revision": revision})
     payload = saved.to_dict()
     payload.pop("terms")
@@ -215,7 +270,15 @@ def stage_booked_terms_amendment(session: Session, product: Product,
     return product.model_copy(update={"terms": terms, "terms_version": version})
 
 
+def lock_command_actor(session: Session, user: User):
+    """Serialize one actor's commands before looking up a durable result."""
+    session.execute(update(User).where(User.id == user.id).values(id=user.id)
+                    .execution_options(synchronize_session=False))
+    session.expire_all()
+
+
 def previous_command(session: Session, user: User, key: str, payload: dict) -> Product | None:
+    lock_command_actor(session, user)
     command = session.exec(select(ProductCommand).where(
         ProductCommand.user_id == user.id, ProductCommand.command_key == key)).first()
     if command is None:

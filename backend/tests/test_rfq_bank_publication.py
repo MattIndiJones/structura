@@ -56,6 +56,10 @@ def decision(row):
 
 def test_single_validator_publishes_commercial_price_once_without_private_inputs(publication_case):
     session, users, rfq, item_id, reviewer, calculation_id = publication_case
+    # The managed superuser uses explicit desk grants, not the technical admin role.
+    users[1].role = 'organization_admin'
+    session.add(users[1])
+    session.commit()
     policy(session, users[1], item_id)
     draft = prepare(session, users[1], item_id, calculation_id)
     assert api.get_rfq(rfq['id'], users[3], session)['quotes'] == []
@@ -256,3 +260,33 @@ def test_newer_calculation_invalidates_approved_response(publication_case):
     with pytest.raises(HTTPException) as err:
         inbox.publish_quote(item_id,decision(draft),users[1],session)
     assert err.value.status_code==409
+
+
+@pytest.mark.parametrize("revocation", ["inactive_membership", "expired_membership", "inactive_user"])
+def test_revoked_approval_is_not_current_in_workspace_and_history_is_preserved(publication_case, revocation):
+    from backend.app.db.models import RfqSolicitation
+    session, users, rfq, item_id, reviewer, calculation_id = publication_case
+    policy(session, users[1], item_id, dual=True)
+    draft = prepare(session, users[1], item_id, calculation_id)
+    approved = inbox.validate_quote(item_id, decision(draft), reviewer, session)
+    assert approved['quote_draft']['validation_current']
+    member = session.exec(select(RfqDeskMembership).where(RfqDeskMembership.user_id == reviewer.id)).first()
+    if revocation == "inactive_membership":
+        member.active = False
+    elif revocation == "expired_membership":
+        member.expires_at = datetime.utcnow() - timedelta(seconds=1)
+    else:
+        reviewer.is_active = False
+    session.add(member); session.add(reviewer); session.commit()
+    shown = service.workspace(session, session.get(RfqSolicitation, item_id), users[1])
+    assert shown['quote_draft']['validation_current'] is False
+    assert shown['quote_draft']['validated_by'] == reviewer.id
+    assert shown['quote_draft']['validated_at'] == approved['quote_draft']['validated_at']
+    with pytest.raises(HTTPException) as refusal:
+        inbox.publish_quote(item_id, decision(draft), users[1], session)
+    assert refusal.value.status_code == 409
+    session.rollback()
+    member.active = True; member.expires_at = None; reviewer.is_active = True
+    session.add(member); session.add(reviewer); session.commit()
+    renewed = inbox.validate_quote(item_id, decision(draft), reviewer, session)
+    assert renewed['quote_draft']['validation_current']

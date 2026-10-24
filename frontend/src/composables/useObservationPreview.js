@@ -21,8 +21,9 @@
  *     arrière, toutes marquées passées. Le passé, lui, est dans
  *     `past.realized_flows`, compté depuis le strike.
  */
-import { computed, ref, watch } from 'vue'
-import { apiFetch } from '../utils/api.js'
+import { computed, ref, watch, onScopeDispose } from 'vue'
+import { apiFetch, apiErrorMessage } from '../utils/api.js'
+import { calendarPolicy, tenorString } from '../utils/payscriptEconomics.js'
 
 export function addDaysStr(isoDate, days) {
   const d = new Date(isoDate)
@@ -43,29 +44,53 @@ export function todayStr() {
 export function useObservationPreview(store, strikeDate, devise) {
   // Dates exactes du calendrier CONSTAT quand il y en a un. Elles priment sur
   // tout : ce sont les dates contractuelles, pas des pas de grille.
+  const datesByCalendar = ref({})
+  let calendarRevision = 0
+  let closesRevision = 0
+  const calendarError = ref('')
   const datesCalendrier = ref([])
   const closesPassees = ref({})   // { 'YYYY-MM-DD': { ticker: cours } }
 
-  function _tenor(t) { return (t && t.value) ? `${t.value}${t.unit}` : null }
+  const _tenor = tenorString
 
   async function chargerCalendrier() {
+    const revision = ++calendarRevision
+    const byCalendar = {}
+    datesByCalendar.value = {}
+    datesCalendrier.value = []
+    calendarError.value = ''
+    const currency=devise() || 'EUR'
+    const failures=[]
+    if (store.contractTermsLocked) {
+      const frozen = store.currentProduct?.terms?.schedule || store.openedDeal?.schedule
+      for (const row of [...(frozen?.constatations || [])].sort((a, b) => a.rang - b.rang)) {
+        if (row.date) (byCalendar[row.calendrier] ||= []).push(row.date)
+      }
+      datesByCalendar.value = byCalendar
+      datesCalendrier.value = [...new Set(Object.values(byCalendar).flat())].sort()
+      return
+    }
     const calendriers = (store.scriptConstats || []).filter(c => c.role !== 'initial_fixing')
     if (!calendriers.length) { datesCalendrier.value = []; return }
     const toutes = new Set()
     for (const c of calendriers) {
+      if(revision!==calendarRevision) return
       const v = store.constatOverrides[c.name] || {}
+      const policy = calendarPolicy(v)
       if (c.kind === 'single') {
         const date = typeof v === 'string' ? v : v.date
         if (date) {
-          if (typeof v === 'object' && v.convention && v.convention !== 'none') {
+          if (typeof v === 'object') {
             try {
               const response = await apiFetch('/api/calendar/resolve', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ date, currency: devise(), convention: v.convention }),
+                body: JSON.stringify({ date, currency, convention: v.convention || 'none', settlement_lag: v.settlement_lag ?? 0, ...policy }),
               })
-              if (response.ok) toutes.add((await response.json()).date)
-            } catch { /* An incomplete convention is not an observed date. */ }
-          } else toutes.add(date)
+              const data=await response.json()
+              if(!response.ok) throw Error(apiErrorMessage(data,'Calendrier refusé.'))
+              byCalendar[c.name] = [data.date]
+            } catch(e) { failures.push(`${c.name} : ${e.message}`) }
+          } else byCalendar[c.name] = [date]
         }
         continue
       }
@@ -78,18 +103,22 @@ export function useObservationPreview(store, strikeDate, devise) {
             first_observation_date: v.first_observation_date || undefined, start_date: v.start_date || undefined, end_date: v.end_date, roll_date: v.roll_date || v.first_observation_date,
             frequency: _tenor(v.frequency), stub: v.stub,
             sub_frequency: _tenor(v.sub_frequency) || null,
-            currency: devise() || 'EUR',
+            currency, ...policy,
             convention: v.convention || 'none',
-            settlement_lag: v.settlement_lag || 0,
+            settlement_lag: v.settlement_lag ?? 0,
           }),
         })
-        if (!res.ok) continue
         const data = await res.json()
+        if (!res.ok) throw Error(apiErrorMessage(data,'Calendrier refusé.'))
         // La première date est le début de période, pas une observation.
-        ;(data.dates || []).slice(data.first_is_observation ? 0 : 1).forEach(d => toutes.add(d))
-      } catch { /* calendrier incomplet : on retombe sur les flux */ }
+        byCalendar[c.name] = (data.dates || []).slice(data.first_is_observation ? 0 : 1)
+      } catch(e) { failures.push(`${c.name} : ${e.message}`) }
     }
+    if (revision !== calendarRevision) return
+    Object.values(byCalendar).flat().forEach(date => toutes.add(date))
+    datesByCalendar.value = byCalendar
     datesCalendrier.value = [...toutes].sort()
+    calendarError.value=failures.join(' · ')
   }
 
   /** Les temps de constatation lus dans la table de flux du dernier pricing. */
@@ -101,7 +130,8 @@ export function useObservationPreview(store, strikeDate, devise) {
 
   /** Dates de constatation, calendrier contractuel en priorité. */
   const datesObservations = computed(() => {
-    if (datesCalendrier.value.length) return datesCalendrier.value
+    if (datesCalendrier.value.length || store.contractTermsLocked
+      || (store.scriptConstats || []).some(c=>c.role!=='initial_fixing')) return datesCalendrier.value
     const origine = strikeDate()
     if (!origine) return []
     const res = store.result
@@ -116,6 +146,8 @@ export function useObservationPreview(store, strikeDate, devise) {
   })
 
   async function chargerCloturesPassees() {
+    const revision=++closesRevision
+    closesPassees.value={}
     const aujourdhui = todayStr()
     const jours = new Set(datesObservations.value)
     const origine = strikeDate()
@@ -143,7 +175,7 @@ export function useObservationPreview(store, strikeDate, devise) {
           if (serie && serie[idx]) releve[jour][tk] = serie[idx]
         }
       }
-      closesPassees.value = releve
+      if(revision===closesRevision) closesPassees.value = releve
     } catch { /* pas d'historique : les cellules restent vides */ }
   }
 
@@ -197,9 +229,11 @@ export function useObservationPreview(store, strikeDate, devise) {
     return events
   })
 
-  watch(() => [store.scriptConstats, store.constatOverrides, strikeDate()],
-        chargerCalendrier, { deep: true, immediate: true })
-  watch(datesObservations, chargerCloturesPassees, { immediate: true })
+  watch(() => [store.scriptConstats, store.constatOverrides, strikeDate(), devise(), store.contractTermsLocked, store.currentProduct, store.openedDeal],
+        chargerCalendrier, { deep: true, immediate: true, flush:'sync' })
+  watch(()=>[datesObservations.value,strikeDate(),(store.underlyings || []).map(u=>u.ticker)],
+    chargerCloturesPassees, {deep:true,immediate:true,flush:'sync'})
+  onScopeDispose(()=>{calendarRevision++;closesRevision++})
 
-  return { datesCalendrier, datesObservations, closesPassees, previewEvents }
+  return { datesByCalendar, datesCalendrier, datesObservations, closesPassees, previewEvents, calendarError }
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass
+from .payscript.bridge import basket_bridge_substeps, resolve_bridge_substeps
 
 
 MAX_SCRIPT_CHARS = 32_000
@@ -129,6 +130,9 @@ def estimate_mc(
     stochastic_rates: bool = False,
     repricings: float = 1.0,
     expanded_dates: int = 0,
+    corr_matrix=None,
+    bridge_refinement=None,
+    simulation_steps: int | None = None,
 ) -> CalculationEstimate:
     validate_problem_dimensions(maturity_years, underlyings)
     if paths < 1:
@@ -142,12 +146,16 @@ def estimate_mc(
         )
 
     steps = max(1, round(maturity_years * 52))
+    if simulation_steps is not None:
+        if not isinstance(simulation_steps, int) or simulation_steps < steps:
+            raise ValueError("Nombre de pas de simulation invalide.")
+        steps = simulation_steps
     model_work = _MODEL_WORK_FACTOR.get(model, 1.0)
     work_factor = model_work
     if antithetic:
         work_factor *= 2.0
     if continuous_monitoring:
-        work_factor *= 1.35
+        work_factor *= 1.35 if underlyings == 1 else 2 * resolve_bridge_substeps(corr_matrix, bridge_refinement)
     if stochastic_rates:
         work_factor *= 1.25
     simulation_units = steps * underlyings * paths * work_factor
@@ -160,9 +168,13 @@ def estimate_mc(
     # leading peak-memory term.  35% covers state arrays and Python containers.
     array_factor = _MODEL_ARRAY_FACTOR.get(model, 2.0)
     if continuous_monitoring:
-        array_factor += 1.0
+        array_factor += 1.0 if underlyings == 1 else 4.0
     cells = (steps + 1) * underlyings * paths
     peak = math.ceil(cells * 8 * array_factor * 1.35)
+    if continuous_monitoring and underlyings > 1:
+        # Depth-first, step-by-step refinement retains O(log(substeps)) slices,
+        # rather than the complete fine time grid for every coarse interval.
+        peak += math.ceil(underlyings * paths * 8 * 8 * resolve_bridge_substeps(corr_matrix, bridge_refinement).bit_length())
     if stochastic_rates:
         peak += math.ceil((steps + 1) * paths * 8 * 3.0 * 1.20)
 
@@ -246,6 +258,7 @@ def estimate_pricing_request(
     stochastic_rates: bool,
     selected_greeks: list[str] | None = None,
     expanded_dates: int = 0,
+    corr_matrix=None,
 ) -> CalculationEstimate:
     """Estimate one synchronous pricing request, including requested Greeks.
 
@@ -254,6 +267,7 @@ def estimate_pricing_request(
     """
     base = estimate_mc(
         operation="pricing",
+        corr_matrix=corr_matrix,
         maturity_years=maturity_years,
         underlyings=underlyings,
         paths=paths,
@@ -270,6 +284,7 @@ def estimate_pricing_request(
     greek_paths = max(1_000, paths // 4)
     greek = estimate_mc(
         operation="greeks",
+        corr_matrix=None if "corr" in (selected_greeks or []) else corr_matrix,
         maturity_years=maturity_years,
         underlyings=underlyings,
         paths=greek_paths,
@@ -311,6 +326,7 @@ def estimate_mc_batch(
     stochastic_rates: bool = False,
     concurrent_runs: int = 1,
     expanded_dates: int = 0,
+    simulation_steps: int | None = None,
 ) -> CalculationEstimate:
     """Estimate a grid, solver or nested calculation made of MC repricings."""
     if concurrent_runs < 1:
@@ -326,6 +342,7 @@ def estimate_mc_batch(
         stochastic_rates=stochastic_rates,
         repricings=total_runs,
         expanded_dates=expanded_dates,
+        simulation_steps=simulation_steps,
     )
     peak = estimate.estimated_peak_bytes * min(concurrent_runs, math.ceil(total_runs))
     warnings = list(estimate.warnings)

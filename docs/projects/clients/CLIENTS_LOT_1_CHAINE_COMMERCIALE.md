@@ -634,3 +634,27 @@ une personne fictive supplémentaire pour la recette.
 
 Les objets ci-dessus sont conservés dans la base parce qu'ils constituent les
 preuves de recette et sont explicitement marqués comme données fictives.
+
+## Complément C24 — attribution commerciale, 22/10/2026
+
+Une opportunité sans dossier lié peut changer de client uniquement après
+validation du contact principal, du mandat et de **tous les participants
+persistés**, y compris lorsque le patch omet leur liste. La suppression ou le
+remplacement des participants doit être explicite et cohérent avec le nouveau
+client ; l'audit du changement conserve les rattachements avant et après.
+
+Dès qu'un Deal, une RFQ, un Indicative, une interaction ou un snapshot Product
+référence l'opportunité, changer son client ou son mandat est refusé. Ouvrir une
+nouvelle opportunité pour une nouvelle intention ; aucune réécriture des preuves
+ni rectification implicite n'est effectuée. Une éventuelle rectification du passé
+reste un workflow gouverné distinct, non ajouté par C24.
+
+Les changements d'attribution sont sérialisés avec leurs consommateurs
+Product/RFQ/Deal. Le Product vérifie à nouveau le client, le mandat et
+l'organisation de l'opportunité avant de conserver sa révision. Le scénario
+concurrent accepte un seul des deux gestes incompatibles : déplacement ou
+création du Product avec l'ancienne attribution.
+
+Voir le [rapport C24](../../audits/REMEDIATION_C24_2026-10-22.md) et ses preuves
+ciblées. Cette qualification est locale ; les anciennes recettes ne constituent
+pas une nouvelle qualification de déploiement.

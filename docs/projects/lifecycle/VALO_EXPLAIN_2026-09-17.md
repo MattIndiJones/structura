@@ -48,7 +48,7 @@ Les deux prix sont d'abord reproduits avec une tolérance absolue de `1e-10`.
 Les réévaluations successives utilisent le pricer résiduel existant, avec les mêmes
 trajectoires et la même graine. Ordre déclaré :
 
-1. Temps et état réalisé, déplacés ensemble pour conserver un état cohérent
+1. Temps, état réalisé et créances à recevoir, déplacés ensemble pour conserver un état cohérent
    lors du franchissement d'une observation ou d'une fenêtre de fixing.
 2. Spots normalisés.
 3. Dividendes : rendement, courbe et décroissance.
@@ -56,7 +56,6 @@ trajectoires et la même graine. Ordre déclaré :
 5. Corrélations.
 6. Taux et courbe sans risque, avec les paramètres de taux stochastiques.
 7. Courbe et spread de financement, distincts du drift.
-8. Valeur actuelle des flux constatés restant à recevoir.
 
 La somme des contributions et du résidu reproduit l'écart observé. L'ordre affecte
 l'attribution des interactions ; un résidu n'est jamais renommé en facteur causal.
@@ -96,3 +95,17 @@ Le test d'un fournisseur IA réel nécessite sa configuration et un appel explic
 
 L'activation et la recette dans l'instance locale nécessitent le démarrage du
 backend par Philippe, conformément à `CLAUDE.md` ; l'agent ne lance pas le serveur.
+
+## Mise à jour C22 — 22/10/2026
+
+Les nouvelles comparaisons portent la version d'attribution `pnl-payment-v2`.
+La créance d'un coupon observé mais non payé se déplace avec le temps et l'état
+réalisé ; elle ne produit plus un saut négatif puis une compensation artificielle
+à une dernière étape de PV. Les dividendes utilisent le même changement de
+champs isolé que l'Explain Booking. Les notes déjà figées conservent leur méthode,
+leurs chiffres et leur fichier PDF ; aucune archive n'est réécrite.
+
+La comparaison reste une **variation du MtM**, sans ajout du cash. Le parcours
+Booking et l'agrégat portefeuille ajoutent séparément le cash contractuel à
+échéance, sur ]date 1, date 2], pour présenter leur P&L contractuel.
+[Rapport et validation C22](../../audits/REMEDIATION_C22_2026-10-22.md).

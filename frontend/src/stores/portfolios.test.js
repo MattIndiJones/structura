@@ -28,7 +28,7 @@ describe('gestion des portefeuilles', () => {
       if (url === '/api/portfolios' && options.method === 'POST') {
         return response({ id: 7, name: 'Book test', user_id: 2, owner_username: 'test' })
       }
-      if (url === '/api/portfolios') {
+      if (url === '/api/portfolios?data_scope=PRODUCTION') {
         return response([{ id: 7, name: 'Book test', user_id: 2, owner_username: 'test' }])
       }
       throw new Error(`Appel inattendu : ${url}`)
@@ -48,7 +48,7 @@ describe('gestion des portefeuilles', () => {
         return response({ id: 12, portfolio_ids: [2, 3] })
       }
       if (url === '/api/deals') return response([{ id: 12, portfolio_ids: [2, 3], status: 'actif' }])
-      if (url === '/api/portfolios') {
+      if (url === '/api/portfolios?data_scope=PRODUCTION') {
         return response([{ id: 3, name: 'Mandat EUR', is_default: false, deal_count: 1 }])
       }
       throw new Error(`Appel inattendu : ${url}`)
@@ -59,7 +59,7 @@ describe('gestion des portefeuilles', () => {
 
     expect(assigned).toEqual({ id: 12, portfolio_ids: [2, 3] })
     expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
-      '/api/deals/12/portfolios', '/api/deals', '/api/portfolios',
+      '/api/deals/12/portfolios', '/api/deals', '/api/portfolios?data_scope=PRODUCTION',
     ])
   })
 })

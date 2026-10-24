@@ -1,0 +1,1268 @@
+{
+  "workstream": "C13",
+  "validated_on": "2026-10-21",
+  "scope": [
+    "M03-01",
+    "M12-01",
+    "M12-02",
+    "M12-05",
+    "M13-01"
+  ],
+  "global_closure": false,
+  "production_qualified": false,
+  "business_decision": {
+    "id": "D03",
+    "title": "Fraîcheur et finalité par usage",
+    "refs": "M03-01 M03-04 M03-05 C11 C13",
+    "proposed_decision": "Seuils C11 et finalité C13 confirmés ci-dessous ; les autres usages restent à qualifier selon leur périmètre.",
+    "due": "Avant publication d'une donnée qualifiée",
+    "status": "Confirmée pour EOD/FX C11 et finalité C13 — autres usages à qualifier",
+    "confirmed_on": "2026-10-21",
+    "decision_source": "Philippe : « 3 jours calendaires pour les cours et le FX », puis correction explicite C13 : « non pas de delai en fait tu prends le cours quand il sest dispo ». Cette correction remplace le choix initial du lendemain.",
+    "accepted_decision": "Cours historiques EOD et FX de reporting : report maximal de 3 jours calendaires, borne incluse ; J+3 admissible, J+4 hors politique et exclu, date effective et ancienneté exposées. C13 : aucun délai ajouté après fin de séance ; clôture non ajustée reçue après clôture admissible dès sa disponibilité. Barre intrajournalière ou mise en cache avant clôture non officialisable automatiquement. Place, calendrier de séance, fuseau et horodatage établis ; sinon exception sourcée explicite. Aucune attente jusqu’au lendemain."
+  },
+  "backend": {
+    "unique_passed": 232,
+    "files": 12,
+    "new_c13_cases": 22,
+    "batches": [
+      {
+        "junit": ".runtime/diagnostic-acceptance/c13-2026-10-21/backend-final.xml",
+        "tests": 220,
+        "passed": 220
+      },
+      {
+        "junit": ".runtime/diagnostic-acceptance/c13-2026-10-21/backend-registry-prestrike-final.xml",
+        "tests": 27,
+        "passed": 27
+      },
+      {
+        "junit": ".runtime/diagnostic-acceptance/c13-2026-10-21/backend-explain-final.xml",
+        "tests": 7,
+        "passed": 7
+      }
+    ],
+    "successful_cases": [
+      {
+        "class": "backend.tests.test_booking_mtm_daily",
+        "name": "test_progress_is_delivered_before_computation_completes",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_booking_mtm_daily",
+        "name": "test_restoration_keeps_access_controls",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_booking_mtm_daily",
+        "name": "test_restoration_selects_latest_compatible_run_with_local_midnight_bounds",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_booking_mtm_daily",
+        "name": "test_stream_matches_regular_mtm_and_records_one_run",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_booking_mtm_daily",
+        "name": "test_stream_reports_market_failure_without_persisting",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_correction_invalidates_current_but_preserves_frozen_run",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_exception_decision_rolls_back_and_same_request_can_retry",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_failure_during_application_rolls_back_fixing_and_product",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-21-metadata2-VENUE_UNKNOWN]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-21-metadata3-TIMEZONE_MISMATCH]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-21-metadata4-PUBLICATION_UNVERIFIED]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-24-metadata1-NON_SESSION]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-12-25-metadata0-NON_SESSION]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_intraday_cannot_create_official_version_or_coupon",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_mtm_uses_official_90_for_coupon_not_provider_40",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[JPX-Asia/Tokyo-2026-10-21-2026-10-21T06:30:00+00:00]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[NYQ-America/New_York-2026-03-02-2026-03-02T21:00:00+00:00]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[NYQ-America/New_York-2026-03-09-2026-03-09T20:00:00+00:00]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[NYQ-America/New_York-2026-11-27-2026-11-27T18:00:00+00:00]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[PAR-Europe/Paris-2026-10-21-2026-10-21T15:30:00+00:00]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_official_automatic_fixing_survives_missing_provider_row",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_pending_version_is_not_a_provider_fallback",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_reference_feed_uses_atomic_local_copy_before_network",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_three_calendar_day_carry_boundary[2026-01-08-True]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_three_calendar_day_carry_boundary[2026-01-09-False]",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_total_outage_keeps_official_prefix_and_diagnoses_source",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_unversioned_candidate_is_never_a_legacy_strike_reference",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_avancer_puis_compter_les_jours_de_semaine_se_compensent[depart0]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_avancer_puis_compter_les_jours_de_semaine_se_compensent[depart1]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_avancer_puis_compter_les_jours_de_semaine_se_compensent[depart2]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_avancer_puis_compter_les_jours_de_semaine_se_compensent[depart3]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_avancer_puis_compter_les_jours_de_semaine_se_compensent[depart4]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_avancer_puis_compter_les_jours_de_semaine_se_compensent[depart5]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_avancer_puis_compter_les_jours_de_semaine_se_compensent[depart6]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_deux_fixings_differents_a_la_meme_date_ne_se_departagent_pas_en_silence",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_la_derniere_fenetre_garde_tout_son_horizon_dans_l_historique",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_la_surveillance_decide_le_rappel_sur_les_cours_de_ses_dates",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_le_rejeu_officiel_lit_chacun_des_dix_fixings_de_la_fenetre_de_depart",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_le_remboursement_d_une_maturite_calendaire_se_retrouve",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_un_rappel_se_decide_sur_ses_deux_fixings_et_se_date_a_sa_constatation",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_un_releve_sans_cotation_est_reporte_et_signale",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_une_constatation_posterieure_a_la_derniere_cloture_reste_a_simuler[valo0]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_une_constatation_posterieure_a_la_derniere_cloture_reste_a_simuler[valo1]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_une_fenetre_quotidienne_lit_dix_seances_quel_que_soit_le_jour_de_depart[0]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_une_fenetre_quotidienne_lit_dix_seances_quel_que_soit_le_jour_de_depart[1]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_une_fenetre_quotidienne_lit_dix_seances_quel_que_soit_le_jour_de_depart[2]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_une_fenetre_quotidienne_lit_dix_seances_quel_que_soit_le_jour_de_depart[3]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lecture_par_date",
+        "name": "test_une_fenetre_quotidienne_lit_dix_seances_quel_que_soit_le_jour_de_depart[4]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_alerts",
+        "name": "test_deux_observations_de_rappel_creent_deux_alertes",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_alerts",
+        "name": "test_le_ki_garde_une_cle_terminale_independante_des_observations",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_alerts",
+        "name": "test_rappel_se_regle_a_sa_date_effective_sans_attendre_la_maturite",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_l_avertissement_nomme_les_dates_reportees",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_le_report_sur_la_fenetre_de_depart_dit_qu_il_touche_s0",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_les_releves_de_la_fenetre_de_depart_sont_verifies_aussi",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_sur_un_extreme_le_report_peut_renverser_la_decision[MAX]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_sur_un_extreme_le_report_peut_renverser_la_decision[MIN]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_sur_une_moyenne_le_report_ne_renverse_pas_la_decision",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_un_cours_nul_ne_compte_pas_comme_un_fixing",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_un_deal_sans_echeancier_fige_n_est_pas_bloque",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_un_echeancier_illisible_ne_leve_pas",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_un_produit_ponctuel_n_est_pas_concerne",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_une_barriere_americaine_reste_bloquee",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_une_constatation_moyennee_n_est_plus_reputee_dependante_du_chemin",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_une_fenetre_complete_ne_bloque_rien",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_une_fenetre_partiellement_fixee_est_signalee_aussi",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_lifecycle_fenetres",
+        "name": "test_une_fenetre_sans_fixings_est_signalee",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_adjusted_only_storage_is_not_reported_usable_for_contract_replay",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_admin_fetch_populates_the_stores_consumers_replay_offline",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_amc_storage_supplies_the_correct_raw_and_adjusted_basis_offline",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_approved_policy_accepts_day_three_and_excludes_day_four[history]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_approved_policy_accepts_day_three_and_excludes_day_four[reporting_fx]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_backtest_correlation_uses_common_estimator_without_rounding",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_closed_market_carry_is_bounded_and_source_dates_are_visible",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_dated_and_current_vol_use_the_same_declared_common_sample",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_dividend_profile_reuses_saved_observations_before_requesting_cash_events",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_durable_local_replay_needs_no_network_and_caches_are_defensive",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_full_backtest_refuses_missing_asset_but_comparison_records_reduction",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_fx_quote_retains_date_and_age_but_excludes_old_or_future_rate[2024-01-01-STALE-False-969]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_fx_quote_retains_date_and_age_but_excludes_old_or_future_rate[2026-08-23-STALE-False-4]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_fx_quote_retains_date_and_age_but_excludes_old_or_future_rate[2026-08-24-CARRIED-True-3]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_fx_quote_retains_date_and_age_but_excludes_old_or_future_rate[2026-08-27-FRESH-True-0]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_fx_quote_retains_date_and_age_but_excludes_old_or_future_rate[2026-08-28-MISSING-False-None]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_invalid_provenance_is_rejected[20%]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_invalid_provenance_is_rejected[True]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_invalid_provenance_is_rejected[nan]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_leading_missing_prices_are_trimmed_without_backfill",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_legacy_underlying_does_not_gain_a_null_provenance_key",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_long_interior_halt_cannot_be_compressed_into_daily_return[False]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_long_interior_halt_cannot_be_compressed_into_daily_return[True]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_missing_asset_requires_explicit_exploratory_reduction",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_more_complete_amc_stock_precedes_refetch_when_shared_copy_is_partial[2026-06-01-2026-01-01]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_more_complete_amc_stock_precedes_refetch_when_shared_copy_is_partial[2026-08-27-2026-07-01]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_old_fx_excludes_exposure_and_does_not_clear_a_counterparty_limit",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_pending_policy_does_not_qualify_carried_prices_or_fx",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_provenance_cannot_replace_the_actual_validated_engine_values[q-0.0200123]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_provenance_cannot_replace_the_actual_validated_engine_values[sigma-0.23456789]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_reference_override_and_exact_value_survive_receipt_product_and_reopen",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_reinvest_unknown_dividend_does_not_call_solver",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_market_data_governance",
+        "name": "test_sixty_day_suspension_is_excluded_instead_of_zero_returns",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_chain_telescopes_exactly",
+        "junit": "backend-explain-final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_flat_market_only_time_effect",
+        "junit": "backend-explain-final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_guards",
+        "junit": "backend-explain-final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_phrases_present",
+        "junit": "backend-explain-final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_report_returns_pdf",
+        "junit": "backend-explain-final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_spot_ramp_spot_effect_dominates",
+        "junit": "backend-explain-final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_payloads_are_json_serializable",
+        "junit": "backend-explain-final.xml"
+      },
+      {
+        "class": "backend.tests.test_prestrike_mtm",
+        "name": "test_apres_le_strike_le_regime_ordinaire_est_intact",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_prestrike_mtm",
+        "name": "test_avant_le_strike_les_constatations_reculent_de_l_ecart_au_strike",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_prestrike_mtm",
+        "name": "test_avant_le_strike_rien_n_est_realise",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_prestrike_mtm",
+        "name": "test_sous_vol_locale_la_dispersion_du_fixing_compte",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_prestrike_mtm",
+        "name": "test_un_stock_absent_ne_bloque_plus_avant_le_strike",
+        "junit": "backend-registry-prestrike-final.xml"
+      },
+      {
+        "class": "backend.tests.test_raw_vs_adjusted_prices",
+        "name": "test_l_estimation_de_volatilite_garde_le_rendement_total",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_raw_vs_adjusted_prices",
+        "name": "test_la_borne_de_fin_est_inclusive_et_la_provenance_est_exposee",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_raw_vs_adjusted_prices",
+        "name": "test_la_calibration_datee_utilise_la_meme_fenetre_que_le_mtm",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_raw_vs_adjusted_prices",
+        "name": "test_le_cours_ajuste_reste_accessible_mais_doit_etre_demande",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_raw_vs_adjusted_prices",
+        "name": "test_les_fixings_contractuels_etaient_deja_sur_le_cours_nu",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_raw_vs_adjusted_prices",
+        "name": "test_par_defaut_on_recoit_le_cours_nu",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_ancien_deal_sans_funding_devient_explicitement_zero",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_booking_refuse_un_script_different_du_pricing",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_booking_refuse_une_maturite_numerique_differente_du_pricing",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_booking_utilise_le_snapshot_serveur_identifie",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_courbe_funding_prolonge_son_dernier_niveau_apres_son_dernier_pilier",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_preuve_modifiee_est_refusee",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_preuve_pricing_fige_funding_seed_globale_monitoring_et_unites",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_run_valuation_transmet_tout_le_contexte",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_scenario_smile_changes_only_the_named_underlying",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_un_scenario_ne_peut_pas_remplacer_le_calendrier_du_contexte",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_a_second_correction_waits_for_the_checker_decision",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_amendment_request_is_persistent_but_does_not_change_deal",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_aucune_etiquette_de_fermete_ne_bloque_le_booking[INDICATIVE]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_aucune_etiquette_de_fermete_ne_bloque_le_booking[UNKNOWN]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_audit_failure_prevents_fixing_persistence",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_auto_exception_owner_can_confirm_pending_human_value",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_auto_exception_owner_can_explicitly_adopt_yahoo",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_auto_exception_resolution_is_refused_for_four_eyes_deal",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_auto_yahoo_never_bypasses_a_pending_human_exception",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_auto_yahoo_officializes_fixings_and_applies_terminal_lifecycle",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_auto_yahoo_revision_never_overwrites_an_official_fixing",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_auto_yahoo_waits_for_same_day_close_without_manual_exception",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_accepts_complete_firm_fresh_request",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_counterparty_mismatch",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_incomplete_terms[T-0-TENOR_INVALID]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_incomplete_terms[currency-EU-CURRENCY_INVALID]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_incomplete_terms[notional-0-NOTIONAL_INVALID]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_incomplete_terms[strike_date--STRIKE_DATE_INVALID]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_incomplete_terms[underlyings-value2-UNDERLYINGS_MISSING]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-MODEL_INPUTS_CHANGED]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-MODEL_INPUT_HASH_MISSING]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-MODEL_PRICE_MISSING]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-MODEL_PRICE_STALE]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-MODEL_PRICE_TIMESTAMP_MISSING]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-QUOTE_EXPIRED]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-QUOTE_PRICE_MISSING]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-QUOTE_STATUS_INVALID]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-QUOTE_VALIDITY_UNKNOWN]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-RFQ_NOT_EXECUTABLE]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_independent_failures[<lambda>-RFQ_STATUS_INVALID]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_no_selected_quote",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_booking_gate_rejects_unmapped_provider",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_checker_can_download_the_verified_archived_evidence",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_checker_can_reject_an_initial_fixing_candidate",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_complete_official_fixing_can_be_validated",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_deal_owner_cannot_capture_even_when_role_is_ops_maker",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch0]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch1]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch2]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch3]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch4]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch5]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch6]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch7]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch8]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_direct_post_booking_change_is_rejected_and_audited[patch9]",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_expired_selected_quote_is_visible_in_business_status",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_fixing_audit_contains_before_after_reason_and_source",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_fixing_capture_requires_complete_actionable_provenance",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_fixing_checker_is_scoped_to_the_deal_entity",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_fixing_correction_creates_a_new_immutable_version",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_fixing_maker_cannot_validate_own_submission",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_fixing_provider_must_match_the_client_account_source",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_fixing_timestamp_offset_must_match_the_market_timezone",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_fixing_validation_requires_an_intact_archived_evidence_payload",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_incomplete_fixing_validation_is_rejected_and_audited",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_la_maturite_se_deduit_de_T_sans_calendrier",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_la_maturite_se_lit_dans_le_calendrier_quand_il_existe",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_last_user_exception_replays_and_applies_terminal_lifecycle",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_legacy_four_eyes_refresh_switches_to_automatic_fixings",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_manual_fixing_is_received_but_not_automatically_validated",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_new_deal_schema_refuses_four_eyes_policy",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_partial_manual_fixing_is_explicit",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_refresh_error_is_visible_audited_and_alerted",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_rejecting_a_correction_restores_the_previous_official_version",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_repeated_automatic_monitoring_applies_terminal_result_once",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_resolution_application_is_exactly_once",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_resolution_authorization_and_application_are_atomic",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_resolution_rejection_rolls_back_the_intermediate_authorization",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_resolution_rolls_back_authorization_and_application_if_audit_fails",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_resolution_validation_requires_all_official_validated_fixings",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_resolution_validation_requires_explicit_outcome_confirmation",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_startup_migration_retires_four_eyes_and_stales_pending_proposal",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_un_last_look_frais_passe_le_portillon",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_un_reglement_apres_la_maturite_ne_signale_rien",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_un_reglement_avant_la_maturite_est_signale",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_un_reglement_le_jour_meme_de_la_maturite_passe",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_user_confirmed_exception_is_not_reopened_by_the_yahoo_feed",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_user_role_cannot_capture_an_official_fixing_candidate",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_controls",
+        "name": "test_validated_fixing_cannot_be_overwritten_and_creates_alert",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_admin_can_run_mtm_and_greeks_on_a_foreign_uat_deal",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_admin_refresh_uses_current_scope_without_foreign_unbound_alerts",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_admin_watchlist_includes_foreign_uat_deals",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_amendment_checker_is_entity_scoped",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_amendment_is_carried_through_by_its_own_maker_by_default",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_amendment_requires_four_eyes_and_applies_exactly_once",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_auto_yahoo_refresh_uses_official_replay_as_lifecycle_truth",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_auto_yahoo_stops_before_observations_after_an_autocall",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_commercial_attribution_always_requires_four_eyes",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_deal_audit_timeline_excludes_rows_from_a_recycled_legacy_id",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_deal_audit_timeline_is_owner_scoped_and_filterable",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_deal_owner_cannot_authorize_own_lifecycle_resolution",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_explicit_script_ki_state_drives_the_label",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_fixing_maker_cannot_authorize_resolution_that_consumes_own_fixing",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_maturity_label_is_semantic_not_a_payout_threshold",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_official_indicative_outcome_mismatch_blocks_validation",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_partial_official_fixing_prefix_cannot_manufacture_maturity",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_path_dependent_official_replay_fails_closed",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_payment_amendment_versions_the_product_terms_and_execution",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_payout_difference_above_currency_tolerance_blocks_authorization",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_pricing_or_calendar_amendment_requires_rebooking",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_single_signature_mode_still_refuses_a_foreign_user",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_validation_freezes_official_replay_and_application_uses_it",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_watchlist_filters_on_commercial_ids_without_requiring_them",
+        "junit": "backend-final.xml"
+      },
+      {
+        "class": "backend.tests.test_workflow_phase2",
+        "name": "test_watchlist_row_exposes_commercial_ids_without_changing_counterparty",
+        "junit": "backend-final.xml"
+      }
+    ],
+    "commands": [
+      ".venv/Scripts/python.exe -X utf8 -m pytest backend/tests/test_fixing_finality_registry.py backend/tests/test_workflow_controls.py backend/tests/test_workflow_phase2.py backend/tests/test_lifecycle_fenetres.py backend/tests/test_lifecycle_alerts.py backend/tests/test_lecture_par_date.py backend/tests/test_raw_vs_adjusted_prices.py backend/tests/test_market_data_governance.py backend/tests/test_booking_mtm_daily.py backend/tests/test_valuation_context.py -q -k \"not legacy_migration_marks_ambiguous_rows_for_manual_review\" -p c13_network_guard",
+      ".venv/Scripts/python.exe -X utf8 -m pytest backend/tests/test_fixing_finality_registry.py backend/tests/test_prestrike_mtm.py -q -k \"not prix and not dynamique and not dupire and not choc and not delta\" -p c13_network_guard",
+      ".venv/Scripts/python.exe -X utf8 -m pytest backend/tests/test_mtm_explain.py -q -k \"not greeks and not rho\" -p c13_network_guard"
+    ]
+  },
+  "frontend": {
+    "passed": 22,
+    "files": 2,
+    "command": "npm.cmd test -- src/composables/useBookingMtm.test.js src/components/EventsTab.test.js",
+    "duration_seconds": 2.09,
+    "evidence": "Tool output recorded in current chat; no Vue source changed, no build executed"
+  },
+  "network": {
+    "external_http_disabled": true,
+    "blocked_attempts": []
+  },
+  "preexisting_failure": {
+    "test": "test_legacy_migration_marks_ambiguous_rows_for_manual_review",
+    "message": "no such table: main.products",
+    "reproduction": ".runtime/diagnostic-acceptance/c13-2026-10-21/preexisting-migration.xml",
+    "database_sources_unchanged_since_baseline": true
+  },
+  "interrupted_attempt": {
+    "log": ".runtime/diagnostic-acceptance/c13-2026-10-21/backend-targeted.log",
+    "reason": "Selection included fundamental Monte Carlo pre-strike pricing/Greeks tests; interrupted and replaced with construction-focused scope. Not counted as validation."
+  },
+  "preservation": {
+    "baseline_directory": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c13-baseline-z1flzq0e",
+    "baseline_files": 1201,
+    "unrelated_files_preserved": 1190,
+    "unexpected_modified_files": [],
+    "business_db_present": false,
+    "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+    "branch": "codex/hybrid-saas-foundation",
+    "no_commit_no_push": true,
+    "register_counts_unchanged": true,
+    "unrelated_register_entries_unchanged": true
+  },
+  "sources_sha256": {
+    "backend/app/core/fixing_finality.py": "96083ec253ab23e656cbf01c0fa23a2a4a452fa05e93d90fcae8b897ea00a182",
+    "backend/app/core/official_history.py": "13317e474a2d0fd159b4ae9286f4434aa5ec9a15fbc96b344ef3c44c60c9ad42",
+    "backend/app/core/deal_valuation.py": "f0142b27373fb23a49e01b8f9a04642eb0d43cbeb7b72838b7fda413fb4c6da5",
+    "backend/app/core/valuation_runs.py": "8d9b9e3d3c4fb642f583e118da1628cd618c11207384f2fc2be93f59110f44cc",
+    "backend/app/services/market_data.py": "7f42c98fe2b70678360ecb968cd914d8ad43c8414897a7bc08f3fa4a1c18e273",
+    "backend/app/services/product_lifecycle.py": "2c54e0c7b0acc2affba46094e5719f2ad10b88540fac12ff764895c161a532c3",
+    "backend/app/api/deals.py": "0968f4b6f637d06dbe6ea3abfc6096867c2dc9915c332c5077fb30b685e51a31",
+    "backend/tests/test_fixing_finality_registry.py": "0b5778353f10b297e04a773b7904ce5f1b3162a394a3ffdb703d4a1eeb10f41f",
+    "backend/tests/test_workflow_controls.py": "89bb9b4f4604c073789f4f39a167d1e927fc9e65e58df9193ba76fa2084a992e",
+    "backend/tests/test_mtm_explain.py": "36d9abc735a06926d77c17b24fb35bf249195c2f03ca730ee65d2b0fcd38f841",
+    "requirements.txt": "6f4364a85006b1cdc53ddf03f8d51bb96af20e15b950b9b013bb05fce1fc61e8",
+    "requirements.lock.txt": "033c514eb0564a80a47b6c02c3bf98bf124f5397ffc65baac36dcdd7822d6e8d"
+  },
+  "limits": [
+    "T08 partial: monitor/CCR/C18/C19/C21/C22/C26 remain open",
+    "Operational publication eligibility is not an exchange-certified finality flag",
+    "Explicit supported venues only; unknown metadata fails closed",
+    "Legacy unversioned strike references remain marked LEGACY_UNVERIFIED",
+    "Continuous/daily path outside official event dates remains provider/indicative",
+    "No production UI acceptance, business-data migration or full backend suite executed"
+  ]
+}

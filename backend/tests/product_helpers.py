@@ -56,6 +56,8 @@ def pricing_receipt_for_deal_payload(payload: dict) -> dict:
 
 
 def add_pricing_receipt(payload: dict) -> dict:
+    payload.setdefault("transaction_format", "EMTN")
+    payload.setdefault("instrument_family", "Note")
     payload["pricing_receipt"] = pricing_receipt_for_deal_payload(payload)
     return payload
 

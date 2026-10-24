@@ -6,11 +6,16 @@ import bcrypt
 from datetime import datetime, date
 from typing import Annotated, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import RfqProvider, RfqProviderContact, RfqOwnership, User, Entity, Counterparty, Underlying
-from .auth import get_current_admin
+from .auth import get_current_admin, revoke_user_sessions
+from ..core.session_security import validate_password
+from ..core.reference_data import ReferenceChange, text_value, currency_value, audit_reference, REFERENCE_CURRENCIES
+from ..services.legal_identity import active_counterparty
+from ..hybrid.config import current_config
+from ..core.audit import record_audit_event
 from ..core import admin_registry
 from ..core.amc_prices import fetch_prices as _fetch_prices, price_status as _price_status, _slug
 from ..services.market_data import probe_ticker, search_symbols
@@ -33,13 +38,13 @@ def _hash_pw(password: str) -> str:
 
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
-class RfqProviderCreate(BaseModel):
+class RfqProviderCreate(ReferenceChange):
     label: str
     mode: str = "manual"
     counterparty_id: Optional[int] = None
 
 
-class RfqProviderUpdate(BaseModel):
+class RfqProviderUpdate(ReferenceChange):
     label: Optional[str] = None
     mode: Optional[str] = None
     active: Optional[bool] = None
@@ -153,8 +158,14 @@ def create_rfq_provider(
     label = body.label.strip()
     if not label:
         raise HTTPException(422, "Le nom du fournisseur est requis")
+    if session.exec(select(RfqProvider).where(RfqProvider.label == label)).first():
+        raise HTTPException(409, "Ce fournisseur existe déjà ; réactivez son entrée si nécessaire.")
+    if body.counterparty_id is not None:
+        active_counterparty(session, body.counterparty_id)
     p = RfqProvider(label=label, mode=body.mode, counterparty_id=body.counterparty_id)
     session.add(p)
+    session.flush()
+    audit_reference(session, admin, "REFERENCE_CREATED", p, None, _row(p), body.reason)
     session.commit()
     session.refresh(p)
     return _row(p, _cpty_names(session))
@@ -170,10 +181,23 @@ def update_rfq_provider(
     p = session.get(RfqProvider, provider_id)
     if not p:
         raise HTTPException(404, "Fournisseur introuvable")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    before = _row(p)
+    values = body.model_dump(exclude_unset=True, exclude={"reason"})
+    if "label" in values:
+        values["label"] = text_value(values["label"], "Le nom du fournisseur")
+        if session.exec(select(RfqProvider.id).where(RfqProvider.label == values["label"], RfqProvider.id != p.id)).first():
+            raise HTTPException(409, "Ce fournisseur existe déjà.")
+    if values.get("counterparty_id") is not None:
+        active_counterparty(session, values["counterparty_id"])
+    if "active" in values and values["active"] is None:
+        raise HTTPException(422, "L'état actif doit être renseigné.")
+    if "mode" in values:
+        values["mode"] = text_value(values["mode"], "Le mode du fournisseur")
+    for field, value in values.items():
         setattr(p, field, value)
     p.updated_at = datetime.utcnow()
     session.add(p)
+    audit_reference(session, admin, "REFERENCE_UPDATED", p, before, _row(p), body.reason)
     session.commit()
     return _row(p, _cpty_names(session))
 
@@ -181,16 +205,18 @@ def update_rfq_provider(
 @router.delete("/rfq-providers/{provider_id}", status_code=204)
 def delete_rfq_provider(
     provider_id: int,
+    body: ReferenceChange,
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
     p = session.get(RfqProvider, provider_id)
     if not p:
         raise HTTPException(404, "Fournisseur introuvable")
-    for contact in session.exec(select(RfqProviderContact).where(
-            RfqProviderContact.provider_id == provider_id)).all():
-        session.delete(contact)
-    session.delete(p)
+    before = _row(p)
+    p.active = False
+    p.updated_at = datetime.utcnow()
+    session.add(p)
+    audit_reference(session, admin, "REFERENCE_DEACTIVATED", p, before, _row(p), body.reason)
     session.commit()
 
 
@@ -262,17 +288,23 @@ def update_rfq_provider_contact(
 
 # ── Counterparties eligible to face a booked deal ─────────────────────
 
-class CounterpartyCreate(BaseModel):
+class CounterpartyCreate(ReferenceChange):
     name: str
     country: str = ""
     limit_eur: Optional[float] = None
 
 
-class CounterpartyUpdate(BaseModel):
+class CounterpartyUpdate(ReferenceChange):
     name: Optional[str] = None
     country: Optional[str] = None
     active: Optional[bool] = None
     limit_eur: Optional[float] = None
+
+
+def _validate_reference_limit(value):
+    import math
+    if value is not None and (not math.isfinite(value) or value < 0):
+        raise HTTPException(422, "La limite doit être positive ou nulle et finie.")
 
 
 def _cpty_row(c: Counterparty) -> dict:
@@ -307,8 +339,11 @@ def create_counterparty(
         raise HTTPException(422, "Le nom de la contrepartie est requis")
     if session.exec(select(Counterparty).where(Counterparty.name == name)).first():
         raise HTTPException(400, "Cette contrepartie existe déjà")
+    _validate_reference_limit(body.limit_eur)
     c = Counterparty(name=name, country=body.country.strip(), limit_eur=body.limit_eur)
     session.add(c)
+    session.flush()
+    audit_reference(session, admin, "REFERENCE_CREATED", c, None, _cpty_row(c), body.reason)
     session.commit()
     session.refresh(c)
     return _cpty_row(c)
@@ -325,7 +360,18 @@ def update_counterparty(
     if not c:
         raise HTTPException(404, "Contrepartie introuvable")
     former_name = c.name
-    for field, value in body.model_dump(exclude_unset=True).items():
+    before = _cpty_row(c)
+    values = body.model_dump(exclude_unset=True, exclude={"reason"})
+    if "name" in values:
+        values["name"] = text_value(values["name"], "Le nom de la contrepartie")
+        if session.exec(select(Counterparty.id).where(Counterparty.name == values["name"], Counterparty.id != c.id)).first():
+            raise HTTPException(409, "Cette contrepartie existe déjà.")
+    if "limit_eur" in values:
+        _validate_reference_limit(values["limit_eur"])
+    for field in ("active", "country"):
+        if field in values and values[field] is None:
+            raise HTTPException(422, "Les métadonnées requises ne peuvent pas être nulles.")
+    for field, value in values.items():
         setattr(c, field, value)
     c.updated_at = datetime.utcnow()
     session.add(c)
@@ -341,8 +387,11 @@ def update_counterparty(
                                        RfqProvider.counterparty_id == None)  # noqa: E711
         ).all()
         for p in orphans:
+            provider_before = _row(p)
             p.counterparty_id = c.id
             session.add(p)
+            audit_reference(session, admin, "REFERENCE_LEGAL_LINK_FROZEN", p, provider_before, _row(p), body.reason)
+    audit_reference(session, admin, "REFERENCE_UPDATED", c, before, _cpty_row(c), body.reason)
     session.commit()
     return _cpty_row(c)
 
@@ -350,13 +399,18 @@ def update_counterparty(
 @router.delete("/counterparties/{cpty_id}", status_code=204)
 def delete_counterparty(
     cpty_id: int,
+    body: ReferenceChange,
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
     c = session.get(Counterparty, cpty_id)
     if not c:
         raise HTTPException(404, "Contrepartie introuvable")
-    session.delete(c)
+    before = _cpty_row(c)
+    c.active = False
+    c.updated_at = datetime.utcnow()
+    session.add(c)
+    audit_reference(session, admin, "REFERENCE_DEACTIVATED", c, before, _cpty_row(c), body.reason)
     session.commit()
 
 
@@ -450,13 +504,14 @@ class UserCreate(BaseModel):
     username: str
     email: str
     password: str
-    role: Literal["user", "ops_maker", "checker", "admin"] = "user"
+    role: Literal["user", "ops_maker", "checker", "admin", "organization_admin"] = "user"
     entity_id: Optional[int] = None
+    _validate = field_validator("password")(validate_password)
 
 
 class UserUpdate(BaseModel):
     email: Optional[str] = None
-    role: Optional[Literal["user", "ops_maker", "checker", "admin"]] = None
+    role: Optional[Literal["user", "ops_maker", "checker", "admin", "organization_admin"]] = None
     entity_id: Optional[int] = None
     is_active: Optional[bool] = None
 
@@ -465,6 +520,7 @@ def _user_row(u: User) -> dict:
     return {
         "id": u.id, "username": u.username, "email": u.email, "role": u.role,
         "entity_id": u.entity_id, "is_active": u.is_active,
+        "password_change_required": u.password_change_required,
         "created_at": u.created_at.isoformat(),
     }
 
@@ -474,7 +530,10 @@ def list_users(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    users = session.exec(select(User).order_by(User.username)).all()
+    query = select(User).order_by(User.username)
+    if current_config():
+        query = query.where(User.entity_id == admin.entity_id)
+    users = session.exec(query).all()
     return [_user_row(u) for u in users]
 
 
@@ -484,6 +543,8 @@ def create_user(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    if current_config() and (body.entity_id != admin.entity_id or body.role == "admin"):
+        raise HTTPException(403, "Création limitée aux profils métier de votre organisation.")
     if session.exec(select(User).where(User.username == body.username)).first():
         raise HTTPException(400, "Cet identifiant est déjà utilisé")
     if session.exec(select(User).where(User.email == body.email)).first():
@@ -492,8 +553,13 @@ def create_user(
         username=body.username, email=body.email,
         password_hash=_hash_pw(body.password),
         role=body.role, entity_id=body.entity_id,
+        password_change_required=True,
     )
     session.add(u)
+    session.flush()
+    if current_config():
+        record_audit_event(session, action="LOCAL_USER_CREATED", object_type="USER", object_id=u.id,
+            actor_user_id=admin.id, result="SUCCESS", after=_user_row(u))
     session.commit()
     session.refresh(u)
     return _user_row(u)
@@ -509,11 +575,66 @@ def update_user(
     u = session.get(User, user_id)
     if not u:
         raise HTTPException(404, "Utilisateur introuvable")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    config = current_config()
+    if config:
+        values = body.model_dump(exclude_unset=True)
+        if u.entity_id != admin.entity_id:
+            raise HTTPException(404, "Utilisateur introuvable")
+        if ("entity_id" in values and values["entity_id"] != admin.entity_id) or ("role" in values and values["role"] not in {"user", "ops_maker", "checker", "organization_admin"}):
+            raise HTTPException(403, "Les habilitations restent dans votre organisation ; aucun rôle technique attribuable.")
+        if u.id == admin.id and ("role" in values or values.get("is_active") is False):
+            raise HTTPException(403, "Un autre administrateur local doit modifier votre habilitation.")
+        before = _user_row(u)
+    values = body.model_dump(exclude_unset=True)
+    if any(values.get(field, getattr(u, field)) is None for field in ("role", "is_active")):
+        raise HTTPException(422, "Le rôle et l'état actif ne peuvent pas être vides.")
+    revoke = any(field in values and values[field] != getattr(u, field) for field in ("role", "entity_id", "is_active"))
+    for field, value in values.items():
         setattr(u, field, value)
     session.add(u)
+    if revoke:
+        revoke_user_sessions(session, u)
+    if config:
+        record_audit_event(session, action="LOCAL_USER_UPDATED", object_type="USER", object_id=u.id,
+            actor_user_id=admin.id, result="SUCCESS", before=before, after=_user_row(u))
     session.commit()
     return _user_row(u)
+
+
+class PasswordReset(BaseModel):
+    password: str
+    _validate = field_validator("password")(validate_password)
+
+
+def _managed_user(session, user_id, admin):
+    user = session.get(User, user_id)
+    if not user or current_config() and user.entity_id != admin.entity_id:
+        raise HTTPException(404, "Utilisateur introuvable")
+    return user
+
+
+@router.post("/users/{user_id}/revoke-sessions", status_code=204)
+def revoke_sessions(user_id: int, admin: Annotated[User, Depends(get_current_admin)],
+                    session: Annotated[Session, Depends(get_session)]):
+    user = _managed_user(session, user_id, admin)
+    revoke_user_sessions(session, user)
+    record_audit_event(session, action="USER_SESSIONS_REVOKED", object_type="USER", object_id=user.id,
+                       actor_user_id=admin.id, result="SUCCESS")
+    session.commit()
+
+
+@router.post("/users/{user_id}/reset-password", status_code=204)
+def reset_password(user_id: int, body: PasswordReset, admin: Annotated[User, Depends(get_current_admin)],
+                   session: Annotated[Session, Depends(get_session)]):
+    user = _managed_user(session, user_id, admin)
+    if user.id == admin.id:
+        raise HTTPException(403, "Utilisez le changement personnel de mot de passe.")
+    user.password_hash = _hash_pw(body.password)
+    user.password_change_required = True
+    revoke_user_sessions(session, user)
+    record_audit_event(session, action="USER_PASSWORD_RESET", object_type="USER", object_id=user.id,
+                       actor_user_id=admin.id, result="SUCCESS")
+    session.commit()
 
 
 # ── Entities (create + rename — no delete in v1) ───────────────────────
@@ -535,7 +656,10 @@ def list_entities(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    entities = session.exec(select(Entity).order_by(Entity.name)).all()
+    query = select(Entity).order_by(Entity.name)
+    if current_config():
+        query = query.where(Entity.id == admin.entity_id)
+    entities = session.exec(query).all()
     return [_entity_row(e) for e in entities]
 
 
@@ -545,6 +669,11 @@ def create_entity(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    if current_config():
+        record_audit_event(session, action="ORGANIZATION_IDENTITY_CHANGE", object_type="ENTITY", object_id=admin.entity_id,
+                           actor_user_id=admin.id, result="REJECTED", reason="PROVISIONING_REQUIRED")
+        session.commit()
+        raise HTTPException(403, "Organisation liée au manifeste ; modification via le provisionnement.")
     name = body.name.strip()
     if not name:
         raise HTTPException(422, "Le nom est requis")
@@ -563,8 +692,15 @@ def update_entity(
     session: Annotated[Session, Depends(get_session)],
 ):
     e = session.get(Entity, entity_id)
-    if not e:
+    if not e or current_config() and e.id != admin.entity_id:
         raise HTTPException(404, "Entité introuvable")
+    if current_config():
+        if body.name is not None and body.name != current_config().name:
+            record_audit_event(session, action="ORGANIZATION_IDENTITY_CHANGE", object_type="ENTITY", object_id=e.id,
+                               actor_user_id=admin.id, result="REJECTED", reason="PROVISIONING_REQUIRED")
+            session.commit()
+            raise HTTPException(403, "Nom canonique verrouillé ; renommage via le provisionnement.")
+        return _entity_row(e)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(e, field, value)
     session.add(e)
@@ -654,28 +790,19 @@ _CATALOG = [
 
 @router.get("/market-data")
 def market_data_catalog(admin: Annotated[User, Depends(get_current_admin)]):
+    from ..services.market_history import storage_status
+    from ..runtime import business_today
     stored = {s["key"]: s for s in _price_status()}
-    today = date.today()
+    today = business_today()
     result = []
     for item in _CATALOG:
         slug = _slug(item["key"])
         s = stored.get(slug, {})
-        available = s.get("available", False)
-        date_max = s.get("date_max", "")
-        if not available or not date_max:
-            cache_status = "missing"
-        else:
-            days_old = (today - date.fromisoformat(date_max)).days
-            cache_status = "stale" if days_old > 7 else "ok"
         result.append({
             **item,
             "slug":         slug,
-            "available":    available,
-            "date_min":     s.get("date_min", ""),
-            "date_max":     date_max,
-            "rows":         s.get("rows", 0),
             "currency":     s.get("currency", ""),
-            "cache_status": cache_status,
+            **storage_status(item["ticker"], today.isoformat()),
         })
     return result
 
@@ -691,7 +818,10 @@ def market_data_fetch(
     admin: Annotated[User, Depends(get_current_admin)],
 ):
     try:
-        return _fetch_prices(body.key, body.ticker)
+        from ..services.market_history import storage_status
+        from ..runtime import business_today
+        result = _fetch_prices(body.key, body.ticker)
+        return {**result, **storage_status(body.ticker, business_today().isoformat())}
     except ValueError as e:
         raise HTTPException(422, str(e))
     except Exception as e:
@@ -703,7 +833,7 @@ def market_data_fetch(
 # seulement. Ces endpoints la rendent administrable : chercher un titre chez
 # Yahoo, vérifier qu'il répond, l'inscrire.
 
-class UnderlyingCreate(BaseModel):
+class UnderlyingCreate(ReferenceChange):
     ticker: str
     label: str = ""
     group: str = "Autres"
@@ -712,7 +842,7 @@ class UnderlyingCreate(BaseModel):
     asset_class: Literal["equity", "index", "unknown"] = "unknown"
 
 
-class UnderlyingUpdate(BaseModel):
+class UnderlyingUpdate(ReferenceChange):
     label: Optional[str] = None
     group: Optional[str] = None
     ccy: Optional[str] = None
@@ -725,6 +855,7 @@ def _underlying_row(u: Underlying) -> dict:
         "id": u.id, "ticker": u.ticker, "label": u.label,
         "group": u.group_name, "ccy": u.ccy, "exchange": u.exchange,
         "active": u.active, "asset_class": u.asset_class,
+        "metadata_status": "QUALIFIED" if u.ccy in REFERENCE_CURRENCIES and u.asset_class != "unknown" else "TO_QUALIFY",
     }
 
 
@@ -761,28 +892,51 @@ def create_underlying(
     ticker = body.ticker.strip()
     if not ticker:
         raise HTTPException(422, "Le ticker est requis")
-    groupe = (body.group or "Autres").strip() or "Autres"
+    groupe = text_value(body.group, "Le groupe")
+    label = text_value(body.label, "Le libellé") if "label" in body.model_fields_set else None
+    if body.ccy:
+        currency_value(body.ccy)
     if session.exec(select(Underlying).where(
             Underlying.ticker == ticker,
             Underlying.group_name == groupe)).first():
         raise HTTPException(409, f"« {ticker} » figure déjà dans le groupe « {groupe} ».")
 
     # On refuse un ticker muet plutôt que de le découvrir au moment de pricer.
-    sonde = probe_ticker(ticker)
-    if not sonde.get("ok"):
-        raise HTTPException(422, sonde.get("error", f"Ticker « {ticker} » injoignable."))
+    known = session.exec(select(Underlying).where(Underlying.ticker == ticker)).all()
+    if known:
+        currencies = {item.ccy for item in known}
+        if len(currencies) != 1 or len({item.asset_class for item in known}) != 1:
+            raise HTTPException(409, "Métadonnées locales divergentes ; qualifiez l'instrument avant de créer un groupe.")
+        existing = known[0]
+        label = label or text_value(existing.label, "Le libellé local")
+        if "asset_class" in body.model_fields_set and body.asset_class != existing.asset_class:
+            raise HTTPException(409, "Qualifiez d'abord le type de l'instrument commun à tous les groupes.")
+        if body.ccy and currency_value(body.ccy) != existing.ccy:
+            raise HTTPException(409, "La devise doit être identique dans tous les groupes de cet instrument.")
+        sonde = {"ok": True, "source": "LOCAL_REFERENCE", "ccy": existing.ccy}
+        ccy, exchange, kind = currency_value(existing.ccy, allow_missing=True), existing.exchange, existing.asset_class
+    else:
+        if label is None:
+            raise HTTPException(422, "Le libellé d'un nouveau titre est requis.")
+        sonde = probe_ticker(ticker)
+        if not sonde.get("ok"):
+            raise HTTPException(422, sonde.get("error", f"Ticker « {ticker} » injoignable."))
+        ccy = currency_value((body.ccy or sonde.get("ccy") or ""), allow_missing=True)
+        exchange, kind = (body.exchange or "").strip(), body.asset_class
 
     u = Underlying(
         ticker=ticker,
-        label=(body.label or "").strip() or ticker,
+        label=label,
         group_name=groupe,
         # La devise vient de Yahoo quand il la donne : plus sûr que le suffixe
         # de cotation, qui ne dit rien d'une place multidevise.
-        ccy=((body.ccy or "").strip() or sonde.get("ccy") or "EUR").upper(),
-        exchange=(body.exchange or "").strip(),
-        asset_class=body.asset_class,
+        ccy=ccy,
+        exchange=exchange,
+        asset_class=kind,
     )
     session.add(u)
+    session.flush()
+    audit_reference(session, admin, "REFERENCE_CREATED", u, None, _underlying_row(u), body.reason)
     session.commit()
     session.refresh(u)
     return {**_underlying_row(u), "probe": sonde}
@@ -798,13 +952,33 @@ def update_underlying(
     u = session.get(Underlying, underlying_id)
     if not u:
         raise HTTPException(404, "Sous-jacent introuvable")
-    data = body.model_dump(exclude_unset=True)
+    before = _underlying_row(u)
+    data = body.model_dump(exclude_unset=True, exclude={"reason"})
+    if "label" in data:
+        data["label"] = text_value(data["label"], "Le libellé")
+    if "active" in data and data["active"] is None or "asset_class" in data and data["asset_class"] is None:
+        raise HTTPException(422, "Les métadonnées requises ne peuvent pas être nulles.")
     if "group" in data:
-        u.group_name = (data.pop("group") or "Autres").strip() or "Autres"
+        group = text_value(data.pop("group"), "Le groupe")
+        if session.exec(select(Underlying.id).where(Underlying.ticker == u.ticker, Underlying.group_name == group, Underlying.id != u.id)).first():
+            raise HTTPException(409, "Cet instrument figure déjà dans ce groupe.")
+        u.group_name = group
+    if "ccy" in data:
+        data["ccy"] = currency_value(data["ccy"])
+    shared = set(data) & {"ccy", "asset_class"}
+    if shared:
+        for peer in session.exec(select(Underlying).where(Underlying.ticker == u.ticker, Underlying.id != u.id)).all():
+            peer_before = _underlying_row(peer)
+            for field in shared:
+                setattr(peer, field, data[field])
+            peer.updated_at = datetime.utcnow()
+            session.add(peer)
+            audit_reference(session, admin, "REFERENCE_CURRENCY_UPDATED" if shared == {"ccy"} else "REFERENCE_INSTRUMENT_UPDATED", peer, peer_before, _underlying_row(peer), body.reason)
     for field, value in data.items():
         setattr(u, field, value)
     u.updated_at = datetime.utcnow()
     session.add(u)
+    audit_reference(session, admin, "REFERENCE_UPDATED", u, before, _underlying_row(u), body.reason)
     session.commit()
     session.refresh(u)
     return _underlying_row(u)
@@ -813,11 +987,31 @@ def update_underlying(
 @router.delete("/underlyings/{underlying_id}", status_code=204)
 def delete_underlying(
     underlying_id: int,
+    body: ReferenceChange,
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
     u = session.get(Underlying, underlying_id)
     if not u:
         raise HTTPException(404, "Sous-jacent introuvable")
-    session.delete(u)
+    before = _underlying_row(u)
+    u.active = False
+    u.updated_at = datetime.utcnow()
+    session.add(u)
+    audit_reference(session, admin, "REFERENCE_DEACTIVATED", u, before, _underlying_row(u), body.reason)
     session.commit()
+
+
+@router.post("/underlyings/{underlying_id}/revalidate")
+def revalidate_underlying(underlying_id: int, body: ReferenceChange,
+                         admin: Annotated[User, Depends(get_current_admin)],
+                         session: Annotated[Session, Depends(get_session)]):
+    item = session.get(Underlying, underlying_id)
+    if not item:
+        raise HTTPException(404, "Sous-jacent introuvable")
+    probe = probe_ticker(item.ticker)
+    record_audit_event(session, action="REFERENCE_EXTERNAL_REVALIDATION", object_type="UNDERLYINGS", object_id=item.id,
+                       actor_user_id=admin.id, result="SUCCESS" if probe.get("ok") else "REJECTED",
+                       reason=body.reason, after=probe)
+    session.commit()
+    return {"reference": _underlying_row(item), "probe": probe, "applied": False}

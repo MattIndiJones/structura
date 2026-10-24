@@ -34,15 +34,16 @@ def check_books(state):
                          if q.get('id') == state.get('accepted', {}).get(case['id'])), None)
         bank_rows = grouped['BANK_SELL']
         bank = selected.get('bank') if selected else bank_rows[0]['actor'] if len(bank_rows) == 1 else None
-        owners = {'BANK_SELL': bank, 'HECTOR_BUY': 'hector', 'HECTOR_SELL': 'hector', 'CLIENT_BUY': 'client'}
-        parties = {'BANK_SELL': 'hector', 'HECTOR_BUY': bank, 'HECTOR_SELL': 'client', 'CLIENT_BUY': 'hector'}
+        sender = case.get('requester', 'hector')
+        owners = {'BANK_SELL': bank, 'HECTOR_BUY': sender, 'HECTOR_SELL': sender, 'CLIENT_BUY': 'client'}
+        parties = {'BANK_SELL': sender, 'HECTOR_BUY': bank, 'HECTOR_SELL': 'client', 'CLIENT_BUY': sender}
         for row in records:
             leg = row.get('leg')
             if leg not in LEG_SIDES:
                 continue
             if owners[leg] and row['actor'] != owners[leg]:
                 issue('ACTOR_MISMATCH', leg, 'actor', owners[leg], row['actor'])
-            if leg == 'BANK_SELL' and actors.get(row['actor'], {}).get('role') != 'bank':
+            if leg == 'BANK_SELL' and actors.get(row['actor'], {}).get('role') != 'bank' and not actors.get(row['actor'], {}).get('capabilities', {}).get('respond_rfq'):
                 issue('ACTOR_MISMATCH', leg, 'role', 'bank', actors.get(row['actor'], {}).get('role'))
             if row.get('our_side') != LEG_SIDES[leg]:
                 issue('SIDE_MISMATCH', leg, 'our_side', LEG_SIDES[leg], row.get('our_side'))

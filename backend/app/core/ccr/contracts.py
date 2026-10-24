@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..schemas import PricingRequest
+from ...runtime import business_today
 
 
 class Contract(BaseModel):
@@ -52,12 +53,19 @@ class MasterAgreement(Contract):
     agreement_id: str = Field(min_length=1)
     agreement_version: str = ""
     effective_date: date
+    expiry_date: date | None = None
     governing_law: str = Field(min_length=1)
     status: Literal["ACTIVE", "INACTIVE", "PENDING", "UNKNOWN"] = "UNKNOWN"
     legal_opinion_available: bool | None = None
     close_out_netting_enforceable: bool | None = None
     cross_product_netting_allowed: bool | None = None
     notes: str = ""
+
+    @model_validator(mode="after")
+    def dates(self):
+        if self.expiry_date and self.expiry_date < self.effective_date:
+            raise ValueError("L'expiration de l'accord précède sa date d'effet.")
+        return self
 
 
 class CSAAgreement(Contract):
@@ -195,7 +203,7 @@ class CalculationRequest(Contract):
     netting_set_id: int | None = None
     deal_id: int | None = None
     portfolio_id: int | None = None
-    as_of_date: date = Field(default_factory=date.today)
+    as_of_date: date = Field(default_factory=business_today)
     currency: str = "EUR"
     proposed: ProposedTrade | None = None
     mode: Literal["FULL", "FAST"] = "FULL"

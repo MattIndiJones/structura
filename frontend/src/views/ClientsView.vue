@@ -211,6 +211,10 @@
       <div v-else-if="section === 'analytics'" class="flex flex-col gap-5">
         <LoadingSpinner v-if="!analytics" />
         <template v-else>
+          <p v-if="analytics.temporal_basis" class="text-xs" style="color: var(--muted)">
+            Transactions au {{ analytics.asof }} · Référentiel et pipeline dans leur état courant au
+            {{ analytics.temporal_basis.reference_asof }} · {{ analytics.analysis_mode === 'real' ? 'Données réelles, hors Demo/UAT' : 'Démonstration incluse' }}.
+          </p>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div class="stat-box">
               <div class="text-xs" style="color: var(--muted)">Clients actifs</div>
@@ -231,16 +235,18 @@
               </div>
             </div>
             <div class="stat-box">
-              <div class="text-xs" style="color: var(--muted)">Pipeline ouvert</div>
+              <div class="text-xs" style="color: var(--muted)">Pipeline ouvert actuel</div>
               <div class="text-2xl font-bold tabular-nums">
-                {{ formaterMontant(analytics.opportunities.pipeline_amount) }}
+                <div v-for="line in currencyAmountLines(analytics.opportunities.pipeline_by_currency, formaterMontant)" :key="line">{{ line }}</div>
+                <span v-if="!Object.keys(analytics.opportunities.pipeline_by_currency || {}).length">—</span>
               </div>
               <div class="text-xs" style="color: var(--subtle)">
                 {{ analytics.opportunities.open }} dossier(s)
+                <span v-if="analytics.opportunities.pipeline_unqualified_count"> · {{ analytics.opportunities.pipeline_unqualified_count }} montant(s) non qualifié(s)</span>
               </div>
             </div>
             <div class="stat-box">
-              <div class="text-xs" style="color: var(--muted)">Taux de conversion</div>
+              <div class="text-xs" style="color: var(--muted)">Conversion actuelle</div>
               <div class="text-2xl font-bold tabular-nums">
                 {{ analytics.opportunities.conversion_rate === null
                    ? '—'
@@ -552,6 +558,7 @@ import PersonFormModal from '../components/clients/PersonFormModal.vue'
 import OpportunityFormModal from '../components/clients/OpportunityFormModal.vue'
 import ImportPanel from '../components/clients/ImportPanel.vue'
 import { formatDate, formatInt } from '../utils/format.js'
+import { currencyAmountLines } from '../utils/clientAmounts.js'
 
 // Les clés sont les segments d'URL : ajouter une section, c'est une entrée ici
 // et un motif dans le routeur. « liste » plutôt que « clients » pour ne pas

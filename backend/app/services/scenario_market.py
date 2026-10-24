@@ -16,7 +16,7 @@ def configured_path():
     return Path(value) if value and os.environ.get('STRUCTURA_WORKSHOP_CHILD') == '1' else None
 
 
-def create_market(path, start, seed, months=24):
+def create_market(path, start, seed, months=24, tickers=None):
     """Reproducible daily scenario; no realized or implied market claim."""
     origin = date.fromisoformat(start) - timedelta(days=365)
     end = date.fromisoformat(start) + timedelta(days=months*32+365)
@@ -28,9 +28,20 @@ def create_market(path, start, seed, months=24):
             spot *= math.exp((.025-.02-.5*.23**2)/252 + .23*math.sqrt(1/252)*rng.gauss(0,1))
             rows[cursor.isoformat()] = round(spot,8)
         cursor += timedelta(days=1)
-    path.write_text(json.dumps({'provider':PROVIDER,'seed':seed,'series':{'AIR.PA':rows},
+    series = {'AIR.PA':rows}
+    for ticker in tickers or []:
+        if ticker in series:
+            continue
+        local = random.Random(str(seed)+':'+ticker)
+        level = 100.0
+        observations = {}
+        for day in rows:
+            level *= math.exp((.025-.02-.5*.23**2)/252 + .23*math.sqrt(1/252)*local.gauss(0,1))
+            observations[day]=round(level,8)
+        series[ticker]=observations
+    path.write_text(json.dumps({'provider':PROVIDER,'seed':seed,'series':series,
         'method':'Synthetic GBM scenario, r=2.5%, q=2%, sigma=23%; not historical data',
-        'currencies':{'AIR.PA':'EUR'}}, ensure_ascii=False),encoding='utf-8')
+        'currencies':{t:'EUR' for t in series}}, ensure_ascii=False),encoding='utf-8')
 
 
 def history(tickers, start, end=None, adjusted=False, *, path=None, as_of=None):
@@ -42,6 +53,9 @@ def history(tickers, start, end=None, adjusted=False, *, path=None, as_of=None):
     if requested > today:
         return {'error':'Le scénario ne fournit aucune donnée future.', 'provider':PROVIDER}
     data = json.loads(path.read_text(encoding='utf-8'))
+    if data.get('provider') == 'HISTORICAL_CACHE':
+        from .agent_workshop.historical_market import historical_history
+        return historical_history(data, tickers, start, requested.isoformat(), adjusted)
     series = data['series']
     if any(t not in series for t in tickers):
         return {'error':'Ticker absent du marché synthétique.', 'provider':PROVIDER}

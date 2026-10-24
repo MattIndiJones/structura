@@ -32,10 +32,10 @@
         <!-- Donut -->
         <div class="card">
           <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">
-            {{ store.proba.has_autocall ? 'Répartition des scénarios' : 'ITM vs OTM' }}
+            {{ store.proba.has_autocall ? 'Répartition des scénarios' : 'Signe des flux nominaux' }}
             <HelpTip :text="store.proba.has_autocall
-              ? 'Chaque chemin classé dans exactement une catégorie : rappelé à telle date, arrivé à échéance sans perte, ou perte en capital — les tranches somment à 100% des chemins.'
-              : 'Part des chemins où le payoff final est positif (ITM) vs nul (OTM), sur cet échantillon dédié de 5 000 chemins.'" />
+              ? 'Chaque chemin classé par STOP, puis par somme nominale des flux au pair ou sous le pair. Ce classement ne certifie ni une garantie de capital ni une barrière KI.'
+              : 'Somme des flux nominaux positive, nulle ou négative ; distincte du retour au pair et du rendement sur le prix payé.'" />
           </div>
           <SensitiveChart>
             <div style="height:200px;position:relative;">
@@ -142,8 +142,8 @@ const acStats = computed(() => {
   return [
     { label: 'P(rappel) cumulée', val: pct(autocall_count, total), cls: 'text-green-400',
       tip: "CUMUL sur toutes les dates d'observation : fraction des chemins rappelés à l'une QUELCONQUE d'entre elles. Ce n'est pas la probabilité de rappel à la première constatation, qui est toujours plus basse — sur un autocall 3 ans annuel, une cumulée de 50 % se décompose typiquement en 31 % à 1 an, 12 % à 2 ans et 7 % à 3 ans. Le graphe « P(rappel) par date » ci-dessus donne la répartition ; le libellé disait seulement « P(rappel autocall) » et se lisait comme la première date." },
-    { label: 'P(KI / perte)',      val: pct(ki_count, total),       cls: 'text-red-400',
-      tip: "Fraction des chemins qui atteignent l'échéance ET franchissent la barrière de perte en capital (jamais rappelés avant, barrière KI touchée)." },
+    { label: 'P(sous-pair sans rappel)', val: pct(ki_count, total), cls: 'text-red-400',
+      tip: 'Somme nominale des flux inférieure au pair sans STOP ; ne prouve pas le franchissement d’une barrière KI.' },
     { label: 'P(remb. normal)',    val: pct(normal_count, total),   cls: 'text-slate-300',
       tip: "Fraction des chemins qui atteignent l'échéance sans jamais avoir été rappelés ni avoir franchi la barrière de perte — remboursement du capital sans coupon additionnel à ce stade." },
     { label: 'Durée espérée',      val: `${formatNumber(expected_life, 2)} Y`,  cls: 'text-blue-400',
@@ -154,14 +154,14 @@ const acStats = computed(() => {
 
 const vanillaStats = computed(() => {
   if (!store.proba) return []
-  const { normal_count, ki_count, total, price } = store.proba
+  const { positive_payoff_pct, zero_payoff_pct, total, price } = store.proba
   return [
-    { label: 'P(ITM)', val: pct(normal_count, total), cls: 'text-green-400',
-      tip: "Fraction des chemins où le payoff final est strictement positif (in-the-money à l'échéance)." },
-    { label: 'P(OTM)', val: pct(ki_count, total),     cls: 'text-slate-400',
-      tip: "Fraction des chemins où le payoff final est nul (out-of-the-money à l'échéance — perte totale de la prime pour une option vanille)." },
+    { label: 'P(flux positif)', val: `${positive_payoff_pct ?? '—'} %`, cls: 'text-green-400',
+      tip: 'Somme nominale des flux strictement positive ; distincte du retour au pair et du gain sur le prix payé.' },
+    { label: 'P(flux nul)', val: `${zero_payoff_pct ?? '—'} %`, cls: 'text-slate-400',
+      tip: 'Somme nominale des flux nulle ; aucune déduction générique ITM/OTM à partir du pair.' },
     { label: 'Prix MC', val: formatPercent(price * 100, 2), cls: 'text-blue-400',
-      tip: "Prix recalculé sur l'échantillon dédié de cet onglet (5 000 chemins) — peut différer légèrement du prix de référence de l'onglet Résultats (bruit MC, échantillon différent)." },
+      tip: 'Même moteur et hypothèses que le prix. Le nombre de tirages dédié est publié ; un échantillon différent peut produire un bruit Monte Carlo différent.' },
     { label: 'Chemins', val: formatInt(total),          cls: 'text-slate-400' },
   ]
 })
@@ -227,7 +227,7 @@ async function renderCharts() {
     donutChart = new Chart(donutCanvas.value, {
       type: 'doughnut',
       data: {
-        labels: [...acLabels, 'Remboursement normal', 'Perte en capital'],
+        labels: [...acLabels, 'Total nominal au pair ou plus', 'Total nominal sous le pair'],
         datasets: [{
           data: [...acData, normal_count, ki_count],
           backgroundColor: [...acColors, chartTheme.ticks, chartTheme.negative],
@@ -269,9 +269,9 @@ async function renderCharts() {
     donutChart = new Chart(donutCanvas.value, {
       type: 'doughnut',
       data: {
-        labels: ['ITM (payoff > 0)', 'OTM (payoff nul)'],
-        datasets: [{ data: [normal_count, ki_count],
-          backgroundColor: [chartTheme.positive, chartTheme.ticks], borderWidth: 1.5, borderColor: chartTheme.surface }],
+        labels: ['Flux positif', 'Flux nul', 'Flux négatif'],
+        datasets: [{ data: [store.proba.positive_payoff_count, store.proba.zero_payoff_count, store.proba.negative_payoff_count],
+          backgroundColor: [chartTheme.positive, chartTheme.ticks, chartTheme.negative], borderWidth: 1.5, borderColor: chartTheme.surface }],
       },
       options: demoChartOptions({
         responsive: true, maintainAspectRatio: false, cutout: '62%',

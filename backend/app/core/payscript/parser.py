@@ -33,6 +33,7 @@ Grammar:
 from __future__ import annotations
 import re
 import math
+import hashlib
 from dataclasses import dataclass
 from typing import Callable
 from .bindings import lower_source, effective_parameters, asset_values, average, monitoring_source
@@ -187,6 +188,7 @@ class Param:
     # 'scalar' (PARAM) | 'array' (PARAM() — one value per observation, the UI
     # supplies a table; stored_val/raw_default then only seed the first row).
     kind: str = 'scalar'
+    observation_calendar: str | None = None
 
     @property
     def required(self):
@@ -287,6 +289,9 @@ class CompiledScript:
     # CompiledEvent.releves_passes) ; les deux parts se recombinent à la
     # constatation, comme la fenêtre de départ avec `fix_state`.
     releves_realises: dict | None = None
+    # Exact source identity, with line endings and final newlines normalized.
+    # Residual transformations without an original-source proof leave it unset.
+    source_hash: str | None = None
 
     @property
     def initial_fixing_name(self):
@@ -457,17 +462,22 @@ def _basket(ctx, *weights):
 # ── Body compiler ─────────────────────────────────────────────────
 def _compile_body(lines: list[dict], errors: list, base_indent: int = 0,
                    declared: set | None = None, unknown: dict | None = None,
-                   array_params: set | None = None) -> str:
+                   array_params: set | None = None, parent_line: int | None = None) -> str:
     """declared collects every SET-assigned name (uppercased); unknown maps
     every identifier that fell through to the generic memo lookup to a line
     number it was seen on. parse_script() diffs the two afterwards to flag
     typos instead of letting them silently price as 0."""
     out = []
+    if not lines and parent_line is not None:
+        errors.append(f'Ligne {parent_line}: bloc sans instruction indentée.')
     i = 0
     while i < len(lines):
         ln = lines[i]
-        if ln['indent'] < base_indent: i += 1; continue
-        if ln['indent'] > base_indent: i += 1; continue
+        if ln['indent'] != base_indent:
+            errors.append(f'Ligne {ln["line_no"]}: indentation inattendue '
+                          f'({ln["indent"]} espaces ; {base_indent} attendus dans ce bloc).')
+            i += 1
+            continue
         text, no = ln['text'], ln['line_no']
 
         m = re.match(r'^IF\s+(.+?)\s*:?\s*$', text, re.I)
@@ -482,11 +492,12 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0,
             while i < len(lines) and lines[i]['indent'] > base_indent:
                 body_lines.append(lines[i]); i += 1
             nbi = body_lines[0]['indent'] if body_lines else base_indent + 4
-            body_code = _compile_body(body_lines, errors, nbi, declared, unknown, array_params)
+            body_code = _compile_body(body_lines, errors, nbi, declared, unknown, array_params, parent_line=no)
             out.append(f'if {cond}:')
             for bl in body_code.splitlines(): out.append('  ' + bl)
             while i < len(lines) and lines[i]['indent'] == base_indent:
                 et = lines[i]['text']
+                branch_no = lines[i]['line_no']
                 mei = re.match(r'^ELSE\s+IF\s+(.+?)\s*:?\s*$', et, re.I)
                 me  = re.match(r'^ELSE\s*:?\s*$', et, re.I)
                 if mei:
@@ -499,7 +510,7 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0,
                     el = []
                     while i < len(lines) and lines[i]['indent'] > base_indent: el.append(lines[i]); i += 1
                     nbi2 = el[0]['indent'] if el else base_indent + 4
-                    ec_code = _compile_body(el, errors, nbi2, declared, unknown, array_params)
+                    ec_code = _compile_body(el, errors, nbi2, declared, unknown, array_params, parent_line=branch_no)
                     out.append(f'elif {ec}:')
                     for bl in ec_code.splitlines(): out.append('  ' + bl)
                 elif me:
@@ -507,7 +518,7 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0,
                     el = []
                     while i < len(lines) and lines[i]['indent'] > base_indent: el.append(lines[i]); i += 1
                     nbi2 = el[0]['indent'] if el else base_indent + 4
-                    el_code = _compile_body(el, errors, nbi2, declared, unknown, array_params)
+                    el_code = _compile_body(el, errors, nbi2, declared, unknown, array_params, parent_line=branch_no)
                     out.append('else:')
                     for bl in el_code.splitlines(): out.append('  ' + bl)
                     break
@@ -620,9 +631,17 @@ def _parse_dates(s: str, line_no: int) -> list[float]:
     return unique
 
 
+def script_source_hash(source: str) -> str:
+    """Keep every token/indent; normalize only CRLF and final newlines."""
+    return hashlib.sha256(source.replace('\r\n', '\n').rstrip('\n').encode('utf-8')).hexdigest()
+
+
 def parse_script(code: str) -> CompiledScript:
     validate_script_source(code)
     original_source = code
+    for line_no, raw in enumerate(code.split('\n'), 1):
+        if raw.split('#', 1)[0].strip() and '\t' in raw[:len(raw) - len(raw.lstrip())]:
+            raise ValueError(f'Ligne {line_no}: utilisez des espaces pour l’indentation, pas des tabulations.')
     code, binding = lower_source(code)
     raw_lines = code.split('\n')
     lines = []
@@ -638,7 +657,7 @@ def parse_script(code: str) -> CompiledScript:
             lines.append({'indent': indent, 'text': stripped, 'line_no': i + 1, 'comment': comment})
 
     if not lines:
-        return CompiledScript(events=[], init_fn=None, params=[], constats=[])
+        return CompiledScript(events=[], init_fn=None, params=[], constats=[], source_hash=script_source_hash(original_source))
 
     errors = []
     events = []
@@ -778,7 +797,7 @@ def parse_script(code: str) -> CompiledScript:
             while i < len(lines) and lines[i]['indent'] > 0:
                 body_lines.append(lines[i]); i += 1
             bi = body_lines[0]['indent'] if body_lines else 4
-            body_code = _compile_body(body_lines, errors, bi, declared, unknown, array_params)
+            body_code = _compile_body(body_lines, errors, bi, declared, unknown, array_params, parent_line=no)
             fn_src = "def _fn(_c, _st):\n"
             for bl in body_code.splitlines():
                 fn_src += f"  {bl}\n"
@@ -832,7 +851,7 @@ def parse_script(code: str) -> CompiledScript:
             while i < len(lines) and lines[i]['indent'] > 0:
                 body_lines.append(lines[i]); i += 1
             bi = body_lines[0]['indent'] if body_lines else 4
-            body_code = _compile_body(body_lines, errors, bi, declared, unknown, array_params)
+            body_code = _compile_body(body_lines, errors, bi, declared, unknown, array_params, parent_line=no)
             fn_src = "def _fn(_c, _st):\n"
             for bl in body_code.splitlines():
                 fn_src += f"  {bl}\n"
@@ -871,7 +890,13 @@ def parse_script(code: str) -> CompiledScript:
             errors.append(f'Ligne {line_no}: identifiant inconnu "{name}" (ni PARAM ni SET déclaré — faute de frappe ?)')
 
     # Portée du rang d'observation : deux écritures le rendent indéfini.
-    errors.extend(_verifier_portee_du_rang(_blocs_et_references(lines), array_params))
+    rank_blocks = _blocs_et_references(lines)
+    errors.extend(_verifier_portee_du_rang(rank_blocks, array_params))
+    for param in params:
+        calendars = {name for name, refs in rank_blocks
+                     if name and name != 'MATURITY' and param.name in refs}
+        if param.kind == 'array' and len(calendars) == 1:
+            param.observation_calendar = next(iter(calendars))
 
     if errors:
         raise ValueError('\n'.join(errors))
@@ -895,7 +920,7 @@ def parse_script(code: str) -> CompiledScript:
     has_stop = any(re.match(r'^STOP$', ln['text'], re.I) for ln in lines)
     monitors = _analyze_monitors(original_source, [p.name for p in params if p.name.startswith('M_')])
     return CompiledScript(events=events, init_fn=init_fn, params=params, constats=constats,
-                          has_stop=has_stop, monitors=monitors)
+                          has_stop=has_stop, monitors=monitors, source_hash=script_source_hash(original_source))
 
 
 # ── M_ monitoring analysis ──────────────────────────────────────────
@@ -1014,6 +1039,22 @@ def _analyze_monitors(code: str, m_param_names: list[str]) -> list[dict]:
 # rest of the engine already uses everywhere (T_max is "years from now").
 # Using each CONSTAT's own start_date as its private zero instead would make
 # multiple CONSTATs in the same script inconsistent with each other.
+def validate_observation_dates(events):
+    """A payoff observation must follow the simulation origin, including legacy calendars.
+
+    Initial fixing windows are separate from AT events and may start at zero.
+    Historical observations belong to realized-state replay, never future paths.
+    """
+    for event in events:
+        if event.type == 'AT_MATURITY':
+            continue
+        if any(not math.isfinite(t) or t <= 0 for t in event.dates):
+            label = f"CONSTAT {event.constat_ref}" if event.constat_ref else "AT"
+            raise ValueError(
+                f"{label} : les dates d'observation AT doivent être finies et strictement positives "
+                "(après l'origine du calcul). Une observation passée exige un rejeu des fixings réalisés.")
+
+
 def resolve_analysis_constats(compiled, req):
     """Resout le calendrier d'une requete d'analyse EXACTEMENT comme le prix.
 
@@ -1112,7 +1153,8 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         return script
 
     from datetime import date
-    from ..calendars import BusinessDayConvention, add_business_days, adjust
+    from ..calendars import (BusinessDayConvention, add_business_days, adjust,
+                             calendar_context, validate_settlement_lag)
     from ..schedule import (generate_schedule, generate_observation_schedule, observation_window, parse_tenor,
                             period_windows, StubConvention)
 
@@ -1120,7 +1162,7 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
 
     def _convention(name: str, v) -> BusinessDayConvention:
         raw = v.get('convention') if isinstance(v, dict) else None
-        if not raw:
+        if raw is None or raw == '':
             return BusinessDayConvention.NONE
         try:
             return BusinessDayConvention(raw)
@@ -1141,6 +1183,8 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         except ValueError:
             raise ValueError(f"CONSTAT {constat_name}: '{field}' invalide (attendu YYYY-MM-DD): {raw!r}")
 
+    payment_days: dict[str, list[date]] = {}
+
     def _resolve_full(name: str) -> tuple[list[float], list[float], list[date]]:
         """Observation dates and their payment dates for a CONSTAT, unfiltered.
 
@@ -1158,21 +1202,24 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
                 f"CONSTAT {name}: un échéancier exige une configuration de calendrier "
                 "(dates, fréquence et roll), pas une liste de dates ni une valeur simple.")
 
-        lag = int(v.get('settlement_lag') or 0) if isinstance(v, dict) else 0
+        lag = validate_settlement_lag(v.get('settlement_lag', 0) if isinstance(v, dict) else 0)
+        observed_calendar, paid_calendar = calendar_context(v, currency)
         conv = _convention(name, v)
 
         if kind == 'single':
             raw = v if isinstance(v, str) else v.get('date') if isinstance(v, dict) else None
             observed = _parse_date_field(raw, name, 'date')
-            if currency:
-                observed = adjust(observed, currency, conv)
-                paid = add_business_days(observed, lag, currency)
+            if observed_calendar:
+                observed = adjust(observed, observed_calendar, conv)
+            if paid_calendar:
+                paid = add_business_days(observed, lag, paid_calendar)
             elif lag:
                 raise ValueError(
                     f"CONSTAT {name}: un décalage de règlement suppose un calendrier — "
                     f"précisez la devise de règlement.")
             else:
                 paid = observed
+            payment_days[name] = [paid]
             return [_to_year_frac(observed)], [_to_year_frac(paid)], [observed]
 
         first = v.get('first_observation_date')
@@ -1193,10 +1240,12 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         generator = generate_observation_schedule if first else generate_schedule
         result = generator(start, end, roll, freq, stub, sub_freq,
                                    currency=currency, convention=conv,
-                                   settlement_lag=lag)
+                                   settlement_lag=lag, observation_calendar=observed_calendar,
+                                   settlement_calendar=paid_calendar)
         # Drop the schedule's own start_date: it's the start of the first
         # accrual period, not itself an observation/payment date.
         offset = 0 if first else 1
+        payment_days[name] = list(result['payment_dates'][offset:])
         return ([_to_year_frac(d) for d in result['dates'][offset:]],
                 [_to_year_frac(d) for d in result['payment_dates'][offset:]],
                 list(result['dates'][offset:]))
@@ -1237,7 +1286,7 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
             _parse_date_field(v.get('roll_date') or v.get('first_observation_date'), name, 'roll_date'),
             parse_tenor(v['frequency']),
             StubConvention(v.get('stub', 'short_last')),
-            freq, currency=currency, convention=_convention(name, v),
+            freq, currency=calendar_context(v, currency)[0], convention=_convention(name, v),
             first_observation_date=(_parse_date_field(v['first_observation_date'], name, 'first_observation_date')
                                     if v.get('first_observation_date') else None))
 
@@ -1274,7 +1323,7 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         # going forward. Every other constatation ARRIVES at its date.
         forward = (name == fixing_name)
         return [observation_window(obs, length, freq, forward=forward,
-                                   currency=currency, convention=conv)
+                                   currency=calendar_context(v, currency)[0], convention=conv)
                 for obs in observed]
 
     def _windows_for(name: str, observed: list[date]) -> list[list[float]] | None:
@@ -1347,7 +1396,7 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
         new_events.append(CompiledEvent(
             type=ev.type, dates=resolved, fn=ev.fn,
             constat_ref=name, constat_qualifier=ev.constat_qualifier,
-            payment_dates=resolved_pay if currency else None,
+            payment_dates=resolved_pay if calendar_context(constat_values.get(name), currency)[1] else None,
             window_dates=resolved_win, reduction=reduction,
             ranks=resolved_ranks))
 
@@ -1375,6 +1424,8 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
             if strike_fix_dates and any(d < max(strike_fix_dates) for e in new_events for d in e.dates):
                 raise ValueError('Une observation ne peut pas précéder la fin de la fenêtre initiale.')
 
+    validate_observation_dates(new_events)
+
     from dataclasses import replace
     from copy import deepcopy
     bound_constats = [replace(c, calendar_values=deepcopy(constat_values), calendar_currency=currency)
@@ -1384,7 +1435,7 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
                             has_stop=script.has_stop, monitors=script.monitors,
                             strike_fix_dates=strike_fix_dates,
                             strike_fix_reduction=strike_fix_reduction,
-                            origine=today)
+                            origine=today, source_hash=script.source_hash)
 
     # L'échéancier contractuel, bâti ICI parce que c'est le dernier endroit où
     # les dates calendaires existent encore : `_full_dates` les a, `_windows_dates`
@@ -1400,10 +1451,8 @@ def resolve_constats(script: CompiledScript, constat_values: dict,
             _, _, observed = _full_dates(c.name)
         except ValueError:
             continue
-        # Les dates de paiement calendaires ne sont pas conservées par
-        # _full_dates — seules leurs year-fractions le sont. La constatation les
-        # portera le jour où le booking en aura besoin.
-        jours[c.name] = (observed, [])
+        # Retain actual calendar cash dates alongside fractions at their source.
+        jours[c.name] = (observed, payment_days.get(c.name, []))
         w = _windows_dates(c.name, observed)
         if w is not None:
             fenetres[c.name] = w

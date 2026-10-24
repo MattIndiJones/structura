@@ -1,9 +1,7 @@
 """CCR orchestration: existing valuations, legal data, shared paths and audit."""
 from copy import deepcopy
 from datetime import date, datetime
-import hashlib
 import json
-from pathlib import Path
 
 import numpy as np
 from fastapi import HTTPException
@@ -14,8 +12,9 @@ from ...db.models import (Counterparty, Deal, DealEvent, DealPortfolioMembership
                           CCRExposureCalculation)
 from ...db.ccr_models import RECORDS
 from ..audit import record_audit_event
+from ..access import is_local_admin
 from ..valuation_context import ValuationContext, canonical_json, canonical_fingerprint, run_valuation
-from ..valuation_runs import engine_identity
+from ..valuation_runs import current_fixings_match
 from ..compute.pricers.var_scenario import residual_script_from_payload
 from ..payscript.parser import parse_script, resolve_analysis_constats, analysis_origin, effective_T_max
 from ..payscript.engine import run_mark_to_future, _simulate_mtf_outer, _mtf_reject_unsupported
@@ -23,6 +22,7 @@ from ..schemas import PricingRequest, validate_correlation_matrix
 from ..var_engine import MarketScenario, apply_scenario_to_deal_base
 from .contracts import SCHEMAS, CalculationRequest, CreditProfile, CreditLimit, CSAAgreement
 from .exposure import VERSION, METRICS, eligible_set, collateral_profile, summarize, limit_check, decision
+from ...runtime import business_today
 
 
 def organization(user):
@@ -41,12 +41,12 @@ def records(session, user, cpty_id):
     if not session.get(Counterparty, cpty_id):
         raise HTTPException(404, "Contrepartie introuvable")
     return {kind: [row_payload(row) for row in session.exec(select(model).where(
-        model.entity_id == organization(user), model.counterparty_id == cpty_id)).all()]
+        model.entity_id == organization(user), model.counterparty_id == cpty_id).execution_options(populate_existing=True)).all()]
         for kind, model in RECORDS.items()}
 
 
 def save_record(session, user, cpty_id, kind, data, row_id=None, expected_version=None):
-    if user.role != "admin":
+    if not is_local_admin(user):
         raise HTTPException(403, "Administration du risque réservée aux administrateurs")
     if kind not in SCHEMAS:
         raise HTTPException(404, "Type de paramétrage CCR inconnu")
@@ -107,7 +107,7 @@ def save_record(session, user, cpty_id, kind, data, row_id=None, expected_versio
     return row_payload(row)
 
 
-def legal_assignment(session, user, cpty_id, set_id, currency, product_type):
+def legal_assignment(session, user, cpty_id, set_id, currency, product_type, *, as_of=None):
     if set_id is None:
         return None
     if cpty_id is None:
@@ -118,7 +118,59 @@ def legal_assignment(session, user, cpty_id, set_id, currency, product_type):
         raise HTTPException(422, "Netting set inactif ou incompatible avec la contrepartie/devise")
     if product_type not in ns["data"]["product_scope"]:
         raise HTTPException(422, "Produit absent du périmètre juridique du netting set")
+    day = str(as_of or business_today())
+    master = next((r["data"] for r in config["agreements"]
+                   if r["id"] == ns["data"]["master_agreement_id"]), None)
+    if (not master or master["status"] != "ACTIVE" or master["effective_date"] > day
+            or (master.get("expiry_date") and master["expiry_date"] < day)):
+        raise HTTPException(422, "Accord OTC absent, inactif ou non effectif à la date métier.")
+    if ns["data"].get("csa_id") is not None:
+        csa = next((r["data"] for r in config["csas"] if r["id"] == ns["data"]["csa_id"]), None)
+        if (not csa or not csa["active"] or csa["master_agreement_id"] != ns["data"]["master_agreement_id"]
+                or csa["base_currency"] != currency):
+            raise HTTPException(422, "CSA inactif ou incompatible avec l'accord OTC et la devise.")
     return ns
+
+
+def booking_legal_classification(body):
+    """A payoff label never decides whether the executed instrument is a note."""
+    form = str(getattr(body, "transaction_format", None) or "").strip().upper()
+    family = str(getattr(body, "instrument_family", None) or "").strip().upper()
+    if form in {"EMTN", "BMTN", "NOTE"} and family == "NOTE":
+        if body.ccr_netting_set_id is not None:
+            raise HTTPException(422, "Une note ne peut pas utiliser un netting set OTC.")
+        return "NOTE"
+    if form == "OTC" and family and family != "NOTE":
+        if getattr(body, "legal_identity_exception", None) is not None:
+            raise HTTPException(422, "Une exception d'identité ne remplace pas l'accord OTC effectif.")
+        if body.ccr_netting_set_id is None:
+            raise HTTPException(422, "OTC : rattachez un netting set avec accord effectif avant booking.")
+        if not str(getattr(body, "documentation_reference", None) or "").strip():
+            raise HTTPException(422, "OTC : référence documentaire obligatoire avant booking.")
+        return "OTC"
+    raise HTTPException(422, "Qualifiez explicitement le format et la famille : note (EMTN/BMTN/NOTE) ou OTC.")
+
+
+def enforce_otc_documentation(session, user, body, as_of):
+    kind = booking_legal_classification(body)
+    if kind == "NOTE":
+        return
+    ns = legal_assignment(session, user, body.counterparty_id, body.ccr_netting_set_id,
+                          body.devise, body.product_type, as_of=as_of)
+    # An applicable bilateral policy may require collateral; selecting another
+    # set under the same master cannot bypass that requirement.
+    from ...db.trading_models import TradingRelationship
+    for row in session.exec(select(TradingRelationship).where(
+            TradingRelationship.entity_id == organization(user),
+            TradingRelationship.counterparty_id == body.counterparty_id)).all():
+        terms = json.loads(row.terms_json)
+        if (terms.get("master_agreement_id") == ns["data"]["master_agreement_id"]
+                and terms.get("currency") == body.devise and terms.get("otc_allowed")
+                and terms.get("status") == "ACTIVE" and terms["effective_date"] <= str(as_of)
+                and (not terms.get("expiry_date") or terms["expiry_date"] >= str(as_of))
+                and terms.get("csa_required")
+                and (not ns["data"].get("csa_id") or ns["data"]["csa_id"] != terms.get("csa_id"))):
+            raise HTTPException(422, "Le CSA requis par la relation OTC doit être actif et rattaché au set.")
 
 
 def portfolio_deals(session, user, request):
@@ -146,7 +198,7 @@ def portfolio_deals(session, user, request):
         query = query.where(Deal.id.in_(members))
     if request.counterparty_id is None and request.deal_id is None:
         return []
-    deals = session.exec(query.order_by(Deal.id)).all()
+    deals = session.exec(query.order_by(Deal.id).execution_options(populate_existing=True)).all()
     if request.deal_id and not deals:
         raise HTTPException(404, "Deal introuvable dans le périmètre demandé")
     # Historical scope follows the actual terminal event, not the original
@@ -160,7 +212,7 @@ def portfolio_deals(session, user, request):
         if deal.status in {"actif", "en_reglement"}:
             selected.append(deal)
             continue
-        if request.as_of_date >= date.today():
+        if request.as_of_date >= business_today():
             continue
         terminal = session.exec(select(DealEvent.event_date).where(
             DealEvent.deal_id == deal.id,
@@ -184,6 +236,8 @@ def archived_trade(session, deal, request):
     runs = session.exec(select(ValuationRun).where(ValuationRun.deal_id == deal.id,
         ValuationRun.contract_version == deal.contract_version).order_by(ValuationRun.id.desc())).all()
     for run in runs:
+        if not current_fixings_match(session, run):
+            continue
         result = json.loads(run.result_json)
         result = result["mtm"] if isinstance(result.get("mtm"), dict) else result
         if result.get("valuation_date") != str(request.as_of_date):
@@ -305,7 +359,7 @@ def validate_future_context(context):
                             context.get("yield_curve"), context.get("sigma_r", 0), context["underlyings"])
 
 
-def joint_scenarios(runtimes, request, times):
+def joint_scenarios(runtimes, request, times, outer_times=None):
     factors, correlations = {}, {}
     rate = None
     for _, ctx in runtimes:
@@ -347,7 +401,8 @@ def joint_scenarios(runtimes, request, times):
     validate_correlation_matrix(matrix, len(keys))
     if np.linalg.eigvalsh(matrix).min() < -1e-10:
         raise ValueError("Matrice jointe non semi-définie positive : aucune réparation implicite CCR")
-    paths = _simulate_mtf_outer([factors[k] for k in keys], matrix, rate, times[1:], request.n_outer, request.seed)
+    paths = _simulate_mtf_outer([factors[k] for k in keys], matrix, rate, times[1:], request.n_outer, request.seed,
+                                time_steps=np.diff(outer_times) if outer_times is not None else None)
     return {k: paths[:, i, :] for i, k in enumerate(keys)}, rate
 
 
@@ -482,21 +537,39 @@ def evaluate_inputs(inputs, progress=None):
         payments = [(date.fromisoformat(d) - request.as_of_date).days / 365.25
                     for trade in trades for d in
                     [trade.get("payment_date"), *[f.get("payment_date") for f in trade.get("unsettled_flows", [])]] if d]
-        horizon = max([max(ctx["T"], ctx.get("maturity_payment_t") or 0) for _, ctx in runtimes if ctx] + payments + [1 / 52])
-        # Weekly lattice inherited from the pricing engine; add every observation
-        # and terminal settlement so the grid cannot omit a contractual boundary.
+        live_contexts = [ctx for _, ctx in runtimes if ctx]
+        horizon = max([max(ctx["T"], ctx.get("maturity_payment_t") or 0) for ctx in live_contexts] + payments + [0.])
+        # Exposure marks and all contract observations keep their exact times.
+        # The shared diffusion is enriched separately with every fixing node.
         marks = set(float(v) for v in np.linspace(1 / 52, horizon, request.n_dates))
         marks.update(t for t in payments if t > 0)
         for script, ctx in runtimes:
             if ctx:
-                marks.update(d for ev in script.events for d in ev.dates if d >= 1 / 52)
+                marks.update(d for ev in script.events for d in ev.dates if d > 0)
                 marks.update([ctx["T"], ctx.get("maturity_payment_t") or ctx["T"]])
-        marks.add(float(np.ceil(horizon * 52) / 52))
-        times = [0.] + sorted(set(round(max(1, round(t * 52)) / 52, 8) for t in marks))
+        times = [0.] + sorted(set(t for t in marks if t > 0))
+        if not live_contexts:
+            # Fixed claims need no weekly market-path replay. Their final
+            # payment is the exact credit horizon, with post-payment EE = 0.
+            times = [0.] + sorted(set([float(t) for t in np.linspace(horizon/request.n_dates, horizon, request.n_dates)]
+                                      + [t for t in payments if t > 0]))
         try:
+            if horizon <= 0:
+                raise ValueError("Horizon CCR futur manquant : aucun allongement implicite")
             if len(times) * request.n_outer * request.n_inner * max(1, len(trades)) > 10_000_000:
                 raise ValueError("Budget CCR dépassé : réduire les simulations ou le périmètre")
-            shared, rate = joint_scenarios(runtimes, request, times)
+            from ..payscript.time_grid import contract_axis, times as grid_times
+            extra = list(times)
+            for compiled, context in runtimes:
+                if context:
+                    extra.extend(compiled.strike_fix_dates or [])
+                    for event in compiled.events:
+                        extra.extend(event.dates or [])
+                        for window in event.window_dates or []:
+                            extra.extend(window)
+            outer_ts, outer_dt = contract_axis(times[-1], extra_dates=extra)
+            outer_times = grid_times(outer_dt, outer_ts).tolist()
+            shared, rate = joint_scenarios(runtimes, request, times, outer_times)
             settlement_rates = []
             for trade, (_, ctx), mtm in zip(trades, runtimes, current):
                 if ctx is None:
@@ -527,7 +600,7 @@ def evaluate_inputs(inputs, progress=None):
                             main_price=0, model=ctx["model"], n_outer=request.n_outer, n_inner=request.n_inner,
                             n_dates=len(times)-1, seed=request.seed, user_params=ctx["user_params"],
                             barrier_monitoring=ctx.get("barrier_monitoring", "weekly"), state=ctx.get("state"),
-                            mtm_dates=times[1:], outer_paths=outer, credit_exposure=True,
+                            mtm_dates=times[1:], outer_paths=outer, outer_times=outer_times, credit_exposure=True,
                             maturity_payment_t=ctx.get("maturity_payment_t"),
                             progress=(lambda done, total: progress({"stage": "stress" if inputs.get("stress_pass") else "projection",
                                 "deal_id": trade.get("deal_id"), "reference": trade["reference"],
@@ -572,7 +645,7 @@ def evaluate_inputs(inputs, progress=None):
             result = {"gross_notional": sum(t["nominal"] for t in ts), "current_exposure": None,
                       "net_mtm": None, "gross_positive_mtm": None, "profile": [], "warnings": []}
         if not full or not result.get("profile"):
-            for key in ("ee", "epe", "pfe95", "pfe99", "maximum_pfe", "maximum_pfe_t", "cva", "ead", "stressed_exposure"):
+            for key in ("epe", "pfe95", "pfe99", "maximum_pfe", "maximum_pfe_t", "cva", "ead", "stressed_exposure"):
                 result[key] = None
             result["profile"] = []
         if any(current[trades.index(t)] is None for t in ts):
@@ -631,8 +704,9 @@ def evaluate_inputs(inputs, progress=None):
               "common_rate": request.common_rate, "common_rate_source": request.common_rate_source,
               "market_overrides": {k:v.model_dump() for k,v in request.market_overrides.items()},
               "correlations": request.correlations, "allow_market_fetch": request.allow_market_fetch,
-              "quantile": "linear", "pfe_limit_metric": "maximum over horizons", "time_grid": "weekly",
-              "cva_integration": "right endpoint", "spread_to_hazard": "spread / LGD, piecewise constant; no CDS bootstrap",
+              "quantile": "linear", "pfe_limit_metric": "maximum over horizons",
+              "time_grid": "exact contractual observations, fixing windows, exposure marks and payments; weekly diffusion nodes retained between contract dates",
+              "cva_integration": "left endpoint discounted EE, ex-payment boundaries", "spread_to_hazard": "spread / LGD, piecewise constant; no CDS bootstrap",
               "collateral": "lagged margin calls on valuation grid; no interpolation", "source": "frozen valuations / explicit pricer inputs"}}
     if not inputs.get("stress_pass") and (original_request.stress or original_request.credit_spread_multiplier != 1):
         stressed = evaluate_inputs({**inputs, "stress_pass": True}, progress=progress)
@@ -658,7 +732,7 @@ def evaluate_inputs(inputs, progress=None):
     return result
 
 
-def calculate(session, user, request, *, persist=True, progress=None):
+def calculate(session, user, request, *, persist=True, progress=None, replacement=None):
     organization(user)
     if request.prepare_mtm:
         # Desk-approved temporary common rate until as-of rate data is wired.
@@ -671,16 +745,27 @@ def calculate(session, user, request, *, persist=True, progress=None):
         raise HTTPException(422, "Choisir une contrepartie, un deal ou une proposition standalone")
     if request.valuation_method != "NESTED_MONTE_CARLO":
         raise HTTPException(422, f"Méthode CCR {request.valuation_method} non implémentée ; utiliser NESTED_MONTE_CARLO")
-    if request.as_of_date > date.today():
+    if request.as_of_date > business_today():
         raise HTTPException(422, "La date d'arrêté ne peut pas être future")
     if request.wwr in {"GENERAL", "SPECIFIC"}:
         raise HTTPException(422, "Modèle joint de wrong-way risk non implémenté ; utiliser le stress explicite")
     if request.counterparty_id and request.hypothetical_profile:
         raise HTTPException(422, "Un profil hypothétique ne peut remplacer le profil d'une contrepartie identifiée")
     deals = portfolio_deals(session, user, request)
+    if replacement is not None:
+        source = session.get(Deal, replacement.id)
+        if (persist or request.prepare_mtm or request.proposed is not None
+                or request.deal_id or request.portfolio_id or request.netting_set_id
+                or not source or source.entity_id != organization(user)
+                or replacement.entity_id != source.entity_id
+                or replacement.contract_version != source.contract_version
+                or replacement.counterparty_id != request.counterparty_id
+                or (source.uat_batch_id is not None) != (request.data_scope == "UAT")):
+            raise HTTPException(422, "Périmètre de remplacement CCR incompatible avec le contrat.")
+        deals = [deal for deal in deals if deal.id != replacement.id]
     if progress:
         progress({"stage": "scope", "total": len(deals), "deals": [{"id":d.id,"reference":d.reference} for d in deals]})
-    if not deals and request.proposed is None:
+    if not deals and request.proposed is None and replacement is None:
         diagnostic = scope_diagnostic(session, user, request)
         raise HTTPException(422, f"Aucun deal retenu dans le périmètre {request.data_scope}. "
                             f"{diagnostic['excluded_other_scope_count']} deal(s) actif(s) exclu(s) appartenant à l'autre périmètre. "
@@ -692,13 +777,11 @@ def calculate(session, user, request, *, persist=True, progress=None):
         config = records(session, user, request.counterparty_id) if request.counterparty_id else {}
     if request.proposed:
         legal_assignment(session, user, request.counterparty_id, request.proposed.netting_set_id,
-                         request.proposed.currency, request.proposed.product_type)
-    version, fingerprint = engine_identity()
-    ccr_digest = hashlib.sha256()
-    for filename in ("contracts.py", "exposure.py", "service.py", "preparation.py", "common_market.py", "cache.py"):
-        ccr_digest.update((Path(__file__).parent / filename).read_bytes())
-    from .cache import preparation_key, find_prepared_base, archived_histories
-    key = preparation_key(session, organization(user), deals, request, fingerprint + ccr_digest.hexdigest()) if request.prepare_mtm else None
+                         request.proposed.currency, request.proposed.product_type, as_of=request.as_of_date)
+    from .cache import preparation_key, find_prepared_base, archived_histories, implementation_identity
+    version, fingerprint, ccr_fingerprint = implementation_identity()
+    dependency_key = preparation_key(session, organization(user), deals, request, fingerprint + ccr_fingerprint)
+    key = dependency_key if request.prepare_mtm else None
     cached = find_prepared_base(session, organization(user), request, key) if key else None
     preparation_cache = {"key": key, "reused": bool(cached), "source_run_id": cached[0] if cached else None,
                          "snapshot_at": datetime.utcnow().isoformat(), "policy": "FROZEN_BASE_UNTIL_EXPLICIT_REFRESH"} if key else {}
@@ -742,11 +825,30 @@ def calculate(session, user, request, *, persist=True, progress=None):
         history_evidence = histories.evidence
     if request.proposed:
         trades.append(proposed_trade(request))
+    if replacement is not None:
+        amended = archived_trade(session, replacement, request)
+        if source.payment_date != replacement.payment_date:
+            # An old valuation cannot qualify an amended settlement horizon.
+            amended = {k: v for k, v in amended.items() if k not in {"mtm_fraction", "replay"}}
+            amended["missing"] = "Date de paiement amendée : valorisation du nouveau calendrier à qualifier avant une limite mesurée."
+        trades.append(amended)
     inputs = {"request": request.model_dump(mode="json"), "trades": trades, "configuration": config,
               "pricing_model_version": version, "pricing_engine_fingerprint": fingerprint,
-              "ccr_version": VERSION, "ccr_fingerprint": ccr_digest.hexdigest(), "entity_id": organization(user),
+              "ccr_version": VERSION, "ccr_fingerprint": ccr_fingerprint, "entity_id": organization(user),
+              "dependency_key": dependency_key,
               "market_histories": history_evidence, "common_market": common_market, "preparation_cache": preparation_cache}
     result = evaluate_inputs(inputs, progress=progress)
+    if replacement is not None:
+        # Keep this private argument out of the public calculation request schema.
+        result["replacement_evidence"] = {
+            "input_hash": canonical_fingerprint(inputs),
+            "configuration_hash": canonical_fingerprint(config),
+            "valuation_sources_hash": canonical_fingerprint([
+                {k: t.get(k) for k in ("deal_id", "contract_version", "valuation_run_id", "market_data_version", "nominal")}
+                for t in trades]),
+            "pricing_engine_fingerprint": fingerprint, "ccr_fingerprint": ccr_fingerprint,
+            "valuation_run_id": amended.get("valuation_run_id"),
+        }
     if persist:
         if progress:
             progress({"stage":"saving"})
@@ -766,13 +868,71 @@ def calculate(session, user, request, *, persist=True, progress=None):
     return result
 
 
+def enforce_amendment(session, user, deal, changes):
+    """Check the resulting portfolio under current policy; never add the old trade twice."""
+    as_of = business_today()
+    from ...services.legal_identity import active_counterparty
+    base_version = deal.contract_version
+    replacement = deal.model_copy(update=changes)
+    cpty = active_counterparty(session, replacement.counterparty_id)
+    if deal.status not in {"actif", "en_reglement"}:
+        raise HTTPException(422, "Un contrat dénoué nécessite une reprise contrôlée avant amendement économique.")
+    limits_model = RECORDS["limits"]
+    if user.entity_id is None:
+        if session.exec(select(limits_model.id).where(limits_model.counterparty_id == cpty.id)).first() is not None or replacement.ccr_netting_set_id is not None:
+            organization(user)
+        config = {"limits": []}
+    else:
+        session.exec(update(limits_model).where(limits_model.entity_id == organization(user),
+                     limits_model.counterparty_id == cpty.id).values(version=limits_model.version))
+        session.refresh(deal)
+        if deal.contract_version != base_version:
+            raise HTTPException(409, "Le contrat a changé avant le contrôle crédit ; rechargez l’amendement.")
+        replacement = deal.model_copy(update=changes)
+        # Read the policies only after acquiring the same write lock as booking/configuration.
+        enforce_otc_documentation(session, user, replacement, as_of)
+        config = records(session, user, cpty.id)
+    today = as_of.isoformat()
+    active = [row for row in config["limits"] if row["data"]["active"]
+        and row["data"]["effective_date"] <= today
+        and (not row["data"].get("expiry_date") or row["data"]["expiry_date"] >= today)]
+    proof = {"evaluation_basis": "RESULTING_PORTFOLIO", "evaluated_at": datetime.utcnow().isoformat(),
+        "as_of_date": today, "counterparty_id": cpty.id, "entity_id": user.entity_id,
+        "deal_id": deal.id, "from_contract_version": deal.contract_version,
+        "to_contract_version": deal.contract_version + 1, "changes": changes,
+        "previous_nominal": deal.nominal, "resulting_nominal": replacement.nominal,
+        "configuration_hash": canonical_fingerprint(config), "limits_policy": config["limits"],
+        "data_scope": "UAT" if deal.uat_batch_id is not None else "PRODUCTION", "uat_batch_id": deal.uat_batch_id}
+    if not active:
+        return {**proof, "decision": {"status": "NO_LIMIT", "booking_allowed": True},
+                "after": {}, "limits": [], "errors": [], "measurement_status": "NOT_REQUESTED"}
+    request = CalculationRequest(counterparty_id=cpty.id, currency=replacement.devise, as_of_date=as_of,
+        data_scope=proof["data_scope"], uat_batch_id=deal.uat_batch_id,
+        mode="FULL" if any(row["data"]["metric"] not in {"gross_notional", "current_exposure"} for row in active) else "FAST")
+    result = calculate(session, user, request, persist=False, replacement=replacement)
+    proof.update({**result["replacement_evidence"], "decision": result["decision"],
+        "after": {metric: result["after"].get(metric) for metric in METRICS},
+        "limits": result["limits"], "errors": ["Mesure CCR incomplète ; qualification des valorisations requise."] if result["errors"] else [],
+        "measurement_status": result["status"], "requested_mode": result["requested_mode"]})
+    if not result["decision"]["booking_allowed"]:
+        raise HTTPException(409, {"code": "CCR_CREDIT_BLOCK",
+            "message": "Limite dépassée, mesure non qualifiée ou approbation requise après amendement.",
+            "credit_check": proof})
+    return proof
+
+
 def enforce_booking(session, user, body):
     """Fresh server-side decision in the booking transaction; no client receipt reuse."""
-    cpty = session.exec(select(Counterparty).where(Counterparty.name == body.contrepartie)).first()
-    if not cpty:
-        if body.ccr_netting_set_id is not None:
-            raise HTTPException(422, "Un netting set nécessite une contrepartie référencée")
+    as_of = business_today()
+    booking_legal_classification(body)
+    if getattr(body, "legal_identity_exception", None) is not None:
+        from ...services.legal_identity import booking_exception
+        booking_exception(session, user, body)
+        # Explicitly unassessed, recorded atomically on Deal and in the booking audit.
+        # No known counterparty ID, netting set or existing credit limit can use this path.
         return
+    from ...services.legal_identity import active_counterparty
+    cpty = active_counterparty(session, getattr(body, "counterparty_id", None))
     model = RECORDS["limits"]
     if user.entity_id is None:
         # Preserve legacy booking only where no CCR policy can be bypassed.
@@ -783,9 +943,9 @@ def enforce_booking(session, user, body):
     # Take the SQLite write lock before reading policy and portfolio state.
     session.exec(update(model).where(model.entity_id == organization(user), model.counterparty_id == cpty.id)
                  .values(version=model.version))
-    legal_assignment(session, user, cpty.id, body.ccr_netting_set_id, body.devise, body.product_type)
+    enforce_otc_documentation(session, user, body, as_of)
     config = records(session, user, cpty.id)
-    today = date.today().isoformat()
+    today = as_of.isoformat()
     active = [r for r in config["limits"] if r["data"]["active"] and r["data"]["effective_date"] <= today
               and (not r["data"].get("expiry_date") or r["data"]["expiry_date"] >= today)]
     if not active:
@@ -795,7 +955,7 @@ def enforce_booking(session, user, body):
         if any(r["data"]["action"] in {"HARD_BLOCK", "REQUIRE_APPROVAL"} for r in active):
             raise HTTPException(409, "CCR MISSING_DATA : preuve de pricing absente")
         return
-    req = CalculationRequest(counterparty_id=cpty.id, currency=body.devise,
+    req = CalculationRequest(counterparty_id=cpty.id, currency=body.devise, as_of_date=as_of,
         mode="FULL" if any(r["data"]["metric"] not in {"gross_notional", "current_exposure"} for r in active) else "FAST",
         proposed={"pricing": priced, "nominal": body.nominal, "currency": body.devise,
                   "sens": body.sens, "product_type": body.product_type, "netting_set_id": body.ccr_netting_set_id})

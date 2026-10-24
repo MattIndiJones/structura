@@ -5,6 +5,7 @@ import { useRfqStore } from '../stores/rfq.js'
 import BaseModal from './ui/BaseModal.vue'
 import AlertMessage from './ui/AlertMessage.vue'
 import SensitiveValue from './SensitiveValue.vue'
+import RfqElectronicExecutionPanel from './RfqElectronicExecutionPanel.vue'
 import { formatInt, formatPercent, formatDateTime } from '../utils/format.js'
 
 const props = defineProps({ rfq: { type: Object, required: true } })
@@ -21,17 +22,26 @@ const request = reactive({ source: 'PHONE', reference: '', bank_contact: '' })
 const confirmation = reactive({ execution_reference: '', acceptance_received_at: '', confirmed_at: '',
   acceptance_evidence: '', source: 'BANK_CONFIRMATION', evidence: '', bank_contact: '' })
 const cancelReason = ref('')
+let contextRevision=0
 const labels = { REQUESTED: 'Traitement demandé · confirmation attendue', CONFIRMED: 'Traitement confirmé',
   BOOKED_LOCALLY: 'Booké localement', CANCELLED: 'Demande annulée' }
 const confirmationComplete = computed(() => confirmation.execution_reference.trim().length >= 3
   && confirmation.bank_contact.trim().length >= 3 && confirmation.acceptance_received_at && confirmation.confirmed_at
   && confirmation.acceptance_evidence.trim().length >= 3 && confirmation.evidence.trim().length >= 3)
 
-watch(() => props.rfq.id, () => { opened.value = false; error.value = ''; terms.value = null; busy.value = false })
+watch([()=>props.rfq.id,()=>props.rfq.selected_quote_id,()=>active.value?.id],()=>{
+  contextRevision++
+  opened.value=false;error.value='';terms.value=null;busy.value=false;commandKey.value='';cancelReason.value=''
+  Object.assign(request,{source:'PHONE',reference:'',bank_contact:''})
+  Object.assign(confirmation,{execution_reference:'',acceptance_received_at:'',confirmed_at:'',
+    acceptance_evidence:'',source:'BANK_CONFIRMATION',evidence:'',bank_contact:''})
+},{flush:'sync'})
+watch(opened,value=>{if(!value){contextRevision++;busy.value=false}},{flush:'sync'})
 
 async function open() {
   const id = props.rfq.id
   error.value = ''; opened.value = true
+  const revision=++contextRevision
   request.bank_contact = selected.value?.contact || ''
   confirmation.bank_contact = active.value?.bank_contact || request.bank_contact
   if (active.value) return
@@ -40,18 +50,19 @@ async function open() {
     const res = await apiFetch(`/api/rfq/${id}/terms`)
     if (!res.ok) throw new Error('Les termes Product n’ont pas pu être chargés.')
     const value = await res.json()
-    if (props.rfq.id === id) { terms.value = value; commandKey.value = crypto.randomUUID() }
-  } catch (e) { if (props.rfq.id === id) error.value = e.message }
-  finally { if (props.rfq.id === id) busy.value = false }
+    if (contextRevision===revision && props.rfq.id === id) { terms.value = value; commandKey.value = crypto.randomUUID() }
+  } catch (e) { if (contextRevision===revision) error.value = e.message }
+  finally { if (contextRevision===revision) busy.value = false }
 }
 
 async function run(action) {
   if (busy.value) return
   const id = props.rfq.id
+  const revision=contextRevision
   busy.value = true; error.value = ''
-  try { await action(); if (props.rfq.id === id) opened.value = false }
-  catch (e) { if (props.rfq.id === id) error.value = e.message }
-  finally { if (props.rfq.id === id) busy.value = false }
+  try { await action(); if (contextRevision===revision && props.rfq.id === id) opened.value = false }
+  catch (e) { if (contextRevision===revision) error.value = e.message }
+  finally { if (contextRevision===revision) busy.value = false }
 }
 function declare() {
   const id = props.rfq.id
@@ -60,6 +71,7 @@ function declare() {
     command_key: commandKey.value }))
 }
 function confirm() {
+  if(!active.value || !confirmationComplete.value) {error.value='Renseignez les preuves de confirmation de ce dossier.';return}
   const id = props.rfq.id, agreement = active.value
   return run(() => store.confirmTreatment(id, agreement.id, { ...confirmation,
     expected_snapshot_hash: agreement.snapshot_hash,
@@ -69,7 +81,8 @@ function confirm() {
 </script>
 
 <template>
-  <section v-if="selected || rfq.execution_agreements?.length" class="card space-y-2">
+  <RfqElectronicExecutionPanel :rfq="rfq" />
+  <section v-if="!rfq.electronic_execution && (selected || rfq.execution_agreements?.length)" class="card space-y-2">
     <div class="flex items-center justify-between gap-3">
       <div class="min-w-0">
         <h3 class="font-semibold text-sm">Accord de traitement</h3>

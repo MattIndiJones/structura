@@ -3,6 +3,8 @@ import { createPinia } from 'pinia'
 import router from './router/index.js'
 import App from './App.vue'
 import './style.css'
+import { installContextReloadGuard } from './composables/useContextChanges.js'
+installContextReloadGuard()
 
 // Note: le thème Chart.js (src/charts/theme.js) n'est PAS importé ici —
 // il n'a aucune dépendance sur le paquet chart.js (208 Ko) et ce serait

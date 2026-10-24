@@ -87,6 +87,29 @@ def test_stream_has_progress_and_persists_one_note(calculated):
     assert len(session.exec(select(ValuationNote)).all()) == 1
 
 
+@pytest.mark.parametrize('provider,label', [
+    ('SYNTHETIC_SCENARIO', 'SYNTHETIC_SCENARIO — données de scénario, sans cours de marché réel'),
+    ('YAHOO_FINANCE', 'Yahoo Finance'),
+    (None, 'non renseignée'),
+])
+def test_pdf_labels_the_archived_observation_source(calculated, monkeypatch, provider, label):
+    from backend.app.core import deal_valuation_pdf as pdf
+    note = create(calculated)
+    data = deepcopy(note['evidence']['runs'][0]['data'])
+    data['mtm'].setdefault('market_used', {})['data'] = {'provider': provider}
+    captured = []
+    original = pdf.Paragraph
+    def paragraph(text, *args, **kwargs):
+        captured.append(text)
+        return original(text, *args, **kwargs)
+    monkeypatch.setattr(pdf, 'Paragraph', paragraph)
+    assert pdf.generate_valuation_pdf(data).startswith(b'%PDF')
+    rendered = '\n'.join(captured)
+    assert f'Source des observations : {label}.' in rendered
+    assert 'marché publiques (Yahoo Finance)' not in rendered
+    assert 'données et hypothèses documentées dans ce rapport' in rendered
+
+
 def test_drafts_are_revision_checked_and_versions_keep_identical_pdf(calculated):
     session, user, deal, run = calculated
     note = create(calculated)
@@ -283,6 +306,7 @@ def test_two_underlying_correlation_change_uses_archived_matrix():
     def record(p):
         return ValuationRun(deal_id=1, user_id=1, context_hash="test", contract_version=1,
                             engine_fingerprint=engine_identity()[1], context_json=json.dumps(p),
+                            diagnostics_json=json.dumps({"calculation_identity": core.calculation_identity()}),
                             result_json=json.dumps({"mtm": core.price_var_scenario_job(p)["price"],
                                                     "valuation_date": "2026-01-01"}))
     result = core.compare_runs(record(a), record(b))

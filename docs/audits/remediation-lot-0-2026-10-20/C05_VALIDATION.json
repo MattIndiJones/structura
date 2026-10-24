@@ -1,0 +1,200 @@
+{
+  "date": "2026-10-20",
+  "timezone": "Europe/Berlin",
+  "workstream": "C05",
+  "status": "Validated locally; cross-workstream, graphical and production qualification open",
+  "baseline": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c05-baseline-20503799fc4448e5a023def7a36e3982",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "baseline_status_entries": 352,
+  "authorization": {
+    "code_and_targeted_tests": true,
+    "commit": false,
+    "push": false,
+    "business_data_mutation": false
+  },
+  "scope": {
+    "findings": [
+      "M02-01",
+      "M02-02",
+      "M02-03",
+      "M02-04",
+      "M02-09",
+      "M02-10",
+      "M05-06",
+      "M17-04"
+    ],
+    "decision_confirmed": "D02",
+    "preserved_dependencies": [
+      "C01",
+      "C02",
+      "C03",
+      "C04"
+    ],
+    "cross_cases_partial": [
+      "T03",
+      "T04",
+      "T16"
+    ]
+  },
+  "decisions": {
+    "id": "D02",
+    "title": "Observation et règlement",
+    "refs": "M02-04 C05",
+    "proposed_decision": "Préciser places d'observation, centres de règlement, combinaisons de places en panier, stubs et traitement des jours non ouvrés. Les dates bookées restent figées.",
+    "due": "Avant changement de sémantique du calendrier",
+    "status": "Confirmée par Philippe — implémentée et validée localement",
+    "confirmed_on": "2026-10-20",
+    "decision_source": "Réponses explicites de Philippe dans ce chat",
+    "accepted_decision": "Places d'observation et centres de règlement distincts. Règle de combinaison choisie explicitement par produit : toutes ouvertes ou au moins une ouverte ; aucun défaut pour plusieurs calendriers. Pour les nouveaux calendriers, fusion systématique de la période irrégulière avec sa période régulière voisine pour un stub long, sans seuil caché. Les dates déjà figées restent inchangées."
+  },
+  "backend": {
+    "distinct_passed_cases": 454,
+    "current_failures": 0,
+    "files": 18,
+    "new_c05_cases": 46,
+    "full_backend_suite_run": false,
+    "aggregation": "Latest result by test ID across targeted runs; not a single 454-test green run.",
+    "attempts": [
+      {
+        "run": "backend-final",
+        "passed": 450,
+        "failed": 4,
+        "xml": ".runtime/diagnostic-acceptance/c05-2026-10-20/backend-final.xml",
+        "xml_sha256": "77338104f8675aa502f718c83511085846e64bc7fdb7308f09c922e7269e6a8b"
+      },
+      {
+        "run": "backend-product-recheck",
+        "passed": 4,
+        "failed": 0,
+        "xml": ".runtime/diagnostic-acceptance/c05-2026-10-20/backend-product-recheck.xml",
+        "xml_sha256": "943a261098809223cdcb6c7709910bc0444e18478a8727d9cdca98e886c84a14"
+      },
+      {
+        "run": "backend-reopening",
+        "passed": 149,
+        "failed": 5,
+        "xml": ".runtime/diagnostic-acceptance/c05-2026-10-20/backend-reopening.xml",
+        "xml_sha256": "b0aa3fd628db135061223112cb90a6081ac9782b66c66d9a7af63dec96e6b9fc"
+      },
+      {
+        "run": "backend-calendar-api-recheck",
+        "passed": 5,
+        "failed": 0,
+        "xml": ".runtime/diagnostic-acceptance/c05-2026-10-20/backend-calendar-api-recheck.xml",
+        "xml_sha256": "661acaf757dd85bc5b189de28fb0f56335f11b42813dbfb6b7547dde1c55ed44"
+      },
+      {
+        "run": "backend-calendar-api-final",
+        "passed": 5,
+        "failed": 0,
+        "xml": ".runtime/diagnostic-acceptance/c05-2026-10-20/backend-calendar-api-final.xml",
+        "xml_sha256": "02977b8d47de4cd7e12323a062e6450d29622b72d9e19b13f029a3217d83640c"
+      }
+    ],
+    "summary": ".runtime/diagnostic-acceptance/c05-2026-10-20/backend-validation-summary.json",
+    "summary_sha256": "b22057690e4c71042cd91e7c79cbc850304f05d5050b2f19af337628336b0c63",
+    "fixture_alignment": "Four pre-C03 Product booking payloads now provide existing active counterparty_id=1; no legal guard disabled.",
+    "reopening_checks": "Exact linked Product terms version, immutable calendar transmission, inconsistent snapshot blocks repricing; permissions and legal booking rechecked."
+  },
+  "frontend": {
+    "passed": 491,
+    "failed": 0,
+    "files": 64,
+    "new_c05_cases": 16,
+    "build_succeeded": true,
+    "build_seconds": 13.38,
+    "command": "npm.cmd run build -- --outDir <temporary directory>",
+    "output_directory": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c05-build-09ca4cc617a74193a531d3eabdad0db1",
+    "log": ".runtime/diagnostic-acceptance/c05-2026-10-20/frontend-final.log",
+    "log_sha256": "125e6e9867a33250872261163726fef063a069b70bb6959539fe3695a8cf96da"
+  },
+  "calendar_library": {
+    "package": "holidays",
+    "version": "0.103",
+    "source": "Installed local library; no external market-data fetch"
+  },
+  "coverage_limits": [
+    "No manual graphical acceptance, real installation restart, historical migration or production qualification",
+    "T03 calendar/rank scope only; C09/C14 chronology and payoff qualification open",
+    "T04 C03/C05 scope only; C11/C12 data freshness and atomic storage open",
+    "T16 maturity guard only; C18/C19/C25 funding, costs, recovery and PDF open",
+    "Legacy currency-only configurations remain visibly marked; explicit multi-calendar selections require product-specific join",
+    "Named calendar catalogue does not cover all venues; any-open does not produce missing fixings (C11/C13)",
+    "Deals with missing/inconsistent linked frozen calendars require explicit requalification before repricing",
+    "Product/RFQ/version safeguards outside tested calendar projections remain C06"
+  ],
+  "integrity": {
+    "prior_changes_preserved": true,
+    "no_preexisting_files_removed": true,
+    "head_unchanged": true,
+    "dist_unchanged": true,
+    "prior_c01_to_c04_reports_and_evidence_unchanged": true,
+    "prior_non_c05_registry_findings_and_workstreams_unchanged": true,
+    "incremental_whitespace_checks_passed": true,
+    "manually_started_services": false,
+    "isolated_backend_data": true,
+    "backend_data_structura_db_exists": false,
+    "business_database_hash_note": "No business-db-sha256.txt in baseline; backend/data/structura.db absent. No hash comparison claimed.",
+    "cleanup": ".runtime/diagnostic-acceptance/c05-2026-10-20/process-cleanup.json",
+    "cleanup_sha256": "38517cb1b1dc0701b745e7742795f3cc34a626334f966e3c589bfeafb8bfd9e2"
+  },
+  "changed_files": [
+    "backend/app/api/deals.py",
+    "backend/app/api/pricing.py",
+    "backend/app/api/schedule.py",
+    "backend/app/core/calendars.py",
+    "backend/app/core/payscript/parser.py",
+    "backend/app/core/schedule.py",
+    "backend/app/core/schemas.py",
+    "backend/tests/test_contractual_calendars.py",
+    "backend/tests/test_payscript_binding.py",
+    "backend/tests/test_products.py",
+    "backend/tests/test_schedule_settlement.py",
+    "docs/README.md",
+    "docs/audits/REMEDIATION_C05_2026-10-20.md",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+    "docs/audits/remediation-lot-0-2026-10-20/C05_VALIDATION.json",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+    "docs/reference/PAYSCRIPT_REFERENCE.md",
+    "frontend/src/components/CalendarPolicyFields.vue",
+    "frontend/src/components/EconomicsCalendars.test.js",
+    "frontend/src/components/EconomicsTab.vue",
+    "frontend/src/components/ObservationSchedule.vue",
+    "frontend/src/components/PayScriptCalendars.vue",
+    "frontend/src/composables/useObservationPreview.js",
+    "frontend/src/stores/pricing.js",
+    "frontend/src/utils/payscriptEconomics.js"
+  ],
+  "source_sha256": {
+    "backend/app/api/deals.py": "f02b5c7eda3cd79e0bcd4bf781893afd32b9c3654fee64082c6c45a2680dff47",
+    "backend/app/api/pricing.py": "b9ddd575bf828b10c088f69233a29981e9ef685e2edcb0deac57c60bed94e81b",
+    "backend/app/api/schedule.py": "28577c38ce37d45b36f221d9603762e5aa25f82ce9d94d7566435da013b0b4cf",
+    "backend/app/core/calendars.py": "ed5d3ec5a587918e9420ddc142e7f90aadc8c265fb694ac0737e07c4eaeb3d67",
+    "backend/app/core/payscript/parser.py": "bff872fb0709829d3304dcca9c21652bbe41c0235926deab657dca4b7cd8b96e",
+    "backend/app/core/schedule.py": "751197e53eee242e92692c1e73caf36ecda651da02c1e72c77aa1f0292b9ce2b",
+    "backend/app/core/schemas.py": "3315dd8f7187b6a743f76c0e69e287d822d87e0df48e5fac76320d9d4d6dd9a3",
+    "backend/tests/test_contractual_calendars.py": "36389d859b3fe746c99dfc4d4d527992908a44358ac6a434fa4b86ce00d2099d",
+    "backend/tests/test_payscript_binding.py": "dc4e14df1caeece8f27a40fcdb7a83a18a5b58633fe597bb0a9f5abddf080c14",
+    "backend/tests/test_products.py": "af2963245c7677131c9385d0e19c116519535ee9607300b337325b657bd221a0",
+    "backend/tests/test_schedule_settlement.py": "65dcb7a4dc00fdcf00b4b9108c4624db31a9fb31247246710298b7e85cac79ab",
+    "docs/README.md": "3923b3718aa16c54f5acf5f420a97a26b9d436027ca379f7c0d68a6d4a7595bd",
+    "docs/audits/REMEDIATION_C05_2026-10-20.md": "92dee388077d9cdbdaf988477369605a46d0f42951a348ea3a9e7e4b0f9c2a0e",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md": "beb0527a3b8f974db76109b09b1c910e3e00143134c010a156ecd1dbc4894953",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md": "3785d73646454ec16dff9e1a5352d7cca283d85565db4d64ee97d242fe747699",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json": "4462278ae959da33802750cefe3cc0ab9f796dd7fb296f4e2a41c5c1b300f9ed",
+    "docs/reference/PAYSCRIPT_REFERENCE.md": "749735e9da6b42499926ff5378eb200ada5c3922328edd14318638ed0873a38a",
+    "frontend/src/components/CalendarPolicyFields.vue": "e154f0173da4b4bdf04652cc875f4e5c3376e9da367c8d9d62ae9aa5ccceb7d4",
+    "frontend/src/components/EconomicsCalendars.test.js": "130a328cae2ceb664d98d380f10dac15a448527fa5a01aad294b7c8dea00565c",
+    "frontend/src/components/EconomicsTab.vue": "964900dab9bc17c7ad17b38660210674b0b7de29aae8625831e043b211185fc4",
+    "frontend/src/components/ObservationSchedule.vue": "22aa78f9414fd872845ce6f599d0cbe2e864737049400f33f5d3dbc0db55901f",
+    "frontend/src/components/PayScriptCalendars.vue": "6bef093f7b03e2cd1dcf7ab3dcb350314719652efc3bb55542f90b5fa74752ec",
+    "frontend/src/composables/useObservationPreview.js": "76abdcc22410e1707a09ab4c391784ceab90ab0d3f7dfedab5cdfa41bdbd0632",
+    "frontend/src/stores/pricing.js": "6de6fa127507f36d24efca8ec7ddbf26fe7a6cea66ee7c73ae6cacf7abab5341",
+    "frontend/src/utils/payscriptEconomics.js": "3469f2b656639d7a1d762606f3363ff69387fcac209d5957beb85356b770a7b6"
+  },
+  "incremental_diff": {
+    "path": ".runtime/diagnostic-acceptance/c05-2026-10-20/incremental.diff",
+    "sha256": "2f3effc5e3f661e6c6219cf668ec122534abee9b05aa6aa7258bc77269f957aa"
+  }
+}

@@ -6,9 +6,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from ..db.database import get_session
-from ..db.models import Alert, SchedulerRun, User
+from ..db.models import Alert, AlertRead, Deal, SchedulerRun, User
 from .auth import get_current_admin, get_current_user
 from ..services.lifecycle_alerts import refresh_book
+from ..services.business_access import can_read_deal
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -17,19 +18,35 @@ def _admin(current: User) -> bool:
     return getattr(current, "role", None) == "admin"
 
 
-def _visible_alerts(current: User):
-    statement = select(Alert)
-    return statement if _admin(current) else statement.where(Alert.user_id == current.id)
+def _visible_alerts(current: User, session: Session):
+    ids = [d.id for d in session.exec(select(Deal)).all() if can_read_deal(d, current, session)]
+    return select(Alert).where(Alert.deal_id.in_(ids) | (
+        Alert.deal_id.is_(None) & (Alert.user_id == current.id)))
 
 
-def _alert_row(a: Alert) -> dict:
+def _unread(current):
+    acknowledged = select(AlertRead.alert_id).where(
+        AlertRead.alert_id == Alert.id, AlertRead.user_id == current.id).exists()
+    return ((Alert.user_id == current.id) & (Alert.read == False)) | (  # noqa: E712
+        (Alert.user_id != current.id) & ~acknowledged)
+
+
+def _mark_read(alert, current, session):
+    if alert.user_id == current.id:
+        alert.read = True
+        session.add(alert)
+    elif session.get(AlertRead, (alert.id, current.id)) is None:
+        session.add(AlertRead(alert_id=alert.id, user_id=current.id))
+
+
+def _alert_row(a: Alert, current: User, session: Session) -> dict:
     return {
         "id": a.id,
         "deal_id": a.deal_id,
         "deal_reference": a.deal_reference,
         "kind": a.kind,
         "message": a.message,
-        "read": a.read,
+        "read": a.read if a.user_id == current.id else session.get(AlertRead, (a.id, current.id)) is not None,
         "created_at": a.created_at.isoformat(),
     }
 
@@ -62,14 +79,14 @@ def list_alerts(
     unread_only: bool = False,
     limit: int = 100,
 ):
-    q = _visible_alerts(current)
+    q = _visible_alerts(current, session)
     if unread_only:
-        q = q.where(Alert.read == False)   # noqa: E712
+        q = q.where(_unread(current))
     rows = session.exec(q.order_by(Alert.created_at.desc()).limit(limit)).all()
     unread = len(session.exec(
-        _visible_alerts(current).where(Alert.read == False)   # noqa: E712
+        _visible_alerts(current, session).where(_unread(current))
     ).all())
-    return {"unread": unread, "alerts": [_alert_row(a) for a in rows]}
+    return {"unread": unread, "alerts": [_alert_row(a, current, session) for a in rows]}
 
 
 @router.post("/{alert_id}/read")
@@ -79,12 +96,12 @@ def mark_read(
     session: Annotated[Session, Depends(get_session)],
 ):
     alert = session.get(Alert, alert_id)
-    if not alert or (not _admin(current) and alert.user_id != current.id):
+    if not alert or (alert.deal_id is None and alert.user_id != current.id) or (
+            alert.deal_id is not None and not can_read_deal(session.get(Deal, alert.deal_id), current, session)):
         raise HTTPException(404, "Alerte introuvable")
-    alert.read = True
-    session.add(alert)
+    _mark_read(alert, current, session)
     session.commit()
-    return _alert_row(alert)
+    return _alert_row(alert, current, session)
 
 
 @router.post("/read-all")
@@ -93,11 +110,10 @@ def mark_all_read(
     session: Annotated[Session, Depends(get_session)],
 ):
     rows = session.exec(
-        _visible_alerts(current).where(Alert.read == False)   # noqa: E712
+        _visible_alerts(current, session).where(_unread(current))
     ).all()
     for a in rows:
-        a.read = True
-        session.add(a)
+        _mark_read(a, current, session)
     session.commit()
     return {"marked": len(rows)}
 
@@ -107,9 +123,5 @@ def refresh_whole_book(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    """Same pass as the nightly scheduler.
-
-    Administrators operate the full book they can see (including UAT deals
-    owned by the selected target user); regular users keep an owner-only pass.
-    """
-    return refresh_book(session, user_id=None if _admin(current) else current.id)
+    """Refresh only contracts visible to the effective identity."""
+    return refresh_book(session, current=current)

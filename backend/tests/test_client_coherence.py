@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from backend.app.api.auth import get_current_user
+from backend.app.api.auth import get_current_user, _make_token
 from backend.app.core.client_cycle import compute_cycle
 from backend.app.core.client_intelligence import (
     _dates_de_trade, deals_of_client, observed_behaviour,
@@ -25,7 +25,7 @@ from backend.app.core.client_intelligence import (
 )
 from backend.app.db.database import get_session
 from backend.app.db.models import (
-    Affiliation, Client, ClientTradeHistory, Interaction, Person, User,
+    Affiliation, Client, ClientTradeHistory, Counterparty, Entity, Interaction, Person, User,
 )
 from backend.tests.product_helpers import add_pricing_receipt
 
@@ -37,30 +37,44 @@ def app_client(monkeypatch):
 
     engine = create_engine("sqlite://", poolclass=StaticPool,
                            connect_args={"check_same_thread": False})
+    @event.listens_for(engine, "connect")
+    def integrity(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.delenv("STRUCTURA_INSTALLATION_CONFIG", raising=False)
 
     from backend.app.main import app
 
     session = Session(engine)
+    session.add_all([Entity(id=1, name="Alice organization"), Entity(id=99, name="Carol organization")])
+    session.flush()
     alice = User(id=1, username="alice", email="a@d.com", password_hash="x",
                  role="user", entity_id=1)
     carol = User(id=2, username="carol", email="c@d.com", password_hash="x",
                  role="user", entity_id=99)
     session.add_all([alice, carol])
+    session.add(Counterparty(id=1, name="Marex", active=True))
     session.commit()
 
-    courant = {"user": alice}
+    previous_overrides = dict(app.dependency_overrides)
     app.dependency_overrides[get_session] = lambda: session
-    app.dependency_overrides[get_current_user] = lambda: courant["user"]
+    app.dependency_overrides.pop(get_current_user, None)
     client = TestClient(app)
     client.session = session
-    client.courant = courant
     client.utilisateurs = {"alice": alice, "carol": carol}
+    client.auth_headers = {user.username: {"Authorization": "Bearer " + _make_token(
+        user.id, user.role, user.entity_id, auth_version=user.auth_version)} for user in (alice, carol)}
+    client.headers.update(client.auth_headers["alice"])
     client.engine = engine
-    yield client
-    app.dependency_overrides.clear()
-    session.close()
+    try:
+        yield client
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(previous_overrides)
+        session.close()
+        engine.dispose()
 
 
 FICHIER = {
@@ -93,7 +107,7 @@ def _importer(app_client, charge=None):
 
 def _corps_deal(**extra):
     corps = {
-        "sens": "vente", "contrepartie": "Marex", "devise": "EUR",
+        "sens": "vente", "contrepartie": "Marex", "counterparty_id": 1, "devise": "EUR",
         "nominal": 1_000_000.0, "fair_value": 98.5, "price_traded": 98.5,
         "trade_date": "2026-01-15", "strike_date": "2026-01-15",
         "value_date": "2026-01-19", "maturity_date": "2027-01-15",
@@ -155,7 +169,7 @@ def test_on_ne_booke_pas_sur_le_client_d_une_autre_entite(app_client):
     bank_a = app_client.session.exec(
         select(Client).where(Client.name == "Bank A")).first()
 
-    app_client.courant["user"] = app_client.utilisateurs["carol"]
+    app_client.headers.update(app_client.auth_headers["carol"])
     reponse = app_client.post("/api/deals",
                               json=_corps_deal(client_id=bank_a.id))
     assert reponse.status_code == 422
@@ -170,7 +184,7 @@ def test_on_ne_booke_pas_sur_l_opportunite_d_une_autre_entite(app_client):
         "/api/opportunities",
         json={"client_id": bank_a.id, "title": "X"}).json()
 
-    app_client.courant["user"] = app_client.utilisateurs["carol"]
+    app_client.headers.update(app_client.auth_headers["carol"])
     reponse = app_client.post(
         "/api/deals", json=_corps_deal(opportunity_id=opportunite["id"]))
     assert reponse.status_code == 422

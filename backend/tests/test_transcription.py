@@ -28,11 +28,10 @@ from backend.app.services.transcription.vocabulary import VOCABULAIRE_FR
 
 
 @pytest.fixture
-def client():
-    app.dependency_overrides[get_current_user] = lambda: object()
-    with TestClient(app) as test_client:
-        yield test_client
-    app.dependency_overrides.pop(get_current_user, None)
+def client(authenticated_client):
+    from backend.app.api import pricing
+    authenticated_client.app.include_router(pricing.router)
+    return authenticated_client
 
 
 # ── Registre ────────────────────────────────────────────────────────

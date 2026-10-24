@@ -36,7 +36,11 @@ class _FakeHistory:
 
 
 @pytest.fixture(autouse=True)
-def _yahoo_factice(monkeypatch):
+def _yahoo_factice(monkeypatch, tmp_path):
+    from backend.app.core import market_policy
+    monkeypatch.setenv('STRUCTURA_DATA_DIR', str(tmp_path))
+    monkeypatch.setattr(market_policy, 'HISTORY_MAX_AGE_DAYS', 3)
+    market_data.vider_cache_prix()
     _FakeHistory.appels = []
     monkeypatch.setattr(market_data, "_HAS_YF", True)
     monkeypatch.setattr(market_data, "yf", type("yf", (), {"Ticker": _FakeHistory}))

@@ -12,6 +12,7 @@ from backend.app.api.auth import get_current_user
 from backend.app.db.database import get_session
 from backend.app.db.models import User, Entity, Counterparty, CCRExposureCalculation
 from backend.tests.test_ccr import proposed
+from backend.tests.test_rfq_relationships import network_case
 
 
 def test_http_configuration_calculation_replay_and_scope():
@@ -58,25 +59,29 @@ def test_anonymous_ccr_is_not_accessible():
     assert TestClient(app).get("/api/ccr/counterparties").status_code == 401
 
 
-def test_rfq_uses_explicit_provider_mapping_and_frozen_engine_units():
+def test_rfq_uses_explicit_provider_mapping_and_frozen_engine_units(network_case):
     import pytest
     from fastapi import HTTPException
-    from backend.tests.test_rfq import _make_session, _new_rfq, _add_quote, USER
     from backend.app.api.ccr import rfq_check, rfq_credit_context
     from backend.app.core.ccr.contracts import CalculationRequest
     from backend.app.db.models import RfqProvider
-    with _make_session() as session:
-        rfq = _new_rfq(session)
-        quote = _add_quote(session, rfq["id"], "RFQ LABEL")
-        with pytest.raises(HTTPException) as exc:
-            rfq_credit_context(rfq["id"], quote["id"], USER, session)
-        assert exc.value.status_code == 422
-        cpty = Counterparty(name="Separate legal name")
-        session.add(cpty); session.flush()
-        session.add(RfqProvider(label="RFQ LABEL", counterparty_id=cpty.id))
-        session.commit()
-        assert rfq_credit_context(rfq["id"], quote["id"], USER, session)["counterparty_id"] == cpty.id
-        result = rfq_check(rfq["id"], quote["id"], CalculationRequest(mode="FAST"), USER, session)
-        assert result["counterparty_id"] == cpty.id
-        assert result["after"]["gross_notional"] == 1_000_000
-        assert result["after"]["current_exposure"] > 0
+    session, users, rfq = network_case
+    USER = users[3]
+    from backend.app.api import rfq as rfq_api
+    quote = rfq_api.add_quote(rfq["id"], rfq_api.QuoteCreate(provider="RFQ LABEL"), USER, session)
+    with pytest.raises(HTTPException) as exc:
+        rfq_credit_context(rfq["id"], quote["id"], USER, session)
+    assert exc.value.status_code == 422
+    cpty = Counterparty(name="Separate legal name")
+    session.add(cpty); session.flush()
+    session.add(RfqProvider(label="RFQ LABEL", counterparty_id=cpty.id))
+    session.commit()
+    from backend.app.api import rfq as rfq_api
+    with pytest.raises(HTTPException): rfq_credit_context(rfq["id"], quote["id"], USER, session)
+    rfq_api.update_quote(rfq["id"], quote["id"], rfq_api.QuoteUpdate(counterparty_id=cpty.id,
+        identity_reason="Rapprochement confirmé par le desk"), USER, session)
+    assert rfq_credit_context(rfq["id"], quote["id"], USER, session)["counterparty_id"] == cpty.id
+    result = rfq_check(rfq["id"], quote["id"], CalculationRequest(mode="FAST"), USER, session)
+    assert result["counterparty_id"] == cpty.id
+    assert result["after"]["gross_notional"] == 1_000_000
+    assert result["after"]["current_exposure"] > 0

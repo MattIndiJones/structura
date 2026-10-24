@@ -345,12 +345,19 @@ def replay_official_fixings(deal, events: list) -> tuple[dict | None, list[dict]
     non_strike = [event for event in ordered if event.t_years > 0]
     if replay["early_recall"]:
         trigger = min(non_strike, key=lambda row: abs(row.t_years - replay["T_actual"]))
+        point = next((point for point in compiled.echeancier.constatations
+                      if abs(point.t - replay["T_actual"]) < 1e-5), None)
+        payment = point.jour_paiement if point and point.jour_paiement else date.fromisoformat(trigger.event_date)
+        terminal_amount = sum(flow["cf"] for flow in replay["cash_flows"]
+                              if abs(flow["t"] - replay["T_actual"]) < 1e-5)
         result = {
             "outcome": "callé",
             "outcome_basis": "SCRIPT_STOP",
             "event_id": trigger.id,
             "event_date": trigger.event_date,
             "t_years": trigger.t_years,
+            "settlement_date": payment.isoformat(),
+            "settlement_amount": round(terminal_amount, 8),
             "realized_payout": realized_payout,
         }
     elif not maturity_reached:

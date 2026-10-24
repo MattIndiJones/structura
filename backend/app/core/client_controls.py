@@ -915,7 +915,8 @@ def require_deal_attribution_coherent(session: Session, *, client_id: Optional[i
         require_affiliation_of_client(session, affiliation_id, client_id)
 
     if opportunity_id is not None:
-        opportunite = session.get(Opportunity, opportunity_id)
+        from .opportunity_integrity import lock_opportunity
+        opportunite = lock_opportunity(session, opportunity_id)
         if opportunite is None or (entity_id is not None
                                    and opportunite.entity_id != entity_id):
             raise ClientRuleError(code="OPPORTUNITY_NOT_FOUND",

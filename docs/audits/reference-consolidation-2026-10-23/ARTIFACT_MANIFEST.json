@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-23",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "scope": "Final documentation changed/added in step 1; this manifest excludes itself to avoid a hash cycle. Reference source files and original evidence hashes are retained separately.",
+  "files": [
+    {
+      "path": "docs/README.md",
+      "sha256": "464da197980d06154605056030bf1071a734efaa93ed858198b05000eb359418",
+      "bytes": 76017
+    },
+    {
+      "path": "docs/audits/REFERENCE_CONSOLIDATION_2026-10-23.md",
+      "sha256": "a4f5ac315a3d2dee9856f0c31e84f41df474a6131846a78e002a60b83aaa1c14",
+      "bytes": 19425
+    },
+    {
+      "path": "docs/audits/reference-consolidation-2026-10-23/EVIDENCE_INVENTORY.json",
+      "sha256": "222164ddf8e2fb14dc58e0696261e35431f5e078044417ec6b05352ad422244b",
+      "bytes": 326041
+    },
+    {
+      "path": "docs/audits/reference-consolidation-2026-10-23/FAILURE_INVENTORY.json",
+      "sha256": "de29f2108bd81fe8cebca8fd11487e5399277dc2ab0f209d68e70eca51bd7650",
+      "bytes": 1038002
+    },
+    {
+      "path": "docs/audits/reference-consolidation-2026-10-23/PRESERVATION_CHECKS.json",
+      "sha256": "e73a73d529ee124b4a9bf3c033beee34af1d5df6245db279b2c1c4b3b8c72e6a",
+      "bytes": 2361
+    },
+    {
+      "path": "docs/audits/reference-consolidation-2026-10-23/REFERENCE.json",
+      "sha256": "d6e3c4783d6704983659dbc9530ee163d60d9b4ad910e00feb0a778622362d4d",
+      "bytes": 399527
+    },
+    {
+      "path": "docs/audits/reference-consolidation-2026-10-23/REMAINING_FAILURES.md",
+      "sha256": "4fb8683bbcff9c766f0ac4a2ccac96eea414804bd72154725ffc1d9c14fcf13f",
+      "bytes": 37316
+    },
+    {
+      "path": "docs/audits/reference-consolidation-2026-10-23/TEST_INVENTORY.json",
+      "sha256": "12c9f21206badb0d8ca9d9994fd796d43d3380b3235a1a6a6b2bfff4e2e49b6f",
+      "bytes": 6173189
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "sha256": "ff9e4221dc4a8320a4478e6ea648d3f0f1c85e91d94eded7ec55c1ac3d3c2be2",
+      "bytes": 180363
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "sha256": "e8f26e370776a9926bbca1ac3ef8ce4e56eecb9c38da0e3267abf097c2a640a4",
+      "bytes": 126561
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "sha256": "188edc12474bf3bfb2b3d9f7de46eee4ed1dc21238d7f878f13e306c369dae64",
+      "bytes": 389813
+    }
+  ]
+}

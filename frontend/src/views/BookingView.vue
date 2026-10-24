@@ -20,6 +20,8 @@
           </div>
         </div>
 
+        <LifecycleRefreshSummary v-if="refreshBookSummary" :summary="refreshBookSummary" />
+
         <LoadingSpinner v-if="dealsStore.loading && !dealsStore.deals.length" class="py-10" />
 
         <EmptyState v-else-if="!dealsStore.deals.length" icon="📒" title="Aucun deal booké pour l'instant"
@@ -35,7 +37,7 @@
                 🔔 Alertes non lues ({{ alerts.length }})
                 <HelpTip width="w-72" text="Alertes levées par le refresh quotidien (23h) ou par le bouton Rafraîchir le book : rappel/échéance/KI détecté sur un deal, ou franchissement d'une barrière surveillée (M_). Chaque fait n'alerte qu'une seule fois." />
               </h2>
-              <button class="ml-auto btn-secondary text-[10px] px-2 py-1" @click="markAllRead">✓ Tout marquer lu</button>
+              <button class="ml-auto btn-secondary text-[10px] px-2 py-1" :disabled="markingAll || markingAlerts.size > 0" @click="markAllRead">✓ Tout marquer lu</button>
             </div>
             <div class="flex flex-col gap-1.5">
               <div v-for="a in alerts" :key="a.id" class="flex items-start gap-2 text-xs">
@@ -44,11 +46,12 @@
                 </span>
                 <span class="text-slate-300 flex-1">{{ a.message }}</span>
                 <span class="text-slate-600 text-[10px] shrink-0">{{ a.created_at.slice(0, 10) }}</span>
-                <button class="text-slate-500 hover:text-emerald-400 shrink-0" title="Marquer lu" @click="markRead(a)">✓</button>
+                <button class="text-slate-500 hover:text-emerald-400 shrink-0" title="Marquer lu" :disabled="markingAll || markingAlerts.has(a.id)" @click="markRead(a)">✓</button>
               </div>
             </div>
           </div>
 
+          <AlertMessage v-if="alertError" kind="error" role="alert">{{ alertError }}</AlertMessage>
           <!-- ── Stats agrégées (sur la sélection filtrée) ───────── -->
           <div class="card kpi-tile">
             <div class="flex flex-wrap gap-x-6 gap-y-3 relative">
@@ -365,6 +368,8 @@
                     {{ dealPayoffFamily(d) }}
                   </span>
                   <span class="text-slate-300">{{ d.contrepartie }}</span>
+                  <span v-if="d.legal_identity_exception && !d.counterparty_id" class="text-[10px] text-amber-300"
+                    :title="d.legal_identity_exception.reason">Exception administrateur · juridique à qualifier · crédit non évalué</span>
                   <span class="text-[10px] border rounded px-1.5 py-0.5"
                     style="border-color: var(--border); background: var(--surface2); color: var(--accent);">
                     Fixings automatiques
@@ -858,7 +863,7 @@
                 <div class="font-semibold text-slate-500 mb-1">Historique</div>
                 <div v-for="h in shockHistory[d.id]" :key="h.id" class="flex gap-2">
                   <span>{{ new Date(h.created_at).toLocaleString('fr-FR') }}</span>
-                  <span class="text-slate-400">{{ h.label }}</span>
+                  <span class="text-slate-400">{{ h.label }} · {{ riskScopeLabel(h.data_scope) }}</span>
                   <span v-if="!h.result.skipped" class="font-mono" :class="h.result.delta_pts >= 0 ? 'text-emerald-500' : 'text-red-500'">
                     {{ (h.result.delta_pts * 100).toFixed(2) }}pts
                   </span>
@@ -894,7 +899,11 @@
 
             <!-- ── Fiche détail dépliable ─────────────────────── -->
             <div v-if="expanded[d.id]" class="pt-3 border-t border-slate-800 flex flex-col gap-4">
-              <div v-if="!details[d.id]" class="text-xs text-slate-600">Chargement du détail…</div>
+              <div v-if="detailErrors[d.id]" role="alert" class="text-xs text-red-600">
+                {{ detailErrors[d.id] }}
+                <button class="btn-secondary" @click="loadDetail(d.id)">Réessayer le détail</button>
+              </div>
+              <div v-else-if="!details[d.id]" class="text-xs text-slate-600">Chargement du détail…</div>
               <template v-else>
 
                 <!-- Barre de vie du produit -->
@@ -1069,7 +1078,7 @@
                             </td>
                           </tr>
                           <tr class="border-b border-slate-800/50">
-                            <td class="py-1 pr-3 pl-3 text-slate-500">Résidu (effets croisés)</td>
+                            <td class="py-1 pr-3 pl-3 text-slate-500">Résidu non attribué</td>
                             <td class="py-1 font-mono text-slate-500 text-right">
                               {{ explainResults[d.id].residual_pts >= 0 ? '+' : '' }}{{ explainResults[d.id].residual_pts.toFixed(2) }} pts
                             </td>
@@ -1078,11 +1087,11 @@
                             <td class="py-1 pr-3 text-slate-300 font-semibold">MtM au {{ explainResults[d.id].date2 }}</td>
                             <td class="py-1 font-mono text-slate-100 font-semibold text-right">{{ (explainResults[d.id].mtm2 * 100).toFixed(2) }}%</td>
                           </tr>
-                          <tr v-if="explainResults[d.id].flows_total_pts" class="border-b border-slate-800/50">
-                            <td class="py-1 pr-3 text-slate-400">Flux détachés sur la période</td>
-                            <td class="py-1 font-mono text-sky-400 text-right">+{{ explainResults[d.id].flows_total_pts.toFixed(2) }} pts</td>
+                          <tr class="border-b border-slate-800/50">
+                            <td class="py-1 pr-3 text-slate-400">{{ explainResults[d.id].cash_basis === 'CONTRACTUAL_PAYMENT_DATE' ? 'Cash contractuel à échéance' : 'Flux détachés — ancien calcul' }}</td>
+                            <td class="py-1 font-mono text-sky-400 text-right">{{ explainResults[d.id].flows_total_pts >= 0 ? '+' : '' }}{{ explainResults[d.id].flows_total_pts.toFixed(2) }} pts</td>
                           </tr>
-                          <tr v-if="explainResults[d.id].flows_total_pts">
+                          <tr>
                             <td class="py-1 pr-3 text-slate-300 font-semibold">P&L total de la période</td>
                             <td class="py-1 font-mono font-semibold text-right"
                               :class="explainResults[d.id].pnl_total_pts >= 0 ? 'text-emerald-400' : 'text-red-400'">
@@ -1096,7 +1105,7 @@
                           class="text-[11px] text-slate-400">• {{ p }}</li>
                       </ul>
                       <button class="btn-secondary text-[10px] px-2 py-1 mt-2"
-                        :disabled="explainNoteLoading[d.id]" @click="downloadExplainNote(d)"
+                        :disabled="explainNoteLoading[d.id] || !explainResults[d.id]?.archive_id" @click="downloadExplainNote(d)"
                         title="Génère la note PDF de l'explication de valo (waterfall, phrases, sensibilités Δ/Γ/véga en annexe) — mêmes chiffres que l'écran">
                         <span v-if="explainNoteLoading[d.id]"
                           class="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin inline-block mr-1"></span>
@@ -1134,7 +1143,8 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useDealsStore } from '../stores/deals.js'
 import { usePortfoliosStore, shockPresets, blankShockForm } from '../stores/portfolios.js'
 import { useAuthStore } from '../stores/auth.js'
-import { apiFetch } from '../utils/api.js'
+import { apiFetch, apiErrorMessage } from '../utils/api.js'
+import AlertMessage from '../components/ui/AlertMessage.vue'
 import { canonicalPayoffFamily } from '../utils/payoffFamilies.js'
 import HelpTip from '../components/HelpTip.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
@@ -1145,6 +1155,8 @@ import { useBookingMtm, localDay } from '../composables/useBookingMtm.js'
 import { useDataFilter } from '../composables/useDataFilter.js'
 import { formatInt, formatPercent, formatDate } from '../utils/format.js'
 import { barrierChipClass, barrierGapLabel, barrierGauges } from '../utils/barriers.js'
+import LifecycleRefreshSummary from '../components/LifecycleRefreshSummary.vue'
+import { riskScopeLabel } from '../utils/riskScope.js'
 import { productTypeLabel } from '../data/payscriptTemplates.js'
 import {
   compterConstatations, compterReleves, estReleve, libelleReduction, ordonnerEvenements,
@@ -1197,7 +1209,7 @@ async function toggleDealPortfolio(deal, portfolioId, checked) {
 }
 
 function canAssignPortfolio(deal) {
-  return authStore.isAdmin || deal.user_id === authStore.user?.id
+  return authStore.canAdministerOrganization || deal.user_id === authStore.user?.id
 }
 
 function portfoliosForDeal(deal) {
@@ -1235,6 +1247,8 @@ async function copyDealReference(reference) {
 // ── Fiche détail dépliable (accordéon multi-ouvert) ─────────────────
 const expanded = reactive({})
 const details = reactive({})   // deal_id → full deal (with events)
+const detailErrors = reactive({})
+const detailRevisions = {}
 const autoExceptionModal = reactive({ open: false, deal: null, event: null })
 
 const autoExceptionStatuses = new Set([
@@ -1300,10 +1314,16 @@ async function focusDealCard(id) {
 }
 
 async function loadDetail(id) {
+  const revision = detailRevisions[id] = (detailRevisions[id] || 0) + 1
+  delete detailErrors[id]
   try {
     const res = await apiFetch(`/api/deals/${id}`)
-    if (res.ok) details[id] = await res.json()
-  } catch { /* panel keeps showing "Chargement…" */ }
+    const data = await res.json()
+    if (!res.ok) throw new Error(apiErrorMessage(data, 'Détail du deal indisponible. Réessayez.'))
+    if (detailRevisions[id] === revision) details[id] = data
+  } catch (error) {
+    if (detailRevisions[id] === revision) detailErrors[id] = error.message || 'Détail du deal indisponible. Réessayez.'
+  }
 }
 
 // Position (%) of a date within the deal's life [value_date → maturity_date]
@@ -1531,13 +1551,17 @@ function strikeFor(id, name) {
 
 // ── Alertes cycle de vie / barrières ────────────────────────────────
 const alerts = ref([])
+const alertError=ref(''),markingAll=ref(false),markingAlerts=reactive(new Set())
+let alertsRevision=0
 const refreshingBook = ref(false)
 const refreshBookStatus = ref('')
+const refreshBookSummary = ref(null)
 
 async function loadAlerts() {
+  const revision=++alertsRevision
   try {
     const res = await apiFetch('/api/alerts?unread_only=true')
-    if (res.ok) alerts.value = (await res.json()).alerts
+    if (res.ok) {const data=await res.json();if(revision===alertsRevision) alerts.value=data.alerts}
   } catch { /* non bloquant — la page reste utilisable sans alertes */ }
 }
 
@@ -1555,27 +1579,42 @@ function alertChipClass(kind) {
 }
 
 async function markRead(a) {
-  await apiFetch(`/api/alerts/${a.id}/read`, { method: 'POST' })
-  alerts.value = alerts.value.filter(x => x.id !== a.id)
+  if(markingAll.value || markingAlerts.has(a.id)) return
+  markingAlerts.add(a.id);alertError.value=''
+  try {
+    const response=await apiFetch(`/api/alerts/${a.id}/read`, { method: 'POST' })
+    if(!response.ok) throw Error(apiErrorMessage(await response.json().catch(()=>({})),'Acquittement refusé.'))
+    alertsRevision++
+    alerts.value = alerts.value.filter(x => x.id !== a.id)
+  } catch(e) {alertError.value=e.message}
+  finally {markingAlerts.delete(a.id)}
 }
 
 async function markAllRead() {
-  await apiFetch('/api/alerts/read-all', { method: 'POST' })
-  alerts.value = []
+  if(markingAll.value || markingAlerts.size) return
+  const ids=new Set(alerts.value.map(a=>a.id))
+  markingAll.value=true;alertError.value=''
+  try {
+    const response=await apiFetch('/api/alerts/read-all', { method: 'POST' })
+    if(!response.ok) throw Error(apiErrorMessage(await response.json().catch(()=>({})),'Acquittement global refusé.'))
+    alertsRevision++
+    alerts.value=alerts.value.filter(a=>!ids.has(a.id))
+  } catch(e) {alertError.value=e.message}
+  finally {markingAll.value=false}
 }
 
 async function refreshBook() {
-  refreshingBook.value = true; refreshBookStatus.value = ''
+  if (refreshingBook.value || authStore.readOnly) return
+  refreshingBook.value = true; refreshBookStatus.value = ''; refreshBookSummary.value = null
   try {
     const res = await apiFetch('/api/alerts/refresh-book', { method: 'POST' })
     if (!res.ok) throw new Error((await res.json()).detail || 'Erreur refresh')
     const s = await res.json()
-    refreshBookStatus.value = `✓ ${s.refreshed}/${s.deals} deal(s) rafraîchi(s), `
-      + `${s.alerts_created} alerte(s)`
-      + (s.resolved.length ? `, ${s.resolved.length} résolu(s)` : '')
+    refreshBookSummary.value = s
     await dealsStore.loadDeals()
-    loadWatchlist()
-    loadAlerts()
+    const ids = dealsStore.deals.map(deal => deal.id)
+    ids.forEach(invalidateMtm)
+    await Promise.all([loadWatchlist(), loadAlerts(), ...ids.filter(id => expanded[id]).map(loadDetail)])
   } catch (e) {
     refreshBookStatus.value = `⚠ ${e.message}`
   } finally {
@@ -1586,7 +1625,7 @@ async function refreshBook() {
 // ── MtM résiduel ────────────────────────────────────────────────────
 const {
   todayIso, mtmLoading, mtmResults, mtmModeFor, mtmDateFor, setMtmMode, setMtmDate,
-  loadSavedMtms, loadSavedMtm, runMtm, mtmProgressLabel, syncDay,
+  loadSavedMtms, loadSavedMtm, runMtm, mtmProgressLabel, syncDay, invalidateMtm,
 } = useBookingMtm(() => authStore.readOnly ? authStore.user.consultation.date : localDay(), { archived: authStore.readOnly })
 let dayTimer
 function refreshDay() {
@@ -1727,7 +1766,7 @@ async function runDealShock(id) {
   }
 }
 
-// P&L explain between two dates — waterfall temps/spot/vol/corr (see
+// P&L explain between two dates — time/state, spot, dividend, vol and corr (see
 // EXPLICATION_VALO_DESIGN.md). Date 1 defaults to booking, date 2 to today.
 const explainD1 = reactive({})
 const explainD2 = reactive({})
@@ -1773,15 +1812,15 @@ async function runExplain(d) {
 const explainNoteLoading = reactive({})
 
 async function downloadExplainNote(d) {
+  const selected = explainResults[d.id]?.archive_id
+  if (!selected) return
   explainNoteLoading[d.id] = true
   try {
     const res = await apiFetch(`/api/deals/${d.id}/mtm/explain/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        date1: explainD1[d.id] || defaultExplainStart(d),
-        date2: explainD2[d.id] || todayIso.value,
-        recalibrate: mtmModeFor(d.id) === 'realized' ? 'realized' : 'none',
+        archive_id: selected,
       }),
     })
     if (!res.ok) {

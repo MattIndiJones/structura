@@ -24,6 +24,7 @@
               <th class="py-1.5 pr-3 font-medium">Rôle</th>
               <th class="py-1.5 pr-3 font-medium">Entité</th>
               <th class="py-1.5 pr-3 font-medium">Actif</th>
+              <th class="py-1.5 font-medium">Sécurité</th>
             </tr>
           </thead>
           <tbody>
@@ -36,10 +37,11 @@
               <td class="py-1.5 pr-3">
                 <select class="select py-1 px-2" :value="u.role"
                         @change="updateUser(u, { role: $event.target.value })">
-                  <option value="user">Utilisateur</option>
-                  <option value="ops_maker">Ops Maker</option>
-                  <option value="checker">Checker opérations</option>
-                  <option value="admin">Admin</option>
+                  <option value="user">Front</option>
+                  <option value="ops_maker">Opérations</option>
+                  <option value="checker">Contrôleur</option>
+                  <option value="organization_admin">Super utilisateur</option>
+                  <option v-if="auth.isAdmin" value="admin">Admin technique</option>
                 </select>
               </td>
               <td class="py-1.5 pr-3">
@@ -51,6 +53,11 @@
               <td class="py-1.5 pr-3">
                 <input type="checkbox" class="accent-blue-500" :checked="u.is_active"
                        @change="updateUser(u, { is_active: $event.target.checked })" />
+              </td>
+              <td class="py-1.5 flex flex-col gap-1">
+                <span v-if="u.password_change_required" class="text-amber-700">Mot de passe provisoire</span>
+                <button class="btn-ghost btn-sm" :disabled="securityBusy" @click="revokeUser(u)">Révoquer les sessions</button>
+                <button v-if="u.id !== auth.user?.id" class="btn-ghost btn-sm" :disabled="securityBusy" @click="resetTarget=u; temporaryPassword=''; error=''">Réinitialiser le mot de passe</button>
               </td>
             </tr>
           </tbody>
@@ -69,16 +76,17 @@
             <input v-model="form.email" type="email" class="input" />
           </div>
           <div class="flex flex-col gap-1">
-            <label class="label">Mot de passe</label>
-            <input v-model="form.password" type="password" class="input" />
+            <label class="label">Mot de passe provisoire · 12 caractères minimum</label>
+            <input v-model="form.password" type="password" class="input" autocomplete="new-password" minlength="12" />
           </div>
           <div class="flex flex-col gap-1">
             <label class="label">Rôle</label>
             <select v-model="form.role" class="select">
-              <option value="user">Utilisateur</option>
-              <option value="ops_maker">Ops Maker</option>
-              <option value="checker">Checker opérations</option>
-              <option value="admin">Admin</option>
+              <option value="user">Front</option>
+              <option value="ops_maker">Opérations</option>
+              <option value="checker">Contrôleur</option>
+              <option value="organization_admin">Super utilisateur</option>
+              <option v-if="auth.isAdmin" value="admin">Admin technique</option>
             </select>
           </div>
           <div class="flex flex-col gap-1">
@@ -138,6 +146,14 @@
           </div>
         </div>
       </div>
+      <BaseModal :model-value="!!resetTarget" title="Réinitialiser le mot de passe" @update:model-value="resetTarget=null; temporaryPassword=''">
+        <form class="flex flex-col gap-3" @submit.prevent="resetUser">
+          <p class="text-sm">{{ resetTarget?.username }} devra choisir un mot de passe personnel. Toutes ses sessions seront fermées.</p>
+          <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
+          <label class="label">Mot de passe provisoire<input v-model="temporaryPassword" class="input" type="password" autocomplete="new-password" minlength="12" required /></label>
+          <button class="btn-primary" :disabled="securityBusy">Réinitialiser</button>
+        </form>
+      </BaseModal>
     </main>
   </div>
 </template>
@@ -148,6 +164,25 @@ import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
+import { useAuthStore } from '../stores/auth.js'
+import BaseModal from '../components/ui/BaseModal.vue'
+import { confirmer } from '../composables/useConfirm.js'
+const auth = useAuthStore()
+const resetTarget = ref(null), temporaryPassword = ref(''), securityBusy = ref(false)
+async function securityAction(user, action, body) {
+  securityBusy.value = true; error.value = ''; notice.value = ''
+  try {
+    const res = await apiFetch(`/api/admin/users/${user.id}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...(body ? {body: JSON.stringify(body)} : {}) })
+    if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(typeof data.detail === 'string' ? data.detail : 'Mot de passe requis : 12 caractères minimum, 72 octets UTF-8 maximum.') }
+    if (action === 'reset-password') { user.password_change_required = true; resetTarget.value = null; temporaryPassword.value = '' }
+    notice.value = 'Sessions révoquées' + (action === 'reset-password' ? ' ; mot de passe provisoire enregistré.' : '.')
+    if (user.id === auth.user?.id) { await auth.logout(); window.location.hash = '#/login'; window.location.reload() }
+  } catch (e) { error.value = e.message } finally { securityBusy.value = false }
+}
+async function revokeUser(user) {
+  if (await confirmer({ titre: 'Révoquer les sessions ?', message: `${user.username} devra se reconnecter.`, confirmer: 'Révoquer', danger: true })) await securityAction(user, 'revoke-sessions')
+}
+async function resetUser() { if (resetTarget.value) await securityAction(resetTarget.value, 'reset-password', { password: temporaryPassword.value }) }
 
 const users    = ref([])
 const entities = ref([])

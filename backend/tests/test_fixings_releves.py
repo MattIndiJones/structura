@@ -12,9 +12,13 @@ fixings officiels pour un seul cours de bourse, et donc deux vérités possibles
 from datetime import date, timedelta
 
 import pytest
+from sqlalchemy import event, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from backend.app.db.models import Deal, DealEvent
+from backend.app.db.models import Counterparty, Deal, DealEvent, Entity, ProductRecord, User
+from backend.app.db.product_migrations import migrate_product_links
+from backend.app.services.product_repository import load_product
+from backend.tests.test_business_permissions import access_case
 
 
 SCRIPT_MOYENNE = """PARAM COUPON = 8%
@@ -178,7 +182,65 @@ AT MATURITE:
 """
 
 
-def test_la_fenetre_de_depart_a_ses_releves_bookes_sous_le_strike():
+def _start_window_body():
+    """Signed fixture evidence for a ten-observation initial averaging window."""
+    from backend.app.api import deals as deals_api
+    from backend.app.api.auth import receipt_signing_secret
+    from backend.app.core.schemas import PricingRequest
+    from backend.app.core.valuation_context import build_pricing_receipt
+    from backend.app.services.product_receipts import signed_receipt
+
+    strike = date.today()
+    maturity = strike + timedelta(days=364)
+    while maturity.weekday() >= 5:
+        maturity -= timedelta(days=1)
+    constats = {
+        "STRIKE_FIX": {"date": strike.isoformat(), "window_length": "10D", "window_frequency": "1D"},
+        "MATURITE": maturity.isoformat(),
+    }
+    tenor = round((maturity - strike).days / 365.25, 4)
+    request = PricingRequest(
+        script=SCRIPT_DEPART,
+        underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}],
+        corr_matrix=[[1.0]], T=tenor, N=2000,
+        user_params={"STRIKE": 1.0}, constats=constats,
+        strike_date=strike, value_date=strike + timedelta(days=4),
+        maturity_date=maturity, payment_date=maturity + timedelta(days=5), settlement_ccy="EUR")
+    receipt = signed_receipt(
+        build_pricing_receipt(request, 0.979), secret=receipt_signing_secret(), result={"price": 0.979})
+    return deals_api.DealCreate(
+        contrepartie="BNP Paribas", counterparty_id=1, nominal=1_000_000.0, fair_value=97.9,
+        price_traded=98.0, trade_date=strike.isoformat(), strike_date=strike.isoformat(),
+        value_date=(strike + timedelta(days=4)).isoformat(), maturity_date=maturity.isoformat(),
+        payment_date=(maturity + timedelta(days=5)).isoformat(), T=tenor,
+        underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "s0_abs": 100.0}],
+        observation_times=[], script_snapshot=SCRIPT_DEPART,
+        market_snapshot={"constats": constats}, pricing_receipt=receipt)
+
+
+@pytest.fixture
+def start_window_case():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    @event.listens_for(engine, "connect")
+    def foreign_keys(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
+    SQLModel.metadata.create_all(engine)
+    try:
+        with Session(engine) as session:
+            migrate_product_links(session.connection())
+            session.add(Entity(id=1, name="Start window test organization"))
+            session.flush()
+            actor = User(id=1, username="window-front", email="window@example.test",
+                         password_hash="test-only", role="user", entity_id=1)
+            session.add(actor)
+            session.add(Counterparty(id=1, name="BNP Paribas", active=True))
+            session.commit()
+            yield session, actor
+    finally:
+        engine.dispose()
+
+
+def test_la_fenetre_de_depart_a_ses_releves_bookes_sous_le_strike(start_window_case):
     """S0 d'un `STRIKE_FIX AVG 10D` se calcule sur dix cours. Le booking ne
     créait que l'événement du strike : les autres relevés n'avaient ni ligne,
     ni fixing, et le rejeu officiel reportait le cours du strike sur toute la
@@ -187,63 +249,49 @@ def test_la_fenetre_de_depart_a_ses_releves_bookes_sous_le_strike():
     Le fixing du jour de strike reste UNE ligne quand ce jour est un relevé :
     il en est le premier, pas un de plus."""
     import json
-    from types import SimpleNamespace
     from backend.app.api import deals as deals_api
-    from backend.app.api.auth import receipt_signing_secret
-    from backend.app.core.schemas import PricingRequest
-    from backend.app.core.valuation_context import build_pricing_receipt
-    from backend.app.services.product_receipts import signed_receipt
 
-    strike = date.today()
-    maturite = strike + timedelta(days=364)
-    while maturite.weekday() >= 5:
-        maturite -= timedelta(days=1)
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as s:
-        constats = {
-            "STRIKE_FIX": {"date": strike.isoformat(), "window_length": "10D",
-                           "window_frequency": "1D"},
-            "MATURITE": maturite.isoformat(),
-        }
-        tenor = round((maturite - strike).days / 365.25, 4)
-        request = PricingRequest(
-            script=SCRIPT_DEPART,
-            underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR"}],
-            corr_matrix=[[1.0]], T=tenor, N=2000,
-            user_params={"STRIKE": 1.0}, constats=constats,
-            strike_date=strike,
-            value_date=strike + timedelta(days=4),
-            maturity_date=maturite,
-            payment_date=maturite + timedelta(days=5),
-            settlement_ccy="EUR",
-        )
-        receipt = signed_receipt(
-            build_pricing_receipt(request, 0.979),
-            secret=receipt_signing_secret(), result={"price": 0.979})
-        deal = deals_api.book_deal(deals_api.DealCreate(
-            contrepartie="BNP Paribas", nominal=1_000_000.0, fair_value=97.9,
-            price_traded=98.0, trade_date=strike.isoformat(),
-            strike_date=strike.isoformat(),
-            value_date=(strike + timedelta(days=4)).isoformat(),
-            maturity_date=maturite.isoformat(),
-            payment_date=(maturite + timedelta(days=5)).isoformat(),
-            T=tenor,
-            underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "s0_abs": 100.0}],
-            observation_times=[], script_snapshot=SCRIPT_DEPART,
-            market_snapshot={"constats": constats},
-            pricing_receipt=receipt,
-        ), SimpleNamespace(id=1, entity_id=1), s)
+    session, actor = start_window_case
+    body = _start_window_body()
+    deal = deals_api.book_deal(body, actor, session)
+    record = session.get(Deal, deal["id"])
+    depart = json.loads(record.schedule_json)["depart"]
+    expected = [r["date"] for r in depart["releves"]]
+    assert depart["reduction"] == "AVG" and len(expected) == 10
 
-        depart = json.loads(s.get(Deal, deal["id"]).schedule_json)["depart"]
-        attendues = [r["date"] for r in depart["releves"]]
-        assert depart["reduction"] == "AVG" and len(attendues) == 10
+    (strike_event,) = [e for e in deal["events"] if e["t_years"] == 0.0]
+    assert strike_event["reduction"] == "AVG"
+    readings = [e for e in deal["events"] if e["parent_event_id"] == strike_event["id"]]
+    dates = sorted([strike_event["event_date"]] + [e["event_date"] for e in readings])
+    assert dates == sorted(set(expected) | {body.strike_date})
+    assert len(dates) == len(set(dates))
+    assert all(e["reduction"] is None for e in readings)
+    assert all(e["fixing_status"] == "EXPECTED" for e in readings)
+    assert deal["counterparty_id"] == 1
+    assert record.product_id is not None and record.product_terms_version == 1
+    product = load_product(session, record.product_id)
+    assert product.execution.to_dict()["deal_id"] == record.id
+    assert session.exec(text("PRAGMA foreign_key_check")).all() == []
 
-        (strike_ev,) = [e for e in deal["events"] if e["t_years"] == 0.0]
-        assert strike_ev["reduction"] == "AVG"
-        releves = [e for e in deal["events"] if e["parent_event_id"] == strike_ev["id"]]
-        lignes = sorted([strike_ev["event_date"]] + [e["event_date"] for e in releves])
-        # Chaque date de la fenêtre a exactement une ligne, le strike compris.
-        assert lignes == sorted(set(attendues) | {strike.isoformat()})
-        assert len(lignes) == len(set(lignes))
-        assert all(e["reduction"] is None for e in releves)
+
+def test_start_window_booking_checks_http_permissions_and_contract_scope(access_case):
+    session, _, login, managed = access_case
+    payload = _start_window_body().model_dump(mode="json")
+    client = login("front")
+    client.headers.pop("Authorization")
+    assert client.post("/api/deals", json=payload).status_code == 401
+    denied = login("checker").post("/api/deals", json=payload)
+    assert denied.status_code == 403, denied.text
+    assert session.exec(select(Deal)).all() == []
+    assert session.exec(select(ProductRecord)).all() == []
+    booked = login("ops").post("/api/deals", json=payload)
+    assert booked.status_code == 201, booked.text
+    result = booked.json()
+    visible = login("checker").get(f"/api/deals/{result['id']}")
+    assert visible.status_code == 200, visible.text
+    parent = next(e for e in visible.json()["events"] if e["t_years"] == 0)
+    readings = [e for e in visible.json()["events"] if e["parent_event_id"] == parent["id"]]
+    assert len(readings) == 9
+    assert all(e["reduction"] is None for e in readings)
+    foreign = login("foreign").get(f"/api/deals/{result['id']}")
+    assert foreign.status_code == (401 if managed else 404), foreign.text

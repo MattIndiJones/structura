@@ -1,0 +1,2535 @@
+{
+  "workstream": "C16",
+  "validated_on": "2026-10-21",
+  "scope": [
+    "M06-03"
+  ],
+  "global_closure": false,
+  "production_qualified": false,
+  "decision": {
+    "date": "2026-10-21",
+    "confirmed_by": "Philippe",
+    "answer": "Autoriser une approximation explicitement signalée, après validation de sa méthode et de sa tolérance",
+    "tolerance_answer": "10 points de base du nominal sur le panel de qualification",
+    "tolerance_nominal": 0.001,
+    "report": "../REMEDIATION_C16_2026-10-21.md",
+    "evidence": "C16_VALIDATION.json",
+    "local_implementation_domain": "Deux actifs GBM, taux déterministes, |rho| <= 0.99 ; copies GBM équivalentes corrélées à +1.",
+    "production_approved": false,
+    "other_models_or_usages_approved": false
+  },
+  "backend": {
+    "unique_passed": 319,
+    "files": 14,
+    "new_c16_cases": 43,
+    "batches": [
+      {
+        "junit": "targeted.xml",
+        "tests": "252",
+        "failures": "4",
+        "errors": "0",
+        "skipped": "0",
+        "time": "37.709"
+      },
+      {
+        "junit": "integration.xml",
+        "tests": "85",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "9.658"
+      },
+      {
+        "junit": "consumers.xml",
+        "tests": "65",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "8.031"
+      }
+    ],
+    "successful_cases": [
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_identical_bridges_share_extrema_and_conditional_crossings",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_complete_payoff_is_unchanged_when_the_same_conditional_path_is_duplicated[AT MATURITY:\\n  PAY INDIC(WOF_MIN < 0.98)]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_complete_payoff_is_unchanged_when_the_same_conditional_path_is_duplicated[AT MATURITY:\\n  PAY INDIC(BOF_MAX > 1.02)]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_complete_payoff_is_unchanged_when_the_same_conditional_path_is_duplicated[AT 0.5:\\n  IF WOF_MIN < 0.98:\\n    PAY 0.7\\n    STOP\\nAT MATURITY:\\n  PAY WOF]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_zero_volatility_never_creates_a_barrier_crossing",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_basket_result_explicitly_labels_the_joint_approximation",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_each_refined_marginal_keeps_the_exact_conditional_law[-1.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_each_refined_marginal_keeps_the_exact_conditional_law[-0.9]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_each_refined_marginal_keeps_the_exact_conditional_law[0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_each_refined_marginal_keeps_the_exact_conditional_law[0.5]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_each_refined_marginal_keeps_the_exact_conditional_law[0.9]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_each_refined_marginal_keeps_the_exact_conditional_law[1.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_independent_assets_match_the_union_of_two_analytic_crossings",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_perfect_asset_factors_remain_identical_with_c15_rates[0.0-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_perfect_asset_factors_remain_identical_with_c15_rates[0.02-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_perfect_asset_factors_remain_identical_with_c15_rates[0.02-0.8]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_refinement_policy_is_explicit[0.0-64]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_refinement_policy_is_explicit[0.5-64]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_refinement_policy_is_explicit[0.7-256]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_refinement_policy_is_explicit[0.9-256]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_refinement_policy_is_explicit[0.99-1024]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_unqualified_basket_domains_are_refused_without_changing_monitoring[constant-0.9999-2-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_unqualified_basket_domains_are_refused_without_changing_monitoring[constant-0.5-3-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_unqualified_basket_domains_are_refused_without_changing_monitoring[heston-0.5-2-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_unqualified_basket_domains_are_refused_without_changing_monitoring[sabr-0.5-2-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_unqualified_basket_domains_are_refused_without_changing_monitoring[localvol-0.5-2-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_unqualified_basket_domains_are_refused_without_changing_monitoring[lsv-0.5-2-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_unqualified_basket_domains_are_refused_without_changing_monitoring[constant-0.5-2-0.02]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_neighbor_analyses_apply_the_same_admission_rule[run_mc_paths]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_neighbor_analyses_apply_the_same_admission_rule[run_mc_proba]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_neighbor_analyses_expose_the_same_approximation_policy[run_mc_paths]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_neighbor_analyses_expose_the_same_approximation_policy[run_mc_proba]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_resource_estimate_accounts_for_correlation_dependent_refinement",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_correlation_greeks_keep_one_refinement_across_the_bump",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_invalid_or_missing_joint_correlations_fail_closed[None]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_invalid_or_missing_joint_correlations_fail_closed[correlation1]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_invalid_or_missing_joint_correlations_fail_closed[correlation2]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_invalid_or_missing_joint_correlations_fail_closed[correlation3]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[constant-False]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[constant-True]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[heston-False]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[heston-True]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[localvol-False]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[localvol-True]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[lsv-False]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[lsv-True]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[sabr-False]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[sabr-True]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_produit_a_barriere",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_produit_a_barriere_heston",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_autocall",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[curve-0.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[curve-0.3]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[flat-0.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[flat-0.3]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_etat_residuel_complet",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_fenetre_strike_fix",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_barriere_continue",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_barriere_continue_heston",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_greeks_pretrade_inchanges",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.0-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[1e-08-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_vanishing_rate_volatility_has_one_funding_discount[0.3-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_payment_rebase_and_parallel_shocks_do_not_double_count_funding[funding0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_payment_rebase_and_parallel_shocks_do_not_double_count_funding[funding1]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-False-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding0-True-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-False-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding1-True-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-False-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_changes_present_value_without_changing_raw_asset_payoffs[funding2-True-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_funding_leaves_stochastic_rates_and_risk_free_factors_identical",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-1.0-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[-0.8-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.0-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[0.8-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_mono_uses_the_joint_factor_in_every_simulator[1.0-lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_joint_basket_covariance_is_preserved",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_incompatible_joint_correlations_are_refused",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_prepaid_forward_martingale_on_independent_replications",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0-0.0027378507871321013]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0-1.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0-30.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0001-0.0027378507871321013]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0001-1.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.0001-30.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-06-0.0027378507871321013]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-06-1.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-06-30.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-08-0.0027378507871321013]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-08-1.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[1e-08-30.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.3-0.0027378507871321013]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.3-1.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_discrete_convexity_matches_independent_gaussian_covariance[0.3-30.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_paths_and_factors_are_continuous_at_zero_reversion[0.0027378507871321013]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_paths_and_factors_are_continuous_at_zero_reversion[1.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_paths_and_factors_are_continuous_at_zero_reversion[30.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_zero_coupon_price_is_finite_and_continuous_near_zero[0.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_zero_coupon_price_is_finite_and_continuous_near_zero[0.0001]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_zero_coupon_price_is_finite_and_continuous_near_zero[1e-06]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_zero_coupon_price_is_finite_and_continuous_near_zero[1e-08]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_short_and_long_zero_coupon_prices_have_a_continuous_zero_limit[0.0027378507871321013]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_short_and_long_zero_coupon_prices_have_a_continuous_zero_limit[30.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_invalid_rate_parameters_fail_closed[sigma_r-nan]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_invalid_rate_parameters_fail_closed[sigma_r--0.01]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_invalid_rate_parameters_fail_closed[a_r-nan]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_invalid_rate_parameters_fail_closed[a_r--0.01]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_stochastic_rate_integrity",
+        "name": "test_nonfinite_or_underflowed_factors_are_refused",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[price]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[probabilities]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[paths]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[profile]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_same_date_retains_explicit_source_order",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_frozen_calendar_january_31_then_february_1_matches_historical_replay",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_dated_blocks_precede_maturity_even_if_declared_after_it",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_occurrences_keep_their_rank_window_and_payment_without_mutating_terms",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_flow_times_are_contractual_and_stop_prevents_later_cashflows",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_calendar_rounding_is_admitted_without_executing_a_future_date",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.0027378507871321013]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.0054757015742642025]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.037]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.37]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_realvol_annualization_matches_dated_and_maturity_blocks[0.0027378507871321013]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_realvol_annualization_matches_dated_and_maturity_blocks[0.037]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_realvol_annualization_matches_dated_and_maturity_blocks[0.37]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_one_day_mtm_uses_contractual_horizon_and_converges",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_one_day_horizon_reaches_var_worker_and_offline_run",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_unbooked_inlife_pricing_keeps_the_same_one_day_horizon",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_parser_rejects_non_positive_date_range_steps_without_looping",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_parser_rejects_descending_and_non_progressing_date_ranges",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_parser_caps_expanded_dates_and_source_size",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_resolved_script_caps_dates_across_multiple_events",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_pricing_estimate_includes_greek_reprices_without_stacking_memory",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_pricing_estimate_includes_expanded_event_cost",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_budget_rejects_memory_and_work_independently",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_batch_estimate_accounts_for_parallel_worker_memory",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_request_schema_caps_maturity_assets_and_script_size",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_request_schema_rejects_non_finite_or_invalid_market_inputs",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_engine_rejects_oversized_run_before_random_allocation",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_analytic_engines_do_not_fall_back_to_gbm_for_unknown_model[run_mc_paths]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_resource_limits",
+        "name": "test_analytic_engines_do_not_fall_back_to_gbm_for_unknown_model[run_mc_proba]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_portfolio_barriers",
+        "name": "test_portfolio_barriers_ranks_by_urgency_and_counts_severity",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_portfolio_barriers",
+        "name": "test_barriers_global_spans_portfolios",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_portfolio_barriers",
+        "name": "test_barriers_deal_with_no_monitored_params_is_excluded",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_portfolio_barriers",
+        "name": "test_barriers_bucket_unexpected_failure_without_aborting_book",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_portfolio_barriers",
+        "name": "test_barriers_are_listed_before_the_strike_has_happened",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_var_request_refuse_un_nombre_de_paths_inferieur_au_plancher_moteur",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_historical_scenarios_carry_real_dates_and_moves",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_historical_scenarios_worst_day_matches_biggest_realized_drop",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_historical_scenarios_single_ticker_has_no_corr_shock",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_historical_lookback_does_not_shrink_with_return_horizon",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_calibrate_comovement_signs_match_crisis_dynamics",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_parametric_scenarios_shape_and_reproducibility",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_parametric_worst_draws_have_positive_vol_shock",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_apply_scenario_neutral_shock_for_untouched_ticker",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_aggregate_var_matches_hand_computed_percentile",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_aggregate_var_queue_fractionnaire",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_aggregate_var_empty_input",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_un_job_echoue_interdit_la_var_globale_et_produit_la_var_hors_deal",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_tous_les_jobs_en_echec_ne_publient_ni_zero_ni_var_reduite",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_un_deal_ecarte_au_preflight_reste_visible_et_declenche_le_scope_reduit",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_univers_complet_publie_la_var_globale_sans_scope_reduit",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_api_var_marque_le_global_incomplet_en_echec_et_publie_le_scope_reduit",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_build_deal_scenario_base_is_json_serializable_and_matches_mtm",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_build_deal_scenario_base_skips_matured_deal",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_var_scenario_pricer_reacts_to_spot_shock",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_vaut_exp_moins_qt_sous_courbe_plate",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_vaut_exp_moins_qt_sous_courbe_pentue",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_sigma_nulle_sur_maturite_non_ronde_est_exact",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_theta_zero_coupon_est_le_portage_quotidien_du_df",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_sous_modeles_a_vol_locale[localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_sous_modeles_a_vol_locale[lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_courbe_plate_au_niveau_r_equivaut_au_taux_plat",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_parite_call_put_sous_courbe",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_rho_du_zero_coupon_vaut_moins_t_fois_le_df",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_le_taux_stochastique_reprice_sa_propre_courbe[0.0]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_le_taux_stochastique_reprice_sa_propre_courbe[0.3]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_rho_non_nul_sous_courbe_et_taux_stochastiques",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_les_forwards_reconstituent_exactement_les_facteurs_d_actualisation",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_dr_decale_la_courbe_entiere_en_parallele",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_absence_de_courbe_se_reconnait_a_step_fwd_none",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_la_grille_de_vol_locale_suit_la_courbe",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_les_probabilites_utilisent_la_courbe_pour_la_derive",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_continuous_barrier_matches_first_passage_analytic",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_continuous_barrier_monitoring_runs_on_every_model[constant]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_continuous_barrier_monitoring_runs_on_every_model[heston]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_continuous_barrier_monitoring_runs_on_every_model[sabr]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_continuous_barrier_monitoring_runs_on_every_model[localvol]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_continuous_barrier_monitoring_runs_on_every_model[lsv]",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_engine",
+        "name": "test_barrier_monitoring_invalid_value_raises",
+        "junit": "targeted.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_price_api_preserves_the_numeric_policy_and_warning",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_bridge_dependence",
+        "name": "test_archived_run_identity_includes_the_bridge_source",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[PAR-Europe/Paris-2026-10-21-2026-10-21T15:30:00+00:00]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[NYQ-America/New_York-2026-11-27-2026-11-27T18:00:00+00:00]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[NYQ-America/New_York-2026-03-09-2026-03-09T20:00:00+00:00]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[NYQ-America/New_York-2026-03-02-2026-03-02T21:00:00+00:00]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[JPX-Asia/Tokyo-2026-10-21-2026-10-21T06:30:00+00:00]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-12-25-metadata0-NON_SESSION]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-24-metadata1-NON_SESSION]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-21-metadata2-VENUE_UNKNOWN]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-21-metadata3-TIMEZONE_MISMATCH]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-21-metadata4-PUBLICATION_UNVERIFIED]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_intraday_cannot_create_official_version_or_coupon",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_three_calendar_day_carry_boundary[2026-01-08-True]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_three_calendar_day_carry_boundary[2026-01-09-False]",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_official_automatic_fixing_survives_missing_provider_row",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_total_outage_keeps_official_prefix_and_diagnoses_source",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_exception_decision_rolls_back_and_same_request_can_retry",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_mtm_uses_official_90_for_coupon_not_provider_40",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_pending_version_is_not_a_provider_fallback",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_unversioned_candidate_is_never_a_legacy_strike_reference",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_correction_invalidates_current_but_preserves_frozen_run",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_failure_during_application_rolls_back_fixing_and_product",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_reference_feed_uses_atomic_local_copy_before_network",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_preuve_pricing_fige_funding_seed_globale_monitoring_et_unites",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_preuve_modifiee_est_refusee",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_ancien_deal_sans_funding_devient_explicitement_zero",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_courbe_funding_prolonge_son_dernier_niveau_apres_son_dernier_pilier",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_run_valuation_transmet_tout_le_contexte",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_un_scenario_ne_peut_pas_remplacer_le_calendrier_du_contexte",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_scenario_smile_changes_only_the_named_underlying",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_booking_utilise_le_snapshot_serveur_identifie",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_booking_refuse_un_script_different_du_pricing",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_valuation_context",
+        "name": "test_booking_refuse_une_maturite_numerique_differente_du_pricing",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_barriere_deja_franchie_rend_le_produit_lineaire",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_le_rang_d_observation_choisit_la_bonne_ligne_de_barriere",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_le_niveau_de_reference_de_la_vol_realisee_suit_le_bump",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_le_bump_est_relatif_au_spot_du_jour",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_le_coupon_de_la_semaine_est_isole_du_theta",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_pas_d_evenement_dans_la_semaine_pas_de_decomposition",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_le_compteur_avance_quand_une_observation_est_enjambee",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_theta_absent_plutot_que_faux_sur_un_etat_non_roulable",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_vieillissement_preserve_tous_les_champs_du_script_compile",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_theta_refuse_de_franchir_un_releve_de_fenetre",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_les_unites_des_notes_pdf_sont_preservees",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_le_vega_des_notes_existe_desormais_hors_gbm",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_greeks_stateful",
+        "name": "test_vega_heston_respecte_la_martingale_du_payoff_lineaire",
+        "junit": "integration.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_portfolio_barriers",
+        "name": "test_portfolio_barriers_without_a_business_role_remains_denied",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[0-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[0.0-0.0]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[3.0-0.03]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[2.5-0.025]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_honours_the_booked_value[-0.5--0.005]",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_falls_back_only_when_the_key_is_absent",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_is_default_distinguishes_a_substitution",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_snapshot_rate_refuses_an_unreadable_value",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_no_call_site_reintroduces_the_or_fallback",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_zero_rate_deal_is_not_discounted",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_mtm_preserves_the_booked_continuous_monitoring_policy",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_three_percent_deal_still_discounts",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_zero_and_three_percent_no_longer_price_identically",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_legacy_snapshot_without_rate_is_flagged",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_market_snapshot_rate",
+        "name": "test_marche_actuel_rafraichit_le_niveau_de_dividende_et_garde_le_decay",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_inlife_pricing",
+        "name": "test_inlife_preserves_continuous_monitoring_policy_and_warning",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_inlife_pricing",
+        "name": "test_le_funding_fait_BAISSER_le_prix",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_inlife_pricing",
+        "name": "test_funding_et_taux_agissent_en_sens_OPPOSES",
+        "junit": "consumers.xml",
+        "failed": false
+      },
+      {
+        "class": "backend.tests.test_inlife_pricing",
+        "name": "test_le_funding_ne_touche_pas_le_drift",
+        "junit": "consumers.xml",
+        "failed": false
+      }
+    ],
+    "resolved_fixture_failures": [
+      [
+        "backend.tests.test_portfolio_barriers",
+        "test_portfolio_barriers_ranks_by_urgency_and_counts_severity"
+      ],
+      [
+        "backend.tests.test_portfolio_barriers",
+        "test_barriers_global_spans_portfolios"
+      ],
+      [
+        "backend.tests.test_portfolio_barriers",
+        "test_barriers_deal_with_no_monitored_params_is_excluded"
+      ],
+      [
+        "backend.tests.test_portfolio_barriers",
+        "test_barriers_bucket_unexpected_failure_without_aborting_book"
+      ]
+    ],
+    "full_suite_executed": false
+  },
+  "frontend": {
+    "passed": 7,
+    "file": "src/utils/barriers.test.js",
+    "log": "frontend-barriers.log",
+    "source_changed": false,
+    "build_required": false
+  },
+  "before_after": {
+    "rows": [
+      {
+        "version": "before",
+        "union_crossing_probability": 0.1603240966796875,
+        "same_minima": false,
+        "same_maxima": false
+      },
+      {
+        "version": "after",
+        "union_crossing_probability": 0.0840301513671875,
+        "same_minima": true,
+        "same_maxima": true
+      }
+    ],
+    "conditional_reference": 0.08293880563179623,
+    "paths": 65536,
+    "seed": 17
+  },
+  "red_acceptance": {
+    "junit": "before.xml",
+    "failed": 6,
+    "notes": "Three full-payoff regressions plus correlation/provenance and zero-volatility acceptances."
+  },
+  "conditional_qualification": {
+    "paths": 32768,
+    "seed": 101,
+    "panel": "two_asset_gbm_one_sided_unit_digitals",
+    "tolerance_nominal": 0.001,
+    "criterion": "Frechet residual width plus 3 sampling standard errors <= tolerance",
+    "rows": [
+      {
+        "rho": -0.99,
+        "substeps": 1024,
+        "barrier": 0.8,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.1716494474483449,
+        "upper": 0.1716494474483449,
+        "estimate": 0.1716494474483449,
+        "standard_error": 0.002057924705905193,
+        "width": 0.0,
+        "width_standard_error": 0.0,
+        "width_plus_3se": 0.0
+      },
+      {
+        "rho": 0.0,
+        "substeps": 64,
+        "barrier": 0.8,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.1584734308748981,
+        "upper": 0.158488695244734,
+        "estimate": 0.1584845357810663,
+        "standard_error": 0.0019200467830448183,
+        "width": 1.5264369835915468e-05,
+        "width_standard_error": 5.402546972961523e-06,
+        "width_plus_3se": 3.147201075480004e-05
+      },
+      {
+        "rho": 0.5,
+        "substeps": 64,
+        "barrier": 0.8,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.14439321540632957,
+        "upper": 0.14453680262441132,
+        "estimate": 0.1444960007006819,
+        "standard_error": 0.0018544382078083837,
+        "width": 0.0001435872180817455,
+        "width_standard_error": 2.0752942766144042e-05,
+        "width_plus_3se": 0.00020584604638017765
+      },
+      {
+        "rho": 0.7,
+        "substeps": 256,
+        "barrier": 0.8,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.1312784697804749,
+        "upper": 0.1313497292156084,
+        "estimate": 0.1313296084641039,
+        "standard_error": 0.0018244647707170284,
+        "width": 7.125943513351622e-05,
+        "width_standard_error": 1.576313012520467e-05,
+        "width_plus_3se": 0.00011854882550913021
+      },
+      {
+        "rho": 0.9,
+        "substeps": 256,
+        "barrier": 0.8,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.11097163335913005,
+        "upper": 0.1111303300790204,
+        "estimate": 0.11108530521596953,
+        "standard_error": 0.0016985351003923615,
+        "width": 0.00015869671989035292,
+        "width_standard_error": 2.340460760491613e-05,
+        "width_plus_3se": 0.00022891054270510132
+      },
+      {
+        "rho": 0.95,
+        "substeps": 1024,
+        "barrier": 0.8,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.10558498670790019,
+        "upper": 0.10564048411941024,
+        "estimate": 0.1056244800129931,
+        "standard_error": 0.001680408187888236,
+        "width": 5.549741151005177e-05,
+        "width_standard_error": 1.806931093006425e-05,
+        "width_plus_3se": 0.00010970534430024452
+      },
+      {
+        "rho": 0.99,
+        "substeps": 1024,
+        "barrier": 0.8,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.09447353916759998,
+        "upper": 0.09463409528685052,
+        "estimate": 0.09459383837380567,
+        "standard_error": 0.0016001420846993167,
+        "width": 0.00016055611925052543,
+        "width_standard_error": 2.5997083605974766e-05,
+        "width_plus_3se": 0.0002385473700684497
+      },
+      {
+        "rho": -0.99,
+        "substeps": 1024,
+        "barrier": 0.9,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.9433593692220255,
+        "upper": 0.9433593692220255,
+        "estimate": 0.9433593692220255,
+        "standard_error": 0.0012298188781190323,
+        "width": 0.0,
+        "width_standard_error": 0.0,
+        "width_plus_3se": 0.0
+      },
+      {
+        "rho": 0.0,
+        "substeps": 64,
+        "barrier": 0.9,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.8196577759553457,
+        "upper": 0.8197540554750963,
+        "estimate": 0.8197332602447863,
+        "standard_error": 0.0019934064246433132,
+        "width": 9.62795197504912e-05,
+        "width_standard_error": 1.1238283360557223e-05,
+        "width_plus_3se": 0.00012999436983216286
+      },
+      {
+        "rho": 0.5,
+        "substeps": 64,
+        "barrier": 0.9,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.7467004748569743,
+        "upper": 0.7471998727354168,
+        "estimate": 0.7470725819896952,
+        "standard_error": 0.002273065401134084,
+        "width": 0.0004993978784425607,
+        "width_standard_error": 3.318210482967773e-05,
+        "width_plus_3se": 0.0005989441929315939
+      },
+      {
+        "rho": 0.7,
+        "substeps": 256,
+        "barrier": 0.9,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.7124916629642212,
+        "upper": 0.7126502619347067,
+        "estimate": 0.7126129774613499,
+        "standard_error": 0.002436658368427951,
+        "width": 0.0001585989704855104,
+        "width_standard_error": 1.9630189693737497e-05,
+        "width_plus_3se": 0.0002174895395667229
+      },
+      {
+        "rho": 0.9,
+        "substeps": 256,
+        "barrier": 0.9,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.6579617247021291,
+        "upper": 0.6585724806326381,
+        "estimate": 0.6584016049408777,
+        "standard_error": 0.0025566394738225366,
+        "width": 0.0006107559305089022,
+        "width_standard_error": 4.517319667641112e-05,
+        "width_plus_3se": 0.0007462755205381355
+      },
+      {
+        "rho": 0.95,
+        "substeps": 1024,
+        "barrier": 0.9,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.6309481523665106,
+        "upper": 0.6311906505757618,
+        "estimate": 0.6311212738067175,
+        "standard_error": 0.002636214950186283,
+        "width": 0.00024249820925120703,
+        "width_standard_error": 3.0310345019102704e-05,
+        "width_plus_3se": 0.00033342924430851515
+      },
+      {
+        "rho": 0.99,
+        "substeps": 1024,
+        "barrier": 0.9,
+        "sigma": 0.2,
+        "duration": 1.0,
+        "lower": 0.5993471624233234,
+        "upper": 0.6000551575659927,
+        "estimate": 0.5998469531055137,
+        "standard_error": 0.0026770100032678227,
+        "width": 0.0007079951426691639,
+        "width_standard_error": 5.237388856784383e-05,
+        "width_plus_3se": 0.0008651168083726954
+      },
+      {
+        "rho": -0.99,
+        "substeps": 1024,
+        "barrier": 0.98,
+        "sigma": 0.2,
+        "duration": 0.019230769230769232,
+        "lower": 0.660365596930123,
+        "upper": 0.660365596930123,
+        "estimate": 0.660365596930123,
+        "standard_error": 0.0025727629021229377,
+        "width": 0.0,
+        "width_standard_error": 0.0,
+        "width_plus_3se": 0.0
+      },
+      {
+        "rho": 0.0,
+        "substeps": 64,
+        "barrier": 0.98,
+        "sigma": 0.2,
+        "duration": 0.019230769230769232,
+        "lower": 0.5717252388863114,
+        "upper": 0.5718043779042616,
+        "estimate": 0.5717874775455047,
+        "standard_error": 0.002595703714220657,
+        "width": 7.91390179502972e-05,
+        "width_standard_error": 1.1921803786910044e-05,
+        "width_plus_3se": 0.00011490442931102733
+      },
+      {
+        "rho": 0.5,
+        "substeps": 64,
+        "barrier": 0.98,
+        "sigma": 0.2,
+        "duration": 0.019230769230769232,
+        "lower": 0.5051937403096631,
+        "upper": 0.5055464105147938,
+        "estimate": 0.5054549700247024,
+        "standard_error": 0.0026378300728930044,
+        "width": 0.0003526702051307288,
+        "width_standard_error": 2.8906912310858993e-05,
+        "width_plus_3se": 0.00043939094206330573
+      },
+      {
+        "rho": 0.7,
+        "substeps": 256,
+        "barrier": 0.98,
+        "sigma": 0.2,
+        "duration": 0.019230769230769232,
+        "lower": 0.4742750015178075,
+        "upper": 0.4743857523605163,
+        "estimate": 0.4743507380338882,
+        "standard_error": 0.0027004649114618622,
+        "width": 0.00011075084270875985,
+        "width_standard_error": 1.8584041638838397e-05,
+        "width_plus_3se": 0.00016650296762527503
+      },
+      {
+        "rho": 0.9,
+        "substeps": 256,
+        "barrier": 0.98,
+        "sigma": 0.2,
+        "duration": 0.019230769230769232,
+        "lower": 0.42263124249074496,
+        "upper": 0.4230704848039637,
+        "estimate": 0.4229482049715056,
+        "standard_error": 0.0026747446989585414,
+        "width": 0.00043924231321880913,
+        "width_standard_error": 3.8225091804648885e-05,
+        "width_plus_3se": 0.0005539175886327557
+      },
+      {
+        "rho": 0.95,
+        "substeps": 1024,
+        "barrier": 0.98,
+        "sigma": 0.2,
+        "duration": 0.019230769230769232,
+        "lower": 0.39807580243095064,
+        "upper": 0.39822429422674727,
+        "estimate": 0.3981869383672241,
+        "standard_error": 0.0026769679859101098,
+        "width": 0.0001484917957966241,
+        "width_standard_error": 2.2063690247545836e-05,
+        "width_plus_3se": 0.0002146828665392616
+      },
+      {
+        "rho": 0.99,
+        "substeps": 1024,
+        "barrier": 0.98,
+        "sigma": 0.2,
+        "duration": 0.019230769230769232,
+        "lower": 0.3692693433042126,
+        "upper": 0.3697960889052754,
+        "estimate": 0.3696466940431142,
+        "standard_error": 0.0026416285239020555,
+        "width": 0.0005267456010627156,
+        "width_standard_error": 4.3033218223691565e-05,
+        "width_plus_3se": 0.0006558452557337902
+      }
+    ],
+    "max_residual_width_plus_3se": 0.0008651168083726954,
+    "all_pass": true,
+    "elapsed_seconds": 27.081640700002026
+  },
+  "full_payoff_qualification": {
+    "paths": 32768,
+    "seed": 303,
+    "rows": [
+      {
+        "rho": -0.99,
+        "substeps": 1024,
+        "price_lower": 0.5007332893387019,
+        "price_upper": 0.5007332893387019,
+        "width": 0.0,
+        "width_standard_error": 0.0,
+        "width_plus_3se": 0.0
+      },
+      {
+        "rho": 0.0,
+        "substeps": 64,
+        "price_lower": 0.4384611588971797,
+        "price_upper": 0.43846115889787723,
+        "width": 6.975868736818458e-13,
+        "width_standard_error": 9.636193096090097e-14,
+        "width_plus_3se": 9.866726665645486e-13
+      },
+      {
+        "rho": 0.5,
+        "substeps": 64,
+        "price_lower": 0.38211777720394186,
+        "price_upper": 0.38211787923762996,
+        "width": 1.0203368809416963e-07,
+        "width_standard_error": 1.0203101238187112e-07,
+        "width_plus_3se": 4.08126725239783e-07
+      },
+      {
+        "rho": 0.9,
+        "substeps": 256,
+        "price_lower": 0.3097684498269476,
+        "price_upper": 0.309768484920184,
+        "width": 3.5093236411815836e-08,
+        "width_standard_error": 3.5087719374030125e-08,
+        "width_plus_3se": 1.4035639453390622e-07
+      },
+      {
+        "rho": 0.99,
+        "substeps": 1024,
+        "price_lower": 0.26982543873206655,
+        "price_upper": 0.26982548593959493,
+        "width": 4.720752838528245e-08,
+        "width_standard_error": 4.71131871303758e-08,
+        "width_plus_3se": 1.8854708977640983e-07
+      }
+    ],
+    "T": 1.0,
+    "steps": 52,
+    "r": 0.03,
+    "q": 0.01,
+    "sigma": 0.2,
+    "funding": 0.02,
+    "lower_barrier": 0.8,
+    "tolerance_nominal": 0.001,
+    "max_width_plus_3se": 4.08126725239783e-07,
+    "all_pass": true,
+    "elapsed_seconds": 2.0979028000001563
+  },
+  "excluded_domain_measurement": {
+    "rho": 0.9999,
+    "substeps": 1024,
+    "barrier": 0.98,
+    "sigma": 0.2,
+    "duration": 0.019230769230769232,
+    "lower": 0.3480588783458467,
+    "upper": 0.35146973371942974,
+    "estimate": 0.3507754016251347,
+    "standard_error": 0.0026112497389303136,
+    "width": 0.0034108553735830837,
+    "width_standard_error": 0.00013117996976639966,
+    "width_plus_3se": 0.0038043952828822826,
+    "admitted": false,
+    "tolerance_nominal": 0.001,
+    "reason": "Outside the locally admitted correlation domain; residual bound exceeds the panel tolerance."
+  },
+  "commands": {
+    "backend": {
+      "targeted": [
+        ".venv/Scripts/python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "backend/tests/test_bridge_dependence.py",
+        "backend/tests/test_engine_golden.py",
+        "backend/tests/test_stochastic_rate_integrity.py",
+        "backend/tests/test_contractual_timeline.py",
+        "backend/tests/test_resource_limits.py",
+        "backend/tests/test_portfolio_barriers.py",
+        "backend/tests/test_var_engine.py",
+        "backend/tests/test_curve_consistency.py",
+        "backend/tests/test_engine.py::test_continuous_barrier_matches_first_passage_analytic",
+        "backend/tests/test_engine.py::test_continuous_barrier_monitoring_runs_on_every_model",
+        "backend/tests/test_engine.py::test_barrier_monitoring_invalid_value_raises",
+        "-q",
+        "-p",
+        "c16_network_guard",
+        "-o",
+        "junit_family=xunit1",
+        "--junitxml=.runtime/diagnostic-acceptance/c16-2026-10-21/targeted.xml"
+      ],
+      "integration": [
+        ".venv/Scripts/python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "backend/tests/test_bridge_dependence.py",
+        "backend/tests/test_fixing_finality_registry.py",
+        "backend/tests/test_valuation_context.py",
+        "backend/tests/test_greeks_stateful.py",
+        "-q",
+        "-p",
+        "c16_network_guard",
+        "-o",
+        "junit_family=xunit1",
+        "--junitxml=.runtime/diagnostic-acceptance/c16-2026-10-21/integration.xml"
+      ],
+      "consumers": [
+        ".venv/Scripts/python.exe",
+        "-X",
+        "utf8",
+        "-m",
+        "pytest",
+        "backend/tests/test_bridge_dependence.py",
+        "backend/tests/test_portfolio_barriers.py",
+        "backend/tests/test_market_snapshot_rate.py",
+        "backend/tests/test_inlife_pricing.py::test_inlife_preserves_continuous_monitoring_policy_and_warning",
+        "backend/tests/test_inlife_pricing.py::test_le_funding_fait_BAISSER_le_prix",
+        "backend/tests/test_inlife_pricing.py::test_funding_et_taux_agissent_en_sens_OPPOSES",
+        "backend/tests/test_inlife_pricing.py::test_le_funding_ne_touche_pas_le_drift",
+        "-q",
+        "-p",
+        "c16_network_guard",
+        "-o",
+        "junit_family=xunit1",
+        "--junitxml=.runtime/diagnostic-acceptance/c16-2026-10-21/consumers.xml"
+      ]
+    },
+    "conditional_panel": ".venv/Scripts/python.exe -X utf8 .runtime/diagnostic-acceptance/c16-2026-10-21/qualification_panel.py",
+    "full_payoff_panel": ".venv/Scripts/python.exe -X utf8 .runtime/diagnostic-acceptance/c16-2026-10-21/qualification_full_payoff.py",
+    "frontend": "npm run test -- src/utils/barriers.test.js --reporter=json --outputFile=../.runtime/diagnostic-acceptance/c16-2026-10-21/frontend-barriers.json",
+    "environment": {
+      "cwd": "C:\\Users\\admin\\GitHub\\structura",
+      "STRUCTURA_DATA_DIR": "<TEMP>/structura-c16-tests",
+      "PYTHONPATH": "<ROOT>/.runtime/diagnostic-acceptance/c16-2026-10-21;<ROOT>"
+    }
+  },
+  "preservation": {
+    "baseline": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c16-baseline-1u1le5hg",
+    "baseline_files": 1343,
+    "unchanged_files": 1328,
+    "changed_files": [
+      "backend/app/api/inlife.py",
+      "backend/app/api/pricing.py",
+      "backend/app/core/compute_budget.py",
+      "backend/app/core/deal_valuation.py",
+      "backend/app/core/payscript/engine.py",
+      "backend/app/core/schemas.py",
+      "backend/app/core/valuation_runs.py",
+      "backend/tests/test_inlife_pricing.py",
+      "backend/tests/test_market_snapshot_rate.py",
+      "backend/tests/test_portfolio_barriers.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/reference/PAYSCRIPT_REFERENCE.md"
+    ],
+    "unexpected_or_missing": [],
+    "previous_runtime_evidence_unchanged": true,
+    "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+    "branch": "codex/hybrid-saas-foundation",
+    "business_db_present_before": false,
+    "business_db_present_after": false,
+    "business_db_opened": false,
+    "server_started": false,
+    "commits_or_pushes": false
+  },
+  "remaining": [
+    "T07/C18 common-context consumer validation",
+    "D04 model/domain extensions, double barriers, sensitivities and production qualification"
+  ],
+  "http_guard": {
+    "external_http_disabled": true,
+    "blocked_attempts": []
+  },
+  "sha256": {
+    "backend/app/api/inlife.py": "e0d540569f7943cb1700f6bde2610b02c2747bae13d2feb9650a8de62886a0cb",
+    "backend/app/api/pricing.py": "b669dcbeaf08468762380439105a818b6657488c039ded21b7a1aa68e37764cc",
+    "backend/app/core/compute_budget.py": "8ee2a4993c7912af727bf2266d548026bc048fe5e7435da19f3e41ce6d31bb8f",
+    "backend/app/core/deal_valuation.py": "afbdc51c36ce2d573238d91e672a731219439a8425d97d27fbc902ec80e4e838",
+    "backend/app/core/payscript/bridge.py": "f6ee235f86cc594912077ce7b476381fb2c7dad95a2acff9f9f5e73421186804",
+    "backend/app/core/payscript/engine.py": "8ab0f47267eae33afbacbe673936231131992cfee209b32a199e62769919d3d6",
+    "backend/app/core/schemas.py": "0392994f17c2cf4ff85ca9366a2c37c59bea8167a4246cee54ef346652120a31",
+    "backend/app/core/valuation_runs.py": "8bf40677b05895d5b349bd878406890dbd7d659f171aee452a71e5a4b2680cce",
+    "backend/tests/test_bridge_dependence.py": "27fd5d66a5ec5a1a6735f989f62c499bc7dbff40612042558bf5d43796bf0a81",
+    "backend/tests/test_inlife_pricing.py": "5f798a3d11f1fa042f982a42a926d82c2348449b79342ddd71b5729e1515f943",
+    "backend/tests/test_market_snapshot_rate.py": "03e7176729ec66319d1b4208200158105049744a186bad29ca4fc52396655dfc",
+    "backend/tests/test_portfolio_barriers.py": "58fe41b03eac20e4a512c9afe612d66abf8be7bcf6a77e41ca019409451eaa65",
+    "docs/README.md": "1699ae3e6756672b19dccac7ff3572140bf53b433b623b9294637c791a7c3e79",
+    "docs/audits/REMEDIATION_C16_2026-10-21.md": "f41760040e6e98ec582513026fa26502ed70e6b93a2702b3fdfcec70c5094eed",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md": "4c4e7216a1ac77654e3f5a1afcef3e35f6e37d8a1e21f83978b227bbf7fc2c7f",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md": "0402ab4ff18529ce1b6ed74811d0217a27e1cfd4f9fcfee6cd32a9aafad3f0d9",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json": "e4167d660d3810e7ef46088d4f718b202de22f30ef57e0addcb12c462e3e36b4",
+    "docs/reference/PAYSCRIPT_REFERENCE.md": "1453a6cb66fee2e84133d54046d99bad3ebc056a3d6c103c90de3c4a8c8e2475"
+  }
+}

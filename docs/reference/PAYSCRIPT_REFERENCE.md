@@ -27,6 +27,11 @@ script sur chacune.
   `PAY 0.08` verse 8 % du nominal.
 - L'**indentation** délimite les blocs (comme en Python). Les déclarations et
   les blocs `AT` sont à l'indentation 0 ; leur corps est indenté.
+  Chaque instruction d'un même bloc doit avoir le même retrait en espaces.
+  Seuls `IF`, `ELSE IF` et `ELSE` ouvrent un sous-bloc dans le corps d'un `AT`.
+  Une indentation supplémentaire sur un `PAY` ou un `STOP`, un bloc vide ou
+  une tabulation d'indentation provoquent une erreur avec le numéro de ligne ;
+  aucune instruction mal indentée n'est ignorée.
 - Les mots-clés sont **insensibles à la casse**, les identifiants sont
   normalisés en majuscules.
 - `#` commence un commentaire jusqu'à la fin de la ligne.
@@ -64,6 +69,18 @@ AT ObservationDates.last:
 
 Le dernier bloc solde le produit à `ObservationDates.last`. `STOP` empêche
 un second remboursement lorsque le rappel a lieu à cette dernière date.
+
+Compiler vérifie la syntaxe ; un prix de contrôle vérifie une exécution.
+La présence de `STOP` ou d'une affectation `MEMO` ne prouve pas le payoff.
+La qualification économique des scripts du catalogue utilise une empreinte
+de source approuvée et un panel versionné de trajectoires : coupons manqués,
+rattrapage, remise à zéro, mémoire impayée, rappels, maturité et seuils.
+Toute modification du script exige une nouvelle qualification de son adaptateur
+Optimizer. Les fins de ligne CRLF/LF et les retours finaux sont normalisés ;
+les instructions, espaces et commentaires restent dans l'empreinte.
+Ce panel porte sur les flux d'une grille synthétique, sans certifier les termes
+du produit, les calendriers de production ou le modèle de pricing. Pour les
+autres scripts, la fiche de l'assistant présente des indicateurs structurels.
 
 ---
 
@@ -263,6 +280,13 @@ Les dates sont **strictement positives** et exprimées en **années depuis la da
 de strike** : t = 0 est la constatation du niveau initial, rien d'autre ne s'y
 observe. La maturité du produit ne peut pas précéder la dernière date `AT`.
 
+Cette règle s'applique aussi aux dates issues des calendriers nommés, après
+ajustement ouvré, aux relevés visés par un bloc `AT` et aux calendriers figés.
+Une observation à l'origine ou antérieure est refusée ; elle n'est jamais
+reportée au premier pas simulé. Les observations passées doivent être reprises
+par le rejeu des fixings réalisés. Le fixing initial et sa fenêtre de départ
+restent distincts des événements de paiement `AT`.
+
 Quand un `CONSTAT` est déclaré, un bloc peut viser son calendrier :
 
 ```
@@ -320,6 +344,160 @@ Il n'y a alors pas de longueur à saisir — seulement la fréquence de relevé 
 les bornes sont ouvertes à gauche, fermées à droite, si bien qu'une date de roll
 partagée par deux périodes n'est comptée qu'une fois. `PERIOD` suppose un
 calendrier : sur une date unique il n'y a pas de période précédente.
+
+#### Calendriers contractuels dans Economics
+
+L'aperçu, Product, les analyses de pricing et le booking utilisent le même
+résolveur. Les dates de roll sont calculées depuis l'ancre originale : un roll
+mensuel au 31 donne le 28 ou le 29 février puis retrouve le 31 mars. L'ajustement
+de jour ouvré intervient ensuite. Sans convention renseignée, **aucun ajustement
+d'observation** n'est appliqué, y compris dans l'aperçu.
+
+Chaque configuration CONSTAT peut porter deux choix indépendants :
+
+| Champ Economics | Signification |
+|---|---|
+| `observation_calendars` | Liste des places ou calendriers d'observation, par exemple NYSE et XETR. |
+| `observation_join` | `all_open` : toutes les places ouvertes ; `any_open` : au moins une ouverte. Choix explicite obligatoire pour plusieurs calendriers. |
+| `settlement_calendars` | Centres de règlement, par exemple TARGET, USD ou GBP ; distincts des places d'observation. |
+| `settlement_join` | Même choix explicite pour la combinaison de plusieurs centres. |
+| `settlement_lag` | Entier de 0 à 30 jours ouvrés sur les centres de règlement, sans conversion ni troncature. |
+
+Ces champs appartiennent aux termes économiques du produit, pas à la syntaxe
+PayScript. Les relevés des fenêtres utilisent les calendriers **d'observation**.
+Un choix `any_open` ne fournit aucun fixing pour une place fermée : la
+disponibilité et la qualification des cours restent des contrôles distincts.
+J+0 règle le jour de l'observation s'il est ouvert au règlement, sinon au jour
+ouvré suivant. Un règlement n'est jamais antérieur à son observation.
+
+Les configurations historiques sans ces champs gardent leur correspondance
+bancaire par devise, signalée « Hérité » dans Economics. Une sélection explicite
+vide ou inconnue et une règle de combinaison manquante sont refusées, sans repli
+vers la devise. Le catalogue disponible vient de `/api/calendar/catalog` ; il ne
+prétend pas couvrir toutes les places mondiales.
+
+Pour les **nouveaux calendriers résolus**, un stub long fusionne systématiquement
+la période irrégulière de bord avec sa période régulière voisine. Aucun seuil de
+demi-période n'intervient ; une frontière déjà régulière ne fusionne pas.
+Les calendriers déjà figés conservent leurs dates, leurs rangs, leurs relevés et
+leurs paiements. L'interface consulte leur snapshot, sans régénération automatique.
+
+Un PARAM() associé à un calendrier nommé est étiqueté avec les dates de ce
+calendrier, même si d'autres calendriers du produit ont des fréquences différentes.
+Sans association connue, seul le rang est affiché, sans date déduite d'une union.
+
+Le scan de réinvestissement refuse un changement de maturité des produits à
+calendriers ou observations littérales : reconstruire leurs termes dans le Pricer.
+Même à maturité inchangée, un déplacement qui change le nombre de constatations
+ou de relevés, ou les rangs figés, est refusé avant le calcul.
+
+#### Chronologie et horizon de simulation — C14
+
+Les occurrences des blocs `AT` sont exécutées par date contractuelle croissante.
+Deux dates distinctes conservent cet ordre même lorsqu'elles lisent le même nœud
+de diffusion. Pour des blocs à la même date, l'ordre du script départage leur
+exécution. Les blocs `AT MATURITY` viennent après les blocs datés encore actifs ;
+`STOP` empêche tout bloc ultérieur, y compris ceux de maturité.
+
+Chaque occurrence conserve son rang, sa fenêtre et son paiement. Trier le calcul
+ne modifie pas le calendrier figé du Product. La tolérance de représentation des
+temps résiduels est de `1e-6` année, cohérente avec leur stockage à six décimales ;
+elle ne permet pas d'exécuter une observation du lendemain hors horizon.
+
+Le prix, les probabilités, les trajectoires et le profil utilisent un axe dont le
+dernier nœud est exactement l'horizon demandé : `dt = T / max(1, round(T × 52))`.
+À un jour de maturité, il y a un pas d'un jour, sans plancher d'une semaine.
+`REALVOL` annualise la variation quadratique par le temps effectivement diffusé.
+La grille de monitoring reste approximativement hebdomadaire : la correction
+d'ordre n'ajoute pas de nœuds de diffusion ni de monitoring aux barrières.
+Les résultats exposent la politique et l'axe effectif dans `time_axis`.
+
+#### Taux stochastiques et funding — C15
+
+La dynamique des taux est construite exclusivement sur la courbe sans risque,
+avec son éventuel choc parallèle de taux. Le funding, plat ou en courbe, et le
+choc de spread interviennent une seule fois dans l'actualisation des flux.
+Ils ne modifient ni les trajectoires de taux sans risque, ni le drift des actifs.
+
+Le facteur résiduel de corrélation est appliqué aussi en mono-sous-jacent :
+le choc action conserve une variance unitaire lorsque `rho_rS` change.
+Une matrice jointe taux/actions incompatible reste refusée.
+
+La transition gaussienne et la correction de convexité discrète sont continues
+lorsque `a_r` tend vers zéro. Les paramètres non finis ou négatifs et les facteurs
+d'actualisation non finis ou nuls sont refusés dans cette branche. Ces contrôles
+ne valent pas qualification de tous les modèles et usages : voir le
+[rapport C15](../audits/REMEDIATION_C15_2026-10-21.md).
+
+#### Extrema et barrières continues — C16
+
+En mono, chaque extremum marginal est tiré selon sa loi conditionnelle analytique
+sous GBM à volatilité constante et taux déterministes. Cela ne rend pas exacte
+la loi jointe minimum/maximum. Les autres modèles conservent leur approximation
+intra-pas à volatilité figée.
+
+Les copies GBM équivalentes, corrélées à 1 et partageant le même pont conditionnel,
+réutilisent les mêmes extrema : dupliquer un actif ne crée pas un franchissement
+supplémentaire. Les facteurs singuliers ne reçoivent plus de bruit artificiel.
+
+Le domaine panier admis localement est le GBM à **deux actifs**, taux déterministes,
+avec `|rho| <= 0,99`, ainsi que les copies équivalentes. La reconstruction utilise
+des milieux de ponts corrélés puis des extrema marginaux sur les sous-intervalles.
+Elle conserve une approximation de dépendance résiduelle. Le raffinement est
+explicite : **64 sous-pas jusqu'à |rho| = 0,5 ; 256 jusqu'à 0,9 ; 1 024 au-delà**.
+Les copies équivalentes utilisent directement le tirage marginal commun.
+Le calcul et son budget appliquent la même règle ; les repricings du Greek de
+corrélation conservent un raffinement commun.
+
+Philippe a retenu une tolérance de **10 pb du nominal sur le panel de qualification**.
+Les sorties exposent la méthode, le raffinement et les limites dans
+`barrier_monitoring_details` et `barrier_monitoring_note`. Le seuil ne constitue
+pas une borne d'erreur de chaque valorisation : `per_run_error_bound` reste nul
+au sens JSON (`null`). Les configurations panier hors domaine sont refusées,
+sans changement automatique de monitoring. La qualification des autres modèles,
+des doubles barrières et des usages de production reste ouverte :
+[rapport et mesures C16](../audits/REMEDIATION_C16_2026-10-21.md).
+
+#### Calibration des surfaces — C17
+
+La convergence de l'optimiseur et la qualification économique sont distinctes.
+Les seuils retenus sont **5 pb du nominal pour les vanilles** et **10 pb pour les
+digitales**, au maximum sur les points publiés. Tous les piliers ATM matériels
+dans l'horizon participent à l'objectif ; les exclusions sont publiées.
+Un résultat non convergé, hors seuil ou hors domaine reste exploratoire et
+n'est pas appliqué automatiquement.
+
+La preuve serveur conserve la cible, les entrées, la grille, les poids, la méthode,
+les paramètres et les diagnostics avec le prix. Son application automatique
+exige le même contexte à taux/dividende plats, sans quanto. SABR reste exploratoire ;
+un ajustement Heston ne qualifie pas le LSV complet. Une preuve passée ne vaut
+pas qualification du MtM à une nouvelle date.
+
+Le Dupire legacy refuse les densités, variances calendaires et volatilités hors
+domaine ; aucun repli silencieux en volatilité implicite. Les archives ne sont
+pas migrées automatiquement. Voir le [rapport C17](../audits/REMEDIATION_C17_2026-10-21.md)
+pour les mesures et limites. Le domaine de barrières C16 reste inchangé.
+
+#### Contexte de valorisation et statistiques — C18
+
+Prix, probabilités et trajectoires utilisent le même Monte Carlo, avec le contexte
+daté complet : modèle, courbes, funding, taux stochastiques, antithétiques, dates
+de paiement/valeur et état réalisé. Cela inclut l'attente du fixing avant strike.
+Une taille d'échantillon dédiée est publiée ; elle ne supprime aucune hypothèse.
+
+Le signe du total nominal, le retour au pair, la perte face au prix payé et les
+quantiles actualisés sont distincts. Un flux certain de 10 % est positif ; être
+sous le pair ne le rend pas OTM. La clé historique `ki` des probabilités désigne
+une classification sous le pair sans STOP, pas une preuve de barrière KI.
+
+La sensibilité de corrélation publie son choc signé effectif et emploie cette
+amplitude au dénominateur ; elle est indisponible si aucun choc isolé admissible
+n'existe. Le vega LSV reste un choc de volatilité locale effective, processus de
+variance figé, sans recalibration. Son périmètre est séparé du GBM/Heston.
+
+Les créances détachées impayées sont réactualisées à leurs paiements réels sous
+choc de taux. Le funding reste en actualisation seule. Les seuils et domaines
+C16/C17 sont inchangés. Voir le [rapport C18](../audits/REMEDIATION_C18_2026-10-21.md).
 
 ### 4.3 `INDEX` — le rang, pas un compteur
 

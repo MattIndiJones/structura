@@ -1,0 +1,722 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-24",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "report": "../BILATERAL_RFQ_ACCEPTANCE_2026-10-24.md",
+  "status": "completed_with_explicit_coverage_limits",
+  "production_qualified": false,
+  "runtime": ".runtime/diagnostic-acceptance/bilateral-2026-10-24",
+  "installations": {
+    "platform": 18200,
+    "bnp-paribas": 18201,
+    "leonteq": 18205
+  },
+  "transport": {
+    "native_real_http": true,
+    "loopback_only": true,
+    "hmac": true,
+    "tls_qualified": false,
+    "workers_and_persistent_outbox": true,
+    "request_delivery_attempts": 4,
+    "application_messages": 5,
+    "native_execution_acceptance_message": false
+  },
+  "business_scope": {
+    "requester_rfq_booking": true,
+    "bank_local_note_booking": true,
+    "both_books_reconciled_read_only": true,
+    "external_agreement": "fictitious_phone_declaration",
+    "written_confirmation_pending": true,
+    "dual_note_journal": false,
+    "settlement_performed": false
+  },
+  "market": {
+    "provider": "SYNTHETIC_SCENARIO",
+    "seed": 42,
+    "tickers": [
+      "AIR.PA"
+    ],
+    "real_market_qualified": false
+  },
+  "reconciliation": {
+    "installations": {
+      "leonteq": {
+        "installation_id": "c913cc87-a9e0-4bdb-8bb8-051e4fff3f8f",
+        "deal_id": 1,
+        "deal_reference": "LEON-20261024-001",
+        "product_id": 1,
+        "product_reference": "PRD-20261024-001",
+        "terms_version": 1,
+        "terms_fingerprint": "5c08020fb7c4aeadb6a4720b078039d094785e705c7b94a1cf4897d3cacba067",
+        "our_side": "BUY",
+        "nominal": 1000000.0,
+        "devise": "EUR",
+        "contrepartie": "BNP Paribas",
+        "counterparty_id": 10,
+        "price_traded": 98.5,
+        "fair_value": 100.5976,
+        "trade_date": "2026-10-24",
+        "strike_date": "2026-10-26",
+        "value_date": "2026-10-26",
+        "maturity_date": "2029-10-26",
+        "payment_date": "2029-10-31",
+        "transaction_format": "EMTN",
+        "instrument_family": "Note",
+        "payoff_family": "Autocall",
+        "documentation_reference": "RECETTE RFQ BILATERALE — EMTN fictif 2026-10-24",
+        "rfq_id": 1,
+        "private_sigma_percent": 20.0,
+        "pricing_input_and_fingerprint_preserved": true,
+        "signed_rfq_pricing_receipt_retained": true,
+        "query_only": true,
+        "foreign_key_violations": 0,
+        "counts": {
+          "products": 1,
+          "product_terms_versions": 1,
+          "product_revisions": 15,
+          "product_calculation_runs": 1,
+          "deals": 1,
+          "deal_events": 4,
+          "rfq_requests": 1,
+          "rfq_quotes": 2,
+          "rfq_exchange_rounds": 1,
+          "rfq_solicitations": 1,
+          "rfq_bank_cases": 0,
+          "rfq_quote_publications": 2,
+          "rfq_booking_evidence": 1,
+          "rfq_execution_agreements": 1,
+          "rfq_execution_bookings": 1,
+          "trading_executions": 0,
+          "rfq_transport_outbox": 2,
+          "rfq_transport_inbox": 3,
+          "rfq_transport_attempts": 5
+        },
+        "rounds": [
+          {
+            "exchange_reference": "RFQX-1-RFQ-20261024-001",
+            "number": 1,
+            "state": "CLOSED",
+            "terms_fingerprint": "5c08020fb7c4aeadb6a4720b078039d094785e705c7b94a1cf4897d3cacba067"
+          }
+        ],
+        "transport": [
+          {
+            "id": "ff3a79ff-8cca-419b-91b0-1becb881c819",
+            "kind": "REQUEST",
+            "sequence": 1,
+            "payload_hash": "0ad67eb5a93e50916fcaa38c884f48aa21d915536a6a14d5e92dd515a882964e",
+            "state": "DELIVERED",
+            "attempts": 4,
+            "received_at": "2026-10-24 09:20:47.303712",
+            "signed_receipt_preserved": true
+          },
+          {
+            "id": "0ec35d88-8e11-44cb-aa5b-d53091704fb3",
+            "kind": "CLOSE",
+            "sequence": 2,
+            "payload_hash": "8f59aca64d4aa735cf07b23b2f88761149cffcb7a1c58c7d837f7626b8e72b76",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 09:34:57.137890",
+            "signed_receipt_preserved": true
+          }
+        ]
+      },
+      "bnp-paribas": {
+        "installation_id": "eb3aef2f-eb2b-47f6-a5ee-c0d7d4458762",
+        "deal_id": 1,
+        "deal_reference": "BNPX-20261024-001",
+        "product_id": 2,
+        "product_reference": "PRD-20261024-002",
+        "terms_version": 1,
+        "terms_fingerprint": "5c08020fb7c4aeadb6a4720b078039d094785e705c7b94a1cf4897d3cacba067",
+        "our_side": "SELL",
+        "nominal": 1000000.0,
+        "devise": "EUR",
+        "contrepartie": "Leonteq",
+        "counterparty_id": 17,
+        "price_traded": 98.5,
+        "fair_value": 94.1256,
+        "trade_date": "2026-10-24",
+        "strike_date": "2026-10-26",
+        "value_date": "2026-10-26",
+        "maturity_date": "2029-10-26",
+        "payment_date": "2029-10-31",
+        "transaction_format": "EMTN",
+        "instrument_family": "NOTE",
+        "payoff_family": "Autocall",
+        "documentation_reference": "RECETTE RFQ BILATERALE — EMTN fictif 2026-10-24",
+        "rfq_id": null,
+        "private_sigma_percent": 30.0,
+        "pricing_input_and_fingerprint_preserved": true,
+        "signed_rfq_pricing_receipt_retained": false,
+        "query_only": true,
+        "foreign_key_violations": 0,
+        "counts": {
+          "products": 2,
+          "product_terms_versions": 2,
+          "product_revisions": 7,
+          "product_calculation_runs": 2,
+          "deals": 1,
+          "deal_events": 4,
+          "rfq_requests": 1,
+          "rfq_quotes": 2,
+          "rfq_exchange_rounds": 1,
+          "rfq_solicitations": 1,
+          "rfq_bank_cases": 1,
+          "rfq_quote_publications": 2,
+          "rfq_booking_evidence": 0,
+          "rfq_execution_agreements": 0,
+          "rfq_execution_bookings": 0,
+          "trading_executions": 1,
+          "rfq_transport_outbox": 3,
+          "rfq_transport_inbox": 2,
+          "rfq_transport_attempts": 3
+        },
+        "rounds": [
+          {
+            "exchange_reference": "8cc31e6a-83e5-43e7-8836-98af43f9bf77:RFQX-1-RFQ-20261024-001",
+            "number": 1,
+            "state": "CLOSED",
+            "terms_fingerprint": "5c08020fb7c4aeadb6a4720b078039d094785e705c7b94a1cf4897d3cacba067"
+          }
+        ],
+        "transport": [
+          {
+            "id": "d24d944d-a5cb-47cf-984e-592137e75305",
+            "kind": "READ",
+            "sequence": 1,
+            "payload_hash": "d8b746b4a3f0e559b5f9103cf09d3c166007426097577c481c5408e2ede132fe",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 09:20:58.072970",
+            "signed_receipt_preserved": true
+          },
+          {
+            "id": "6329f60e-d226-417f-84a3-40b4c8215ba1",
+            "kind": "QUOTE",
+            "sequence": 2,
+            "payload_hash": "317852311af958ab7d832e31320445f2cc9bc8263cb596fe58c773a44cd9c8fc",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 09:26:43.879343",
+            "signed_receipt_preserved": true
+          },
+          {
+            "id": "7d34d4a2-5c8d-45d8-bfc2-e463736457bc",
+            "kind": "QUOTE",
+            "sequence": 3,
+            "payload_hash": "900049cd27839676af8dd31f5abe849ce02c54d149fcd16bb9cb7cfb92c9e1af",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 09:27:00.031235",
+            "signed_receipt_preserved": true
+          }
+        ]
+      }
+    },
+    "checks": {
+      "same_terms_fingerprint": true,
+      "same_terms_version": true,
+      "same_nominal": true,
+      "same_devise": true,
+      "same_price_traded": true,
+      "same_trade_date": true,
+      "same_strike_date": true,
+      "same_value_date": true,
+      "same_maturity_date": true,
+      "same_payment_date": true,
+      "same_payoff_family": true,
+      "same_documentation_reference": true,
+      "same_normalized_transaction_format": true,
+      "same_normalized_instrument_family": true,
+      "exact_terms_and_script_equal": true,
+      "contractual_events_equal": true,
+      "exact_private_pricing_inputs_retained": true,
+      "opposite_sides": true,
+      "distinct_installations": true,
+      "local_pricing_hypotheses_distinct": true,
+      "one_deal_per_installation": true,
+      "shared_execution_reference": true,
+      "no_payment_declared": true,
+      "all_messages_received_with_matching_peer_hash": true,
+      "signed_transport_receipts_retained": true,
+      "saved_receipt_hmac_verified_offline": true,
+      "no_private_pricing_fields_in_transported_payloads": true,
+      "booking_closure_received": true
+    },
+    "execution": {
+      "reference": "BILAT-20261024-001",
+      "instrument_reference_bank": "QA-ATHENA-AIR-EUR-20261024",
+      "issuer": "BNP Paribas",
+      "bank_note_journal_id": 1,
+      "requester_rfq_booking_id": 1,
+      "confirmation_source": "PHONE_DECLARATION",
+      "written_confirmation_pending": true,
+      "native_acceptance_message": false,
+      "cash_amount": 985000.0,
+      "note_journal_present_on_requester": false
+    },
+    "status": "PASS_WITH_EXPLICIT_LIMITS"
+  },
+  "checkpoints": [
+    {
+      "id": "B01-rfq-terms",
+      "at": "2026-10-24T09:18:41.394Z",
+      "url": "http://127.0.0.1:18200/#/rfq",
+      "notes": "Athena 3Y EUR 1 M, achat demandeur, coupon 10 %, rappel 100 %, protection 60 %, strike/valeur 26/10/2026, paiement 31/10/2029, calendriers TARGET explicites ; marché privé sigma20/q1/r3, N5000.",
+      "dom": "B01-rfq-terms.dom.txt",
+      "screenshot": "screenshots/B01-rfq-terms.jpg"
+    },
+    {
+      "id": "B02-requester-priced",
+      "at": "2026-10-24T09:19:16.358Z",
+      "url": "http://127.0.0.1:18200/#/rfq?rfq=1",
+      "notes": "Prix modèle demandeur calculé par moteur natif, marché privé sigma20/q1/r3, à conserver uniquement côté Leonteq.",
+      "dom": "B02-requester-priced.dom.txt",
+      "screenshot": "screenshots/B02-requester-priced.jpg"
+    },
+    {
+      "id": "B03-shared-preview",
+      "at": "2026-10-24T09:19:52.793Z",
+      "url": "http://127.0.0.1:18200/#/rfq?rfq=1",
+      "notes": "Récapitulatif figé : seule BNP Pricing reçoit le contrat, nominal, quatre dates, calendrier et paramètres de payoff ; hypothèses et prix privé restent dans la zone privée.",
+      "dom": "B03-shared-preview.dom.txt",
+      "screenshot": "screenshots/B03-shared-preview.jpg"
+    },
+    {
+      "id": "B04-bank-unavailable",
+      "at": "2026-10-24T09:20:25.256Z",
+      "url": "http://127.0.0.1:18200/#/rfq?rfq=1",
+      "notes": "Banque arrêtée volontairement : demande persistée, transport en reprise automatique, aucune réception ni déclin inventé.",
+      "dom": "B04-bank-unavailable.dom.txt",
+      "screenshot": "screenshots/B04-bank-unavailable.jpg"
+    },
+    {
+      "id": "B05-delivery-recovered",
+      "at": "2026-10-24T09:20:53.610Z",
+      "url": "http://127.0.0.1:18200/#/rfq?rfq=1",
+      "notes": "Réception confirmée après redémarrage de la même installation BNP : 4 tentatives, même demande et même tour ; pas de ressaisie ni nouvelle RFQ.",
+      "dom": "B05-delivery-recovered.dom.txt",
+      "screenshot": "screenshots/B05-delivery-recovered.jpg"
+    },
+    {
+      "id": "B06-bank-received",
+      "at": "2026-10-24T09:21:00.164Z",
+      "url": "http://127.0.0.1:18200/#/rfq/recues",
+      "notes": "Demande reçue par le vrai transport, termes/empreinte/date/nominal identiques, aucun prix ou sigma du demandeur affiché.",
+      "dom": "B06-bank-received.dom.txt",
+      "screenshot": "screenshots/B06-bank-received.jpg"
+    },
+    {
+      "id": "B07-bank-private-calculation",
+      "at": "2026-10-24T09:21:31.848Z",
+      "url": "http://127.0.0.1:18200/#/products/2/pricer?receivedRfq=1",
+      "notes": "Calcul privé natif BNP : sigma30/q1/r3, N5000 seed42, date de valorisation24/10/2026 ; prix94,13 % contre100,60 % chez Leonteq. Conservation explicite, sans publication.",
+      "dom": "B07-bank-private-calculation.dom.txt",
+      "screenshot": "screenshots/B07-bank-private-calculation.jpg"
+    },
+    {
+      "id": "B08-bank-calculation-remains-private",
+      "at": "2026-10-24T09:21:46.691Z",
+      "url": "http://127.0.0.1:18200/#/rfq?rfq=1",
+      "notes": "Après conservation du calcul bancaire94,1256 %, Leonteq reste à100,598 % et affiche Prix en attente ; aucune quote commerciale encore reçue.",
+      "dom": "B08-bank-calculation-remains-private.dom.txt",
+      "screenshot": "screenshots/B08-bank-calculation-remains-private.jpg"
+    },
+    {
+      "id": "B09-draft-refresh-defect",
+      "at": "2026-10-24T09:22:44.249Z",
+      "url": "http://127.0.0.1:18200/#/rfq/recues?open=1",
+      "notes": "Anomalie R01 : préparation enregistrée HTTP200 en base, mais panneau inchangé et boutons de validation absents ; événement enfant non raccordé au contexte attendu par le parent.",
+      "dom": "B09-draft-refresh-defect.dom.txt",
+      "screenshot": "screenshots/B09-draft-refresh-defect.jpg"
+    },
+    {
+      "id": "B10-bank-validation-corrected",
+      "at": "2026-10-24T09:26:41.397Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R02#/rfq/recues?open=1",
+      "notes": "R01 corrigé : la validation revient immédiatement dans le panneau, révision1 à99 %, bouton Publier disponible sans fermer/réouvrir.",
+      "dom": "B10-bank-validation-corrected.dom.txt",
+      "screenshot": "screenshots/B10-bank-validation-corrected.jpg"
+    },
+    {
+      "id": "B11-first-network-quote-selected",
+      "at": "2026-10-24T09:26:53.522Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R02#/rfq?rfq=1",
+      "notes": "Quote réseau v1 à99 % reçue, non éditable, sélection explicite ; calcul94,1256 % et sigma30 bancaires restent absents de la projection demandeur.",
+      "dom": "B11-first-network-quote-selected.dom.txt",
+      "screenshot": "screenshots/B11-first-network-quote-selected.jpg"
+    },
+    {
+      "id": "B12-second-publication",
+      "at": "2026-10-24T09:26:59.219Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R02#/rfq/recues?open=1",
+      "notes": "Révision2 à98,50 % : nouvelle préparation, nouvelle validation et publication ; publicationv1 à99 % conservée.",
+      "dom": "B12-second-publication.dom.txt",
+      "screenshot": "screenshots/B12-second-publication.jpg"
+    },
+    {
+      "id": "B13-revision-revokes-selection",
+      "at": "2026-10-24T09:27:13.829Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R02#/rfq?rfq=1",
+      "notes": "Publicationv1 conservée mais remplacée/non sélectionnable ; v2 à98,50 % active. Ancienne sélection révoquée, aucune sélection automatique de la nouvelle quote.",
+      "dom": "B13-revision-revokes-selection.dom.txt",
+      "screenshot": "screenshots/B13-revision-revokes-selection.jpg"
+    },
+    {
+      "id": "B14-confirmation-required",
+      "at": "2026-10-24T09:29:32.046Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R02#/rfq?rfq=1",
+      "notes": "Traitement demandé sur publication v2 ; confirmation attendue, aucun booking automatique.",
+      "dom": "B14-confirmation-required.dom.txt",
+      "screenshot": "screenshots/B14-confirmation-required.jpg"
+    },
+    {
+      "id": "B15-treatment-confirmed",
+      "at": "2026-10-24T09:29:53.714Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R02#/rfq?rfq=1",
+      "notes": "Accord fictif déclaré par téléphone, référence BILAT-20261024-001 ; écrit à suivre explicitement conservé.",
+      "dom": "B15-treatment-confirmed.dom.txt",
+      "screenshot": "screenshots/B15-treatment-confirmed.jpg"
+    },
+    {
+      "id": "B16-saved-product-booking-blocked",
+      "at": "2026-10-24T09:31:33.514Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R02#/products/2/pricer?receivedRfq=1",
+      "notes": "Anomalie R03 : informations du Product absentes du formulaire et champs d’exécution intégralement désactivés avant le premier booking.",
+      "dom": "B16-saved-product-booking-blocked.dom.txt",
+      "screenshot": "screenshots/B16-saved-product-booking-blocked.jpg"
+    },
+    {
+      "id": "B17-bank-booking-review",
+      "at": "2026-10-24T09:34:18.107Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/products/2/pricer?receivedRfq=1",
+      "notes": "Revue native BNP : vente locale, relation Leonteq active, prix traité 98,50 %, nominal EUR 1m ; calcul privé sigma30/FV94,1256.",
+      "dom": "B17-bank-booking-review.dom.txt",
+      "screenshot": "screenshots/B17-bank-booking-review.jpg"
+    },
+    {
+      "id": "B18-bank-booked",
+      "at": "2026-10-24T09:34:24.484Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/products/2/pricer?receivedRfq=1",
+      "notes": "Booking natif BNPX-20261024-001, Deal1 du Product2 ; exécution note BILAT-20261024-001, SELL, EUR 1m à 98,50 %.",
+      "dom": "B18-bank-booked.dom.txt",
+      "screenshot": "screenshots/B18-bank-booked.jpg"
+    },
+    {
+      "id": "B19-flux-dates-corrected",
+      "at": "2026-10-24T09:34:47.418Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/rfq?rfq=1",
+      "notes": "R02 revérifié : observation26/10/2027, règlement29/10/2027 ; prix inchangé100,598 % à la valorisation24/10/2026.",
+      "dom": "B19-flux-dates-corrected.dom.txt",
+      "screenshot": "screenshots/B19-flux-dates-corrected.jpg"
+    },
+    {
+      "id": "B20-requester-booking-review",
+      "at": "2026-10-24T09:34:55.989Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/rfq/1/booking",
+      "notes": "Revue native RFQ Leonteq : Product1/v1, BNP, nominalEUR1m, prix98,50%, accordconfirmed et reçu local conservé.",
+      "dom": "B20-requester-booking-review.dom.txt",
+      "screenshot": "screenshots/B20-requester-booking-review.jpg"
+    },
+    {
+      "id": "B21-requester-booked",
+      "at": "2026-10-24T09:35:02.372Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/booking?deal=1",
+      "notes": "DealLEON-20261024-001, Product1/v1, accordBILAT-20261024-001 ; 1seulDealEUR1m98,50%, FV100,598%, sigma20 privée.",
+      "dom": "B21-requester-booked.dom.txt",
+      "screenshot": "screenshots/B21-requester-booked.jpg"
+    },
+    {
+      "id": "B22-bank-booking-book",
+      "at": "2026-10-24T09:35:15.730Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/booking?deal=1",
+      "notes": "Livre BNP : un unique DealBNPX-20261024-001, Leonteqcontrepartie, prix98,50%, FV94,1256%, nominalEUR1m.",
+      "dom": "B22-bank-booking-book.dom.txt",
+      "screenshot": "screenshots/B22-bank-booking-book.jpg"
+    },
+    {
+      "id": "B23-bank-note-journal",
+      "at": "2026-10-24T09:36:23.806Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/trading",
+      "notes": "Journal BNP : nous vendons1m, émetteurBNP, instrumentQA-ATHENA-AIR-EUR-20261024, cash théorique985000EUR à recevoir ; règlementPENDING, aucune preuve de paiement saisie.",
+      "dom": "B23-bank-note-journal.dom.txt",
+      "screenshot": "screenshots/B23-bank-note-journal.jpg"
+    },
+    {
+      "id": "B24-bank-round-closed",
+      "at": "2026-10-24T09:36:52.103Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/rfq/recues?open=1",
+      "notes": "CLOSE signé livré après bookingLeonteq : tour clôturé côtéBNP, historique consultable, Pricer/nouvellepublication désactivés.",
+      "dom": "B24-bank-round-closed.dom.txt",
+      "screenshot": "screenshots/B24-bank-round-closed.jpg"
+    },
+    {
+      "id": "B25-requester-booking-reloaded",
+      "at": "2026-10-24T09:37:08.607Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/booking?deal=1",
+      "notes": "Rechargement du livre : même dealLEON-20261024-001, seul1mEUR ; aucun doublon.",
+      "dom": "B25-requester-booking-reloaded.dom.txt",
+      "screenshot": "screenshots/B25-requester-booking-reloaded.jpg"
+    },
+    {
+      "id": "B26-bank-keyboard-close",
+      "at": "2026-10-24T09:37:45.736Z",
+      "url": "http://127.0.0.1:18200/?build=R01-R03#/rfq/recues?open=1",
+      "notes": "Anomalie R04 : Tab reste dans la modale et Escape ferme, mais le focus est perdu sur BODY car le bouton Ouvrir est désactivé pendant le chargement.",
+      "dom": "B26-bank-keyboard-close.dom.txt",
+      "screenshot": "screenshots/B26-bank-keyboard-close.jpg"
+    },
+    {
+      "id": "B27-bank-keyboard-corrected",
+      "at": "2026-10-24T09:39:29.671Z",
+      "url": "http://127.0.0.1:18200/?build=final#/rfq/recues",
+      "notes": "R04 corrigé : Tab reste dans la modale, Escape ferme et le focus revient au bouton Ouvrir sur les assets finaux.",
+      "dom": "B27-bank-keyboard-corrected.dom.txt",
+      "screenshot": "screenshots/B27-bank-keyboard-corrected.jpg"
+    },
+    {
+      "id": "B28-final-requester-book",
+      "at": "2026-10-24T09:40:05.972Z",
+      "url": "http://127.0.0.1:18200/?build=final#/booking?deal=1",
+      "notes": "Build final : LEON-20261024-001 seul dans le livre Leonteq ; conditions et FV privées conservées après rechargement.",
+      "dom": "B28-final-requester-book.dom.txt",
+      "screenshot": "screenshots/B28-final-requester-book.jpg"
+    },
+    {
+      "id": "B29-final-bank-book",
+      "at": "2026-10-24T09:40:06.035Z",
+      "url": "http://127.0.0.1:18200/?build=final#/booking?deal=1",
+      "notes": "Build final : BNPX-20261024-001 seul dans le livre BNP ; conditions identiques, sens opposé, FV privée distincte.",
+      "dom": "B29-final-bank-book.dom.txt",
+      "screenshot": "screenshots/B29-final-bank-book.jpg"
+    }
+  ],
+  "checkpoint_count": 29,
+  "anomalies": [
+    {
+      "id": "R01",
+      "priority": "P1",
+      "title": "Rafraîchissement bancaire et contexte des retours asynchrones",
+      "dependencies": [
+        "C10",
+        "C23"
+      ],
+      "new_tests": 6,
+      "checkpoints": [
+        "B09-draft-refresh-defect",
+        "B10-bank-validation-corrected",
+        "B12-second-publication"
+      ],
+      "status": "corrected_locally_and_revalidated",
+      "production_qualified": false
+    },
+    {
+      "id": "R02",
+      "priority": "P2",
+      "title": "Origine de valorisation et dates calendaires des flux RFQ",
+      "dependencies": [
+        "C05",
+        "C18"
+      ],
+      "new_tests": 2,
+      "checkpoints": [
+        "B02-requester-priced",
+        "B19-flux-dates-corrected"
+      ],
+      "status": "corrected_locally_and_revalidated",
+      "production_qualified": false
+    },
+    {
+      "id": "R03",
+      "priority": "P1",
+      "title": "Première exécution du Product conservé et reprise du formulaire",
+      "dependencies": [
+        "C03",
+        "C06",
+        "C07",
+        "C08"
+      ],
+      "new_tests": 3,
+      "checkpoints": [
+        "B16-saved-product-booking-blocked",
+        "B17-bank-booking-review",
+        "B18-bank-booked"
+      ],
+      "status": "corrected_locally_and_revalidated",
+      "production_qualified": false
+    },
+    {
+      "id": "R04",
+      "priority": "P3",
+      "title": "Retour du focus au bouton d’ouverture RFQ",
+      "dependencies": [
+        "C10",
+        "C27"
+      ],
+      "new_tests": 0,
+      "checkpoints": [
+        "B26-bank-keyboard-close",
+        "B27-bank-keyboard-corrected"
+      ],
+      "status": "corrected_locally_and_revalidated",
+      "production_qualified": false
+    }
+  ],
+  "anomalies_corrected": 4,
+  "open_observed_anomalies": 0,
+  "source_files": [
+    "frontend/src/views/RfqInboxView.vue",
+    "frontend/src/components/RfqBankQuotePanel.vue",
+    "frontend/src/views/asyncInterfaces.test.js",
+    "frontend/src/components/RfqPricingPanel.vue",
+    "frontend/src/components/FluxDecomposition.vue",
+    "frontend/src/components/RfqPricingPanel.test.js",
+    "frontend/src/components/DealTab.vue",
+    "frontend/src/components/DealTab.test.js",
+    "frontend/src/stores/pricing.js"
+  ],
+  "validation": {
+    "backend": {
+      "passed_distinct": 138,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "junit": "backend-targeted.xml",
+      "full_backend_rerun": false
+    },
+    "frontend": {
+      "passed_distinct": 149,
+      "failed": 0,
+      "new_cases": 11,
+      "last_touched_file_rerun_passed": 44,
+      "reruns_counted_twice": false,
+      "junit": [
+        "R01-R03-targeted.xml",
+        "R04-targeted.xml"
+      ],
+      "intermediate_full_run_passed": 745,
+      "intermediate_full_run_precedes_R03_R04": true,
+      "final_build": "build-final.log",
+      "final_asset": "/assets/index-BWVfEvHt.js"
+    },
+    "browser_console_errors_final": 0
+  },
+  "coverage_limits": [
+    "No deployed TLS or remote network qualification.",
+    "External agreement is explicitly fictitious; no electronic execution acceptance protocol.",
+    "Bank note journal and requester RFQ booking reconciled; no automatic dual note-journal registration.",
+    "No cash settlement or arrived lifecycle events.",
+    "Superuser profiles only in this bilateral scenario; D05 remains open.",
+    "No new graphical full reopen/new-round, divergent currency or in-flight revocation matrix.",
+    "Delivery retry exercised; not a lost booking response or concurrent deployed booking.",
+    "Desktop graphical checks; no narrow/mobile viewport qualification."
+  ],
+  "cleanup": {
+    "date": "2026-10-24",
+    "listeners": [],
+    "owned_processes": [],
+    "real_database_absent": true,
+    "all_released": true
+  },
+  "no_commit_or_push": true,
+  "historical_proofs_preserved": true,
+  "preservation": {
+    "head_and_branch_unchanged": true,
+    "real_database_absent": true,
+    "unexpected_preexisting_changes": [],
+    "historical_audit_files_verified": 119,
+    "prior_graphical_runtime_evidence_verified": 155,
+    "existing_frontend_dist_preserved": true,
+    "hybrid_retirement_marker_preserved": true
+  },
+  "runtime_evidence_sha256": {
+    "backend-targeted.xml": "482ab27cdbd2501b184dd6f5cb08a81fe970f7a0306cc1fe4d96218fa617f7e2",
+    "backend-targeted.log": "56a01501acae0b6e85b0e8701cb5310f0045c4e23e5dd8f7d8e462e468f253b5",
+    "R01-R02-before.xml": "253e33bfe73c1bbf3b84bab25e133334050546dba537245ae919ffe7812f73b2",
+    "R01-R02-after.xml": "e07accd4961ca49250df1e2fabbdb057931b895373332de589ff96933690b209",
+    "R01-R03-targeted.xml": "e91d2e8c0934898460eadab50303e7500737200c00716bbc2b2f6419f65767ad",
+    "R01-R03-targeted.log": "891208ef269bf2cc0eee35ad9d854a42e0ebc321a90352db1f7425f269e13699",
+    "R04-targeted.xml": "407fa42a625162c176b08462c7be3452756d4529ae9021e6ac707f8451e32764",
+    "R04-targeted.log": "cc7da48b384df96ca76df6474a75ae53e2f3573bc761ba1595fd0b966688e449",
+    "build-final.log": "64731aec6958eb7bc629896c72b64840c2b2337853a8e3c6f65a1b22e95d5d2b",
+    "build-final/index.html": "afc14265d0449181e1cff3d3a5e46803fb6ac5c702e4cee5f197749b2d8ab56b",
+    "ui-checks.json": "64515f523c636a6fc754a4029758a218df1c9ae0f1d612c6b2fc7b4c773097e4",
+    "reconciliation.json": "5981355a2b595a6c2fd4b3ccc7160183193537a4ee666079be3b7aada94378d6",
+    "reconciliation.log": "5981355a2b595a6c2fd4b3ccc7160183193537a4ee666079be3b7aada94378d6",
+    "cleanup.json": "8776c4f4f2caf7e0d244c9850d7daeb0675b8d1f3cda7e48b3d2ef96d405549f",
+    "stop-final.log": "09df1708c68b363681afa10ee80189c358364104415487655e4aa8f73f9d1d30",
+    "final-browser-errors.json": "bc86e4d4164a18aa9d18901b1ba16f26fb2b5e540013f821f40a8adb60a15312",
+    "pairing-public.json": "a0641a9f3ce910988d3989249e9cac8f6c2a37129fa41f20e55b7ae745a44530",
+    "reference-configuration.json": "ac7f00899213af1678bbe0400a5ee02b943626c80a1e93354070c3cf0c5a470f",
+    "trading-reference-qualified.json": "f15c4e2cb7f30b5e94f11e4396599003dcc15f5f3b638a59d5da0fca798850f9",
+    "prepare.py": "f3bb4cb5ea76bdb6f6ef58e78117f2f24bfc2409f969fbd58236fdb609bddf5e",
+    "serve.py": "34afdbc03d5f7205a53d4216ff57d1c9f728cd0f85fbdf6c35311d28bf1849ea",
+    "manage.py": "e0d36e7a68346d0b522f3833d4ff5723d801de78dfa573c7f1db2dae2097007c",
+    "seed_references.py": "48968782b71d90171270d5b2461f2474f547fa621e1fb79c42b9e463103a08a4",
+    "reconcile.py": "2d5233cf01a65d57f0d80780d30d694b4c985f6b60a14619c61ffe5630b34f51",
+    "run_tests.py": "d4c48ac04357d9c743f6713a513e54b53f62dd1ed431d110b552cc8eb87491ed",
+    "full_network_guard.py": "e82c903a53df06804e649010073207e50d098dbb94426b1f02424120b7116084",
+    "update_register.py": "bb94cb15a79510c89161270393166bd8c04352316c42aa13e0679af632e24265",
+    "B01-rfq-terms.dom.txt": "9c38fb8c46fe181184e7486d972e8cf52550947dc8a8cc802869fec13d180684",
+    "screenshots/B01-rfq-terms.jpg": "527de45de97700aca7dedaa512b657bf19a948b12326f3e02fa7108efa4a24f7",
+    "B02-requester-priced.dom.txt": "334553865263d947d2b4f377a7ef61765e6d1e3dc2f1da89ac0caecee60b8fdf",
+    "screenshots/B02-requester-priced.jpg": "5bc317ff329337f07ab94980f7f83331661184e27c9d8f70f1e96076ec404425",
+    "B03-shared-preview.dom.txt": "4a80ebaca332322f41ac59c0e8bb8e2f1add3cff38275e92c2df99eae496991c",
+    "screenshots/B03-shared-preview.jpg": "f8949929baf720c9a2a73e7d00716f040001aa844bc1f10da61505968f2475a6",
+    "B04-bank-unavailable.dom.txt": "02d23d6c3ea79c43b7711cfa8955ee3513ac9b25c62e2932f0e70894866803ca",
+    "screenshots/B04-bank-unavailable.jpg": "f4bdc90e7eb317309dab6cf2e2f3b22ef25ea44e3d04542a11c197ea09072dcb",
+    "B05-delivery-recovered.dom.txt": "311470bf128ee4bead5e9688fcd34c39a12f0692c6072fe3385d64cd23b309b1",
+    "screenshots/B05-delivery-recovered.jpg": "662aaea6e9976e6357bf1b41b65547e465725ef77e8de93b0baf3195987c41b8",
+    "B06-bank-received.dom.txt": "50c3b69226dcb2156f5a3bd73134c727e9dde02dc8790c9c8be1e0f8075555e7",
+    "screenshots/B06-bank-received.jpg": "61cdd206b6bea8290310d61f77d5db09c234038c21b2b40be0b71e959b06ef61",
+    "B07-bank-private-calculation.dom.txt": "87a97b52a91c4468d49e05dc4b519f3c7f17a948f9eac753328df9a694658cf6",
+    "screenshots/B07-bank-private-calculation.jpg": "366cc73c75eb134e2b4f61b361bfe7ba7042c3ac49b38c0d263f15aec0478b00",
+    "B08-bank-calculation-remains-private.dom.txt": "e7a6a597694095143798a30fcb41dbb0e4ef6930984ad2a6e444fccf25e140c8",
+    "screenshots/B08-bank-calculation-remains-private.jpg": "5b6a6196fa2d38b57479cf9510631de1a7ebf98e7e21d43b2da2b5567fbaaa21",
+    "B09-draft-refresh-defect.dom.txt": "d6a659908df8bec1df1c5b54884ecf9ee3e7fc5f8d7663cc6349990e1f6167b9",
+    "screenshots/B09-draft-refresh-defect.jpg": "92eee0535b801e25aebec5f8eb9a6b9c2e8c093fe6238ab3728fc8edf0aaac79",
+    "B10-bank-validation-corrected.dom.txt": "348ae066c626d16e733f256db1e430ebe9cebd35d4d7deea985d9d6ccdde5723",
+    "screenshots/B10-bank-validation-corrected.jpg": "f293931ae2a62ccae544a9bccd6e0430030758e44060c94fa110d1d0e5abd260",
+    "B11-first-network-quote-selected.dom.txt": "2f13bf9529b377e20dcfd22571ff103655fdc488abbea8947f998d58e3f87949",
+    "screenshots/B11-first-network-quote-selected.jpg": "1c50c27d7e772194f5c5f90700098b6ff7f00c85fe7e13fdae62b1058d8a85e4",
+    "B12-second-publication.dom.txt": "9cbeea69006224c056de3d2eba22449715b044bf625cf87a1c0b911fca5be3ab",
+    "screenshots/B12-second-publication.jpg": "39fb1b0be15f1d5eec6e2bf9cb631248dc403410161b7cdfc750d8603f95bca7",
+    "B13-revision-revokes-selection.dom.txt": "9b6a0d427a8854420779cc2822a4ee297f8da30aee2397ea037946d9ea6c55c1",
+    "screenshots/B13-revision-revokes-selection.jpg": "dc5b74b46aefb455496908945593aeab4520a6fef5794484d8a2c1ac8a6ac35c",
+    "B14-confirmation-required.dom.txt": "fe2757a51c1892ed19ed5b679a08039d4a44310ddf7e20721e60f6050ce404c2",
+    "screenshots/B14-confirmation-required.jpg": "7f1d5997c1325d354d2ce7dd254790a3a3340aa8a9912ba067b02ad64bdc25b4",
+    "B15-treatment-confirmed.dom.txt": "bddf127b4255b5d5af6bc77363079d711d0696cba41204c922ccdae5be60a105",
+    "screenshots/B15-treatment-confirmed.jpg": "357beb7e2f546d4cd745a5784738acf6237fe41e39e4ba1160473524f1d60864",
+    "B16-saved-product-booking-blocked.dom.txt": "77e2fc02e2aae628e7e8f00c751ce9ddebf2bd4bb3bd632875a7a60bc1e137c1",
+    "screenshots/B16-saved-product-booking-blocked.jpg": "88f0bba25ff2ac221611aacf6ceaac724a8aa07ea82dd1f729a5419b41a3333a",
+    "B17-bank-booking-review.dom.txt": "4df2db1bd873fa9059b32305036b122e36f9d9516af06898cd0147ff5f2bce24",
+    "screenshots/B17-bank-booking-review.jpg": "f23b591d1a55516eb3b403ecebac127db2ec549a756192e3fbabde4173511919",
+    "B18-bank-booked.dom.txt": "18a732dc2d4e5bea1ada9d3f35377fb04e1d007c2d89147323ccf30412b3c85b",
+    "screenshots/B18-bank-booked.jpg": "e7b3d385d384a16e38e87f4e9b76949b6b369d22f74f215502087636e8834b0e",
+    "B19-flux-dates-corrected.dom.txt": "db8ad022fbaf402ff98052eb4bb33ee6851ae5abcb20274c615580841b606fa8",
+    "screenshots/B19-flux-dates-corrected.jpg": "918f50e84716ca07a90b81314311a11da879d1214e66be452cb5a826f934a07a",
+    "B20-requester-booking-review.dom.txt": "50ec66565a49cbab525a5be90b0e7e0a9863ebc56cda1240f72b4070569e0bb1",
+    "screenshots/B20-requester-booking-review.jpg": "09f1c2a1a02ab9d18989e30b24854fab06e287f69b756150c73d73083713f4ce",
+    "B21-requester-booked.dom.txt": "7566c1d7f1ef4d8d62a7304044595639ea4f1e45a77aa89fd0107bdb7a3ddbb5",
+    "screenshots/B21-requester-booked.jpg": "6a7680eda9fd032b4a532c04aa3daf313f7388b1877fef5c29513ebfae4e6316",
+    "B22-bank-booking-book.dom.txt": "6243efa5b3f968fddb9730fabf4f14d7b3587f4a92454c325a4728f8cb69479a",
+    "screenshots/B22-bank-booking-book.jpg": "1ca1c1c13f95c984b5c164f45eecd3f16752754f72ec8521b954d555fcaaaa2b",
+    "B23-bank-note-journal.dom.txt": "77d151506d1c6e7ff83b883a402e7beb15630cc1df8ae252432ceade07c5380d",
+    "screenshots/B23-bank-note-journal.jpg": "fb745e0311c4eaaaa233e92a98d4a31823017c9dc0fa5f3a41dd064e59f93a9c",
+    "B24-bank-round-closed.dom.txt": "6b3ed1a31d45b93b6fd3de8e6fa9883aee650624438b6a64a9db00b859b983cf",
+    "screenshots/B24-bank-round-closed.jpg": "fb54b83471dbc4dcd4c2edfa8ae99bd0d809bf224b421ea645001c9ec3243573",
+    "B25-requester-booking-reloaded.dom.txt": "7566c1d7f1ef4d8d62a7304044595639ea4f1e45a77aa89fd0107bdb7a3ddbb5",
+    "screenshots/B25-requester-booking-reloaded.jpg": "6b36d2be240233090f09ef38276e16303b088f50f00a2c5fad276cbd525fdca4",
+    "B26-bank-keyboard-close.dom.txt": "638723c0f813a1d75031dff8806d3778c7277b0b4c417c781c8da4d1b91d092a",
+    "screenshots/B26-bank-keyboard-close.jpg": "c3c01d9a54b519f5ade746e4ae30bae194bfc4031329ea868a374a740b23a047",
+    "B27-bank-keyboard-corrected.dom.txt": "d2c7d381593d785329033651e4b3d5267389ab1c7bacb76fbc0ac593fda37fe6",
+    "screenshots/B27-bank-keyboard-corrected.jpg": "e0984498478038cc198f5d9c6f3f182d973ae3718eb0a0f94738952ac5b8cbff",
+    "B28-final-requester-book.dom.txt": "7566c1d7f1ef4d8d62a7304044595639ea4f1e45a77aa89fd0107bdb7a3ddbb5",
+    "screenshots/B28-final-requester-book.jpg": "6b36d2be240233090f09ef38276e16303b088f50f00a2c5fad276cbd525fdca4",
+    "B29-final-bank-book.dom.txt": "6243efa5b3f968fddb9730fabf4f14d7b3587f4a92454c325a4728f8cb69479a",
+    "screenshots/B29-final-bank-book.jpg": "1e6961c3952b7fac652ed6cafe277524a692350f37a9aceb2118c3a017fa5a46"
+  }
+}

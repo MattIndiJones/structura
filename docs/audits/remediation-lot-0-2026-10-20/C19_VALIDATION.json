@@ -1,0 +1,223 @@
+{
+  "workstream": "C19",
+  "validated_on": "2026-10-21",
+  "global_closure": false,
+  "production_qualified": false,
+  "backend": {
+    "unique_passed": 444,
+    "files": 20,
+    "new_c19_cases": 34,
+    "preexisting_failures_reproduced": 104,
+    "batches": [
+      {
+        "junit": "initial.xml",
+        "tests": 45,
+        "failures": 0
+      },
+      {
+        "junit": "archive-final.xml",
+        "tests": 64,
+        "failures": 1
+      },
+      {
+        "junit": "dependencies.xml",
+        "tests": 262,
+        "failures": 99
+      },
+      {
+        "junit": "final-targeted.xml",
+        "tests": 72,
+        "failures": 0
+      },
+      {
+        "junit": "consumers.xml",
+        "tests": 122,
+        "failures": 10
+      },
+      {
+        "junit": "release.xml",
+        "tests": 66,
+        "failures": 0
+      },
+      {
+        "junit": "variants.xml",
+        "tests": 97,
+        "failures": 0
+      },
+      {
+        "junit": "upgrade.xml",
+        "tests": 1,
+        "failures": 0
+      },
+      {
+        "junit": "documents-final.xml",
+        "tests": 3,
+        "failures": 0
+      },
+      {
+        "junit": "source-deletion-final.xml",
+        "tests": 1,
+        "failures": 0
+      },
+      {
+        "junit": "claims-final.xml",
+        "tests": 21,
+        "failures": 0
+      }
+    ]
+  },
+  "frontend": {
+    "passed": 55,
+    "files": 4,
+    "new_c19_cases": 5,
+    "build": "PASS, temporary output outside frontend/dist"
+  },
+  "decisions": {
+    "D10": "Explicit manual freeze before export, confirmed by Philippe",
+    "D11": "Qualified replay only with matching engine/conventions identity; distinct probe otherwise, no archive overwrite, confirmed by Philippe"
+  },
+  "regression_baseline": {
+    "baseline_path": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c19-baseline-ydfbu2_y",
+    "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+    "failure_messages_match": true,
+    "known_failures": {
+      "backend.tests.test_rfq::test_rfq_provider_contacts_are_admin_managed_and_offered_on_rfq": "pydantic_core._pydantic_core.ValidationError: 1 validation error for RfqProviderCreate",
+      "backend.tests.test_rfq::test_rfq_contract_change_creates_a_product_terms_version": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_deleted_rfq_and_quote_ids_are_never_reused_by_sqlite": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_multi_underlying_repricing_cannot_replace_the_matrix_with_an_incomplete_one": "AssertionError: assert 403 == 422",
+      "backend.tests.test_rfq::test_quoted_at_round_trips_without_timezone_shift": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_quotes_sorted_by_response_time_not_add_order": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_last_look_creates_nested_child_quote": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_last_look_cannot_be_reverted_once_answered": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_selecting_an_unpriced_quote_is_rejected": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_selecting_an_expired_quote_is_rejected": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_selecting_a_quote_from_another_rfq_is_rejected": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_deleting_the_selected_quote_clears_the_selection": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_changing_the_selected_quote_does_not_reuse_the_previous_reason": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_deleting_a_quote_cascades_to_its_last_look_child": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_booking_from_an_rfq_links_deal_and_closes_the_rfq": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_multi_underlying_rfq_reaches_the_deal_without_losing_market_inputs": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_booking_never_reuses_a_deal_id_retained_by_the_audit_trail": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_booking_uses_the_rfq_commercial_and_legal_context_as_authority[Phoenix-None]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_booking_uses_the_rfq_commercial_and_legal_context_as_authority[Autocall-Autocall]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_history_reports_edge_alongside_the_raw_spread": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_booking_rejects_an_unknown_rfq_id": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_booking_rejects_another_users_rfq": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_status_follows_the_tender_from_draft_to_retenue": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_deselecting_a_quote_takes_the_rfq_back_to_cotee": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_deleting_the_selected_quote_takes_the_rfq_back_too": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_clearing_a_price_takes_the_rfq_back_to_envoyee": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_sans_suite_is_terminal_until_reopened": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_a_booked_rfq_never_falls_back": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_status_cannot_be_posed_by_hand_beyond_sans_suite": "AssertionError: assert 403 == 422",
+      "backend.tests.test_rfq::test_reference_numbering_survives_a_deletion": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_deleting_an_rfq_a_deal_was_booked_from_is_refused": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_an_rfq_without_a_booked_deal_stays_deletable": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_quote_row_carries_the_resolved_counterparty": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_an_answered_last_look_supersedes_its_parent": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_an_unanswered_last_look_supersedes_nothing": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_history_flags_the_winner_only_once_the_deal_is_booked": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_booking_from_an_rfq_without_a_retained_quote_is_refused": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_booking_freezes_the_competitive_picture_on_the_deal": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_booking_freezes_selection_reason_and_every_final_response": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_provenance_keeps_only_final_quotes_as_competition": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_a_deal_booked_outside_any_tender_has_no_provenance": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_an_rfq_cannot_be_booked_twice": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_a_booked_rfq_points_at_its_deal": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_observations_are_derived_without_any_pricing": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_the_contractual_calendar_wins_over_the_simulation_grid": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_an_unresolvable_script_is_refused_even_with_client_times": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_maturity_lands_on_the_deals_own_maturity_date": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_a_coupon_calendar_shorter_than_the_note_keeps_the_notes_maturity": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_a_deal_with_no_observation_at_all_is_refused": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_a_broken_calendar_is_not_rescued_by_pricing_times": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_the_competitive_record_is_frozen_once_the_tender_traded[d\\xe9s\\xe9lectionner la gagnante-<lambda>]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_the_competitive_record_is_frozen_once_the_tender_traded[r\\xe9\\xe9crire le prix de la gagnante-<lambda>]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_the_competitive_record_is_frozen_once_the_tender_traded[supprimer la gagnante-<lambda>]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_the_competitive_record_is_frozen_once_the_tender_traded[inverser le sens de l'AO-<lambda>]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_the_competitive_record_is_frozen_once_the_tender_traded[reclasser sans suite-<lambda>]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_the_competitive_record_is_frozen_once_the_tender_traded[r\\xe9\\xe9crire le prix mod\\xe8le-<lambda>]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_the_competitive_record_is_frozen_once_the_tender_traded[ajouter un fournisseur apr\\xe8s coup-<lambda>]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_the_winner_survives_every_refused_mutation": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_annotating_a_booked_tender_stays_possible": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_booking_refuses_what_is_not_a_trade[nominal nul-over0-nominal]": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_booking_refuses_what_is_not_a_trade[nominal n\\xe9gatif-over1-nominal]": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_booking_refuses_what_is_not_a_trade[fair value nulle-over2-fair value]": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_booking_refuses_what_is_not_a_trade[fair value n\\xe9gative-over3-fair value]": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_booking_refuses_what_is_not_a_trade[prix trait\\xe9 nul-over4-prix trait\\xe9]": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_booking_refuses_what_is_not_a_trade[contrepartie vide-over5-contrepartie]": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_booking_refuses_what_is_not_a_trade[r\\xe8glement avant maturit\\xe9-over6-r\\xe8glement]": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_booking_accepts_a_forward_start_paid_before_its_strike": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_a_counterparty_outside_the_catalog_stays_accepted": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_quote_prices_are_percentage_points[0.0-nul ou n\\xe9gatif]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_quote_prices_are_percentage_points[-50.0-nul ou n\\xe9gatif]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_quote_prices_are_percentage_points[10000.0-invraisemblable]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_the_same_provider_cannot_be_solicited_twice_on_one_tender": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_a_last_look_that_degrades_the_price_is_refused": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_a_last_look_that_degrades_is_read_the_other_way_on_a_sell": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_a_negative_model_price_is_refused": "AssertionError: assert 403 == 422",
+      "backend.tests.test_rfq::test_booking_refuse_un_autre_produit_sous_le_meme_rfq_id": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_booking_conforme_fige_un_hash_des_termes_rfq": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_termes_contractuels_rfqs_sont_figes_apres_sollicitation": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_last_look_ne_peut_pas_devenir_une_chaine_cachee": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_datetime_avec_offset_est_normalise_en_utc": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_calendrier_post_maturite_est_refuse": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_deux_ans_de_coupons_sur_une_note_a_trois_ans_se_booke": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'",
+      "backend.tests.test_rfq::test_le_pricer_reprend_le_contrat_canonique_du_product_de_la_rfq": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_un_autre_contrat_reste_refuse_au_booking_de_la_rfq[maturite_un_jour_plus_tard-T]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_un_autre_contrat_reste_refuse_au_booking_de_la_rfq[frequence-constats]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_un_autre_contrat_reste_refuse_au_booking_de_la_rfq[fenetre_de_constatation-constats]": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_le_booking_qualifie_une_quote_a_qualifier": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_une_quote_deja_ferme_ne_doit_rien_au_booking": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_une_quote_indicative_se_booke_et_laisse_sa_trace": "fastapi.exceptions.HTTPException: 403: Habilitation RFQ insuffisante pour cette action",
+      "backend.tests.test_rfq::test_le_refus_vaut_aussi_a_la_modification": "AssertionError: assert 403 == 422",
+      "backend.tests.test_uat_generation::test_full_chain_uses_uat_references_and_batch_cleanup_is_isolated": "sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) Version Product canonique valide requise",
+      "backend.tests.test_uat_generation::test_every_reached_observation_carries_its_real_close[CURRENT_ACTIVE-ATHENA]": "AssertionError: pas de S0 : la surveillance des barrières ne peut rien calculer",
+      "backend.tests.test_uat_generation::test_every_reached_observation_carries_its_real_close[ACTIVE_1Y_PENDING-ATHENA]": "AssertionError: pas de S0 : la surveillance des barrières ne peut rien calculer",
+      "backend.tests.test_uat_generation::test_every_reached_observation_carries_its_real_close[ACTIVE_2Y_OFFICIAL-PHOENIX]": "AssertionError: pas de S0 : la surveillance des barrières ne peut rien calculer",
+      "backend.tests.test_uat_generation::test_every_reached_observation_carries_its_real_close[MATURED_PENDING-REVERSE_CONVERTIBLE]": "AssertionError: pas de S0 : la surveillance des barrières ne peut rien calculer",
+      "backend.tests.test_uat_generation::test_every_reached_observation_carries_its_real_close[CALLED-ATHENA]": "AssertionError: pas de S0 : la surveillance des barrières ne peut rien calculer",
+      "backend.tests.test_uat_generation::test_every_reached_observation_carries_its_real_close[MATURED_FINAL-CAPITAL_GUARANTEED]": "AssertionError: pas de S0 : la surveillance des barrières ne peut rien calculer",
+      "backend.tests.test_uat_generation::test_every_reached_observation_carries_its_real_close[MATURED_KI-REVERSE_CONVERTIBLE]": "AssertionError: pas de S0 : la surveillance des barrières ne peut rien calculer",
+      "backend.tests.test_uat_generation::test_complete_mix_covers_all_eight_profiles_and_cleans_terminal_dependencies": "assert None",
+      "backend.tests.test_product_analysis::test_l_apercu_n_appelle_pas_le_modele": "assert 403 == 200",
+      "backend.tests.test_product_analysis::test_l_api_refuse_en_422_pas_en_500[charge0]": "AssertionError: assert 403 == 422",
+      "backend.tests.test_product_analysis::test_l_api_refuse_en_422_pas_en_500[charge1]": "AssertionError: assert 403 == 422",
+      "backend.tests.test_product_analysis::test_l_api_refuse_en_422_pas_en_500[charge2]": "AssertionError: assert 403 == 422",
+      "backend.tests.test_product_analysis::test_les_intentions_exposees_sont_celles_qui_existent": "assert 403 == 200"
+    },
+    "invalid_first_uat_baseline_harness": "baseline-failures.xml UAT outcomes superseded by guarded baseline-uat-final.xml"
+  },
+  "boundaries": [
+    "No production database migration or server launch",
+    "No commit or push",
+    "No historical results backfilled or rewritten",
+    "C20/C21/C22/C25/C26 and production qualification remain open"
+  ],
+  "runtime_artifacts": ".runtime/diagnostic-acceptance/c19-2026-10-21",
+  "preservation": {
+    "initial_files": 1499,
+    "unchanged": 1468,
+    "expected_changed": 31,
+    "original_source_hashes_verified": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "business_db_before": false,
+    "business_db_after": false,
+    "prior_runtime_and_dist_unchanged": true,
+    "scoped_diff_check": "PASS",
+    "unrelated_preexisting_diff_check": "backend/app/api/opportunities.py:625 blank EOF; unchanged in C19"
+  },
+  "external_http": {
+    "disabled_in_targeted_tests": true,
+    "last_guard_report": {
+      "external_http_disabled": true,
+      "blocked_attempts": []
+    }
+  },
+  "operational": {
+    "no_server_started": true,
+    "no_business_database_access": true,
+    "no_commit_or_push": true
+  }
+}

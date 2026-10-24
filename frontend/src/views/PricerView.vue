@@ -2,7 +2,10 @@
   <!-- Resume the in-memory session unless another product was requested. -->
   <Pricer v-if="ready && !loadError" />
   <div v-else-if="loadError" class="flex-1 min-h-0 overflow-auto p-6 space-y-3">
-    <AlertMessage kind="error">{{ loadError }}</AlertMessage><RouterLink to="/rfq/recues" class="btn-secondary">Revenir aux RFQ reçues</RouterLink>
+    <AlertMessage kind="error">{{ loadError }}</AlertMessage>
+    <RouterLink :to="route.query.receivedRfq ? '/rfq/recues' : '/products'" class="btn-secondary">
+      {{ route.query.receivedRfq ? 'Revenir aux RFQ reçues' : 'Revenir à la bibliothèque' }}
+    </RouterLink>
   </div>
   <div v-else class="flex-1 flex items-center justify-center text-slate-500 text-sm">
     Chargement…
@@ -45,6 +48,7 @@ async function charger() {
       }
     } catch (error) { loadError.value = error.message; ready.value = true; return }
   }
+  try {
   await openPricingSession(store, route, async () => {
   const { id, variantId, productId } = route.params
   if (productId) {
@@ -88,6 +92,7 @@ async function charger() {
     store.resetToDefaults()
   }
   })
+  } catch (error) { loadError.value = error.message }
   if (route.query.fromRfq && route.query.tab === 'economics') store.leftTab = 'economics'
   if (route.query.receivedRfq) store.leftTab = 'params'
   ready.value = true
@@ -114,11 +119,10 @@ async function loadProductFromDb(id, requestedCalculationId = null) {
     calculationId: Number.isFinite(parsedCalculationId) ? parsedCalculationId : null,
   })
   if (!loaded) {
-    store.resetToDefaults()
-    if (route.query.receivedRfq) loadError.value = products.error || 'Le Product bancaire ne peut pas être chargé.'
-    return
+    throw new Error(products.error || 'Le Product ne peut pas être chargé. La session précédente est conservée.')
   }
   await store.loadFromProduct(loaded.product, loaded.calculationInput)
+  store.productLoadNotice = loaded.notice || ''
 }
 
 async function loadVariantFromDb(id) {

@@ -10,7 +10,7 @@
         <span class="font-display font-black tracking-tight text-[15px]" style="color: var(--text);">Structura</span>
       </RouterLink>
 
-      <nav class="header-nav flex items-center gap-0.5 overflow-x-auto" aria-label="Navigation principale">
+      <nav v-if="!auth.isPlatformAdmin" class="header-nav flex items-center gap-0.5 overflow-x-auto" aria-label="Navigation principale">
         <RouterLink v-for="item in navItems" :key="item.label" :to="item.to"
           class="nav-link" :class="{ 'nav-link-active': isActive(item) }"
           :aria-current="isActive(item) ? 'page' : null">
@@ -18,10 +18,17 @@
         </RouterLink>
       </nav>
 
+      <nav v-else class="header-nav flex items-center gap-1" aria-label="Administration centrale">
+        <RouterLink to="/platform" class="nav-link" :class="{ 'nav-link-active': route.path === '/platform' }">Administration</RouterLink>
+        <RouterLink v-if="auth.canManageSimulation" to="/agent-workshop" class="nav-link" :class="{ 'nav-link-active': route.path.includes('agent-workshop') }">Simulation avec agents</RouterLink>
+      </nav>
+
       <div class="header-actions ml-auto flex items-center gap-2.5 shrink-0 pl-2">
-        <DemoModeToggle />
-        <span class="text-xs hidden sm:inline" style="color: var(--muted);">{{ auth.user?.username }}</span>
-        <RouterLink v-if="auth.isAdmin" to="/admin" title="Administration" aria-label="Administration" class="admin-gear">⚙️</RouterLink>
+        <button v-if="auth.user?.admin_workbench && auth.user?.development_admin_enabled && auth.user?.platform_url" class="nav-link" @click="openOrganizations">Changer de compte</button>
+        <DemoModeToggle v-if="!auth.isPlatformAdmin" />
+        <ContextSelector />
+        <RouterLink to="/account/security" class="nav-link">Mon compte</RouterLink>
+        <RouterLink v-if="auth.canAdministerOrganization" to="/admin" title="Administration" aria-label="Administration" class="admin-gear">⚙️</RouterLink>
         <button class="btn-ghost btn-sm" @click="logout">Déconnexion</button>
       </div>
     </div>
@@ -33,11 +40,22 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import { usePricingStore } from '../stores/pricing.js'
 import DemoModeToggle from './DemoModeToggle.vue'
+import ContextSelector from './ContextSelector.vue'
+import { confirmer } from '../composables/useConfirm.js'
+import { hasContextChanges, prepareContextReload } from '../composables/useContextChanges.js'
+import { installationUrl } from '../utils/session.js'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const pricing = usePricingStore()
+
+async function openOrganizations() {
+  if ((pricing.variantDirty || pricing.hasUnsavedSession() || hasContextChanges()) && !await confirmer({titre:'Changer de compte sans enregistrer ?', message:'Enregistrez vos saisies avant de quitter cet écran, ou abandonnez-les.', confirmer:'Abandonner et changer', danger:true})) return
+  const target = installationUrl({url: auth.user.platform_url})
+  prepareContextReload()
+  window.location.assign(target + '/#/login')
+}
 
 // Regroupement par domaine métier — un lien par grande zone fonctionnelle,
 // actif dès qu'on est sur une de ses sous-pages (préfixe de route).
@@ -73,8 +91,10 @@ function isActive(item) {
  * Un rechargement la rend inconditionnelle — et la déconnexion n'est pas un
  * chemin où la milliseconde compte.
  */
-function logout() {
-  auth.logout()
+async function logout() {
+  if ((pricing.variantDirty || pricing.hasUnsavedSession() || hasContextChanges()) && !await confirmer({ titre:'Se déconnecter sans enregistrer ?', message:'Les saisies modifiées seront abandonnées.', confirmer:'Se déconnecter', danger:true })) return
+  prepareContextReload()
+  await auth.logout()
   // Le jeton est parti ; la déclinaison éventuellement ouverte aussi, sinon
   // l'avertissement de fermeture du navigateur s'interposerait sur une sortie
   // délibérée.

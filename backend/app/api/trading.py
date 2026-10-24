@@ -14,12 +14,23 @@ from ..db.database import get_session
 from ..db.models import User, Entity, Counterparty, Deal
 from ..db.trading_models import TradingRelationship, TradingExecution
 from ..core.audit import record_audit_event
+from ..core.audit import commit_rejection
+from ..core.access import has_capability
 from ..runtime import business_today
+from ..services.business_access import can_read_deal
 
 router = APIRouter(prefix="/api/trading", tags=["Trading relationships"])
 Current = Annotated[User, Depends(get_current_user)]
 Database = Annotated[Session, Depends(get_session)]
 _booking_lock = threading.RLock()
+
+
+def require_trading_permission(current, session, capability, action, object_id=None):
+    if not has_capability(current, capability):
+        commit_rejection(session, action=action, object_type="TRADING", object_id=object_id,
+                         actor_user_id=current.id, reason="Habilitation métier insuffisante.",
+                         metadata={"capability": capability})
+        raise HTTPException(403, "Votre profil ne permet pas cette action.")
 
 
 class RelationshipTerms(BaseModel):
@@ -85,7 +96,8 @@ def check_references(body, current, session):
             raise HTTPException(422, "Accord OTC ou CSA requis manquant.")
         master = session.get(CCRMasterAgreement, body.master_agreement_id)
         terms = json.loads(master.payload_json)
-        if terms.get("status") != "ACTIVE" or date.fromisoformat(terms["effective_date"]) > body.effective_date:
+        if (terms.get("status") != "ACTIVE" or date.fromisoformat(terms["effective_date"]) > body.effective_date
+                or (terms.get("expiry_date") and date.fromisoformat(terms["expiry_date"]) < body.effective_date)):
             raise HTTPException(422, "Le master agreement n'est pas actif à la date requise.")
         if body.csa_id:
             csa = json.loads(session.get(CCRCSAAgreement, body.csa_id).payload_json)
@@ -95,6 +107,7 @@ def check_references(body, current, session):
 
 @router.post("/relationships", status_code=201)
 def create_relationship(body: RelationshipTerms, current: Current, session: Database):
+    require_trading_permission(current, session, "trading.relationships.manage", "TRADING_RELATIONSHIP_CREATE_REJECTED")
     check_references(body, current, session)
     if session.exec(select(TradingRelationship).where(
             TradingRelationship.entity_id == entity_id(current),
@@ -115,6 +128,7 @@ def update_relationship(row_id: int, body: RelationshipUpdate, current: Current,
     row = session.get(TradingRelationship, row_id)
     if not row or row.entity_id != entity_id(current):
         raise HTTPException(404, "Relation introuvable.")
+    require_trading_permission(current, session, "trading.relationships.manage", "TRADING_RELATIONSHIP_UPDATE_REJECTED", row_id)
     if row.version != body.expected_version or body.counterparty_id != row.counterparty_id or body.reference != row.reference:
         raise HTTPException(409, "Version ou identité de relation incohérente.")
     check_references(body, current, session)
@@ -143,7 +157,8 @@ def execution(row, session):
     d = session.get(Deal, row.deal_id)
     return {**row.model_dump(mode="json"), "nominal": d.nominal, "currency": d.devise,
         "price_traded": d.price_traded, "counterparty": d.contrepartie, "deal_reference": d.reference,
-        "value_date": d.value_date, "status": d.status, "contract_hash": contract_identity(d)}
+        "value_date": d.value_date, "status": d.status, "settlement_date":d.settlement_date,
+        "payment_date":d.payment_date, "contract_hash": contract_identity(d)}
 
 
 def contract_identity(deal):
@@ -158,7 +173,8 @@ def contract_identity(deal):
 @router.get("/executions")
 def executions(current: Current, session: Database):
     return [execution(r, session) for r in session.exec(select(TradingExecution).where(
-        TradingExecution.entity_id == entity_id(current))).all()]
+        TradingExecution.entity_id == entity_id(current))).all()
+        if can_read_deal(session.get(Deal, r.deal_id), current, session)]
 
 
 @router.post("/book-note", status_code=201)
@@ -248,13 +264,18 @@ def settle(row_id: int, body: SettlementProof, current: Current, session: Databa
     row = session.get(TradingExecution, row_id)
     if not row or row.entity_id != entity_id(current):
         raise HTTPException(404, "Exécution introuvable.")
+    require_trading_permission(current, session, "trading.settle", "NOTE_SETTLEMENT_REJECTED", row_id)
     d = session.get(Deal, row.deal_id)
+    if not can_read_deal(d, current, session):
+        raise HTTPException(404, "Exécution introuvable.")
     if date.fromisoformat(d.value_date) > business_today():
         raise HTTPException(422, "La date de valeur n'est pas atteinte.")
     if row.settlement_status == "SETTLED" and row.settlement_reference != body.reference:
         raise HTTPException(409, "Cette exécution possède déjà une preuve de règlement.")
     if row.settlement_status != "SETTLED":
         row.settlement_status = "SETTLED"; row.settlement_reference = body.reference
+        from ..runtime import business_now
+        row.settled_at = business_now()
         session.add(row)
         record_audit_event(session, action="NOTE_SETTLEMENT_RECORDED", object_type="DEAL", object_id=d.id,
             actor_user_id=current.id, after={"reference": body.reference}, result="SUCCESS")

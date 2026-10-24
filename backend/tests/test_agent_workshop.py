@@ -4,6 +4,42 @@ from datetime import date, timedelta
 import json
 from types import SimpleNamespace
 import pytest
+
+
+def test_registration_uses_the_actor_tab_session_not_a_shared_old_identity(tmp_path, monkeypatch):
+    from backend.app.services.agent_workshop.tools import Tools
+    state = Store(tmp_path / "campaigns").create(CampaignConfig(months=1), 1)
+    state["actors"]["hector"].update(url="http://127.0.0.1:9999",registered=True)
+    directory = tmp_path / "instances" / "hector"
+    directory.mkdir(parents=True)
+    (directory / "agent_credentials.json").write_text(json.dumps({"username":"agent_hector","password":"fixture-password","email":"hector@recette.invalid"}))
+    class Page:
+        def goto(self,*args): pass
+        def locator(self,*args): return self
+        def fill(self,*args): pass
+        def get_by_role(self,*args,**kwargs): return self
+        def click(self): pass
+        def expect_event(self, *args): return self
+        def expect_response(self, *args): return self
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        @property
+        def value(self): return SimpleNamespace(status=200)
+        def wait_for_function(self,*args): pass
+        def evaluate(self, expression):
+            return "actor-tab-token" if "sessionStorage" in expression else "stale-other-actor-token"
+    tools = Tools(tmp_path,state,None)
+    monkeypatch.setattr(tools,"page",lambda key:Page())
+    monkeypatch.setattr(tools,"refresh_native_facts",lambda key:None)
+    monkeypatch.setattr(tools,"screenshot",lambda key:"fixture.png")
+    def authenticated(key,method,path,body=None):
+        assert tools.tokens[key] == "actor-tab-token"
+        return {"id":4,"role":"user","username":"agent_hector","entity_id":2}
+    monkeypatch.setattr(tools,"api",authenticated)
+    try:
+        assert tools.register("hector")["username"] == "agent_hector"
+    finally:
+        tools.close()
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
@@ -24,27 +60,46 @@ from backend.app.runtime import business_today, data_path
 
 @pytest.fixture
 def client():
+    from sqlalchemy import event
+    from backend.app.api import auth
+    from backend.app.db.product_migrations import migrate_product_links
     engine=create_engine('sqlite://',connect_args={'check_same_thread':False},poolclass=StaticPool)
+    @event.listens_for(engine, "connect")
+    def integrity(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
     SQLModel.metadata.create_all(engine)
-    with Session(engine) as s:
-        s.add(Entity(id=1,name='Banque'));s.add(Entity(id=2,name='Autre'))
-        s.add(User(id=1,username='agent',email='a@example.invalid',password_hash='unused',entity_id=1,role='user'))
-        s.add(Counterparty(id=1,name='Client'));s.commit()
-    identity=SimpleNamespace(id=1,entity_id=1,role='user')
-    app=FastAPI();app.include_router(trading.router);app.include_router(pricing.router)
-    def session():
-        with Session(engine) as s: yield s
-    app.dependency_overrides[get_session]=session
-    app.dependency_overrides[get_current_user]=lambda:identity
-    with TestClient(app) as c: yield c,identity,engine
-    engine.dispose()
+    with Session(engine) as session:
+        migrate_product_links(session.connection())
+        session.add_all([Entity(id=1,name='Banque'), Entity(id=2,name='Autre')])
+        session.flush()
+        roles = [('front', 'user', 1), ('admin', 'organization_admin', 1),
+                 ('ops', 'ops_maker', 1), ('foreign', 'user', 2)]
+        headers = {}
+        for uid, (name, role, entity) in enumerate(roles, start=1):
+            user=User(id=uid,username=name,email=name+'@example.test',password_hash='test-only',entity_id=entity,role=role)
+            session.add(user)
+            headers[name]={'Authorization': 'Bearer '+auth._make_token(uid,role,entity,auth_version=user.auth_version)}
+        session.add(Counterparty(id=1,name='Client',active=True))
+        session.commit()
+    app=FastAPI()
+    for router in (auth.router, trading.router, pricing.router):
+        app.include_router(router)
+    def sessions():
+        with Session(engine) as session:
+            yield session
+    app.dependency_overrides[get_session]=sessions
+    try:
+        with TestClient(app, headers=headers['front']) as browser:
+            yield browser,headers,engine
+    finally:
+        engine.dispose()
 
 
-def relationship(c,**over):
+def relationship(c,headers,**over):
     data={'counterparty_id':1,'reference':'REL-COMMON','status':'ACTIVE','effective_date':date.today().isoformat(),
         'note_distribution_allowed':True,'documentation_reference':'Programme fictif','gross_notional_limit':10000000}
     data.update(over)
-    response=c.post('/api/trading/relationships',json=data)
+    response=c.post('/api/trading/relationships',json=data,headers=headers['admin'])
     assert response.status_code==201,response.text
     return response.json()
 
@@ -59,7 +114,7 @@ def priced_booking(c, relation, side='SELL',issuer='Banque',reference='TRADE-000
     priced=c.post('/api/price',json=payload);assert priced.status_code==200,priced.text
     result=priced.json()
     return {'trade_reference':reference,'relationship_id':relation['id'],'issuer':issuer,'our_side':side,'instrument_reference':'NOTE-COMMON',
-        'deal':{'sens':'achat' if side=='SELL' else 'vente','contrepartie':'Client','devise':'EUR','nominal':1000000,
+        'deal':{'sens':'achat' if side=='SELL' else 'vente','contrepartie':'Client','counterparty_id':1,'devise':'EUR','nominal':1000000,
         'product_type':'Coupon note','fair_value':result['price']*100,'price_traded':105,'trade_date':str(start),
         **{k:payload[k] for k in ['strike_date','value_date','maturity_date','payment_date','T']},
         'underlyings':[{'name':'AAA','ticker':'AAA','ccy':'EUR','s0_abs':100}], 'script_snapshot':script,
@@ -67,7 +122,7 @@ def priced_booking(c, relation, side='SELL',issuer='Banque',reference='TRADE-000
 
 
 def test_real_pricing_booking_idempotence_and_contract_identity(client):
-    c,_,engine=client;r=relationship(c);payload=priced_booking(c,r)
+    c,headers,engine=client;r=relationship(c,headers);payload=priced_booking(c,r)
     a=c.post('/api/trading/book-note',json=payload);assert a.status_code==201,a.text
     b=c.post('/api/trading/book-note',json=payload);assert b.status_code==201,b.text
     assert a.json()['deal_id']==b.json()['deal_id']
@@ -76,29 +131,27 @@ def test_real_pricing_booking_idempotence_and_contract_identity(client):
     with Session(engine) as s: assert len(s.exec(select(Deal)).all())==1
     changed=priced_booking(c,r,reference='TRADE-0002',coupon=.09)
     assert c.post('/api/trading/book-note',json=changed).status_code==409
-    proof=c.post(f"/api/trading/executions/{a.json()['id']}/settle",json={'reference':'DVP-TEST'})
+    proof=c.post(f"/api/trading/executions/{a.json()['id']}/settle",json={'reference':'DVP-TEST'},headers=headers['ops'])
     assert proof.status_code==200 and proof.json()['settlement_status']=='SETTLED'
 
 
 def test_incomplete_contract_and_external_resale_are_refused(client):
-    c,_,_=client;r=relationship(c,status='PENDING',documentation_reference='')
+    c,headers,_=client;r=relationship(c,headers,status='PENDING',documentation_reference='')
     response=c.post('/api/trading/book-note',json=priced_booking(c,r));assert response.status_code==422
     edited={k:v for k,v in r.items() if k not in {'id','version'}}
     edited.update(status='ACTIVE',documentation_reference='Programme fictif',expected_version=1)
-    assert c.put('/api/trading/relationships/'+str(r['id']),json=edited).status_code==200
+    assert c.put('/api/trading/relationships/'+str(r['id']),json=edited,headers=headers['admin']).status_code==200
     response=c.post('/api/trading/book-note',json=priced_booking(c,r,issuer='Banque externe'))
     assert response.status_code==422 and 'insuffisante' in response.text
 
 
 def test_scope_version_and_otc_without_master(client):
-    c,identity,_=client;r=relationship(c)
-    identity.entity_id=2
-    assert c.get('/api/trading/relationships').json()==[]
-    identity.entity_id=1
+    c,headers,_=client;r=relationship(c,headers)
+    assert c.get('/api/trading/relationships',headers=headers['foreign']).json()==[]
     data={k:v for k,v in r.items() if k not in {'id','version'}};data['expected_version']=2
-    assert c.put('/api/trading/relationships/'+str(r['id']),json=data).status_code==409
+    assert c.put('/api/trading/relationships/'+str(r['id']),json=data,headers=headers['admin']).status_code==409
     data.pop('expected_version');data.update(reference='REL-OTC',otc_allowed=True,csa_required=True)
-    assert c.post('/api/trading/relationships',json=data).status_code==422
+    assert c.post('/api/trading/relationships',json=data,headers=headers['admin']).status_code==422
 
 
 def test_store_and_private_agent_observations(tmp_path):
@@ -122,7 +175,7 @@ def test_synthetic_history_cannot_look_ahead(tmp_path,monkeypatch):
 
 
 def test_note_rejects_otc_netting_and_changed_issuer_or_documentation(client):
-    c,_,_=client;r=relationship(c)
+    c,headers,_=client;r=relationship(c,headers)
     payload=priced_booking(c,r)
     payload['deal']['ccr_netting_set_id']=123
     assert c.post('/api/trading/book-note',json=payload).status_code==422
@@ -167,18 +220,22 @@ def test_lease_and_published_snapshot_are_independent(tmp_path,monkeypatch):
 
 
 def test_official_user_fixing_survives_missing_provider(monkeypatch):
-    event=SimpleNamespace(current_fixing_version_id=12,fixing_status=FixingStatus.VALIDATED.value,
+    event=SimpleNamespace(id=34,current_fixing_version_id=12,fixing_status=FixingStatus.VALIDATED.value,
         spots_json='{"AAA":100}',data_category=DataCategory.FIXING_OFFICIAL.value)
-    version=SimpleNamespace(capture_actor_type='USER')
-    session=SimpleNamespace(get=lambda model,key:version)
+    version=SimpleNamespace(id=12,status=FixingStatus.VALIDATED.value,capture_actor_type='USER')
+    audit=[]
+    session=SimpleNamespace(get=lambda model,key:version,add=audit.append)
     monkeypatch.setattr(deals_api,'_auto_yahoo_event_values',lambda *args:({}, {}, [{'code':'MISSING'}],False))
     monkeypatch.setattr(deals_api,'_auto_yahoo_exception',lambda *args,**kw:pytest.fail('An official fixing must not reopen'))
     assert deals_api._auto_validate_yahoo_event(SimpleNamespace(),event,[],{},session,1)==(False,None)
     assert event.fixing_status==FixingStatus.VALIDATED.value
+    assert event.current_fixing_version_id==12 and version.status==FixingStatus.VALIDATED.value
+    assert len(audit)==1 and audit[0].action=='OFFICIAL_FIXING_SOURCE_UNAVAILABLE'
 
 
 def test_manual_maturity_uses_contract_date_not_rounded_time(monkeypatch):
-    event=SimpleNamespace(id=1,event_date='2026-04-08',t_years=.4983,fixing_status=FixingStatus.VALIDATED.value,data_category=DataCategory.FIXING_OFFICIAL.value)
+    from backend.app.db.models import DealEvent
+    event=DealEvent(id=1,deal_id=1,event_date='2026-04-08',t_years=.4983,fixing_status=FixingStatus.VALIDATED.value,data_category=DataCategory.FIXING_OFFICIAL.value)
     monkeypatch.setattr(deals_api,'business_today',lambda:date(2026,4,8))
     monkeypatch.setattr(deals_api,'_get_events',lambda *args:[event])
     monkeypatch.setattr(deals_api,'replay_official_fixings',lambda *args:({'outcome':'final'},[]))
@@ -187,7 +244,7 @@ def test_manual_maturity_uses_contract_date_not_rounded_time(monkeypatch):
 
 
 def test_pending_booking_choices_do_not_repeat_the_completed_buy(tmp_path):
-    state=Store(tmp_path).create(CampaignConfig(months=1),1)
+    state=Store(tmp_path).create(CampaignConfig(months=1,native_rfq=False),1)
     state['cases']['CASE-001']={'id':'CASE-001','month':0,'rfq_sent':True,'declines':[]}
     state['quotes']=[{'id':'q1','bank':'bnp','case_id':'CASE-001'}]
     state['accepted']['CASE-001']='q1';state['client_offers']['CASE-001']={'quote_id':'q1'};state['client_acceptances']=['CASE-001']
@@ -241,7 +298,7 @@ def test_normal_instance_keeps_its_local_calendar_day(monkeypatch):
 
 def test_all_documentation_refusals_close_the_need_without_a_fake_trade(tmp_path,monkeypatch):
     from backend.app.services.agent_workshop.tools import Tools
-    state=Store(tmp_path).create(CampaignConfig(include_sg=False),1)
+    state=Store(tmp_path).create(CampaignConfig(include_sg=False,environment='legacy'),1)
     state['cases']['CASE-001']={'id':'CASE-001','declines':[]}
     tools=Tools(tmp_path,state,None)
     def refuse(*args):raise ValueError('EXPECTED_REFUSAL : missing contracts')
@@ -276,6 +333,7 @@ def test_atomic_save_retries_a_brief_windows_reader_lock(tmp_path,monkeypatch):
 
 def test_risk_choices_exclude_a_counterparty_already_reviewed_today(tmp_path):
     state=Store(tmp_path).create(CampaignConfig(months=1),1)
+    state['config']['exploratory_actions']=True
     actor=state['actors']['hector']
     actor['otc_sets']={'bnp':1,'sg':2}
     actor['risk_runs']=[{'date':state['business_date'],'party':'bnp'}]
@@ -301,7 +359,7 @@ def test_actor_installation_cannot_inspect_or_control_parent_campaigns(monkeypat
         assert c.post(prefix,json={}).status_code==403
 
 
-def test_regular_user_can_run_private_recipes_without_admin_rights(tmp_path,monkeypatch):
+def test_regular_user_cannot_run_or_read_agent_recipes(tmp_path,monkeypatch):
     from backend.app.api import agent_workshop
     local_store=Store(tmp_path)
     monkeypatch.delenv('STRUCTURA_WORKSHOP_CHILD',raising=False)
@@ -312,11 +370,9 @@ def test_regular_user_can_run_private_recipes_without_admin_rights(tmp_path,monk
     other=local_store.create(CampaignConfig(months=1),1)
     with TestClient(app) as c:
         created=c.post('/api/agent-workshop',json={'months':1})
-        assert created.status_code==201 and created.json()['owner']==3
-        key=created.json()['id']
-        assert c.get('/api/agent-workshop/'+key).status_code==200
-        assert c.get('/api/agent-workshop/'+other['id']).status_code==404
-        assert [r['id'] for r in c.get('/api/agent-workshop').json()]==[key]
+        assert created.status_code==403
+        assert c.get('/api/agent-workshop/'+other['id']).status_code==403
+        assert c.get('/api/agent-workshop').status_code==403
         assert c.get('/api/admin/agent-workshop').status_code==403
 
 
@@ -392,9 +448,9 @@ def test_controller_publishes_decision_execution_and_clears_activity_on_stop(tmp
         return Decision(tool='api',args={'path':'/api/deals'},reason='Lire mon book'),{'seconds':.01}
     monkeypatch.setattr(controller,'Instances',PrivateInstances)
     monkeypatch.setattr(controller,'Tools',NativeTools)
-    monkeypatch.setattr(controller,'observation',lambda *args:{'messages':[],'possible_actions':['Lire mon book']})
+    monkeypatch.setattr(controller,'observation',lambda *args:{'messages':[],'possible_actions':['Lire mon book'],'connected':True,'relation_tasks':[],'available_tools':['api'],'solicitations':['read-book']})
     monkeypatch.setattr(controller,'decide',decide)
-    monkeypatch.setattr(controller,'prepare_model',lambda config:{'model':config['model'],'seconds':0})
+    monkeypatch.setattr(controller,'prepare_model',lambda config, *args:{'model':config['model'],'seconds':0})
     monkeypatch.setattr(playwright.sync_api,'sync_playwright',lambda:Playwright())
     runner.run()
     final=runner.snapshot(state['id'])
@@ -541,7 +597,7 @@ def test_quiet_actor_waits_until_a_real_message_or_task_arrives(tmp_path):
 
 
 def test_context_focus_preserves_previous_terms_and_unfinished_bookings(tmp_path):
-    state=Store(tmp_path).create(CampaignConfig(),1)
+    state=Store(tmp_path).create(CampaignConfig(native_rfq=False),1)
     state['month']=1
     old={'id':'CASE-001','month':0,'rfq_sent':True,'declines':[], 'pricing':{'user_params':{'COUPON':.08}}}
     state['cases'][old['id']]=old

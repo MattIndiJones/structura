@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "checked_on": "2026-10-20",
+  "timezone": "Europe/Berlin",
+  "status": "documentary_preparation_passed",
+  "scope": "Registre, references locales, dependances et preservation de la baseline Git ; aucune validation applicative nouvelle.",
+  "documentary_checks": {
+    "findings": 132,
+    "priority_counts": {
+      "P1": 49,
+      "P2": 81,
+      "P3": 2
+    },
+    "workstreams": 27,
+    "cross_cases": 16,
+    "dependency_graph": "acyclic",
+    "links_checked": 1792,
+    "broken_links": [],
+    "preexisting_files_unchanged": 215,
+    "preexisting_changed_unexpectedly": [],
+    "head_unchanged": true
+  },
+  "preexisting_git_status_preserved": true,
+  "unexpected_status_changes": [],
+  "index_change": {
+    "before_sha256": "6a5cfd3a7978feb17cfb98309aaabf523a5a8b20dd686ea52f6ea4024e9e99dc",
+    "after_sha256": "0ba39775b9d1e951a25b3dcd210596883531c2fdfb82c544a01e652b2e046667",
+    "inserted_bytes": 287,
+    "minimal_insertion_verified": true,
+    "reversing_only_the_insert_restores_original_hash": true
+  },
+  "documentation_files_created": [
+    "docs/audits/REMEDIATION_LOT_0_2026-10-20.md",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+    "docs/audits/remediation-lot-0-2026-10-20/AUDIT_SOURCES.md",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+    "docs/audits/remediation-lot-0-2026-10-20/BASELINE.json",
+    "docs/audits/remediation-lot-0-2026-10-20/PREPARATION_CHECKS.json"
+  ],
+  "files_hashed": [
+    {
+      "path": "docs/audits/REMEDIATION_LOT_0_2026-10-20.md",
+      "sha256": "169f3e9b707829076bca509435dfc90ac72e069fc67bcd8f87eea2c4eae78250"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "sha256": "b2cbd636567ed99af900d523ed3793307529b9882a73169cdad2455a9a585116"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "sha256": "64bf2e4d3c3995ca5e91112c75daae152e7eda8e4d519b1f4e94c1733f76a162"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/AUDIT_SOURCES.md",
+      "sha256": "8b6719ec81fadffad379b43bb00e10d78b56ffab900137758991d3039f854458"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "sha256": "70109dcb369a5a60abc2840630e4347a6359715e1896590bae4f46f1b9269e33"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/BASELINE.json",
+      "sha256": "54a59fccbf50851b4593d83d1adb2115ee62c152e9e88bdc1824bcd86d0a676b"
+    }
+  ],
+  "report_self_hash_excluded": true,
+  "application_tests_run": 0,
+  "business_validation_criteria_executed": 0,
+  "application_remediation_executed": false,
+  "business_database_opened": false,
+  "services_started": false,
+  "external_market_or_ai_calls": false,
+  "commit_or_push_performed": false
+}

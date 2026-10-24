@@ -2,7 +2,8 @@ import { beforeEach,afterEach,describe,it,expect,vi } from 'vitest'
 import { calibrateUnderlying } from './smileCalibration.js'
 import { makeSurface } from './volSurface.js'
 
-const result={parameters:{v0:.09,theta:.1,kappa:1.2,xi:.4,rho_h:-.8},max_price_error_bp:20,method:'Fourier Heston',approximate:true}
+const result={parameters:{v0:.09,theta:.1,kappa:1.2,xi:.4,rho_h:-.8},max_price_error_bp:2,max_digital_error_bp:4,method:'Fourier Heston',approximate:true,
+  success:true,qualified:true,calibration_evidence:{version:1,server_signature:'server-test-evidence'}}
 const underlying=()=>({vol_surface:makeSurface('equity',30),sigma:30,q:2,v0:9,theta:9,kappa:2,xi:35,rho_h:-70,alpha:30,beta:100,rho:-75,nu:50})
 describe('surface-driven model parameter synchronization',()=>{
   beforeEach(()=>vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>result}))))
@@ -12,6 +13,7 @@ describe('surface-driven model parameter synchronization',()=>{
     await Promise.all([calibrateUnderlying(u,'heston',4,3),calibrateUnderlying(u,'heston',4,3)])
     expect(u.v0).toBe(9);expect(u.theta).toBe(10);expect(u.kappa).toBe(1.2);expect(u.rho_h).toBe(-80)
     expect(u.smile_calibration.status).toBe('ready')
+    expect(u.calibration_evidence).toEqual(result.calibration_evidence)
     await calibrateUnderlying(u,'heston',4,3)
     expect(fetch).toHaveBeenCalledTimes(1)
   })
@@ -43,5 +45,23 @@ describe('surface-driven model parameter synchronization',()=>{
     const u=underlying()
     await expect(calibrateUnderlying(u,'heston',4,3)).rejects.toThrow(/domaine/)
     expect(u.smile_calibration.status).toBe('error');expect(u.kappa).toBe(2)
+  })
+  it.each([
+    {success:false,qualified:false},
+    {success:true,qualified:false,max_price_error_bp:500},
+    {success:true,qualified:false,max_digital_error_bp:11},
+    {success:true,qualified:true,calibration_evidence:null},
+  ])('retains exploratory diagnostics without applying an unqualified result %j',async overrides=>{
+    const u=underlying(),prior={version:1,server_signature:'prior'}
+    u.calibration_evidence=prior
+    fetch.mockResolvedValue({ok:true,json:async()=>({...result,...overrides})})
+    expect(await calibrateUnderlying(u,'heston',4,3)).toBe(false)
+    expect(u.kappa).toBe(2);expect(u.theta).toBe(9)
+    expect(u.smile_calibration.status).toBe('unqualified')
+    expect(u.calibration_evidence).toBe(prior)
+  })
+  it('sends the actual long horizon so its exclusions cannot be hidden',async()=>{
+    await calibrateUnderlying(underlying(),'heston',15,3)
+    expect(JSON.parse(fetch.mock.calls[0][1].body).horizon).toBe(15)
   })
 })

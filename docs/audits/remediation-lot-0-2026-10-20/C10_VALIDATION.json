@@ -1,0 +1,430 @@
+{
+  "date": "2026-10-21",
+  "timezone": "Europe/Berlin",
+  "workstream": "C10",
+  "status": "VALIDATED_LOCALLY",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "baseline": "C:/Users/phili/AppData/Local/Temp/structura-c10-baseline-uws44uxn/baseline.json",
+  "authorization": {
+    "code_and_targeted_tests": true,
+    "commit": false,
+    "push": false,
+    "business_data_mutation": false
+  },
+  "scope": [
+    "M03-03",
+    "M05-07",
+    "M07-02",
+    "M09-06",
+    "M09-09",
+    "M10-03",
+    "M10-04",
+    "M12-06"
+  ],
+  "revalidation_method": "Lecture ciblée avant correction ; régressions déterministes après correction. Aucun résultat avant correction nouvellement exécuté n’est revendiqué.",
+  "criterion_evidence": {
+    "M03-03": [
+      {
+        "file": "frontend/src/stores/asyncContext.test.js",
+        "passed_cases": [
+          "le chargement one ignore une réponse après changement ticker",
+          "le chargement one ignore une réponse après changement override",
+          "le chargement one ignore une réponse après changement replacement",
+          "le chargement one ignore une réponse après changement date",
+          "le chargement one ignore une réponse après changement correlation",
+          "le chargement one ignore une réponse après changement round_trip",
+          "le chargement all ignore une réponse après changement ticker",
+          "le chargement all ignore une réponse après changement override",
+          "le chargement all ignore une réponse après changement replacement",
+          "le chargement all ignore une réponse après changement date",
+          "le chargement all ignore une réponse après changement correlation",
+          "le chargement all ignore une réponse après changement round_trip",
+          "le chargement courant one applique le marché et conserve sa date",
+          "le chargement courant all applique le marché et conserve sa date",
+          "un override pendant la seconde requête dividendes reste conservé"
+        ]
+      },
+      {
+        "file": "frontend/src/views/asyncInterfaces.test.js",
+        "passed_cases": [
+          "un ancien chargement ne ressuscite pas une alerte acquittée"
+        ]
+      }
+    ],
+    "M05-07": [
+      {
+        "file": "frontend/src/stores/asyncContext.test.js",
+        "passed_cases": [
+          "l’aperçu ignore l’ancien calendrier après changement de dates",
+          "l’aperçu ignore l’ancien calendrier après changement de currency",
+          "un calendrier refusé n’est pas remplacé par les flux de l’ancien prix",
+          "les clôtures tardives du ticker A ne remplacent pas celles de B"
+        ]
+      }
+    ],
+    "M07-02": [
+      {
+        "file": "frontend/src/stores/asyncContext.test.js",
+        "passed_cases": [
+          "une calibration lancée à 3 % ne s’applique pas après passage à 4 %",
+          "deux calibrations chevauchées restent indépendantes, ancienne en premier=true",
+          "deux calibrations chevauchées restent indépendantes, ancienne en premier=false",
+          "le Pricer refuse de transmettre un pricing préparé avec une calibration périmée",
+          "une ancienne préparation ne bloque pas le pricing de la nouvelle calibration"
+        ]
+      },
+      {
+        "file": "frontend/src/views/asyncInterfaces.test.js",
+        "passed_cases": [
+          "la RFQ refuse de calculer avec une calibration correspondant à l’ancien taux"
+        ]
+      }
+    ],
+    "M09-06": [
+      {
+        "file": "frontend/src/stores/asyncContext.test.js",
+        "passed_cases": [
+          "recharger la même RFQ invalide la décomposition si model_price change",
+          "recharger la même RFQ invalide la décomposition si model_price_at change",
+          "recharger la même RFQ invalide la décomposition si model_input_hash change",
+          "recharger la même RFQ invalide la décomposition si product_terms_version change",
+          "un rafraîchissement de cotations conserve une décomposition toujours liée au même prix",
+          "une ancienne ouverture RFQ ne remplace pas la dernière",
+          "une ancienne erreur réseau d’ouverture ne remonte pas après ouverture de B"
+        ]
+      }
+    ],
+    "M09-09": [
+      {
+        "file": "frontend/src/stores/asyncContext.test.js",
+        "passed_cases": [
+          "une ancienne modification de cotation ne remplace pas une nouvelle lecture du même dossier",
+          "un ancien polling réseau ne remplace pas une cotation modifiée pendant son attente"
+        ]
+      },
+      {
+        "file": "frontend/src/views/asyncInterfaces.test.js",
+        "passed_cases": [
+          "le refus du champ price restaure sa valeur affichée et conserve la saisie refusée",
+          "le refus du champ status restaure sa valeur affichée et conserve la saisie refusée",
+          "le refus du champ firmness restaure sa valeur affichée et conserve la saisie refusée",
+          "le refus du champ quoted_at restaure sa valeur affichée et conserve la saisie refusée",
+          "le refus du champ valid_until restaure sa valeur affichée et conserve la saisie refusée",
+          "un refus de add RFQ est restitué sans succès visuel",
+          "un refus de remove RFQ est restitué sans succès visuel",
+          "un refus de select RFQ est restitué sans succès visuel",
+          "un refus de side RFQ est restitué sans succès visuel",
+          "un ancien refus de prix ne restaure pas une saisie plus récente",
+          "un refus reçu après navigation ne devient pas une erreur sur B",
+          "un prix refusé recharge la valeur désormais enregistrée sur le serveur",
+          "le sens refusé revient au sens enregistré et conserve la saisie refusée",
+          "le last look refusé restaure le choix enregistré sans ajouter de ligne",
+          "un refus de A ne relance pas une lecture de A pendant l’ouverture de B"
+        ]
+      }
+    ],
+    "M10-03": [
+      {
+        "file": "frontend/src/views/asyncInterfaces.test.js",
+        "passed_cases": [
+          "le formulaire d’exécution est remis à zéro au changement rfq",
+          "le formulaire d’exécution est remis à zéro au changement quote",
+          "le formulaire d’exécution est remis à zéro au changement agreement",
+          "les termes tardifs d’exécution ne remplissent pas une autre RFQ",
+          "un rafraîchissement du même accord conserve les preuves en cours de saisie"
+        ]
+      }
+    ],
+    "M10-04": [
+      {
+        "file": "frontend/src/views/asyncInterfaces.test.js",
+        "passed_cases": [
+          "réaffecter A ne remplace pas B, refus serveur=false",
+          "réaffecter A ne remplace pas B, refus serveur=true",
+          "fermer une RFQ pendant la réaffectation ne réouvre pas son détail",
+          "la réponse de réaffectation courante reste applicable",
+          "une ancienne liste de collaborateurs ne s’ouvre pas sur B"
+        ]
+      }
+    ],
+    "M12-06": [
+      {
+        "file": "frontend/src/views/asyncInterfaces.test.js",
+        "passed_cases": [
+          "l’acquittement single ne retire une alerte que sur succès : 500",
+          "l’acquittement single ne retire une alerte que sur succès : 403",
+          "l’acquittement single ne retire une alerte que sur succès : network",
+          "l’acquittement single ne retire une alerte que sur succès : success",
+          "l’acquittement all ne retire une alerte que sur succès : 500",
+          "l’acquittement all ne retire une alerte que sur succès : 403",
+          "l’acquittement all ne retire une alerte que sur succès : network",
+          "l’acquittement all ne retire une alerte que sur succès : success",
+          "un acquittement global ne masque pas une nouvelle alerte reçue pendant son attente",
+          "un ancien chargement ne ressuscite pas une alerte acquittée"
+        ]
+      }
+    ]
+  },
+  "frontend": {
+    "passed": 615,
+    "files": 70,
+    "new_c10_cases": 69,
+    "new_case_files": {
+      "asyncContext.test.js": 33,
+      "asyncInterfaces.test.js": 36
+    },
+    "new_cases_report": ".runtime/diagnostic-acceptance/c10-2026-10-21/frontend-new.json",
+    "targeted_earlier_passed": 199,
+    "build": "PASS",
+    "vite_seconds": 12.58,
+    "build_log": ".runtime/diagnostic-acceptance/c10-2026-10-21/frontend-build.log",
+    "output_dir": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c10-delivery-build-zsh_sl6a"
+  },
+  "backend": {
+    "passed": 37,
+    "files": 3,
+    "new_test_cases": 1,
+    "extended_existing_cases": 1,
+    "seconds": 13.497,
+    "command_manifest": ".runtime/diagnostic-acceptance/c10-2026-10-21/backend-command.json",
+    "junit": ".runtime/diagnostic-acceptance/c10-2026-10-21/backend.xml"
+  },
+  "private_model_identity": {
+    "exposed_only_with_right": "price",
+    "fields": [
+      "model_price",
+      "model_price_at",
+      "model_input_hash"
+    ],
+    "backend_tests": [
+      "backend/tests/test_rfq_desk_access.py::test_model_input_identity_is_private_to_pricing_right",
+      "backend/tests/test_rfq_product_exchange.py::test_native_pricing_uses_the_current_engine_and_persisted_private_inputs",
+      "backend/tests/test_rfq_bank_publication.py"
+    ]
+  },
+  "limits": [
+    "No full backend suite",
+    "No manual graphical, keyboard or viewport acceptance",
+    "Frontend tests use real components/stores with deterministic network responses and simulated native fields",
+    "T11 C17 quantitative calibration qualification remains open",
+    "A missing response does not undo a server command; refresh remains required",
+    "No production certification, business data mutation, migration, service startup, commit or push"
+  ],
+  "preservation": {
+    "existing_files_removed": [],
+    "protected_prior_reports_and_evidence_and_dist_files": 123,
+    "protected_hashes": {
+      "frontend/dist/assets/HomeView-D2MHLdLe.js": "ad3e79763a8efecd3eb3475fc23f9f5f175a675c831e502ec89e4ba5ac651b71",
+      "frontend/dist/assets/ProductModelsView-U8TRYY8f.js": "272dfc496622b69dc822ff0f2db054a6dc56d8d56cdd4ec8dde62de934b22d7d",
+      "docs/audits/remediation-lot-0-2026-10-20/C03_D01_VALIDATION.json": "f2866ba7d2170e3da2216dc815a16dc2b35aa263c40ad74f3fb6ca2408b5abcb",
+      "frontend/dist/index.html": "fe129fbb8a10a746654394863c8dbcdfe3434641daa21c5eeffa073ac8c7d074",
+      "docs/audits/REMEDIATION_C02_2026-10-20.md": "eebedc54ed0df7dc0d72c918b833e77cbcb03b81db5d3ddcfdb9c647a639c438",
+      "docs/audits/remediation-lot-0-2026-10-20/C09_VALIDATION.json": "fae128e7361e46829dcd90facb1c4c9ebb169747edd892ccbadf40c4f45ff168",
+      "frontend/dist/assets/barriers-ddfFbG7b.css": "6757f737f52a65b9ca59f786e183c17c668e1fa8552ebbdd8fceb3dae752f3d6",
+      "frontend/dist/assets/OptimizerResultsView-DPV9EB6k.css": "b6e94e794d58d4bdf18c734c3cd42f7236cf6cac4e2a2607999f10ed7e6811a6",
+      "frontend/dist/assets/optimizerPayoff-BzMAuHbl.css": "72e99454acc0bf207c8b4825b2a2f95138e4a65a47901fd0562e5b9c85941107",
+      "frontend/dist/assets/ReinvestView-Dgtng-4q.js": "68a0be0296fb7d5e2db74eac0ed958c8a8373e9e03ef00c2d00caa4a1cb8a37b",
+      "frontend/dist/assets/RfqInboxView-ojO71dlX.js": "d0256b6d1957ce4e15e2335674b6cfa070904dff57c165c19c08b5c784aac1b2",
+      "frontend/dist/assets/OpportunityDetailView-DHrK5hJu.js": "42b064fa539bef3211806541cbc0e8adec63c1f5ee6170bec1055c0babd589de",
+      "frontend/dist/assets/HelpTip-BevNG-Cz.js": "02ba1a1470213e6f6a84275033fe7f414e7966c25755344b6b796c88c2d58e7a",
+      "frontend/dist/assets/PersonFormModal-Dd41PRVM.js": "8749aafafd736ae392f43828c2499f5c4e80c424786c300f7869ee8ecb0e442b",
+      "docs/audits/REMEDIATION_C01_2026-10-20.md": "dd77735dec8a3e7d040e24a94ab56cdead0fc19f1295ae7e107665b9ab958efd",
+      "frontend/dist/assets/FluxDecomposition-BTJLcAov.js": "be78af52ac508399097d82709e220dc11f8086e7009501e12584cf12b516fd86",
+      "frontend/dist/assets/dealEvents-BZIEselI.js": "8334117cd2686d25c146c2209455ef351f7f135863f55ccaecbe92245f32cb19",
+      "frontend/dist/assets/AdminComputeView-CHn5pekI.js": "73cc933c11e8410517e4f1b8e4f00b351bf7d48459a1f72597561fb22d7db9ab",
+      "frontend/dist/assets/PriceComparisonPanel-Cu28oTNR.css": "094b3986c63c905e59e1fa6030684bcbd667f2f5d4f4937c1c170918f2a0c48d",
+      "frontend/dist/assets/OptimizerResearchListView-Cd0qwvP7.js": "42211ab81eedbf667d35589ee8a2f86cad469d11c1f24fd4a6febb08886bfff2",
+      "frontend/dist/assets/DealReferenceLink-CZGOPi95.js": "51ce0507e180fbe954748dcabbd7aa4b94e13dff60dc153f71ff1e833446daec",
+      "frontend/dist/assets/useDataFilter-B-YCu5bf.js": "178ce4eafe0a51619fa817387695c132f430bdbd82af15a19c9e10730ee13886",
+      "frontend/dist/assets/index-DWuKu8Lz.css": "d79e9d1b8cad4832187db9b636bd7295f65602b612a29f91732496aee525021f",
+      "frontend/dist/assets/EmptyState-CobusW1W.js": "ff589437ff152cb94865a90d34e006dc9a3373f69b4881564a71de6fbf71c5b9",
+      "frontend/dist/tp_logo.png": "f8b5d65aeb603c497dfd6e3e94a0677505cd6769b36c48cb4ef277621d34d493",
+      "frontend/dist/assets/RfqView-BTAx8nsM.js": "94f7b443671a368f9864f60fb068ad9f9c53e4bad429291dbcfb8a8131d1bcbd",
+      "frontend/dist/assets/RfqView-DO9iKyz4.css": "399d4e876f539f8908ba9f74f8d655d3a53dff2a56eb745223412652588114f9",
+      "docs/audits/remediation-lot-0-2026-10-20/C07_VALIDATION.json": "213cecd86630d21b2d08c0b20a2a423bc9398677900c6e7cbe2ceb63a0f0f689",
+      "frontend/dist/assets/barriers-DEXimm7X.js": "aefdf34a67147a0880c05871bc446970468def3f0ab97415490961cbda23c2d4",
+      "frontend/dist/assets/ClientsView-8CTO4oKR.js": "7656f11223aae7dcfded11ab2dae9ab905215a46f7d0af2528380e09961a4b67",
+      "frontend/dist/assets/index-Bx2vCey3.js": "0862a5e36f8809e1d6a57f2d470932220dcac9cf9d283a371e4f219056a92369",
+      "frontend/dist/assets/CcrResult-tpD5rMx1.js": "c0d277045f948675c4e1f90e86c444a797fea7365963dd8cfa20acd7714a1d92",
+      "frontend/dist/assets/chart-19k6OvwP.js": "455f8b9747e87f8dd425497bd02bc13785712f52b880f0911c914fed2ba28851",
+      "frontend/dist/assets/FifoView-Df8uZGhA.js": "970918d8ac8e50170b67e89f360b2bdc9c5d35f0ff28b7ac1e162b50009d3c95",
+      "frontend/dist/assets/CcrView-DmIB6yQA.css": "4b767f603e48417e318a1d2c1c73738fa818e87774cba9f5dba6e43a9b60a17c",
+      "frontend/dist/assets/AiWorkbench-DnkO_jXH.js": "bf3beda122699d5b984387e49f78ca7b872157d2999332276bd12e280c37b7e7",
+      "frontend/dist/assets/DealValuationsView-BZxnp1_P.css": "74ff95d66b5d9a0c2c3330cc5783d28f248d19fd5511a8baca877d541346388d",
+      "frontend/dist/assets/AmcView--JjgOD99.js": "2ed98f02b3e20d4699a00f4bd02356d4263e77511ee47a2d1127976de270ea9b",
+      "frontend/dist/assets/payoffFamilies-DTB3SPz5.js": "f9d0ea9b9baed1e684c18fbc566e80b12fced0e3802133f3c5eededaa59396ca",
+      "frontend/dist/assets/ValoExplainView-FTRlH_th.css": "f5a8ab88a5902514e229d9c76c32308c598eeda8ff116dd9d11bec7182d045b8",
+      "frontend/dist/assets/theme-CFwEg9ph.js": "90d32572bdbf5d8ed6d0ee650cf2665a2dcff3756348a707c2addf90d8b7e095",
+      "frontend/dist/assets/PricerView-Cp7fz82s.css": "e70228764ca3cf656e047e9a29f5df67f6167486148c45f80b3ac9b076f084f9",
+      "frontend/dist/assets/AdminEntitiesView-CVk6J4ux.js": "86b5c7a882d2207390e2d68f7ffbe3b03afe2f4ecb99b1cc78c6ab6f3f560953",
+      "docs/audits/remediation-lot-0-2026-10-20/C01_VALIDATION.json": "25f2fd246075e04ddc084be48ffc44ec105aea4740b4e678e0d46f65e702ed44",
+      "frontend/dist/assets/optimizerPayoff-BGSAZFLi.js": "cdbfec066729db91d1abb47214410e7fd4475d6038c3133424f1b634f519398b",
+      "frontend/dist/assets/ClientDetailView-BNIPn8at.css": "c483f0802a1106b86803855658c4c21d7fa48d8cc48b5bea23e7d36a48d17fa2",
+      "docs/audits/remediation-lot-0-2026-10-20/C06_VALIDATION.json": "3be5792bb7dfa0e05479f862c6977ce6c94df5a826bcb4ee6e6f3eb8f60e8f06",
+      "frontend/dist/assets/AdminRfqRelationsView-Dx7e9ZEj.js": "99e300f54db7ce3c6fa9625de8b2514b5325bc172da01fa1c5bec1bb66c45444",
+      "frontend/dist/assets/DocumentationView-Bfu9PK7S.js": "e0217cc20afc4273207087cbbea93013431b7979a71186f156a2fe64934f9837",
+      "frontend/dist/assets/BookingView-2iwPMGEJ.js": "4b69996210540cc4a1b870d10a928d22631317fe14f655e6ea9a8e8379c1ed7a",
+      "frontend/dist/assets/OptimizerResultsView-CjtVN0Es.js": "aeb4faf39fa1e556e9f37e18c9a9bd2eeebb8dbdbcb5c7371b7acdad9ec87629",
+      "frontend/dist/assets/EmptyState-oRkKegCC.css": "504db178b83e9e1277e4cbdb96b44a831efd19f3824ccdb276098bcb2ab9e2bf",
+      "frontend/dist/assets/ProductOptimizerView-BuJXDWnO.js": "cd8de88207e5aee8b072a086afb0c41033f295d1a6b9bc45cc329ed9b6675a7d",
+      "docs/audits/remediation-lot-0-2026-10-20/C05_VALIDATION.json": "2c8547381c2c1b07295bfa70acb106249e31a61b7cd116ec6578d426d6eab4b5",
+      "frontend/dist/assets/OptimizerCurveInput-73p7R-8b.js": "229e71c891ba1e60584823fd2ebc5f73d736783ca0c0b9868064968dff743d5d",
+      "docs/audits/remediation-lot-0-2026-10-20/C03_VALIDATION.json": "0e291f783c1b7c2219650684edc1e6c420ae3091be4245fdde177594ce2a2542",
+      "frontend/dist/assets/OptimizerCurveInput-C--yjPKe.css": "0b6404a3571af69c734dd8b0a3cea5aaa4de0d4e7affe673c982c24d9c9a7319",
+      "frontend/dist/assets/TradingView-C-VadlX6.js": "f9c27972ddb4ba227e590cfb8df5f90d1ed92042bee18e296bdae6fd3c3cbd27",
+      "frontend/dist/assets/TradingView-BmP02Ka7.css": "a6dd64512450134d7c075cf56210b4ba3d3bc2f26c7599ed744aa4e58bec16d8",
+      "frontend/dist/assets/OptimizerResearchListView-CAflqmDU.css": "820cb7407cd88addc41f0d2ed0d1bd5cf20460fe25acfe6fabdcb76e9f591fef",
+      "frontend/dist/assets/ProductsView-CMlaVN1C.js": "c2212819729ebe51273783e036dabea8bbe25869726ef75b877af730fda5c0e9",
+      "docs/audits/remediation-lot-0-2026-10-20/C02_VALIDATION.json": "d81bc13cd0fa0354abeb50f9deaf75ee6d92039cc4ffb6fb92c295a49c9912c7",
+      "frontend/dist/assets/CcrView-D5_wUVMa.js": "365b5d8c55280001a1668637439ae3a0d6bfafc8703a56618a295669b3c0a272",
+      "frontend/dist/assets/AmcView-n7Ic_tWG.css": "50a4ede252fe5cbc173d154c0ed7f1ef6347da972c2cfb65cee1f48da7b3b55c",
+      "frontend/dist/assets/ValoExplainView-Lqi_99IG.js": "90abcc26460632753d9bc17d2a3388ce133caf66b4cf3f40c14169e378975f1c",
+      "frontend/dist/assets/AdminUnderlyingsView-CZvqmH4i.js": "84ca41638135ae014810d4824fd3dbab7b8f379304e62dc1ac09442cc85aa654",
+      "frontend/dist/assets/InteractionFormModal-YRX8uAwb.js": "93682d3776f4d4c352ee08a5c25133e7c98bbc6d127d91ea921c1c8256d055a7",
+      "frontend/dist/assets/BackLink-DZMytWO-.js": "00f08e9912042042b24455fce7c351c34a653f22cf7e2494a13a2dcd10d582aa",
+      "frontend/dist/assets/LoginView-C8ibtsfR.js": "59181e434e807c35c442fe86800d990334b3bfccf90d702febec6c9e334e502d",
+      "docs/audits/REMEDIATION_C06_2026-10-20.md": "250c0da7c768b9e93da932c5859f0ba5a26a15251b96e9c933db75e0296901b0",
+      "frontend/dist/assets/ConsultationView-B-terOSz.js": "22284034ba496bb6d72dfe1aab54b37505bf01e5c465b0ce55370cb462246ad0",
+      "frontend/dist/assets/AdminCounterpartiesView-BpJqy0yT.js": "a13a1181dd1e777324e73482f58b77e1fcbb021fa7c53025ac59cc9104158299",
+      "frontend/dist/assets/ScriptsView-C8JJsEv2.js": "d1a50f9d0a2376b5592cc8e5eee5c15ddafc2d6ad6c5a95df0239583304f46e6",
+      "docs/audits/REMEDIATION_C04_2026-10-20.md": "61ce36835ce4da23bc4f119691f1494a6c4de50ce582df8a96b665c3c1be6c8e",
+      "frontend/dist/assets/ProductsView-BkF9Cl2E.css": "1f4bfcc67b75082f019fd87915172b3b341594e9765dbec8ca1cad515e6b5de4",
+      "frontend/dist/assets/useBookingMtm-BkN64thq.js": "80f4fa81cb2e59c3bd1d8dac0cb6c8c9abc0f1a52a7853a6b345f434bfb2761b",
+      "frontend/dist/assets/AdminMarketDataView-UYdSLDo7.js": "a98cd84ca48c2aeb2f3456344d8f451206f3ade85631e75653c8d87ed3e21c3c",
+      "frontend/dist/assets/RfqTransportStatus-s27nwqwf.js": "9241b8b3a326dde7d653151ece976b69cfe5af7e500fd28b7028d6ccd13edea1",
+      "docs/audits/REMEDIATION_C03_2026-10-20.md": "0d9dae47118ddc915c0228a1b884effa1b116c757a77ae0827440b2c0eec1093",
+      "frontend/dist/assets/AiWorkbench-B1FWlsOO.css": "72cea1a49ce450de6fb3791a5d9c09d1a5fbbbae18e4592fc27d10719ff0d461",
+      "frontend/dist/assets/CyclePanel-D-kR4Vhu.js": "26120b5beaed866dfe2d9cf560a501cccdbe9d371cde84263aacfd60722aabbc",
+      "frontend/dist/assets/DealValuationsView-AuENCUGE.js": "817fe28b0fafbd0c90ee48ed73894a300394609c816cae08b7be2e7a7b4d9395",
+      "frontend/dist/assets/AgentWorkshopView-NmyrwG8c.css": "b1bf78e8995ea21bd0143d40296220b362d1d48f7ed3fd59354502c841ef3938",
+      "frontend/dist/assets/PriceComparisonPanel-clTrsS_4.js": "4f8176facea5d7d365bd2173c0a846d24283628f28b84372291bca6f4ff2d3ad",
+      "frontend/dist/assets/RfqNetworkPrototypeView-dPDR1DqT.css": "d968f18d0c1a09e819ab85e47488b73fe09ec90dd7e75ed55473e3cb62c20870",
+      "frontend/dist/assets/BookingView-CnEAOwZ7.css": "7c3b041d04509344e795ca54cc9453b5a553ec00e742fb2441c86cc30d523d83",
+      "frontend/dist/assets/SensitiveValue-DBikijxS.js": "534fbcdd16cd65d51f888c9e6d9cbf408d1b93b5c6fee63ccc6f4ec567c37ac9",
+      "frontend/dist/assets/AdminUatGeneratorView-Bh3nE79b.js": "c80479a4da3e2ec94a73274c9e44b101c6efe242bfa8f906ee472fcd780c2060",
+      "frontend/dist/assets/ClientDetailView-Cslxz3Jn.js": "92e757ee82eb9b8232cdff34507e19049ffd22ffdb6921723d0b114c25103889",
+      "frontend/dist/assets/OpportunityFormModal-Dj4Y90aS.js": "d5c725bc469d5956fdf1bf42fc9f67d69f48928f0d752bb664d68c592efffcc7",
+      "frontend/dist/assets/valuationComparison-CBPCD7Ek.js": "36b9bf60d4bf6f646feef7f48a03de73b7b803489d2287f589d2341e7d6248f0",
+      "frontend/dist/assets/SensitiveValue-DLQcP5OO.css": "07dc182def4f1462b498ce322c1baa850765b53c3035aa70f2ea88b74b99cd9e",
+      "docs/audits/REMEDIATION_C07_2026-10-21.md": "6279ff8949e64e7a925e63cc3f6f13c7eb159e23da4143396321ffcabf7e4f23",
+      "frontend/dist/assets/ProductOptimizerView-BOZV0F5Y.css": "40bbe91f3c5c6219c91f0c53ee098bf7f11c6b274ef571ff4593a3f5fb015873",
+      "frontend/dist/assets/AdminView-Dha91_r3.js": "70b71503b8a6acb031fec167f63d19c494e842a05b2bc7aa0c6c1a68ccf2871c",
+      "frontend/dist/assets/CcrResult-BRQhfOfQ.css": "65c5e0bc8c9d14067d81918f5936332d1f487adcd9ba88bcc7388c739f6529a7",
+      "frontend/dist/assets/PersonDetailView-CkzcL7XY.js": "2984ee2fa335ab5eba0f2cba7b60c06fd8e7b9e484bf7e3a67ecfde036848dd5",
+      "frontend/dist/assets/StructuringView-DJNd9Clf.js": "d788b24f3b45522fc5f193b60f1966545318d9d1924197cb95c737716cc19fd2",
+      "frontend/dist/assets/AgentWorkshopView-B2skLHY1.js": "8317fdb570e86c94a4be293cae1c75f473a18ba3d64fbf0a32aa8b7afa78808d",
+      "frontend/dist/assets/optimizerResearch-pl8asrxn.js": "03f2360206f8094ee862de2e7284b7f7bd5824185ffd4763089a687ef9498a16",
+      "frontend/dist/assets/RfqAnalysisView-Cj0xvaly.js": "716c450c0189b833f1967828b45b0c5d15b9ce7fbc39410ce1b199151e7eff5c",
+      "frontend/dist/assets/AdminRfqProvidersView-C6trYVGw.js": "c97a86ebe0029f446b0d2ca5ac2794201ef57315992e72c60cedf055361a1fbf",
+      "frontend/dist/assets/RiskManagementView-pnATlip4.css": "ab6603cde30a856f8d9ee981f31ba010c7aa5eac042e5c93dd265f0964225a1e",
+      "frontend/dist/assets/RfqInboxView-CwIzgj87.css": "0ad2d98205fda962492fbada210efaec712d43594afd457400862d2c7398fbde",
+      "frontend/dist/assets/PlatformView-wDAygylX.css": "faa633a932ed2652bc3b3e29ca00959b92f58e042419b930a461a1aa516da5d2",
+      "frontend/dist/assets/PricerView-BFl0il-V.js": "b94cfee31ce0bbf296f5d4009913de2b5961c2f83440b6fad7332d0585e6dc54",
+      "frontend/dist/assets/deals-SqrTdfza.js": "55f677b6767d9ad1f95ae80400f27c5c1368fb7770a26d0a1d7b2c358c2f96b1",
+      "frontend/dist/assets/useSensitiveChart-CLCGRjBs.js": "83d29dd9a318b2c0a56a1c3f9a8fcd5238cb9fb9d14e591135ba4fd19d158ab5",
+      "frontend/dist/assets/PlatformView-CdsgkT05.js": "cf1911a540951d77ee88e59c879a8f60ad00f3b0c158abba3097e3edf76bbd97",
+      "frontend/dist/assets/LoadingSpinner-HxxSpFuy.js": "ceac86fbf2589eba024dfc50f9b4480051e272d85f639d9210f949a46a0c16f3",
+      "frontend/dist/assets/FluxDecomposition-BFDXMHck.css": "47a10347b120a1d5db91d23f35cf1a73754ac59554894d91fc55dde14118f8ea",
+      "frontend/dist/assets/ProductModelsView-pRSBGExg.css": "4a6498178e2def99108f7e6f042f33f43d281bfb069148abdbaaeec7a083581f",
+      "docs/audits/remediation-lot-0-2026-10-20/C04_VALIDATION.json": "ac81e17557ab96df92f324fd34cf3f1f7139205bae0cd8ccd5ecff374df6b725",
+      "frontend/dist/assets/AdminUsersView-gmvoycQB.js": "d2b9d51071bdd08109317d7c33d8c8ccdbe97294464d6757fb88c51b5221011b",
+      "frontend/dist/assets/format-DTcMLInZ.js": "c6931c4973537a017c833597dec514c97995db537272ef2c3e3fed9badf8cd97",
+      "frontend/dist/assets/clients-gqMaz2dX.js": "bba6e1965d97f7531c0d1fce53717c6c2da791b243a9fdec47488430f3f62ec1",
+      "frontend/dist/assets/LoginView-BCPoCLqD.css": "4170b97f393f4569a3d0d69964707b045b3acb22b010b745e3574bdf60aec3e1",
+      "frontend/dist/assets/LoadingSpinner-CR1tj8Oc.css": "97a3432934785cf62401fd448e85a9b2360c7c6994aca8bbca76777469506696",
+      "frontend/dist/assets/RiskManagementView-Bu-jRmb5.js": "231b38981657404ad765d2b807d6e0cf0657a466bc149925cd1387b27418c8d6",
+      "frontend/dist/assets/RfqNetworkPrototypeView-COi6SKVI.js": "b322d18a078e08057e9da506138ee46ebea8b4a2952c9b1330b92a08eb7b8ef7",
+      "frontend/dist/assets/AdminBrowseView-G37zB0c-.js": "be3b838c0be8e7fe9ec4b676eebdae95e973fc0749d6d32a0a67f7cc73008768",
+      "docs/audits/REMEDIATION_C09_2026-10-21.md": "6d637bd18863b091401a3b5a2ce6226fd27b49dc0d409b3e6aa7b278b65a87b7",
+      "docs/audits/REMEDIATION_C05_2026-10-20.md": "92dee388077d9cdbdaf988477369605a46d0f42951a348ea3a9e7e4b0f9c2a0e"
+    },
+    "only_registry_items_updated": {
+      "findings": [
+        "M03-03",
+        "M05-07",
+        "M07-02",
+        "M09-06",
+        "M09-09",
+        "M10-03",
+        "M10-04",
+        "M12-06"
+      ],
+      "workstreams": [
+        "C10"
+      ],
+      "cross_validation_cases": [
+        "T11"
+      ]
+    },
+    "counts_decisions_conditional_dependencies_and_audit_scope_unchanged": true,
+    "baseline_business_db_present": false,
+    "current_business_db_present": false,
+    "services_started": false,
+    "head_unchanged": true,
+    "branch_unchanged": true
+  },
+  "changed_files": [
+    "backend/app/api/rfq.py",
+    "backend/tests/test_rfq_desk_access.py",
+    "backend/tests/test_rfq_product_exchange.py",
+    "docs/README.md",
+    "docs/audits/REMEDIATION_C10_2026-10-21.md",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+    "docs/audits/remediation-lot-0-2026-10-20/C10_VALIDATION.json",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+    "frontend/src/components/EconomicsTab.vue",
+    "frontend/src/components/EventsTab.vue",
+    "frontend/src/components/RfqExecutionPanel.vue",
+    "frontend/src/components/VolSurfaceEditor.vue",
+    "frontend/src/composables/useObservationPreview.js",
+    "frontend/src/stores/asyncContext.test.js",
+    "frontend/src/stores/pricing.js",
+    "frontend/src/stores/rfq.js",
+    "frontend/src/utils/smileCalibration.js",
+    "frontend/src/utils/volSurface.js",
+    "frontend/src/views/BookingView.vue",
+    "frontend/src/views/RfqInboxView.vue",
+    "frontend/src/views/RfqView.vue",
+    "frontend/src/views/asyncInterfaces.test.js"
+  ],
+  "source_and_test_hashes": {
+    "backend/app/api/rfq.py": "52e870012bc960fa73c89486148111071fe1c2f85d79aa52a1b57d65d34f364a",
+    "backend/tests/test_rfq_desk_access.py": "cfb342c50bdfc8947fb84eb0a691df0bb18fa956aac1449ddd89917cfb5b977a",
+    "backend/tests/test_rfq_product_exchange.py": "673b5b6e8c54087e58224d4863663a85726bd5449c8bb2b0439899785706d4b1",
+    "frontend/src/components/EconomicsTab.vue": "c571b9efe25bf9ceff7c0375fb119a5f88da85a06b7fc7da6a158afaee36bcf6",
+    "frontend/src/components/EventsTab.vue": "f9336d08245ade4fe71b55e22579cde01d9a4432a70972c1e1205d09c640ae0d",
+    "frontend/src/components/RfqExecutionPanel.vue": "086bf70e79cba18f1f4ad5f36d96b80ec947d500a2bb2b996e6b1e41b5e78a38",
+    "frontend/src/components/VolSurfaceEditor.vue": "f9031b6cddef56f4a4e55a2cdfb00d6f4617c4c1d6f34b030ae119cb1c274107",
+    "frontend/src/composables/useObservationPreview.js": "5f35864dfd7a4c33a52a98dc24df9157f672bc3d96d8022a5ec59febe148d742",
+    "frontend/src/stores/asyncContext.test.js": "79d1341c6a8e136eeb52867674ba8547fb3f78d0f4c5e5f46475bc28683a8320",
+    "frontend/src/stores/pricing.js": "4bb07967fc6f41a304d45926757a2250e662a2a858723cadbc01f9d4d3440d10",
+    "frontend/src/stores/rfq.js": "ac6eff296704d33a0a7760b4a23635f0fc7f237d5b813e316dc783b646c92ac9",
+    "frontend/src/utils/smileCalibration.js": "bca5fad9f1d7c8aeda965cd5a24fc9a974600228ef5ebe9147519e0c3c81ceb8",
+    "frontend/src/utils/volSurface.js": "77fe2cb6500f3675fea771ada833f838ceccf367d78bfd23c19c7f7a9ffb3044",
+    "frontend/src/views/BookingView.vue": "364bcdf847416749a30e3b036aad6b5c0a4e4cbf262f34bf9dd6d4dea4260b93",
+    "frontend/src/views/RfqInboxView.vue": "708de588e14ac79da4a920ef2c7f7fdd7eba6bfc71920f7f1249bfdf64f73a70",
+    "frontend/src/views/RfqView.vue": "a99f90c8a9addc1c7aebcb82a2d026026a4088587cb14b9a2f779eb47f50ad14",
+    "frontend/src/views/asyncInterfaces.test.js": "b45cb1d585cfe2a8fbda8e39fa9950ac83f34bc017b8bc696e01b640dab6ebb6"
+  },
+  "document_hashes": {
+    "docs/README.md": "90729c73cdb8ad0879f38504225fcdf14ed600c4e4944596d5816c8738444965",
+    "docs/audits/REMEDIATION_C10_2026-10-21.md": "02ac5e80263b795d530ed055270ba9feded1bd16e1dfd8cb753c717622167762",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md": "13e14ff8a6498007a579073ac8697eeba29ce561eef423a56545f5f67042bece",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md": "7b43290441a7714c7b3b457b4a8c361ca609762bbe8177cd85361af5d26b1cb6",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json": "70188b8f2d5a294748ab4bbd0864e868e6e861045fd7a6c3e8317f15459134fb"
+  },
+  "document_hashes_exclude_this_evidence": true,
+  "runtime_artifact_hashes": {
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/backend-command.json": "c7c192dbb592d60397e116d717ceb8a00ef892e4928457984d74d200d2b22c51",
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/backend.log": "f9f7564da949299fba896d71ab3dc24cd2c215b61be3121edb29ec279f6778f9",
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/backend.xml": "cb92d3fdc7580eb7ebe0a199d7b78ddd25220027bb5e45edf5ea46c5aed255e4",
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/frontend-build-path.json": "2fec7d4eebbed75b4f7f628ae5f1e481b973ef330d27cb82332a77ac48c3579e",
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/frontend-build.log": "87954a855ab7366d2dc47b9e9270abe47d5c7f39384f6ad118534fee48340140",
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/frontend-first.log": "fe5724254b6b9802e666b653dc280e39aa3478e84b3aaa080778b3946ff9e720",
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/frontend-interfaces.log": "46129d84e5dab79dfb024177851e8b6021e7306197be1c0c1aefeeab3eb5abc6",
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/frontend-new.json": "9f8dd2d69178cf3ffdcc11eade7866e4abc3526d02d975ad4829b26eca399a3e",
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/frontend-new.log": "2e31eca19eaf842ac1f0b317a511667dae991e84ec9f7d6170ff42c21c1a548d",
+    ".runtime/diagnostic-acceptance/c10-2026-10-21/frontend-targeted.log": "cf06f9da36bca73a50dfeb6948315e56f5873440337a8e050c44de23aa742b32"
+  }
+}

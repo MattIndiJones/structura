@@ -73,7 +73,8 @@ def policy_row(policy):
 
 def put_policy(session, item_id, user, body):
     item = exchange.require_received(session, item_id, user)
-    if user.role != "admin" or user.entity_id != item.recipient_entity_id:
+    from ..core.access import is_local_admin
+    if not is_local_admin(user) or user.entity_id != item.recipient_entity_id:
         raise HTTPException(403, "La politique appartient à l’administrateur de l’organisation bancaire")
     if len(body.reason.strip()) < 3:
         raise HTTPException(422, "Précisez le motif de modification de politique")
@@ -187,7 +188,10 @@ def commercial_checks(session, item, case, draft, policy):
     if not product.calculations or product.calculations[-1].id != calc.id:
         raise HTTPException(409, "Un calcul plus récent existe ; préparez à nouveau la réponse")
     now = business_now()
-    if calc.calculated_at > now or now - calc.calculated_at > timedelta(minutes=policy.max_calculation_age_minutes):
+    # Pricing receipts are issued on the operational UTC clock. Accelerated
+    # business dates govern contractual validity, not the age of a calculation.
+    calculation_now = datetime.utcnow()
+    if calc.calculated_at > calculation_now or calculation_now - calc.calculated_at > timedelta(minutes=policy.max_calculation_age_minutes):
         raise HTTPException(409, "Le calcul privé est trop ancien pour la politique du desk")
     if utc(payload["valid_until"]) <= now:
         raise HTTPException(409, "La validité proposée est dépassée")
@@ -206,6 +210,8 @@ def commercial_checks(session, item, case, draft, policy):
 
 def save_draft(session, item_id, user, body):
     item = bank.require_action(session, item_id, user, lock=True)
+    from .rfq_electronic import protect_publication
+    protect_publication(session, item_id)
     case = session.get(RfqBankCase, item_id)
     if not case:
         raise HTTPException(409, "Prenez en charge et calculez le produit avant de préparer la réponse")
@@ -278,6 +284,14 @@ def validate(session, item_id, user, body):
     session.commit()
 
 
+def validation_current(session, item, draft, policy):
+    validator = session.get(User, draft.validated_by) if draft.validated_by else None
+    return bool(policy and validator and draft.validated_hash == draft.payload_hash
+                and draft.validated_policy_version == policy.version
+                and "validate_quote" in membership_rights(session, item.recipient_desk_id, validator)
+                and (not policy.second_validation_required or validator.id != draft.prepared_by))
+
+
 def publish(session, item_id, user, body):
     item = bank.require_action(session, item_id, user, "publish_quote", lock=True)
     draft = expected_draft(session, item_id, body)
@@ -285,12 +299,11 @@ def publish(session, item_id, user, body):
         RfqQuotePublication.revision == draft.revision)).first()
     if prior:
         return public_row(session, prior)
+    from .rfq_electronic import protect_publication
+    protect_publication(session, item_id)
     policy = session.get(RfqBankPublicationPolicy, item.recipient_desk_id)
     commercial_checks(session, item, session.get(RfqBankCase, item_id), draft, policy)
-    validator = session.get(User, draft.validated_by) if draft.validated_by else None
-    if draft.validated_hash != draft.payload_hash or draft.validated_policy_version != policy.version or not validator \
-            or "validate_quote" not in membership_rights(session, item.recipient_desk_id, validator) \
-            or (policy.second_validation_required and validator.id == draft.prepared_by):
+    if not validation_current(session, item, draft, policy):
         raise HTTPException(409, "Une validation actuelle du contenu exact est requise")
     older = session.exec(select(RfqQuotePublication).where(RfqQuotePublication.solicitation_id == item_id)
         .order_by(RfqQuotePublication.revision.desc())).first()
@@ -303,10 +316,16 @@ def publish(session, item_id, user, body):
     message_id = str(uuid4())
     payload.update(response_reference=json.loads(older.payload_json)["response_reference"] if older else f"RSP-{uuid4().hex[:16]}", revision=draft.revision, message_id=message_id,
         message_type="RFQ_QUOTE", published_at=exchange.iso(now), publisher={"name": user.username, "email": user.email})
+    from .legal_identity import relation_counterparty
+    legal = relation_counterparty(session, rfq, item)
     quote = RfqQuote(id=next_audited_id(session, RfqQuote, "RFQ_QUOTE"), rfq_id=rfq.id,
+        revision=payload['revision'],
+        counterparty_id=legal.id, counterparty_name=legal.name, identity_frozen=True,
         provider=payload["organization"], contact=user.email, price=payload["price"], currency=payload["currency"],
         status="recu", firmness=payload["firmness"], valid_until=utc(payload["valid_until"]),
         quoted_at=now, created_at=now, note=payload["comment"] or None)
+    from .rfq_model_reference import snapshot
+    quote.model_reference_json = snapshot(session, rfq)
     session.add(quote)
     session.flush()
     row = RfqQuotePublication(solicitation_id=item_id, revision=draft.revision, quote_id=quote.id, message_id=message_id,
@@ -320,9 +339,10 @@ def publish(session, item_id, user, body):
         old_quote.status = "expire"
         session.add(old_quote)
         if rfq.selected_quote_id == older.quote_id:
-            rfq.selected_quote_id = None
+            from .rfq_quote_integrity import clear_selection
+            clear_selection(rfq)
             rfq.selection_reason_code = rfq.selection_reason_note = None
-    from ..api.rfq import _sync_status, _sync_product_rfq
+    from .rfq_state import _sync_status, _sync_product_rfq
     _sync_status(rfq, session)
     _sync_product_rfq(session, rfq, user, action="PRODUCT_RFQ_RESPONSE_RECEIVED")
     record_audit_event(session, result="SUCCESS", action="RFQ_RESPONSE_PUBLISHED_AND_QUEUED" if pending else "RFQ_RESPONSE_PUBLISHED_AND_DELIVERED", object_type="RFQ_SOLICITATION",
@@ -334,6 +354,8 @@ def publish(session, item_id, user, body):
 
 def withdraw(session, item_id, publication_id, user, reason):
     item = bank.require_action(session, item_id, user, "publish_quote", lock=True)
+    from .rfq_electronic import protect_publication
+    protect_publication(session, item_id)
     row = session.get(RfqQuotePublication, publication_id)
     if not row or row.solicitation_id != item_id:
         raise HTTPException(404, "Publication introuvable")
@@ -352,9 +374,10 @@ def withdraw(session, item_id, publication_id, user, reason):
     quote.status = "expire"
     session.add(row); session.add(quote)
     if rfq.selected_quote_id == quote.id:
-        rfq.selected_quote_id = None
+        from .rfq_quote_integrity import clear_selection
+        clear_selection(rfq)
         rfq.selection_reason_code = rfq.selection_reason_note = None
-    from ..api.rfq import _sync_status, _sync_product_rfq
+    from .rfq_state import _sync_status, _sync_product_rfq
     _sync_status(rfq, session)
     _sync_product_rfq(session, rfq, user, action="PRODUCT_RFQ_RESPONSE_WITHDRAWN")
     record_audit_event(session, result="SUCCESS", action="RFQ_RESPONSE_WITHDRAWN", object_type="RFQ_SOLICITATION",
@@ -375,8 +398,7 @@ def workspace(session, item, user):
             "response": json.loads(draft.payload_json), "calculation_id": draft.calculation_id if "price" in rights else None,
             "prepared_by": draft.prepared_by, "validated_by": draft.validated_by,
             "validated_at": exchange.iso(draft.validated_at), "published": bool(published),
-            "validation_current": draft.validated_hash == draft.payload_hash and bool(policy)
-                and draft.validated_policy_version == policy.version}
+            "validation_current": validation_current(session, item, draft, policy)}
     result["publications"] = [public_row(session, row) for row in session.exec(select(RfqQuotePublication)
         .where(RfqQuotePublication.solicitation_id == item.id).order_by(RfqQuotePublication.revision.desc())).all()]
     return result

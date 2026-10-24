@@ -12,13 +12,16 @@ describe('panier RFQ multi-sous-jacents', () => {
     expect(rfqUnderlyingToParams(row)).toMatchObject({ sigma: 0.2, q: 0.02 })
   })
 
-  it('arrondit les hypothèses de marché affichées, y compris les modèles de vol', () => {
+  it('conserve la précision des hypothèses, y compris les modèles de vol', () => {
     const [row] = rfqBasketFromParams([{
-      ticker: 'MC.PA', sigma: 0.30099999999999996, q: 0.032799999999999996,
+      ticker: 'MC.PA', sigma: 0.30123456789, q: 0.0328123456789,
       v0: 0.09060000000000001, rho_h: -0.7000000000000001,
     }])
-    expect(row).toMatchObject({ sigma: 30.1, q: 3.28, v0: 9.06, rho_h: -70 })
+    expect(row.sigma).toBe(30.123456789)
+    expect(row.q).toBe(3.28123456789)
     const saved = rfqUnderlyingToParams(row)
+    expect(saved.sigma).toBeCloseTo(0.30123456789, 15)
+    expect(saved.q).toBeCloseTo(0.0328123456789, 15)
     expect(saved.v0).toBeCloseTo(0.0906)
     expect(saved.rho_h).toBeCloseTo(-0.7)
   })

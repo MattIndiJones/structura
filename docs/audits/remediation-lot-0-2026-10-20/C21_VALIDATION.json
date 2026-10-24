@@ -1,0 +1,164 @@
+{
+  "workstream": "C21",
+  "validated_on": "2026-10-22",
+  "global_closure": false,
+  "production_qualified": false,
+  "scope": [
+    "M15-01",
+    "M15-02",
+    "M15-04",
+    "M15-05"
+  ],
+  "backend": {
+    "unique_passed": 226,
+    "files": 16,
+    "new_c21_cases": 20,
+    "batches": [
+      {
+        "junit": "dependencies-final.xml",
+        "tests": 116,
+        "failures": 0
+      },
+      {
+        "junit": "ccr-final.xml",
+        "tests": 70,
+        "failures": 0
+      },
+      {
+        "junit": "regressions-final.xml",
+        "tests": 62,
+        "failures": 0
+      },
+      {
+        "junit": "c21-scope-final.xml",
+        "tests": 20,
+        "failures": 0
+      }
+    ],
+    "final_unresolved_failures": 0
+  },
+  "frontend": {
+    "passed": 660,
+    "files": 75,
+    "new_cases": 1,
+    "build": "PASS; temporary output outside frontend/dist; no interactive UI acceptance"
+  },
+  "baseline_reproduction": {
+    "junit": "baseline-final-c21.xml",
+    "cases": 20,
+    "expected_failures": 19,
+    "guard_passed": 1,
+    "fixture_errors": 0,
+    "preexisting_migration_failure": "baseline-migration.xml",
+    "migration_fixture_corrected_without_changing_production_guards": true
+  },
+  "criteria": {
+    "M15-01": {
+      "local_passed": true,
+      "tests": [
+        "test_missing_scenario_factor_is_rejected",
+        "test_invalid_history_is_not_a_covered_factor",
+        "test_var_launch_refuses_incomplete_factors_before_enqueue"
+      ]
+    },
+    "M15-02": {
+      "local_passed": true,
+      "tests": [
+        "test_partial_greeks_are_unknown_with_latest_run_source",
+        "test_partial_portfolio_totals_are_separate_from_available_sums"
+      ]
+    },
+    "M15-04": {
+      "local_passed": true,
+      "tests": [
+        "test_short_claim_keeps_exposure_and_blocks_cva_limit",
+        "test_discounted_claim_cva_matches_constant_discounted_exposure",
+        "test_fixed_claims_net_only_over_their_actual_common_life",
+        "test_c04_amendment_rechecks_short_claim_cva_without_mutating_terms"
+      ]
+    },
+    "M15-05": {
+      "local_passed": true,
+      "tests": [
+        "test_monitor_and_preparation_invalidate_after_official_fixing",
+        "test_corrected_fixing_rejects_archived_mtm_and_cached_greeks"
+      ]
+    }
+  },
+  "quantitative": {
+    "method": "ccr-1.3-payment-exposure",
+    "notional": 1000000,
+    "days_to_payment": 2,
+    "recovery": 0.4,
+    "annual_pd_linear": 0.2,
+    "rate": 0,
+    "cva_eur": 657.0841889117044,
+    "hard_limit": 100,
+    "booking_allowed": false,
+    "amended_notional": 1100000,
+    "amended_cva_eur": 722.7926078028747
+  },
+  "domain": {
+    "fixed_claims": "Exact contractual payment dates; discounted EE left endpoint; EPE left endpoint.",
+    "optional_projection": "Weekly bounded replay; subweekly options and mixed off-grid fixed payments unavailable.",
+    "var": "Residual snapshot shocks; no complete horizon cash/event, FX translation or portfolio funding model.",
+    "regulatory_extension": false,
+    "d08_resolved": false
+  },
+  "c27": {
+    "partial": true,
+    "covered": [
+      "Greeks default Production and explicit UAT",
+      "VaR default Production and explicit archived UAT",
+      "C01 organization visibility"
+    ],
+    "remaining": [
+      "other aggregates",
+      "transverse history",
+      "scope selection workflow",
+      "Demo CRM"
+    ]
+  },
+  "cross_validation": {
+    "T05": "Partiel — C03/C04 et requalification C21 des limites PFE/CVA validés localement ; amendement de créance courte bloqué sans mutation ; recette transverse et production restantes",
+    "T08": "Partiel — C13/C18/C19 et invalidation du moniteur, des bases et des sélections courantes C21 validés localement ; consommateurs C22/C26 et recette complète restants",
+    "T09": "Partiel — C14/C18 et créance courte C21 validés localement : CVA 657,084 EUR, limite 100 bloquante, paiements exacts ; réconciliation cash/P&L C22 et production restantes",
+    "T10": "Partiel — FX C11, facteurs VaR et couverture Greeks C21, défaut Production et UAT explicite Greeks/VaR validés localement ; autres agrégats, historiques et CRM C27 restants"
+  },
+  "preservation": {
+    "initial_files": 2403,
+    "unchanged": 2387,
+    "expected_changed": 16,
+    "changed_files": [
+      "backend/app/api/ccr.py",
+      "backend/app/api/portfolios.py",
+      "backend/app/api/var.py",
+      "backend/app/core/ccr/cache.py",
+      "backend/app/core/ccr/exposure.py",
+      "backend/app/core/ccr/service.py",
+      "backend/app/core/var_engine.py",
+      "backend/tests/test_ccr.py",
+      "backend/tests/test_var_engine.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/projects/pricing/CCR_IMPLEMENTATION_2026-09-28.md",
+      "frontend/src/views/RiskManagementView.test.js",
+      "frontend/src/views/RiskManagementView.vue"
+    ],
+    "missing_files": [],
+    "original_source_snapshots_verified": true,
+    "prior_runtime_and_dist_unchanged": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "real_db_absent_before_and_after": true
+  },
+  "no_commit": true,
+  "no_push": true,
+  "server_started": false,
+  "network_guard": {
+    "external_http_disabled": true,
+    "blocked_attempts": []
+  }
+}

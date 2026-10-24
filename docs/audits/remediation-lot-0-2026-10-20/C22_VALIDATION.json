@@ -1,0 +1,198 @@
+{
+  "workstream": "C22",
+  "validated_on": "2026-10-22",
+  "scope": [
+    "M14-01",
+    "M14-02"
+  ],
+  "global_closure": false,
+  "production_qualified": false,
+  "method": "pnl-payment-v2",
+  "cash_basis": "CONTRACTUAL_PAYMENT_DATE",
+  "backend": {
+    "unique_passed": 161,
+    "files": 8,
+    "new_c22_cases": 22,
+    "final_unresolved_failures": 0,
+    "batches": [
+      {
+        "junit": "core-final.xml",
+        "cases": 50,
+        "failures_at_execution": 1
+      },
+      {
+        "junit": "dependencies-final.xml",
+        "cases": 110,
+        "failures_at_execution": 0
+      },
+      {
+        "junit": "pdf-final.xml",
+        "cases": 23,
+        "failures_at_execution": 0
+      },
+      {
+        "junit": "portfolio-offline-final.xml",
+        "cases": 3,
+        "failures_at_execution": 0
+      }
+    ],
+    "latest_distinct": "latest-distinct.xml",
+    "superseded_fixture_failure": "core-final.xml dividend_curve case; corrected without weakening validation, passed in pdf-final.xml",
+    "parameterization": "Original frozen comparison replaced by two periods; original unparameterized node not double counted"
+  },
+  "frontend": {
+    "passed": 662,
+    "files": 75,
+    "new_render_cases": 2,
+    "build": "PASS; output outside frontend/dist",
+    "targeted": "12 cases in 3 files"
+  },
+  "baseline": {
+    "junit": "baseline-core.xml",
+    "cases": 10,
+    "expected_failures": 9,
+    "guard_passed": 1,
+    "fixture_errors": 0,
+    "preexisting_portfolio_fixture_failures": 3,
+    "initial_invalid_PAY_fixture_discarded": true
+  },
+  "criteria": {
+    "M14-01": {
+      "local_passed": true,
+      "tests": [
+        "test_coupon_cash_uses_payment_day_and_reconciles",
+        "test_portfolio_cash_and_mtm_have_one_position_sign",
+        "test_frozen_comparison_rolls_receivables_with_realized_state_without_false_jump",
+        "test_realized_coupon_memory_moves_with_calendar",
+        "test_equal_pay_legs_are_not_deduplicated",
+        "test_negative_contractual_cash_is_preserved",
+        "test_official_correction_changes_new_cash_but_not_archived_explain"
+      ]
+    },
+    "M14-02": {
+      "local_passed": true,
+      "tests": [
+        "test_only_q_change_has_dividend_effect_and_no_vega",
+        "test_portfolio_keeps_dividend_contribution",
+        "test_frozen_dividends_do_not_change_diffusion_bucket",
+        "test_portfolio_uses_prices_before_rounding_points"
+      ]
+    }
+  },
+  "identities": {
+    "sum_factors_plus_residual": "delta_mtm",
+    "contractual_pnl": "delta_mtm + contractual cash in (date1,date2]",
+    "frozen_Valo_Explain": "delta_mtm only; no paid cash added"
+  },
+  "canonical_case": {
+    "notional": 1000000,
+    "coupon_fraction": 0.1,
+    "observation": "2026-09-15",
+    "payment": "2026-09-22",
+    "before_payment": {
+      "period": [
+        "2026-09-14",
+        "2026-09-16"
+      ],
+      "cash_pts": 0,
+      "delta_pts": 0,
+      "pnl_pts": 0
+    },
+    "across_payment": {
+      "period": [
+        "2026-09-21",
+        "2026-09-23"
+      ],
+      "cash_pts": 10,
+      "delta_pts": -10,
+      "pnl_pts": 0
+    }
+  },
+  "pdf": {
+    "samples": 2,
+    "pages_each": 2,
+    "visual_inspection": "PASS; all final before/after PNG pages inspected",
+    "archive_json_hash_and_pdf_preserved": true
+  },
+  "cross_validation": {
+    "T08": "Partiel — C13/C18/C19/C21 et cash/attribution C22 validés localement ; correction officielle reprise par le nouvel Explain, ancien PDF conservé ; consommateur C26 et recette complète restants",
+    "T09": "Partiel — contrôles déterministes C14/C18/C21/C22 validés localement : CVA 657,084 EUR, limite 100 bloquante, coupon observé le 15 payé le 22, P&L réconcilié ; recette transverse intégrale et production restantes"
+  },
+  "network_guards": {
+    "core-final.xml": {
+      "external_http_disabled": true,
+      "blocked_attempts": [
+        {
+          "test": "backend/tests/test_portfolio_pnl.py::test_portfolio_pnl_skips_unexplainable_deal",
+          "method": "GET",
+          "host": "query1.finance.yahoo.com"
+        },
+        {
+          "test": "backend/tests/test_portfolio_pnl.py::test_portfolio_pnl_skips_unexplainable_deal",
+          "method": "GET",
+          "host": "query1.finance.yahoo.com"
+        },
+        {
+          "test": "backend/tests/test_portfolio_pnl.py::test_portfolio_pnl_skips_unexplainable_deal",
+          "method": "GET",
+          "host": "query1.finance.yahoo.com"
+        },
+        {
+          "test": "backend/tests/test_portfolio_pnl.py::test_portfolio_pnl_skips_unexplainable_deal",
+          "method": "GET",
+          "host": "query1.finance.yahoo.com"
+        }
+      ]
+    },
+    "dependencies-final.xml": {
+      "external_http_disabled": true,
+      "blocked_attempts": []
+    },
+    "pdf-final.xml": {
+      "external_http_disabled": true,
+      "blocked_attempts": []
+    },
+    "portfolio-offline-final.xml": {
+      "external_http_disabled": true,
+      "blocked_attempts": []
+    }
+  },
+  "legacy_fixture_blocked_attempts": 4,
+  "final_network_attempts": 0,
+  "preservation": {
+    "initial_files": 2446,
+    "unchanged": 2432,
+    "expected_changed": 14,
+    "changed_files": [
+      "backend/app/api/deals.py",
+      "backend/app/api/portfolios.py",
+      "backend/app/core/deal_valuation_pdf.py",
+      "backend/app/core/valuation_notes.py",
+      "backend/tests/test_portfolio_pnl.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/projects/lifecycle/EXPLICATION_VALO_DESIGN.md",
+      "docs/projects/lifecycle/VALO_EXPLAIN_2026-09-17.md",
+      "frontend/src/views/BookingView.vue",
+      "frontend/src/views/RiskManagementView.test.js",
+      "frontend/src/views/RiskManagementView.vue"
+    ],
+    "missing_files": [],
+    "source_snapshots_verified": true,
+    "prior_runtime_and_dist_unchanged": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "real_db_absent_before_and_after": true
+  },
+  "limitations": [
+    "Contractual dates are not bank transfer evidence",
+    "Terminal resolutions remain bounded by available valuation context",
+    "Reporting FX convention at date2 unchanged",
+    "C27 and production acceptance remain open"
+  ],
+  "no_commit": true,
+  "no_push": true,
+  "server_started": false
+}

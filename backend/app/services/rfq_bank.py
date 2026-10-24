@@ -53,9 +53,12 @@ def require_open(session, item):
 
 
 def work_row(session, item, user):
+    from .rfq_reconciliation import confirmed_booking_pending
     case = session.get(RfqBankCase, item.id)
     rights = membership_rights(session, item.recipient_desk_id, user)
-    row = {"case": None, "rights": sorted(rights), "open_for_work": True, "block_reason": None}
+    row = {"case": None, "rights": sorted(rights), "open_for_work": True, "block_reason": None,
+           "booking_recovery_available": bool(case and case.responsible_user_id == user.id
+               and {'book','price'} <= rights and confirmed_booking_pending(session,item.id))}
     try:
         require_open(session, item)
     except HTTPException as exc:
@@ -131,7 +134,9 @@ def assign(session, item_id, user, target_id, expected_revision, reason):
     if len(reason.strip()) < 3:
         raise HTTPException(422, "Précisez le motif de réaffectation")
     item = require_action(session, item_id, user, lock=True)
-    require_open(session, item)
+    from .rfq_reconciliation import confirmed_booking_pending
+    if not confirmed_booking_pending(session,item.id):
+        require_open(session, item)
     case = session.get(RfqBankCase, item_id)
     if not case or case.state != "IN_PROGRESS":
         raise HTTPException(409, "Prenez en charge une RFQ active avant réaffectation")
@@ -163,7 +168,9 @@ def private_product_access(session, case, user):
 
 def require_pricing(session, case, user):
     item = private_product_access(session, case, user)
-    require_open(session, item)
+    from .rfq_reconciliation import confirmed_booking_pending
+    if not confirmed_booking_pending(session,item.id):
+        require_open(session, item)
     if case.state != "IN_PROGRESS":
         raise HTTPException(409, "Cette RFQ a été déclinée")
     if case.responsible_user_id != user.id:

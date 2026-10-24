@@ -1,3 +1,8 @@
+// Explicit calendar choices travel unchanged through every Economics boundary.
+export function calendarPolicy(value) {
+  return Object.fromEntries(['observation_calendars', 'observation_join', 'settlement_calendars', 'settlement_join']
+    .filter(key => value && value[key] !== undefined).map(key => [key, value[key]]))
+}
 // Shared Economics boundary for the Pricer, RFQ and saved configurations.
 export function usesAbsoluteSpots(script) {
   const name=/^\s*UNDERLYING\s+(\w+)/mi.exec(script||'')?.[1]

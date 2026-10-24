@@ -34,7 +34,8 @@ from .vocabulary import VOCABULAIRE_FR
 # Les poids vivent avec le reste des données de l'app plutôt que dans le cache
 # HuggingFace de l'utilisateur : même répertoire que la base et les caches de
 # prix, donc un seul endroit à connaître — et à exclure de git.
-MODEL_DIR = Path(__file__).resolve().parents[3] / "data" / "whisper_models"
+from ...runtime import data_path
+MODEL_DIR = data_path("whisper_models")
 WORKER = Path(__file__).resolve().parent / "worker.py"
 
 # `small` quantifié int8 : ~480 Mo, plusieurs fois le temps réel sur CPU, ce qui

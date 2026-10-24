@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import AmcStudy, User
 from .auth import get_current_user
+from ..services.business_access import can_read_organization_record
 
 router = APIRouter(prefix="/api/amc/studies", tags=["amc-studies"])
 
@@ -57,10 +58,9 @@ def list_studies(
     """Lightweight list of the current user's saved studies, most recent first."""
     rows = session.exec(
         select(AmcStudy)
-        .where(AmcStudy.user_id == current.id)
         .order_by(AmcStudy.updated_at.desc())
     ).all()
-    return [_summary_row(s) for s in rows]
+    return [_summary_row(s) for s in rows if can_read_organization_record(s, current)]
 
 
 @router.get("/{study_id}")
@@ -70,7 +70,7 @@ def get_study(
     session: Annotated[Session, Depends(get_session)],
 ):
     s = session.get(AmcStudy, study_id)
-    if not s or s.user_id != current.id:
+    if not can_read_organization_record(s, current):
         raise HTTPException(404, "Étude introuvable")
     return _detail_row(s)
 
@@ -93,7 +93,7 @@ def create_study(
     result["_snapshot_integrity"] = fingerprint(snapshot)
     label = payload.label.strip() or f"{payload.isin} — {datetime.utcnow().strftime('%d/%m/%Y %H:%M')}"
     s = AmcStudy(
-        user_id=current.id,
+        user_id=current.id, entity_id=current.entity_id,
         isin=payload.isin,
         product_name=payload.product_name,
         label=label,

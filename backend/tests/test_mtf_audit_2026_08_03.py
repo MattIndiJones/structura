@@ -220,15 +220,14 @@ def test_quantiles_standards_et_strictement_ordonnes():
 
 # ── Garde-fous ──────────────────────────────────────────────────────
 
-def test_date_de_mark_sous_un_demi_pas_refusee():
-    """step_k = 0 faisait indexer un tenseur vide : `IndexError: index -1 is out
-    of bounds for axis 0 with size 0`, une trace sur laquelle aucun appelant ne
-    peut agir."""
+def test_date_de_mark_sous_un_demi_pas_uses_exact_grid():
+    """A positive mark is now a diffusion node, including before half a week."""
     cs = parse_script(PHOENIX)
-    with pytest.raises(ValueError, match="trop proche"):
-        run_mark_to_future(cs, _ul(), C1, r=0.03, T_max=2.0, main_price=100.0,
-                           model="constant", n_outer=20, n_inner=20, seed=1,
-                           mtm_dates=[0.005])
+    result = run_mark_to_future(cs, _ul(), C1, r=0.03, T_max=2.0, main_price=100.0,
+                               model="constant", n_outer=20, n_inner=20, seed=1,
+                               mtm_dates=[0.005])
+    assert result['results'][0]['t'] == .005
+    assert len(result['results'][0]['pvs']) == 20
 
 
 def test_grille_de_dates_strictement_croissante_sur_produit_ultra_court():

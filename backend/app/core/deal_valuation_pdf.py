@@ -611,6 +611,10 @@ def generate_valuation_pdf(data: dict) -> bytes:
         story.append(PageBreak())
     story.append(Paragraph("Annexe technique", S_SECTION))
     mu = mtm.get("market_used") or {}
+    provider = (mu.get("data") or {}).get("provider")
+    provider_label = "Yahoo Finance" if provider == "YAHOO_FINANCE" else (provider or "non renseignée")
+    source_note = " — données de scénario, sans cours de marché réel" if str(provider or "").startswith("SYNTHETIC") else ""
+    story.append(Paragraph(f"Source des observations : {escape(provider_label)}{source_note}.", S_BODY))
     src = ("paramètres de marché figés au booking" if mu.get("source") == "booking"
            else f"paramètres de marché recalibrés (vol réalisée"
                 f"{', ' + str(mu.get('window_returns')) + ' rendements quotidiens' if mu.get('window_returns') else ''})")
@@ -659,8 +663,8 @@ def generate_valuation_pdf(data: dict) -> bytes:
     story.append(Spacer(1, 5))
     story.append(Paragraph(
         "Document d'information établi à titre purement indicatif. La valorisation "
-        "présentée est une estimation à la date indiquée, fondée sur des données de "
-        "marché publiques (Yahoo Finance) et un modèle de simulation interne ; elle ne "
+        "présentée est une estimation à la date indiquée, fondée sur les données et "
+        "hypothèses documentées dans ce rapport et un modèle de simulation interne ; elle ne "
         "constitue ni un prix ferme, ni une offre d'achat ou de vente, ni un conseil en "
         "investissement. La valeur de remboursement effective du produit dépendra des "
         "conditions de marché futures et des termes contractuels du produit. "
@@ -732,6 +736,9 @@ def _explain_market_table(m1: dict, m2: dict, res: dict, uls: list) -> Table:
         rows.append([Paragraph(f"Volatilité {n}", S_CELL),
                      Paragraph(f"{m1.get('sigma', {}).get(n, '—')}%", S_CELL_R),
                      Paragraph(f"{m2.get('sigma', {}).get(n, '—')}%", S_CELL_R)])
+        rows.append([Paragraph(f"Dividende {n}", S_CELL),
+                     Paragraph(f"{m1.get('q', {}).get(n, '—')}%", S_CELL_R),
+                     Paragraph(f"{m2.get('q', {}).get(n, '—')}%", S_CELL_R)])
     rows.append([Paragraph("Taux d'actualisation", S_CELL),
                  Paragraph(f"{m1.get('r', '—')}%", S_CELL_R),
                  Paragraph(f"{m2.get('r', '—')}%", S_CELL_R)])
@@ -788,26 +795,28 @@ def generate_explain_pdf(data: dict) -> bytes:
                      Paragraph(f"{s['delta_pts']:+.2f} pt(s)",
                                _sty(f"e_s_{s['label']}", fontSize=8.5, textColor=col,
                                     alignment=TA_RIGHT))])
-    rows.append([Paragraph("Résidu (effets croisés)", S_CELL),
+    rows.append([Paragraph("Résidu non attribué", S_CELL),
                  Paragraph(f"{res['residual_pts']:+.2f} pt(s)", S_CELL_R)])
     if res.get("flows_total_pts"):
-        rows.append([Paragraph("Flux détachés sur la période", S_CELL),
+        cash_label = ("Cash contractuel à échéance" if res.get("cash_basis") == "CONTRACTUAL_PAYMENT_DATE"
+                      else "Flux détachés — ancien calcul")
+        rows.append([Paragraph(cash_label, S_CELL),
                      Paragraph(f"{res['flows_total_pts']:+.2f} pt(s)", S_CELL_R)])
     story.append(_tbl(rows, [11.0 * cm, 6.0 * cm], header=True))
 
     story.append(Paragraph("Lecture", S_SECTION))
     for line in res.get("phrases") or []:
-        story.append(Paragraph("•&nbsp;&nbsp;" + line, S_BODY))
+        story.append(Paragraph("•&nbsp;&nbsp;" + escape(line), S_BODY))
         story.append(Spacer(1, 2))
 
     # ── Annexe technique ──────────────────────────────────────────────
-    story.append(PageBreak())
+    story.append(CondPageBreak(10 * cm))
     story.append(Paragraph("Annexe technique", S_SECTION))
     story.append(Paragraph(
         "Décomposition par réévaluations Monte Carlo successives à graine identique "
         "(Common Random Numbers) : chaque ligne du waterfall change un seul facteur — "
-        "calendrier (temps), spots et état path-dependent réalisé (spot), volatilités "
-        "(véga), corrélations — en partant de la photo complète du produit à la première "
+        "temps, état réalisé et créances ensemble, puis spots, dividendes, "
+        "volatilité (véga), corrélations — en partant de la photo complète du produit à la première "
         "date jusqu'à celle de la seconde. La chaîne est télescopique : la somme des "
         "effets et du résidu reproduit exactement la variation de valeur. Le taux "
         "d'actualisation est maintenu constant (pas de source de taux historiques).",
@@ -828,8 +837,8 @@ def generate_explain_pdf(data: dict) -> bytes:
     story.append(Spacer(1, 5))
     story.append(Paragraph(
         "Document d'information établi à titre purement indicatif. Les valorisations et "
-        "attributions présentées sont des estimations fondées sur des données de marché "
-        "publiques (Yahoo Finance) et un modèle de simulation interne ; elles ne "
+        "attributions présentées sont des estimations fondées sur les données et hypothèses "
+        "documentées dans ce rapport et un modèle de simulation interne ; elles ne "
         "constituent ni un prix ferme, ni une offre d'achat ou de vente, ni un conseil "
         f"en investissement. Généré par Structura le {today}.", S_SMALL))
 

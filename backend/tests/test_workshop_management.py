@@ -26,7 +26,7 @@ def workshop(tmp_path, monkeypatch):
     app = FastAPI()
     app.include_router(agent_workshop.router)
     app.include_router(agent_workshop.admin_router)
-    identity = SimpleNamespace(id=3, role='user')
+    identity = SimpleNamespace(id=3, role='admin')
     app.dependency_overrides[get_current_user] = lambda: identity
     with TestClient(app) as client:
         yield local, manager, client, identity
@@ -179,7 +179,8 @@ def test_replay_keeps_previous_campaign_visible_and_creates_no_shared_data(works
     response = client.post(f"/api/agent-workshop/{previous['id']}/replay")
     assert response.status_code == 200, response.text
     fresh = response.json()
-    assert fresh['replay_of'] == previous['id'] and fresh['config'] == previous['config']
+    assert fresh['replay_of'] == previous['id'] and fresh['config']['schema_version']==2
+    assert sum(row['count'] for row in fresh['config']['calendar'])==previous['config']['months']
     assert fresh['turns'] == 0 and fresh['actors']['hector']['deals'] == []
     assert fresh['issue_reviews'] == {} and not (local.path(fresh['id']) / 'instances').exists()
     assert len(local.list(3)) == 2

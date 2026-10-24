@@ -1,5 +1,7 @@
 # Explication de valo (P&L explain entre deux dates) — design (2026-07-19)
 
+**Mise à jour C22 — 22/10/2026 :** les conventions ci-dessous distinguent désormais observation, créance et cash à échéance ; [livraison et limites](../../audits/REMEDIATION_C22_2026-10-22.md). Les constats de juillet restent un historique de validation.
+
 **Statut : IMPLÉMENTÉ le 2026-07-19 (soir), 162/162 tests, build OK, validé en réel.**
 Arbitrages : σ booking quand d1 = date de booking (σ réalisée sinon), waterfall
 Temps/Spot/Vol/Corr + résidu + flux détachés, UI dans la fiche détail Booking.
@@ -32,15 +34,22 @@ Deux photos complètes via la machinerie MtM résiduel existante, puis on change
 | # | Étape | Ce qui change | Lecture |
 |---|-------|---------------|---------|
 | 0 | MtM(d1) | — | point de départ |
-| 1 | **Effet temps** | calendrier d1 → d2 (T_remaining, events shiftés), spots/σ/état de d1 | theta, pull-to-par |
-| 2 | **Effet spot** | spots d1 → d2 **ET état path-dependent d1 → d2** (wof_min, s_min, index, memo, accum — un KI touché entre les deux est un effet spot) | delta (+ gamma) |
-| 3 | **Effet vol** | σ(d1) → σ(d2) | véga |
-| 4 | **Effet corrélation** | corr(d1) → corr(d2) — seulement si n_uls > 1 | cega |
-| 5 | **Résidu** | ΔMtM − Σ effets | croisés + bruit MC (petit grâce au CRN) |
+| 1 | **Effet temps** | calendrier, état réalisé et créances d2 déplacés ensemble ; spots/σ de d1 | temps et état contractuel, pas un theta pur |
+| 2 | **Effet spot** | spots normalisés d1 → d2 ; état réalisé déjà repris à la première étape | revalorisation spot |
+| 3 | **Effet dividendes** | q, courbe et décroissance d1 → d2, diffusion conservée | revalorisation dividendes |
+| 4 | **Effet vol** | paramètres de diffusion d1 → d2, dividendes déjà repris | revalorisation de diffusion |
+| 5 | **Effet corrélation** | corr(d1) → corr(d2) — seulement si n_uls > 1 | revalorisation corrélation |
+| 6 | **Résidu** | ΔMtM − Σ effets | non attribué, jamais renommé en facteur causal |
 
-Ligne à part, hors modèle : **flux détachés entre d1 et d2** (coupons/remboursements
-payés dans l'intervalle, depuis `realized_cash_flows` des deux replays — différence des
-deux listes). Identité affichée : `MtM(d2) − MtM(d1) + flux détachés = P&L de la période`.
+Ligne à part : **cash contractuel à échéance dans ]d1, d2]**, depuis les
+`settled_cash_flows` du replay à d2 et leur `payment_date`. La date d'observation
+crée une créance tant que le paiement est futur ; elle ne crée pas du cash.
+Une date de paiement absente/invalide rend le P&L cash indisponible. Ces
+échéances ne sont pas une preuve de virement bancaire.
+
+Identités : `Σ facteurs + résidu = ΔMtM` et `P&L contractuel = ΔMtM + cash`.
+Les sommes en EUR utilisent les contributions non arrondies, avant présentation
+en centimes ; la conversion de reporting reste celle de la date 2.
 
 ### Conventions de marché
 
@@ -87,8 +96,8 @@ futur → 422.
 
 Dans l'accordéon du deal, nouveau bloc « Explication de valo » : deux `<input type=date>`
 (d1 pré-rempli value_date, d2 aujourd'hui), bouton « Expliquer » → tableau waterfall
-(une ligne par effet : label, points signés colorés, phrase), ligne flux détachés, ligne
-résidu, total = ΔMtM. Petit graphique cascade optionnel (barres cumulées) si simple.
+(une ligne par effet : label, points signés colorés, phrase), ligne cash contractuel à échéance, ligne
+résidu, somme des facteurs et résidu = ΔMtM ; P&L total = ΔMtM + cash contractuel. Petit graphique cascade optionnel (barres cumulées) si simple.
 Réservé aux deals actifs.
 
 ## Tests (offline, patterns test_engine.py — séries synthétiques)

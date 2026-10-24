@@ -14,12 +14,14 @@ row (result_summary_json) — the worker itself stays completely
 VaR-agnostic, it only knows about generic jobs (see queue_store.py)."""
 from __future__ import annotations
 import json
+import math
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from ..db.database import get_session
+from ..core.risk_scope import HistoryDataScope, archived_data_scope
 from ..db.models import Deal, Portfolio, ComputeBatch, ComputeJob, User, position_sign
 from .auth import get_current_user
 from ..services.market_data import load_hist_prices
@@ -36,6 +38,7 @@ router = APIRouter(prefix="/api/portfolios", tags=["var"])
 
 
 class VarRequest(BaseModel):
+    data_scope: Literal["PRODUCTION", "UAT"] = "PRODUCTION"
     method: Literal["historical", "parametric", "both"] = "both"
     confidence: float = 0.95
     horizon_days: int = Field(default=1, ge=1, le=20)
@@ -243,7 +246,9 @@ def _aggregate_var_jobs(jobs: list[ComputeJob], params: dict) -> dict:
 
 
 def _launch_var_study(deals: list[Deal], session: Session, user_id: int,
-                       label: str, body: VarRequest) -> dict:
+                       label: str, body: VarRequest, *,
+                       scope: str = "global", portfolio_id: int | None = None) -> dict:
+    deals = [d for d in deals if (getattr(d, "uat_batch_id", None) is not None) == (body.data_scope == "UAT")]
     if not deals:
         raise HTTPException(422, "Aucun deal actif dans cette sélection.")
     requested_deals = [_deal_descriptor(deal) for deal in deals]
@@ -280,6 +285,8 @@ def _launch_var_study(deals: list[Deal], session: Session, user_id: int,
         "nominal": base["nominal"], "currency": base.get("currency"),
     } for base in bases]
     common_params = {
+        "data_scope": body.data_scope, "is_test": body.data_scope == "UAT",
+        "scope": scope, "portfolio_id": portfolio_id, "scope_version": 1,
         "method": body.method, "confidence": body.confidence,
         "horizon_days": body.horizon_days, "lookback_years": body.lookback_years,
         "n_deals": len(bases), "max_workers": body.max_workers,
@@ -355,6 +362,16 @@ def _launch_var_study(deals: list[Deal], session: Session, user_id: int,
         raise HTTPException(422, "Historique de prix insuffisant pour générer des scénarios "
                                  f"(lookback demandé : {body.lookback_years} an(s))")
 
+    # Reject the requested universe before allocating any jobs or requesting
+    # a compute confirmation. An absent factor must never become a zero shock.
+    missing = sorted({tk for s in scenarios for tk in ticker_list
+                      if tk not in s.spot_pct or tk not in s.vol_pts
+                      or not math.isfinite(s.spot_pct[tk]) or not math.isfinite(s.vol_pts[tk])})
+    if missing:
+        raise HTTPException(422, detail={"code": "VAR_FACTOR_COVERAGE_INCOMPLETE",
+            "message": "VaR refusée : facteurs de marché incomplets.",
+            "missing_factors": missing, "requested_factors": ticker_list})
+
     estimate = estimate_var_portfolio(bases, len(scenarios), body.max_workers)
     confirmation_payload = {
         "deal_ids": [base["deal_id"] for base in bases],
@@ -424,9 +441,8 @@ def launch_var_global(
     session: Annotated[Session, Depends(get_session)],
 ):
     statement = select(Deal).where(Deal.status.in_(["actif", "en_reglement"]))
-    if getattr(current, "role", "user") != "admin":
-        statement = statement.where(Deal.user_id == current.id)
-    deals = session.exec(statement).all()
+    from ..services.business_access import visible_deals
+    deals = visible_deals(session, session.exec(statement).all(), current)
     result = _launch_var_study(list(deals), session, current.id, "VaR — tous portefeuilles", body)
     result["scope"] = "global"
     return result
@@ -440,14 +456,46 @@ def launch_var_portfolio(
     session: Annotated[Session, Depends(get_session)],
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or (getattr(current, "role", "user") != "admin" and p.user_id != current.id):
+    from .portfolios import _portfolio_accessible
+    if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
     from .portfolios import _portfolio_deals
-    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"))
-    result = _launch_var_study(list(deals), session, current.id, f"VaR — {p.name}", body)
+    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"), current=current)
+    result = _launch_var_study(list(deals), session, current.id, f"VaR — {p.name}", body,
+                               scope="portfolio", portfolio_id=portfolio_id)
     result["scope"] = "portfolio"
     result["portfolio_id"] = portfolio_id
     return result
+
+
+@router.get("/var-history")
+def list_var_history(
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    data_scope: HistoryDataScope = "PRODUCTION",
+    scope: Literal["global", "portfolio"] = "global",
+    portfolio_id: int | None = None,
+    limit: int = 10,
+    all_views: bool = False,
+):
+    """Classify archived params only; never relabel an old mixed study."""
+    rows = session.exec(select(ComputeBatch).where(
+        ComputeBatch.user_id == current.id, ComputeBatch.kind == "var_scenario")
+        .order_by(ComputeBatch.created_at.desc(), ComputeBatch.id.desc())).all()
+    result = []
+    for batch in rows:
+        params = json.loads(batch.params_json or "{}")
+        origin = archived_data_scope(params, require_view=True)
+        if origin != data_scope:
+            continue
+        if not all_views and origin != "LEGACY_UNQUALIFIED" and (
+                params["scope"] != scope or params.get("portfolio_id") != portfolio_id):
+            continue
+        result.append(dict(id=batch.id, label=batch.label, status=batch.status,
+            created_at=batch.created_at.isoformat(), total_jobs=batch.total_jobs,
+            completed_jobs=batch.completed_jobs, failed_jobs=batch.failed_jobs,
+            params=params, data_scope=origin))
+    return result[:max(1, min(limit, 100))]
 
 
 @router.get("/var/{batch_id}")
@@ -468,6 +516,7 @@ def get_var_result(
         "params": json.loads(batch.params_json) if batch.params_json else {},
         "result": None,
     }
+    row["data_scope"] = archived_data_scope(row["params"], require_view=True)
     if batch.status in ("queued", "running"):
         return row
 

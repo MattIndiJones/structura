@@ -1,0 +1,1974 @@
+{
+  "captured_for_date": "2026-10-20",
+  "timezone": "Europe/Berlin",
+  "root": "C:\\Users\\admin\\GitHub\\structura",
+  "branch": "codex/hybrid-saas-foundation",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "default_porcelain_entries": 279,
+  "expanded_entries_count": 291,
+  "entries": [
+    {
+      "status": " M",
+      "path": ".gitignore",
+      "renamed_from": null,
+      "sha256": "882ad384ec04507e7225fadcec8239590f1516c6a9e880b05d4bbd8701c7d11a",
+      "size_bytes": 2153
+    },
+    {
+      "status": " M",
+      "path": "backend/app/api/admin.py",
+      "renamed_from": null,
+      "sha256": "5a1a13b48be2bab3683eec1e6926d50c0b8d916022027041be590c2c20d2ded8",
+      "size_bytes": 34880
+    },
+    {
+      "status": " M",
+      "path": "backend/app/api/agent_workshop.py",
+      "renamed_from": null,
+      "sha256": "0674ad899b23e762be36426d50733368b76ca54036cdf68ad8ba4818eda3b696",
+      "size_bytes": 8475
+    },
+    {
+      "status": " M",
+      "path": "backend/app/api/amc_access.py",
+      "renamed_from": null,
+      "sha256": "48d2467ba893546eebee16385ccaca34887bb4617a812e0eadda5e68f381b9e5",
+      "size_bytes": 1677
+    },
+    {
+      "status": " M",
+      "path": "backend/app/api/auth.py",
+      "renamed_from": null,
+      "sha256": "f879f6759ee809e08345555a5f28b05ccb92e3a7e80f9794dd22669c98a9e904",
+      "size_bytes": 16256
+    },
+    {
+      "status": " M",
+      "path": "backend/app/api/ccr.py",
+      "renamed_from": null,
+      "sha256": "48b462d846f5cd2dbc39db4623022f7adca3407aa83b85c6e6e20f20e622eb92",
+      "size_bytes": 11989
+    },
+    {
+      "status": " M",
+      "path": "backend/app/api/deals.py",
+      "renamed_from": null,
+      "sha256": "500b295ba75e0a81458870a35eb41f3735ed6f5cdef449e73750fefdc8049076",
+      "size_bytes": 351203
+    },
+    {
+      "status": " M",
+      "path": "backend/app/api/pricing.py",
+      "renamed_from": null,
+      "sha256": "5e115e64455d05075b042c23f7ab7ff54162fe4eb5c123d4b61a35afc29bd4cc",
+      "size_bytes": 45420
+    },
+    {
+      "status": " M",
+      "path": "backend/app/api/trading.py",
+      "renamed_from": null,
+      "sha256": "92d2a37cc5a9b58f7541c32d1de01847c678c12bd6e76827d106140e25329eda",
+      "size_bytes": 15700
+    },
+    {
+      "status": " M",
+      "path": "backend/app/core/amc_engine.py",
+      "renamed_from": null,
+      "sha256": "f13c44ad289846506962d37efc1195b0a4d8fd761399b3ea1aa5e04374e8a438",
+      "size_bytes": 47489
+    },
+    {
+      "status": " M",
+      "path": "backend/app/core/ccr/service.py",
+      "renamed_from": null,
+      "sha256": "a1a0aeea6588d3d17b21ed0dfe5a7504eb48a07aa953f18756caeb20822cda7a",
+      "size_bytes": 51903
+    },
+    {
+      "status": " M",
+      "path": "backend/app/core/deal_valuation.py",
+      "renamed_from": null,
+      "sha256": "89cb2c89c769957609844a92c0134166d63f505c5fd49bb83783214e8e3c2de6",
+      "size_bytes": 32887
+    },
+    {
+      "status": " M",
+      "path": "backend/app/core/lifecycle_controls.py",
+      "renamed_from": null,
+      "sha256": "93f51db5cbd333cce3f5cb9b4c850709a2871f8e72a4c50fcebf6a68bdb76a16",
+      "size_bytes": 17684
+    },
+    {
+      "status": " M",
+      "path": "backend/app/core/payscript/parser.py",
+      "renamed_from": null,
+      "sha256": "0a7f1adb153fb994f2c4b85d85fe6002dd804d89ce60d82ce25bccfbf2d959c5",
+      "size_bytes": 73666
+    },
+    {
+      "status": " M",
+      "path": "backend/app/db/database.py",
+      "renamed_from": null,
+      "sha256": "756b159bc68383f69eb912a0be97e61d0f8a35fda3f15a7f86738e28a796ab02",
+      "size_bytes": 47132
+    },
+    {
+      "status": " M",
+      "path": "backend/app/db/models.py",
+      "renamed_from": null,
+      "sha256": "8baab8823bb9503de8ab44cde4d9bd2a3f2058f52eb8a6b766d28c8c36ec0f46",
+      "size_bytes": 107389
+    },
+    {
+      "status": " M",
+      "path": "backend/app/main.py",
+      "renamed_from": null,
+      "sha256": "ff0da5fc54cef7ce33c0da8c6e004236c141dfeda4c4e3d890d0ee1be34748a9",
+      "size_bytes": 13790
+    },
+    {
+      "status": " M",
+      "path": "backend/app/runtime.py",
+      "renamed_from": null,
+      "sha256": "9d49b2993c90074925a5153a3cefb29895eddb2b579c1d56a65d4ca7a3561017",
+      "size_bytes": 982
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/agent_workshop/brain.py",
+      "renamed_from": null,
+      "sha256": "9090b948ede3179bb5194b8002358967bfc4f47284a26bb8e7b249dfd1194ecb",
+      "size_bytes": 23473
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/agent_workshop/consultation.py",
+      "renamed_from": null,
+      "sha256": "50e2e59102d2b0f0138cb50f7e19daec76d20c193d9f6a5b16fde462a2d0e60c",
+      "size_bytes": 10448
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/agent_workshop/engine.py",
+      "renamed_from": null,
+      "sha256": "57bf910fa19ab7faa07594ec7e9e956036196bcb698b177f3bd0a832c0f9ecf8",
+      "size_bytes": 52951
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/agent_workshop/instances.py",
+      "renamed_from": null,
+      "sha256": "2a3afaa40a7d8ba0ca3e413fdb0b832704e9931c349ac2c7abaecbafcfed4b11",
+      "size_bytes": 27589
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/agent_workshop/reconciliation.py",
+      "renamed_from": null,
+      "sha256": "d3dcd6d4f14a3774db4c542d976de37b49ede5ae3f47c33d54159f061f6b28af",
+      "size_bytes": 5576
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/agent_workshop/store.py",
+      "renamed_from": null,
+      "sha256": "b29bee87dbcf40e593277e4b7c17121cd34c7be20dfcd9283410426bf4fb6304",
+      "size_bytes": 17601
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/agent_workshop/tools.py",
+      "renamed_from": null,
+      "sha256": "1333fab9d05430f350db11a051d5a34f1a5a67267fc77a8a6ce0f351de06032b",
+      "size_bytes": 77748
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/lifecycle_alerts.py",
+      "renamed_from": null,
+      "sha256": "4ac2b3f4a278928769c0784e24a3f89c13763a9ae7d702a9f2963412df0bcaa3",
+      "size_bytes": 11989
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/rfq_publication.py",
+      "renamed_from": null,
+      "sha256": "2cd6308ab90d948f04e313b25cdbfc9bb9452ccc431b31664ba9e224f39dbf60",
+      "size_bytes": 23237
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/rfq_relationships.py",
+      "renamed_from": null,
+      "sha256": "1e848838d4422ed383926c7802bfa1d645ed4cd1d768e05eaa816139189ba6ed",
+      "size_bytes": 19529
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/scenario_market.py",
+      "renamed_from": null,
+      "sha256": "728a5afbe524e4739e76223d0f2745bbea28f6f6b4338e3a04c53b2d2b0725ce",
+      "size_bytes": 3509
+    },
+    {
+      "status": " M",
+      "path": "backend/app/services/transcription/engines.py",
+      "renamed_from": null,
+      "sha256": "111e52b421da472e73ba6b91a8bd6a84ed2e490417dfc4fc106975d299f3155f",
+      "size_bytes": 11311
+    },
+    {
+      "status": " M",
+      "path": "backend/run.py",
+      "renamed_from": null,
+      "sha256": "e46eb7928732524239b4c44299375a1400079526afea34c74af92b106f08a52c",
+      "size_bytes": 2995
+    },
+    {
+      "status": " M",
+      "path": "backend/tests/test_agent_workshop.py",
+      "renamed_from": null,
+      "sha256": "4d14f5d925988f40b35c585b5205d51b16b20dff44a02bcf138fd3fe2ea61224",
+      "size_bytes": 37702
+    },
+    {
+      "status": " M",
+      "path": "backend/tests/test_lifecycle_alerts.py",
+      "renamed_from": null,
+      "sha256": "1865920c0e40ef7f62bc68e653ee48028c49cdc2f43e61191d68118f42cd3685",
+      "size_bytes": 4254
+    },
+    {
+      "status": " M",
+      "path": "backend/tests/test_rfq_bank_publication.py",
+      "renamed_from": null,
+      "sha256": "bc5b9f29c65740b3485d10ff9df8440aea828ae75d1787b3a173eb56d0430bba",
+      "size_bytes": 15746
+    },
+    {
+      "status": " M",
+      "path": "backend/tests/test_workshop_consultation.py",
+      "renamed_from": null,
+      "sha256": "9ece4f774057e9b3a8ba8cc102da33ed1e2c86922bbda4fc5da67b635812a7a4",
+      "size_bytes": 9774
+    },
+    {
+      "status": " M",
+      "path": "backend/tests/test_workshop_management.py",
+      "renamed_from": null,
+      "sha256": "62bb1fdfff0deee7f652bee5b93231c245a7ae3e4b4a5a57afb999e005b6a291",
+      "size_bytes": 10939
+    },
+    {
+      "status": " M",
+      "path": "docs/README.md",
+      "renamed_from": null,
+      "sha256": "6a5cfd3a7978feb17cfb98309aaabf523a5a8b20dd686ea52f6ea4024e9e99dc",
+      "size_bytes": 62082
+    },
+    {
+      "status": " M",
+      "path": "docs/handoffs/HYBRID_SAAS_HANDOFF_2026-10-13.md",
+      "renamed_from": null,
+      "sha256": "495d786aca7998d1125edc4df5643d0134aba84aaed11bd8f2f1da5c046a0df2",
+      "size_bytes": 30698
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminBrowseView-BP7wemPu.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminComputeView-C4S1oICo.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminCounterpartiesView-D4tmUE8i.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminEntitiesView-DI95IU73.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminMarketDataView-DdlhwAul.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminRfqProvidersView-DtyA9HZU.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminRfqRelationsView-CyBj-lzC.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminUatGeneratorView-BB27D33o.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminUnderlyingsView-jYuv485x.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminUsersView-Cr5Yg7x9.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AdminView-OT63Gimm.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AgentWorkshopView-C2bsufnG.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AgentWorkshopView-CPwgftXB.css",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AiWorkbench-CSJhGzZA.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AlertMessage-B4XlnwPg.css",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AlertMessage-BE2rgIT3.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/AmcView-CP53Jy_l.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/BackLink-YFZS3q9y.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/BookingView-CebGYfm9.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/BookingView-DbDRnNkN.css",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/CcrResult-uL9bgyG9.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/CcrView-CQdqI8a1.css",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/CcrView-QWRR8n0u.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ClientDetailView-DEn_qZ7r.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ClientsView-CC6VVMmf.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ConsultationView-XEIVYm2x.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/CyclePanel-B5kaNCx2.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/DealReferenceLink-dDUT-HMm.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/DealValuationsView-CActdP69.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/DocumentationView-D6NO1dxg.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/EmptyState-DLkbiG5f.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/FifoView-DKbYesAI.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/FluxDecomposition-DEiQjl5t.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/HelpTip-BPE2nntW.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/HomeView-BfuLelAO.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/InteractionFormModal-CdJTF0Lx.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/LoadingSpinner-Dyu9B_Mp.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/LoginView-CExn4vjX.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/OpportunityDetailView-B_w7rENx.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/OpportunityFormModal-DQOn7Oo6.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/OptimizerResearchListView-BadOlrjW.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/OptimizerResultsView-Bc357OEY.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/PersonDetailView-Ce52ebUA.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/PersonFormModal-PyEhTH8S.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/PriceComparisonPanel-BRFGdKVW.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/PricerView-C97bWtVU.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " M",
+      "path": "frontend/dist/assets/PricerView-Cp7fz82s.css",
+      "renamed_from": null,
+      "sha256": "e70228764ca3cf656e047e9a29f5df67f6167486148c45f80b3ac9b076f084f9",
+      "size_bytes": 2670
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ProductModelsView-CCtNzfUJ.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ProductOptimizerView-BOYmcrR3.css",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ProductOptimizerView-Bf5Xad1o.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ProductsView-BREJ2fp7.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ReinvestView-BDMIxtFB.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/RfqAnalysisView-Wyzmx3s6.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/RfqInboxView-BlgRoj_s.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/RfqInboxView-D4qx044H.css",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/RfqNetworkPrototypeView-C273sx3Y.css",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/RfqNetworkPrototypeView-DFCrhG3b.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/RfqTransportStatus-ChICwtYi.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " M",
+      "path": "frontend/dist/assets/RfqView-DO9iKyz4.css",
+      "renamed_from": null,
+      "sha256": "399d4e876f539f8908ba9f74f8d655d3a53dff2a56eb745223412652588114f9",
+      "size_bytes": 971
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/RfqView-dL1yhBQW.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/RiskManagementView-DyWWt8Gp.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ScriptsView-CjQqQ0Ui.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/SensitiveValue-DHgn3_wv.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/StructuringView-CflnXIMF.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/TradingView-6L2qx-fr.css",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/TradingView-zZltTypg.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/ValoExplainView-B7owuwry.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/barriers-CwMtjpP1.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/clients-DLyzqdEP.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/dealEvents-DvOwjjAK.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/deals-C3qZcq3R.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " M",
+      "path": "frontend/dist/assets/format-DTcMLInZ.js",
+      "renamed_from": null,
+      "sha256": "c6931c4973537a017c833597dec514c97995db537272ef2c3e3fed9badf8cd97",
+      "size_bytes": 1536
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/index-B-xbyoTF.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/index-iIH_-FFg.css",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/optimizerPayoff-DS5MH3yU.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/optimizerResearch-LcFMpgp2.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/useBookingMtm-BYqVXDpG.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " D",
+      "path": "frontend/dist/assets/useDataFilter-BJSTEqz9.js",
+      "renamed_from": null,
+      "hash_status": "missing_or_non_file"
+    },
+    {
+      "status": " M",
+      "path": "frontend/dist/assets/useSensitiveChart-CLCGRjBs.js",
+      "renamed_from": null,
+      "sha256": "83d29dd9a318b2c0a56a1c3f9a8fcd5238cb9fb9d14e591135ba4fd19d158ab5",
+      "size_bytes": 318
+    },
+    {
+      "status": " M",
+      "path": "frontend/dist/index.html",
+      "renamed_from": null,
+      "sha256": "fe129fbb8a10a746654394863c8dbcdfe3434641daa21c5eeffa073ac8c7d074",
+      "size_bytes": 745
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/App.vue",
+      "renamed_from": null,
+      "sha256": "7fa25c442206f9e589b430024303e80b8b093a3ebe8a166c82637e4e281895f1",
+      "size_bytes": 2398
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/components/AppHeader.vue",
+      "renamed_from": null,
+      "sha256": "7c1d3e1367c3501ace39123e3062c89e9267e6d16c08115f445cce23ca340755",
+      "size_bytes": 7267
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/components/EventsTab.vue",
+      "renamed_from": null,
+      "sha256": "20de24d3eb2bbe4bb82a2e865ca751274d9e5d2f3eedb329072e2738c531fb61",
+      "size_bytes": 64969
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/components/OptimizerCurveInput.vue",
+      "renamed_from": null,
+      "sha256": "0c7e03403fe07a033b635276c7b19de35655b9373aa4c93cd40531ff01e8fb0e",
+      "size_bytes": 2465
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/components/RfqBankQuotePanel.vue",
+      "renamed_from": null,
+      "sha256": "279f429d6822a8bb23d3d4deae94d44fa6c36896c9478b77c251c2c7ff7ed28d",
+      "size_bytes": 14962
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/components/WorkshopBooks.vue",
+      "renamed_from": null,
+      "sha256": "3ac80f465b2d46cc0a8ba9b2d7334bcdf012d1ff9326007be1297f4af33ef454",
+      "size_bytes": 7908
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/components/WorkshopMonitor.vue",
+      "renamed_from": null,
+      "sha256": "c4b5675c6917514bb4a8afb101ab5663116e3569168c808429abf78047575c07",
+      "size_bytes": 12137
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/composables/useAiSettings.js",
+      "renamed_from": null,
+      "sha256": "d7210b9e9149103ceec018774240a1b7c66dfe087c0e454a33b1afa0816aa041",
+      "size_bytes": 2831
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/composables/useAiWorkbench.test.js",
+      "renamed_from": null,
+      "sha256": "7fb46a5a786466cf51144c396874b11691fb7721a483e4b91c3bb34d528b86e4",
+      "size_bytes": 6874
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/main.js",
+      "renamed_from": null,
+      "sha256": "65ae0a78be961de5bdb0a4b175c899b41e47bb835a600faff1a80a72e1cf8434",
+      "size_bytes": 808
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/router/index.js",
+      "renamed_from": null,
+      "sha256": "aa9baf1717e080f69885e0e2c6e4bd0bad193f3fee0e42d0d6525fbf525b5cf0",
+      "size_bytes": 11626
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/stores/auth.js",
+      "renamed_from": null,
+      "sha256": "bd785e6417f1cfcc10d6717574ef92c712942b7e00d79af92dd81b38d4438557",
+      "size_bytes": 6119
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/stores/auth.test.js",
+      "renamed_from": null,
+      "sha256": "212905eb04bfd7499569fb68a2f3f522c7a57bf3f3d4ba070fd349a43330e09b",
+      "size_bytes": 4035
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/stores/pricing.test.js",
+      "renamed_from": null,
+      "sha256": "c31cb9694a4ba7be7275d132a55ac10e5acd0aec729e9eaed22f843c7121bffa",
+      "size_bytes": 63509
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/stores/products.test.js",
+      "renamed_from": null,
+      "sha256": "e1830c276c45f8892ad7ec8a31a0a51cc27ea9023f4c7adf5bb18f9701d66678",
+      "size_bytes": 3184
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/test/setup.js",
+      "renamed_from": null,
+      "sha256": "3d98dea0aea7814f7a863e6da2273c72387db917193f65b6be96a41d55c6968c",
+      "size_bytes": 902
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/utils/api.js",
+      "renamed_from": null,
+      "sha256": "549cde3bb8b75804345e19f756f99e8c5468b452ac42169c858caf6ca7168ec3",
+      "size_bytes": 3206
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/utils/api.test.js",
+      "renamed_from": null,
+      "sha256": "0ac1ac750cea51cb2086d3c2143051413d8c539bbb98f736d94eddf2ad0148eb",
+      "size_bytes": 3905
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/utils/productOptimizer.test.js",
+      "renamed_from": null,
+      "sha256": "433da56ff426d5d4cc834e44419e922bcab324e78bc39c7fc278e5e32e0e736c",
+      "size_bytes": 2279
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/utils/workshopHelp.js",
+      "renamed_from": null,
+      "sha256": "dff441453665fca70c84f7f1d610286f2559d2a44a03844a7883158f4db6e21c",
+      "size_bytes": 10316
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/utils/workshopPilot.js",
+      "renamed_from": null,
+      "sha256": "a2a92e0bd91260c411dd42cac198c79bd7575839b9d2ccb8a8289bd0318c1986",
+      "size_bytes": 4201
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/utils/workshopPilot.test.js",
+      "renamed_from": null,
+      "sha256": "20b6f378093337aa61a27b953d1b7b1d736b7e4906ef885c4f2930a0075bab83",
+      "size_bytes": 2754
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/utils/workshopProgress.js",
+      "renamed_from": null,
+      "sha256": "5f30529b720449b21e6182dcd02cec7a4d80e731aca43dad2e9f6baef6aeb040",
+      "size_bytes": 13724
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/utils/workshopProgress.test.js",
+      "renamed_from": null,
+      "sha256": "44c55ea6e74102be9992df4ccdbd6bccf9675f8227a3ee044b0f6800ffdb6265",
+      "size_bytes": 6435
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/views/AdminUsersView.vue",
+      "renamed_from": null,
+      "sha256": "10c639c8e641b7e86f98a1f8e5d88edc705b347743c81929a53ffe7cdec2ff7e",
+      "size_bytes": 13305
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/views/AdminView.vue",
+      "renamed_from": null,
+      "sha256": "60ca495b5404db2654946e7b80e46906bb4cb91b301de92a6270f97a8f04f914",
+      "size_bytes": 9396
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/views/AgentWorkshopView.vue",
+      "renamed_from": null,
+      "sha256": "39c8b49cd43805adca80b919e62deaef9e5a9fb19032bffee9c57bd0d2f233cc",
+      "size_bytes": 38767
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/views/BookingView.vue",
+      "renamed_from": null,
+      "sha256": "a4c2e1479d7eba0d334dbb19345d1b5957198b9f32d97344ac0eca58be9b1c5d",
+      "size_bytes": 132350
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/views/CcrView.vue",
+      "renamed_from": null,
+      "sha256": "76a9aed140db9095f58fe6a102b6b0e302110f5e4c7d275849e972c2556ef438",
+      "size_bytes": 41731
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/views/HomeView.vue",
+      "renamed_from": null,
+      "sha256": "f08622c401e5200319da7b55d68bf187e2f7c1e2988568211cba5983265ce88c",
+      "size_bytes": 41145
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/views/LoginView.vue",
+      "renamed_from": null,
+      "sha256": "4b81161f9cd14b85e853563ac4e4b95edfb5af06bd60a4dac5a8bd5cd2e3f5de",
+      "size_bytes": 10106
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/views/RfqInboxView.vue",
+      "renamed_from": null,
+      "sha256": "23fcff2791e35e8e2aa2e92731a1cc69f5618d4ae0fdb45245df62317da417e6",
+      "size_bytes": 11666
+    },
+    {
+      "status": " M",
+      "path": "frontend/src/views/RfqView.vue",
+      "renamed_from": null,
+      "sha256": "3e997ba96200050261798284626b1dd74aa54528e5c472170859fb216cad6e25",
+      "size_bytes": 154380
+    },
+    {
+      "status": " M",
+      "path": "frontend/vite.config.js",
+      "renamed_from": null,
+      "sha256": "af6f6a23c40bda86e45068ea6d89b7146dee60172d900fb09c1e563d86821539",
+      "size_bytes": 325
+    },
+    {
+      "status": " M",
+      "path": "lancer_structura.bat",
+      "renamed_from": null,
+      "sha256": "e34ae728519a77047cd0b20483ea5224d423b205e834283ba175c8f92ac922b2",
+      "size_bytes": 248
+    },
+    {
+      "status": "??",
+      "path": "backend/app/core/access.py",
+      "renamed_from": null,
+      "sha256": "87cce258d037741f2bd03eeef162518e4a0eb25df09e85fe384450041005bc82",
+      "size_bytes": 1590
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/__init__.py",
+      "renamed_from": null,
+      "sha256": "a59066775e11e5acfc3d22217798d7d2e59708b5404868b74e28f37a5eab0654",
+      "size_bytes": 84
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/admin_workbench.py",
+      "renamed_from": null,
+      "sha256": "a01a8b602dc079d86058a7159935398e9983b91b4c4d2a9bcc599120b211a992",
+      "size_bytes": 3587
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/business.py",
+      "renamed_from": null,
+      "sha256": "54d581f2a70cf7b3c2e52919438a1c88c744dc9c1af6b65a0986d3650b867de8",
+      "size_bytes": 9144
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/config.py",
+      "renamed_from": null,
+      "sha256": "ef415d20e4a1866662d2bcab1452345b402f3b92e8d36e0b5da3ad4bcda0ac75",
+      "size_bytes": 4508
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/control_services.py",
+      "renamed_from": null,
+      "sha256": "2da9ac1a8efd47c2f4275ae20660015ec844cf189a6f8bd964e61f4123470763",
+      "size_bytes": 4779
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/deployment.py",
+      "renamed_from": null,
+      "sha256": "ca9b3bf769d3f958b5ac5f2c8ec6e8296aa605b175c0e04e1e350c6708353f5e",
+      "size_bytes": 18878
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/development.py",
+      "renamed_from": null,
+      "sha256": "3a2b7cd05659b37cb9eef22d2d8d2beaabee04636ca3f57d1490a7fb402d9390",
+      "size_bytes": 3334
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/launcher.py",
+      "renamed_from": null,
+      "sha256": "df599522500cfda4d089f94f6c5178ca6bebffbdc150f93de8e586c600e84057",
+      "size_bytes": 29659
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/launcher_widgets.py",
+      "renamed_from": null,
+      "sha256": "b0c1b70d31529db6d9643e9eb95112cde4791497d23a5ee11bfb331d82c46fc0",
+      "size_bytes": 5888
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/platform.py",
+      "renamed_from": null,
+      "sha256": "cecf0a60a51abce214fc5d22903c767269993766e24b0c083345bd626be92173",
+      "size_bytes": 15081
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/reset.py",
+      "renamed_from": null,
+      "sha256": "ed308317586cddec7fc57c9cb1faaf1905704b680ce2da6a2f66fb980f7ff626",
+      "size_bytes": 9298
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/simulation.py",
+      "renamed_from": null,
+      "sha256": "bc72633f0f5b07bfb4dea5f151d5d7b3e3a8f8fde433782eff994af403a46ba6",
+      "size_bytes": 6063
+    },
+    {
+      "status": "??",
+      "path": "backend/app/hybrid/simulation_gateway.py",
+      "renamed_from": null,
+      "sha256": "25ab5994e7a538db1dcc1d57f67cae9f84f4400ca585b8cd769a06f71a4a1566",
+      "size_bytes": 3944
+    },
+    {
+      "status": "??",
+      "path": "backend/app/services/agent_workshop/configuration.py",
+      "renamed_from": null,
+      "sha256": "9c7bc1d1e1a847d695da8c4b86ff4888746ea0485f32486a5f8c61071e5df06d",
+      "size_bytes": 14696
+    },
+    {
+      "status": "??",
+      "path": "backend/app/services/agent_workshop/coverage.py",
+      "renamed_from": null,
+      "sha256": "79d922b5a782d46e06004f18b2d88c7a47fd97ff6f71fd340e9f9ba57825effa",
+      "size_bytes": 11180
+    },
+    {
+      "status": "??",
+      "path": "backend/app/services/agent_workshop/diagnostic.py",
+      "renamed_from": null,
+      "sha256": "d76a65819005cc248785afcb3810114d1dde5c5359cd7fc2c52b13d4b0f7c410",
+      "size_bytes": 27642
+    },
+    {
+      "status": "??",
+      "path": "backend/app/services/agent_workshop/historical_market.py",
+      "renamed_from": null,
+      "sha256": "788b36b98c762bd1bd95dac87ab4a0daf917e817b9a88fe0a5e91ca49636e042",
+      "size_bytes": 7559
+    },
+    {
+      "status": "??",
+      "path": "backend/app/services/agent_workshop/native_rfq.py",
+      "renamed_from": null,
+      "sha256": "e76840bb4afd6b31bc76cfad5b9224e7cea01cc31abec42c814c4578d259ace4",
+      "size_bytes": 11221
+    },
+    {
+      "status": "??",
+      "path": "backend/app/services/agent_workshop/openai_model.py",
+      "renamed_from": null,
+      "sha256": "d15fd3c10ebf9f83e51ec3f0cc6220d2e320ecb6f9b17913fc1132e4935392af",
+      "size_bytes": 9213
+    },
+    {
+      "status": "??",
+      "path": "backend/tests/test_central_simulation.py",
+      "renamed_from": null,
+      "sha256": "26485219a99ebd070995c1ddc0dc6dcd4dede814af45b9b116cac4c58fab9907",
+      "size_bytes": 4482
+    },
+    {
+      "status": "??",
+      "path": "backend/tests/test_hybrid_bootstrap.py",
+      "renamed_from": null,
+      "sha256": "71a146dd032bedaa13eb0b577eb8e1bdcb85c500ccadb49a8bcc76cd6216f107",
+      "size_bytes": 12329
+    },
+    {
+      "status": "??",
+      "path": "backend/tests/test_hybrid_development.py",
+      "renamed_from": null,
+      "sha256": "40630621a1a90f27d8652f5d7f94814c01036aad018cc87c03576a99786daf55",
+      "size_bytes": 5624
+    },
+    {
+      "status": "??",
+      "path": "backend/tests/test_hybrid_installations.py",
+      "renamed_from": null,
+      "sha256": "9feae6fa777cd81056aac36029ab4acbdd4687f7d8c4ef62b6b99606a9a28256",
+      "size_bytes": 6871
+    },
+    {
+      "status": "??",
+      "path": "backend/tests/test_hybrid_reset.py",
+      "renamed_from": null,
+      "sha256": "4ec7db0c3f85ee5d6c8dd2824a00fa9c76eae0841e0dd4d799813af6a72af2d8",
+      "size_bytes": 4588
+    },
+    {
+      "status": "??",
+      "path": "backend/tests/test_structura_launcher.py",
+      "renamed_from": null,
+      "sha256": "87d1f5cfeb824c70f7d64754c8f38334f78bc738adb2923882bdc0946d38abcd",
+      "size_bytes": 4443
+    },
+    {
+      "status": "??",
+      "path": "backend/tests/test_workshop_diagnostic.py",
+      "renamed_from": null,
+      "sha256": "ed3813274c66a9da729dca44a30fbdca95dfa7b1b071959c9bbc604ff6bd60bb",
+      "size_bytes": 13913
+    },
+    {
+      "status": "??",
+      "path": "backend/tests/test_workshop_historical.py",
+      "renamed_from": null,
+      "sha256": "da634c8ed6fda9ffaf897c20affc727093fafbc38fdb7925e5ab712b4698eb97",
+      "size_bytes": 12343
+    },
+    {
+      "status": "??",
+      "path": "backend/tests/test_workshop_openai.py",
+      "renamed_from": null,
+      "sha256": "6d251c4ff657506bf567026084efce44046f5ee1cdbc0b449d065ddca5338c70",
+      "size_bytes": 7915
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/CAMPAIGN_CORRECTIONS_PILOT_2026-10-13.md",
+      "renamed_from": null,
+      "sha256": "5bd6796198f49ef2672e89d820f08be8336c2f0bdc250968c85187c9e4bad77a",
+      "size_bytes": 5751
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/CAMPAIGN_DIAGNOSTIC_5Y_BILAN_2026-10-14.md",
+      "renamed_from": null,
+      "sha256": "f5433dc006b7c635818027ed0a0665de9ce1cc54401b643c2e06cf27857efef1",
+      "size_bytes": 15037
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/CAMPAIGN_HISTORICAL_PREPARATION_2026-10-14.md",
+      "renamed_from": null,
+      "sha256": "905bbb55058d98e4891102de198417e25422ed95bbd1afba9ab9535f22a3eafc",
+      "size_bytes": 10823
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/CAMPAIGN_LIFECYCLE_SHORT_2026-10-14.md",
+      "renamed_from": null,
+      "sha256": "919fe55c2fe215144bcfbc365fd7e19e040cde531b2fdc0678407ade86d6c686",
+      "size_bytes": 3690
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/CAMPAIGN_MULTI_PRODUCT_MULTI_UNDERLYING_2026-10-14.md",
+      "renamed_from": null,
+      "sha256": "12b12a72d8af53829e200eaf73084b73fc8b9fc8d1443872023a7b1d87a8627c",
+      "size_bytes": 4468
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/CAMPAIGN_MULTI_PRODUCT_RESUME_2026-10-15.md",
+      "renamed_from": null,
+      "sha256": "d793c5a7ec02db5c14f36027635b337afb2793d27965afae2d24cef212891d8b",
+      "size_bytes": 2860
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/CAMPAIGN_NATIVE_RFQ_FULL_2026-10-13.md",
+      "renamed_from": null,
+      "sha256": "3a742ae5d3023c78a4344e254769f560b5731abc78c295a5348abb85bb5e30f5",
+      "size_bytes": 3762
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/CAMPAIGN_OPENAI_PILOT_2026-10-14.md",
+      "renamed_from": null,
+      "sha256": "03c9bead3b8cc2a137112794abd8838a721cd86365e991fdabcf355b07d4ee1b",
+      "size_bytes": 4716
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/CAMPAIGN_PILOT_2026-10-13.md",
+      "renamed_from": null,
+      "sha256": "bc94cacc56c662ac551d405dff80d1a266e149340e69a7dc1cfcfd53cfac457f",
+      "size_bytes": 10416
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/RECETTE_DETERMINISTE_SANS_IA_2026-10-15.md",
+      "renamed_from": null,
+      "sha256": "7f2beac559f17ee4bba27d02705974edf75a07181cefc2a73213695e4936ef1d",
+      "size_bytes": 3041
+    },
+    {
+      "status": "??",
+      "path": "docs/projects/platform/AGENT_WORKSHOP_NATIVE_RFQ_2026-10-13.md",
+      "renamed_from": null,
+      "sha256": "3e1fbc33eeffd22c01380dab57a878691a7754fff7eff9d35fb5e4500b6836c5",
+      "size_bytes": 11092
+    },
+    {
+      "status": "??",
+      "path": "docs/projects/platform/HYBRID_SAAS_ACCESS_2026-10-13.md",
+      "renamed_from": null,
+      "sha256": "3789243cf444f5eff64ed7058793302132f47476946361fd5428424118ddb730",
+      "size_bytes": 11442
+    },
+    {
+      "status": "??",
+      "path": "docs/projects/platform/HYBRID_SAAS_FOUNDATION_2026-10-13.md",
+      "renamed_from": null,
+      "sha256": "afff5856d667d11d1065e9979efd7497430028f57b8ad490d3d2f9a016dd304e",
+      "size_bytes": 14104
+    },
+    {
+      "status": "??",
+      "path": "docs/projects/platform/RFQ_NAVIGATION_2026-10-13.md",
+      "renamed_from": null,
+      "sha256": "20870e7dc4d76e244482b55eb4ce18ae2c97f4d300eae3ede26bc5dcdd25f62a",
+      "size_bytes": 1302
+    },
+    {
+      "status": "??",
+      "path": "docs/projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md",
+      "renamed_from": null,
+      "sha256": "d272a2dae68cfd3809b07b04198a37e45105ca061b59a14b237a168f38c7fe99",
+      "size_bytes": 7646
+    },
+    {
+      "status": "??",
+      "path": "docs/projects/platform/WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md",
+      "renamed_from": null,
+      "sha256": "ed947eff8552b7f821ac5478b54836a913e8fe0fbb17736b63b87c6b8e2bf49e",
+      "size_bytes": 12653
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminBrowseView-G37zB0c-.js",
+      "renamed_from": null,
+      "sha256": "be3b838c0be8e7fe9ec4b676eebdae95e973fc0749d6d32a0a67f7cc73008768",
+      "size_bytes": 11897
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminComputeView-CHn5pekI.js",
+      "renamed_from": null,
+      "sha256": "73cc933c11e8410517e4f1b8e4f00b351bf7d48459a1f72597561fb22d7db9ab",
+      "size_bytes": 5826
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminCounterpartiesView-BpJqy0yT.js",
+      "renamed_from": null,
+      "sha256": "a13a1181dd1e777324e73482f58b77e1fcbb021fa7c53025ac59cc9104158299",
+      "size_bytes": 5468
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminEntitiesView-CVk6J4ux.js",
+      "renamed_from": null,
+      "sha256": "86b5c7a882d2207390e2d68f7ffbe3b03afe2f4ecb99b1cc78c6ab6f3f560953",
+      "size_bytes": 3189
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminMarketDataView-UYdSLDo7.js",
+      "renamed_from": null,
+      "sha256": "a98cd84ca48c2aeb2f3456344d8f451206f3ade85631e75653c8d87ed3e21c3c",
+      "size_bytes": 6224
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminRfqProvidersView-C6trYVGw.js",
+      "renamed_from": null,
+      "sha256": "c97a86ebe0029f446b0d2ca5ac2794201ef57315992e72c60cedf055361a1fbf",
+      "size_bytes": 9080
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminRfqRelationsView-Dx7e9ZEj.js",
+      "renamed_from": null,
+      "sha256": "99e300f54db7ce3c6fa9625de8b2514b5325bc172da01fa1c5bec1bb66c45444",
+      "size_bytes": 27508
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminUatGeneratorView-Bh3nE79b.js",
+      "renamed_from": null,
+      "sha256": "c80479a4da3e2ec94a73274c9e44b101c6efe242bfa8f906ee472fcd780c2060",
+      "size_bytes": 25156
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminUnderlyingsView-CZvqmH4i.js",
+      "renamed_from": null,
+      "sha256": "84ca41638135ae014810d4824fd3dbab7b8f379304e62dc1ac09442cc85aa654",
+      "size_bytes": 8864
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminUsersView-gmvoycQB.js",
+      "renamed_from": null,
+      "sha256": "d2b9d51071bdd08109317d7c33d8c8ccdbe97294464d6757fb88c51b5221011b",
+      "size_bytes": 11186
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AdminView-Dha91_r3.js",
+      "renamed_from": null,
+      "sha256": "70b71503b8a6acb031fec167f63d19c494e842a05b2bc7aa0c6c1a68ccf2871c",
+      "size_bytes": 8555
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AgentWorkshopView-B2skLHY1.js",
+      "renamed_from": null,
+      "sha256": "8317fdb570e86c94a4be293cae1c75f473a18ba3d64fbf0a32aa8b7afa78808d",
+      "size_bytes": 109494
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AgentWorkshopView-NmyrwG8c.css",
+      "renamed_from": null,
+      "sha256": "b1bf78e8995ea21bd0143d40296220b362d1d48f7ed3fd59354502c841ef3938",
+      "size_bytes": 20436
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AiWorkbench-DnkO_jXH.js",
+      "renamed_from": null,
+      "sha256": "bf3beda122699d5b984387e49f78ca7b872157d2999332276bd12e280c37b7e7",
+      "size_bytes": 10989
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/AmcView--JjgOD99.js",
+      "renamed_from": null,
+      "sha256": "2ed98f02b3e20d4699a00f4bd02356d4263e77511ee47a2d1127976de270ea9b",
+      "size_bytes": 327560
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/BackLink-DZMytWO-.js",
+      "renamed_from": null,
+      "sha256": "00f08e9912042042b24455fce7c351c34a653f22cf7e2494a13a2dcd10d582aa",
+      "size_bytes": 443
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/BookingView-2iwPMGEJ.js",
+      "renamed_from": null,
+      "sha256": "4b69996210540cc4a1b870d10a928d22631317fe14f655e6ea9a8e8379c1ed7a",
+      "size_bytes": 79337
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/BookingView-CnEAOwZ7.css",
+      "renamed_from": null,
+      "sha256": "7c3b041d04509344e795ca54cc9453b5a553ec00e742fb2441c86cc30d523d83",
+      "size_bytes": 13489
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/CcrResult-tpD5rMx1.js",
+      "renamed_from": null,
+      "sha256": "c0d277045f948675c4e1f90e86c444a797fea7365963dd8cfa20acd7714a1d92",
+      "size_bytes": 36675
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/CcrView-D5_wUVMa.js",
+      "renamed_from": null,
+      "sha256": "365b5d8c55280001a1668637439ae3a0d6bfafc8703a56618a295669b3c0a272",
+      "size_bytes": 38746
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/CcrView-DmIB6yQA.css",
+      "renamed_from": null,
+      "sha256": "4b767f603e48417e318a1d2c1c73738fa818e87774cba9f5dba6e43a9b60a17c",
+      "size_bytes": 6030
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ClientDetailView-Cslxz3Jn.js",
+      "renamed_from": null,
+      "sha256": "92e757ee82eb9b8232cdff34507e19049ffd22ffdb6921723d0b114c25103889",
+      "size_bytes": 82094
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ClientsView-8CTO4oKR.js",
+      "renamed_from": null,
+      "sha256": "7656f11223aae7dcfded11ab2dae9ab905215a46f7d0af2528380e09961a4b67",
+      "size_bytes": 36749
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ConsultationView-B-terOSz.js",
+      "renamed_from": null,
+      "sha256": "22284034ba496bb6d72dfe1aab54b37505bf01e5c465b0ce55370cb462246ad0",
+      "size_bytes": 819
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/CyclePanel-D-kR4Vhu.js",
+      "renamed_from": null,
+      "sha256": "26120b5beaed866dfe2d9cf560a501cccdbe9d371cde84263aacfd60722aabbc",
+      "size_bytes": 4625
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/DealReferenceLink-CZGOPi95.js",
+      "renamed_from": null,
+      "sha256": "51ce0507e180fbe954748dcabbd7aa4b94e13dff60dc153f71ff1e833446daec",
+      "size_bytes": 581
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/DealValuationsView-AuENCUGE.js",
+      "renamed_from": null,
+      "sha256": "817fe28b0fafbd0c90ee48ed73894a300394609c816cae08b7be2e7a7b4d9395",
+      "size_bytes": 15881
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/DocumentationView-Bfu9PK7S.js",
+      "renamed_from": null,
+      "sha256": "e0217cc20afc4273207087cbbea93013431b7979a71186f156a2fe64934f9837",
+      "size_bytes": 9724
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/EmptyState-CobusW1W.js",
+      "renamed_from": null,
+      "sha256": "ff589437ff152cb94865a90d34e006dc9a3373f69b4881564a71de6fbf71c5b9",
+      "size_bytes": 613
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/FifoView-Df8uZGhA.js",
+      "renamed_from": null,
+      "sha256": "970918d8ac8e50170b67e89f360b2bdc9c5d35f0ff28b7ac1e162b50009d3c95",
+      "size_bytes": 12227
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/FluxDecomposition-BTJLcAov.js",
+      "renamed_from": null,
+      "sha256": "be78af52ac508399097d82709e220dc11f8086e7009501e12584cf12b516fd86",
+      "size_bytes": 92774
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/HelpTip-BevNG-Cz.js",
+      "renamed_from": null,
+      "sha256": "02ba1a1470213e6f6a84275033fe7f414e7966c25755344b6b796c88c2d58e7a",
+      "size_bytes": 2125
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/HomeView-D2MHLdLe.js",
+      "renamed_from": null,
+      "sha256": "ad3e79763a8efecd3eb3475fc23f9f5f175a675c831e502ec89e4ba5ac651b71",
+      "size_bytes": 30411
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/InteractionFormModal-YRX8uAwb.js",
+      "renamed_from": null,
+      "sha256": "93682d3776f4d4c352ee08a5c25133e7c98bbc6d127d91ea921c1c8256d055a7",
+      "size_bytes": 4242
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/LoadingSpinner-HxxSpFuy.js",
+      "renamed_from": null,
+      "sha256": "ceac86fbf2589eba024dfc50f9b4480051e272d85f639d9210f949a46a0c16f3",
+      "size_bytes": 589
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/LoginView-BCPoCLqD.css",
+      "renamed_from": null,
+      "sha256": "4170b97f393f4569a3d0d69964707b045b3acb22b010b745e3574bdf60aec3e1",
+      "size_bytes": 2248
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/LoginView-C8ibtsfR.js",
+      "renamed_from": null,
+      "sha256": "59181e434e807c35c442fe86800d990334b3bfccf90d702febec6c9e334e502d",
+      "size_bytes": 7725
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/OpportunityDetailView-DHrK5hJu.js",
+      "renamed_from": null,
+      "sha256": "42b064fa539bef3211806541cbc0e8adec63c1f5ee6170bec1055c0babd589de",
+      "size_bytes": 13218
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/OpportunityFormModal-Dj4Y90aS.js",
+      "renamed_from": null,
+      "sha256": "d5c725bc469d5956fdf1bf42fc9f67d69f48928f0d752bb664d68c592efffcc7",
+      "size_bytes": 11608
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/OptimizerCurveInput-73p7R-8b.js",
+      "renamed_from": null,
+      "sha256": "229e71c891ba1e60584823fd2ebc5f73d736783ca0c0b9868064968dff743d5d",
+      "size_bytes": 4918
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/OptimizerCurveInput-C--yjPKe.css",
+      "renamed_from": null,
+      "sha256": "0b6404a3571af69c734dd8b0a3cea5aaa4de0d4e7affe673c982c24d9c9a7319",
+      "size_bytes": 167
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/OptimizerResearchListView-Cd0qwvP7.js",
+      "renamed_from": null,
+      "sha256": "42211ab81eedbf667d35589ee8a2f86cad469d11c1f24fd4a6febb08886bfff2",
+      "size_bytes": 6689
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/OptimizerResultsView-CjtVN0Es.js",
+      "renamed_from": null,
+      "sha256": "aeb4faf39fa1e556e9f37e18c9a9bd2eeebb8dbdbcb5c7371b7acdad9ec87629",
+      "size_bytes": 33628
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/PersonDetailView-CkzcL7XY.js",
+      "renamed_from": null,
+      "sha256": "2984ee2fa335ab5eba0f2cba7b60c06fd8e7b9e484bf7e3a67ecfde036848dd5",
+      "size_bytes": 13125
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/PersonFormModal-Dd41PRVM.js",
+      "renamed_from": null,
+      "sha256": "8749aafafd736ae392f43828c2499f5c4e80c424786c300f7869ee8ecb0e442b",
+      "size_bytes": 10796
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/PlatformView-CdsgkT05.js",
+      "renamed_from": null,
+      "sha256": "cf1911a540951d77ee88e59c879a8f60ad00f3b0c158abba3097e3edf76bbd97",
+      "size_bytes": 3538
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/PlatformView-wDAygylX.css",
+      "renamed_from": null,
+      "sha256": "faa633a932ed2652bc3b3e29ca00959b92f58e042419b930a461a1aa516da5d2",
+      "size_bytes": 1189
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/PriceComparisonPanel-clTrsS_4.js",
+      "renamed_from": null,
+      "sha256": "4f8176facea5d7d365bd2173c0a846d24283628f28b84372291bca6f4ff2d3ad",
+      "size_bytes": 8495
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/PricerView-BFl0il-V.js",
+      "renamed_from": null,
+      "sha256": "b94cfee31ce0bbf296f5d4009913de2b5961c2f83440b6fad7332d0585e6dc54",
+      "size_bytes": 383626
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ProductModelsView-U8TRYY8f.js",
+      "renamed_from": null,
+      "sha256": "272dfc496622b69dc822ff0f2db054a6dc56d8d56cdd4ec8dde62de934b22d7d",
+      "size_bytes": 7439
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ProductOptimizerView-BOZV0F5Y.css",
+      "renamed_from": null,
+      "sha256": "40bbe91f3c5c6219c91f0c53ee098bf7f11c6b274ef571ff4593a3f5fb015873",
+      "size_bytes": 2709
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ProductOptimizerView-BuJXDWnO.js",
+      "renamed_from": null,
+      "sha256": "cd8de88207e5aee8b072a086afb0c41033f295d1a6b9bc45cc329ed9b6675a7d",
+      "size_bytes": 40537
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ProductsView-CMlaVN1C.js",
+      "renamed_from": null,
+      "sha256": "c2212819729ebe51273783e036dabea8bbe25869726ef75b877af730fda5c0e9",
+      "size_bytes": 21164
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ReinvestView-Dgtng-4q.js",
+      "renamed_from": null,
+      "sha256": "68a0be0296fb7d5e2db74eac0ed958c8a8373e9e03ef00c2d00caa4a1cb8a37b",
+      "size_bytes": 28316
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/RfqAnalysisView-Cj0xvaly.js",
+      "renamed_from": null,
+      "sha256": "716c450c0189b833f1967828b45b0c5d15b9ce7fbc39410ce1b199151e7eff5c",
+      "size_bytes": 7663
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/RfqInboxView-CwIzgj87.css",
+      "renamed_from": null,
+      "sha256": "0ad2d98205fda962492fbada210efaec712d43594afd457400862d2c7398fbde",
+      "size_bytes": 336
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/RfqInboxView-ojO71dlX.js",
+      "renamed_from": null,
+      "sha256": "d0256b6d1957ce4e15e2335674b6cfa070904dff57c165c19c08b5c784aac1b2",
+      "size_bytes": 25780
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/RfqNetworkPrototypeView-COi6SKVI.js",
+      "renamed_from": null,
+      "sha256": "b322d18a078e08057e9da506138ee46ebea8b4a2952c9b1330b92a08eb7b8ef7",
+      "size_bytes": 38082
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/RfqNetworkPrototypeView-dPDR1DqT.css",
+      "renamed_from": null,
+      "sha256": "d968f18d0c1a09e819ab85e47488b73fe09ec90dd7e75ed55473e3cb62c20870",
+      "size_bytes": 409
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/RfqTransportStatus-s27nwqwf.js",
+      "renamed_from": null,
+      "sha256": "9241b8b3a326dde7d653151ece976b69cfe5af7e500fd28b7028d6ccd13edea1",
+      "size_bytes": 2345
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/RfqView-BTAx8nsM.js",
+      "renamed_from": null,
+      "sha256": "94f7b443671a368f9864f60fb068ad9f9c53e4bad429291dbcfb8a8131d1bcbd",
+      "size_bytes": 133208
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/RiskManagementView-Bu-jRmb5.js",
+      "renamed_from": null,
+      "sha256": "231b38981657404ad765d2b807d6e0cf0657a466bc149925cd1387b27418c8d6",
+      "size_bytes": 82089
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ScriptsView-C8JJsEv2.js",
+      "renamed_from": null,
+      "sha256": "d1a50f9d0a2376b5592cc8e5eee5c15ddafc2d6ad6c5a95df0239583304f46e6",
+      "size_bytes": 13774
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/SensitiveValue-DBikijxS.js",
+      "renamed_from": null,
+      "sha256": "534fbcdd16cd65d51f888c9e6d9cbf408d1b93b5c6fee63ccc6f4ec567c37ac9",
+      "size_bytes": 734
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/StructuringView-DJNd9Clf.js",
+      "renamed_from": null,
+      "sha256": "d788b24f3b45522fc5f193b60f1966545318d9d1924197cb95c737716cc19fd2",
+      "size_bytes": 1891
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/TradingView-BmP02Ka7.css",
+      "renamed_from": null,
+      "sha256": "a6dd64512450134d7c075cf56210b4ba3d3bc2f26c7599ed744aa4e58bec16d8",
+      "size_bytes": 4278
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/TradingView-C-VadlX6.js",
+      "renamed_from": null,
+      "sha256": "f9c27972ddb4ba227e590cfb8df5f90d1ed92042bee18e296bdae6fd3c3cbd27",
+      "size_bytes": 16548
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/ValoExplainView-Lqi_99IG.js",
+      "renamed_from": null,
+      "sha256": "90abcc26460632753d9bc17d2a3388ce133caf66b4cf3f40c14169e378975f1c",
+      "size_bytes": 24513
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/barriers-DEXimm7X.js",
+      "renamed_from": null,
+      "sha256": "aefdf34a67147a0880c05871bc446970468def3f0ab97415490961cbda23c2d4",
+      "size_bytes": 10331
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/clients-gqMaz2dX.js",
+      "renamed_from": null,
+      "sha256": "bba6e1965d97f7531c0d1fce53717c6c2da791b243a9fdec47488430f3f62ec1",
+      "size_bytes": 13442
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/dealEvents-BZIEselI.js",
+      "renamed_from": null,
+      "sha256": "8334117cd2686d25c146c2209455ef351f7f135863f55ccaecbe92245f32cb19",
+      "size_bytes": 10603
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/deals-SqrTdfza.js",
+      "renamed_from": null,
+      "sha256": "55f677b6767d9ad1f95ae80400f27c5c1368fb7770a26d0a1d7b2c358c2f96b1",
+      "size_bytes": 6072
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/index-Bx2vCey3.js",
+      "renamed_from": null,
+      "sha256": "0862a5e36f8809e1d6a57f2d470932220dcac9cf9d283a371e4f219056a92369",
+      "size_bytes": 252517
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/index-DWuKu8Lz.css",
+      "renamed_from": null,
+      "sha256": "d79e9d1b8cad4832187db9b636bd7295f65602b612a29f91732496aee525021f",
+      "size_bytes": 83899
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/optimizerPayoff-BGSAZFLi.js",
+      "renamed_from": null,
+      "sha256": "cdbfec066729db91d1abb47214410e7fd4475d6038c3133424f1b634f519398b",
+      "size_bytes": 2691
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/optimizerResearch-pl8asrxn.js",
+      "renamed_from": null,
+      "sha256": "03f2360206f8094ee862de2e7284b7f7bd5824185ffd4763089a687ef9498a16",
+      "size_bytes": 9455
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/useBookingMtm-BkN64thq.js",
+      "renamed_from": null,
+      "sha256": "80f4fa81cb2e59c3bd1d8dac0cb6c8c9abc0f1a52a7853a6b345f434bfb2761b",
+      "size_bytes": 3847
+    },
+    {
+      "status": "??",
+      "path": "frontend/dist/assets/useDataFilter-B-YCu5bf.js",
+      "renamed_from": null,
+      "sha256": "178ce4eafe0a51619fa817387695c132f430bdbd82af15a19c9e10730ee13886",
+      "size_bytes": 4164
+    },
+    {
+      "status": "??",
+      "path": "frontend/src/components/ContextSelector.vue",
+      "renamed_from": null,
+      "sha256": "64fa640b43359bcfc931a145e100e8e47d6044649535ce38ef37e43b76ee1e88",
+      "size_bytes": 6032
+    },
+    {
+      "status": "??",
+      "path": "frontend/src/components/WorkshopConfiguration.vue",
+      "renamed_from": null,
+      "sha256": "418d95445ab3b73c9aa9507835d7f8cc520ec2efac2920d42716e653baae4842",
+      "size_bytes": 21536
+    },
+    {
+      "status": "??",
+      "path": "frontend/src/composables/useContextChanges.js",
+      "renamed_from": null,
+      "sha256": "d2149ea7c63e28c4a0118ff61e83042705195dfb275c586d5260a85433de2c4d",
+      "size_bytes": 1579
+    },
+    {
+      "status": "??",
+      "path": "frontend/src/utils/contextSwitch.js",
+      "renamed_from": null,
+      "sha256": "169d8179ee2de6f45cb98a5d7136dfad5feaff9894c35df42616b099a575beb5",
+      "size_bytes": 1630
+    },
+    {
+      "status": "??",
+      "path": "frontend/src/utils/session.js",
+      "renamed_from": null,
+      "sha256": "4c29ca4e08f6bc2363f1961ea06e7c0ea45ed2aaf2271ab8c99b6b272a4f029f",
+      "size_bytes": 2252
+    },
+    {
+      "status": "??",
+      "path": "frontend/src/utils/session.test.js",
+      "renamed_from": null,
+      "sha256": "dafd84355e823c5034917e3e04e09d4a4abd3f1ade34b9c6129e2b43da55602f",
+      "size_bytes": 3344
+    },
+    {
+      "status": "??",
+      "path": "frontend/src/views/PlatformView.vue",
+      "renamed_from": null,
+      "sha256": "d4ed57a9aa725c3a4469f2cd94f65604c1c6f3bff6d6852c25fda0c46c008101",
+      "size_bytes": 4769
+    },
+    {
+      "status": "??",
+      "path": "scripts/check_hybrid_access.py",
+      "renamed_from": null,
+      "sha256": "637b9737ae13078f04eaad82592975c5023913c4ff59a897a35524ab85fe3d1c",
+      "size_bytes": 4158
+    },
+    {
+      "status": "??",
+      "path": "scripts/check_hybrid_foundation.py",
+      "renamed_from": null,
+      "sha256": "b73c3ffa241a2ea7581cfc26e03732e763ce37200cac7eedc872a631294c310b",
+      "size_bytes": 6932
+    },
+    {
+      "status": "??",
+      "path": "scripts/check_structura_launcher.py",
+      "renamed_from": null,
+      "sha256": "bf02b54eb644eb0da66fbfbf84acc7d5a721ac3c1331785b95544a4462255ae1",
+      "size_bytes": 6639
+    },
+    {
+      "status": "??",
+      "path": "scripts/check_workshop_diagnostic.py",
+      "renamed_from": null,
+      "sha256": "c135ccc19c14391317d82961c3aba1e487015014e01b53427ddb94f7cd5bac0f",
+      "size_bytes": 16292
+    },
+    {
+      "status": "??",
+      "path": "scripts/launch_structura.py",
+      "renamed_from": null,
+      "sha256": "29af3411953efc882427740826b958cdeb53b201c16cff93b6f29a496f2c65bc",
+      "size_bytes": 957
+    },
+    {
+      "status": "??",
+      "path": "scripts/manage_hybrid_dev.py",
+      "renamed_from": null,
+      "sha256": "677b8964069e1b6aee698f1cb21738385a369b3ebbad1017a1a732964e1e8f7b",
+      "size_bytes": 2159
+    },
+    {
+      "status": "??",
+      "path": "scripts/reset_hybrid_legacy.py",
+      "renamed_from": null,
+      "sha256": "a7fd3d46c588997f1871eb849b2a273275b695dc95ff60a947334599153793f4",
+      "size_bytes": 1311
+    },
+    {
+      "status": "??",
+      "path": "scripts/run_workshop_campaign.py",
+      "renamed_from": null,
+      "sha256": "80561095880e959fd41f9f3f939c4829cc97f352ae174aa8b1ba17ca67c781d7",
+      "size_bytes": 6746
+    }
+  ]
+}
+

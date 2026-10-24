@@ -7,6 +7,7 @@ Runs 3 Monte Carlo simulations (T_full, T_half, T_1Y) and returns:
 """
 from __future__ import annotations
 import math
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 try:
@@ -23,13 +24,18 @@ from sqlmodel import Session, select
 
 from ..core.schemas import PricingRequest
 from ..core.payscript.parser import parse_script, resolve_analysis_constats, resolve_constats, effective_T_max
-from ..core.payscript.engine import run_mc, run_mark_to_future, compute_irr
+from ..core.payscript.engine import run_mark_to_future, compute_irr
+from ..core.valuation_context import (
+    ValuationContext, valuation_context_from_request, run_valuation,
+    validate_mtf_context,
+)
 from .auth import get_current_user
 from ..db.database import get_session
 from ..db.models import User, KidRecord, Indicative, Deal
 from ..core.product.models import FrozenObject
 from ..core.product.inputs import calculation_context, pricing_input
 from ..services.product_repository import ProductError, load_product, owned_record, stage_revision
+from ..services.kid_receipts import issue_kid_receipt, bind_kid_receipt, archived_kid_status
 
 router = APIRouter(prefix="/api/kid", tags=["kid"])
 
@@ -62,7 +68,7 @@ def _sri(mrm: int, crm: int) -> int:
 
 def _mc_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
                     antithetic, user_params, yield_curve, sigma_r, a_r,
-                    floor_price: float = 0.0) -> dict:
+                    floor_price: float = 0.0, valuation_context=None) -> dict:
     """Amounts held at the recommended holding period, per scenario.
 
     Only valid when T_cap reaches the product's own horizon: the script runs
@@ -84,13 +90,16 @@ def _mc_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
     A scenario's return is annualised over the life THAT scenario had, not
     over the label at the top of the column."""
     T_eff = min(effective_T_max(compiled, T_run), T_cap)
-    res = run_mc(
-        script=compiled, underlyings=uls, corr_matrix=corr, r=r,
-        T_max=T_eff, N=N, model=model, seed=seed, antithetic=antithetic,
-        user_params=user_params, yield_curve=yield_curve or [],
-        sigma_r=sigma_r, a_r=a_r, per_path_flows=True,
-    )
-    flows = res["path_flows"]
+    context = deepcopy(valuation_context) if valuation_context is not None else ValuationContext(
+        underlyings=uls, corr_matrix=corr, r=r, T=T_eff, N=N,
+        model=model, seed=seed, antithetic=antithetic, user_params=user_params,
+        yield_curve=yield_curve or [], sigma_r=sigma_r, a_r=a_r)
+    context.T = T_eff
+    res = run_valuation(compiled, context, per_path_flows=True, flows_at_payment=True)
+    flows = [[(float(t) - context.value_date_t, float(v)) for t, v in stream]
+             for stream in res["path_flows"]]
+    if any(t < -1e-6 for stream in flows for t, _v in stream):
+        raise ValueError("Le KID ne couvre pas les flux antérieurs à la value date.")
     px = np.array([sum(v for _t, v in fl) for fl in flows], dtype=np.float64)
 
     # Floor near-zero payoffs (surviving paths at intermediate horizon)
@@ -135,10 +144,11 @@ def _percentile_rows(amounts, flows, pv, t_eff) -> dict:
 
 def _horizon_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
                          antithetic, user_params, yield_curve, sigma_r, a_r,
-                         n_outer: int = 2000, n_inner: int = 250) -> dict:
+                         n_outer: int = 2000, n_inner: int = 250,
+                         valuation_context=None) -> dict:
     """Distribution of what an investor walks away with at an INTERMEDIATE
-    horizon: cash already received, plus the residual value of a contract that
-    is still alive.
+    horizon: cash already received, plus continuation value and unpaid claims,
+    including claims surviving a contractual STOP.
 
     Why this is not `_mc_percentiles` with a smaller T_cap. Truncating T_max
     filters `step_map` but never `mat_events`, so the `AT MATURITY` block fired
@@ -156,12 +166,10 @@ def _horizon_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
     the "défavorable" and "stress" columns of every intermediate horizon read
     the same number for every scenario that had not knocked out.
 
-    Since the Mark-to-Future replay was made state-aware it computes exactly
-    the right thing: each outer scenario is replayed from inception to the
-    horizon, keeping coupon memory, observation counter and realized extrema;
-    scenarios already recalled are marked at zero residual value and carry
-    their cash; the rest get a residual repricing of what is left of the
-    contract. Total value per scenario = residual mark + cash received, which
+    The payment-aware Mark-to-Future replay follows each outer scenario to the
+    horizon, keeping coupon memory, observation counter and realized extrema.
+    It preserves unpaid receivables after recall and reprices the continuation
+    of live contracts. Total value per scenario = residual mark + cash received, which
     is precisely the PRIIPs question "what do I get if I exit here".
 
     Known limitation, refused rather than absorbed: the nested replay prices
@@ -169,41 +177,41 @@ def _horizon_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
     would produce a document whose RHP row uses the curve and whose
     intermediate rows quietly use a flat rate — two conventions in one KID,
     which is the class of defect this rewrite exists to remove."""
-    if yield_curve:
-        raise ValueError(
-            "Horizons intermédiaires PRIIPs et courbe de taux : la revalorisation "
-            "résiduelle ne porte pas encore la courbe. Générez le KID à taux plat, "
-            "ou limitez-vous à la période de détention recommandée.")
-    if sigma_r and sigma_r > 0:
-        raise ValueError(
-            "Horizons intermédiaires PRIIPs et taux stochastiques : la "
-            "revalorisation résiduelle ne porte pas encore le facteur de taux. "
-            "Générez le KID avec sigma_r = 0.")
-
+    context = valuation_context or ValuationContext(
+        underlyings=uls, corr_matrix=corr, r=r, T=effective_T_max(compiled, T_run),
+        N=N, model=model, seed=seed, antithetic=antithetic,
+        user_params=user_params, yield_curve=yield_curve or [],
+        sigma_r=sigma_r, a_r=a_r)
+    validate_mtf_context(compiled, context, payment_aware=True)
     mtf = run_mark_to_future(
-        script=compiled, underlyings=uls, corr_matrix=corr, r=r,
-        T_max=effective_T_max(compiled, T_run),
-        main_price=0.0, model=model,
-        n_outer=n_outer, n_inner=n_inner, seed=seed,
-        user_params=user_params, mtm_dates=[T_cap],
+        script=compiled, underlyings=context.underlyings,
+        corr_matrix=context.corr_matrix, r=context.r, T_max=context.T,
+        main_price=0.0, model=context.model,
+        n_outer=n_outer, n_inner=n_inner, seed=context.seed,
+        user_params=context.user_params, mtm_dates=[T_cap],
+        barrier_monitoring=context.barrier_monitoring,
+        yield_curve=context.yield_curve, sigma_r=context.sigma_r,
+        credit_exposure=True, maturity_payment_t=context.maturity_payment_t,
+        state=context.state,
     )
     row = mtf["results"][0]
     marks = np.array(row["pvs"], dtype=np.float64) / 100.0        # residual value at T_cap
-    alive = row["alive"]
 
     # One dated flow stream per scenario: what was already paid, at its dates,
-    # plus — for a contract still running — the exit proceeds at the horizon.
+    # plus continuation value and unpaid receivables sold at the horizon.
     # A scenario recalled at year 1 keeps a one-year life even in the row
     # labelled "2.5 ans"; the exponent must follow the scenario, not the label.
     flows: list[list] = []
     for i, past in enumerate(row["realized_flows"]):
-        stream = [(float(t), float(v)) for t, v in past]
-        if alive[i] and marks[i] != 0.0:
+        # The payment-aware replay carries acquired future receivables too.
+        # They belong in the residual mark, never in cash already received.
+        stream = [(float(t), float(v)) for t, v in past if t <= T_cap + 1e-10]
+        if marks[i] != 0.0:
             stream.append((float(T_cap), float(marks[i])))
         flows.append(stream)
 
     amounts = np.array([sum(v for _t, v in fl) for fl in flows], dtype=np.float64)
-    pv = float(np.mean([sum(v * math.exp(-r * t) for t, v in fl) for fl in flows]))
+    pv = float(np.mean([sum(v * math.exp(-context.r * t) for t, v in fl) for fl in flows]))
 
     out = _percentile_rows(amounts, flows, pv, T_cap)
     out["terminated_pct"] = row["terminated_pct"]
@@ -309,6 +317,7 @@ def kid_compute(
     session: Annotated[Session, Depends(get_session)],
 ):
     """Compute PRIIPs KID scenarios and SRI."""
+    product = None
     if req.product_id is not None:
         try:
             owned_record(session, req.product_id, current)
@@ -340,7 +349,8 @@ def kid_compute(
     if len(corr) != n or any(len(row) != n for row in corr):
         raise HTTPException(422, "Matrice de corrélation invalide.")
 
-    T_full = req.T
+    context = valuation_context_from_request(req, compiled)
+    T_full = context.T
     T_half = T_full / 2.0
     T_1y   = min(1.0, T_full)
 
@@ -349,9 +359,12 @@ def kid_compute(
         T_run=T_full, N=req.N, model=req.model, seed=req.seed,
         antithetic=req.antithetic, user_params=req.user_params,
         yield_curve=req.yield_curve or [], sigma_r=req.sigma_r, a_r=req.a_r,
+        valuation_context=context,
     )
 
     try:
+        if T_full > 0.5:
+            validate_mtf_context(compiled, context, payment_aware=True)
         # Step 1 — recommended holding period: the contract runs to term.
         sc_full = _mc_percentiles(**common, T_cap=T_full, floor_price=0.0)
 
@@ -404,7 +417,7 @@ def kid_compute(
         horizons.append(_scenario_row(sc_half, T_half, *cost))
     horizons.append(_scenario_row(sc_full, T_full, *cost))
 
-    return {
+    result = {
         "sri":  sri,
         "mrm":  mrm,
         "crm":  req.crm,
@@ -427,6 +440,7 @@ def kid_compute(
             "ongoing": req.cost_ongoing,
         },
     }
+    return {**result, 'calculation_receipt': issue_kid_receipt(req, result, current, product)}
 
 
 # ── Persistence — append-only, one row per generation ──────────────────
@@ -446,10 +460,11 @@ class KidSaveRequest(BaseModel):
     T_rhp: float
     horizons: list = Field(default_factory=list)
     costs: dict = Field(default_factory=dict)
+    calculation_receipt: Optional[dict] = None
 
 
 def _kid_record_row(k: KidRecord) -> dict:
-    return {
+    row = {
         "id": k.id,
         "indicative_id": k.indicative_id,
         "deal_id": k.deal_id,
@@ -461,6 +476,14 @@ def _kid_record_row(k: KidRecord) -> dict:
         "costs": json.loads(k.costs_json),
         "created_at": k.created_at.isoformat(),
     }
+    try:
+        evidence = json.loads(k.calculation_evidence_json or '{}')
+    except (ValueError, TypeError):
+        evidence = {'invalid': True}
+    row['provenance_status'] = archived_kid_status(evidence, {**row, 'user_id': k.user_id})
+    row['calculation_evidence'] = evidence or None
+    row['methodology_status'] = 'INDICATIVE_NON_PRIIPS'
+    return row
 
 
 @router.post("/save", status_code=201)
@@ -508,6 +531,11 @@ def save_kid(
         if req.product_terms_version is not None and req.product_terms_version != product.terms_version:
             raise HTTPException(409, "La version des termes du Product a changé.")
 
+    try:
+        evidence = bind_kid_receipt(req.calculation_receipt, req.model_dump(mode='json'), current, product)
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
     rec = KidRecord(
         product_id=linked_product_id,
         product_terms_version=product.terms_version if product else None,
@@ -515,10 +543,11 @@ def save_kid(
         product_title=req.product_title,
         sri=req.sri, mrm=req.mrm, crm=req.crm, vev=req.vev, t_rhp=req.T_rhp,
         horizons_json=json.dumps(req.horizons), costs_json=json.dumps(req.costs),
+        calculation_evidence_json=json.dumps(evidence, ensure_ascii=False),
     )
-    session.add(rec)
-    session.flush()
-    if product is not None:
+    try:
+        session.add(rec)
+        session.flush()
         document = FrozenObject({"kind": "KID", "record_id": rec.id,
                                  "terms_version": product.terms_version,
                                  "created_at": rec.created_at.isoformat()})
@@ -526,7 +555,10 @@ def save_kid(
         stage_revision(session, product, expected_revision=product.revision,
                        actor_id=current.id, action="PRODUCT_KID_RETAINED",
                        reason="Conservation d’un KID sur le Product.")
-    session.commit()
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     session.refresh(rec)
     return _kid_record_row(rec)
 

@@ -18,7 +18,8 @@ const activity = computed(()=>props.state.activity)
 const elapsed = computed(()=>activity.value?.started_at ? Math.max(0,Math.floor((props.now-Date.parse(activity.value.started_at))/1000)) : null)
 const age = computed(()=>props.updatedAt ? Math.max(0,Math.floor((props.now-props.updatedAt)/1000)) : null)
 const stale = computed(()=>age.value!=null && age.value>15)
-const progress = computed(()=>Math.min(props.state.month || 0,props.state.config.months))
+const horizon = computed(()=>props.state.config.horizon_months||props.state.config.months)
+const progress = computed(()=>Math.min(props.state.month || 0,horizon.value))
 const request = computed(()=>activity.value?.request)
 const pilot = computed(()=>pilotSummary(props.state))
 const duration = computed(()=>durationLabel((props.state.elapsed_seconds ?? props.state.usage?.duration_seconds ?? 0) + (pilot.value.active && age.value!=null && !stale.value ? age.value : 0)))
@@ -35,10 +36,10 @@ const duration = computed(()=>durationLabel((props.state.elapsed_seconds ?? prop
         <p v-if="summary.active && activity?.phase==='EXECUTING'" class="task"><template v-if="request">{{request.status==='PENDING' ? 'Structura traite' : 'Structura a répondu à'}} : <code>{{request.method}} {{request.path}}</code><template v-if="request.status!=='PENDING'"> · HTTP {{request.status}}</template></template><template v-else-if="['register','browser'].includes(activity.tool)">Action dans le navigateur de l’agent · preuve disponible après exécution</template><template v-else-if="['mail','request','client_accept','wait','report'].includes(activity.tool)">Échange interne ou attente · aucun deal booké par ce seul message</template><template v-else>Décision en cours d’exécution · attente du premier résultat de Structura</template></p>
       </div><span v-if="summary.active && elapsed!=null" class="elapsed">{{elapsed}} s</span>
     </div>
-    <div class="time-row"><span><strong>Date du jeu : {{state.business_date}}</strong> · {{progress}} / {{state.config.months}} mois parcourus <WorkshopHelp topic="clock"/></span><span>Durée réelle cumulée : {{duration}} <WorkshopHelp topic="duration"/></span></div>
-    <progress :value="progress" :max="state.config.months" aria-label="Mois parcourus"></progress>
-    <div class="pilot-facts"><span>{{pilot.percent}} % de la période · {{state.month>=state.config.months && state.status!=='COMPLETED' ? 'revue finale en cours' : pilot.next}}</span><span>{{pilot.completed}} opération(s) rapprochée(s) · {{pilot.refusals}} dossier(s) sans trade</span><span>{{pilot.remaining}} décision(s) disponible(s)</span></div>
-    <div v-if="pilot.advice" class="recovery" role="status"><p>{{pilot.advice}}</p><div><button v-if="pilot.action && !stale" class="btn-secondary" @click="emit('recover',pilot.action)">{{pilot.action==='resume' ? 'Reprendre la partie' : pilot.action==='start' ? 'Reprendre les données existantes' : 'Préparer une nouvelle campagne'}}</button><button class="btn-secondary" @click="emit('issues')">Examiner les problèmes</button></div></div>
+    <div class="time-row"><span><strong>Date du scénario : {{state.business_date}}</strong> · {{progress}} / {{horizon}} mois parcourus <WorkshopHelp topic="clock"/></span><span>Durée réelle cumulée : {{duration}} <WorkshopHelp topic="duration"/></span></div>
+    <progress :value="progress" :max="horizon" aria-label="Mois parcourus"></progress>
+    <div class="pilot-facts"><span>{{pilot.percent}} % de la période · {{state.month>=horizon && state.status!=='COMPLETED' ? 'revue finale en cours' : pilot.next}}</span><span>{{pilot.completed}} opération(s) rapprochée(s) · {{pilot.refusals}} dossier(s) sans trade</span><span>{{pilot.remaining}} décision(s) disponible(s)</span></div>
+    <div v-if="pilot.advice" class="recovery" role="status"><p>{{pilot.advice}}</p><div><button v-if="pilot.action && !stale" class="btn-secondary" @click="emit('recover',pilot.action)">{{pilot.action==='resume' ? 'Reprendre la campagne' : pilot.action==='start' ? 'Reprendre les données existantes' : 'Préparer une nouvelle campagne'}}</button><button class="btn-secondary" @click="emit('issues')">Examiner les problèmes</button></div></div>
     <p v-if="pilot.uncertain" class="stale">{{pilot.uncertain}} dossier(s) avec écart ou preuve incomplète : consulter Books et risques avant de conclure.</p>
     </template>
     <slot name="metrics"></slot>

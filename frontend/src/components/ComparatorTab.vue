@@ -1,5 +1,10 @@
 <template>
   <div class="flex flex-col gap-4">
+    <div v-if="Object.keys(store.comparator?.excluded_universe || {}).length" class="card text-xs text-amber-400">
+      Univers réduit pour cette exploration :
+      <SensitiveValue>{{ Object.values(store.comparator.excluded_universe).map(row => `${row.ticker} (${row.reason})`).join(', ') }}</SensitiveValue>.
+      Ces exclusions ne qualifient pas un calcul du panier complet.
+    </div>
     <!-- Header + controls -->
     <div class="card">
       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
@@ -139,9 +144,12 @@
 import { reactive, ref, computed, onMounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { apiFetch } from '../utils/api.js'
+import { fractionToPercentExact } from '../utils/underlyingDefaults.js'
+import { recordMarketReference, marketProvenanceFields } from '../utils/marketProvenance.js'
 import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
 import { formatPercent, formatInt } from '../utils/format.js'
 import HelpTip from './HelpTip.vue'
+import SensitiveValue from './SensitiveValue.vue'
 
 // Catalogue de sous-jacents : chargé depuis la base au montage.
 onMounted(ensureUnderlyings)
@@ -210,15 +218,20 @@ async function quotePrice(row) {
   }
   st.pricing = true; st.error = ''
   try {
-    const res = await apiFetch(`/api/finance/hist_vol?tickers=${encodeURIComponent(row.tickers.join(','))}&period=1y`)
+    const asof = store.globalParams.valuation_date || today
+    const res = await apiFetch(`/api/finance/hist_vol?tickers=${encodeURIComponent(row.tickers.join(','))}&period=1y&asof=${encodeURIComponent(asof)}`)
     const vol = await res.json()
+    if (!res.ok) throw new Error(typeof vol.detail === 'string' ? vol.detail : `Erreur HTTP ${res.status}`)
     if (vol.error) throw new Error(vol.error)
 
-    const underlyings = row.tickers.map(tk => ({
-      name: labelFor(tk), ticker: tk, ccy: 'EUR',
-      sigma: vol.vols?.[tk] ?? 0.20,
-      q: vol.div_yields?.[tk] ?? 0,
-    }))
+    const underlyings = row.tickers.map(tk => {
+      const sigma = vol.vols?.[tk], q = vol.dividend_profiles?.[tk]?.ok === false ? null : vol.div_yields?.[tk]
+      if (sigma == null || !Number.isFinite(sigma) || q == null || !Number.isFinite(q))
+        throw new Error(`${tk} : volatilité ou dividende inconnu ; hypothèse explicite requise dans le Pricer.`)
+      const editable = {ticker:tk, sigma:fractionToPercentExact(sigma), q:fractionToPercentExact(q)}
+      recordMarketReference(editable, vol, tk)
+      return {name:labelFor(tk), ticker:tk, ccy:'EUR', sigma, q, ...marketProvenanceFields(editable)}
+    })
 
     const priceRes = await apiFetch('/api/price', {
       method: 'POST',
@@ -232,6 +245,7 @@ async function quotePrice(row) {
         N: 8000,
         seed: store.globalParams.seed,
         model: store.globalParams.model,
+        valuation_date: asof,
         user_params: store.pricingBody().user_params,
         constats: store.pricingBody().constats,
       }),

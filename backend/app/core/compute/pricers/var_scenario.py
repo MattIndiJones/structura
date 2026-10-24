@@ -47,7 +47,10 @@ def residual_script_from_payload(payload: dict):
     from ...payscript.engine import run_mc, _shift_events_for_mtf
 
     compiled = parse_script(payload["script_text"])
-    if payload.get("constat_values"):
+    if payload.get("frozen_calendar") is not None:
+        from ...product.calendar import restore_calendar
+        compiled = restore_calendar(compiled, payload["frozen_calendar"])
+    elif payload.get("constat_values"):
         # Le worker re-resout le calendrier depuis une charge serialisee : la
         # devise doit donc voyager avec, sinon un CONSTAT portant un decalage
         # de reglement le fait echouer alors que le MtM du meme deal passe.
@@ -79,7 +82,16 @@ def residual_script_from_payload(payload: dict):
 
 def price_var_scenario_job(payload: dict) -> dict:
     if payload.get("settlement_claim"):
-        return {"price": float(payload["fixed_price"])}
+        from ...valuation_context import deterministic_cashflow_pv
+        if "amount" not in payload or "valuation_date" not in payload:
+            raise ValueError("Ancienne créance sans entrées de calcul : restitution seule, rejeu indisponible.")
+        remaining = (date.fromisoformat(payload["payment_date"]) - date.fromisoformat(payload["valuation_date"])).days / 365.25
+        dr = float(payload.get("dr", 0.0))
+        return {"price": deterministic_cashflow_pv(
+            payload["amount"], remaining, r=payload["r"] + dr,
+            yield_curve=[[t, r + dr] for t, r in payload.get("yield_curve", [])],
+            funding_curve=payload.get("funding_curve"),
+            funding_spread=payload.get("funding_spread", 0.0))}
     from ...payscript.engine import run_mc
     residual_script = residual_script_from_payload(payload)
 
@@ -121,4 +133,11 @@ def price_var_scenario_job(payload: dict) -> dict:
             wof0_init=min(effective_spots),
             realvol_state_init=state["realvol_state"], fix_state_init=state["fix_state"],
         )
-    return {"price": result["price"] + float(payload.get("unsettled_pv", 0.0))}
+    from ...valuation_context import unsettled_cashflows_pv
+    receivables = unsettled_cashflows_pv({
+        **payload, "r_frac": context["r"] if context else payload.get("r_frac", 0.0),
+        "yc": (context.get("yield_curve") if context else payload.get("yc")) or [],
+        "funding_curve": (context.get("funding_curve") if context else payload.get("funding_curve")) or [],
+        "funding_spread": context.get("funding_spread", 0.0) if context else payload.get("funding_spread", 0.0),
+    }, dr=payload.get("dr", 0.0))
+    return {"price": result["price"] + receivables}

@@ -1,13 +1,15 @@
 /**
  * Thin fetch wrapper that injects the JWT Authorization header
- * when a token exists in localStorage.
+ * for the active installation and this tab only.
  * Usage: apiFetch('/api/db/scripts', { method: 'POST', body: JSON.stringify({...}) })
  */
+import { sessionToken, sessionFetch } from './session.js'
+
 export function apiFetch(url, options = {}) {
-  const token = localStorage.getItem('auth_token')
+  const token = sessionToken()
   const headers = { ...(options.headers || {}) }
   if (token) headers['Authorization'] = `Bearer ${token}`
-  return fetch(url, { ...options, headers })
+  return sessionFetch(url, { ...options, headers })
 }
 
 /** Turn structured API validation errors into actionable French messages. */

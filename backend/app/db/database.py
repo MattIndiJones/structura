@@ -14,6 +14,7 @@ from .models import (
 from . import trading_models  # Register reusable trading tables before create_all.
 
 from ..runtime import data_path, consultation_mode
+from ..hybrid import business as hybrid_business  # Register managed bootstrap before create_all.
 
 _DB_PATH = data_path("structura.db")
 _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -60,9 +61,36 @@ def _migrate():
     tables, it never ALTERs an existing one. No Alembic in this project;
     keep patches here small and check-before-add."""
     with engine.connect() as conn:
+        user_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(users)"))}
+        for column, declaration in (("auth_version", "INTEGER NOT NULL DEFAULT 0"),
+                                    ("password_change_required", "BOOLEAN NOT NULL DEFAULT 0")):
+            if user_columns and column not in user_columns:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {column} {declaration}"))
+        conn.commit()
+        quote_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_quotes)"))}
+        if quote_columns and "model_reference_json" not in quote_columns:
+            conn.execute(text("ALTER TABLE rfq_quotes ADD COLUMN model_reference_json TEXT"))
+        from .rfq_quote_migrations import migrate_quote_revisions
+        migrate_quote_revisions(conn)
+        from .archive_integrity import migrate as migrate_archive_integrity
+        migrate_archive_integrity(conn)
+        for column, declaration in (("provider_id", "INTEGER REFERENCES rfq_providers(id)"),
+                                    ("counterparty_id", "INTEGER REFERENCES counterparties(id)"),
+                                    ("counterparty_name", "TEXT"), ("identity_frozen", "BOOLEAN NOT NULL DEFAULT 0")):
+            if quote_columns and column not in quote_columns:
+                conn.execute(text(f"ALTER TABLE rfq_quotes ADD COLUMN {column} {declaration}"))
+        conn.commit()
+        from .organization_scope_migrations import migrate_organization_scopes
+        migrate_organization_scopes(conn)
+        from .trading_migrations import migrate_settlement_evidence
+        migrate_settlement_evidence(conn)
+        conn.commit()
         _migrate_underlying_classes(conn)
         conn.commit()
         ccr_deal_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deals)"))}
+        if ccr_deal_cols and "legal_identity_exception_json" not in ccr_deal_cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN legal_identity_exception_json TEXT"))
+            conn.commit()
         if ccr_deal_cols and "ccr_netting_set_id" not in ccr_deal_cols:
             conn.execute(text("ALTER TABLE deals ADD COLUMN ccr_netting_set_id INTEGER REFERENCES ccr_netting_sets(id)"))
             conn.commit()
@@ -114,6 +142,8 @@ def _migrate():
 
         if "resolution_outcome" not in cols:
             conn.execute(text("ALTER TABLE deals ADD COLUMN resolution_outcome TEXT"))
+        if "settlement_date" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN settlement_date TEXT"))
             conn.commit()
 
         if "product_type" not in cols:
@@ -312,6 +342,7 @@ def _migrate():
             ("applied_by", "INTEGER"),
             ("applied_at", "DATETIME"),
             ("applied_contract_version", "INTEGER"),
+            ("credit_check_json", "TEXT"),
         ):
             if amendment_cols and name not in amendment_cols:
                 conn.execute(text(
@@ -613,6 +644,7 @@ def _migrate():
         _ensure_one_deal_per_rfq(conn)
         _ensure_rfq_integrity_triggers(conn)
         _make_kid_vev_nullable(conn)
+        _migrate_kid_evidence(conn)
         conn.execute(text(
             "INSERT OR IGNORE INTO app_migrations(key) VALUES (:key)"),
             {"key": "lot7_operational_columns_v1"})
@@ -700,7 +732,20 @@ def _make_kid_vev_nullable(conn) -> None:
     vev = next((row for row in columns if row[1] == "vev"), None)
     if not vev or not vev[3]:
         return
-    conn.execute(text("""
+    # Preserve columns already added by later migrations when upgrading an
+    # older NOT NULL VEV table. The base layout remains compatible with old DBs.
+    names = {row[1] for row in columns}
+    extra = [name for name in ('product_id', 'product_terms_version', 'calculation_evidence_json') if name in names]
+    declarations = {'product_id': 'INTEGER REFERENCES products(id)',
+                    'product_terms_version': 'INTEGER', 'calculation_evidence_json': 'TEXT'}
+    schema_objects = conn.execute(text("""
+        SELECT sql FROM sqlite_master
+        WHERE tbl_name='kid_records' AND type IN ('index','trigger') AND sql IS NOT NULL
+    """)).scalars().all()
+    definitions = ','.join(name + ' ' + declarations[name] for name in extra)
+    extra_definition = definitions + ',' if definitions else ''
+    extra_select = ',' + ','.join(extra) if extra else ''
+    conn.execute(text(f"""
         CREATE TABLE kid_records__vev_nullable (
             id INTEGER NOT NULL PRIMARY KEY,
             indicative_id INTEGER,
@@ -715,20 +760,32 @@ def _make_kid_vev_nullable(conn) -> None:
             horizons_json TEXT,
             costs_json TEXT,
             created_at DATETIME NOT NULL,
+            {extra_definition}
             FOREIGN KEY(indicative_id) REFERENCES indicatives(id),
             FOREIGN KEY(deal_id) REFERENCES deals(id),
             FOREIGN KEY(user_id) REFERENCES users(id)
         )
     """))
-    conn.execute(text("""
+    conn.execute(text(f"""
         INSERT INTO kid_records__vev_nullable
         SELECT id, indicative_id, deal_id, user_id, product_title, sri, mrm,
-               crm, vev, t_rhp, horizons_json, costs_json, created_at
+               crm, vev, t_rhp, horizons_json, costs_json, created_at{extra_select}
         FROM kid_records
     """))
     conn.execute(text("DROP TABLE kid_records"))
     conn.execute(text("ALTER TABLE kid_records__vev_nullable RENAME TO kid_records"))
+    for definition in schema_objects:
+        conn.execute(text(definition))
+    if 'product_id' in extra:
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_kid_records_product_id ON kid_records(product_id)'))
     conn.commit()
+
+
+def _migrate_kid_evidence(conn):
+    columns = {row[1] for row in conn.execute(text('PRAGMA table_info(kid_records)'))}
+    if columns and 'calculation_evidence_json' not in columns:
+        conn.execute(text("ALTER TABLE kid_records ADD COLUMN calculation_evidence_json TEXT NOT NULL DEFAULT '{}'"))
+        conn.commit()
 
 
 def _backfill_portfolio_memberships():
@@ -861,11 +918,47 @@ def _retire_four_eyes_fixing_policy():
         session.commit()
 
 
+def _require_simulation_bootstrap():
+    """Only an explicitly isolated workshop can start without installation identity."""
+    import os
+    raw = os.environ.get('STRUCTURA_DATA_DIR', '')
+    directory = Path(raw) if raw else None
+    private_data = Path(__file__).resolve().parents[2] / 'data'
+    if (os.environ.get('STRUCTURA_BOOTSTRAP_PROFILE') != 'simulation'
+            or os.environ.get('STRUCTURA_WORKSHOP_CHILD') != '1'
+            or directory is None or not directory.is_absolute()
+            or directory.resolve() != _DB_PATH.parent.resolve()
+            or directory.resolve().is_relative_to(private_data.resolve())
+            or (directory / '.hybrid-retired.json').exists()):
+        raise RuntimeError(
+            "Installation non configurée : aucun compte par défaut n'est créé. "
+            "Utilisez scripts/manage_hybrid_dev.py ou un workspace Admin configuré.")
+    with engine.connect() as conn:
+        tables = {r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        for table in ('hybrid_bootstrap', 'admin_workbench_identity'):
+            if table in tables and conn.execute(text(f'SELECT 1 FROM {table} LIMIT 1')).first():
+                raise RuntimeError("Une base d'installation ne peut pas être démarrée comme simulation.")
+
+
 def init_db():
+    if (_DB_PATH.parent / ".hybrid-retired.json").exists():
+        raise RuntimeError("Ancienne base fictive retirée. Démarrez les installations avec scripts/manage_hybrid_dev.py.")
     if consultation_mode():
         if not _DB_PATH.is_file():
             raise RuntimeError("Le book sauvegardé est introuvable ; consultation annulée.")
         return
+    from ..hybrid.config import current_config
+    config = current_config()
+    if config:
+        if _DB_PATH.resolve() != (config.data_dir / "structura.db").resolve():
+            raise RuntimeError("Le moteur SQL ne correspond pas à l'installation configurée.")
+        hybrid_business.preflight(engine, config)
+    from ..hybrid import admin_workbench
+    workbench_config = admin_workbench.config()
+    if workbench_config:
+        admin_workbench.preflight(engine, workbench_config)
+    if config is None and workbench_config is None:
+        _require_simulation_bootstrap()
     SQLModel.metadata.create_all(engine)
     from .rfq_transport_integrity import install_transport_guards
     install_transport_guards(engine)
@@ -873,83 +966,69 @@ def init_db():
     install_execution_guards(engine)
     _migrate()
     _retire_four_eyes_fixing_policy()
-    _seed()
+    report = _seed()
     _seed_rfq_providers()
     _seed_counterparties()
     _seed_underlyings()
     _backfill_portfolio_memberships()
     _backfill_rfq_statuses()
+    return report
 
 
 def _seed_underlyings():
-    """Sème le catalogue repris du front. Idempotent : n'ajoute que les couples
-    (ticker, groupe) absents, donc une base déjà administrée n'est pas écrasée
-    et une base existante récupère les nouveautés du seed."""
+    """Initialize once, or adopt existing rows without restoring removed groups."""
     from .underlyings_seed import UNDERLYINGS_SEED, seeded_asset_class
 
+    from .models import ReferenceCatalogState
+    from ..core.audit import record_audit_event
     with Session(engine) as s:
-        for row in s.exec(select(Underlying)).all():
-            kind = seeded_asset_class(row.ticker)
-            if row.asset_class == "unknown" and kind != "unknown":
-                row.asset_class = kind
-                s.add(row)
+        if s.get(ReferenceCatalogState, "underlyings"):
+            return
+        existing = bool(s.exec(select(Underlying.id)).first())
+        if not existing:
+            s.add_all([Underlying(ticker=ticker, label=label, group_name=group, ccy=ccy,
+                                  asset_class=seeded_asset_class(ticker))
+                       for ticker, label, group, ccy in UNDERLYINGS_SEED])
+        s.add(ReferenceCatalogState(key="underlyings", adopted_existing=existing))
+        record_audit_event(s, action="REFERENCE_CATALOG_INITIALIZED", object_type="UNDERLYINGS", object_id=None,
+                           actor_user_id=None, actor_type="SYSTEM", result="SUCCESS",
+                           after={"adopted_existing": existing}, reason="Initialisation unique ; catalogue existant conservé sans réinsertion.")
         s.commit()
-        # Correct the original seeded Yahoo symbol, preserving the catalogue
-        # row's identity. Contractual snapshots and user-defined groups stay intact.
-        seeded_axa = s.exec(select(Underlying).where(
-            Underlying.ticker == "AXA.PA", Underlying.label == "AXA",
-            Underlying.group_name == "Actions FR (CAC)")).first()
-        corrected_axa = s.exec(select(Underlying).where(
-            Underlying.ticker == "CS.PA",
-            Underlying.group_name == "Actions FR (CAC)")).first()
-        if seeded_axa and not corrected_axa:
-            seeded_axa.ticker = "CS.PA"
-            s.add(seeded_axa)
-            s.commit()
-        elif seeded_axa and seeded_axa.active:
-            # Keep the old row recoverable if an administrator already added
-            # CS.PA in the same group; the invalid duplicate is no longer offered.
-            seeded_axa.active = False
-            s.add(seeded_axa)
-            s.commit()
-        existants = {(u.ticker, u.group_name) for u in s.exec(select(Underlying)).all()}
-        ajouts = [
-            Underlying(ticker=ticker, label=label, group_name=groupe, ccy=ccy, asset_class=seeded_asset_class(ticker))
-            for ticker, label, groupe, ccy in UNDERLYINGS_SEED
-            if (ticker, groupe) not in existants
-        ]
-        if ajouts:
-            s.add_all(ajouts)
-            s.commit()
 
 
 def _seed():
+    from ..hybrid.config import current_config
+    config = current_config()
+    if config:
+        return hybrid_business.seed(engine, config)
+    import os
+    if os.environ.get("STRUCTURA_BOOTSTRAP_PROFILE") == "admin_workbench":
+        from ..hybrid.admin_workbench import seed
+        return seed(engine)
+    _require_simulation_bootstrap()
+    from ..core.simulation_bootstrap import simulation_credentials
+    credentials = simulation_credentials(_DB_PATH.parent)
     with Session(engine) as s:
-        # Idempotent — skip if already seeded
-        if s.query(Entity).count() > 0:
-            return
-
-        demo = Entity(name="Demo")
-        s.add(demo)
-        s.flush()
-
-        admin = User(
-            username="admin",
-            email="admin@structura.local",
-            password_hash=_hash_pw("admin123"),
-            role="admin",
-            entity_id=demo.id,
-        )
-        test = User(
-            username="test",
-            email="test@structura.local",
-            password_hash=_hash_pw("test123"),
-            role="user",
-            entity_id=demo.id,
-        )
-        s.add(admin)
-        s.add(test)
+        # Simulation identities are registered explicitly by the workshop.
+        # Never create accounts with shared, published passwords.
+        if s.exec(select(Entity.id)).first() is None:
+            s.add(Entity(name="Demo"))
+            s.flush()
+        created = 0
+        if credentials:
+            user = s.exec(select(User).where(User.username == credentials['username'])).first()
+            if user is None:
+                if s.exec(select(User.id)).first() is not None:
+                    raise RuntimeError('Simulation existante sans compte technique attesté ; aucune habilitation ajoutée.')
+                entity = s.exec(select(Entity).where(Entity.name == 'Demo')).one()
+                s.add(User(username=credentials['username'], email=credentials['email'],
+                    password_hash=_hash_pw(credentials['password']), role='admin', entity_id=entity.id))
+                created = 1
+            elif (not user.is_active or user.role != 'admin'
+                    or not _verify_pw(credentials['password'], user.password_hash)):
+                raise RuntimeError('Habilitation technique de simulation modifiée ; aucune restauration automatique.')
         s.commit()
+        return {"profile": "simulation", "accounts_created": created}
 
 
 def _seed_counterparties():
@@ -965,11 +1044,25 @@ def _seed_counterparties():
         ("Crédit Agricole CIB", "FR"), ("Natixis", "FR"),
         ("Santander", "ES"), ("Nomura", "JP"), ("Mizuho", "JP"),
     ]
+    from .models import ReferenceCatalogState
+    from ..core.audit import record_audit_event
     with Session(engine) as s:
-        if s.query(Counterparty).count() > 0:
+        if s.get(ReferenceCatalogState, "counterparties"):
+            return
+        existing = bool(s.exec(select(Counterparty.id)).first())
+        if existing:
+            s.add(ReferenceCatalogState(key="counterparties", adopted_existing=True))
+            record_audit_event(s, action="REFERENCE_CATALOG_INITIALIZED", object_type="COUNTERPARTIES", object_id=None,
+                               actor_user_id=None, actor_type="SYSTEM", result="SUCCESS",
+                               after={"adopted_existing": True}, reason="Reprise explicite du catalogue existant, sans restauration automatique.")
+            s.commit()
             return
         for name, country in _DEFAULTS:
             s.add(Counterparty(name=name, country=country, active=True))
+        s.add(ReferenceCatalogState(key="counterparties", adopted_existing=False))
+        record_audit_event(s, action="REFERENCE_CATALOG_INITIALIZED", object_type="COUNTERPARTIES", object_id=None,
+                           actor_user_id=None, actor_type="SYSTEM", result="SUCCESS",
+                           after={"adopted_existing": False}, reason="Initialisation unique du catalogue standard.")
         s.commit()
 
 
@@ -977,9 +1070,23 @@ def _seed_rfq_providers():
     """Independent idempotency check (not gated behind _seed()'s early
     return) so this default catalog still gets created on a database that
     was already seeded with users before RfqProvider existed."""
+    from .models import ReferenceCatalogState
+    from ..core.audit import record_audit_event
     with Session(engine) as s:
-        if s.query(RfqProvider).count() > 0:
+        if s.get(ReferenceCatalogState, "rfq_providers"):
+            return
+        existing = bool(s.exec(select(RfqProvider.id)).first())
+        if existing:
+            s.add(ReferenceCatalogState(key="rfq_providers", adopted_existing=True))
+            record_audit_event(s, action="REFERENCE_CATALOG_INITIALIZED", object_type="RFQ_PROVIDERS", object_id=None,
+                               actor_user_id=None, actor_type="SYSTEM", result="SUCCESS",
+                               after={"adopted_existing": True}, reason="Reprise explicite du catalogue existant, sans restauration automatique.")
+            s.commit()
             return
         for label in ["Saisie manuelle", "UBS", "Vontobel (deritrade)", "Leonteq", "BNP Paribas", "Société Générale"]:
             s.add(RfqProvider(label=label, mode="manual", active=True))
+        s.add(ReferenceCatalogState(key="rfq_providers", adopted_existing=False))
+        record_audit_event(s, action="REFERENCE_CATALOG_INITIALIZED", object_type="RFQ_PROVIDERS", object_id=None,
+                           actor_user_id=None, actor_type="SYSTEM", result="SUCCESS",
+                           after={"adopted_existing": False}, reason="Initialisation unique du catalogue standard.")
         s.commit()

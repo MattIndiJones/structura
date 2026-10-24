@@ -6,7 +6,8 @@
  * jsdom pour une méthode rendrait chaque exécution plus lente sans rien couvrir
  * de plus.
  */
-const stockage = new Map()
+import { beforeEach } from 'vitest'
+const stockage = new Map(), sessions = new Map()
 
 globalThis.localStorage = {
   getItem: (k) => (stockage.has(k) ? stockage.get(k) : null),
@@ -14,3 +15,10 @@ globalThis.localStorage = {
   removeItem: (k) => stockage.delete(k),
   clear: () => stockage.clear(),
 }
+globalThis.sessionStorage = {
+  getItem: (k) => sessions.has(k) ? sessions.get(k) : null,
+  setItem: (k, v) => sessions.set(k, String(v)),
+  removeItem: (k) => sessions.delete(k),
+  clear: () => sessions.clear(),
+}
+beforeEach(() => sessionStorage.clear())

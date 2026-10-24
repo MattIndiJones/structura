@@ -381,6 +381,7 @@ import { confirmer } from '../composables/useConfirm.js'
 import AlertMessage from '../components/ui/AlertMessage.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import { formatDateTime } from '../utils/format.js'
+import { runTimestamp } from '../composables/useBookingMtm.js'
 
 const config = reactive({ users: [], providers: [], products: [], underlyings: [], lifecycle_profiles: [], limits: {} })
 const batches = ref([])
@@ -589,7 +590,7 @@ async function deleteBatch(batch) {
   }
 }
 
-const fmtDate = formatDateTime
+const fmtDate = value => formatDateTime(runTimestamp(value))
 const fmtMoney = (value, currency) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value)
 const dealCountLabel = count => `${count} ${count === 1 ? 'deal' : 'deals'}`
 const roleLabel = role => ({ admin: 'Admin', user: 'Utilisateur', ops_maker: 'Ops Maker', checker: 'Checker' }[role] || role)

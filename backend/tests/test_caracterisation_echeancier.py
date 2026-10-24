@@ -30,6 +30,8 @@ from backend.app.core.payscript.parser import parse_script, resolve_constats
 from backend.app.core.payscript.engine import run_mc
 
 TODAY = date(2026, 9, 10)
+CONTRACT_TENOR = (date(2029, 9, 10) - TODAY).days / 365.25
+MATURITY_TIME = round(CONTRACT_TENOR, 3)
 
 # Calendrier annuel sur 3 ans, relevé trimestriellement : 3 constatations de
 # 4 relevés. C'est le cas de référence de toute la refonte.
@@ -54,7 +56,7 @@ def _ul():
                 sigma_fx=0.0, rho_sfx=0.0, ccyh=0.0)
 
 
-def _flux(src, constats=None, user_params=None, T=3.0):
+def _flux(src, constats=None, user_params=None, T=CONTRACT_TENOR):
     """{(t arrondi, libellé): montant moyen} — la table de flux, lisible."""
     compiled = resolve_constats(parse_script(src), constats or CAL_ANNUEL,
                                 anchor=TODAY, currency="EUR")
@@ -144,8 +146,8 @@ def test_un_stop_interrompt_les_blocs_suivants_du_meme_jour():
     le comportement voulu — si un autocall rappelle, sa protection finale ne
     s'évalue pas."""
     f = _flux(STOP_DABORD)
-    assert (3.0, "bloc avec STOP") in f
-    assert (3.0, "bloc suivant, meme jour") not in f, (
+    assert (MATURITY_TIME, "bloc avec STOP") in f
+    assert (MATURITY_TIME, "bloc suivant, meme jour") not in f, (
         "le bloc postérieur au STOP a été évalué")
 
 
@@ -154,8 +156,8 @@ def test_l_ordre_du_script_fait_foi_a_date_egale():
     s'exécutent, puisque le `STOP` vient en dernier. L'ordre d'écriture est donc
     contractuel, pas cosmétique."""
     f = _flux(STOP_ENSUITE)
-    assert f[(3.0, "bloc avec STOP")] == 1.0
-    assert f[(3.0, "bloc suivant, meme jour")] == 99.0
+    assert f[(MATURITY_TIME, "bloc avec STOP")] == 1.0
+    assert f[(MATURITY_TIME, "bloc suivant, meme jour")] == 99.0
 
 
 # ── C. Rang d'observation — les défauts mesurés ────────────────────────

@@ -19,8 +19,15 @@ TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=400)
 MATURITY = VALUE_D + timedelta(days=1096)
 
-USER = SimpleNamespace(id=1)
+USER = SimpleNamespace(id=1, role='user', entity_id=None)
 BODY = deals_api.MtmExplainRequest(recalibrate="none")   # σ booking aux 2 dates
+
+
+@pytest.fixture(autouse=True)
+def offline_dividends(monkeypatch):
+    # Historical date1 uses realized parameters even when date2 uses booking.
+    # Preserve the fixture's booked q=0 without consulting an external provider.
+    monkeypatch.setattr(deals_api, 'dividend_profile', lambda *a, **kw: {'ok':False})
 
 
 def _add_deal(s: Session, script: str, reference: str,

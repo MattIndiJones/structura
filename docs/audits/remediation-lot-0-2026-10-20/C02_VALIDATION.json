@@ -1,0 +1,295 @@
+{
+  "date": "2026-10-20",
+  "workstream": "C02",
+  "status": "Validated locally; manual UI and full T01 remain open",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "authorization": {
+    "code_and_targeted_tests": true,
+    "commit": false,
+    "push": false,
+    "live_business_data_mutation": false
+  },
+  "baseline": {
+    "snapshot": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c02-baseline-8enzd4wo",
+    "default_porcelain_entries": 313,
+    "prior_changes_preserved": true
+  },
+  "backend": {
+    "passed": 138,
+    "failed": 0,
+    "duration_seconds": 138.35,
+    "files": [
+      "backend/tests/test_session_security.py",
+      "backend/tests/test_installation_identity_security.py",
+      "backend/tests/test_hybrid_bootstrap.py",
+      "backend/tests/test_hybrid_installations.py",
+      "backend/tests/test_hybrid_development.py",
+      "backend/tests/test_hybrid_reset.py",
+      "backend/tests/test_structura_launcher.py",
+      "backend/tests/test_business_permissions.py",
+      "backend/tests/test_schedule.py",
+      "backend/tests/test_schedule_settlement.py",
+      "backend/tests/test_workshop_consultation.py"
+    ],
+    "command": ".venv/Scripts/python.exe <temporary sanitized-environment wrapper> backend/tests/test_session_security.py backend/tests/test_installation_identity_security.py backend/tests/test_hybrid_bootstrap.py backend/tests/test_hybrid_installations.py backend/tests/test_hybrid_development.py backend/tests/test_hybrid_reset.py backend/tests/test_structura_launcher.py backend/tests/test_business_permissions.py backend/tests/test_schedule.py backend/tests/test_schedule_settlement.py backend/tests/test_workshop_consultation.py -q --tb=short",
+    "isolation": "Temporary STRUCTURA_DATA_DIR, dedicated test JWT secret, inherited STRUCTURA variables removed; no real business database used"
+  },
+  "frontend": {
+    "passed": 455,
+    "failed": 0,
+    "files": 59,
+    "command": "npm.cmd run build -- --outDir <temporary directory>",
+    "vite_build_succeeded": true,
+    "build_seconds": 12.06,
+    "output_directory": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c02-build-a445ab01c3a64d61b93599e0a255cfaf",
+    "existing_dist_preserved": true
+  },
+  "decisions": {
+    "D13": "Explicit user confirmation: lock managed canonical organization name locally; rename through provisioning"
+  },
+  "incremental_diff": {
+    "changed_files_excluding_this_evidence": 32,
+    "deleted_files": [],
+    "git_diff_check_exit_code": 0,
+    "preexisting_full_checkout_warning": "backend/app/api/opportunities.py:625 extra blank line at EOF; file unchanged by C02"
+  },
+  "logs": [
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/backend-qualified.log",
+      "sha256": "a93ebea6460e311d561b8ffcac9e2c161338e733b03d9e07792346024b9a32c0",
+      "passed": 138,
+      "duration_seconds": 138.35
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/frontend-qualified.log",
+      "sha256": "da2a289603edb988da2c3287c3c29902923dfaee56dac95e9e7cc2763080ea8e"
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/backend-initial.log",
+      "sha256": "23b8582e040eb8d195e7ae74c0393fa266ea0e9239b84b1171e89aff6eeae263",
+      "passed": 23,
+      "duration_seconds": 39.64
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/backend-regression.log",
+      "sha256": "9450bee9b1f64a7e8d1af0c6f3521de3cfb6360c7b962ab87dba0f54dbd95390",
+      "passed": 123,
+      "duration_seconds": 120.15
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/backend-consultation.log",
+      "sha256": "fdf2724a3fdf1e07a66c5a8e98aee744a54bd393ce971417a6fa6e1a561a15cd",
+      "passed": 28,
+      "duration_seconds": 55.79
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/backend-final.log",
+      "sha256": "08181dc6bb666d211e3c4ac7fcf23305b23208475eca8ca79237ce1a8bf06e13",
+      "passed": 37,
+      "duration_seconds": 62.19
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/frontend-build-initial.log",
+      "sha256": "2414ca1da6cc7567d3906772b2626c052e36c0b4bfe561f0e31a735d5fb4fc72"
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/frontend-build-asset.log",
+      "sha256": "add44cd4251004251390709ad3f55f770f2b601585272fe0d7a3f4739dc82583"
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/frontend-login.log",
+      "sha256": "d998f26a83b8d62a10cea9be50ac11d576a16d990f44d26a6aa4602086a42311"
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c02-2026-10-20/incremental-diff-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "source_and_document_files": [
+    {
+      "path": "backend/app/api/admin.py",
+      "status": "changed",
+      "sha256": "b2f7b8d0053827f831b6ee29a4721286fc8ae1c7d4c7c00bacb9bdd69de23372"
+    },
+    {
+      "path": "backend/app/api/auth.py",
+      "status": "changed",
+      "sha256": "da3887993238d1322a4f89f7b241206cd27e84d976585f4cf516673ee8a9ee01"
+    },
+    {
+      "path": "backend/app/api/schedule.py",
+      "status": "changed",
+      "sha256": "a0ea9eb227dc1e48afe0318698b01a10edb9188dca79d4ac7c3f614d2b2abf27"
+    },
+    {
+      "path": "backend/app/core/calendar_budget.py",
+      "status": "added",
+      "sha256": "baecb13e1133eff16577f7acedc984552cab50e2136e1c1c86dcd02540fcb86c"
+    },
+    {
+      "path": "backend/app/core/consultation_sessions.py",
+      "status": "added",
+      "sha256": "b09a547e8bd6f56496db7817d1ae2f159f9ac14dc896cac43019af5b2897e562"
+    },
+    {
+      "path": "backend/app/core/session_security.py",
+      "status": "added",
+      "sha256": "298d02163a9c06a527d2266748bcb574ffa664dceabbfe54cba72171c1e8f73d"
+    },
+    {
+      "path": "backend/app/db/database.py",
+      "status": "changed",
+      "sha256": "11e19b46460d4a0144a438504fd710a1fb2fb23a35c172a20ae38d437c1d376f"
+    },
+    {
+      "path": "backend/app/db/models.py",
+      "status": "changed",
+      "sha256": "c66f23e7b06df351b9017e7005773ab393753f67c252401fac7bde3672a784db"
+    },
+    {
+      "path": "backend/app/hybrid/admin_workbench.py",
+      "status": "changed",
+      "sha256": "f1f81d10287c1cafb4f04fdc54e228623db266292aae45dfec66a5a444fe727d"
+    },
+    {
+      "path": "backend/app/hybrid/business.py",
+      "status": "changed",
+      "sha256": "874a2f1c6aa791fa5edc3d3461e3fb807e43a3b08b23d1e55ea416d9096db6ee"
+    },
+    {
+      "path": "backend/app/hybrid/development.py",
+      "status": "changed",
+      "sha256": "bb2c3b52e1c6d46906e1b8aa3451b8f9e829d3144db3d1bbcb11d336319372e3"
+    },
+    {
+      "path": "backend/app/hybrid/platform.py",
+      "status": "changed",
+      "sha256": "cce79c22148cd8905839c96c3ea0eace1eb6dae928bd631d67c8ca8019ca026f"
+    },
+    {
+      "path": "backend/app/main.py",
+      "status": "changed",
+      "sha256": "b1b8c553174aadc98e12fd09c57fbb25570d25c4e4eda3b78ebda8fa9842c44f"
+    },
+    {
+      "path": "backend/tests/test_hybrid_bootstrap.py",
+      "status": "changed",
+      "sha256": "a34623376ec1e2db19805bff087e6a6d3e7500830ace190988e1ea9c7a2b979b"
+    },
+    {
+      "path": "backend/tests/test_hybrid_installations.py",
+      "status": "changed",
+      "sha256": "e0efeddafcce26b2ee545be4a4537f0869f6b44f1738198257d97685d059a6cd"
+    },
+    {
+      "path": "backend/tests/test_installation_identity_security.py",
+      "status": "added",
+      "sha256": "7e223519dd86cb95b725810cd3b1ba68af0406d3c0a5bf9562a719c074dc88f5"
+    },
+    {
+      "path": "backend/tests/test_session_security.py",
+      "status": "added",
+      "sha256": "1076043f20ffafc657eae09cace35d78ae9955e1b27d65d71dfc5abe028a37f1"
+    },
+    {
+      "path": "backend/tests/test_workshop_consultation.py",
+      "status": "changed",
+      "sha256": "6f6b105c5e6cb0255e8256634279f0f645a80c6f9d95cd9312074bea0ada17cb"
+    },
+    {
+      "path": "docs/README.md",
+      "status": "changed",
+      "sha256": "d2fbfc8c0ca78c5427c79d7bc967bceb2c770a357907935b90b0a191bda66861"
+    },
+    {
+      "path": "docs/audits/REMEDIATION_C02_2026-10-20.md",
+      "status": "added",
+      "sha256": "eebedc54ed0df7dc0d72c918b833e77cbcb03b81db5d3ddcfdb9c647a639c438"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "status": "changed",
+      "sha256": "503559aa75523f4968f21d9d439f11926bec9bc8daa920c627b635e4f3e55d7f"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "status": "changed",
+      "sha256": "b20a9a9250d2de79d580e9c1507817b46b63fefbe5ab4d606aaec982dfae8023"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "status": "changed",
+      "sha256": "0cf935e6315594b6fbffc2da8f1789338bf0632de2c818b5ad248969d4626702"
+    },
+    {
+      "path": "frontend/src/components/AppHeader.vue",
+      "status": "changed",
+      "sha256": "0265df725fe273a8854ab532de9e6a94bdba8e05e586126de531187ce05220dd"
+    },
+    {
+      "path": "frontend/src/router/index.js",
+      "status": "changed",
+      "sha256": "9b4bf5ff445c4114722b1fc698d35441d50cc15b2aafac9a9d21aec4029fc1aa"
+    },
+    {
+      "path": "frontend/src/stores/auth.js",
+      "status": "changed",
+      "sha256": "5ea4e83678d015206a59910be2b667ed6494d3cfa7fb91a2bd5b84301b9e75f0"
+    },
+    {
+      "path": "frontend/src/stores/authSecurity.test.js",
+      "status": "added",
+      "sha256": "ab56f14f95e5027c3397a78256e239cb6b8bbf32995a9e65e166403f3c1f4d0f"
+    },
+    {
+      "path": "frontend/src/views/AccountSecurityView.vue",
+      "status": "added",
+      "sha256": "5714c2b4d8cc0073260a8556e9c0d67c1e3a0309f07ddb4598c9cfa366af1690"
+    },
+    {
+      "path": "frontend/src/views/AdminEntitiesView.vue",
+      "status": "changed",
+      "sha256": "dba06971defc3482cd8c1c7e27c3ab105c6711ad8fa4058721d2e400ee778ed8"
+    },
+    {
+      "path": "frontend/src/views/AdminUsersView.vue",
+      "status": "changed",
+      "sha256": "e24e44667b27490cc2a1592701b5d55827a1889a55d81a0a762ad7a67e2be550"
+    },
+    {
+      "path": "frontend/src/views/LoginView.test.js",
+      "status": "added",
+      "sha256": "c8f2982de6be988555321872fad856f8ef6295535df5520a1d01687035651051"
+    },
+    {
+      "path": "frontend/src/views/LoginView.vue",
+      "status": "changed",
+      "sha256": "7db20aac2d69bccf6bc9e4b51058cc65cbadfe885abc0c3b623dbc6abf71ec5f"
+    }
+  ],
+  "coverage_limits": [
+    "No manual graphical acceptance",
+    "Full T01 remains partial",
+    "No migration, marking or restart of an existing installation",
+    "No adoption utility for unmarked populated Admin workspaces; explicit provisioning required",
+    "C19 archive formats and reproducible quantitative replay remain open",
+    "No complete backend test suite"
+  ],
+  "operational_impact": [
+    "Pre-C02 JWTs require reauthentication",
+    "Existing unmarked populated Admin workspaces fail closed before migration",
+    "Normal logout is confirmed only if the server acknowledges or rejects an already invalid token",
+    "Revocation and audit in archived consultation books use a separate viewer session database"
+  ],
+  "native_process_cleanup": "test_native_viewer_preserves_books_campaign_and_reuses_its_process closes its owned viewer, verifies port unavailable and archive hash unchanged",
+  "final_document_validation": {
+    "registry_counts_consistent": true,
+    "c02_document_links_resolve": true,
+    "files": [
+      "docs\\audits\\REMEDIATION_C02_2026-10-20.md",
+      "docs\\README.md",
+      "docs\\audits\\remediation-lot-0-2026-10-20\\ANOMALY_REGISTER.md",
+      "docs\\audits\\remediation-lot-0-2026-10-20\\DEPENDENCIES_AND_VALIDATION.md"
+    ]
+  }
+}

@@ -7,17 +7,28 @@
     </div>
     <BaseModal v-model="open" title="Appliquer une configuration" max-width="560px">
       <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
-      <select class="select" v-model="selectedId"><option value="">Choisir…</option><option v-for="row in rows" :value="row.id" :key="row.id">{{ row.name }}</option></select>
+      <select class="select" v-model="selectedId" :disabled="busy"><option value="">Choisir…</option><option v-for="row in rows" :value="row.id" :key="row.id">{{ row.name }}</option></select>
       <p v-if="!rows.length" class="text-slate-500 mt-2">Aucune configuration enregistrée.</p>
       <div v-if="selected" class="mt-3 space-y-2 text-xs">
-        <p>Remplacera le script, les paramètres et les dates affichés. {{ metadata.include_basket ? 'Le panier enregistré sera également chargé.' : 'Le panier actuel sera conservé.' }}</p>
+        <label class="label">Portée de l’application<select class="select" v-model="scope" :disabled="busy">
+          <option value="terms">Termes seulement — conserver les hypothèses actuelles</option>
+          <option value="all">Termes et hypothèses enregistrées</option>
+        </select></label>
+        <p>Remplacera le script, les paramètres, les dates et la devise de règlement.
+          {{ scope === 'all' && metadata.include_basket ? 'Le panier enregistré et ses hypothèses seront également chargés.' : 'Le panier actuel sera conservé.' }}</p>
+        <p>{{ scope === 'all' ? 'Remplacera aussi les taux, courbes, funding, modèle et réglages numériques enregistrés ci-dessous.' : 'Taux, courbes, funding, modèle et réglages numériques actuels seront conservés.' }}</p>
         <p>Modèle : {{ productTypeLabel(metadata.model_key) || 'personnalisé' }}{{ metadata.model_version ? ` · version ${metadata.model_version}` : '' }}</p>
         <dl class="grid grid-cols-2 gap-2 max-h-64 overflow-auto">
           <template v-for="(value, key) in readJson(selected.params_json)" :key="key"><dt class="text-slate-400">{{ key }}</dt><dd>{{ showParameter(key, value) }}</dd></template>
           <template v-for="(value, key) in readJson(selected.constats_json)" :key="key"><dt class="text-slate-400">{{ key }}</dt><dd>{{ showCalendar(value) }}</dd></template>
         </dl>
+        <details><summary>Devise, dates et hypothèses enregistrées</summary>
+          <dl class="grid grid-cols-2 gap-2 max-h-64 overflow-auto mt-2">
+            <template v-for="row in assumptionPreview" :key="row.key"><dt>{{ row.label }}</dt><dd class="break-words">{{ row.value }}</dd></template>
+          </dl>
+        </details>
       </div>
-      <template #footer><button class="btn-secondary" @click="open = false">Annuler</button><button class="btn-primary" :disabled="!selected" @click="apply">Appliquer</button></template>
+      <template #footer><button class="btn-secondary" @click="open = false">Annuler</button><button class="btn-primary" :disabled="!selected || busy || store.contractTermsLocked" @click="apply">Appliquer</button></template>
     </BaseModal>
     <BaseModal v-model="saving" title="Enregistrer une configuration" max-width="420px">
       <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
@@ -38,9 +49,22 @@ import AlertMessage from './ui/AlertMessage.vue'
 const store = usePricingStore()
 const open = ref(false), saving = ref(false), busy = ref(false), error = ref('')
 const rows = ref([]), selectedId = ref(''), name = ref(''), includeBasket = ref(false)
+const scope = ref('terms')
 const selected = computed(() => rows.value.find(r => r.id === selectedId.value))
 function readJson(value) { try { return JSON.parse(value || '{}') } catch { return {} } }
 const metadata = computed(() => readJson(selected.value?.global_params_json).configuration || {})
+const assumptionPreview = computed(() => {
+  const saved = readJson(selected.value?.global_params_json)
+  const labels = { deal_ccy:'Devise de règlement', r:'Taux plat (%)', T:'Maturité (années)',
+    yield_curve_enabled:'Courbe de taux active', yield_curve_pillars:'Piliers de taux (%, années)', funding:'Funding (%, années)',
+    model:'Modèle actions', rateModel:'Modèle de taux', sigma_r:'Volatilité de taux (%)', a_r:'Retour à la moyenne (1/an)',
+    N:'Nombre de chemins', seed:'Graine', antithetic:'Antithétiques', barrierMonitoring:'Suivi des barrières',
+    trade_date:'Date de trade', strike_date:'Strike', value_date:'Date de valeur', maturity_date:'Maturité',
+    payment_date:'Paiement', valuation_date:'Date de valorisation', underlyings:'Panier et hypothèses (%)', corr_matrix:'Corrélations' }
+  return Object.entries(saved).filter(([key]) => key !== 'configuration').map(([key,value]) => ({
+    key, label:labels[key] || key, value:typeof value === 'object' ? JSON.stringify(value) : String(value ?? 'À renseigner'),
+  }))
+})
 function showParameter(key, value) {
   const format = v => v == null || v === '' ? 'À renseigner' : `${v}${metadata.value.parameter_units?.[key] || ''}`
   return Array.isArray(value) ? value.map(format).join(' · ') : format(value)
@@ -62,13 +86,12 @@ async function load() {
   } catch (e) { error.value = e.message }
 }
 async function apply() {
-  const basket = JSON.parse(JSON.stringify(store.underlyings)), corr = JSON.parse(JSON.stringify(store.corrMatrix))
-  const keep = !metadata.value.include_basket
+  busy.value = true; error.value = ''
   try {
-    await store.loadFromDb(selected.value)
-    if (keep) { store.underlyings = basket; store.corrMatrix = corr }
+    await store.loadFromDb(selected.value, { scope: scope.value })
     open.value = false
   } catch (e) { error.value = e.message }
+  finally { busy.value = false }
 }
 async function save() {
   busy.value = true; error.value = ''

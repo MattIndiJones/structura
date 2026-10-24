@@ -118,9 +118,11 @@ def test_matrice_psd_singuliere_ne_leve_plus_d_erreur_brute():
 
 def test_reparation_negligeable_est_reportee_et_non_silencieuse():
     rapport: dict = {}
-    cholesky([[1.0, 1.0], [1.0, 1.0]], 2, repair_report=rapport)
+    matrix = [[1.0 if i == j else -0.5000001 for j in range(3)] for i in range(3)]
+    cholesky(matrix, 3, repair_report=rapport)
+    assert rapport["max_shift"] > 0
     assert rapport["max_shift"] < CORR_REPAIR_TOL
-    assert rapport["matrix_used"][0][1] == pytest.approx(1.0, abs=1e-6)
+    assert rapport["matrix_used"][0][1] == pytest.approx(-0.5, abs=1e-6)
 
 
 def test_reparation_materielle_est_refusee():

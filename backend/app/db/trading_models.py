@@ -32,4 +32,5 @@ class TradingExecution(SQLModel, table=True):
     instrument_reference: str
     settlement_status: str = "PENDING"
     settlement_reference: str = ""
+    settled_at: datetime | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

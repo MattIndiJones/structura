@@ -39,6 +39,7 @@ def scope_client():
         deals = []
         for i, batch in enumerate([None, batches[0].id, batches[1].id, batches[2].id]):
             d = Deal(reference=f"SCOPE-{i}", user_id=user.id, entity_id=entity.id if i < 3 else other.id,
+                transaction_format="EMTN", instrument_family="Note",
                 counterparty_id=cpty.id, contrepartie=cpty.name, nominal=1_000_000, status="en_reglement",
                 script_snapshot="AT MATURITY\n  PAY 1", product_type="Note", T=1,
                 underlyings_json='[{"name":"Synthetic", "ticker":"S", "ccy":"EUR"}]',

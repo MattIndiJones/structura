@@ -64,7 +64,7 @@ def _pct(x) -> str:
     return f"{x * 100:.1f}%" if isinstance(x, (int, float)) else "?"
 
 
-def refresh_book(session: Session, user_id: int | None = None) -> dict:
+def refresh_book(session: Session, user_id: int | None = None, *, current=None) -> dict:
     """Refresh every active deal (of one user, or all users for the
     scheduler), create alerts, and return a summary dict."""
     if _refresh_deal_handler is None or _watchlist_handler is None:
@@ -74,100 +74,101 @@ def refresh_book(session: Session, user_id: int | None = None) -> dict:
     if user_id is not None:
         q = q.where(Deal.user_id == user_id)
     deals = session.exec(q).all()
+    if current is not None:
+        from .business_access import visible_deals
+        deals = visible_deals(session, deals, current)
 
     today = business_today()
     summary = {"deals": len(deals), "refreshed": 0, "settled": 0,
-               "alerts_created": 0,
-               "proposed": [], "resolved": [], "errors": []}
-
-    for deal in deals:
-        if deal.status == "en_reglement":
-            try:
-                payment = date.fromisoformat(deal.payment_date)
-            except (TypeError, ValueError):
-                summary["errors"].append(
-                    f"{deal.reference}: date de règlement absente ou invalide")
-                continue
-            if today >= payment:
-                before = {"status": deal.status,
-                          "settlement_amount": deal.settlement_amount}
-                deal.status = "échu"
-                deal.updated_at = datetime.utcnow()
-                session.add(deal)
-                record_audit_event(
-                    session, action="DEAL_SETTLED", object_type="DEAL",
-                    object_id=deal.id, actor_user_id=None, actor_type="PROCESS",
-                    result="SUCCESS", before=before,
-                    after={"status": deal.status,
-                           "settlement_amount": deal.settlement_amount},
-                    reason=f"Date de règlement atteinte ({deal.payment_date}).",
-                    metadata={"payment_date": deal.payment_date},
-                )
-                if deal.product_id is not None:
-                    stage_product_lifecycle(
-                        session, deal, actor_user_id=None,
-                        action="PRODUCT_DEAL_SETTLED",
-                        reason=f"Date de règlement atteinte ({deal.payment_date}).",
-                    )
-                session.commit()
-                summary["settled"] += 1
-            continue
+               "alerts_created": 0, "proposed": [], "resolved": [],
+               "errors": [], "results": []}
+    # Capture identities before a rollback expires the session's loaded rows.
+    identities = [(deal.id, deal.reference) for deal in deals]
+    for deal_id, reference in identities:
+        result = {"deal_id": deal_id, "reference": reference, "status": "SUCCESS",
+                  "stage": "refresh", "refreshed": False, "alerts_created": 0}
         try:
-            res = _refresh_deal_handler(deal, session)   # commits on success
-        except Exception as e:
-            summary["errors"].append(f"{deal.reference}: {e}")
-            continue
-        summary["refreshed"] += 1
-
-        ev = (res or {}).get("evaluation") or {}
-        outcome = ev.get("outcome")
-        proposal = (res or {}).get("proposal") or {}
-        if outcome in ("callé", "ki", "final"):
-            target = (
-                summary["resolved"]
-                if proposal.get("status") == "APPLIED"
-                else summary["proposed"]
-            )
-            target.append({"reference": deal.reference, "outcome": outcome})
-
-        # An automated resolution has just made the deal terminal.  There is
-        # no remaining barrier watchlist to inspect in this pass.
-        if proposal.get("status") == "APPLIED":
-            continue
-
-        # Still active — barrier crossings on the same gaps the watchlist shows.
-        try:
-            row = _watchlist_handler(deal, session, today)
-        except Exception as e:   # a broken snapshot must not sink the whole run
-            summary["errors"].append(f"{deal.reference}: watchlist — {e}")
-            continue
-        days_to_next = row.get("days_to_next")
-        next_observation_date = (row.get("next_event") or {}).get("date")
-        for b in row.get("barriers", []):
-            gap = b.get("gap_pts")
-            if gap is None:
-                continue
-            obs = f"{b['observable']} à {_pct(b['level'] + gap / 100)}"
-            if b["kind"] == "ki" and gap <= 0:
-                created = _alert_once(
-                    session, deal, "barrier_ki",
-                    f"{deal.reference} : {obs}, SOUS la barrière {b['name']} ({_pct(b['level'])})",
-                    f"deal:{deal.id}:barrier:{b['name']}")
-            elif (b["kind"] == "autocall" and gap >= 0
-                  and days_to_next is not None and days_to_next <= _AC_ALERT_MAX_DAYS
-                  and next_observation_date):
-                created = _alert_once(
-                    session, deal, "barrier_ac",
-                    f"{deal.reference} : {obs}, au-dessus de la barrière de rappel {b['name']} "
-                    f"({_pct(b['level'])}) — rappel probable à l'observation du "
-                    f"{next_observation_date} (dans {days_to_next} j)",
-                    f"deal:{deal.id}:barrier:{b['name']}:{next_observation_date}")
+            deal = session.get(Deal, deal_id)
+            if deal.status == "en_reglement":
+                result["stage"] = "settlement"
+                try:
+                    payment = date.fromisoformat(deal.settlement_date or deal.payment_date)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Date de règlement absente ou invalide") from exc
+                result["action"] = "WAITING_SETTLEMENT"
+                if today >= payment:
+                    before = {"status": deal.status, "settlement_amount": deal.settlement_amount}
+                    deal.status = "callé" if deal.resolution_outcome == "callé" else "échu"
+                    deal.updated_at = datetime.utcnow()
+                    session.add(deal)
+                    record_audit_event(
+                        session, action="DEAL_SETTLED", object_type="DEAL",
+                        object_id=deal.id, actor_user_id=None, actor_type="PROCESS",
+                        result="SUCCESS", before=before,
+                        after={"status": deal.status, "settlement_amount": deal.settlement_amount},
+                        reason=f"Date de règlement atteinte ({payment.isoformat()}).",
+                        metadata={"payment_date": payment.isoformat(), "contractual_payment_date": deal.payment_date})
+                    if deal.product_id is not None:
+                        stage_product_lifecycle(session, deal, actor_user_id=None,
+                            action="PRODUCT_DEAL_SETTLED",
+                            reason=f"Date de règlement atteinte ({payment.isoformat()}).")
+                    session.commit()
+                    summary["settled"] += 1
+                    result["action"] = "SETTLED"
             else:
-                created = False
-            if created:
-                summary["alerts_created"] += 1
-        session.commit()
-
+                res = _refresh_deal_handler(deal, session) or {}  # commits its own official facts
+                summary["refreshed"] += 1
+                result["refreshed"] = True
+                ev = res.get("evaluation") or {}
+                proposal = res.get("proposal") or {}
+                if ev.get("outcome") in ("callé", "ki", "final"):
+                    target = summary["resolved"] if proposal.get("status") == "APPLIED" else summary["proposed"]
+                    target.append({"reference": reference, "outcome": ev["outcome"]})
+                if proposal.get("status") != "APPLIED":
+                    result["stage"] = "watchlist"
+                    row = _watchlist_handler(deal, session, today)
+                    result["market_coverage"] = row.get("market_coverage")
+                    missing = [b.get("observable") or b["name"] for b in row.get("barriers", [])
+                               if b.get("value_status") == "UNAVAILABLE" and b.get("kind") != "neutral"]
+                    days = row.get("days_to_next")
+                    next_date = (row.get("next_event") or {}).get("date")
+                    created_count = 0
+                    for barrier in row.get("barriers", []):
+                        gap = barrier.get("gap_pts")
+                        if gap is None:
+                            continue
+                        obs = f"{barrier['observable']} à {_pct(barrier['level'] + gap / 100)}"
+                        if barrier.get("monitoring_basis") == "SAMPLED_CLOSES_SINCE_STRIKE":
+                            obs += " (clôtures indicatives depuis le strike)"
+                        created = False
+                        if barrier["kind"] == "ki" and gap <= 0:
+                            created = _alert_once(session, deal, "barrier_ki",
+                                f"{reference} : {obs}, SOUS la barrière {barrier['name']} ({_pct(barrier['level'])})",
+                                f"deal:{deal.id}:barrier:{barrier['name']}")
+                        elif (barrier["kind"] == "autocall" and gap >= 0
+                              and days is not None and 0 <= days <= _AC_ALERT_MAX_DAYS and next_date):
+                            created = _alert_once(session, deal, "barrier_ac",
+                                f"{reference} : {obs}, au-dessus de la barrière de rappel {barrier['name']} "
+                                f"({_pct(barrier['level'])}) — rappel probable à l'observation du "
+                                f"{next_date} (dans {days} j)",
+                                f"deal:{deal.id}:barrier:{barrier['name']}:{next_date}")
+                        created_count += int(created)
+                    session.commit()
+                    summary["alerts_created"] += created_count
+                    result["alerts_created"] = created_count
+                    if missing:
+                        result.update(status="FAILED", error="Observables indisponibles : " + ", ".join(missing))
+                        summary["errors"].append(f"{reference}: {result['error']}")
+        except Exception as exc:
+            session.rollback()
+            message = str(getattr(exc, "detail", exc))
+            result.update(status="FAILED", error=message)
+            summary["errors"].append(f"{reference}: {result['stage']} — {message}")
+        summary["results"].append(result)
+    succeeded = sum(result["status"] == "SUCCESS" for result in summary["results"])
+    failed = len(identities) - succeeded
+    summary["coverage"] = {"total": len(identities), "succeeded": succeeded, "failed": failed}
+    summary["status"] = "PARTIAL" if failed and succeeded else "FAILED" if failed else "SUCCESS"
     return summary
 
 
@@ -190,7 +191,11 @@ def _claim_scheduler_run(session: Session, slot: datetime,
     if existing:
         stale_running = (existing.status == "RUNNING"
                          and existing.started_at < now - timedelta(hours=1))
-        if existing.status != "FAILED" and not stale_running:
+        try:
+            legacy_errors = existing.status == "SUCCESS" and bool(json.loads(existing.result_json).get("errors"))
+        except (ValueError, AttributeError):
+            legacy_errors = False
+        if existing.status not in {"FAILED", "PARTIAL"} and not stale_running and not legacy_errors:
             return None
         claimed = session.exec(
             update(SchedulerRun)
@@ -202,7 +207,10 @@ def _claim_scheduler_run(session: Session, slot: datetime,
             .execution_options(synchronize_session=False)
         )
         session.commit()
-        return session.get(SchedulerRun, existing.id) if claimed.rowcount == 1 else None
+        if claimed.rowcount != 1:
+            return None
+        session.refresh(existing)
+        return existing
     row = SchedulerRun(
         job_key=SCHEDULER_JOB_KEY, scheduled_for=slot,
         timezone=SCHEDULER_TIMEZONE, status="RUNNING", trigger=trigger,
@@ -219,46 +227,43 @@ def _claim_scheduler_run(session: Session, slot: datetime,
 
 def run_scheduled_refresh(scheduled_for: datetime | None = None,
                           trigger: str = "SCHEDULED") -> dict:
-    """Entry point for the daily in-process scheduler — own session, never
-    raises (the loop in main.py must survive any single bad day)."""
+    """Persist actual coverage, and permit retries of failed or partial slots."""
     slot = scheduled_for or scheduled_slot()
+    claim_id = claimed_at = None
     try:
         with Session(engine) as session:
             journal = _claim_scheduler_run(session, slot, trigger)
             if journal is None:
                 return {"status": "SKIPPED", "scheduled_for": slot.isoformat()}
+            claim_id, claimed_at = journal.id, journal.started_at
             summary = refresh_book(session)
-            journal = session.get(SchedulerRun, journal.id)
-            journal.status = "SUCCESS"
-            journal.result_json = json.dumps(summary)
-            journal.finished_at = datetime.utcnow()
-            session.add(journal)
+            status = summary["status"]
+            completed = session.exec(update(SchedulerRun).where(
+                SchedulerRun.id == claim_id, SchedulerRun.started_at == claimed_at,
+                SchedulerRun.status == "RUNNING").values(
+                    status=status, result_json=json.dumps(summary), finished_at=datetime.utcnow(),
+                    error="; ".join(summary["errors"]) or None)
+                .execution_options(synchronize_session=False))
             session.commit()
-        log.info(
-            "Refresh quotidien : %s deal(s) actifs, %s rafraîchi(s), %s alerte(s), propositions=%s, résolutions=%s, erreurs=%s",
-            summary["deals"], summary["refreshed"], summary["alerts_created"],
-            summary["proposed"], summary["resolved"], summary["errors"],
-        )
-        return {"status": "SUCCESS", "scheduled_for": slot.isoformat(),
-                "summary": summary}
+            if completed.rowcount != 1:
+                return {"status": "SUPERSEDED", "scheduled_for": slot.isoformat(), "summary": summary}
+        report = log.info if status == "SUCCESS" else log.warning
+        report("Refresh quotidien %s : couverture=%s, erreurs=%s", status, summary["coverage"], summary["errors"])
+        return {"status": status, "scheduled_for": slot.isoformat(), "summary": summary}
     except Exception as exc:
-        try:
-            with Session(engine) as session:
-                journal = session.exec(select(SchedulerRun).where(
-                    SchedulerRun.job_key == SCHEDULER_JOB_KEY,
-                    SchedulerRun.scheduled_for == slot,
-                )).first()
-                if journal:
-                    journal.status = "FAILED"
-                    journal.error = str(exc)
-                    journal.finished_at = datetime.utcnow()
-                    session.add(journal)
+        if claim_id is not None:
+            try:
+                with Session(engine) as session:
+                    session.exec(update(SchedulerRun).where(
+                        SchedulerRun.id == claim_id, SchedulerRun.started_at == claimed_at,
+                        SchedulerRun.status == "RUNNING").values(
+                            status="FAILED", error=str(exc), finished_at=datetime.utcnow())
+                        .execution_options(synchronize_session=False))
                     session.commit()
-        except Exception:
-            log.exception("Journalisation de l'échec du scheduler impossible")
+            except Exception:
+                log.exception("Journalisation de l'échec du scheduler impossible")
         log.exception("Refresh quotidien échoué")
-        return {"status": "FAILED", "scheduled_for": slot.isoformat(),
-                "error": str(exc)}
+        return {"status": "FAILED", "scheduled_for": slot.isoformat(), "error": str(exc)}
 
 
 def run_missed_refresh_if_needed(now: datetime | None = None) -> dict:

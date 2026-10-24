@@ -213,6 +213,7 @@ def test_hard_block_at_real_booking_boundary_keeps_pricing_available():
                 action="HARD_BLOCK", effective_date=date.today()).model_dump(mode="json")))
         session.add(row); session.commit()
         body = _booking_body()
+        body.counterparty_id = cpty.id
         body.pricing_receipt = _pricing_receipt_for_booking(body)
         # A real pricing receipt exists despite the limit breach.
         assert body.pricing_receipt["pricing_input"]["script"]
@@ -232,6 +233,9 @@ def test_additive_migration_preserves_old_unknown_data(monkeypatch):
     with engine.begin() as conn:
         columns = [r[1] for r in conn.execute(text("PRAGMA table_info(deals)")) if r[1] != "ccr_netting_set_id"]
         conn.execute(text("CREATE TABLE legacy_deals AS SELECT " + ", ".join(columns) + " FROM deals"))
+        # Reconstruct a legacy schema, before the C19 trigger referencing deals
+        # existed. SQLite otherwise rejects the fixture's intermediate rename.
+        conn.execute(text("DROP TRIGGER IF EXISTS archived_documents_no_delete"))
         conn.execute(text("DROP TABLE deals"))
         conn.execute(text("ALTER TABLE legacy_deals RENAME TO deals"))
         conn.execute(text("INSERT INTO counterparties(name, country, active, created_at, updated_at) VALUES ('Legacy', '', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
@@ -242,6 +246,7 @@ def test_additive_migration_preserves_old_unknown_data(monkeypatch):
         assert "ccr_netting_set_id" in {r[1] for r in conn.execute(text("PRAGMA table_info(deals)"))}
         assert conn.execute(text("SELECT name FROM counterparties")).scalar() == "Legacy"
         assert conn.execute(text("SELECT COUNT(*) FROM ccr_credit_profiles")).scalar() == 0
+        assert conn.execute(text("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='archived_documents_no_delete'")).scalar() == 1
 
 
 def test_settlement_only_horizon_covers_payment_and_credit_stress():
@@ -278,6 +283,7 @@ def test_legacy_user_cannot_bypass_configured_credit_policy():
         cpty = Counterparty(name="BNP Paribas")
         session.add(cpty); session.commit()
         body = _booking_body()
+        body.counterparty_id = cpty.id
         enforce_booking(session, user, body)
         session.add(CCRCreditLimit(entity_id=1, counterparty_id=cpty.id, updated_by=1, payload_json="{}"))
         session.commit()

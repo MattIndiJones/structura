@@ -46,7 +46,7 @@ from ..core.valuation_context import (
 )
 from ..db.models import User
 from ..services.market_data import load_hist_prices
-from .auth import get_current_user
+from .auth import get_current_pricer
 from .auth import receipt_signing_secret
 from ..services.product_receipts import signed_receipt
 from .pricing import _clean_flux
@@ -144,6 +144,7 @@ def _snapshot_underlying(u: UnderlyingParams) -> dict:
         "vol_surface": u.vol_surface.model_dump() if u.vol_surface else None,
         "asset_class": u.asset_class,
         "smile_parameter_mode": u.smile_parameter_mode,
+        "calibration_evidence": u.calibration_evidence,
     }
 
 
@@ -388,7 +389,7 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
         raise HTTPException(422, str(exc))
 
 
-    T_remaining = max(1 / 52, (req.maturity_date - valuation).days / 365.25)
+    T_remaining = (req.maturity_date - valuation).days / 365.25
     # Une variante qui prolonge la maturité déplace l'horizon de simulation :
     # la maturité de la REQUÊTE est celle du parent, et s'y tenir laisserait les
     # constatations prolongées hors du Monte Carlo — le remboursement final ne
@@ -404,7 +405,7 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
 @router.post("/price/in-life")
 def price_in_life(
     req: InLifePricingRequest,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
 ):
     ctx = build_request_residual(req, variant_terms_or_none(req))
     residuel = ctx.residuel
@@ -434,6 +435,7 @@ def price_in_life(
     try:
         validate_compiled_dates(residuel.residual_script)
         calculation_budget = estimate_pricing_request(
+            corr_matrix=req.corr_matrix,
             maturity_years=T_remaining,
             underlyings=len(residuel.engine_uls),
             paths=req.N,
@@ -446,18 +448,8 @@ def price_in_life(
             expanded_dates=count_compiled_dates(residuel.residual_script),
         )
         ensure_budget(calculation_budget)
-        valuation_context = ValuationContext(
-            underlyings=residuel.engine_uls, corr_matrix=req.corr_matrix,
-            r=residuel.r_frac, T=T_remaining, N=req.N, model=req.model,
-            seed=42, antithetic=req.antithetic, user_params=ctx.user_params,
-            yield_curve=courbe_residuelle, funding_curve=funding_residuel,
-            funding_spread=req.funding_spread, sigma_r=req.sigma_r, a_r=req.a_r,
-            barrier_monitoring=req.barrier_monitoring,
-            maturity_payment_t=paiement_residuel,
-            strike_set_t=residuel.strike_set_t,
-            script_text=ctx.script_text, constats=ctx.constats,
-            state=ctx.mc_kwargs,
-        )
+        from ..core.valuation_context import valuation_context_from_request
+        valuation_context = valuation_context_from_request(req, residuel.residual_script, residual=ctx)
         res = run_valuation(residuel.residual_script, valuation_context)
     except ValueError as exc:
         raise HTTPException(422, f"Monte Carlo résiduel impossible : {exc}")
@@ -514,8 +506,16 @@ def price_in_life(
     etat_repris = {k: v for k, v in etat["memo"].items() if k not in noms_params and not k.startswith('__')}
     schedule = (residuel.compiled.echeancier.to_dict()
                 if residuel.compiled and residuel.compiled.echeancier else None)
+    from ..core.product.calendar import freeze_calendar
     return {
         "price": res["price"],
+        "valuation_context": valuation_context.to_dict(),
+        "frozen_calendar": freeze_calendar(residuel.compiled),
+        "T_elapsed": T_elapsed,
+        "time_axis": res.get("time_axis"),
+        "barrier_monitoring": res.get("barrier_monitoring", req.barrier_monitoring),
+        "barrier_monitoring_note": res.get("barrier_monitoring_note"),
+        "barrier_monitoring_details": res.get("barrier_monitoring_details"),
         "ic95": res["ic95"],
         # Les mêmes statistiques que /api/price. Elles ne partaient pas d'ici,
         # si bien que médiane, VaR, P(retour > 100 %), spread inter-quartile,
@@ -591,7 +591,7 @@ class ImpliedFundingRequest(InLifePricingRequest):
 @router.post("/price/implied-funding")
 def implied_funding(
     req: ImpliedFundingRequest,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
 ):
     """Spread émetteur implicite d'un prix de marché.
 

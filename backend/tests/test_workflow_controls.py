@@ -175,9 +175,17 @@ def test_expired_selected_quote_is_visible_in_business_status():
 
 def _deal(session: Session) -> Deal:
     today = date.today()
-    strike = (today - timedelta(days=1)).isoformat()
-    maturity = today.isoformat()
-    tenor = 1 / 365.25
+    from backend.app.core.fixing_finality import session_calendar
+    cal = session_calendar("XPAR", today.year)
+    maturity_day = today - timedelta(days=1)
+    while not cal.is_session(maturity_day.isoformat()):
+        maturity_day -= timedelta(days=1)
+    strike_day = maturity_day - timedelta(days=1)
+    while not cal.is_session(strike_day.isoformat()):
+        strike_day -= timedelta(days=1)
+    strike = strike_day.isoformat()
+    maturity = maturity_day.isoformat()
+    tenor = (maturity_day-strike_day).days / 365.25
     product = stage_internal_product(
         session,
         user=USER,
@@ -680,6 +688,8 @@ def _yahoo_closes(deal: Deal, *, maturity_close: float | None = 100.0) -> dict:
         "fetched_at": datetime.utcnow().isoformat(),
         "series": {"TK1": series},
         "splits": {"TK1": {}},
+        "sources": {"TK1": {"exchange": "PAR", "timezone": "Europe/Paris",
+                              "fetched_at": datetime.now(timezone.utc).isoformat()}},
         "missing": [],
     }
 
@@ -715,6 +725,9 @@ def test_auto_yahoo_officializes_fixings_and_applies_terminal_lifecycle(monkeypa
 
 def test_auto_yahoo_waits_for_same_day_close_without_manual_exception(monkeypatch):
     session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
+    maturity = _events(session, deal)[-1]
+    maturity.event_date = date.today().isoformat()
+    session.add(maturity); session.commit()
     monkeypatch.setattr(
         deals_api, "load_yahoo_reference_closes",
         lambda *args: _yahoo_closes(deal, maturity_close=None))
@@ -1118,18 +1131,125 @@ def test_legacy_migration_marks_ambiguous_rows_for_manual_review(tmp_path, monke
         conn.execute(text("INSERT INTO rfq_quotes(id, rfq_id) VALUES (1, 1)"))
         conn.execute(text("INSERT INTO deal_events(id, spots_json) VALUES (1, '{\"UL1\": 100}')"))
     monkeypatch.setattr(database_api, "engine", engine)
-    database_api._migrate()
-    database_api._migrate()  # additive and idempotent
-    with engine.connect() as conn:
-        quote = conn.execute(text(
-            "SELECT firmness, valid_until FROM rfq_quotes WHERE id=1")).one()
-        event = conn.execute(text(
-            "SELECT fixing_status, data_category, indicative_spots_json "
-            "FROM deal_events WHERE id=1")).one()
-    assert quote.firmness == "UNKNOWN" and quote.valid_until is None
-    assert event.fixing_status == "MANUAL_REVIEW_REQUIRED"
-    assert event.data_category == "UNKNOWN"
-    assert event.indicative_spots_json == "{}"
+    # Match init_db(): missing tables are created before existing columns migrate.
+    # create_all leaves the historical rows and their old table columns intact.
+    SQLModel.metadata.create_all(engine)
+    try:
+        migrated = []
+        for _ in range(2):
+            database_api._migrate()
+            with engine.connect() as conn:
+                quote = conn.execute(text(
+                    "SELECT firmness, valid_until FROM rfq_quotes WHERE id=1")).one()
+                event = conn.execute(text(
+                    "SELECT fixing_status, data_category, indicative_spots_json, "
+                    "spots_json FROM deal_events WHERE id=1")).one()
+                rfq = conn.execute(text(
+                    "SELECT reference, product_id, product_terms_version "
+                    "FROM rfq_requests WHERE id=1")).one()
+                assert conn.execute(text("SELECT count(*) FROM products")).scalar_one() == 0
+            assert quote.firmness == "UNKNOWN" and quote.valid_until is None
+            assert event.fixing_status == "MANUAL_REVIEW_REQUIRED"
+            assert event.data_category == "UNKNOWN"
+            assert event.indicative_spots_json == "{}"
+            assert event.spots_json == '{"UL1": 100}'
+            assert tuple(rfq) == ("RFQ-OLD", None, None)
+            migrated.append((tuple(quote), tuple(event), tuple(rfq)))
+        assert migrated[0] == migrated[1]
+    finally:
+        engine.dispose()
+
+
+def test_startup_creates_product_tables_before_upgrading_legacy_rows(tmp_path, monkeypatch):
+    from sqlalchemy import event
+    from sqlalchemy.exc import IntegrityError
+    from backend.app.db.models import (
+        Entity, User, ProductRecord, ProductTermsVersion,
+        ProductRevision, ProductCalculationRun,
+    )
+
+    db_path = tmp_path / "legacy-startup.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    @event.listens_for(engine, "connect")
+    def foreign_keys_on(connection, _record):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    try:
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as session:
+            entity = Entity(name="Legacy organization")
+            session.add(entity)
+            session.flush()
+            user = User(username="legacy", email="legacy@example.test",
+                        password_hash="unused", entity_id=entity.id)
+            session.add(user)
+            session.flush()
+            rfq = RfqRequest(reference="RFQ-LEGACY", user_id=user.id,
+                             entity_id=entity.id, status="sans_suite")
+            deal = Deal(reference="DEAL-LEGACY", user_id=user.id,
+                        entity_id=entity.id, fixing_policy="AUTO_YAHOO")
+            session.add_all([rfq, deal])
+            session.flush()
+            quote = RfqQuote(rfq_id=rfq.id, provider="Historical bank", price=99.1)
+            observation = DealEvent(deal_id=deal.id, spots_json='{"UL1": 100}')
+            session.add_all([quote, observation])
+            session.commit()
+            rfq_id, quote_id, event_id, user_id = rfq.id, quote.id, observation.id, user.id
+
+        # Only this isolated fixture is downgraded. No Product history existed.
+        for model in (ProductCalculationRun, ProductRevision,
+                      ProductTermsVersion, ProductRecord):
+            model.__table__.drop(engine)
+        with engine.begin() as conn:
+            conn.execute(text("DROP INDEX ix_deal_events_fixing_status"))
+            for table, columns in (
+                ("rfq_quotes", ("firmness", "valid_until")),
+                ("deal_events", ("fixing_status", "data_category", "indicative_spots_json")),
+            ):
+                for column in columns:
+                    conn.execute(text(f'ALTER TABLE "{table}" DROP COLUMN "{column}"'))
+            assert not conn.execute(text("PRAGMA table_info(products)")).all()
+
+        monkeypatch.setattr(database_api, "engine", engine)
+        monkeypatch.setattr(database_api, "_DB_PATH", db_path)
+        snapshots = []
+        for _ in range(2):
+            # Exercise the actual startup, including create_all, migrations and seeds.
+            database_api.init_db()
+            with engine.connect() as conn:
+                assert conn.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+                assert conn.execute(text("PRAGMA foreign_key_check")).all() == []
+                rfq_row = conn.execute(text(
+                    "SELECT reference, product_id, product_terms_version "
+                    "FROM rfq_requests WHERE id=:id"), {"id": rfq_id}).one()
+                quote_row = conn.execute(text(
+                    "SELECT provider, price, firmness, valid_until "
+                    "FROM rfq_quotes WHERE id=:id"), {"id": quote_id}).one()
+                event_row = conn.execute(text(
+                    "SELECT spots_json, fixing_status, data_category, indicative_spots_json "
+                    "FROM deal_events WHERE id=:id"), {"id": event_id}).one()
+                assert tuple(rfq_row) == ("RFQ-LEGACY", None, None)
+                assert tuple(quote_row) == ("Historical bank", 99.1, "UNKNOWN", None)
+                assert tuple(event_row) == ('{"UL1": 100}', "MANUAL_REVIEW_REQUIRED", "UNKNOWN", "{}")
+                for table in ("products", "product_terms_versions", "product_revisions",
+                              "product_calculation_runs", "official_fixing_versions"):
+                    assert conn.execute(text(f'SELECT count(*) FROM "{table}"')).scalar_one() == 0
+                snapshots.append((tuple(rfq_row), tuple(quote_row), tuple(event_row)))
+
+            # Canonical-link guards remain active after both upgrades.
+            with engine.begin() as conn:
+                with pytest.raises(IntegrityError, match="Product canonique|Version Product"):
+                    conn.execute(text(
+                        "INSERT INTO rfq_requests(reference, user_id) VALUES ('INVALID', :user)"),
+                        {"user": user_id})
+                with pytest.raises(IntegrityError, match="Version Product"):
+                    conn.execute(text(
+                        "UPDATE rfq_requests SET product_id=999, product_terms_version=1 WHERE id=:id"),
+                        {"id": rfq_id})
+        assert snapshots[0] == snapshots[1]
+    finally:
+        engine.dispose()
 
 
 # ── Cohérence maturité / règlement (29/08/2026) ───────────────────────

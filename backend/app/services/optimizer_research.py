@@ -9,10 +9,9 @@ from uuid import uuid4
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
-from sqlalchemy import DDL, event
 
 from ..db.models import OptimizerResearch
-from ..core.product_optimizer.contracts import OptimizationRequest
+from ..core.product_optimizer.contracts import OptimizationRequest, OPTIMIZER_METHOD_VERSION
 from ..core.product_optimizer.families import family_schema
 from ..core.product_optimizer.market import freeze_market
 
@@ -20,22 +19,6 @@ logger = logging.getLogger(__name__)
 _active = {}
 _lock = threading.Lock()
 TERMINAL = {"COMPLETED", "PARTIAL", "FAILED", "INTERRUPTED"}
-
-# Requests and final calculation evidence are immutable even outside the API.
-event.listen(OptimizerResearch.__table__, "after_create", DDL("""
-CREATE TRIGGER optimizer_research_immutable BEFORE UPDATE ON optimizer_researches
-WHEN NEW.user_id != OLD.user_id OR NEW.request_json != OLD.request_json
- OR NEW.request_hash != OLD.request_hash OR NEW.context_json != OLD.context_json
- OR NEW.summary != OLD.summary OR NEW.intention != OLD.intention
- OR NEW.parent_id IS NOT OLD.parent_id OR NEW.command_key != OLD.command_key
- OR NEW.title != OLD.title OR NEW.product_family != OLD.product_family
- OR NEW.pricing_date != OLD.pricing_date OR NEW.created_at != OLD.created_at
- OR (OLD.status IN ('COMPLETED','PARTIAL','FAILED','INTERRUPTED') AND
-     (NEW.status != OLD.status OR NEW.result_json != OLD.result_json
-      OR NEW.progress_json != OLD.progress_json OR NEW.error != OLD.error
-      OR NEW.finished_at IS NOT OLD.finished_at))
-BEGIN SELECT RAISE(ABORT, 'Optimizer research evidence is immutable'); END;
-""").execute_if(dialect="sqlite"))
 
 class ResearchCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -87,14 +70,15 @@ def create(session, body, user_id):
     summary+=f" {solved['label']} résolu entre {getattr(req.constraints,solved['minimum_key'])*100:g} et {getattr(req.constraints,solved['maximum_key'])*100:g} %. "
     if family['has_autocall']: summary+=f"Constatations tous les {' / '.join(str(n) for n in req.ranges.observation_months)} mois. "
     for field in family['fixed_fields']:
-        value=getattr(req.payoff_settings,field['key']);factor=100 if field['unit']=='fraction' else 1
+        value=req.payoff_settings[field['key']];factor=100 if field['unit']=='fraction' else 1
         summary+=f"{field['label']} : {value*factor:g}. "
     controls=[('max_probability_loss','Perte Q max.',100,'%'),('min_probability_autocall','Rappel Q min.',100,'%'),
         ('max_expected_capital_loss','Perte en capital moyenne Q max.',100,'%'),('max_expected_maturity','Durée moyenne Q max.',1,'ans'),
         ('target_coupon','Coupon cible',100,'%'),('coupon_tolerance','Tolérance coupon',100,'points')]
     summary+=' '.join(f"{label} : {value*factor:g} {unit}." for key,label,factor,unit in controls if (value:=getattr(req.constraints,key)) is not None)
     summary+=f" Frais {req.economics.upfront_fees*100:g} %, marge {req.economics.structuring_margin*100:g} % ; {req.search.simulations} paires indépendantes, budget {req.search.max_seconds:g} s."
-    context={"payoff":family, "market_snapshot":freeze_market(req.market), "summary_schema":1}
+    context={"payoff":family, "market_snapshot":freeze_market(req.market), "summary_schema":1,
+             "optimizer_method_version":OPTIMIZER_METHOD_VERSION}
     row=OptimizerResearch(id=str(uuid4()),user_id=user_id,parent_id=body.parent_id,command_key=body.command_key,
         title=title[:160],intention=body.intention.strip(),summary=summary,product_family=req.product_family,
         pricing_date=req.pricing_date.isoformat(),request_hash=fingerprint(body),request_json=dump(req.model_dump(mode="json")),context_json=dump(context))
@@ -115,7 +99,7 @@ def projection(row, detail=False):
 def partial_result(req, context, candidates, progress):
     values=list(candidates.values())
     confirmed=[c for c in values if c.get("constraint_status")=="PASS" and c.get("validation_status")=="PASSED"]
-    return {"schema_version":1,"engine_version":"optimizer-v1-researches", "complete":False,
+    return {"schema_version":1,"engine_version":OPTIMIZER_METHOD_VERSION, "complete":False,
         "request":req.model_dump(mode="json"),"payoff":context["payoff"],"market_snapshot":context["market_snapshot"],
         "market_date":req.pricing_date.isoformat(),"simulations":req.search.simulations,"seed":req.search.seed,
         "economics":{"issue_price":req.constraints.target_price,**req.economics.model_dump(),"pricing_target":req.pricing_target},

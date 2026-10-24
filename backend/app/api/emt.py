@@ -80,7 +80,7 @@ def _detect_features(compiled, n_underlyings: int, script_text: str = "",
         return value if isinstance(value, list) else [value]
 
     has_leverage = any(
-        p.name in _LEVERAGE_NAMES and p.is_pct
+        p.name in _LEVERAGE_NAMES
         and any(isinstance(value, (int, float)) and value > 1.0
                 for value in values(p))
         for p in compiled.params

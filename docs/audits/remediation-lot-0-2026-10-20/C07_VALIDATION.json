@@ -1,0 +1,238 @@
+{
+  "date": "2026-10-21",
+  "timezone": "Europe/Berlin",
+  "workstream": "C07",
+  "status": "Validated locally; M04-10 production volume budget, T11/T15, graphical and production qualification open",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "baseline": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c07-baseline-fdvmnzil",
+  "baseline_status_entries": 371,
+  "authorization": {
+    "code_and_targeted_tests": true,
+    "commit": false,
+    "push": false,
+    "business_data_mutation": false
+  },
+  "scope": {
+    "findings": [
+      "M04-04",
+      "M04-05",
+      "M04-08",
+      "M04-10",
+      "M05-02",
+      "M05-03",
+      "M05-04",
+      "M05-05",
+      "M07-07",
+      "M08-06",
+      "M11-06",
+      "M13-04"
+    ],
+    "depends_on": [
+      "C06"
+    ],
+    "preserved_dependencies": [
+      "C01",
+      "C02",
+      "C03",
+      "C04",
+      "C05",
+      "C06"
+    ],
+    "decisions_changed": [],
+    "cross_cases_not_closed": [
+      "T11",
+      "T15"
+    ]
+  },
+  "backend": {
+    "distinct_passed_cases": 303,
+    "new_c07_cases": 47,
+    "files": 10,
+    "current_failures": 0,
+    "full_backend_suite_run": false,
+    "aggregation": "301-case main run plus 45-case follow-up; 43 repeated cases and 2 additional cases.",
+    "attempts": [
+      {
+        "xml": ".runtime/diagnostic-acceptance/c07-2026-10-21/backend.xml",
+        "sha256": "b513b53be8a739e146d3837c872017be98903367e58c26feef26b0f33a8b036d",
+        "passed": 301
+      },
+      {
+        "xml": ".runtime/diagnostic-acceptance/c07-2026-10-21/backend-followup.xml",
+        "sha256": "bad9674a4f914c55e431d68ed1dcd863f2d9f6bcf9ac1119ba9f8f7faa552dfc",
+        "passed": 45
+      }
+    ],
+    "summary": ".runtime/diagnostic-acceptance/c07-2026-10-21/backend-summary.json",
+    "summary_sha256": "4db53c272cf1baca7f31161cbf340b33e22f426747af04753a4dae91da59f579",
+    "authentication": "36 non-finite booking cases use real authenticated C01 desks/roles in standalone and managed fixtures, with FK enforcement.",
+    "isolation": "STRUCTURA_* environment cleared, fresh temporary data and JWT secret; in-memory and temporary fixture DBs only."
+  },
+  "frontend": {
+    "passed": 541,
+    "files": 67,
+    "new_c07_cases": 47,
+    "current_failures": 0,
+    "build_passed": true,
+    "build_output": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c07-build-dz4glv49",
+    "index_html_sha256": "13c694f82107361453c5e1b414c8add9741bd830b2bc5330f30aa05defcc19a3",
+    "log": ".runtime/diagnostic-acceptance/c07-2026-10-21/build-delivery.log",
+    "log_sha256": "30af88403e4fd41dcfa4be2ce4970afc28fb755de218a60b56c7c15d81f37d57",
+    "build_seconds": 16.19,
+    "initial_failure": "One exact-equality fixture exposed binary percent tails after unrounded multiplication; decimal exponent conversion preserves saved digits and stable displayed values. Final tests pass.",
+    "build_cli": "npm.cmd invoked with explicit argument array and temporary outDir; pre-existing dist preserved."
+  },
+  "volume": {
+    "synthetic_products": 220,
+    "page_size": 20,
+    "materialized_projections_per_page": 20,
+    "first_page_seconds": 0.066,
+    "response_json_bytes": 10055,
+    "source_log": ".runtime/diagnostic-acceptance/c07-2026-10-21/backend-c07.log",
+    "server_limit": 100,
+    "ui_products_default": 50,
+    "ui_calculations_and_history_default": 20,
+    "production_budget_agreed": false,
+    "limit": "Authorization can scan more identities; deep offsets and production volume not qualified."
+  },
+  "criterion_evidence": {
+    "M04-04": [
+      "backend/tests/test_input_retention.py::test_library_labels_old_price_and_paginates_calculations_and_history",
+      "frontend/src/stores/inputRetention.test.js",
+      "frontend/src/components/InputRetentionUi.test.js"
+    ],
+    "M04-05": [
+      "backend/tests/test_input_retention.py::test_partial_draft_can_be_retained_completed_and_reopened_without_losing_cells",
+      "frontend/src/components/InputRetentionUi.test.js"
+    ],
+    "M04-08": [
+      "frontend/src/stores/inputRetention.test.js",
+      "backend/tests/test_input_retention.py::test_calculation_comparison_can_cross_a_page_boundary"
+    ],
+    "M04-10": [
+      "backend/tests/test_input_retention.py::test_large_library_materializes_only_the_requested_page",
+      "backend/tests/test_input_retention.py::test_library_labels_old_price_and_paginates_calculations_and_history",
+      "frontend/src/components/InputRetentionUi.test.js"
+    ],
+    "M05-02": [
+      "frontend/src/stores/inputRetention.test.js"
+    ],
+    "M05-03": [
+      "backend/tests/test_input_retention.py::test_partial_draft_can_be_retained_completed_and_reopened_without_losing_cells",
+      "backend/tests/test_input_retention.py::test_incomplete_retained_product_cannot_be_booked_using_a_different_complete_receipt",
+      "frontend/src/stores/inputRetention.test.js"
+    ],
+    "M05-04": [
+      "frontend/src/stores/inputRetention.test.js"
+    ],
+    "M05-05": [
+      "frontend/src/stores/inputRetention.test.js",
+      "frontend/src/components/InputRetentionUi.test.js"
+    ],
+    "M07-07": [
+      "frontend/src/components/InputRetentionUi.test.js"
+    ],
+    "M08-06": [
+      "frontend/src/stores/inputRetention.test.js",
+      "frontend/src/components/InputRetentionUi.test.js"
+    ],
+    "M11-06": [
+      "backend/tests/test_input_retention.py::test_non_finite_booking_is_refused_before_hashing_and_leaves_no_partial_product"
+    ],
+    "M13-04": [
+      "backend/tests/test_input_retention.py::test_custom_funding_never_masks_the_older_standard_booking_run",
+      "frontend/src/stores/inputRetention.test.js"
+    ]
+  },
+  "preservation": {
+    "existing_files_removed": [],
+    "protected_prior_reports_and_evidence_and_dist_files": 118,
+    "non_C07_findings_unchanged": true,
+    "non_C07_workstreams_unchanged": true,
+    "decisions_unchanged": true,
+    "conditional_dependencies_unchanged": true,
+    "only_cross_cases_updated": [
+      "T11",
+      "T15"
+    ],
+    "baseline_business_db_present": false,
+    "services_started": false
+  },
+  "limits": [
+    "No manual graphical acceptance",
+    "No full backend suite",
+    "No business-data migration",
+    "M04-10 production volume budget remains to be agreed",
+    "T11 C10/C17 qualification open",
+    "T15 C09/C19/C20 qualification open",
+    "No mathematical model or production certification",
+    "Dormant declaration forms are session state; contractual versions remain durable",
+    "Document snapshots retain references; complete archive/replay qualification remains C19"
+  ],
+  "changed_files": [
+    "backend/app/api/deals.py",
+    "backend/app/api/products.py",
+    "backend/app/core/deal_valuation.py",
+    "backend/app/core/payscript/bindings.py",
+    "backend/app/core/product/models.py",
+    "backend/app/services/product_repository.py",
+    "backend/tests/test_input_retention.py",
+    "docs/README.md",
+    "docs/audits/REMEDIATION_C07_2026-10-21.md",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+    "docs/audits/remediation-lot-0-2026-10-20/C07_VALIDATION.json",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+    "frontend/src/components/DealTab.vue",
+    "frontend/src/components/EconomicsTab.vue",
+    "frontend/src/components/InputRetentionUi.test.js",
+    "frontend/src/components/PayScriptConfigurations.vue",
+    "frontend/src/components/PriceComparisonPanel.vue",
+    "frontend/src/components/ProductContextBar.vue",
+    "frontend/src/components/VolSurfaceEditor.vue",
+    "frontend/src/composables/useBookingMtm.js",
+    "frontend/src/stores/inputRetention.test.js",
+    "frontend/src/stores/pricing.js",
+    "frontend/src/stores/products.js",
+    "frontend/src/utils/optimizerResume.js",
+    "frontend/src/utils/pricingConfiguration.js",
+    "frontend/src/utils/productCalculations.js",
+    "frontend/src/utils/underlyingDefaults.js",
+    "frontend/src/views/PricerView.vue",
+    "frontend/src/views/ProductsView.vue"
+  ],
+  "source_and_test_hashes": {
+    "backend/app/api/deals.py": "d6c767b9290829fa644de5b3132616d87610e3acd5bd8dfe960232d651260780",
+    "backend/app/api/products.py": "3eb169ac287d58253c727353793b302ca4a5bb5c64a3fb932a99e987e32454ab",
+    "backend/app/core/deal_valuation.py": "337c07a1b0bd0b323d77f7557d91ef34266126e1ba2787a7b548e3c2c9b42336",
+    "backend/app/core/payscript/bindings.py": "7fdb33e9ddfaf8dc164bf5cee8ceb4b7d1c674565bf5fa6aae7b7bc66079067e",
+    "backend/app/core/product/models.py": "90f27778eb5be82c88935599fb6d6c2ad3d1da7bdf2552857a599a82639ac882",
+    "backend/app/services/product_repository.py": "37646c7a6540b9bbb78519c633be2c80ca1369cba7c86f8caa588a91ed252b08",
+    "backend/tests/test_input_retention.py": "4ece57edc52fec1d4484f71b906f6f740acf95365a24aeee74bb2d589cdc7dc7",
+    "frontend/src/components/DealTab.vue": "7d4dd8712b9fa4356e27bc8f4e3a3d2d6b33ea35760bd899563b95addfc24221",
+    "frontend/src/components/EconomicsTab.vue": "5b57441b0f39d01264a69fe3f5d09a01b0fb0a35f79d989ad2f4d7f2f381c9a6",
+    "frontend/src/components/InputRetentionUi.test.js": "8ea377c2764aa73fa87a2510fb60d10c649e60bb555172427614356894a47fab",
+    "frontend/src/components/PayScriptConfigurations.vue": "cf472aaee449e09662a3072e952bcb424f5c37847bf565eff969e977d4ca19bc",
+    "frontend/src/components/PriceComparisonPanel.vue": "a4e4d7de14a0ff41ea9c13d4e745da0124699704162581a68391441bee14bfda",
+    "frontend/src/components/ProductContextBar.vue": "b95aef232202d193d09ba778b39c56eb2b90475917b5566fb3bf60f7cda5ea5f",
+    "frontend/src/components/VolSurfaceEditor.vue": "fc60f11c5158cad1b71eb08667c06a19b1ae8784e9daaa0f613822e8b045ed26",
+    "frontend/src/composables/useBookingMtm.js": "8c2c9c0d369f66ba88ea8356e8ad1288bea0003f1b292b8612490478047fa6da",
+    "frontend/src/stores/inputRetention.test.js": "da81618add119390df6c49022d93dab19d17bcfca74bb14362e62fc8ce8891ee",
+    "frontend/src/stores/pricing.js": "e444ccf188e22ac4bb194f6fe2a67bdcdc61941498a4ac878f1210ebcf8c4875",
+    "frontend/src/stores/products.js": "c9933af2da096e77c5b009a43acab1009f7a0794bce1fa3d26d1f78972ca9ae9",
+    "frontend/src/utils/optimizerResume.js": "54359c83c13cd1d6b8d5229486555f6cf77cac8e34350944ed2e534ca8f11698",
+    "frontend/src/utils/pricingConfiguration.js": "bf574b52e2b267b8054473f867d354209a140c43ef19a2403c95dbf80168028c",
+    "frontend/src/utils/productCalculations.js": "39f0a1ff5a2806f8e3a3b15a37d46d76387bc6621e4c066aa2937eb4b07c0ea3",
+    "frontend/src/utils/underlyingDefaults.js": "cab477518fe883e3f5f3329d218859411dadbfd74581fdf69db0fc280135df43",
+    "frontend/src/views/PricerView.vue": "a72ec5d41b167501bd74ed54e1c6291e5acb1530de77e2790f08685050ebd260",
+    "frontend/src/views/ProductsView.vue": "838bf0149efabe28e39cedfe5c85c565e9d4057baff89e1f75fe3b2aea5243d2"
+  },
+  "document_hashes": {
+    "docs/README.md": "48c97ef5a55af3a4b19fd544fdb5cb5fbf25202d9c944d06dbbd53ba17a70edb",
+    "docs/audits/REMEDIATION_C07_2026-10-21.md": "6279ff8949e64e7a925e63cc3f6f13c7eb159e23da4143396321ffcabf7e4f23",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md": "650626096e0a44abe5dd3fcecea4c2d64e1795b166157752543121a75900df16",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md": "8c0c0fa5602b6ae8a13f4e9d5b4bdf0d74baf0ff5b9c5588279f14184665dbe0",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json": "93aba92e27587d4aa94da38af695293ba8610d4bf35f2352818c9f7e003f8d2f"
+  },
+  "document_hashes_exclude_this_evidence": true
+}

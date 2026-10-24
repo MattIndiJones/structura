@@ -61,7 +61,7 @@
           </article>
           <article>
             <span>Dernier calcul</span>
-            <strong class="valuation-kpis__date">{{ formatDateTime(runs[0].created_at) }}</strong>
+            <strong class="valuation-kpis__date">{{ formatDateTime(runTimestamp(runs[0].created_at)) }}</strong>
             <small>{{ basisLabel(runs[0]) }}</small>
           </article>
         </section>
@@ -81,11 +81,7 @@
             <div class="history-filters">
               <label>
                 <span>Base</span>
-                <select v-model="basisFilter" class="select">
-                  <option value="">Toutes</option>
-                  <option value="realized">Marché actualisé</option>
-                  <option value="booking">Paramètres du booking</option>
-                </select>
+                <select v-model="basisFilter" class="select"><option value="">Toutes</option><option v-for="(label, code) in VALUATION_SOURCES" :key="code" :value="code">{{ label }}</option></select>
               </label>
               <label>
                 <span>Du</span>
@@ -136,7 +132,7 @@
                         :aria-label="`Sélectionner le MtM du ${formatDate(valuationDate(run))}`"
                         @change="toggleSelection(run.id)" />
                     </td>
-                    <td class="is-mono">{{ formatDateTime(run.created_at) }}</td>
+                    <td class="is-mono">{{ formatDateTime(runTimestamp(run.created_at)) }}</td>
                     <td class="is-mono">{{ formatDate(valuationDate(run)) }}</td>
                     <td class="is-number history-mtm">
                       <SensitiveValue>{{ formatFractionAsPercent(mtmValue(run)) }}</SensitiveValue>
@@ -229,6 +225,8 @@
 </template>
 
 <script setup>
+import { runTimestamp } from '../composables/useBookingMtm.js'
+import { VALUATION_SOURCES, valuationSourceCode, valuationSourceLabel } from '../utils/valuationSource.js'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import BackLink from '../components/ui/BackLink.vue'
@@ -261,17 +259,9 @@ const selectedRunIds = ref(
 )
 const comparisonOpen = ref(selectedRunIds.value.length >= 2)
 
-function basisCode(run) {
-  return run?.diagnostics?.request?.recalibrate === 'none' ? 'booking' : 'realized'
-}
-
-function basisLabel(run) {
-  return basisCode(run) === 'booking' ? 'Paramètres booking' : 'Marché actualisé'
-}
-
-function basisShortLabel(run) {
-  return basisCode(run) === 'booking' ? 'Booking' : 'Marché'
-}
+const basisCode = valuationSourceCode
+const basisLabel = valuationSourceLabel
+const basisShortLabel = valuationSourceLabel
 
 function marketUsed(run) {
   return run?.result?.market_used || run?.market_data?.market_used || {}

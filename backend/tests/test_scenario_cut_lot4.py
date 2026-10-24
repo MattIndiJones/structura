@@ -18,7 +18,7 @@ def test_var_worker_keeps_event_after_exact_replay_cut(monkeypatch):
         "script_text": SCRIPT, "value_date": "2026-01-01",
         "T_elapsed": 0.49, "passe_jusqu_a": 0.49,
         "state": {}, "norm_spots": [1.0], "corr": [[1.0]],
-        "valuation_context": {"version": 1},
+        "valuation_context": {"version": 1, "r": 0.03},
     })
 
     assert result["price"] == 1.0

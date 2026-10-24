@@ -22,7 +22,7 @@ def test_portfolio_count_uses_the_live_risk_perimeter():
         session.add(Deal(reference="MATURED-1", user_id=1, portfolio_id=portfolio.id, status="echu"))
         session.commit()
 
-        rows = portfolios_api.list_portfolios(SimpleNamespace(id=1), session)
+        rows = portfolios_api.list_portfolios(SimpleNamespace(id=1, role="user", entity_id=None), session)
 
     assert rows[0]["deal_count"] == 1
 

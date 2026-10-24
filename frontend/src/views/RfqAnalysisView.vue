@@ -70,7 +70,7 @@
           <div class="card">
             <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3"
                  title="Écart au prix modèle Structura, signé de notre côté : positif = en notre faveur, achats et ventes confondus.">
-              Écart favorable vs prix modèle par fournisseur (bps)
+              Écart favorable vs prix modèle par fournisseur — moyenne quotidienne (bps)
             </div>
             <canvas ref="chartRef" height="90"></canvas>
           </div>
@@ -119,6 +119,7 @@ import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import { templateMeta } from '../data/payscriptTemplates.js'
 import { formatBps as centralFormatBps } from '../utils/format.js'
+import { aggregateDailyQuoteEdges, isHistoricalQuoteEligible } from '../utils/rfqAnalysis.js'
 
 Chart.register(...registerables)
 applyChartTheme(Chart)
@@ -159,12 +160,11 @@ const supersededCount = computed(() => rfq.history.filter(h => h.superseded).len
 
 const filteredHistory = computed(() => {
   return rfq.history.filter(h => {
-    if (h.edge_bps === null || h.edge_bps === undefined) return false
+    if (!isHistoricalQuoteEligible(h)) return false
     // Une cotation remplacée par le last look du même fournisseur n'est pas
     // une réponse de plus : la compter mettrait la banque deux fois dans
     // l'AO et tirerait sa moyenne vers sa cotation améliorée.
     if (h.superseded) return false
-    if (h.origin === 'NETWORK' && !h.comparable) return false
     if (filters.templateType && h.template_type !== filters.templateType) return false
     if (!filters.providers.includes(h.provider)) return false
     if (filters.from && h.date.slice(0, 10) < filters.from) return false
@@ -222,7 +222,7 @@ function chartOpts() {
     plugins: {
       legend: { display: true, labels: { font: { size: 10 }, boxWidth: 12 } },
       tooltip: {
-        callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y} bps` },
+        callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y} bps · moyenne de ${ctx.dataset.quoteCounts[ctx.dataIndex]} cotation(s)` },
       },
     },
     scales: {
@@ -239,16 +239,13 @@ function rebuildChart() {
   chart?.destroy()
   if (!chartRef.value || !filters.providers.length) return
 
-  const labels = [...new Set(filteredHistory.value.map(h => h.date.slice(0, 10)))].sort()
+  const { labels, series } = aggregateDailyQuoteEdges(filteredHistory.value, filters.providers)
 
   const datasets = filters.providers.map((provider, i) => {
-    const byDate = {}
-    for (const h of filteredHistory.value) {
-      if (h.provider === provider) byDate[h.date.slice(0, 10)] = h.edge_bps
-    }
     return {
       label: providerLabel(provider),
-      data: labels.map(d => byDate[d] ?? null),
+      data: series[i].values,
+      quoteCounts: series[i].counts,
       spanGaps: true,
       borderColor: FACTOR_COLORS[i % FACTOR_COLORS.length],
       backgroundColor: 'transparent',

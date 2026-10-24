@@ -9,7 +9,7 @@
       <div class="page-actions flex-wrap">
         <button class="btn-ghost btn-sm md:hidden" @click="mobilePanel = mobilePanel === 'list' ? 'detail' : 'list'">{{ mobilePanel === 'list' ? 'Dossier' : 'Liste des RFQ' }}</button>
         <RouterLink to="/rfq/prototype-reseau" class="btn-ghost btn-sm">Parcours réseau · prototype</RouterLink>
-        <RouterLink to="/rfq/recues" class="btn-secondary btn-sm">RFQ reçues · banque</RouterLink>
+        <RouterLink to="/rfq/recues" class="btn-secondary btn-sm">RFQ reçues</RouterLink>
         <RouterLink to="/rfq/analyse" class="btn-ghost btn-sm">📈 Analyse</RouterLink>
         <button class="btn-primary text-xs px-3 py-1.5" @click="openCreateForm">+ Nouvelle RFQ</button>
       </div>
@@ -70,7 +70,7 @@
           </div>
           <div class="text-[10px] text-slate-600 font-mono">{{ r.reference }} · AO {{ fmtDateOnly(r.ao_date) }}</div>
           <div class="flex items-center gap-3 text-[10px] text-slate-500 mt-1">
-            <span v-if="r.model_price !== null">Modèle: {{ fmtPrice(r.model_price) }}</span>
+            <span v-if="r.model_price !== null">Modèle: <SensitiveValue>{{ fmtPrice(r.model_price) }}</SensitiveValue></span>
             <span v-else class="text-slate-700">Modèle: —</span>
           </div>
         </div>
@@ -351,9 +351,11 @@
                     </div>
                     <div class="col-span-3"><label class="label">Devise du sous-jacent</label>
                     <select v-model="underlying.ccy" class="select" :disabled="!!sourceProduct">
+                      <option v-if="underlying.ccy && !['EUR','USD','GBP','JPY','CHF','SGD'].includes(underlying.ccy)">{{ underlying.ccy }}</option>
                       <option>EUR</option><option>USD</option><option>GBP</option>
                       <option>JPY</option><option>CHF</option><option>SGD</option>
                     </select>
+                    <p v-if="catalogInstrument(underlying.ticker)?.ccy && underlying.ccy !== catalogInstrument(underlying.ticker).ccy" class="text-xs text-amber-700">Surcharge ; référence {{ catalogInstrument(underlying.ticker).ccy }}.</p>
                     </div>
                   </div>
                 </div>
@@ -625,12 +627,12 @@
                 <div>
                   <div class="label mb-0.5">Panier ({{ underlyingSummaries.length }})</div>
                   <div class="text-xs text-slate-200 font-mono">
-                    {{ underlyingSummaries.join(' / ') || '—' }}
+                    <SensitiveValue>{{ underlyingSummaries.join(' / ') || '—' }}</SensitiveValue>
                   </div>
                 </div>
                 <div>
                   <div class="label mb-0.5">Nominal</div>
-                  <div class="text-xs text-slate-200">{{ fmtNominal(rfq.current.params?.notional) }} {{ rfq.current.params?.currency || '' }}</div>
+                  <div class="text-xs text-slate-200"><SensitiveValue>{{ fmtNominal(rfq.current.params?.notional) }} {{ rfq.current.params?.currency || '' }}</SensitiveValue></div>
                 </div>
                 <div>
                   <div class="label mb-0.5">Date de strike</div>
@@ -664,12 +666,13 @@
                   <div class="flex items-center gap-2">
                     <span class="text-xs text-slate-200">{{ statusLabel(rfq.current.status) }}</span>
                     <button v-if="rfq.current.status !== 'clos' && can(rfq.current, 'prepare')"
+                            :disabled="rfq.current.status === 'sans_suite' && !!rfq.current.exchange_round"
                             class="text-[10px] underline text-slate-500 hover:text-slate-300"
                             :title="rfq.current.status === 'sans_suite'
-                                    ? 'Rendre l\'AO au statut déduit de ses cotations'
+                                    ? (rfq.current.exchange_round ? 'La clôture est définitive ; utilisez Nouveau tour dans Diffusion RFQ' : 'Rendre l\'AO au statut déduit de ses cotations')
                                     : 'AO abandonné ou perdu — il ne donnera pas lieu à un trade'"
                             @click="toggleSansSuite">
-                      {{ rfq.current.status === 'sans_suite' ? 'Rouvrir' : 'Sans suite' }}
+                      {{ rfq.current.status === 'sans_suite' ? (rfq.current.exchange_round ? 'Tour clôturé' : 'Rouvrir') : 'Sans suite' }}
                     </button>
                   </div>
                 </div>
@@ -678,7 +681,7 @@
                   <select class="select py-1 px-2 text-xs" :value="rfq.current.sens || 'achat'"
                           :disabled="!!rfq.current.quotes?.length || !can(rfq.current, 'prepare')"
                           :title="rfq.current.quotes?.length ? 'Sens figé dès la première sollicitation' : sensHint(rfq.current.sens)"
-                          @change="updateSens($event.target.value)">
+                          @change="updateSens($event.target.value, $event.target)">
                     <option value="achat">↓ Achat (nous achetons)</option>
                     <option value="vente">↑ Vente (nous vendons)</option>
                   </select>
@@ -690,7 +693,7 @@
                 <div class="flex items-center gap-4">
                   <div class="stat-box flex-1">
                     <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Prix modèle Structura</div>
-                    <div class="text-xl font-bold text-slate-100">{{ fmtPrice(rfq.current.model_price) }}</div>
+                    <div class="text-xl font-bold text-slate-100"><SensitiveValue>{{ fmtPrice(rfq.current.model_price) }}</SensitiveValue></div>
                     <!-- Ligne toujours rendue : sans elle, la tuile gagnait un cran
                          de hauteur au premier calcul et tout le bloc sautait. -->
                     <div class="text-[10px] text-slate-600 mt-0.5">
@@ -709,6 +712,7 @@
 
                 <details v-if="can(rfq.current, 'price')" class="border-t border-slate-800 pt-3">
                   <summary class="label mb-0 cursor-pointer select-none">▸ Paramètres de pricing (modifiables)</summary>
+                  <SensitiveValue mode="input">
                   <div class="mt-2 flex flex-col gap-3">
                     <fieldset :disabled="!!rfq.current.quotes?.length">
                       <RfqParamsEditor :parsed-params="detailParsedParams" :param-overrides="detailParamOverrides"
@@ -837,6 +841,7 @@
                       <FundingCurveCard :courbe="aoDetail.fundingCurve" />
                     </div>
                   </div>
+                  </SensitiveValue>
                 </details>
               </div>
               <AlertMessage v-if="computeError" kind="error">{{ computeError }}</AlertMessage>
@@ -844,7 +849,7 @@
               <!-- Script (collapsible) -->
               <details class="card text-xs text-slate-400">
                 <summary class="font-bold cursor-pointer text-slate-300 select-none">▸ PayScript</summary>
-                <pre class="mt-3 font-mono text-slate-400 whitespace-pre-wrap">{{ rfq.current.script_snapshot }}</pre>
+                <SensitiveValue mode="input"><pre class="mt-3 font-mono text-slate-400 whitespace-pre-wrap">{{ rfq.current.script_snapshot }}</pre></SensitiveValue>
               </details>
 
               <!-- Quotes -->
@@ -854,14 +859,20 @@
                   <div class="flex items-center gap-2">
                     <span v-if="bestQuote" class="text-[10px] text-slate-500" :title="sensHint(rfq.current.sens)">
                       Meilleure réponse ({{ rfq.current.sens === 'vente' ? 'prix le plus haut' : 'prix le plus bas' }}) :
-                      <span class="text-slate-300 font-semibold">{{ fmtPrice(bestQuote.price) }}</span>
+                      <span class="text-slate-300 font-semibold"><SensitiveValue>{{ fmtPrice(bestQuote.price) }}</SensitiveValue></span>
                       ({{ providerLabel(bestQuote.provider) }})
                     </span>
                     <button v-if="!rfq.current.booked_deal && can(rfq.current, 'prepare')" class="btn-secondary text-xs" @click="openAddQuote">+ Ajouter un fournisseur</button>
                   </div>
                 </div>
 
-                <AlertMessage v-if="lastLookError" kind="error" dismissible @dismiss="lastLookError = ''">{{ lastLookError }}</AlertMessage>
+                <AlertMessage v-if="mutationError" kind="error" dismissible @dismiss="mutationError = ''; rejectedMutation = null">
+                  {{ mutationError }}
+                  <p v-if="rejectedMutation" class="mt-1">Saisie refusée · {{ rejectedMutation.label }} :
+                    <SensitiveValue>{{ rejectedMutation.value }}</SensitiveValue>.
+                    {{ rejectedMutation.reloadFailed ? 'Rechargement impossible ; dernière valeur connue affichée.' : 'Valeur enregistrée restaurée.' }}
+                  </p>
+                </AlertMessage>
 
                 <!-- Un AO s'exécute une fois : une fois booké, plus de bouton de
                      booking, on renvoie vers le deal. Le serveur refuse le doublon
@@ -883,7 +894,7 @@
                   <div class="min-w-0 flex-1">
                     <div class="text-xs font-bold text-slate-300">
                       Motif de sélection figé au booking
-                      <span v-if="!selectedIsBest" class="ml-1 text-amber-400">
+                      <span v-if="bestQuote && !selectedIsBest" class="ml-1 text-amber-400">
                         · meilleur prix non retenu
                       </span>
                     </div>
@@ -900,6 +911,9 @@
                 <div v-else-if="rfq.current.selected_quote_id" class="flex items-center justify-between gap-3 rounded-lg border border-amber-800/60 bg-amber-950/20 px-3 py-2">
                   <span class="text-xs text-amber-300">
                     ⭐ Réponse retenue —
+                    <span v-if="rfq.current.selected_quote_revision !== selectedQuote?.revision" class="font-semibold">
+                      révision historique à requalifier en cliquant sur Retenir à nouveau.
+                    </span>
                     <span v-if="selectedQuote?.origin === 'NETWORK'">{{ confirmedExecution ? 'accord de traitement confirmé ; ' : 'cotation réseau publiée ; confirmation de traitement requise avant booking. ' }}</span>
                     {{ modelPriceRecorded
                       ? 'prix modèle enregistré, prête à contrôler dans le Pricer.'
@@ -927,7 +941,7 @@
                   <div class="min-w-0">
                     <div class="text-xs font-bold text-slate-300">
                       Motif de sélection
-                      <span v-if="!selectedIsBest" class="ml-1 text-amber-400">
+                      <span v-if="bestQuote && !selectedIsBest" class="ml-1 text-amber-400">
                         · meilleur prix non retenu
                       </span>
                     </div>
@@ -956,7 +970,8 @@
                   Aucun fournisseur sollicité pour l'instant.
                 </div>
 
-                <div v-else class="table-shell" tabindex="0" role="region">
+                <SensitiveValue v-else>
+                <div class="table-shell" tabindex="0" role="region">
                 <table class="w-full text-xs min-w-[1280px]">
                   <thead>
                     <tr class="text-left text-slate-500 border-b border-slate-800">
@@ -981,7 +996,14 @@
                         <span v-if="q.parent_quote_id" class="text-slate-600 mr-1">↳</span>
                         <span :class="q.parent_quote_id ? 'text-slate-400 italic' : ''">
                           {{ q.parent_quote_id ? 'Last look' : providerLabel(q.provider) }}
+                          <div v-if="q.origin !== 'NETWORK' && q.identity_status === 'TO_QUALIFY' && !rfq.current.booked_deal && can(rfq.current, 'prepare')" class="flex flex-col gap-1 mt-2 whitespace-normal">
+                            <span class="text-amber-700">Identité juridique à qualifier</span>
+                            <select v-model="legalDraft[q.id]" class="select text-xs"><option :value="undefined">Choisir une contrepartie</option><option v-for="legal in legalCounterparties" :key="legal.id" :value="legal.id">{{ legal.name }}</option></select>
+                            <input v-model="legalReasons[q.id]" class="input text-xs" placeholder="Motif de la qualification" minlength="3" />
+                            <button class="btn-secondary btn-sm" @click="qualifyQuote(q)">Qualifier l’identité</button>
+                          </div>
                           <span v-if="q.origin === 'NETWORK'" class="badge badge-accent ml-1">Réseau · v{{ q.publication.revision }} · {{ publicationStateLabel(q.publication.state) }}</span>
+                          <span v-else-if="q.revision" class="text-[10px] text-slate-500 ml-1">r{{ q.revision }} · {{ q.currency }}</span>
                           <details v-if="q.origin === 'NETWORK'" class="text-xs mt-1"><summary class="cursor-pointer">Réponse publiée et conditions</summary><div class="max-w-sm whitespace-normal space-y-1"><p>{{ q.publication.response.counterparty_name }} · émetteur {{ q.publication.response.issuer_name || 'Sans objet' }}</p><p>{{ q.publication.response.documentation_reference }}</p><p>{{ q.publication.response.conditions_type === 'NONE' ? 'Sans condition supplémentaire' : 'Réponse conditionnelle' }}</p><p v-for="(condition, i) in q.publication.response.conditions" :key="i">{{ quoteConditionLabel(condition.code) }} : {{ condition.description }}</p><p v-if="q.publication.withdrawal_reason">Retrait : {{ q.publication.withdrawal_reason }}</p></div></details>
                         </span>
                       </td>
@@ -990,12 +1012,12 @@
                         <input type="number" class="input py-1 px-2 w-24"
                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
                                :value="q.price ?? ''"
-                               @change="onQuotePriceChange(q, $event.target.value)" />
+                               @change="onQuotePriceChange(q, $event.target.value, $event.target)" />
                       </td>
                       <td class="py-1.5 pr-2 num whitespace-nowrap" :class="spreadClass(q)">{{ spreadBps(q) }}</td>
                       <td class="py-1.5 pr-2">
                         <select class="select py-1 px-2 min-w-[125px]" :value="q.status"
-                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')" @change="updateQuoteField(q, 'status', $event.target.value)">
+                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')" @change="updateQuoteField(q, 'status', $event.target.value, $event.target)">
                           <option value="en_attente">En attente</option>
                           <option value="recu">Reçu</option>
                           <option value="decline">Décliné</option>
@@ -1005,7 +1027,7 @@
                       <td class="py-1.5 pr-2">
                         <select class="select py-1 px-2 min-w-[125px]" :value="q.firmness || 'UNKNOWN'"
                                 :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
-                                @change="updateQuoteField(q, 'firmness', $event.target.value)">
+                                @change="updateQuoteField(q, 'firmness', $event.target.value, $event.target)">
                           <option value="UNKNOWN">À qualifier</option>
                           <option value="INDICATIVE">Indicative</option>
                           <option value="FIRM">Ferme</option>
@@ -1015,19 +1037,19 @@
                         <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
                                :value="toDatetimeLocal(q.quoted_at)"
-                               @change="onQuoteDateChange(q, $event.target.value)" />
+                               @change="onQuoteDateChange(q, $event.target.value, $event.target)" />
                       </td>
                       <td class="py-1.5 pr-2">
                         <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
                                :value="toDatetimeLocal(q.valid_until)"
-                               @change="onQuoteValidityChange(q, $event.target.value)" />
+                               @change="onQuoteValidityChange(q, $event.target.value, $event.target)" />
                       </td>
                       <td class="py-1.5 pr-2">
                         <select v-if="!q.parent_quote_id" class="select py-1 px-2 min-w-[80px]"
                                 :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || q.price == null || !can(rfq.current, 'prepare')"
                                 :value="q.last_look ? 'oui' : 'non'"
-                                @change="onLastLookToggle(q, $event.target.value === 'oui')">
+                                @change="onLastLookToggle(q, $event.target.value === 'oui', $event.target)">
                           <option value="non">Non</option>
                           <option value="oui">Oui</option>
                         </select>
@@ -1037,7 +1059,7 @@
                                 :disabled="!!rfq.current.booked_deal || !!activeExecution || !q.comparable || !can(rfq.current, 'select')"
                                 :title="!q.comparable ? 'Seule une cotation finale, active et non remplacée peut être retenue' : (q.id === rfq.current.selected_quote_id ? 'Réponse retenue — cliquer pour désélectionner' : 'Retenir cette réponse')"
                                 @click="onSelectQuote(q)">
-                          {{ q.id === rfq.current.selected_quote_id ? '★ Retenue' : '☆ Retenir' }}
+                          {{ q.id === rfq.current.selected_quote_id ? (rfq.current.selected_quote_revision === q.revision ? '★ Retenue' : '☆ Retenir à nouveau') : '☆ Retenir' }}
                         </button>
                         <button v-if="q.origin !== 'NETWORK' && !rfq.current.booked_deal && can(rfq.current, 'prepare')" class="text-slate-600 hover:text-red-400" @click="removeQuote(q.id)">✕</button>
                       </td>
@@ -1046,6 +1068,7 @@
                   </tbody>
                 </table>
                 </div>
+                </SensitiveValue>
 
                 <!-- Add quote inline form -->
                 <div v-if="addingQuote" class="flex items-end gap-2 pt-2 border-t border-slate-800">
@@ -1077,9 +1100,14 @@
               </div>
             </div>
 
-            <RfqPricingPanel :rfq="rfq.current" :pricing="rfq.lastPricing" />
-            <CcrCreditCheck v-if="selectedQuote" :rfq-id="rfq.current.id" :quote-id="selectedQuote.id"
-              :counterparty-name="selectedQuote.counterparty" />
+            <SensitiveValue><RfqPricingPanel :rfq="rfq.current" :pricing="rfq.lastPricing" :can-price="can(rfq.current, 'price')" /></SensitiveValue>
+            <div v-if="selectedQuote">
+              <SensitiveValue v-if="demoMode.enabled" />
+              <div v-show="!demoMode.enabled">
+                <CcrCreditCheck :rfq-id="rfq.current.id" :quote-id="selectedQuote.id"
+                  :counterparty-name="selectedQuote.counterparty" />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1158,15 +1186,18 @@
 
 <script setup>
 import BackLink from '../components/ui/BackLink.vue'
+import SensitiveValue from '../components/SensitiveValue.vue'
 import RfqExecutionPanel from '../components/RfqExecutionPanel.vue'
 import { publicationStateLabel, quoteConditionLabel } from '../utils/rfqQuoteStates.js'
 import DealReferenceLink from '../components/DealReferenceLink.vue'
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useRfqStore } from '../stores/rfq.js'
+import { useDemoModeStore } from '../stores/demoMode.js'
 import { useProductsStore } from '../stores/products.js'
 import { useMarketAssumptions } from '../composables/useMarketAssumptions.js'
-import { fractionToPercent } from '../utils/underlyingDefaults.js'
+import { fractionToPercent, fractionToPercentExact } from '../utils/underlyingDefaults.js'
+import { recordMarketReference } from '../utils/marketProvenance.js'
 import {
   PAYOFF_FAMILIES, canonicalPayoffFamily, payoffFamilyForDisplay,
   payoffFamilyForModel,
@@ -1176,10 +1207,11 @@ import FundingCurveCard from '../components/FundingCurveCard.vue'
 import DividendCurveCard from '../components/DividendCurveCard.vue'
 import UnderlyingVolFields from '../components/UnderlyingVolFields.vue'
 import { calibrateUnderlying } from '../utils/smileCalibration.js'
+import { surfaceCalibrationKey } from '../utils/volSurface.js'
 import { apiFetch } from '../utils/api.js'
 import { calendarValue, serializeCalendars, fixingDate, parameterValues, tenorString, tenorPair } from '../utils/payscriptEconomics.js'
 import { templateMeta, examples } from '../data/payscriptTemplates.js'
-import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
+import { underlyingGroups, ensureUnderlyings, catalogInstrument, selectCatalogUnderlying } from '../data/commonUnderlyings.js'
 import {
   emptyRfqUnderlying, normaliseCorrelation, rfqBasketFromParams,
   rfqUnderlyingToParams,
@@ -1199,6 +1231,14 @@ import { formatDate, formatDateTime, formatPercent, formatInt, formatBps } from 
 
 // Catalogue de sous-jacents : chargé depuis la base au montage.
 onMounted(ensureUnderlyings)
+const legalCounterparties = ref([]), legalDraft = reactive({}), legalReasons = reactive({})
+onMounted(async () => {
+  try { const res = await apiFetch('/api/deals/counterparties'); if (res.ok) legalCounterparties.value = await res.json() } catch { /* Qualification remains unavailable until the catalog can be loaded. */ }
+})
+async function qualifyQuote(quote) {
+  if (!legalDraft[quote.id] || (legalReasons[quote.id] || '').trim().length < 3) { rfq.error = 'Choisissez une contrepartie active et renseignez un motif.'; return }
+  await rfq.updateQuote(rfq.current.id, quote.id, { counterparty_id: legalDraft[quote.id], identity_reason: legalReasons[quote.id].trim() })
+}
 
 // ── CONSTAT calendar helpers — mirror of pricing.js's constatOverrides
 // shape/serialization (see RfqParamsEditor.vue's docstring), duplicated
@@ -1219,6 +1259,7 @@ function restoreConstatOverrides(constats, values, saved) {
 }
 
 const rfq = useRfqStore()
+const demoMode = useDemoModeStore()
 const can = (row, right) => !row?.pilot_desk_id || row.access_rights?.includes(right)
 const myDesks = ref([])
 const organizationDesks = ref([])
@@ -1363,6 +1404,7 @@ const showCreateForm = ref(false)
 const creating       = ref(false)
 const createError    = ref('')
 const computing      = ref(false)
+let computeRevision=0
 const computeError   = ref('')
 const addingQuote    = ref(false)
 const scripts        = ref([])
@@ -1550,12 +1592,8 @@ const aoDetail = useMarketAssumptions(computed(() => detailBasket.map(row => ({
 function onUnderlyingSelect(index, ticker) {
   const row = createBasket[index]
   if (!row) return
-  row.ticker = ticker
-  const instrument = underlyingGroups.flatMap(g => g.items).find(it => it.ticker === ticker)
-  if (instrument) {
-    row.name = instrument.label
-    row.ccy = instrument.ccy || row.ccy
-  }
+  try { selectCatalogUnderlying(row, ticker) }
+  catch (e) { createError.value = e.message }
 }
 
 // ── Termes du produit + calendrier(s) CONSTAT (dynamiques, extraits du script) ──
@@ -1792,6 +1830,21 @@ async function prefillFromProduct(productId) {
   duplicateSourceScript.value = terms.script
   form.source = 'script'
   form.name = loaded.product.name
+  const intent = loaded.product.intent || {}
+  const commercial = loaded.product.commercial || {}
+  Object.assign(form, {
+    sens: intent.side === 'SELL' ? 'vente' : 'achat',
+    template_type: intent.product_type || '',
+    transaction_format: intent.transaction_format || '',
+    instrument_family: intent.instrument_family || '',
+    payoff_family: intent.payoff_family || '',
+    payoff_description: intent.payoff_description || '',
+    documentation_reference: intent.documentation_reference || '',
+    client_id: commercial.client_id ?? null, mandate_id: commercial.mandate_id ?? null,
+    opportunity_id: commercial.opportunity_id ?? null,
+    primary_affiliation_id: commercial.primary_affiliation_id ?? null,
+  })
+  commercialLinkEnabled.value = !!(form.client_id || form.opportunity_id)
   form.T = terms.T
   form.currency = terms.settlement_ccy || 'EUR'
   form.strike_date = terms.strike_date || ''
@@ -1814,6 +1867,13 @@ async function prefillFromProduct(productId) {
       : (parameter.is_pct ? fractionToPercent(parameter.value) : parameter.value)
   }
   restoreConstatOverrides(scriptConstats.value, constatOverrides, terms.constats || {})
+  if (commercialLinkEnabled.value) {
+    if (!directClients.value.length) {
+      const response = await apiFetch('/api/clients')
+      if (response.ok) directClients.value = await response.json()
+    }
+    await loadDirectCommercialOptions(form.client_id)
+  }
 }
 
 async function toggleDirectCommercial() {
@@ -1951,8 +2011,16 @@ async function selectRfq(id) {
   showCreateForm.value = false
   selectedId.value = id
   computeError.value = ''
-  await rfq.fetchOne(id)
-  await refreshDetailParams()
+  try {
+    const loaded=await rfq.fetchOne(id)
+    if(!loaded || selectedId.value!==id || rfq.current?.id!==id) return
+    await refreshDetailParams()
+    if (selectedId.value === id && rfq.current?.id === id) {
+      // A retained dossier replaces the one-shot Product creation intent.
+      // Reload must reopen this RFQ rather than prepare a second request.
+      await router.replace({ path: '/rfq', query: { rfq: String(id) } })
+    }
+  } catch(e) {if(selectedId.value===id) listError.value=e.message}
 }
 
 // Editable copy of the RFQ's pricing params, shown in the detail panel's
@@ -1971,11 +2039,12 @@ const detailAdvanced = reactive({
 })
 
 async function refreshDetailParams() {
-  await _loadDetailParams()
-  termsBaseline.value = contractualSubset(detailTermsPayload())
+  if(await _loadDetailParams()) termsBaseline.value = contractualSubset(detailTermsPayload())
 }
 
+let detailLoadRevision=0
 async function _loadDetailParams() {
+  const ticket=++detailLoadRevision,id=rfq.current?.id
   const script = rfq.current?.script_snapshot || ''
   const p = rfq.current?.params || {}
   setDetailBasket(p.underlyings, p.corr_matrix)
@@ -1993,7 +2062,7 @@ async function _loadDetailParams() {
   // « Calculer prix modèle » les effacerait sans un mot.
   aoDetail.depuisParams(p)
   Object.keys(detailParamOverrides).forEach(k => delete detailParamOverrides[k])
-  if (!script.trim()) { detailParsedParams.value = []; detailScriptConstats.value = []; return }
+  if (!script.trim()) { detailParsedParams.value = []; detailScriptConstats.value = []; return true }
   try {
     const res = await apiFetch('/api/parse', {
       method: 'POST',
@@ -2001,6 +2070,7 @@ async function _loadDetailParams() {
       body: JSON.stringify({ script }),
     })
     const data = await res.json()
+    if(ticket!==detailLoadRevision || rfq.current?.id!==id) return false
     detailParsedParams.value = data.ok ? data.params : []
     const savedParams = p.user_params || {}
     for (const pp of detailParsedParams.value) {
@@ -2009,9 +2079,12 @@ async function _loadDetailParams() {
     }
     detailScriptConstats.value = data.ok ? (data.constats || []) : []
     restoreConstatOverrides(detailScriptConstats.value, detailConstatOverrides, p.constats || {})
+    return true
   } catch {
+    if(ticket!==detailLoadRevision || rfq.current?.id!==id) return false
     detailParsedParams.value = []
     detailScriptConstats.value = []
+    return false
   }
 }
 
@@ -2138,14 +2211,29 @@ const createYfLoading = ref(false)
 const detailYfStatus  = ref('')
 const detailYfLoading = ref(false)
 
-async function _loadUnderlyingParams(ticker, target, status, loading) {
+const marketRequests = new WeakMap()
+let createMarketRevision = 0, detailMarketRevision = 0
+watch(() => JSON.stringify([createBasket, createActiveUnderlyingIdx.value, form.pricing_date]),
+  () => { createMarketRevision++ }, { flush:'sync' })
+watch(() => JSON.stringify([detailBasket, detailActiveUnderlyingIdx.value, detailAdvanced.valuation_date, rfq.current?.id]),
+  () => { detailMarketRevision++ }, { flush:'sync' })
+async function _loadUnderlyingParams(ticker, target, status, loading, liveContext) {
   const tk = (ticker || '').trim().toUpperCase()
   if (!tk) { status.value = '⚠ Aucun ticker de sous-jacent'; return }
+  const context = liveContext(), request = Symbol('market-request')
+  marketRequests.set(status, request)
+  const current = () => marketRequests.get(status) === request && liveContext() === context
+  const asof = JSON.parse(context).asof
   loading.value = true
   status.value = `Chargement ${tk}…`
   try {
-    const res = await apiFetch(`/api/finance/hist_vol?tickers=${encodeURIComponent(tk)}&period=1y`)
+    const res = await apiFetch(`/api/finance/hist_vol?tickers=${encodeURIComponent(tk)}&period=1y&asof=${encodeURIComponent(asof)}`)
     const data = await res.json()
+    if (!current()) {
+      if (marketRequests.get(status) === request) status.value = '⚠ Réponse ignorée : le contexte a changé.'
+      return
+    }
+    if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `Erreur HTTP ${res.status}`)
     if (data.error) { status.value = `⚠ ${tk} : ${data.error}`; return }
     const vol = data.vols?.[tk] ?? null
     if (vol == null) {
@@ -2153,25 +2241,32 @@ async function _loadUnderlyingParams(ticker, target, status, loading) {
       if (data.missing?.includes(tk)) status.value += ' — vérifiez le ticker'
       return
     }
-    const q = data.div_yields?.[tk] ?? 0
+    const q = data.dividend_profiles?.[tk]?.ok === false ? null : data.div_yields?.[tk]
     target.vol_level_source = 'realized'
-    target.sigma = Math.round(vol * 1000) / 10
-    target.q = Math.round(q * 10000) / 100
-    status.value = `✓ ${tk} — σ=${(vol * 100).toFixed(1)}%, q=${(q * 100).toFixed(2)}% · ${data.n_obs} obs.`
+    target.sigma = fractionToPercentExact(vol)
+    if (q != null && Number.isFinite(q)) target.q = fractionToPercentExact(q)
+    recordMarketReference(target, data, tk)
+    status.value = q != null && Number.isFinite(q)
+      ? `✓ ${tk} — σ=${target.sigma}%, q=${target.q}% · ${data.n_obs} obs.`
+      : `⚠ ${tk} — σ chargée ; dividende inconnu, hypothèse q conservée.`
   } catch (e) {
-    status.value = '⚠ Erreur réseau : ' + e.message
+    if (current()) status.value = '⚠ ' + e.message
   } finally {
-    loading.value = false
+    if (marketRequests.get(status) === request) loading.value = false
   }
 }
 
 function loadCreateUnderlyingParams() {
   const row = createBasket[createActiveUnderlyingIdx.value]
-  return _loadUnderlyingParams(row?.ticker, row, createYfStatus, createYfLoading)
+  return _loadUnderlyingParams(row?.ticker, row, createYfStatus, createYfLoading,
+    () => JSON.stringify({asof: form.pricing_date || todayIso(), rows: createBasket, active: createActiveUnderlyingIdx.value,
+      revision: createMarketRevision}))
 }
 function loadDetailUnderlyingParams() {
   return _loadUnderlyingParams(underlyingSummary.value.ticker, underlyingSummary.value,
-                               detailYfStatus, detailYfLoading)
+                               detailYfStatus, detailYfLoading,
+    () => JSON.stringify({asof: detailAdvanced.valuation_date || todayIso(), rows: detailBasket,
+      active: detailActiveUnderlyingIdx.value, rfq: rfq.current?.id, revision: detailMarketRevision}))
 }
 
 // Latest CONSTAT schedule end date — empty when the script has no calendar
@@ -2344,8 +2439,18 @@ async function submitCreate() {
     const productMarket = sourceProductPricingInput.value || {}
     const horizon = createMaturityDate.value
       ? yearsBetween(form.strike_date, createMaturityDate.value) : form.T
-    if (!sourceProduct.value) await Promise.all(createBasket.map(u=>
-      calibrateUnderlying(u,advanced.model,horizon,advanced.r)))
+    const calibrationContext=()=>({model:advanced.model,
+      horizon:createMaturityDate.value?yearsBetween(form.strike_date,createMaturityDate.value):form.T,rate:advanced.r})
+    const signature=()=>JSON.stringify([form,advanced,paramOverrides,constatOverrides,createCorrMatrix.value,
+      currentScriptText(),sourceProduct.value,createBasket.map(u=>[u.ticker,u.ccy,u.sigma,u.q,u.vol_surface,u.smile_parameter_mode])])
+    const initial=signature(),inputs=createBasket.slice()
+    if (!sourceProduct.value) await Promise.all(inputs.map(u=>
+      calibrateUnderlying(u,advanced.model,horizon,advanced.r,calibrationContext)))
+    if(signature()!==initial || inputs.some((u,i)=>u!==createBasket[i]
+      || (!sourceProduct.value && u.vol_surface && ['heston','sabr','lsv'].includes(advanced.model)
+        && u.smile_parameter_mode!=='manual' && (u.smile_calibration?.status!=='ready'
+          || u.smile_calibration.key!==surfaceCalibrationKey(u,advanced.model,horizon,advanced.r)))))
+      throw Error('Le contexte a changé pendant la préparation de la RFQ. Relancez la création.')
     const basketPayload = createBasket.map((underlying, index) =>
       rfqUnderlyingToParams(
         underlying, ao.dividendeDuSousJacent(index, horizon)))
@@ -2369,7 +2474,7 @@ async function submitCreate() {
       payoff_family: form.payoff_family || null,
       payoff_description: form.payoff_description || null,
       documentation_reference: form.documentation_reference || null,
-      template_type: form.source === 'template' ? form.template_type : '',
+      template_type: sourceProduct.value ? (sourceProduct.value.intent?.product_type || '') : form.source === 'template' ? form.template_type : '',
       script_id: form.source === 'script' ? form.script_id : null,
       script_snapshot,
       params: {
@@ -2431,6 +2536,7 @@ async function submitCreate() {
 // hands the RFQ back to the server-side derivation, which puts it at the
 // stage its quotes actually justify (see api/rfq.py _derive_status).
 async function toggleSansSuite() {
+  if (rfq.current.status === 'sans_suite' && rfq.current.exchange_round) return
   listError.value = ''
   try {
     await rfq.update(rfq.current.id, {
@@ -2470,6 +2576,11 @@ async function confirmDeleteRfq() {
 }
 
 async function computeModelPrice() {
+  const ticket=++computeRevision
+  const id=rfq.current.id,context=mutationContext
+  const inputs=detailBasket.slice()
+  const calibrationContext=()=>({model:detailAdvanced.model,horizon:detailHorizon.value,rate:detailAdvanced.r})
+  const initial=JSON.stringify(calibrationContext())
   computing.value = true
   computeError.value = ''
   try {
@@ -2488,12 +2599,20 @@ async function computeModelPrice() {
     // sigma/q sont fusionnés par INDICE sur le panier stocké (voir
     // _merge_pricing_params) : la taille du panier vient de l'AO, pas du
     // formulaire de pricing.
-    await Promise.all(detailBasket.map(u=>
-      calibrateUnderlying(u,detailAdvanced.model,detailHorizon.value,detailAdvanced.r)))
-    const pricingUnderlyings = detailBasket.map((underlying, index) =>
-      rfqUnderlyingToParams(
-        underlying, aoDetail.dividendeDuSousJacent(index, detailHorizon.value)))
-    await rfq.update(rfq.current.id, {
+    await Promise.all(inputs.map(u=>
+      calibrateUnderlying(u,detailAdvanced.model,detailHorizon.value,detailAdvanced.r,calibrationContext)))
+    if(ticket!==computeRevision) return
+    if(context!==mutationContext || JSON.stringify(calibrationContext())!==initial
+      || inputs.some((u,i)=>u!==detailBasket[i] || (u.vol_surface && ['heston','sabr','lsv'].includes(detailAdvanced.model)
+        && u.smile_parameter_mode!=='manual' && (u.smile_calibration?.status!=='ready'
+          || u.smile_calibration.key!==surfaceCalibrationKey(u,detailAdvanced.model,detailHorizon.value,detailAdvanced.r)))))
+      throw Error('Le contexte a changé pendant la calibration. Relancez le calcul.')
+    const pricingUnderlyings = detailBasket.map((underlying, index) => {
+      const { name, ticker, ccy, ...assumptions } = rfqUnderlyingToParams(
+        underlying, aoDetail.dividendeDuSousJacent(index, detailHorizon.value))
+      return assumptions
+    })
+    const saved=await rfq.update(id, {
       pricing_params: {
         underlyings: pricingUnderlyings,
         corr_matrix: normaliseCorrelation(detailCorrMatrix.value, pricingUnderlyings.length),
@@ -2506,11 +2625,12 @@ async function computeModelPrice() {
         ...aoDetail.hypothesesDeMarche(),
       },
     })
-    await rfq.computeModelPrice(rfq.current)
+    if(context!==mutationContext || ticket!==computeRevision) return
+    await rfq.computeModelPrice(saved || rfq.current)
   } catch (e) {
-    computeError.value = e.message
+    if(context===mutationContext && ticket===computeRevision) computeError.value = e.message
   } finally {
-    computing.value = false
+    if(context===mutationContext && ticket===computeRevision) computing.value = false
   }
 }
 
@@ -2527,16 +2647,18 @@ watch(() => quoteForm.provider, () => { quoteForm.contact = '' })
 
 async function submitAddQuote() {
   const provider = quoteForm.provider === 'autre' ? (quoteForm.customProvider.trim() || 'Autre') : quoteForm.provider
-  await rfq.addQuote(rfq.current.id, { provider, contact: quoteForm.contact || null })
-  addingQuote.value = false
+  const id=rfq.current.id
+  return runRfqMutation(()=>rfq.addQuote(id,{provider,contact:quoteForm.contact || null}),
+    {label:'Ajout de fournisseur',success:()=>{addingQuote.value=false}})
 }
 
 async function removeQuote(quoteId) {
-  await rfq.removeQuote(rfq.current.id, quoteId)
+  const id=rfq.current.id
+  return runRfqMutation(()=>rfq.removeQuote(id,quoteId),{label:'Suppression de la cotation'})
 }
 
-function updateQuoteField(q, field, value) {
-  rfq.updateQuote(rfq.current.id, q.id, { [field]: value })
+function updateQuoteField(q, field, value, element) {
+  return saveQuoteField(q,field,value,{[field]:value},element)
 }
 
 // Une cotation vit quelques heures, pas quelques jours : dès qu'on connaît
@@ -2555,7 +2677,7 @@ function withDefaultValidity(q, quotedAtIso, payload) {
   return payload
 }
 
-function onQuotePriceChange(q, value) {
+function onQuotePriceChange(q, value, element) {
   const price = value === '' ? null : Number(value)
   const payload = { price }
   // First time a price is entered, log the response as received now unless
@@ -2564,16 +2686,16 @@ function onQuotePriceChange(q, value) {
     payload.quoted_at = new Date().toISOString()
     withDefaultValidity(q, payload.quoted_at, payload)
   }
-  rfq.updateQuote(rfq.current.id, q.id, payload)
+  return saveQuoteField(q,'price',value,payload,element)
 }
 
-function onQuoteDateChange(q, value) {
+function onQuoteDateChange(q, value, element) {
   const quotedAt = value ? new Date(value).toISOString() : null
-  rfq.updateQuote(rfq.current.id, q.id, withDefaultValidity(q, quotedAt, { quoted_at: quotedAt }))
+  return saveQuoteField(q,'quoted_at',value,withDefaultValidity(q, quotedAt, { quoted_at: quotedAt }),element)
 }
 
-function onQuoteValidityChange(q, value) {
-  rfq.updateQuote(rfq.current.id, q.id, { valid_until: value ? new Date(value).toISOString() : null })
+function onQuoteValidityChange(q, value, element) {
+  return saveQuoteField(q,'valid_until',value,{ valid_until: value ? new Date(value).toISOString() : null },element)
 }
 
 // <input type="datetime-local"> expects "YYYY-MM-DDTHH:mm" in local time.
@@ -2658,12 +2780,47 @@ function sensHint(s) {
     : 'Nous achetons le produit aux fournisseurs : la meilleure réponse est le prix le PLUS BAS (on paie moins).'
 }
 
-async function updateSens(value) {
-  await rfq.update(rfq.current.id, { sens: value })
+async function updateSens(value,element) {
+  const id=rfq.current.id
+  return runRfqMutation(()=>rfq.update(id,{sens:value}),{label:'Sens de la RFQ',field:'sens',value,element})
+}
+
+const mutationError=ref(''),rejectedMutation=ref(null)
+let mutationContext=0
+const mutationTickets=new Map()
+watch([()=>rfq.current?.id,()=>selectedId.value],()=>{
+  mutationContext++;detailLoadRevision++;computing.value=false
+  mutationError.value='';rejectedMutation.value=null;addingQuote.value=false
+},{flush:'sync'})
+async function runRfqMutation(action,{label,field,quoteId,value,element,success}={}) {
+  const id=rfq.current?.id,context=mutationContext,key=`${id}:${quoteId}:${field || label}`,ticket=Symbol()
+  mutationTickets.set(key,ticket);mutationError.value='';rejectedMutation.value=null
+  const current=()=>context===mutationContext && mutationTickets.get(key)===ticket
+  try { await action();if(current()) success?.();return true }
+  catch(e) {
+    if(current()) {
+      mutationError.value=`${label} refusé : ${e.message}`
+      let reloadFailed=false
+      try {reloadFailed=!(await rfq.fetchOne(id))} catch {reloadFailed=true}
+      if(!current()) return false
+      if(field) rejectedMutation.value={label,value,quoteId,field,reloadFailed}
+      else if(reloadFailed) mutationError.value+=' Le dossier n’a pas pu être rechargé ; dernière version connue conservée.'
+      if(element && field) {
+        const saved=quoteId==null?rfq.current?.[field]:rfq.current?.quotes?.find(q=>q.id===quoteId)?.[field]
+        element.value=field==='last_look'?(saved?'oui':'non'):
+          ['quoted_at','valid_until'].includes(field)?toDatetimeLocal(saved):(saved ?? '')
+      }
+    }
+    return false
+  } finally {if(mutationTickets.get(key)===ticket) mutationTickets.delete(key)}
+}
+function saveQuoteField(q,field,value,payload,element) {
+  const id=rfq.current.id
+  const label={price:'Prix',status:'Statut',firmness:'Fermeté',quoted_at:'Date de réponse',valid_until:'Validité'}[field] || field
+  return runRfqMutation(()=>rfq.updateQuote(id,q.id,payload),{label,field,quoteId:q.id,value,element})
 }
 
 // ── Last look ─────────────────────────────────────────────────────────
-const lastLookError = ref('')
 
 // The best competing price to date — the reference an existing responder is
 // invited to match (or the desk uses to judge "close enough, give them the
@@ -2734,22 +2891,20 @@ async function saveSelectionReason() {
 const modelPriceRecorded = computed(() =>
   Number(rfq.current?.model_price) > 0 && !!rfq.current?.model_price_at)
 
-async function onLastLookToggle(q, value) {
-  lastLookError.value = ''
-  try {
-    await rfq.toggleLastLook(rfq.current.id, q.id, value)
-  } catch (e) {
-    lastLookError.value = e.message
-  }
+async function onLastLookToggle(q, value,element) {
+  const id=rfq.current.id
+  return runRfqMutation(()=>rfq.toggleLastLook(id,q.id,value),
+    {label:'Last look',field:'last_look',quoteId:q.id,value,element})
 }
 
 async function onSelectQuote(q) {
-  const alreadySelected = rfq.current.selected_quote_id === q.id
-  await rfq.selectQuote(rfq.current.id, alreadySelected ? null : q.id)
+  const id=rfq.current.id
+  const alreadySelected = rfq.current.selected_quote_id === q.id && rfq.current.selected_quote_revision === q.revision
+  return runRfqMutation(()=>rfq.selectQuote(id,alreadySelected ? null : q.id),{label:'Sélection de la cotation'})
 }
 
 function bookFromRfq() {
-  router.push({ path: '/pricer', query: { fromRfq: rfq.current.id } })
+  router.push({ path: `/rfq/${rfq.current.id}/booking` })
 }
 
 function openRfqPricer() {

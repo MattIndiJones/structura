@@ -14,6 +14,7 @@
       <AlertMessage v-if="error" kind="error">{{ error }}</AlertMessage>
       <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
+      <label class="card label">Motif de la modification du référentiel<input v-model="changeReason" class="input" minlength="3" maxlength="500" placeholder="Motif explicite, conservé dans l’audit" /></label>
       <div class="card overflow-x-auto">
         <LoadingSpinner v-if="loading" class="py-6" />
         <table v-else class="w-full text-xs">
@@ -61,7 +62,7 @@
               </td>
               <td class="py-1.5 pr-3 text-right">
                 <button class="btn-secondary btn-sm mr-2" @click="selectProvider(p)">Contacts</button>
-                <button class="icon-btn-danger" title="Supprimer" aria-label="Supprimer le fournisseur" @click="deleteProvider(p)">🗑</button>
+                <button class="icon-btn-danger" title="Désactiver" aria-label="Supprimer le fournisseur" @click="deleteProvider(p)">🗑</button>
               </td>
             </tr>
           </tbody>
@@ -117,6 +118,7 @@ import { confirmer } from '../composables/useConfirm.js'
 const providers = ref([])
 const counterparties = ref([])
 const loading   = ref(true)
+const changeReason = ref('')
 const error     = ref('')
 const notice    = ref('')
 const creating  = ref(false)
@@ -160,7 +162,7 @@ async function updateContact(contact, payload) {
   error.value = ''
   try {
     const res = await apiFetch(`/api/admin/rfq-providers/${selectedProvider.value.id}/contacts/${contact.id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, reason: changeReason.value }),
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur mise à jour contact')
     Object.assign(contact, await res.json())
@@ -197,6 +199,7 @@ function autoMatch(p) {
 onMounted(() => { fetchProviders(); fetchCounterparties() })
 
 async function createProvider() {
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite (3 caractères minimum).'; return }
   const label = newLabel.value.trim()
   if (!label) return
   creating.value = true
@@ -206,7 +209,7 @@ async function createProvider() {
     const res = await apiFetch('/api/admin/rfq-providers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label, mode: newMode.value }),
+      body: JSON.stringify({ reason: changeReason.value, label, mode: newMode.value }),
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur création')
     providers.value.push(await res.json())
@@ -222,13 +225,14 @@ async function createProvider() {
 }
 
 async function updateProvider(p, payload) {
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite (3 caractères minimum).'; return }
   error.value = ''
   notice.value = ''
   try {
     const res = await apiFetch(`/api/admin/rfq-providers/${p.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, reason: changeReason.value }),
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur mise à jour')
     Object.assign(p, await res.json())
@@ -238,14 +242,15 @@ async function updateProvider(p, payload) {
 }
 
 async function deleteProvider(p) {
-  if (!await confirmer({ titre: `Supprimer « ${p.label} » ?`,
-                       confirmer: 'Supprimer', danger: true })) return
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite (3 caractères minimum).'; return }
+  if (!await confirmer({ titre: `Désactiver « ${p.label} » ?`,
+                       confirmer: 'Désactiver', danger: true })) return
   error.value = ''
   notice.value = ''
   try {
-    const res = await apiFetch(`/api/admin/rfq-providers/${p.id}`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/admin/rfq-providers/${p.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: changeReason.value }) })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur suppression')
-    providers.value = providers.value.filter(x => x.id !== p.id)
+    p.active = false
     if (selectedProvider.value?.id === p.id) { selectedProvider.value = null; contacts.value = [] }
   } catch (e) {
     error.value = e.message

@@ -85,6 +85,18 @@ def _create(client, *, key="create-product-001", receipt=None, pricing_input=Non
     return response.json()
 
 
+def _kid_evidence(client, product_id):
+    """Synthetic server-issued result for Product attachment tests, not a pricing oracle."""
+    from backend.app.api.kid import KidRequest
+    from backend.app.core.product.inputs import calculation_context, pricing_input
+    from backend.app.services.product_repository import load_product
+    from backend.app.services.kid_receipts import issue_kid_receipt
+    product = load_product(client.session, product_id)
+    request = KidRequest.model_validate(pricing_input(product, calculation_context(_pricing_input())))
+    values = dict(sri=4, mrm=4, crm=2, vev=.15, T_rhp=1., horizons=[], costs={})
+    return issue_kid_receipt(request, values, client.current['user'], product)
+
+
 def _browser_json_roundtrip(value):
     """Model JSON.stringify: integral JavaScript numbers are posted as ints."""
     if isinstance(value, dict):
@@ -149,6 +161,7 @@ def test_indicatif_persistant_cree_un_product_interne_et_y_rattache_le_kid(produ
 
     kid = product_client.post("/api/kid/save", json={
         "indicative_id": indicative["id"],
+        "calculation_receipt": _kid_evidence(product_client, indicative['product_id']),
         "product_title": "Autocall indicatif",
         "sri": 4, "mrm": 4, "crm": 2, "vev": 0.15, "T_rhp": 1.0,
         "horizons": [], "costs": {},
@@ -436,7 +449,7 @@ def test_booking_direct_rattache_l_execution_au_product(product_client):
     response = product_client.post("/api/deals", json={
         "product_id": product["product_id"],
         "product_terms_version": product["terms_version"],
-        "sens": "vente", "contrepartie": "Banque Test", "devise": "EUR",
+        "sens": "vente", "contrepartie": "Banque Test", "counterparty_id": 1, "devise": "EUR",
         "nominal": 1_000_000, "fair_value": 98.25, "price_traded": 98.20,
         "trade_date": "2026-09-14", "strike_date": "2026-09-14",
         "value_date": "2026-09-16", "maturity_date": "2027-09-14",
@@ -468,7 +481,7 @@ def test_booking_direct_cree_un_product_interne_sans_doublon(product_client):
         secret=receipt_signing_secret(), result={"price": 0.9825},
     )
     response = product_client.post("/api/deals", json={
-        "sens": "vente", "contrepartie": "Banque Test", "devise": "EUR",
+        "sens": "vente", "contrepartie": "Banque Test", "counterparty_id": 1, "devise": "EUR",
         "nominal": 1_000_000, "fair_value": 98.25, "price_traded": 98.20,
         "trade_date": "2026-09-14", "strike_date": "2026-09-14",
         "value_date": "2026-09-16", "maturity_date": "2027-09-14",
@@ -506,7 +519,7 @@ def test_booking_depuis_un_indicatif_reutilise_exactement_son_product(product_cl
 
     response = product_client.post("/api/deals", json={
         "indicative_id": indicative["id"],
-        "sens": "vente", "contrepartie": "Banque Test", "devise": "EUR",
+        "sens": "vente", "contrepartie": "Banque Test", "counterparty_id": 1, "devise": "EUR",
         "nominal": 1_000_000, "fair_value": 98.25, "price_traded": 98.20,
         "trade_date": "2026-09-14", "strike_date": "2026-09-14",
         "value_date": "2026-09-16", "maturity_date": "2027-09-14",
@@ -533,7 +546,7 @@ def test_booking_direct_refuse_un_recu_non_signe(product_client):
     response = product_client.post("/api/deals", json={
         "product_id": product["product_id"],
         "product_terms_version": product["terms_version"],
-        "sens": "vente", "contrepartie": "Banque Test", "devise": "EUR",
+        "sens": "vente", "contrepartie": "Banque Test", "counterparty_id": 1, "devise": "EUR",
         "nominal": 1_000_000, "fair_value": 98.25, "price_traded": 98.20,
         "trade_date": "2026-09-14", "strike_date": "2026-09-14",
         "value_date": "2026-09-16", "maturity_date": "2027-09-14",
@@ -551,6 +564,7 @@ def test_kid_et_emt_s_attachent_directement_au_product(product_client):
     product = _create(product_client, key="product-for-documents")
     kid = product_client.post("/api/kid/save", json={
         "product_id": product["product_id"],
+        "calculation_receipt": _kid_evidence(product_client, product['product_id']),
         "product_terms_version": product["terms_version"],
         "product_title": product["name"],
         "sri": 4, "mrm": 4, "crm": 2, "vev": 0.15, "T_rhp": 1.0,

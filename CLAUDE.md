@@ -158,14 +158,18 @@ devait servir.
 
 `backend/data/structura.db` (SQLite) n'est **jamais versionné** (`.gitignore`) — les
 deals, scripts, études AMC, RFQ etc. de Philippe sont des données réelles, pas du code.
-Sur une machine où ce fichier n'existe pas encore (nouveau clone, autre PC), l'app
-démarre quand même normalement : `init_db()` (appelé au boot dans `main.py`) crée le
-schéma et sème deux comptes par défaut (`admin`/`admin123`, `test`/`test123`) — une base
-vide n'est donc **pas une panne à corriger**, c'est l'état attendu. Ce qui manque alors,
-c'est uniquement le travail réel de Philippe (deals bookés, scripts sauvegardés,
-études...) — pour le retrouver sur une autre machine, il doit copier
-`backend/data/structura.db` lui-même (cloud perso, clé USB...) ; ni git ni Claude ne
-peuvent le faire à sa place. Les données Fama-French (`backend/data/ff_factors/*.parquet`)
+Sur un nouveau clone, le démarrage exige une installation métier ou un workspace
+Admin configuré ; utiliser `scripts/manage_hybrid_dev.py`. Aucun compte à mot de
+passe partagé n'est créé. Une simulation doit être explicitement déclarée par
+`STRUCTURA_BOOTSTRAP_PROFILE=simulation`, `STRUCTURA_WORKSHOP_CHILD=1` et un
+`STRUCTURA_DATA_DIR` absolu hors de `backend/data` ; elle crée son organisation
+technique et, uniquement sur instruction du fichier privé préparé par le workshop,
+un compte technique à secret généré. Le workshop enregistre ensuite ses comptes.
+Sans ce fichier, aucun utilisateur n'est créé. Une base
+d'installation identifiée ne peut pas être ouverte comme simulation. Les données
+réelles se reprennent par les procédures de sauvegarde et d'identité de leur
+installation ; ne jamais remplacer une base pour contourner un refus de bootstrap.
+Les données Fama-French (`backend/data/ff_factors/*.parquet`)
 sont elles versionnées et arrivent avec le clone ; les caches de prix
 (`underlying_prices/`, `fx_rates/`) sont auto-régénérés à la demande.
 

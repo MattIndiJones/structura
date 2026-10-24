@@ -1,0 +1,165 @@
+{
+  "correction": "C23",
+  "date": "2026-10-22",
+  "status": "Implemented and validated locally",
+  "issues": [
+    "M09-02",
+    "M09-03",
+    "M09-04",
+    "M09-07",
+    "M09-08",
+    "M10-01"
+  ],
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "production_qualified": false,
+  "backend": {
+    "distinct_passed": 271,
+    "new_c23_cases": 32,
+    "files": 12,
+    "results": [
+      "backend-final.xml",
+      "concurrency-final.xml",
+      "core-final-02.xml"
+    ],
+    "per_file": {
+      "backend.tests.test_business_permissions": 35,
+      "backend.tests.test_economic_amendments": 30,
+      "backend.tests.test_legal_identity_workflows": 10,
+      "backend.tests.test_product_transition_integrity": 72,
+      "backend.tests.test_rfq_bank_pricing": 7,
+      "backend.tests.test_rfq_bank_publication": 16,
+      "backend.tests.test_rfq_c23": 32,
+      "backend.tests.test_rfq_execution": 14,
+      "backend.tests.test_rfq_network_delivery": 9,
+      "backend.tests.test_rfq_product_exchange": 11,
+      "backend.tests.test_rfq_relationships": 17,
+      "backend.tests.test_rfq_transport": 18
+    },
+    "aggregate": "latest-distinct.xml",
+    "intermediate_fixture_failure": "SQLAlchemy expired User.id accessed from the main-thread session; captured scalar before threads, then repeated with a Barrier. No production relaxation."
+  },
+  "frontend": {
+    "passed": 674,
+    "files": 76,
+    "new_cases": 12,
+    "build_passed": true,
+    "log": "frontend-final.log",
+    "out_dir": "C:/Users/phili/AppData/Local/Temp/structura-c23-vite-build-final"
+  },
+  "baseline": {
+    "existing_passed": 38,
+    "valid_reproductions_failed": 8,
+    "reproductions": "baseline-reproductions.xml",
+    "discarded_fixture_attempts": [
+      "baseline-c23.xml",
+      "baseline-c23-valid.xml"
+    ],
+    "chart_reproduction": "chart-reproduction.json",
+    "snapshot": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c23-baseline-69zbfa86"
+  },
+  "acceptance_tests": {
+    "M09-02": [
+      "test_historical_network_quote_survives_closure_without_becoming_selectable",
+      "frontend/src/utils/rfqAnalysis.test.js"
+    ],
+    "M09-03": [
+      "test_price_revision_invalidates_decision_and_preserves_audit",
+      "test_material_revision_revokes_selection_with_reason_and_product_projection",
+      "test_improved_parent_retires_last_look_and_its_decision",
+      "test_network_price_revision_preserves_old_response_and_clears_exact_decision"
+    ],
+    "M09-04": [
+      "test_currency_is_explicit_and_mismatch_cannot_be_selected",
+      "test_booking_gate_refuses_unqualified_revision_or_currency_even_if_selection_is_forged"
+    ],
+    "M09-07": [
+      "frontend/src/utils/rfqAnalysis.test.js",
+      "chart-reproduction.json"
+    ],
+    "M09-08": [
+      "test_quoted_at_only_patch_validates_merged_times",
+      "test_merged_times_normalize_offsets_and_preserve_entry_time"
+    ],
+    "M10-01": [
+      "test_closed_round_cannot_reopen_and_new_round_is_explicit",
+      "test_successor_of_legacy_abandoned_round_preserves_closed_state",
+      "test_closed_manual_round_keeps_history_but_refuses_economic_edits"
+    ]
+  },
+  "dependencies": {
+    "C01": "targeted pass",
+    "C03": "targeted pass",
+    "C06": "targeted pass",
+    "C04_to_C23": "resulting-position controls re-exercised",
+    "C08": "RFQ retry subset validated; three C08 findings remain open",
+    "C10": "full frontend tests including cross-dossier quote response isolation",
+    "T12": "local application acceptance on two isolated databases; deployed qualification remains partial"
+  },
+  "migration": {
+    "additive": true,
+    "idempotent_test": true,
+    "old_decisions_not_requalified": true,
+    "real_database_touched": false
+  },
+  "http_guard": {
+    "requests_and_curl_disabled": true,
+    "final_blocked_attempts": 0,
+    "httpx_peer": "MockTransport; no deployed TLS acceptance"
+  },
+  "preservation": {
+    "initial_files": 2496,
+    "unchanged_files": 2478,
+    "expected_changed_existing_files": [
+      "backend/app/api/deals.py",
+      "backend/app/api/rfq.py",
+      "backend/app/db/database.py",
+      "backend/app/db/models.py",
+      "backend/app/services/rfq_booking.py",
+      "backend/app/services/rfq_exchange.py",
+      "backend/app/services/rfq_execution.py",
+      "backend/app/services/rfq_publication.py",
+      "backend/app/services/rfq_transport.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/projects/platform/RFQ_NETWORK_OPERATIONS_2026-10-12.md",
+      "frontend/src/stores/rfq.js",
+      "frontend/src/stores/rfq.test.js",
+      "frontend/src/views/RfqAnalysisView.vue",
+      "frontend/src/views/RfqView.vue"
+    ],
+    "unexpected_changes": [],
+    "original_source_copies_verified": 960,
+    "prior_runtime_artifacts_unchanged": true,
+    "frontend_dist_unchanged": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "real_db_present_before": false,
+    "real_db_present_after": false
+  },
+  "services_started": false,
+  "commit": false,
+  "push": false,
+  "source_sha256": {
+    "backend/app/api/deals.py": "cecd11923c1312ecf080e558eed18529a6535d598cd9da9b346390196b055a34",
+    "backend/app/api/rfq.py": "9ec203f81c76ec90ba93756a5d7d2370b56b8ed7c7ccb00985311d59a3cc7f61",
+    "backend/app/db/database.py": "78c4572ff65efa43bfa07910fd5cdf8dd76c9bb3335f5ced997829ab1d53f854",
+    "backend/app/db/models.py": "06c4178fc080d4e2fa1f5d8aefd65a04423105fbd29d699ed7cd2e0395ab424d",
+    "backend/app/db/rfq_quote_migrations.py": "57ea2295d11ecf4c9eb1fa584bd162f605d1c329360e250bf1748e2c3aef9141",
+    "backend/app/services/rfq_booking.py": "8fbc0942805eead0048d04f3178eb148744df3aaa1f65ffc830f9c0f9b3b46f0",
+    "backend/app/services/rfq_exchange.py": "b364de12819c9b02d47eb969cfbfe3e6a57d470e60afc77bf4635f03461a7247",
+    "backend/app/services/rfq_execution.py": "923dd4297a4846031efbf4ff32965321c18c1028b91a2318723c4df3bc01b61a",
+    "backend/app/services/rfq_publication.py": "897fd87383d90b6d550a15b46c3aa992c4b30537e47427b8e13d2c391232bb79",
+    "backend/app/services/rfq_quote_integrity.py": "8ed42b3255e9d97146ed996c1ada177d45ac16ecb58a85198211a761ba11a615",
+    "backend/app/services/rfq_transport.py": "759c9dfc6b06fa09b411e1ed9ef409376157983bd45c599f4caa74fea26a9ad7",
+    "backend/tests/test_rfq_c23.py": "702bfe3156b11e7e6f3914089615c0617204fb27da23b3ac4a9f8ee60d1c0e4f",
+    "frontend/src/stores/rfq.js": "3fae790e9822e1f517f33c9436e66581bc9bee7adf0c4dd7e7b3c43006f6e6fa",
+    "frontend/src/stores/rfq.test.js": "6d0dee88c41b771c85d94cb448753a535b6f674c13ce89fc40a4c9e6d6e25e35",
+    "frontend/src/utils/rfqAnalysis.js": "3d5f015050cac403401be00de760e9a2c36598edfc060dce97408a400fe9e38d",
+    "frontend/src/utils/rfqAnalysis.test.js": "f7615be6f4e530216bb8dd45b90d85e56f9817f654602960b382d7439ec2d3da",
+    "frontend/src/views/RfqAnalysisView.vue": "b0176864c8f92754524cb4efab479b8342b30b8bf35fd6a1c16ea60bf4577460",
+    "frontend/src/views/RfqView.vue": "57d26ae8dcf75a654eb8e536a33339767bccd0670a816aca67e61db3dacb57c9"
+  }
+}

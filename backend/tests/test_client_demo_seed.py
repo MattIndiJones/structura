@@ -255,7 +255,9 @@ def test_alpes_est_dormant_par_rapport_a_sa_propre_cadence(base):
     assert round(cycle["median_interval_days"]) == 62
     assert cycle["days_since_last"] == 210
 
-    signaux = build_signals(base, entity_id=None, user_id=None, asof=AUJOURDHUI)
+    production = build_signals(base, entity_id=None, user_id=None, asof=AUJOURDHUI)
+    assert not any(signal.kind == DORMANT for signal in production)
+    signaux = build_signals(base, entity_id=None, user_id=None, asof=AUJOURDHUI, include_demo=True)
     dormants = {s.client_name for s in signaux if s.kind == DORMANT}
     assert "Alpes Institutionnel" in dormants
     # Rhône traite tous les 88 jours et se tait depuis 74 : pas dormant.
@@ -351,12 +353,40 @@ def test_la_comparaison_d_anne_est_lisible_et_descriptive(base):
 def test_le_jeu_produit_des_signaux_de_plusieurs_natures(base):
     """Un jeu qui ne lèverait qu'un type de signal ne permettrait pas de voir
     l'écran Cycles & Signaux faire son travail."""
-    signaux = build_signals(base, entity_id=None, user_id=None, asof=AUJOURDHUI)
+    signaux = build_signals(base, entity_id=None, user_id=None, asof=AUJOURDHUI, include_demo=True)
     natures = {s.kind for s in signaux}
     assert FOLLOW_UP_DUE in natures
     assert DORMANT in natures
     assert UPCOMING_MATURITY in natures
     assert len(natures) >= 3, f"seulement {natures}"
+
+
+def test_demo_signals_require_explicit_http_opt_in(authenticated_client):
+    from contextlib import contextmanager
+    from backend.app.api import client_intelligence as api
+    from backend.app.db.database import get_session
+
+    client = authenticated_client
+    client.app.include_router(api.router)
+    with contextmanager(client.app.dependency_overrides[get_session])() as session:
+        for ticker, group in CATALOGUE:
+            session.add(Underlying(ticker=ticker, label=ticker, group_name=group))
+        session.commit()
+        semer(session, entity_id=1, user_id=1)
+    for route in ("signals", "overview"):
+        real = client.get(f"/api/client-intelligence/{route}", params={"asof": AUJOURDHUI.isoformat()})
+        assert real.status_code == 200, real.text
+        assert real.json()["analysis_mode"] == "real"
+        demo = client.get(f"/api/client-intelligence/{route}", params={
+            "asof": AUJOURDHUI.isoformat(), "include_demo": "true"})
+        assert demo.status_code == 200, demo.text
+        assert demo.json()["analysis_mode"] == "demo_included"
+        real_kinds = ({item["kind"] for item in real.json()["signals"]} if route == "signals"
+                      else set(real.json()["by_kind"]))
+        demo_kinds = ({item["kind"] for item in demo.json()["signals"]} if route == "signals"
+                      else set(demo.json()["by_kind"]))
+        assert DORMANT not in real_kinds and UPCOMING_MATURITY not in real_kinds
+        assert {DORMANT, UPCOMING_MATURITY} <= demo_kinds
 
 
 # ── Le fichier d'import de démonstration ─────────────────────────────

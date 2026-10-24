@@ -1,5 +1,6 @@
 import { reactive, watch } from 'vue'
 import { apiFetch } from '../utils/api'
+import { sessionToken } from '../utils/session.js'
 
 function read(key) { try { return localStorage.getItem(key) } catch { return null } }
 function saved() { try { return JSON.parse(read('ai_settings_v1') || '{}') } catch { return {} } }
@@ -13,14 +14,14 @@ export const aiSettings = reactive({
 // Session credentials are shared, but never written to browser storage.
 export const aiCredentials = reactive({ openai: '', anthropic: '' })
 export const aiCatalog = reactive({ providers: [], loading: false, error: '', url: '' })
-let identity = read('auth_token'), epoch = 0
+let identity = sessionToken(), epoch = 0
 watch(aiSettings, () => {
   try { localStorage.setItem('ai_settings_v1', JSON.stringify(aiSettings)) } catch { /* private browsing */ }
 }, { deep: true })
 
 export function syncAiIdentity() {
-  if (identity !== read('auth_token')) {
-    identity = read('auth_token')
+  if (identity !== sessionToken()) {
+    identity = sessionToken()
     aiCredentials.openai = ''; aiCredentials.anthropic = ''
   }
 }

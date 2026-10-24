@@ -40,10 +40,11 @@ export function barrierChipClass(b) {
 
 export function barrierGapLabel(b) {
   const g = b.gap_pts
-  if (barrierPending(b)) return 'en attente du strike'
-  if (b.kind === 'ki' && g <= 0) return `franchie (${g.toFixed(1)} pts)`
-  if ((b.kind === 'autocall' || b.kind === 'coupon') && g >= 0) return `≥ barrière (+${g.toFixed(1)} pts)`
-  return `${g >= 0 ? '+' : ''}${g.toFixed(1)} pts`
+  if (barrierPending(b)) return b.value_status === 'STRIKE_PENDING' ? 'en attente du strike' : 'observable indisponible'
+  const basis = b.monitoring_basis === 'SAMPLED_CLOSES_SINCE_STRIKE' ? ' · clôtures indicatives depuis le strike' : ''
+  if (b.kind === 'ki' && g <= 0) return `franchie (${g.toFixed(1)} pts)${basis}`
+  if ((b.kind === 'autocall' || b.kind === 'coupon') && g >= 0) return `≥ barrière (+${g.toFixed(1)} pts)${basis}`
+  return `${g >= 0 ? '+' : ''}${g.toFixed(1)} pts${basis}`
 }
 
 // Closest two tick labels may sit on the ruler, in % of its width: below

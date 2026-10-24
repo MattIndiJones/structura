@@ -3968,10 +3968,7 @@
                               <span v-if="priceRefreshing === u.key" class="w-2.5 h-2.5 border border-blue-400 border-t-transparent rounded-full animate-spin inline-block"></span>
                               <span v-else>⬇ Yahoo</span>
                             </button>
-                            <label class="px-2 py-0.5 rounded border border-slate-700 text-slate-400 hover:text-purple-300 hover:border-purple-700 transition-colors text-[10px] cursor-pointer">
-                              📁 Upload
-                              <input type="file" accept=".xlsx,.json" class="hidden" @change="uploadUnderlying(u, $event)" />
-                            </label>
+                            <PriceSeriesImport :busy="priceRefreshing === u.key" @upload="uploadUnderlying(u, $event)" />
                           </div>
                         </td>
                       </tr>
@@ -4423,6 +4420,7 @@ import { apiFetch } from '../utils/api.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
 import SensitiveValue from '../components/SensitiveValue.vue'
+import PriceSeriesImport from '../components/PriceSeriesImport.vue'
 import { formatPercent, formatPercentRaw, formatNumber, formatInt, formatMoneyRound, formatDate } from '../utils/format.js'
 
 Chart.register(...registerables)
@@ -5359,8 +5357,8 @@ async function fetchUnderlying(u) {
   }
 }
 
-async function uploadUnderlying(u, event) {
-  const file = event.target.files?.[0]
+async function uploadUnderlying(u, payload) {
+  const { file, currency, price_type, unit, adjustment_date } = payload
   if (!file) return
   priceErrors.value[u.key] = ''
   priceRefreshing.value = u.key
@@ -5369,6 +5367,10 @@ async function uploadUnderlying(u, event) {
     fd.append('key', u.key)
     fd.append('file', file)
     if (u.ticker) fd.append('ticker', u.ticker)
+    fd.append('currency', currency)
+    fd.append('price_type', price_type)
+    fd.append('unit', unit)
+    if (adjustment_date) fd.append('adjustment_date', adjustment_date)
     const res = await apiFetch('/api/amc/prices/upload', { method: 'POST', body: fd })
     if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `Erreur ${res.status}`) }
     await loadPriceStatus()
@@ -5376,7 +5378,6 @@ async function uploadUnderlying(u, event) {
     priceErrors.value[u.key] = e.message
   } finally {
     priceRefreshing.value = null
-    event.target.value = ''
   }
 }
 

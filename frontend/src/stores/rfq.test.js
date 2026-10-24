@@ -11,12 +11,94 @@ function response(body, status = 200) {
   }
 }
 
+describe('commande électronique durable', () => {
+  beforeEach(() => { setActivePinia(createPinia()); sessionStorage.clear(); localStorage.clear() })
+  afterEach(() => vi.unstubAllGlobals())
+  const payload = { quote_id: 4, expected_terms_version: 2, expected_terms_fingerprint: 'a'.repeat(64) }
+  it('reprend la même clé après perte de réponse sans conserver le contenu sensible en session', async () => {
+    const store = useRfqStore(); store.current = { id: 1 }; store.list = [{ id: 1 }]
+    const commands = []
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      if (options?.method === 'POST') {
+        commands.push(JSON.parse(options.body))
+        if (commands.length === 1) throw new Error('Réponse perdue')
+        return response({ id: 'EXE-1' })
+      }
+      return response({ id: 1, electronic_execution: { id: 'EXE-1', state: 'PENDING' } })
+    }))
+    await expect(store.requestElectronicExecution(1, payload)).rejects.toThrow('Réponse perdue')
+    expect(sessionStorage.getItem('structura_pending_commands_v1')).not.toContain('quote_id')
+    await store.requestElectronicExecution(1, payload)
+    expect(commands[1].command_key).toBe(commands[0].command_key)
+    expect(store.current.electronic_execution.state).toBe('PENDING')
+    expect(JSON.parse(sessionStorage.getItem('structura_pending_commands_v1'))).toEqual({})
+  })
+})
+
 describe('les mutations concurrentes d’une quote', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it('C23 applique la révocation serveur et la révision du last look dans le même dossier', async () => {
+    const store = useRfqStore()
+    store.current = { id: 1, selected_quote_id: 5, selected_quote_revision: 2, selection_reason_note: 'Ancien choix',
+      quotes: [{ id: 4, revision: 2 }, { id: 5, revision: 2, status: 'recu' }] }
+    store.list = [{ id: 1, selected_quote_id: 5 }]
+    const fetch = vi.fn(async (_url, options) => {
+      expect(JSON.parse(options.body)).toEqual({ expected_revision: 2, price: 97 })
+      return response({ id: 4, revision: 3, price: 97, rfq_state: {
+        id: 1, status: 'quote', selected_quote_id: null, selected_quote_revision: null, selection_reason_note: null,
+        quotes: [{ id: 5, revision: 3, status: 'expire', comparable: false }],
+      } })
+    })
+    vi.stubGlobal('fetch', fetch)
+    await store.updateQuote(1, 4, { price: 97 })
+    expect(store.current.selected_quote_id).toBeNull()
+    expect(store.current.selection_reason_note).toBeNull()
+    expect(store.current.quotes[1]).toMatchObject({ id: 5, revision: 3, status: 'expire', comparable: false })
+    expect(store.list[0].selected_quote_id).toBeNull()
+  })
+
+  it('C23 sérialise les modifications avec la révision renvoyée par la précédente', async () => {
+    const store = useRfqStore()
+    store.current = { id: 1, quotes: [{ id: 4, revision: 2 }] }
+    const calls = []
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      const patch = JSON.parse(options.body)
+      calls.push(patch)
+      return response({ id: 4, revision: patch.expected_revision + 1, ...patch,
+        expected_revision: undefined })
+    }))
+    await Promise.all([store.updateQuote(1, 4, { price: 98 }), store.updateQuote(1, 4, { status: 'decline' })])
+    expect(calls).toEqual([{ expected_revision: 2, price: 98 }, { expected_revision: 3, status: 'decline' }])
+  })
+
+  it('C23 transmet la révision effectivement affichée lors de la sélection', async () => {
+    const store = useRfqStore()
+    store.current = { id: 1, quotes: [{ id: 4, revision: 3 }] }
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      expect(JSON.parse(options.body)).toEqual({ selected_quote_id: 4, expected_quote_revision: 3 })
+      return response({ id: 1, selected_quote_id: 4, selected_quote_revision: 3 })
+    }))
+    await store.selectQuote(1, 4)
+    expect(store.current.selected_quote_revision).toBe(3)
+  })
+
+  it('C23 une réponse tardive avec révocation ne touche pas un autre dossier', async () => {
+    const store = useRfqStore()
+    store.current = { id: 1, quotes: [{ id: 4, revision: 2 }] }
+    let finish
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { finish = resolve })))
+    const pending = store.updateQuote(1, 4, { price: 97 })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    store.current = { id: 2, selected_quote_id: 6, quotes: [{ id: 6, revision: 4 }] }
+    finish(response({ id: 4, revision: 3, rfq_state: { id: 1, selected_quote_id: null, quotes: [] } }))
+    await pending
+    expect(store.current).toMatchObject({ id: 2, selected_quote_id: 6, quotes: [{ id: 6, revision: 4 }] })
+  })
 
   it('reçoit un prix réseau en préservant les hypothèses locales et le dossier actif', async () => {
     const store = useRfqStore()

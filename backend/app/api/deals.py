@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..runtime import business_today, business_now
+from ..core.access import has_business_role, is_organization_superuser
 from ..db.models import (Alert, AuditEvent, Deal, DealContractVersion, DealEvent,
                           DealPortfolioMembership, Entity, User, Counterparty,
                           Portfolio, LifecycleProposal,
@@ -28,6 +29,7 @@ from ..services.market_data import (
     DEFAULT_MARKET_DATA_PROVIDER, dividend_profile, load_hist_prices,
     load_yahoo_reference_closes, market_data_provider_for_deal,
 )
+from ..services.archived_documents import DocumentSelection, ProposalFreeze
 from ..core.payscript.parser import parse_script, resolve_constats, CompiledScript, effective_T_max
 from ..core.payscript.engine import derniere_fenetre, eval_script_on_history
 from ..core.inlife_valuation import (
@@ -46,6 +48,7 @@ from ..core.lifecycle_controls import (
 )
 from ..core.market_snapshot import snapshot_rate, snapshot_rate_is_default
 from ..core.payoff_families import canonical_payoff_family, normalize_new_payoff_family
+from ..core.watchlist_observations import watchlist_observations
 from ..core.payoff_terms import classify_param_barrier
 from ..core.agregats_officiels import calculer as calculer_agregat
 from ..core.rfq_controls import (
@@ -62,7 +65,7 @@ from ..core.valuation_context import (
     verify_pricing_receipt,
 )
 from ..core.deal_valuation import (
-    DealGreeksRequest, MtmRequest, mtm_core as _deal_mtm_core,
+    DealGreeksRequest, MtmRequest, standard_mtm_request, mtm_core as _deal_mtm_core,
 )
 from ..core.valuation_runs import stage_valuation_run, replay_valuation_run
 from ..core.product.inputs import terms_from_input
@@ -77,59 +80,12 @@ from ..services.product_receipts import verify_server_receipt
 router = APIRouter(prefix="/api/deals", tags=["deals"])
 
 
+from ..core.booking_contract import DealCreate, LegalIdentityExceptionRequest
+
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
-class DealCreate(BaseModel):
-    ccr_netting_set_id: Optional[int] = None
-    product_id: Optional[int] = None
-    product_terms_version: Optional[int] = None
-    sens: Literal["achat", "vente"] = "vente"
-    contrepartie: str
-    devise: str = "EUR"
-    product_type: str = ""
-    fixing_policy: Literal["AUTO_YAHOO"] = "AUTO_YAHOO"
-    nominal: float
-    fair_value: float
-    price_traded: float
-    trade_date: str
-    strike_date: str
-    value_date: str
-    maturity_date: str
-    payment_date: str = ""
-    T: float
-    underlyings: List[dict]          # [{name, ticker, s0_abs}]
-    observation_times: List[float]   # unique AT times in years from value_date
-    script_snapshot: str
-    script_id: Optional[int] = None
-    market_snapshot: dict = {}
-    # Returned by /api/price. Kept nullable at schema level so a missing proof
-    # reaches the audited booking refusal boundary; every accepted booking
-    # requires it.
-    pricing_receipt: Optional[dict] = None
-    # Pre-trade opportunity this deal converts from, if any — see
-    # db/models.py:Deal.indicative_id.
-    indicative_id: Optional[int] = None
-    # Winning RFQ response this deal was booked from, if any — see
-    # db/models.py:Deal.rfq_id.
-    rfq_id: Optional[int] = None
-    execution_agreement_id: Optional[int] = None
-    # ── Rattachement commercial (Client Intelligence) ──────────────────
-    # À QUI le produit est vendu. Le reste du modèle décrit l'offre —
-    # contrepartie est l'émetteur qui fait face au trade. Les trois sont
-    # optionnels : un deal booké hors parcours client reste parfaitement
-    # valide, simplement non rattaché.
-    client_id: Optional[int] = None
-    opportunity_id: Optional[int] = None
-    # L'AFFILIATION, jamais la personne : c'est ce qui empêche qu'un trade
-    # change de société le jour où son interlocuteur change d'employeur.
-    primary_affiliation_id: Optional[int] = None
-    mandate_id: Optional[int] = None
-    transaction_format: Optional[str] = None
-    instrument_family: Optional[str] = None
-    payoff_family: Optional[str] = None
-    payoff_description: Optional[str] = None
-    documentation_reference: Optional[str] = None
-    commercial_reason: Optional[str] = None
+
+
 
 
 class DealUpdate(BaseModel):
@@ -341,6 +297,9 @@ def _validate_rfq_booking_identity(rfq: RfqRequest, body: DealCreate,
     selected = next((q for q in quotes if q.id == rfq.selected_quote_id), None)
     if not selected or selected.price is None:
         raise HTTPException(422, "La réponse retenue doit porter un prix final avant booking.")
+    from ..services.rfq_quote_integrity import same_currency, selection_matches
+    if not same_currency(session, rfq, selected) or not selection_matches(rfq, selected):
+        raise HTTPException(409, "Requalifiez la sélection de cette révision et sa devise avant booking.")
     if selected.status in {"decline", "expire"}:
         raise HTTPException(422, "La réponse retenue n'est plus exécutable.")
     if selected.id in superseded_quote_ids(quotes):
@@ -655,6 +614,7 @@ def _deal_row(
         "entity_id": d.entity_id,
         "user_id": d.user_id,
         "counterparty_id": d.counterparty_id,
+        "legal_identity_exception": json.loads(d.legal_identity_exception_json) if d.legal_identity_exception_json else None,
         "ccr_netting_set_id": d.ccr_netting_set_id,
         "uat_batch_id": d.uat_batch_id,
         "indicative_id": d.indicative_id,
@@ -716,6 +676,7 @@ def _deal_row(
         "T": d.T,
         "realized_payout": d.realized_payout,
         "settlement_amount": d.settlement_amount,
+        "settlement_date": d.settlement_date,
         "resolution_outcome": d.resolution_outcome,
         "underlyings": json.loads(d.underlyings_json),
         "market_snapshot": json.loads(d.market_snapshot_json),
@@ -874,6 +835,7 @@ def _amendment_row(request: TradeAmendmentRequest) -> dict:
         "applied_by": request.applied_by,
         "applied_at": request.applied_at.isoformat() if request.applied_at else None,
         "applied_contract_version": request.applied_contract_version,
+        "credit_check": json.loads(request.credit_check_json) if request.credit_check_json else None,
         "created_at": request.created_at.isoformat(),
     }
 
@@ -907,6 +869,9 @@ def _contract_snapshot(deal: Deal) -> dict:
         "contract_version": deal.contract_version,
         "sens": deal.sens,
         "contrepartie": deal.contrepartie,
+        "counterparty_id": deal.counterparty_id,
+        "legal_identity_exception": json.loads(deal.legal_identity_exception_json) if deal.legal_identity_exception_json else None,
+        "ccr_netting_set_id": deal.ccr_netting_set_id,
         "devise": deal.devise,
         "nominal": deal.nominal,
         "fair_value": deal.fair_value,
@@ -986,19 +951,25 @@ def _validated_amendment_value(
             "field": field,
         })
     if field in {"nominal", "price_traded"}:
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        try:
+            numeric = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else float("nan")
+        except (OverflowError, ValueError):
+            numeric = float("nan")
+        if not math.isfinite(numeric) or numeric <= 0:
             raise HTTPException(422, {
                 "code": "AMENDMENT_VALUE_INVALID", "field": field,
-                "message": "La nouvelle valeur doit être strictement positive.",
+                "message": "La nouvelle valeur doit être finie et strictement positive.",
             })
-        return float(value)
+        return numeric
     if field == "contrepartie":
-        if not isinstance(value, str) or not value.strip():
-            raise HTTPException(422, {
-                "code": "AMENDMENT_VALUE_INVALID", "field": field,
-                "message": "La contrepartie ne peut pas être vide.",
-            })
-        return value.strip()
+        from ..services.legal_identity import active_counterparty
+        if not isinstance(value, dict) or type(value.get("counterparty_id")) is not int:
+            raise HTTPException(422, "L'amendement doit désigner un counterparty_id juridique explicite.")
+        legal = active_counterparty(session, value["counterparty_id"])
+        if legal.id == deal.counterparty_id:
+            raise HTTPException(422, "La contrepartie juridique est inchangée ; le renommage du catalogue ne nécessite aucun transfert de contrat.")
+        return {"counterparty_id": legal.id, "contrepartie": legal.name,
+                "ccr_netting_set_id": value.get("ccr_netting_set_id", deal.ccr_netting_set_id if legal.id == deal.counterparty_id else None)}
     if field == "payment_date":
         try:
             parsed = date.fromisoformat(value)
@@ -1051,21 +1022,7 @@ def _validated_amendment_value(
     raise HTTPException(422, {"code": "AMENDMENT_VALUE_INVALID", "field": field})
 
 
-def _deal_entity_id(deal: Deal, session: Session) -> int | None:
-    if deal.entity_id is not None:
-        return deal.entity_id
-    owner = session.get(User, deal.user_id)
-    return owner.entity_id if owner else None
-
-
-def _can_access_deal(deal: Deal, current: User, session: Session) -> bool:
-    if deal.user_id == current.id or getattr(current, "role", None) == "admin":
-        return True
-    return (
-        getattr(current, "role", None) in {"ops_maker", "checker"} and
-        current.entity_id is not None and
-        current.entity_id == _deal_entity_id(deal, session)
-    )
+from ..services.business_access import deal_entity_id as _deal_entity_id, can_read_deal as _can_access_deal
 
 
 def _workflow_failure(
@@ -1131,7 +1088,7 @@ def _ops_deal(
     entity_id = _deal_entity_id(deal, session)
     if current.entity_id is None or current.entity_id != entity_id:
         raise HTTPException(404, "Deal introuvable")
-    if getattr(current, "role", None) not in allowed_roles:
+    if not has_business_role(current, allowed_roles):
         role_label = "Ops Maker" if allowed_roles == {"ops_maker"} else "Ops Checker"
         _reject_workflow_action(
             session,
@@ -1434,14 +1391,16 @@ def _checker_request(
         amendment_four_eyes_enabled()
         or request.field_name == "commercial_attribution"
     )
+    from ..core.access import require_managed_capability
+    require_managed_capability(current, "operations.validate" if strict_four_eyes else "operations.prepare")
+    if not _can_access_deal(deal, current, session):
+        raise HTTPException(404, "Demande d'amendement introuvable")
     if not strict_four_eyes:
         # Single-signature mode: whoever may act on the deal may decide on its
         # amendments, including the maker. Every other guarantee still applies.
-        if not _can_access_deal(deal, current, session):
-            raise HTTPException(404, "Demande d'amendement introuvable")
         return deal, request
 
-    if getattr(current, "role", None) not in {"checker", "admin"}:
+    if not has_business_role(current, {"checker", "admin"}):
         raise HTTPException(403, {
             "code": "CHECKER_ROLE_REQUIRED",
             "message": "Cette action est réservée à un checker ou administrateur.",
@@ -1469,7 +1428,10 @@ def _checker_request(
 
 
 def _booking_request_summary(body: DealCreate) -> dict:
-    return {
+    return _safe_booking_numbers({
+        "command_key": body.command_key,
+        "counterparty_id": body.counterparty_id,
+        "legal_identity_exception": body.legal_identity_exception.model_dump() if body.legal_identity_exception else None,
         "rfq_id": body.rfq_id,
         "execution_agreement_id": body.execution_agreement_id,
         "sens": body.sens,
@@ -1494,7 +1456,28 @@ def _booking_request_summary(body: DealCreate) -> dict:
         "transaction_format": body.transaction_format,
         "instrument_family": body.instrument_family,
         "payoff_family": body.payoff_family,
-    }
+    })
+
+
+def _safe_booking_numbers(value):
+    """Keep rejected non-finite values readable in strict JSON audit records."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _safe_booking_numbers(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_safe_booking_numbers(v) for v in value]
+    return value
+
+
+def _non_finite_booking_paths(value, path=''):
+    if isinstance(value, float) and not math.isfinite(value):
+        return [path]
+    if isinstance(value, dict):
+        return [p for k, v in value.items() for p in _non_finite_booking_paths(v, f'{path}.{k}'.lstrip('.'))]
+    if isinstance(value, (list, tuple)):
+        return [p for i, v in enumerate(value) for p in _non_finite_booking_paths(v, f'{path}[{i}]')]
+    return []
 
 
 def _ai_script_provenance(body: DealCreate) -> Optional[dict]:
@@ -1639,26 +1622,84 @@ def next_ref(
     return {"reference": _gen_ref(entity.name if entity else None, session)}
 
 
-def _book_deal(
+def _book_deal(body: DealCreate, current: User, session: Session, *,
+               reference_prefix: str | None = None, uat_batch_id: int | None = None):
+    from ..core.access import require_booking_permission
+    from ..services.booking_commands import booking_intent
+    require_booking_permission(current)
+    body = body.model_copy(deep=True)
+    if _non_finite_booking_paths(body.model_dump()):
+        # Keep non-finite refusals at the existing audited validation boundary.
+        return _execute_booking(body, current, session, reference_prefix=reference_prefix,
+                                uat_batch_id=uat_batch_id)
+    try:
+        key, digest, replay = booking_intent(session, current, body,
+            reference_prefix=reference_prefix, uat_batch_id=uat_batch_id)
+        if replay is not None:
+            if not _can_access_deal(replay, current, session):
+                raise ProductError('BOOKING_NOT_FOUND', 'Booking introuvable.', 404)
+            result = _deal_row(replay, _get_events(replay.id, session), session)
+            session.rollback()
+            return result
+        return _execute_booking(body, current, session, reference_prefix=reference_prefix,
+            uat_batch_id=uat_batch_id, command=(key, digest))
+    except ProductError as exc:
+        session.rollback()
+        _reject_booking(session, current, body, exc.status, {'code': exc.code, 'message': str(exc)})
+    except Exception:
+        session.rollback()
+        raise
+
+
+def _execute_booking(
     body: DealCreate,
     current: User,
     session: Session,
     *,
     reference_prefix: str | None = None,
     uat_batch_id: int | None = None,
+    command: tuple[str, str] | None = None,
 ):
+    from ..core.access import require_booking_permission
+    require_booking_permission(current)
+    invalid_numbers = _non_finite_booking_paths(body.model_dump())
+    if invalid_numbers:
+        _reject_booking(session, current, body, 422, {
+            'code': 'BOOKING_NON_FINITE',
+            'message': 'Valeurs numériques finies requises avant booking.',
+            'fields': invalid_numbers,
+        })
     from ..services import rfq_execution
     execution_request_hash = rfq_execution.booking_request_hash(body)
     try:
         agreement, replayed = rfq_execution.booking_context(session, body, current)
         if replayed is not None:
-            session.rollback()
-            return _deal_row(replayed, _get_events(replayed.id, session), session)
+            result = _deal_row(replayed, _get_events(replayed.id, session), session)
+            if command is not None:
+                from ..services.booking_commands import stage_booking_command
+                stage_booking_command(session, current, *command, replayed)
+                session.commit()
+            else:
+                session.rollback()
+            return result
+        from ..services.legal_identity import active_counterparty
+        legal_exception = None
+        if body.legal_identity_exception is not None:
+            from ..services.legal_identity import booking_exception
+            legal_exception = booking_exception(session, current, body)
+            body.contrepartie = legal_exception["counterparty_name"]
+            legal_exception.update({"actor_user_id": current.id, "actor_role": current.role,
+                "entity_id": current.entity_id, "approved_at": business_now().isoformat(),
+                "booking_request_hash": execution_request_hash,
+                "nominal": body.nominal, "currency": body.devise})
+        else:
+            legal = active_counterparty(session, body.counterparty_id)
+            if body.contrepartie.strip() != legal.name:
+                raise HTTPException(422, "Le libellé ne correspond pas à l'identifiant juridique choisi.")
+            body.contrepartie = legal.name
         _validate_economics(body)
         ai_provenance = _ai_script_provenance(body)
         _apply_pricing_receipt(body, ai_provenance)
-        from ..core.ccr.service import enforce_booking
-        enforce_booking(session, current, body)
         if ai_provenance and not body.pricing_receipt:
             body.market_snapshot["ai_script_provenance"] = ai_provenance
     except HTTPException as exc:
@@ -1714,11 +1755,14 @@ def _book_deal(
 
         selected = session.get(RfqQuote, source_rfq.selected_quote_id) \
             if source_rfq.selected_quote_id else None
-        from .rfq import _counterparty_by_provider
-        expected_counterparty = (
-            _counterparty_by_provider(session).get(selected.provider) if selected else None)
-        if agreement:
-            expected_counterparty = json.loads(agreement.snapshot_json)["counterparty_name"]
+        try:
+            expected_legal = (active_counterparty(session, json.loads(agreement.snapshot_json)["counterparty_id"]) if agreement
+                              else rfq_execution._counterparty(session, source_rfq, selected) if selected else None)
+            expected_counterparty = expected_legal.name if expected_legal else None
+            if expected_legal and body.counterparty_id != expected_legal.id:
+                raise HTTPException(422, "La banque bookée diffère de l'identité juridique de la cotation.")
+        except HTTPException as exc:
+            _reject_booking(session, current, body, exc.status_code, exc.detail)
         gate_failures = booking_gate_failures(
             source_rfq, selected,
             now=business_now(),
@@ -1965,6 +2009,29 @@ def _book_deal(
     else:
         pending_product_terms = priced_terms
 
+    if source_product is not None:
+        for field in ("transaction_format", "instrument_family", "documentation_reference"):
+            expected = str(getattr(source_product.intent, field) or "").strip()
+            requested = legal_context[field]
+            if expected:
+                if requested and requested.casefold() != expected.casefold():
+                    _reject_booking(session, current, body, 422, {
+                        "code": "PRODUCT_LEGAL_CONTEXT_MISMATCH",
+                        "message": f"Le champ {field} contredit le Product ouvert.",
+                        "field": field,
+                    })
+                legal_context[field] = expected
+
+    # Legal metadata is authoritative only after the RFQ reconciliation above.
+    # Every native booking route reaches this gate before any Deal is persisted.
+    try:
+        from ..core.ccr.service import enforce_booking
+        for field, value in legal_context.items():
+            setattr(body, field, value)
+        enforce_booking(session, current, body)
+    except HTTPException as exc:
+        _reject_booking(session, current, body, exc.status_code, exc.detail)
+
     # A new deal's script and frozen CONSTAT values are the contract.  Client
     # Monte-Carlo grid points are never a safe booking fallback.
     try:
@@ -2119,8 +2186,8 @@ def _book_deal(
         script_id=body.script_id,
         sens=body.sens,
         contrepartie=body.contrepartie,
-        counterparty_id=(session.exec(select(Counterparty.id).where(
-            Counterparty.name == body.contrepartie)).first()),
+        counterparty_id=body.counterparty_id,
+        legal_identity_exception_json=json.dumps(legal_exception, ensure_ascii=False) if legal_exception else None,
         ccr_netting_set_id=body.ccr_netting_set_id,
         devise=body.devise,
         product_type=body.product_type,
@@ -2141,6 +2208,8 @@ def _book_deal(
     session.add(deal)
     session.flush()
     rfq_execution.attach_booking(session, agreement, deal, current, execution_request_hash)
+    from ..services.rfq_electronic import attach_booking as attach_electronic_booking
+    attach_electronic_booking(session, body, deal, current, execution_request_hash)
 
     if quote_to_qualify is not None:
         quote_to_qualify.firmness = QuoteFirmness.FIRM.value
@@ -2353,6 +2422,11 @@ def _book_deal(
             reason=f"Booking du Product dans le deal {deal.reference}.")
 
     try:
+        if legal_exception is not None:
+            record_audit_event(session, action="BOOKING_LEGAL_IDENTITY_EXCEPTION_APPROVED",
+                object_type="DEAL", object_id=deal.id, actor_user_id=current.id,
+                result="SUCCESS", reason=legal_exception["reason"], after=legal_exception,
+                metadata={"product_id": deal.product_id, "contract_version": deal.contract_version})
         record_audit_event(
             session,
             action="BOOKING_ACCEPTED",
@@ -2369,8 +2443,11 @@ def _book_deal(
                 **legal_context,
             },
             result="SUCCESS",
-            metadata={"rfq_id": body.rfq_id},
+            metadata={"rfq_id": body.rfq_id, "command_key": command[0] if command else None},
         )
+        if command is not None:
+            from ..services.booking_commands import stage_booking_command
+            stage_booking_command(session, current, *command, deal)
         session.commit()
     except IntegrityError:
         session.rollback()
@@ -2407,9 +2484,11 @@ class DealPortfoliosSet(BaseModel):
 
 def _deal_for_portfolio_change(deal_id: int, current: User, session: Session) -> Deal:
     deal = session.get(Deal, deal_id)
-    is_admin = getattr(current, "role", "user") == "admin"
-    if not deal or (not is_admin and deal.user_id != current.id):
+    if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
+    from ..core.access import has_capability
+    if not (has_capability(current, "business.prepare") or has_capability(current, "operations.prepare")):
+        raise HTTPException(403, "Votre profil ne permet pas de modifier les vues de portefeuille.")
     return deal
 
 
@@ -2420,10 +2499,11 @@ def _validated_portfolios(
     portfolios = [session.get(Portfolio, pid) for pid in unique_ids]
     if any(p is None for p in portfolios):
         raise HTTPException(404, "Portefeuille introuvable")
-    if any(p.user_id != deal.user_id for p in portfolios):
+    if any((p.entity_id != _deal_entity_id(deal, session) if p.entity_id is not None
+            else p.user_id != deal.user_id) for p in portfolios):
         raise HTTPException(
             422,
-            "Chaque portefeuille doit appartenir au propriétaire du deal.",
+            "Chaque portefeuille doit appartenir à l’organisation du deal.",
         )
     return portfolios
 
@@ -2502,12 +2582,8 @@ def list_deals(
     session: Annotated[Session, Depends(get_session)],
 ):
     statement = select(Deal).order_by(Deal.created_at.desc())
-    current_role = getattr(current, "role", "user")
-    if current_role not in {"ops_maker", "checker", "admin"}:
-        statement = statement.where(Deal.user_id == current.id)
-    deals = session.exec(statement).all()
-    if current_role in {"ops_maker", "checker"}:
-        deals = [deal for deal in deals if _can_access_deal(deal, current, session)]
+    deals = [deal for deal in session.exec(statement).all()
+             if _can_access_deal(deal, current, session)]
     from ..core.risk_lifecycle import terminal_dates_by_deal
     terminal_dates = terminal_dates_by_deal(
         session, [deal.id for deal in deals if deal.id is not None])
@@ -2562,12 +2638,8 @@ def watchlist(
         statement = statement.where(Deal.client_id == client_id)
     if mandate_id is not None:
         statement = statement.where(Deal.mandate_id == mandate_id)
-    current_role = getattr(current, "role", "user")
-    if current_role not in {"ops_maker", "checker", "admin"}:
-        statement = statement.where(Deal.user_id == current.id)
-    deals = session.exec(statement).all()
-    if current_role in {"ops_maker", "checker"}:
-        deals = [deal for deal in deals if _can_access_deal(deal, current, session)]
+    deals = [deal for deal in session.exec(statement).all()
+             if _can_access_deal(deal, current, session)]
     today = business_today()
     rows = [build_watchlist_row(deal, session, today) for deal in deals]
 
@@ -2616,60 +2688,43 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
     # is measured against a partial average.
     s0_map: dict = _niveau_initial_constate(events, deal.schedule_json)
 
-    # Current perfs + running extrema since strike. The running min is
-    # what a continuously-monitored KI actually compares against; the
-    # current perfs are what the next discrete observation will see.
-    wof = None
-    wof_min = None
-    bof = None
-    bof_max = None
-    perfs = []
-    # Which underlyings the deal is on is known from the deal itself — it must
-    # not depend on having prices. A deal whose strike is still in the future
-    # has no S₀ fixed and no performance yet, and used to display "—" in the
-    # Sous-jacent column as if the product had none.
-    spots_out = [{"name": u["name"], "ticker": u.get("ticker", ""),
-                  "s0": s0_map.get(u["name"]), "spot": None, "perf": None}
-                 for u in underlyings]
-    by_name = {row["name"]: row for row in spots_out}
-    if tickers and s0_map:
-        # yfinance's `end` is exclusive — fetching [strike_date, today] when
-        # the deal was booked TODAY (strike_date == today_str) requests a
-        # zero-width window and comes back empty, same failure mode
-        # refresh_deal_core already guards against by starting a week early.
+    # Keep source positions even when a constituent has no usable observation.
+    history = {}
+    if tickers and s0_map and deal.strike_date <= today_str:
         fetch_start = (date.fromisoformat(deal.strike_date) - timedelta(days=7)).isoformat()
-        px = load_hist_prices(tickers, fetch_start, today_str)
-        if "error" not in px:
-            dates = px.get("dates", [])
-            prices = px.get("prices", {})
-            # Since-strike window: wof_min/bof_max must only see closes from
-            # t=0 onward. The wider fetch above is purely to survive a
-            # same-day/weekend strike with no close of its own — the CURRENT
-            # spot still falls back to the latest known price even when that
-            # window is empty (a deal struck today, before the market's
-            # closed, genuinely has no post-strike close yet; the extrema
-            # then degrade to just that one spot, same as "nothing has
-            # happened since inception").
-            since_strike = [i for i, d in enumerate(dates) if d >= deal.strike_date]
-            min_perfs, max_perfs = [], []
-            for u in underlyings:
-                tk = u.get("ticker", "")
-                name = u["name"]
-                s0 = s0_map.get(name, 0.0)
-                raw = prices.get(tk, [])
-                all_series = [float(p) for p in raw if p]
-                extrema_series = [float(raw[i]) for i in since_strike if i < len(raw) and raw[i]] or all_series[-1:]
-                if tk and all_series and s0 > 0:
-                    spot = all_series[-1]
-                    perfs.append(spot / s0)
-                    min_perfs.append(min(extrema_series) / s0)
-                    max_perfs.append(max(extrema_series) / s0)
-                    by_name[name].update({
-                        "s0": s0, "spot": round(spot, 4), "perf": round(spot / s0, 4),
-                    })
-            if perfs:
-                wof, bof = min(perfs), max(perfs)
-                wof_min, bof_max = min(min_perfs), max(max_perfs)
+        history = load_hist_prices(tickers, fetch_start, today_str,
+                                   adjusted=False, allow_partial=True)
+    # C13: validate governed versions even during an outage. Provider history
+    # cannot replace a pending/corrected contractual fixing or its initial level.
+    if len(tickers) == len(underlyings) and tickers:
+        from ..core.official_history import official_history
+        old_dates = history.get("dates", [])
+        old_prices = history.get("prices", {})
+        padded = {tk: [(old_prices.get(tk) or [])[i] if i < len(old_prices.get(tk) or []) else None
+                       for i in range(len(old_dates))] for tk in tickers}
+        overlaid, combined, _, ledger = official_history(
+            session, deal, events, padded, old_dates, today)
+        if ledger["official_fixings"]:
+            source_dates = history.get("source_observation_dates", {})
+            original = {day: i for i, day in enumerate(old_dates)}
+            official_dates = set(ledger["official_dates"])
+            effective = dict(history.get("effective_dates", {}))
+            for tk in tickers:
+                if effective.get(tk):
+                    effective[tk] = max(effective[tk], max(official_dates))
+            history = {**history, "dates": combined, "prices": overlaid,
+                       "effective_dates": effective, "fixing_registry": ledger,
+                       "source_observation_dates": {tk: [day if day in official_dates else
+                           source_dates[tk][original[day]] if tk in source_dates else
+                           min(day, (history.get("effective_dates", {}).get(tk) or day))
+                           for day in combined] for tk in tickers}}
+            # An available official close remains usable, subject to C11 age.
+            history.pop("error", None)
+    observations_data = watchlist_observations(
+        underlyings, s0_map, history, deal.strike_date, today_str)
+    spots_out = observations_data["underlyings"]
+    wof, bof = observations_data["wof"], observations_data["bof"]
+    wof_min, bof_max = observations_data["wof_min"], observations_data["bof_max"]
 
     # The next observation's 1-based rank — a PARAM() barrier schedule
     # is read at THAT row (a degressive autocall must show the barrier
@@ -2703,12 +2758,13 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
                 return wof_min
             if obs == "BOF_MAX":
                 return bof_max
-            if obs == "BASKET":
-                return sum(perfs) / len(perfs) if perfs else None
-            m_s = re.match(r"^S(?:_MIN|_MAX)?\[(\d+)\]$", obs)
+            if obs in {"BASKET", "BASKET()"}:
+                return observations_data["basket"]
+            m_s = re.fullmatch(r"(S|S_MIN|S_MAX)\[(\d+)\]", obs)
             if m_s:
-                i_u = int(m_s.group(1)) - 1
-                return perfs[i_u] if 0 <= i_u < len(perfs) else None
+                i_u = int(m_s.group(2)) - 1
+                field = {"S": "perf", "S_MIN": "min_perf", "S_MAX": "max_perf"}[m_s.group(1)]
+                return spots_out[i_u][field] if 0 <= i_u < len(spots_out) else None
             return None
 
         def _level_for(name: str) -> float | None:
@@ -2742,6 +2798,11 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
                     "kind": kind,
                     "observable": mon["observable"],
                     "level": round(level, 4),
+                    "value_status": ("AVAILABLE" if obs_val is not None else
+                                     "STRIKE_PENDING" if deal.strike_date > today_str else "UNAVAILABLE"),
+                    "monitoring_basis": ("SAMPLED_CLOSES_SINCE_STRIKE" if
+                        mon["observable"] and ("_MIN" in mon["observable"] or "_MAX" in mon["observable"])
+                        else "LATEST_CLOSE"),
                     # None = the observable isn't computable yet (strike not
                     # fixed, prices unavailable). Every consumer must read it
                     # as "no gap yet", never as zero — see utils/barriers.js
@@ -2759,6 +2820,9 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
                         "kind": kind,
                         "observable": "WOF",
                         "level": level,
+                        "value_status": ("AVAILABLE" if wof is not None else
+                                         "STRIKE_PENDING" if deal.strike_date > today_str else "UNAVAILABLE"),
+                        "monitoring_basis": "LATEST_CLOSE",
                         "gap_pts": round((wof - level) * 100, 1) if wof is not None else None,
                     })
     except ValueError:
@@ -2785,6 +2849,10 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
         "next_event": {"date": next_ev.event_date, "label": next_ev.label} if next_ev else None,
         "days_to_next": days_to_next,
         "underlyings": spots_out,
+        "market_coverage": observations_data["coverage"],
+        "history_window": {"start": deal.strike_date, "end": today_str,
+                           "basis": "UNADJUSTED_SAMPLED_CLOSES", "indicative": True},
+        "fixing_registry": history.get("fixing_registry"),
         "wof": round(wof, 4) if wof is not None else None,
         "wof_min": round(wof_min, 4) if wof_min is not None else None,
         "barriers": barriers,
@@ -2844,7 +2912,7 @@ def pending_amendment_requests(
     session: Annotated[Session, Depends(get_session)],
 ):
     """Checker work queue, restricted to the same legal entity."""
-    if current.role not in {"checker", "admin"}:
+    if not has_business_role(current, {"checker", "admin"}):
         raise HTTPException(403, "Réservé aux checkers")
     requests = session.exec(
         select(TradeAmendmentRequest).where(
@@ -2855,7 +2923,7 @@ def pending_amendment_requests(
     rows = []
     for request in requests:
         deal = session.get(Deal, request.deal_id)
-        if not deal:
+        if not deal or not _can_access_deal(deal, current, session):
             continue
         if current.role != "admin" and _deal_entity_id(deal, session) != current.entity_id:
             continue
@@ -2876,6 +2944,23 @@ def get_deal(
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
     row = _deal_row(deal, _get_events(deal_id, session), session)
+    row['schedule'] = json.loads(deal.schedule_json or '{}') or None
+    # The Pricer must replay the version linked to this contract, not resolve
+    # old raw terms with today's calendar algorithm or read the latest terms.
+    row['frozen_schedule'] = None
+    row['calendar_status'] = 'UNAVAILABLE'
+    if deal.product_id is not None and deal.product_terms_version is not None:
+        try:
+            owned_record(session, deal.product_id, current)
+            contract = load_product(session, deal.product_id, terms_version=deal.product_terms_version)
+            frozen = contract.terms.resolved_events.to_dict() if contract.terms.resolved_events else None
+            if frozen and (not row['schedule'] or frozen.get('schedule') == row['schedule']):
+                row['frozen_schedule'] = frozen
+                row['calendar_status'] = 'FROZEN'
+        except (ProductError, ValueError, TypeError):
+            # Read-only consultation remains possible; pricing cannot invent
+            # the missing proof and will require explicit requalification.
+            pass
     versions = session.exec(
         select(OfficialFixingVersion)
         .where(OfficialFixingVersion.deal_id == deal_id)
@@ -3034,7 +3119,11 @@ def request_amendment(
 ):
     """Record a maker request without changing the booked trade."""
     deal = session.get(Deal, deal_id)
-    if not deal or deal.user_id != current.id:
+    from ..core.access import require_managed_capability
+    from ..hybrid.config import current_config
+    require_managed_capability(current, "operations.prepare")
+    if (not deal or not _can_access_deal(deal, current, session)
+            or (current_config() is None and deal.user_id != current.id)):
         raise HTTPException(404, "Deal introuvable")
     old_value = _amendment_current_value(deal, body.field_name)
     if old_value == body.new_value:
@@ -3166,7 +3255,7 @@ def approve_amendment(
             object_id=request.id,
             actor_user_id=current.id,
             before=_amendment_row(request),
-            reason=exc.detail.get("message", "Amendement non applicable en place"),
+            reason=exc.detail.get("message", "Amendement non applicable en place") if isinstance(exc.detail, dict) else str(exc.detail),
             metadata={"failure": exc.detail, "deal_id": deal.id},
         )
         raise
@@ -3262,7 +3351,22 @@ def apply_amendment(
                 "code": "AMENDMENT_BASE_VALUE_CHANGED",
                 "message": "La valeur contractuelle de départ a changé.",
             })
-    normalized = _validated_amendment_value(deal, request, session)
+    try:
+        normalized = _validated_amendment_value(deal, request, session)
+    except HTTPException as exc:
+        _amendment_action_rejection(session, request, current, "AMENDMENT_APPLICATION_REJECTED", exc.detail)
+    credit_check = None
+    if request.field_name in {"contrepartie", "nominal", "payment_date"}:
+        from ..core.ccr.service import enforce_amendment
+        changes = normalized if request.field_name == "contrepartie" else {request.field_name: normalized}
+        try:
+            credit_check = enforce_amendment(session, current, deal, changes)
+        except HTTPException as exc:
+            session.rollback()
+            request = session.get(TradeAmendmentRequest, request_id)
+            _amendment_action_rejection(session, request, current, "AMENDMENT_APPLICATION_REJECTED",
+                                        {"code": "AMENDMENT_LEGAL_OR_CREDIT_BLOCK", "message": str(exc.detail),
+                                         "credit_check": exc.detail.get("credit_check") if isinstance(exc.detail, dict) else None})
     before_contract = _contract_snapshot(deal)
     current_version = deal.contract_version
     product = None
@@ -3321,6 +3425,8 @@ def apply_amendment(
             **normalized,
             "client_attribution_json": current_attribution,
         })
+    elif request.field_name == "contrepartie":
+        update_values.update(normalized)
     else:
         update_values[request.field_name] = normalized
     deal_cas = session.exec(
@@ -3346,6 +3452,7 @@ def apply_amendment(
             applied_by=current.id,
             applied_at=applied_at,
             applied_contract_version=current_version + 1,
+            credit_check_json=json.dumps(credit_check, ensure_ascii=False, sort_keys=True) if credit_check else None,
         ).execution_options(synchronize_session=False)
     )
     if request_cas.rowcount != 1:
@@ -3375,7 +3482,7 @@ def apply_amendment(
                 opportunity_id=deal.opportunity_id,
                 primary_affiliation_id=deal.primary_affiliation_id,
             ),
-            "execution": FrozenObject(_contract_snapshot(deal)),
+            "execution": FrozenObject({**_contract_snapshot(deal), "amendment_credit_check": credit_check}),
         })
         try:
             stage_revision(
@@ -3388,6 +3495,7 @@ def apply_amendment(
             raise HTTPException(
                 exc.status, detail={"code": exc.code, "message": str(exc)}) from exc
     after_contract = _contract_snapshot(deal)
+    after_contract["amendment_credit_check"] = credit_check
     session.add(DealContractVersion(
         deal_id=deal.id,
         version=deal.contract_version,
@@ -3418,6 +3526,7 @@ def apply_amendment(
         after=after_contract,
         reason=body.reason,
         metadata={"deal_id": deal.id, "field": request.field_name,
+                  "credit_check": credit_check,
                   "from_version": current_version,
                   "to_version": deal.contract_version,
                   "required_follow_up": [
@@ -4313,8 +4422,12 @@ def _evaluate_lifecycle(deal: Deal, events: list, dates_list: list, prices: dict
     if res["early_recall"]:
         T_actual = res["T_actual"]
         triggering = min(non_strike, key=lambda e: abs(e.t_years - T_actual))
+        point = next((c for c in compiled.echeancier.constatations if abs(c.t-T_actual)<1e-5), None)
+        payment_day = point.jour_paiement if point and point.jour_paiement else date.fromisoformat(triggering.event_date)
+        terminal_amount = sum(cf['cf'] for cf in res['cash_flows'] if abs(cf['t']-T_actual)<1e-5)
         return {"outcome": "callé", "event_id": triggering.id,
                 "event_date": triggering.event_date, "t_years": triggering.t_years,
+                "settlement_date":payment_day.isoformat(), "settlement_amount":round(terminal_amount,8),
                 "realized_payout": realized_payout}
 
     # No early recall — only conclude "matured" if today has actually
@@ -4482,7 +4595,7 @@ def _refresh_deal_core(
         deal, session, actor_user_id, underlyings, tickers)
 
 
-_AUTO_YAHOO_MAX_FALLBACK_DAYS = 4
+_AUTO_YAHOO_MAX_FALLBACK_DAYS = 3
 _AUTO_YAHOO_MAX_DAILY_MOVE = 0.50
 
 
@@ -4523,7 +4636,7 @@ def _auto_yahoo_event_values(
 
     Returns ``(spots, used_dates, failures, waiting_for_close)``.  The policy
     is explicit: exact close for an event dated today; otherwise the last
-    unadjusted close on or before the date, no more than four calendar days
+    unadjusted close on or before the date, no more than three calendar days
     old.  Splits and daily moves above 50% are escalated instead of silently
     becoming contractual facts.
     """
@@ -4576,6 +4689,19 @@ def _auto_yahoo_event_values(
         # only says "outlier" without showing the value under review.
         spots[name] = round(value, 8)
         used_dates[name] = used_date
+        from ..core.fixing_finality import qualify_close
+        finality = qualify_close(used_date, (reference_data.get("sources") or {}).get(ticker) or {})
+        if not finality["qualified"]:
+            waiting = finality["status"] == "WAITING_SESSION_CLOSE"
+            waiting_for_close = waiting_for_close or waiting
+            failures.append(_workflow_failure(
+                "YAHOO_CLOSE_NOT_PUBLISHED" if waiting else "YAHOO_CLOSE_FINALITY_UNVERIFIED",
+                f"spots.{name}",
+                "La clôture n'est pas encore disponible après la fin de sa séance locale.",
+                expected="Séance, fuseau et téléchargement après clôture établis, sans délai ajouté.",
+                action="Relancez à la publication de la clôture ou traitez une exception sourcée explicite.",
+                received=finality))
+            continue
         lag_days = (target - date.fromisoformat(used_date)).days
         if lag_days > _AUTO_YAHOO_MAX_FALLBACK_DAYS:
             failures.append(_workflow_failure(
@@ -4631,10 +4757,12 @@ def _auto_yahoo_evidence(
     used_dates: dict,
     fetched_at: str,
     provider_currencies: dict,
+    provider_sources: dict | None = None,
 ) -> tuple[dict, bytes, str]:
     inputs = []
     for underlying in underlyings:
         name = underlying["name"]
+        from ..core.fixing_finality import qualify_close
         inputs.append({
             "name": name,
             "ticker": underlying["ticker"],
@@ -4642,6 +4770,7 @@ def _auto_yahoo_evidence(
             "unadjusted_close": spots[name],
             "currency": underlying.get("ccy") or deal.devise,
             "provider_currency": provider_currencies.get(underlying["ticker"]),
+            "finality": qualify_close(used_dates[name], (provider_sources or {}).get(underlying["ticker"]) or {}),
         })
     evidence = {
         "provider": "YAHOO_FINANCE",
@@ -4702,30 +4831,33 @@ def _user_exception_lifecycle_evaluation(
 ) -> tuple[dict | None, list[dict]]:
     """Derive a terminal fact only from all reached official observations."""
     today = business_today().isoformat()
-    reached = [event for event in _get_events(deal.id, session)
-               if event.event_date <= today]
-    pending = [event for event in reached if (
-        event.fixing_status not in {
-            FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value,
-        }
-        or event.data_category != DataCategory.FIXING_OFFICIAL.value
-    )]
-    if pending:
-        return None, [_workflow_failure(
-            "AUTO_USER_EXCEPTION_STILL_PENDING",
-            "events",
-            "Toutes les constatations déjà atteintes ne sont pas encore validées.",
-            expected="Une décision utilisateur sur chaque exception atteinte.",
-            action="Traitez les autres lignes signalées en exception.",
-            received=[event.id for event in pending],
-        )]
+    reached = sorted((event for event in _get_events(deal.id, session)
+                      if event.event_date <= today and event.status != "annulé"),
+                     key=lambda event: (event.t_years, event.event_index))
     if not reached:
         return {"outcome": "en_cours"}, []
-    official_result, failures = replay_official_fixings(deal, reached)
-    if failures or not official_result:
-        return None, failures
-    if official_result.get("outcome") == "callé":
-        return official_result, []
+    prefix = []
+    official_result = None
+    for event in reached:
+        if (event.fixing_status not in {
+                FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value,
+            } or event.data_category != DataCategory.FIXING_OFFICIAL.value):
+            return None, [_workflow_failure(
+                "AUTO_USER_EXCEPTION_STILL_PENDING",
+                "events",
+                "Une constatation nécessaire au rejeu n'est pas encore validée.",
+                expected="Une décision utilisateur sur chaque exception requise.",
+                action="Traitez la prochaine ligne signalée en exception.",
+                received=[event.id],
+            )]
+        prefix.append(event)
+        official_result, failures = replay_official_fixings(deal, prefix)
+        if failures or not official_result:
+            return None, failures
+        # A terminal prefix ends contractual life even when replay happens
+        # years later. Subsequent observations are no longer required.
+        if official_result.get("outcome") == "callé":
+            return official_result, []
     if today >= deal.maturity_date:
         maturity = max(reached, key=lambda row: row.t_years)
         # DealEvent stores a rounded display time. The immutable contractual
@@ -4758,6 +4890,14 @@ def resolve_auto_fixing_exception(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    try:
+        return _resolve_auto_fixing_exception(deal_id, event_id, body, current, session)
+    except Exception:
+        session.rollback()
+        raise
+
+
+def _resolve_auto_fixing_exception(deal_id, event_id, body, current, session):
     """Make the authenticated deal user accountable for an AUTO exception.
 
     This is deliberately not the FOUR_EYES endpoint.  It creates a new,
@@ -4768,7 +4908,7 @@ def resolve_auto_fixing_exception(
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
-    if current.id != deal.user_id and getattr(current, "role", None) != "admin":
+    if current.id != deal.user_id and getattr(current, "role", None) != "admin" and not is_organization_superuser(current):
         raise HTTPException(403, {
             "code": "AUTO_EXCEPTION_USER_RESPONSIBILITY_REQUIRED",
             "message": "Cette exception doit être décidée par le propriétaire du deal.",
@@ -4872,6 +5012,7 @@ def resolve_auto_fixing_exception(
         hard_codes = {
             "YAHOO_CLOSE_MISSING", "YAHOO_CLOSE_INVALID",
             "YAHOO_CLOSE_NOT_PUBLISHED", "YAHOO_CURRENCY_MISMATCH",
+            "YAHOO_CLOSE_FINALITY_UNVERIFIED",
         }
         hard_failures = [failure for failure in review_failures
                          if failure["code"] in hard_codes]
@@ -4916,6 +5057,7 @@ def resolve_auto_fixing_exception(
             deal, event, underlyings, spots, used_dates,
             str(reference_data.get("fetched_at") or datetime.utcnow().isoformat()),
             reference_data.get("currencies") or {},
+            reference_data.get("sources") or {},
         )
         if review_failures:
             evidence["user_reviewed_failures"] = review_failures
@@ -5107,27 +5249,19 @@ def resolve_auto_fixing_exception(
     )
     deal.updated_at = decided_at
     session.add(deal)
-    stage_product_lifecycle(
-        session, deal, actor_user_id=current.id,
-        action="PRODUCT_FIXING_EXCEPTION_DECIDED",
-        reason=body.reason,
-    )
-    session.commit()
-    session.refresh(event)
+    session.flush()
 
     evaluation, replay_failures = _user_exception_lifecycle_evaluation(deal, session)
     proposal = None
     if evaluation and evaluation.get("outcome") != "en_cours":
         proposal = _auto_apply_lifecycle(
             deal, evaluation, session, actor_user_id=current.id)
-        stage_product_lifecycle(
-            session, deal, actor_user_id=current.id,
-            action=("PRODUCT_LIFECYCLE_RESOLUTION_APPLIED"
-                    if proposal and proposal.status == LifecycleStatus.APPLIED.value
-                    else "PRODUCT_LIFECYCLE_REFRESHED"),
-            reason="Synchronisation après rejeu des fixings validés.",
-        )
-        session.commit()
+    stage_product_lifecycle(
+        session, deal, actor_user_id=current.id,
+        action="PRODUCT_FIXING_EXCEPTION_DECIDED",
+        reason=body.reason,
+    )
+    session.commit()
     remaining = _pending_auto_fixing_exceptions(deal, session)
     actor_label = getattr(current, "username", None) or f"utilisateur #{current.id}"
     if proposal and proposal.status == LifecycleStatus.APPLIED.value:
@@ -5221,10 +5355,16 @@ def _auto_validate_yahoo_event(
         session.get(OfficialFixingVersion, event.current_fixing_version_id)
         if event.current_fixing_version_id else None
     )
-    # A signed user decision stays authoritative when a later provider fetch
-    # fails. Missing indicative data cannot reopen an official fixing.
-    if (current_version and current_version.capture_actor_type == "USER" and
-            event.fixing_status in {FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value}):
+    # A source diagnostic cannot revoke a validated ledger fact, regardless
+    # of whether it was captured automatically or by a user.
+    official = current_version and current_version.status in {
+        FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value}
+    if official and (failures or current_version.capture_actor_type == "USER"):
+        if failures:
+            record_audit_event(session, action="OFFICIAL_FIXING_SOURCE_UNAVAILABLE",
+                object_type="DEAL_EVENT", object_id=event.id, actor_user_id=actor_user_id,
+                result="PENDING", reason="Le registre officiel conserve son autorité.",
+                metadata={"source_failures": failures, "fixing_version_id": current_version.id})
         return False, None
     if failures:
         return False, _auto_yahoo_exception(
@@ -5259,6 +5399,7 @@ def _auto_validate_yahoo_event(
         deal, event, underlyings, spots, used_dates,
         str(reference_data.get("fetched_at") or datetime.utcnow().isoformat()),
         reference_data.get("currencies") or {},
+        reference_data.get("sources") or {},
     )
     latest = session.exec(
         select(OfficialFixingVersion)
@@ -5569,6 +5710,7 @@ def _auto_apply_lifecycle(
         deal, outcome, official_result, business_today())
     deal.realized_payout = official_result.get("realized_payout")
     deal.resolution_outcome = outcome
+    deal.settlement_date = official_result.get('settlement_date')
     deal.updated_at = now
     session.add(deal)
     if outcome == "callé":
@@ -5680,7 +5822,10 @@ def _refresh_auto_yahoo_deal_core(
         - timedelta(days=7)
     ).isoformat()
     reference_data = load_yahoo_reference_closes(tickers, fetch_start, today)
-    if "error" in reference_data:
+    if "error" in reference_data and not any(
+            event.current_fixing_version_id and event.fixing_status in {
+                FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value}
+            for event in past_events):
         raise ValueError(reference_data["error"])
     officialized = 0
     exceptions: list[dict] = []
@@ -5708,7 +5853,7 @@ def _refresh_auto_yahoo_deal_core(
                 official_evaluation.get("outcome") != "en_cours"):
             break
     dates, prices = _reference_history_arrays(reference_data, tickers)
-    if not dates:
+    if not dates and official_evaluation is None and not reference_data.get("error"):
         from ..services.scenario_market import configured_path
         if configured_path():
             # Preserve the real missing-source exception for a subsequent
@@ -5732,7 +5877,8 @@ def _refresh_auto_yahoo_deal_core(
             deal, official_prefix)
     evaluation = official_evaluation
     if evaluation is None:
-        evaluation = _evaluate_lifecycle(deal, events, dates, prices, tickers)
+        evaluation = (_evaluate_lifecycle(deal, events, dates, prices, tickers)
+                      if dates else {"outcome": "en_cours"})
     proposal = _auto_apply_lifecycle(deal, evaluation, session, actor_user_id)
     deal.updated_at = datetime.utcnow()
     session.add(deal)
@@ -5765,7 +5911,10 @@ def _refresh_auto_yahoo_deal_core(
             f"✓ {officialized} constatation(s) Yahoo validée(s) ; "
             "le produit reste en vie."
         )
+    if reference_data.get("error"):
+        message = f"Flux indisponible : {reference_data['error']}. Les fixings officiels sont conservés. " + message
     return {
+        "monitoring_error": reference_data.get("error"),
         "updated": officialized,
         "officialized": officialized,
         "exceptions": exceptions,
@@ -5897,7 +6046,9 @@ def _terminal_deal_state(
 ) -> tuple[str, Optional[float]]:
     """Status and outstanding amount after a terminal observation."""
     if outcome == "callé":
-        return "callé", None
+        payment = date.fromisoformat(result.get('settlement_date') or deal.settlement_date or result.get('event_date') or asof.isoformat())
+        amount = result.get('settlement_amount',result.get('realized_payout'))
+        return ('en_reglement',float(amount)) if payment>asof and amount is not None else ('callé',None)
     payment = date.fromisoformat(deal.payment_date or deal.maturity_date)
     outstanding = result.get("maturity_payout")
     if payment > asof and outstanding is not None:
@@ -6259,6 +6410,7 @@ def apply_lifecycle_proposal(
             realized_payout=result.get("realized_payout"),
             settlement_amount=settlement_amount,
             resolution_outcome=outcome,
+            settlement_date=result.get('settlement_date'),
             updated_at=applied_at,
         )
         .execution_options(synchronize_session=False)
@@ -6550,7 +6702,7 @@ def reinvest_roll_endpoint(
 def _price_reinvest_candidate(compiled, base_ul: dict, r_frac: float, T: float, corr: list,
                                user_params: dict, ticker: str, name: str,
                                param_name: str, target_price: float, lo: float, hi: float,
-                               N: int, model: str, vol_period: str) -> dict:
+                               N: int, model: str, vol_period: str, valuation_context=None) -> dict:
     """Price one candidate underlying for the reinvestment scan/proposal:
     fresh vol/div from Yahoo, solve param_name to target_price, then price
     the risk profile. Shared by the scan (looped over the pool) and the
@@ -6565,18 +6717,33 @@ def _price_reinvest_candidate(compiled, base_ul: dict, r_frac: float, T: float, 
         return {"ticker": ticker, "name": name,
                 "error": vol_data.get("error", "Vol Yahoo indisponible pour ce ticker")}
 
-    ul = dict(base_ul)
+    from copy import deepcopy
+    from ..core.valuation_context import ValuationContext, run_analysis
+    ul = deepcopy(base_ul)
     ul["name"], ul["ticker"] = name, ticker
     ul["sigma"] = vol_data["vols"][ticker]
-    ul["q"] = vol_data["div_yields"].get(ticker, 0.0)
+    q = vol_data.get("div_yields", {}).get(ticker)
+    if q is None or not math.isfinite(q):
+        return {"ticker": ticker, "name": name, "error": "Dividende inconnu : hypothèse explicite requise avant proposition.",
+                "dividend_diagnostic": vol_data.get("dividend_profiles", {}).get(ticker)}
+    ul["q"] = q
     _regenerate_dividend_curve(ul, T)
+
+    if ul.get('vol_surface') and model in ('heston','sabr','lsv') and ul.get('smile_parameter_mode','automatic') != 'manual':
+        return {'ticker':ticker, 'name':name, 'error':
+                'La calibration du sous-jacent d’origine ne qualifie pas ce candidat. Choisissez explicitement GBM ou des hypothèses manuelles qualifiées pour ce modèle.'}
+    context = deepcopy(valuation_context) if valuation_context is not None else ValuationContext(
+        underlyings=[ul], corr_matrix=corr, r=r_frac, T=T, N=N, model=model)
+    context.underlyings = [ul]
+    context.N = min(10000, max(2000, N))
+    context.user_params = dict(user_params)
 
     try:
         solved = solve_for_param(
             compiled, [ul], corr, r_frac, T,
             model=model, seed=42, base_user_params=user_params,
             param_name=param_name, target_price=target_price,
-            lo=lo, hi=hi, N=N,
+            lo=lo, hi=hi, N=context.N, valuation_context=context,
         )
     except ValueError as e:
         return {"ticker": ticker, "name": name, "error": str(e)}
@@ -6586,9 +6753,8 @@ def _price_reinvest_candidate(compiled, base_ul: dict, r_frac: float, T: float, 
 
     up = {**user_params, param_name: solved["param_value"]}
     try:
-        proba = run_mc_proba(compiled, [ul], corr, r_frac, T,
-                              N=N, model=model, seed=42, user_params=up,
-                              capital_ref=target_price)
+        context.user_params = up
+        proba = run_analysis(compiled, context, 'proba', capital_ref=target_price)
     except ValueError as e:
         return {"ticker": ticker, "name": name, "error": str(e)}
 
@@ -6597,6 +6763,9 @@ def _price_reinvest_candidate(compiled, base_ul: dict, r_frac: float, T: float, 
         "sigma": round(ul["sigma"], 4), "q": round(ul["q"], 4),
         "param_name": param_name, "solved_param": solved["param_value"],
         "price": proba["price"],
+        'valuation_context': context.to_dict(),
+        'estimator': {**proba['estimator'], 'requested_draws': N},
+        'model_source': 'Explicit override or inherited booking model; realized sigma/q, no automatic recalibration',
         "ki_pct": proba["ki_pct"], "autocall_pct": proba["autocall_pct"],
         # Le scan classe des candidats sur « récupère-t-on ce qu'on a payé ? » —
         # une valeur présente contre le prix payé. C'est `net_loss_pct`, pas
@@ -6605,6 +6774,25 @@ def _price_reinvest_candidate(compiled, base_ul: dict, r_frac: float, T: float, 
         # défaut de référence à 1,0 la rendait fausse partout ailleurs.
         "capital_loss_pct": proba["net_loss_pct"], "full_coupon_pct": proba["full_coupon_pct"],
     }
+
+
+def _reinvest_valuation_context(deal, market, base_ul, r, horizon, paths, model, user_params):
+    from ..core.valuation_context import ValuationContext
+    yc = [[p['T'], p['rate']/100] for p in market.get('yieldCurve') or []]
+    fc, fs = funding_from_market_snapshot(market)
+    rate_model = market.get('rateModel','deterministic')
+    lag = ((date.fromisoformat(str(deal.payment_date))-date.fromisoformat(str(deal.maturity_date))).days/365.25
+           if deal.payment_date and deal.maturity_date else 0.)
+    settlement = ((date.fromisoformat(str(deal.value_date))-date.fromisoformat(str(deal.strike_date))).days/365.25
+                  if deal.value_date and deal.strike_date else 0.)
+    return ValuationContext(underlyings=[base_ul], corr_matrix=[[1.]], r=r, T=horizon, N=paths,
+        model=model or market.get('model','constant'), antithetic=bool(market.get('antithetic',True)),
+        yield_curve=yc, funding_curve=fc, funding_spread=fs,
+        sigma_r=(market.get('sigma_r',0.) or 0.)/100 if rate_model!='deterministic' else 0.,
+        a_r=(market.get('a_r',0.) or 0.) if rate_model=='hull_white' else 0.,
+        barrier_monitoring=market.get('barrierMonitoring','weekly'),
+        maturity_payment_t=horizon+lag, value_date_t=settlement,
+        user_params=user_params, script_text=deal.script_snapshot, constats=market.get('constats') or {})
 
 
 def _reinvest_context(deal: Deal, req_T: float | None):
@@ -6620,32 +6808,32 @@ def _reinvest_context(deal: Deal, req_T: float | None):
         compiled = parse_script(deal.script_snapshot)
         from ..core.payscript.bindings import shift_calendars
         rolled = shift_calendars(market.get("constats") or {}, deal.strike_date, business_today())
-        if req_T is not None and compiled.initial_fixing_name:
-            terminal = (business_today() + timedelta(days=round(req_T * 365.25))).isoformat()
-            ends = [value if isinstance(value, str) else value.get('end_date') or value.get('date')
-                    for declaration in compiled.constats if declaration.role != 'initial_fixing'
-                    for value in [rolled.get(declaration.name)] if value]
-            old_terminal = max((value for value in ends if value), default=None)
-            for declaration in compiled.constats:
-                if declaration.role == 'initial_fixing':
-                    continue
-                value = rolled.get(declaration.name)
-                end = value if isinstance(value, str) else (value or {}).get('end_date') or (value or {}).get('date')
-                if end != old_terminal:
-                    if end and end > terminal:
-                        raise ValueError('La nouvelle maturité précède un calendrier intermédiaire ; '
-                                         'ajustez les termes dans le Pricer.')
-                    continue
-                if isinstance(value, dict) and value.get('end_date'):
-                    value['end_date'] = terminal
-                    if value.get('first_observation_date', '') > terminal:
-                        value['first_observation_date'] = terminal
-                        value['roll_date'] = terminal
-                elif declaration.kind == 'single':
-                    if isinstance(value, dict): value['date'] = terminal
-                    else: rolled[declaration.name] = terminal
+        if req_T is not None and req_T != deal.T and (
+                compiled.constats or any(event.type != 'AT_MATURITY' for event in compiled.events)):
+            raise ValueError('Changer la maturité de ce produit exige de reconstruire ses '
+                             'calendriers et ses PARAM() dans le Pricer ; le scan conserve '
+                             'uniquement la maturité contractuelle.')
+        original = None
+        if compiled.constats:
+            original = resolve_constats(parse_script(deal.script_snapshot), market.get('constats') or {},
+                anchor=date.fromisoformat(str(deal.strike_date)), currency=(deal.devise or '').strip().upper() or None)
         compiled = resolve_constats(compiled, rolled, anchor=business_today(),
                                     currency=(deal.devise or "").strip().upper() or None)
+        if original is not None:
+            def shape(script):
+                return [(len(event.dates), event.ranks,
+                         [len(window) for window in (event.window_dates or [])]) for event in script.events]
+            if shape(original) != shape(compiled):
+                raise ValueError('Le déplacement des calendriers modifie le nombre de constatations '
+                                 'ou de relevés ; reconstruire les termes et les PARAM() dans le Pricer.')
+            frozen = json.loads(getattr(deal, 'schedule_json', None) or '{}')
+            if frozen.get('constatations'):
+                def ranks(schedule):
+                    return sorted((str(row['calendrier']), row['rang'], len(row.get('releves') or []))
+                                  for row in schedule['constatations'])
+                if ranks(frozen) != ranks(compiled.echeancier.to_dict()):
+                    raise ValueError('Le calendrier déplacé ne conserve pas les rangs du contrat figé ; '
+                                     'reconstruire les termes dans le Pricer.')
     except ValueError as e:
         raise HTTPException(422, f"Script non exploitable : {e}")
 
@@ -6673,6 +6861,8 @@ def reinvest_scan_endpoint(
     user_params = {**(market.get("user_params", {}) or {}), **(req.param_overrides or {})}
     corr = [[1.0]]
 
+    context = _reinvest_valuation_context(deal, market, base_ul, r_frac, T, req.N, req.model, user_params)
+
     def pct(res: dict, metric: str) -> float:
         return {"ki": res["ki_pct"], "autocall": res["autocall_pct"],
                 "capital_loss": res["capital_loss_pct"], "full_coupon": res["full_coupon_pct"]}[metric]
@@ -6685,7 +6875,7 @@ def reinvest_scan_endpoint(
         row = _price_reinvest_candidate(
             compiled, base_ul, r_frac, T, corr, user_params,
             tk, cand.name or tk, req.param_name, req.target_price, req.lo, req.hi,
-            req.N, req.model, req.vol_period,
+            req.N, context.model, req.vol_period, valuation_context=context,
         )
         if "error" in row:
             excluded.append(row)
@@ -6701,7 +6891,9 @@ def reinvest_scan_endpoint(
             kept.append(row)
 
     kept.sort(key=lambda r: r["solved_param"], reverse=True)
-    return {"results": kept, "excluded": excluded}
+    from ..services.archived_documents import sign_preview
+    study = {"results": kept, "excluded": excluded}
+    return {**study, "study_preview": sign_preview(study, req.model_dump(mode="json"), deal, current, purpose="STUDY")}
 
 
 def _reinvest_proposal_data(deal: Deal, req: ReinvestProposalRequest) -> dict:
@@ -6717,10 +6909,12 @@ def _reinvest_proposal_data(deal: Deal, req: ReinvestProposalRequest) -> dict:
     user_params = {**(market.get("user_params", {}) or {}), **(req.param_overrides or {})}
     corr = [[1.0]]
 
+    context = _reinvest_valuation_context(deal, market, base_ul, r_frac, T, req.N, req.model, user_params)
+
     row = _price_reinvest_candidate(
         compiled, base_ul, r_frac, T, corr, user_params,
         req.ticker, req.name or req.ticker, req.param_name, req.target_price, req.lo, req.hi,
-        req.N, req.model, req.vol_period,
+        req.N, context.model, req.vol_period, valuation_context=context,
     )
     if "error" in row:
         raise HTTPException(422, row["error"])
@@ -6782,11 +6976,14 @@ def _reinvest_proposal_data(deal: Deal, req: ReinvestProposalRequest) -> dict:
     value_date_new = business_today()
     maturity_date_new = value_date_new + timedelta(days=round(T * 365.25))
     param_term = next((p for p in compiled.params if p.name == req.param_name), None)
+    from ..core.product.calendar import freeze_calendar
 
     return {
         "deal": {"reference": deal.reference, "product_type": deal.product_type,
                  "sens": deal.sens, "devise": deal.devise, "nominal": deal.nominal},
         "candidate": row,
+        "script_text": deal.script_snapshot,
+        "frozen_calendar": freeze_calendar(compiled),
         "param_desc": (param_term.desc if param_term and param_term.desc else req.param_name),
         "param_is_pct": param_term.is_pct if param_term else True,
         "T": T,
@@ -6806,34 +7003,79 @@ def reinvest_proposal_endpoint(
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
-    return _reinvest_proposal_data(deal, req)
+    from ..services import archived_documents as archives
+    study = None
+    if req.study_preview:
+        study = archives.verify_preview(req.study_preview, deal, current, purpose="STUDY")
+        if req.ticker not in [row["ticker"] for row in study["data"]["results"]]:
+            raise HTTPException(422, "Le candidat ne figure pas parmi les alternatives retenues de cette étude.")
+        material = ("param_name", "target_price", "lo", "hi", "T", "N", "model", "vol_period", "param_overrides")
+        request_values = req.model_dump(mode="json")
+        if any(request_values.get(key) != study["request"].get(key) for key in material):
+            raise HTTPException(409, "Les hypothèses ont changé depuis le scan ; relancez l'étude.")
+    data = _reinvest_proposal_data(deal, req)
+    data["study"] = study or {"data": {"results": [data["candidate"]], "excluded": []},
+                              "scope": "SINGLE_CANDIDATE"}
+    data["parent_archive_id"] = req.parent_archive_id
+    return {**data, "preview": archives.sign_preview(data, req.model_dump(mode="json"), deal, current)}
+
+
+@router.post("/{deal_id}/reinvest/proposal/freeze")
+def freeze_reinvest_proposal(
+    deal_id: int, body: ProposalFreeze,
+    current: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    from ..services import archived_documents as archives
+    from ..core.reinvest_proposal_pdf import generate_reinvest_proposal_pdf
+    deal = session.get(Deal, deal_id)
+    if not deal or not _can_access_deal(deal, current, session):
+        raise HTTPException(404, "Deal introuvable")
+    claims = archives.verify_preview(body.preview, deal, current)
+    # Repeated freezes of exactly the same server proof are idempotent.
+    from ..db.models import ArchivedDocument
+    for existing in session.exec(select(ArchivedDocument).where(
+            ArchivedDocument.deal_id == deal_id, ArchivedDocument.user_id == current.id,
+            ArchivedDocument.kind == "REINVEST")).all():
+        if json.loads(existing.data_json).get("preview_signature") == body.preview["signature"]:
+            return {"archive_id": existing.id, "data": json.loads(existing.data_json)["proposal"]}
+    proof = {"proposal": claims["data"], "calculation_identity": claims["calculation_identity"],
+             "preview_signature": body.preview["signature"], "calculated_at": claims["created_at"],
+             "product_id": claims["product_id"], "product_terms_version": claims["product_terms_version"]}
+    row = archives.stage(session, kind="REINVEST", deal=deal, user=current,
+                         request=claims["request"], data=proof,
+                         parent_id=claims["data"].get("parent_archive_id"),
+                         pdf=generate_reinvest_proposal_pdf(claims["data"]))
+    session.commit()
+    return {"archive_id": row.id, "data": claims["data"]}
 
 
 @router.post("/{deal_id}/reinvest/proposal/pdf")
 def reinvest_proposal_pdf_endpoint(
     deal_id: int,
-    req: ReinvestProposalRequest,
+    req: DocumentSelection,
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
-    import io as _io
-    from fastapi.responses import StreamingResponse
-    from ..core.reinvest_proposal_pdf import generate_reinvest_proposal_pdf
-
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
-    data = _reinvest_proposal_data(deal, req)
-    try:
-        pdf_bytes = generate_reinvest_proposal_pdf(data)
-    except Exception as e:
-        raise HTTPException(500, f"Erreur génération de la note de proposition : {e}")
-    filename = f"Proposition_{deal.reference}_{data['candidate']['ticker']}_{business_today().isoformat()}.pdf"
-    return StreamingResponse(
-        _io.BytesIO(pdf_bytes),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    from ..services import archived_documents as archives
+    return archives.response(archives.load(session, req.archive_id, kind="REINVEST", deal=deal, user=current))
+
+
+@router.get("/{deal_id}/archives")
+def list_deal_archives(deal_id: int, current: Annotated[User, Depends(get_current_user)],
+                      session: Annotated[Session, Depends(get_session)]):
+    from ..db.models import ArchivedDocument
+    deal = session.get(Deal, deal_id)
+    if not deal or not _can_access_deal(deal, current, session):
+        raise HTTPException(404, "Deal introuvable")
+    return [{"archive_id": row.id, "kind": row.kind, "parent_id": row.parent_id,
+             "contract_version": row.contract_version, "created_at": row.created_at.isoformat(),
+             "data": json.loads(row.data_json)} for row in session.exec(select(ArchivedDocument).where(
+                 ArchivedDocument.deal_id == deal_id, ArchivedDocument.user_id == current.id)
+                 .order_by(ArchivedDocument.created_at.desc(), ArchivedDocument.id)).all()]
 
 
 # Residual MtM schemas and implementation live in core/deal_valuation.py.
@@ -6974,6 +7216,7 @@ def deal_greeks(
     # actually reaches (see compute_greeks). Kept out of `scalar`, which is
     # summed across the book.
     vega_scope = raw.pop("vega_scope", None)
+    corr_bumps = raw.pop('corr_bumps', None)
     for key, val in raw.items():
         m = re.match(r"^(delta|gamma|vega)_(\d+)$", key)
         if m:
@@ -6999,6 +7242,7 @@ def deal_greeks(
         "theta_event": theta_event,
         "vega_scope": vega_scope,
         "corr_pairs": corr_pairs,
+        'corr_bumps': corr_bumps,
         "market_used": mtm_payload["market_used"],
     }
     if ctx.get("pre_strike"):
@@ -7109,7 +7353,9 @@ def _run_explain_step(cal: dict, spot: dict, uls: list, corr, model: str,
             "fix_state_init": st["fix_state"],
         },
     )
-    return run_valuation(cal["residual_script"], context)["price"]
+    from ..core.valuation_context import unsettled_cashflows_pv
+    return run_valuation(cal["residual_script"], context)["price"] + unsettled_cashflows_pv({
+        **common, "unsettled_cash_flows": cal.get("unsettled_cash_flows", [])})
 
 
 def _greeks_state(ctx: dict) -> dict:
@@ -7171,9 +7417,9 @@ def _residual_greeks(ctx: dict, n_paths: int) -> list[dict]:
 
 def _explain_core(deal: Deal, session: Session, n_paths: int,
                   body: MtmExplainRequest) -> tuple[dict, dict, dict]:
-    """P&L explain between two dates: waterfall MtM(d1) → temps → spot → vol →
-    corr → MtM(d2), sequential revaluations at identical seed (CRN), plus the
-    cash flows detached in between (hors modèle). The chain telescopes exactly
+    """P&L explain: time/state/receivables, spot, dividend, diffusion, corr,
+    with identical seeds (CRN), plus contractual cash at payment dates.
+    The chain telescopes exactly
     to ΔMtM; the residual line is the invariant check (≈0 — anything nonzero
     means a factor escaped the chain). Design: EXPLICATION_VALO_DESIGN.md.
     Returns (payload, ctx1, ctx2) — the ctxs feed the PDF note (greeks at d2)."""
@@ -7218,6 +7464,9 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
         raise HTTPException(422, "Produit rappelé entre les deux dates — c'est la "
                                  "résolution qui explique le P&L, pas un MtM")
 
+    from ..core.valuation_attribution import (
+        ATTRIBUTION_VERSION, CASH_BASIS, contractual_cash_in_period, with_dividend_inputs,
+    )
     common = {"r_frac": c1["r_frac"], "yc": c1["yc"], "sigma_r": c1["sigma_r"],
               "a_r": c1["a_r"], "antithetic": c1["antithetic"],
               "user_params": c1["user_params"], "bm": c1["barrier_monitoring"],
@@ -7228,23 +7477,25 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
     # existante. Avant le strike, l'omettre ferait pricer chaque étage comme un
     # produit déjà striké pendant que les deux /mtm encadrants pricent un
     # forward-start — la cascade ne télescoperait plus vers ΔMtM.
-    cal1 = {"residual_script": c1["residual_script"], "T_remaining": c1["T_remaining"],
-            "index_offset": c1["state"]["index"],
-            "strike_set_t": c1.get("strike_set_t"),
-            "residual_payment_t": c1.get("residual_payment_t")}
     cal2 = {"residual_script": c2["residual_script"], "T_remaining": c2["T_remaining"],
             "index_offset": c2["state"]["index"],
             "strike_set_t": c2.get("strike_set_t"),
-            "residual_payment_t": c2.get("residual_payment_t")}
-    spot1 = {"norm_spots": c1["norm_spots"], "state": c1["state"]}
+            "residual_payment_t": c2.get("residual_payment_t"),
+            "unsettled_cash_flows": c2.get("unsettled_cash_flows", [])}
     spot2 = {"norm_spots": c2["norm_spots"], "state": c2["state"]}
+    # Calendar, realized payoff state and receivables are one lifecycle bundle.
+    # Moving only the calendar deletes an observed but still unpaid coupon.
+    time_state = {"norm_spots": c1["norm_spots"], "state": c2["state"]}
+    dividend_uls = with_dividend_inputs(c1["engine_uls"], c2["engine_uls"])
 
     mtm1, mtm2 = p1["mtm"], p2["mtm"]
     try:
-        v_time = _run_explain_step(cal2, spot1, c1["engine_uls"], c1["corr"],
+        v_time = _run_explain_step(cal2, time_state, c1["engine_uls"], c1["corr"],
                                    c1["model_used"], common)
         v_spot = _run_explain_step(cal2, spot2, c1["engine_uls"], c1["corr"],
                                    c1["model_used"], common)
+        v_dividend = _run_explain_step(cal2, spot2, dividend_uls, c1["corr"],
+                                       c1["model_used"], common)
         v_vol = _run_explain_step(cal2, spot2, c2["engine_uls"], c1["corr"],
                                   c2["model_used"], common)
         if len(c1["engine_uls"]) > 1 and c2["corr"] != c1["corr"]:
@@ -7261,7 +7512,9 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
          "mtm_after": round(v_time, 6)},
         {"label": "Effet spot", "delta_pts": round((v_spot - v_time) * 100, 2),
          "mtm_after": round(v_spot, 6)},
-        {"label": "Effet volatilité", "delta_pts": round((v_vol - v_spot) * 100, 2),
+        {"label": "Effet dividendes", "delta_pts": round((v_dividend - v_spot) * 100, 2),
+         "mtm_after": round(v_dividend, 6)},
+        {"label": "Effet volatilité", "delta_pts": round((v_vol - v_dividend) * 100, 2),
          "mtm_after": round(v_vol, 6)},
     ]
     if corr_step:
@@ -7270,9 +7523,10 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
                       "mtm_after": round(v_corr, 6)})
     residual = mtm2 - v_corr
 
-    eps = 1e-9
-    flows = [cf for cf in (p2.get("realized_cash_flows") or [])
-             if cf["t"] > c1["T_elapsed"] + eps]
+    try:
+        flows = contractual_cash_in_period(p2, d1, d2)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     flows_total = sum(cf["cf"] for cf in flows)
 
     # Rule-based sentences — one per waterfall line, auditable.
@@ -7284,28 +7538,32 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
         f"{delta * 100:+.2f} point(s).",
         f"L'écoulement du temps ({months:.1f} mois) contribue pour "
         f"{steps[0]['delta_pts']:+.2f} point(s) — rapprochement des échéances et des "
-        f"coupons (theta).",
+        f"coupons ; état réalisé et créances déplacés ensemble.",
     ]
     moves = ", ".join(
         f"{u['name']} de {s1 * 100:.1f}% à {s2 * 100:.1f}% du strike"
         for u, s1, s2 in zip(c1["underlyings_json"], c1["norm_spots"], c2["norm_spots"]))
     phrases.append(f"Le mouvement des sous-jacents ({moves}) contribue pour "
-                   f"{steps[1]['delta_pts']:+.2f} point(s) (delta/gamma, barrières "
-                   f"franchies sur la période comprises).")
+                   f"{steps[1]['delta_pts']:+.2f} point(s) (delta/gamma ; état et "
+                   f"franchissements de barrières déjà portés par l'étape temps/état).")
+    phrases.append(f"L'évolution des rendements et courbes de dividendes contribue pour "
+                   f"{steps[2]['delta_pts']:+.2f} point(s), séparément de la volatilité.")
     sig1 = p1["market_used"]["sigma"]
     sig2 = p2["market_used"]["sigma"]
     vols = ", ".join(f"{n} de {sig1.get(n, '—')}% à {sig2.get(n, '—')}%"
                      for n in sig1)
     phrases.append(f"L'évolution de la volatilité ({vols}) contribue pour "
-                   f"{steps[2]['delta_pts']:+.2f} point(s) (véga).")
+                   f"{steps[3]['delta_pts']:+.2f} point(s) (véga).")
     if corr_step:
         phrases.append(f"L'évolution des corrélations contribue pour "
-                       f"{steps[3]['delta_pts']:+.2f} point(s).")
+                       f"{steps[4]['delta_pts']:+.2f} point(s).")
     if flows:
-        phrases.append(f"Flux détachés sur la période : {flows_total * 100:.2f}% du "
+        phrases.append(f"Flux contractuels à échéance sur la période : {flows_total * 100:.2f}% du "
                        f"nominal — le P&L total de la période ressort à "
                        f"{(delta + flows_total) * 100:+.2f} point(s) (variation de "
-                       f"valeur + flux perçus).")
+                       f"valeur + cash contractuel).")
+    phrases.append("Le cash est retenu selon les dates contractuelles de paiement, sur l'intervalle "
+                   "]date 1, date 2] ; il ne constitue pas une preuve de virement bancaire.")
     phrases.append("Le taux d'actualisation est maintenu constant entre les deux dates "
                    "(pas de source de taux historiques) — tout effet taux résiduel est "
                    "porté par la ligne « résidu ».")
@@ -7323,6 +7581,17 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
         "flows_detached": flows,
         "flows_total_pts": round(flows_total * 100, 2),
         "pnl_total_pts": round((delta + flows_total) * 100, 2),
+        "cash_basis": CASH_BASIS,
+        "cash_flows": flows,
+        "attribution_version": ATTRIBUTION_VERSION,
+        "unrounded": {
+            "delta_pts": delta * 100, "residual_pts": residual * 100,
+            "flows_total_pts": flows_total * 100, "pnl_total_pts": (delta + flows_total) * 100,
+            "steps": [{"label": step["label"], "delta_pts": (after-before)*100}
+                for step, before, after in zip(steps,
+                    [mtm1, v_time, v_spot, v_dividend, v_vol],
+                    [v_time, v_spot, v_dividend, v_vol, v_corr])],
+        },
         "market1": p1["market_used"],
         "market2": p2["market_used"],
         "phrases": phrases,
@@ -7342,9 +7611,31 @@ def deal_mtm_explain(
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
-    payload, _c1, _c2 = _explain_core(deal, session, n_paths,
+    payload, _c1, c2 = _explain_core(deal, session, n_paths,
                                       body or MtmExplainRequest())
-    return payload
+    from ..services import archived_documents as archives
+    from ..core.deal_valuation_pdf import generate_explain_pdf
+    from ..core.valuation_runs import calculation_identity, replay_context
+    data = {
+        "deal": {key: getattr(deal, key, None) for key in (
+            "reference", "product_type", "sens", "contrepartie", "nominal", "devise",
+            "price_traded", "trade_date", "strike_date", "value_date", "maturity_date")},
+        "res": payload, "underlyings": [
+            {"name": u["name"], "ticker": u.get("ticker", ""), "spot_pct": spot}
+            for u, spot in zip(c2["underlyings_json"], c2["norm_spots"])],
+        "greeks": None, "calculation_identity": calculation_identity(),
+        "replay_contexts": [replay_context(deal, _c1, {"mtm": payload["mtm1"]}),
+                            replay_context(deal, c2, {"mtm": payload["mtm2"]})],
+    }
+    try:
+        data["greeks"] = _residual_greeks(c2, n_paths)
+    except (ValueError, ArithmeticError, RuntimeError) as exc:
+        data["greeks_diagnostic"] = str(exc)
+    row = archives.stage(session, kind="EXPLAIN", deal=deal, user=current,
+                         request={"n_paths": n_paths, "body": (body or MtmExplainRequest()).model_dump(mode="json")},
+                         data=data, pdf=generate_explain_pdf(data))
+    session.commit()
+    return {**payload, "archive_id": row.id}
 
 
 @router.post("/{deal_id}/mtm/explain/report")
@@ -7352,47 +7643,14 @@ def deal_mtm_explain_report(
     deal_id: int,
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
-    n_paths: int = 20000,
-    body: Optional[MtmExplainRequest] = None,
+    body: DocumentSelection,
 ):
-    """PDF note of the P&L explain — same body/seed as /mtm/explain, so the
-    figures in the PDF are exactly the ones displayed, plus the residual
-    sensitivities (Δ/Γ/véga) at date 2 in the technical annex."""
-    import io as _io
-    from fastapi.responses import StreamingResponse
-    from ..core.deal_valuation_pdf import generate_explain_pdf
-
+    """Return the exact PDF retained with the selected displayed calculation."""
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
-    payload, _c1, c2 = _explain_core(deal, session, n_paths,
-                                     body or MtmExplainRequest())
-    data = {
-        "deal": {
-            "reference": deal.reference, "product_type": deal.product_type,
-            "sens": deal.sens, "contrepartie": deal.contrepartie,
-            "nominal": deal.nominal, "devise": deal.devise,
-            "price_traded": deal.price_traded,
-            "trade_date": deal.trade_date, "strike_date": deal.strike_date,
-            "value_date": deal.value_date, "maturity_date": deal.maturity_date,
-        },
-        "res": payload,
-        "underlyings": [{"name": u["name"], "ticker": u.get("ticker", ""),
-                         "spot_pct": s}
-                        for u, s in zip(c2["underlyings_json"], c2["norm_spots"])],
-        "greeks": _residual_greeks(c2, n_paths),
-    }
-    try:
-        pdf_bytes = generate_explain_pdf(data)
-    except Exception as e:
-        raise HTTPException(500, f"Erreur génération de la note d'explication : {e}")
-    filename = (f"Explication_valo_{deal.reference}_"
-                f"{payload['date1']}_{payload['date2']}.pdf")
-    return StreamingResponse(
-        _io.BytesIO(pdf_bytes),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    from ..services import archived_documents as archives
+    return archives.response(archives.load(session, body.archive_id, kind="EXPLAIN", deal=deal, user=current))
 
 
 def _monitor_levels(compiled, user_params: dict, next_row: int) -> list[dict]:
@@ -7517,12 +7775,18 @@ def deal_mtm_report(
 
 
 def _valuation_run_row(run: ValuationRun, include_payload: bool = False) -> dict:
+    from ..core.valuation_runs import calculation_identity
+    saved_identity = json.loads(run.diagnostics_json or "{}").get("calculation_identity")
     row = {
         "id": run.id, "deal_id": run.deal_id, "run_type": run.run_type,
         "contract_version": run.contract_version,
         "context_hash": run.context_hash, "engine_version": run.engine_version,
         "engine_fingerprint": run.engine_fingerprint, "n_paths": run.n_paths,
         "created_at": run.created_at.isoformat(),
+        "calculation_identity": saved_identity,
+        "replay_compatible": saved_identity == calculation_identity(),
+        "archive_warnings": ([] if saved_identity == calculation_identity() else
+                             ["Moteur ou conventions absent/différent ; résultat conservé, rejeu non qualifié."]),
     }
     if include_payload:
         row.update({
@@ -7587,6 +7851,9 @@ def latest_mtm_runs(
             continue
         if run.contract_version != deal.contract_version:
             continue
+        from ..core.valuation_runs import current_fixings_match
+        if not current_fixings_match(session, run):
+            continue
         row = _valuation_run_row(run, include_payload=True)
         request = row.get("diagnostics", {}).get("request", {})
         if valuation_date is not None:
@@ -7594,10 +7861,7 @@ def latest_mtm_runs(
             if saved_date != valuation_date.isoformat():
                 continue
         if recalibrate is not None:
-            if request.get("recalibrate", "none") != recalibrate:
-                continue
-            # The Booking form has no overrides or alternative calibration window.
-            if request.get("r") is not None or request.get("overrides") or request.get("window_days", 252) != 252:
+            if not standard_mtm_request(request, recalibrate):
                 continue
         seen.add(run.deal_id)
         latest.append(row)

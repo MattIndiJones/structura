@@ -1,19 +1,8 @@
-"""Variantes — étape 5 : le tableau comparatif.
+"""Variant comparisons: original nominal recovery and independent roll quantity.
 
-À iso-valeur, le prix ne départage plus rien : c'est même le but d'une
-restructuration réussie. La colonne qui décide est donc P(récupérer le pair
-D'ORIGINE) — et c'est elle que ces tests protègent, parce qu'elle est le seul
-endroit du chantier où un chiffre juste peut mener à la conclusion inverse.
-
-Le piège, mesuré sur le dossier Marex : la note neuve affiche 53,8 % de chance
-de rendre SON pair, contre 28,0 % pour l'avenant. Rangés côte à côte, ces deux
-nombres donnent le roll gagnant. Mais le roll ne rend son pair que sur un
-nominal réduit — le détenteur débouclé à 46 % n'achète que 53 unités d'une note
-à 87 %. Sa récupération plafonne à 53 % du nominal d'origine, définitivement,
-alors que l'avenant garde 100 % atteignable.
-
-Une probabilité sans son plafond n'est donc pas comparable, et c'est ce que le
-tableau doit encoder plutôt que laisser le lecteur le reconstituer.
+The full engine path is exercised. Model prices finance the compatibility default;
+explicit costs and proven caps are covered in test_roll_c25.py. No sampled maximum
+or nominal ratio is interpreted as a contractual recovery bound.
 """
 import json
 from datetime import date, timedelta
@@ -170,7 +159,8 @@ def test_l_origine_est_repricee_dans_le_meme_appel(client):
     lignes = _comparer(client, [])
     assert "Origine" in lignes
     o = lignes["Origine"]
-    assert o["ecart"] == 0.0 and o["plafond"] == 1.0
+    assert o["ecart"] == 0.0 and o['reinvested_notional'] == 1.0
+    assert o['plafond'] is None
     assert 0 < o["prix"] < 1
 
 
@@ -183,7 +173,8 @@ def test_un_avenant_garde_le_pair_atteignable(client):
     lignes = _comparer(client, [vid])
     v = lignes["Protection 20 %"]
 
-    assert v["plafond"] == 1.0, "le nominal est inchangé"
+    assert v['reinvested_notional'] == 1.0
+    assert v['plafond'] is None
     # Une barrière abaissée protège : la probabilité de rendre le pair monte.
     assert v["proba_pair_origine"] > lignes["Origine"]["proba_pair_origine"]
 
@@ -214,17 +205,16 @@ def test_les_pourcentages_stockes_sont_convertis_pour_le_moteur(client):
 
 # ── Le roll : le nominal se réduit, et c'est LE piège ───────────────
 
-def test_une_note_neuve_plafonne_la_recuperation(client):
-    """Le détenteur débouclé à P₀ n'achète que P₀/P_neuve unités. Son plafond
-    tombe donc sous 100 %, définitivement, et c'est ce que la colonne doit
-    dire."""
+def test_une_note_neuve_distingue_le_nominal_du_plafond_non_demontre(client):
+    """The model-price ratio is a quantity, never a bound on future coupons."""
     pid = _origine(client)
     vid = _variante(client, pid, "Roll 3 ans", MODE_ROLL, {})
     lignes = _comparer(client, [vid])
     r, o = lignes["Roll 3 ans"], lignes["Origine"]
 
-    assert r["plafond"] < 1.0, "une note neuve réduit le nominal"
-    assert r["plafond"] == pytest.approx(o["prix"] / r["prix"], rel=1e-3)
+    assert r['reinvested_notional'] < 1.0
+    assert r['reinvested_notional'] == pytest.approx(o['prix'] / r['prix'], rel=1e-3)
+    assert r['plafond'] is None
 
 
 def test_la_proba_du_roll_est_ramenee_au_pair_D_ORIGINE(client):
@@ -242,8 +232,8 @@ def test_la_proba_du_roll_est_ramenee_au_pair_D_ORIGINE(client):
     lignes = _comparer(client, [vid])
     r = lignes["Roll"]
 
-    # Le seuil exigé de la note neuve est 1/plafond, très au-dessus du pair.
-    assert 1.0 / r["plafond"] > 1.3, "le scénario doit bien être piégeux"
+    # The required new-note payoff is the inverse quantity, not a cap.
+    assert 1.0 / r['reinvested_notional'] > 1.3
     assert r["proba_pair_origine"] < 0.10, (
         "récupérer le pair d'origine par un roll est quasi impossible ici")
 
@@ -683,3 +673,30 @@ def test_la_grille_de_stress_et_la_grille_2d_concordent(client, monkeypatch, pay
     assert solved["converged"]
     assert solved["param_value"] == pytest.approx(0.02, abs=1e-9)
     assert solved["achieved_price"] == stress["prices"][0][0]
+
+
+def test_frozen_comparison_keeps_origin_variants_and_displayed_results(client):
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+    from backend.app.db import database as db
+    pid = _origine(client)
+    vid = _variante(client, pid, "KI 20", MODE_AVENANT, {"set": {"params[M_KI_BAR]": 20.0}})
+    shown = client.post("/api/variants/compare", json={"base": BASE, "parent_id": pid,
+                         "variant_ids": [vid], "N": 1000})
+    assert shown.status_code == 200, shown.text
+    preview = shown.json()["preview"]
+    frozen = client.post("/api/variants/archives", json={"preview": preview})
+    assert frozen.status_code == 200, frozen.text
+    assert client.put(f"/api/db/scripts/variants/{vid}", json={
+        "delta": {"set": {"params[M_KI_BAR]": 90.0}}}).status_code == 200
+    saved = client.get(f"/api/variants/archives/{pid}").json()[0]
+    assert saved["archive_id"] == frozen.json()["archive_id"]
+    assert saved["evidence"]["result"]["lignes"] == shown.json()["lignes"]
+    assert saved["evidence"]["evidence"][1]["delta"]["set"]["params[M_KI_BAR]"] == 20.0
+    assert saved["evidence"]["evidence"][1]["result"]["frozen_calendar"]
+    with Session(db.engine) as session:
+        with pytest.raises(IntegrityError, match="immutable"):
+            session.exec(text("UPDATE variant_study_archives SET evidence_json=NULL"))
+        session.rollback()
+    assert client.post("/api/variants/archives", json={"preview": preview}).json() == frozen.json()
+    assert client.delete(f"/api/db/scripts/{pid}?cascade=true").status_code == 409

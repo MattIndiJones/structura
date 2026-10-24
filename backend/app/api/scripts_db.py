@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select, or_
 from ..db.database import get_session
-from ..db.models import Script, User, Folder
+from ..db.models import Script, User, Folder, VariantStudyArchive
 from ..core.variants import (
     MODE_AVENANT, MODE_ROLL, MODES, VariantError, decrire_ecarts, resoudre,
     termes_de_rejeu, valider,
@@ -256,6 +256,10 @@ def delete_script(
         raise HTTPException(404, "Script introuvable ou accès refusé")
 
     enfants = session.exec(select(Script).where(Script.parent_id == script_id)).all()
+    affected_ids = [script_id] + [row.id for row in enfants if row.user_id == current.id]
+    if session.exec(select(VariantStudyArchive.id).where(
+            VariantStudyArchive.script_id.in_(affected_ids))).first():
+        raise HTTPException(409, "Suppression bloquée : une étude figée conserve cette origine.")
     # La cascade n'emporte QUE ses propres déclinaisons. Sur une origine
     # partagée, ranger son dossier détruisait les propositions client des
     # collègues — après une confirmation qui ne nommait que des titres, sans

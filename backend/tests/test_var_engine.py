@@ -149,15 +149,19 @@ def test_parametric_worst_draws_have_positive_vol_shock():
 
 # ── apply_scenario_to_deal_base ────────────────────────────────────────
 
-def test_apply_scenario_neutral_shock_for_untouched_ticker():
+def test_apply_scenario_refuses_an_untouched_missing_ticker():
     deal_base = {
         "tickers": ["TKA", "TKB"],
         "base": {"corr": [[1.0, 0.2], [0.2, 1.0]]},
     }
     scenario = ve.MarketScenario(key="k", label="l", method="historical",
                                  spot_pct={"TKA": -10.0}, vol_pts={"TKA": 5.0}, corr_delta=20.0)
+    with pytest.raises(ValueError, match="TKB"):
+        ve.apply_scenario_to_deal_base(deal_base, scenario)
+    scenario.spot_pct["TKB"] = 0.0
+    scenario.vol_pts["TKB"] = 0.0
     payload = ve.apply_scenario_to_deal_base(deal_base, scenario)
-    assert payload["spot_mult"] == [0.9, 1.0]     # TKB untouched -> neutral 1.0
+    assert payload["spot_mult"] == [0.9, 1.0]  # Explicit neutral assumption.
     assert payload["vol_add"] == [0.05, 0.0]
     assert payload["corr_shocked"][0][1] == pytest.approx(0.4)   # 0.2 + 20pts
 
@@ -444,7 +448,8 @@ def test_build_deal_scenario_base_is_json_serializable_and_matches_mtm(monkeypat
     reloaded = json.loads(dumped)
     assert reloaded == base
 
-    zero_scenario = ve.MarketScenario(key="zero", label="zero", method="historical")
+    zero_scenario = ve.MarketScenario(key="zero", label="zero", method="historical",
+        spot_pct={tk: 0. for tk in base["tickers"]}, vol_pts={tk: 0. for tk in base["tickers"]})
     job_payload = ve.apply_scenario_to_deal_base(base, zero_scenario)
     job_payload["_meta"] = {"scenario_key": "zero"}   # harmless extra key, same as the real API path
     result = price_var_scenario_job(job_payload)
@@ -478,7 +483,7 @@ def test_var_scenario_pricer_reacts_to_spot_shock(monkeypatch):
 
     base = ve.build_deal_scenario_base(deal, s, n_paths=3000)
     down_scenario = ve.MarketScenario(key="down", label="down", method="historical",
-                                      spot_pct={"TK1": -20.0})
+                                 spot_pct={"TK1": -20.0}, vol_pts={"TK1": 0.0})
     shocked_payload = ve.apply_scenario_to_deal_base(base, down_scenario)
     shocked_price = price_var_scenario_job(shocked_payload)["price"]
 

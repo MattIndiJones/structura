@@ -5,7 +5,7 @@
     <table v-else class="mt-2 w-full text-xs">
       <thead><tr><th>Maturité (années)</th><th>{{ rateLabel }}</th><th></th></tr></thead>
       <tbody><tr v-for="(node,index) in modelValue" :key="index">
-        <td><input class="input" type="number" min="0.000001" max="30" :step="annual ? 1 : .25" :value="node[0]" required :aria-label="`${label}, nœud ${index+1}, maturité`" @input="edit(index,0,$event.target.value)" /></td>
+        <td><input class="input" type="number" :min="annual ? 1 : .000001" max="30" :step="annual ? 1 : 'any'" :value="node[0]" required :aria-label="`${label}, nœud ${index+1}, maturité`" @input="edit(index,0,$event.target.value)" /></td>
         <td><OptimizerNumberInput :min="minimum" :max="maximum" :model-value="node[1]" required :aria-label="`${label}, nœud ${index+1}, taux en pourcent`" @update:model-value="edit(index,1,$event)" /></td>
         <td><button type="button" class="btn-ghost btn-sm" :aria-label="`Retirer ${label}, nœud ${index+1}`" @click="remove(index)">Retirer</button></td>
       </tr></tbody>

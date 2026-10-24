@@ -1,0 +1,172 @@
+{
+  "date": "2026-10-24",
+  "package": "structura-application-review-2026-10-24.zip",
+  "note": "Hashes of delivered entries, excluding this manifest and the ZIP itself.",
+  "files": [
+    {
+      "archive_path": "APPLICATION_REVIEW_2026-10-24.md",
+      "bytes": 172359,
+      "sha256": "2467878bab489a391d10f8f41f70c73b8a5e7b714c1e41e1b9d9d7ab1c44522e"
+    },
+    {
+      "archive_path": "START_HERE.md",
+      "bytes": 1620,
+      "sha256": "fc8a98f103d7422b0ba3c2f1c0aad1cc8fcc1ddf5429eaf7652659e7396bf330"
+    },
+    {
+      "archive_path": "LAUNCH_REVIEW_PROMPT.md",
+      "bytes": 1654,
+      "sha256": "ca2506ade425e23864b897347925fa0b057df46b5fcd0955848d1fb46b8541ab"
+    },
+    {
+      "archive_path": "annexes/ANNEXES.md",
+      "bytes": 3366,
+      "sha256": "abeb0104f528b3bbb9917d3c23cfb1127faf14cdd3be9f70f5203221e510c777"
+    },
+    {
+      "archive_path": "annexes/API_CATALOGUE.md",
+      "bytes": 45264,
+      "sha256": "3867ec0515a2b012117660f7f399d814dd4eb37ab22edba39516ae465c4e5969"
+    },
+    {
+      "archive_path": "annexes/API_ROUTES.json",
+      "bytes": 235391,
+      "sha256": "d554ad35b0c9078060a3df54ad3fb9c11e739e3a99b8f24dd54c72a903572aac"
+    },
+    {
+      "archive_path": "annexes/build_review_appendices.py",
+      "bytes": 15559,
+      "sha256": "e55e717ae232bf00131b92f29d6184d2b59aa3d527b36567eacaf8ffe2d3d41b"
+    },
+    {
+      "archive_path": "annexes/CRITICAL_SOURCE_EXCERPTS.md",
+      "bytes": 123039,
+      "sha256": "be4858fb036c21014a40673423886454a1cc026f9b283504dbaafcd6f21232a7"
+    },
+    {
+      "archive_path": "annexes/DATA_MODEL.md",
+      "bytes": 267113,
+      "sha256": "78be74514578bbd369c31efaf516b9ed2843c781e4e58d530b44bcf2f34d3c8c"
+    },
+    {
+      "archive_path": "annexes/DOCUMENTARY_EVIDENCE.json",
+      "bytes": 7122,
+      "sha256": "afaf6686810ef4eaad02560cde078bae06345d246fab40aaf8be90cbe156bbb5"
+    },
+    {
+      "archive_path": "annexes/finalize_review.py",
+      "bytes": 9235,
+      "sha256": "eb8a3735bbe612fd8d26313a6dd90cc8e2dacf75e591611af69574d07657d0d3"
+    },
+    {
+      "archive_path": "annexes/FRONTEND_INVENTORY.json",
+      "bytes": 163871,
+      "sha256": "574b850cee313e6d1c29dc5813d97260da4a78ad9d9f8373318010d87b3ae8e1"
+    },
+    {
+      "archive_path": "annexes/FRONTEND_ROUTES.json",
+      "bytes": 11351,
+      "sha256": "51a56cf6d1afe095af6f7f0affa4b49c003453798606c7219303d9019a226e89"
+    },
+    {
+      "archive_path": "annexes/inspect_sources.py",
+      "bytes": 12399,
+      "sha256": "ecc88883c0d8b2f28356301942ce4e07333c272a134b418f670322bf0f0958c9"
+    },
+    {
+      "archive_path": "annexes/INSPECTION_REFERENCE.json",
+      "bytes": 38318,
+      "sha256": "ae908ef324545728aeb863c24ac9d33ce43b45466f20e27be0fd7552e9f7cad9"
+    },
+    {
+      "archive_path": "annexes/MODELS_AND_FIELDS.json",
+      "bytes": 531525,
+      "sha256": "561b69b10b442ff45814c7f9d844c9d2d275e4a506269d63dc6bdd2e4427c8e2"
+    },
+    {
+      "archive_path": "annexes/MODULE_CATALOGUE.md",
+      "bytes": 216892,
+      "sha256": "85cb1d9906185311f2bfe30fcf593903e83633368fc4ce513d7e30b653f01c9f"
+    },
+    {
+      "archive_path": "annexes/PRESERVATION_CHECKS.json",
+      "bytes": 1316,
+      "sha256": "58c290f83df5fc7f98bdb0e3d0d5931a396f4296b0b9bf873a12197738a67f60"
+    },
+    {
+      "archive_path": "annexes/PYTHON_SYMBOLS.json",
+      "bytes": 3522113,
+      "sha256": "b7bb20861731643295a0a6d6e5ce5e4fc22cc17691bf2bd2b27dad64b7a46737"
+    },
+    {
+      "archive_path": "annexes/REVIEW_PROMPT.md",
+      "bytes": 19572,
+      "sha256": "973a696fb7b307552d06ba08e90ce0e19e87644cb9c946e1fbcb842d4ed2e924"
+    },
+    {
+      "archive_path": "annexes/SOURCE_MANIFEST.json",
+      "bytes": 219232,
+      "sha256": "44b767b5f214970c6a3a218a34c30ab46fd5049435be9b21e0843a50c5067159"
+    },
+    {
+      "archive_path": "annexes/TEST_CATALOGUE.md",
+      "bytes": 196058,
+      "sha256": "64b81ac8846bb140076f6451523ee40d69db9f8c35ab359a17bd08a068854664"
+    },
+    {
+      "archive_path": "annexes/TEST_DEFINITIONS.json",
+      "bytes": 426951,
+      "sha256": "f80d884b06c84b4a89e37ffda6263042044e196dc84caa8980b3a164a1129899"
+    },
+    {
+      "archive_path": "reference-evidence/BACKEND_FULL_VALIDATION_2026-10-23.md",
+      "bytes": 9601,
+      "sha256": "981191d9a8b44f5e0bcdbdd4a755d4880ba0f4379716362d73406bcee3a88520"
+    },
+    {
+      "archive_path": "reference-evidence/GRAPHICAL_ACCEPTANCE_2026-10-23.md",
+      "bytes": 14148,
+      "sha256": "65c795794353642458342115c36a7dea9f455c6f42dba6ea5df1669291511edb"
+    },
+    {
+      "archive_path": "reference-evidence/BILATERAL_RFQ_ACCEPTANCE_2026-10-24.md",
+      "bytes": 13637,
+      "sha256": "fdef670be791c54606d500c5e2cd4fe2ca82cc21aa1df4c67ea7bb1c3a7f7636"
+    },
+    {
+      "archive_path": "reference-evidence/ELECTRONIC_RFQ_EXECUTION_2026-10-24.md",
+      "bytes": 13699,
+      "sha256": "5dca98c94d1ab4cb1adba78f8d22df6345a7270fdadad186e797e971d4f0ea8a"
+    },
+    {
+      "archive_path": "reference-evidence/RFQ_RECONCILIATION_2026-10-24.md",
+      "bytes": 14584,
+      "sha256": "bb735040d7939e7364d5d45b5ecbfd5dcbcf7c94c240c335a2b6eac789940af6"
+    },
+    {
+      "archive_path": "reference-evidence/LAUNCHER_ACCESS_ACCEPTANCE_2026-10-24.md",
+      "bytes": 6403,
+      "sha256": "c0faf6bc454c40cf6417ac25e620d1cf2011d04a35d979b2c03dd4501e45a2aa"
+    },
+    {
+      "archive_path": "reference-evidence/ADMIN_ACCOUNT_SWITCH_2026-10-24.md",
+      "bytes": 5012,
+      "sha256": "b5dfbd9178e13062dbcc9350bf280398788d284059915c4b03115bee0eef5067"
+    },
+    {
+      "archive_path": "reference-evidence/REMEDIATION_C15_2026-10-21.md",
+      "bytes": 7905,
+      "sha256": "df7950744dcbd3f1d5a09f4baa527ea09a4c5cc316c25788f102afe92bc8bc24"
+    },
+    {
+      "archive_path": "reference-evidence/REMEDIATION_C16_2026-10-21.md",
+      "bytes": 10236,
+      "sha256": "f41760040e6e98ec582513026fa26502ed70e6b93a2702b3fdfcec70c5094eed"
+    },
+    {
+      "archive_path": "reference-evidence/REMEDIATION_C17_2026-10-21.md",
+      "bytes": 11137,
+      "sha256": "298236accca2d8cee4db9ad13502a2e3e2ebf15c864bf7037133a1e3edfaadbf"
+    }
+  ]
+}

@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from sqlmodel import Session, select
 
-from .auth import get_current_user
+from .auth import get_current_pricer
 from ..db.database import get_session
 from ..db.models import Underlying, User
 from ..core.product_optimizer.capabilities import capabilities
@@ -23,7 +23,7 @@ from ..services import optimizer_research as research
 from sqlalchemy import func, or_
 
 router = APIRouter(prefix="/api/product-optimizer", tags=["product-optimizer"],
-                   dependencies=[Depends(get_current_user)])
+                   dependencies=[Depends(get_current_pricer)])
 logger = logging.getLogger(__name__)
 # Resource admission only: never contains user input, candidates or results.
 _capacity = threading.BoundedSemaphore(1)
@@ -77,7 +77,7 @@ def market_reference(body: MarketReferenceRequest, session: Annotated[Session, D
 
 
 @router.post("/cancel/{run_id}")
-def cancel_run(run_id: str, current: Annotated[User, Depends(get_current_user)]):
+def cancel_run(run_id: str, current: Annotated[User, Depends(get_current_pricer)]):
     with _cancellation_lock:
         owned = _cancellations.get(run_id)
         if owned is None or owned[0] != current.id:
@@ -92,7 +92,7 @@ def get_capabilities():
 
 
 @router.post("/researches")
-def create_research(body: research.ResearchCreate, current: Annotated[User, Depends(get_current_user)],
+def create_research(body: research.ResearchCreate, current: Annotated[User, Depends(get_current_pricer)],
                     session: Annotated[Session, Depends(get_session)]):
     previous=research.existing(session,body,current.id)
     if previous: return research.projection(previous)
@@ -116,7 +116,7 @@ def create_research(body: research.ResearchCreate, current: Annotated[User, Depe
 
 
 @router.get("/researches")
-def list_researches(current: Annotated[User, Depends(get_current_user)],
+def list_researches(current: Annotated[User, Depends(get_current_pricer)],
                     session: Annotated[Session, Depends(get_session)], archived: bool=False,
                     q: str="", family: str="", status: str="", offset: int=0, limit: int=30):
     if offset<0 or not 1<=limit<=100: raise HTTPException(422,"Pagination invalide.")
@@ -133,21 +133,21 @@ def list_researches(current: Annotated[User, Depends(get_current_user)],
 
 
 @router.get("/researches/{research_id}")
-def read_research(research_id: str, current: Annotated[User, Depends(get_current_user)],
+def read_research(research_id: str, current: Annotated[User, Depends(get_current_pricer)],
                   session: Annotated[Session, Depends(get_session)]):
     return research.projection(research.owned(session,research_id,current.id),True)
 
 
 @router.patch("/researches/{research_id}")
 def archive_research(research_id: str, body: research.ArchiveChange,
-                     current: Annotated[User, Depends(get_current_user)],session: Annotated[Session, Depends(get_session)]):
+                     current: Annotated[User, Depends(get_current_pricer)],session: Annotated[Session, Depends(get_session)]):
     row=research.owned(session,research_id,current.id)
     row.archived=body.archived;session.add(row);session.commit();session.refresh(row)
     return research.projection(row)
 
 
 @router.post("/researches/{research_id}/cancel")
-def cancel_research(research_id: str, current: Annotated[User, Depends(get_current_user)],
+def cancel_research(research_id: str, current: Annotated[User, Depends(get_current_pricer)],
                     session: Annotated[Session, Depends(get_session)]):
     row=research.owned(session,research_id,current.id)
     return {"stopping":research.cancel(row.id),"status":row.status}
@@ -161,7 +161,7 @@ def estimate(body: OptimizationRequest, session: Annotated[Session, Depends(get_
 
 @router.post("/run")
 async def run(body: OptimizationRequest, request: Request,
-              current: Annotated[User, Depends(get_current_user)],
+              current: Annotated[User, Depends(get_current_pricer)],
               session: Annotated[Session, Depends(get_session)]):
     validate_catalogue(body, session)
     estimate = estimate_search(body)

@@ -1,9 +1,10 @@
-import { defaultUnderlying, fractionToPercent, PERCENT_MARKET_FIELDS } from './underlyingDefaults.js'
+import { defaultUnderlying, fractionToPercentExact, PERCENT_MARKET_FIELDS } from './underlyingDefaults.js'
+import { marketProvenanceFields } from './marketProvenance.js'
 
 function pct(value, fallback) {
   if (value == null || value === '') return fallback
   const number = Number(value)
-  return Number.isFinite(number) ? fractionToPercent(number) : fallback
+  return Number.isFinite(number) ? fractionToPercentExact(number) : fallback
 }
 
 export function emptyRfqUnderlying(index = 0, ccy = 'EUR') {
@@ -37,6 +38,7 @@ export function rfqBasketFromParams(underlyings, fallbackCcy = 'EUR') {
       smile_parameter_mode: market.smile_parameter_mode || 'automatic',
       _smileDefaults: false,
       vol_level_source: 'saved',
+      ...(market.market_data?{market_data:JSON.parse(JSON.stringify(market.market_data))}:{}),
       market: {
         ...rest,
         ...(dividend_curve?.length ? { dividend_curve } : {}),
@@ -63,6 +65,7 @@ export function rfqUnderlyingToParams(row, dividend = {}) {
   for (const field of PERCENT_MARKET_FIELDS) {
     if (row?.[field] != null) out[field] = Number(row[field]) / 100
   }
+  Object.assign(out,marketProvenanceFields(row))
   return out
 }
 

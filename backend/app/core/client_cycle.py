@@ -172,7 +172,7 @@ def compute_cycle(trade_dates: Sequence[date], *,
     pour que les tests ne dépendent pas du jour où ils tournent.
     """
     asof = asof or date.today()
-    brutes = [d for d in trade_dates if d is not None]
+    brutes = [d for d in trade_dates if d is not None and d <= asof]
     # Les intervalles se comptent sur des JOURNÉES, pas sur des lignes : trois
     # allocations le même jour ne font pas trois épisodes d'investissement.
     dates = sorted(set(brutes))

@@ -3,15 +3,19 @@ from __future__ import annotations
 import logging
 import math
 import time
+import threading
+from concurrent.futures import Future
+from copy import deepcopy
 import numpy as np
-from datetime import date, datetime, timedelta
+import pandas as pd
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from ..core import market_storage
 
 logger = logging.getLogger(__name__)
 
 try:
     import yfinance as yf
-    import pandas as pd
     _HAS_YF = True
 except ImportError:
     _HAS_YF = False
@@ -19,153 +23,45 @@ except ImportError:
 
 
 def load_hist_vol(tickers: list[str], period: str = "1y",
-                  asof: Optional[str] = None, window_days: int = 252) -> dict:
-    """Realized annualized vol and correlation matrix from Yahoo Finance.
-
-    With ``asof`` the calculation uses the same adjusted, rounded and aligned
-    history as the residual MtM.  This is the path used by the Pricer when its
-    valuation date changes: a historical valuation must not receive today's
-    trailing window.  The legacy ``period`` path remains available for callers
-    that do not ask for a dated market context.
-    """
-    if not _HAS_YF:
-        return {"error": "yfinance non installé — pip install yfinance"}
-    if asof:
-        try:
-            requested_end = date.fromisoformat(asof)
-            if not 20 <= int(window_days) <= 2520:
-                return {"error": "window_days doit être compris entre 20 et 2520"}
-            # Local import avoids making the generic price loader depend on a
-            # calibration module during import.  This is exactly the estimator,
-            # and the window, used by deal_valuation.mtm_core.
-            from ..core.calibration import calibration_history_start, realized_market
-
-            # Calendar-day cushion large enough to retain ``window_days``
-            # common trading returns through holidays and exchange closures.
-            start = calibration_history_start(requested_end, int(window_days)).isoformat()
-            history = load_hist_prices(
-                tickers, start, requested_end.isoformat(), adjusted=True)
-            if history.get("error"):
-                return history
-            calibrated = realized_market(
-                history.get("prices", {}), tickers, int(window_days))
-            corr_matrix = calibrated["corr"]
-            corr = {
-                t1: {t2: round(float(corr_matrix[i][j]), 4)
-                     for j, t2 in enumerate(tickers)}
-                for i, t1 in enumerate(tickers)
-            }
-            return {
-                "tickers": list(tickers),
-                "vols": {tk: round(float(calibrated["sigma"][tk]), 8)
-                         for tk in tickers},
-                # Kept for response compatibility. Dated dividend assumptions
-                # come from dividend_profile(), never from today's Yahoo info.
-                "div_yields": {},
-                "corr": corr,
-                "period": period,
-                "window_days": int(window_days),
-                "n_obs": int(calibrated["n_returns"]),
-                "missing": [],
-                "provider": history.get("provider", DEFAULT_MARKET_DATA_PROVIDER),
-                "price_type": history.get("price_type", "ADJUSTED_CLOSE"),
-                "adjusted": True,
-                "requested_asof": requested_end.isoformat(),
-                "asof_effective": history.get("asof_effective"),
-                "effective_dates": history.get("effective_dates", {}),
-                "age_sessions": history.get("age_sessions", {}),
-                "warnings": history.get("warnings", []),
-                "fetched_at": history.get("fetched_at"),
-            }
-        except ValueError as exc:
-            return {"error": f"Calibration réalisée impossible : {exc}"}
-        except Exception as exc:
-            logger.exception("load_hist_vol asof")
-            return {"error": str(exc)}
+                  asof: Optional[str] = None, window_days: int | None = None) -> dict:
+    """One dated common-sample RMS estimator for every entry point."""
+    from ..core.calibration import calibration_history_start, realized_market
+    from ..runtime import business_today
+    windows = {"1mo": 21, "3mo": 63, "6mo": 126, "1y": 252, "2y": 504, "5y": 1260, "10y": 2520}
     try:
-        price_series: dict = {}
-        for tk in tickers:
-            try:
-                hist = yf.Ticker(tk).history(period=period, auto_adjust=True)
-                if not hist.empty and "Close" in hist.columns:
-                    # Each exchange's index is tz-aware in ITS OWN local timezone
-                    # (Europe/Paris for ^FCHI, America/New_York for AAPL, etc.) —
-                    # combining series across timezones without stripping this
-                    # makes pandas treat "same calendar day, different close
-                    # time" as distinct rows, so a DataFrame of >1 ticker ends up
-                    # almost entirely unaligned (verified: 2 tickers x ~250 daily
-                    # rows each merged into ~500 rows of mostly-single-column
-                    # data). Normalizing to the naive local date is the standard
-                    # (imperfect but industry-standard) fix for daily-close
-                    # cross-timezone alignment.
-                    hist.index = hist.index.tz_localize(None)
-                    s = hist["Close"].dropna()
-                    if len(s) > 5:
-                        price_series[tk] = s
-            except Exception as e:
-                logger.debug("YF error %s: %s", tk, e)
-
-        if not price_series:
-            return {"error": "Aucune donnée disponible pour ces tickers"}
-
-        prices = pd.DataFrame(price_series).dropna(how="all")
-        log_ret = np.log(prices / prices.shift(1)).dropna(how="all")
-
-        vols: dict = {}
-        div_yields: dict = {}
-        found: list = []
-        missing: list = []
-
-        for tk in tickers:
-            if tk not in log_ret.columns:
-                missing.append(tk)
-                continue
-            s = log_ret[tk].dropna()
-            if len(s) < 10:
-                missing.append(tk)
-                continue
-            vols[tk] = round(float(s.std() * math.sqrt(252)), 4)
-            found.append(tk)
-            try:
-                # fast_info.dividend_yield doesn't exist on current yfinance
-                # (0.2.66) — silently returned 0.0 for every ticker via the
-                # getattr(..., 0.0) fallback. info['dividendYield'] exists but
-                # is pre-multiplied by 100 (0.34 means 0.34%, not a fraction)
-                # — trailingAnnualDividendYield is the one field that's a
-                # plain fraction, consistent with what UnderlyingParams.q
-                # expects. None for tickers with no per-security dividend
-                # data (indices) — 0.0 is the right fallback there.
-                info = yf.Ticker(tk).get_info()
-                dy = info.get("trailingAnnualDividendYield") or 0.0
-                div_yields[tk] = round(float(dy), 4)
-            except Exception:
-                div_yields[tk] = 0.0
-
-        cols = [tk for tk in found if tk in log_ret.columns]
-        corr: dict = {}
-        if len(cols) > 1:
-            corr_df = log_ret[cols].corr()
-            for t1 in cols:
-                corr[t1] = {t2: round(float(corr_df.loc[t1, t2]), 4) for t2 in cols}
-        else:
-            for tk in found:
-                corr[tk] = {tk: 1.0}
-
-        return {
-            "tickers": found,
-            "vols": vols,
-            "div_yields": div_yields,
-            "corr": corr,
-            "period": period,
-            "n_obs": int(len(log_ret)),
-            "missing": missing,
-            "provider": "YAHOO_FINANCE",
-            "price_type": "ADJUSTED_CLOSE",
-            "adjusted": True,
-        }
-    except Exception as e:
+        requested = date.fromisoformat(asof) if asof else business_today()
+        window = int(window_days) if window_days is not None else windows.get(period)
+        if window is None or not 20 <= window <= 2520:
+            return {"error": "Période inconnue ou fenêtre hors bornes : préciser window_days entre 20 et 2520."}
+        history = load_hist_prices(tickers, calibration_history_start(requested, window).isoformat(),
+                                   requested.isoformat(), adjusted=True)
+        if history.get("error"):
+            return history
+        calibrated = realized_market(history.get("prices", {}), tickers, window)
+        matrix = np.asarray(calibrated["corr"], dtype=float)
+        if not np.isfinite(matrix).all() or np.linalg.eigvalsh(matrix).min() < -1e-8:
+            raise ValueError("Matrice de corrélation réalisée invalide.")
+        from .scenario_market import configured_path
+        profiles = {tk: ({"ok": False, "error": "Dividendes synthétiques non fournis : hypothèse explicite conservée."}
+                         if configured_path() else dividend_profile(tk, requested.isoformat())) for tk in tickers}
+        yields = {tk: p["yield_declared"] for tk, p in profiles.items()
+                  if p.get("ok") and p.get("yield_declared") is not None
+                  and math.isfinite(p["yield_declared"]) and p["yield_declared"] >= 0}
+        return {**{k: v for k, v in history.items() if k not in {"prices", "source_observation_dates", "carry_age_days"}},
+                "tickers": list(tickers), "vols": {tk: float(calibrated["sigma"][tk]) for tk in tickers},
+                "div_yields": yields, "dividend_profiles": profiles,
+                "missing_dividends": [tk for tk in tickers if tk not in yields],
+                "corr": {t1:{t2:float(matrix[i,j]) for j,t2 in enumerate(tickers)} for i,t1 in enumerate(tickers)},
+                "period": period, "window_days": window, "n_obs": int(calibrated["n_returns"]),
+                "requested_asof": requested.isoformat(),
+                "estimator": {"volatility": "RMS_LOG_RETURNS", "correlation": "PEARSON_COMMON_SAMPLE",
+                              "annualization": 252, "n_returns": int(calibrated["n_returns"]),
+                              "common_sample": True, "correlation_psd": True}}
+    except (ValueError, TypeError) as exc:
+        return {"error": f"Calibration réalisée impossible : {exc}"}
+    except Exception as exc:
         logger.exception("load_hist_vol")
-        return {"error": str(e)}
+        return {"error": str(exc)}
 
 
 # ── Cache d'historique ──────────────────────────────────────────────
@@ -182,6 +78,9 @@ def load_hist_vol(tickers: list[str], period: str = "1y",
 # gardant l'application vivante sur un marché ouvert.
 _TTL_PRIX = 120.0
 _cache_prix: dict[tuple, tuple[float, dict]] = {}
+_cache_lock = threading.Lock()
+_cache_inflight = {}
+_cache_epoch = 0
 
 DEFAULT_MARKET_DATA_PROVIDER = "YAHOO_FINANCE"
 SUPPORTED_MARKET_DATA_PROVIDERS = {DEFAULT_MARKET_DATA_PROVIDER}
@@ -244,152 +143,127 @@ def _business_sessions_between(last_date: date, requested_end: date) -> int:
 
 
 def vider_cache_prix() -> None:
-    """Force le prochain appel à repartir de la source. Pour les tests, et pour
-    un rafraîchissement explicite demandé par l'utilisateur."""
-    _cache_prix.clear()
+    """Clear memory responses; dated durable observations remain reusable."""
+    global _cache_epoch
+    with _cache_lock:
+        _cache_prix.clear()
+        _cache_epoch += 1
 
 
 def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
-                     adjusted: bool = False,
-                     provider: str = DEFAULT_MARKET_DATA_PROVIDER) -> dict:
-    """Daily close prices for backtest replay.
+                     adjusted: bool = False, provider: str = DEFAULT_MARKET_DATA_PROVIDER,
+                     allow_partial: bool = False) -> dict:
+    """Coalesce identical reads; every caller receives an independent snapshot."""
+    tickers = list(tickers)
+    from ..core import market_storage, market_policy
+    from ..runtime import business_today
+    from .scenario_market import configured_path
+    build = lambda: _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_partial)
+    if configured_path():
+        return deepcopy(build())
+    try:
+        storage_revision = market_storage.view_revision()
+    except ValueError as exc:
+        return {'error':str(exc)}
+    with _cache_lock:
+        epoch = _cache_epoch
+        key = (storage_revision, epoch, provider, tuple(tickers), start, end or business_today().isoformat(),
+               adjusted, allow_partial, market_policy.POLICY_VERSION, market_policy.HISTORY_MAX_AGE_DAYS)
+        cached = _cache_prix.get(key)
+        if cached and time.monotonic()-cached[0] < _TTL_PRIX:
+            return deepcopy(cached[1])
+        future = _cache_inflight.get(key)
+        leader = future is None
+        if leader:
+            future = Future()
+            _cache_inflight[key] = future
+    if not leader:
+        return deepcopy(future.result())
+    try:
+        with market_storage.read_view():
+            result = build()
+        current_revision = market_storage.revision()
+        with _cache_lock:
+            if not result.get('error') and epoch == _cache_epoch and current_revision == storage_revision:
+                if len(_cache_prix) >= 256:
+                    _cache_prix.pop(next(iter(_cache_prix)))
+                _cache_prix[key] = (time.monotonic(), deepcopy(result))
+        future.set_result(deepcopy(result))
+        return deepcopy(result)
+    except BaseException as exc:
+        future.set_exception(exc)
+        raise
+    finally:
+        with _cache_lock:
+            _cache_inflight.pop(key, None)
 
-    `adjusted` decides WHICH price, and the two answer different questions.
 
-    False (the default) returns the raw close — the price that actually traded
-    that day. Every payoff reads this one: a barrier, a coupon condition, a
-    fixing and a strike are written on the price the market printed, not on a
-    total-return series. Yahoo's adjusted close deflates past prices by every
-    dividend paid since, so a 50% barrier tested on it is crossed later than in
-    reality, or never. On Société Générale at 14/06/2024 the raw close is 22.150
-    — the strike of a real term sheet to the cent — where the adjusted one says
-    21.105, 4.7% off. It also keeps this feed consistent with the contractual
-    fixings, which load_yahoo_reference_closes already takes raw.
-
-    True returns the dividend-adjusted close, for statistical estimates where
-    total return is the honest input: realized volatility, correlations,
-    calibration. Never for anything a payoff reads."""
+def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_partial):
+    """Provider observations with durable local reuse and explicit coverage."""
+    from ..runtime import business_today
+    from ..core import market_policy, market_storage
+    from .market_history import local_history, store_history, align_history, _path as shared_path
     from .scenario_market import configured_path, history
     if configured_path():
-        return history(tickers, start, end, adjusted)
+        result = history(tickers, start, end, adjusted)
+        if result.get("error"):
+            return result
+        frames = {tk:pd.Series(values, index=pd.to_datetime(result["dates"])) for tk,values in result.get("prices", {}).items()}
+        qualified = align_history(tickers, frames, start, end or business_today().isoformat(), adjusted,
+                                  {tk:{"provider":result.get("provider"), "storage":"SCENARIO"} for tk in frames}, {}, allow_partial)
+        return {**result, **qualified, "provider":result.get("provider", "SYNTHETIC_SCENARIO")}
     try:
         provider = normalize_market_data_provider(provider)
+        requested_end = date.fromisoformat(end) if end else business_today()
+        if date.fromisoformat(start) > requested_end:
+            raise ValueError('La date de début doit précéder la date de fin.')
     except ValueError as exc:
         return {"error": str(exc)}
-    if not _HAS_YF:
-        return {"error": "yfinance non installé"}
-
-    # La clé porte les tickers TRIÉS : deux appels au même panier dans un ordre
-    # différent décrivent le même historique.
-    cle = (provider, tuple(sorted(tickers)), start, end, adjusted)
-    fige = _cache_prix.get(cle)
-    if fige is not None and (time.monotonic() - fige[0]) < _TTL_PRIX:
-        # Copie superficielle : l'appelant ne doit pas pouvoir muter le cache.
-        return {**fige[1]}
-
-    try:
-        requested_end = date.fromisoformat(
-            end or datetime.today().strftime("%Y-%m-%d"))
-        # yfinance treats ``end`` as exclusive.  Every Structura caller treats
-        # it as an as-of date, so request the next calendar day and then filter
-        # defensively.  A post-close valuation can now consume today's close.
-        end_exclusive = (requested_end + timedelta(days=1)).isoformat()
-        price_series: dict = {}
-        effective_dates: dict[str, str] = {}
-        age_sessions: dict[str, int] = {}
-        for tk in tickers:
+    end = requested_end.isoformat()
+    series, sources, failures, fetched = {}, {}, {}, {}
+    expected = market_storage.versions([shared_path(ticker,adjusted) for ticker in tickers])
+    for ticker in tickers:
+        local, source = local_history(ticker, start, end, adjusted)
+        local_window = local.loc[(local.index >= pd.Timestamp(start)) & (local.index <= pd.Timestamp(end))] if local is not None else None
+        usable = (local_window is not None and not local_window.empty
+                  and source.get("requested_start", start) <= start
+                  and market_policy.freshness(local_window.index[-1].date(), requested_end, "history")["qualified"])
+        selected = local_window if usable else None
+        if selected is None and _HAS_YF:
             try:
-                hist = yf.Ticker(tk).history(
-                    start=start, end=end_exclusive, auto_adjust=adjusted)
-                if not hist.empty and "Close" in hist.columns:
-                    # Same cross-timezone alignment fix as load_hist_vol above —
-                    # without it, a multi-ticker basket backtest silently
-                    # compares near-random staggered rows instead of the same
-                    # calendar day across exchanges.
-                    hist.index = hist.index.tz_localize(None)
-                    series = hist["Close"].dropna()
-                    series = series[series.index.date <= requested_end]
-                    if not series.empty:
-                        price_series[tk] = series
-                        effective = series.index[-1].date()
-                        effective_dates[tk] = effective.isoformat()
-                        age_sessions[tk] = _business_sessions_between(
-                            effective, requested_end)
-            except Exception as e:
-                logger.debug("YF prices error %s: %s", tk, e)
-
-        if not price_series:
-            return {"error": "Aucune donnée historique disponible"}
-
-        frame = pd.DataFrame(price_series).dropna(how="all").ffill()
-        requested_start = frame.index.min() if not frame.empty else None
-
-        # `.bfill()` used to close the remaining holes. Forward filling is
-        # legitimate — a closed exchange means the last close still stands,
-        # and it only ever uses information already available. Backward
-        # filling is the opposite: it copies a ticker's FIRST KNOWN close
-        # onto dates that precede it, so a listing, a ticker change or a
-        # suspension gets a price on days it had none. Measured on a series
-        # starting five days into the window: five fabricated zero returns,
-        # realized volatility understated by 21.8%, and a barrier that can
-        # never be breached over the fabricated stretch because the level
-        # sits wherever the first real quote happened to be — a bias that
-        # systematically FAVOURS the product being backtested.
-        #
-        # After ffill the only holes left are the leading ones, so dropping
-        # incomplete rows starts the basket at the first date every
-        # constituent actually traded. A worst-of cannot be replayed before
-        # its worst member existed.
-        prices = frame.dropna()
-        dates = [d.strftime("%Y-%m-%d") for d in prices.index]
-
-        payload = {
-            "dates": dates,
-            "prices": {
-                tk: [round(v, 4) for v in prices[tk].tolist()]
-                for tk in tickers
-                if tk in prices.columns
-            },
-            "n_obs": len(dates),
-            "provider": provider,
-            "price_type": ("ADJUSTED_CLOSE" if adjusted
-                           else "UNADJUSTED_CLOSE"),
-            "adjusted": bool(adjusted),
-            "requested_start": start,
-            "requested_end": requested_end.isoformat(),
-            "asof_effective": dates[-1] if dates else None,
-            "effective_dates": effective_dates,
-            "age_sessions": age_sessions,
-            "fetched_at": datetime.utcnow().isoformat(),
-        }
-        stale = {ticker: age for ticker, age in age_sessions.items() if age > 1}
-        payload["warnings"] = ([{
-            "code": "MARKET_DATA_STALE",
-            "message": "Dernière clôture éloignée de la date de valorisation.",
-            "age_sessions": stale,
-        }] if stale else [])
-        # Say when the window had to be shortened, rather than returning a
-        # shorter history that looks like the one that was asked for.
-        if not prices.empty and requested_start is not None:
-            effective_start = prices.index.min()
-            if effective_start > requested_start:
-                skipped = int((frame.index < effective_start).sum())
-                payload["start_effective"] = effective_start.strftime("%Y-%m-%d")
-                payload["rows_dropped_incomplete"] = skipped
-                payload["note"] = (
-                    f"Historique tronqué au {effective_start.strftime('%Y-%m-%d')} : "
-                    f"{skipped} séance(s) écartée(s) car au moins un sous-jacent "
-                    f"n'y cotait pas encore.")
-        elif prices.empty and not frame.empty:
-            return {"error": "Aucune séance où tous les sous-jacents cotent "
-                             "simultanément sur la période demandée."}
-        # Seuls les SUCCÈS sont mis en cache : figer une erreur réseau la
-        # rejouerait pendant deux minutes alors qu'un simple réessai passerait.
-        _cache_prix[cle] = (time.monotonic(), payload)
-        return {**payload}
-    except Exception as e:
-        logger.exception("load_hist_prices")
-        return {"error": str(e)}
+                frame = yf.Ticker(ticker).history(start=start,
+                    end=(requested_end+timedelta(days=1)).isoformat(), auto_adjust=adjusted)
+                if not frame.empty and "Close" in frame:
+                    selected = market_storage.validate_frame(frame[['Close']], ('Close',))['Close']
+                    selected = selected.loc[(selected.index >= pd.Timestamp(start)) & (selected.index <= pd.Timestamp(end))]
+                    if not selected.empty:
+                        source = dict(provider=provider, storage="PROVIDER", fetched_at=datetime.utcnow().isoformat(),
+                                      requested_start=start, requested_end=end, finality="UNVERIFIED_PROVIDER_BAR")
+                        fetched[ticker] = selected
+            except Exception as exc:
+                failures[ticker] = f"PROVIDER_UNAVAILABLE: {type(exc).__name__}"
+        if selected is None or selected.empty:
+            selected = local_window
+        if selected is not None and not selected.empty:
+            series[ticker] = selected
+            sources[ticker] = source
+        else:
+            failures.setdefault(ticker, "NO_OBSERVATIONS")
+    if fetched:
+        try:
+            with market_storage.transaction() as pending:
+                pending.require_unchanged(expected)
+                for ticker,values in fetched.items():
+                    store_history(ticker,values,adjusted,start,end,transaction=pending)
+        except (OSError,ValueError) as exc:
+            for ticker in fetched:
+                sources[ticker]['storage_error'] = str(exc)
+    payload = align_history(tickers, series, start, end, adjusted, sources, failures, allow_partial)
+    payload["retrieved_at"] = datetime.utcnow().isoformat()
+    payload["fetched_at"] = min((source["fetched_at"] for source in sources.values() if source.get("fetched_at")), default=None)
+    payload["age_sessions"] = {tk:_business_sessions_between(date.fromisoformat(day), requested_end)
+                               for tk,day in payload["effective_dates"].items()}
+    return payload
 
 
 def load_yahoo_reference_closes(
@@ -420,9 +294,30 @@ def load_yahoo_reference_closes(
         series: dict[str, dict[str, float]] = {}
         splits: dict[str, dict[str, float]] = {}
         currencies: dict[str, str] = {}
+        sources: dict[str, dict] = {}
         missing: list[str] = []
         for ticker in tickers:
             try:
+                from hashlib import sha256
+                import json
+                from ..runtime import data_path
+                from ..core.fixing_finality import POLICY_VERSION, qualify_close
+                from ..core.market_policy import freshness
+                cache_path = data_path("market_reference", sha256(ticker.upper().encode()).hexdigest()+".json")
+                expected = market_storage.versions([cache_path])
+                try:
+                    cached = json.loads(market_storage.current_path(cache_path).read_text(encoding="utf-8"))
+                    local = {d: v for d, v in cached["series"].items() if start <= d <= last_day.isoformat()}
+                    if (local and cached["requested_start"] <= start
+                            and qualify_close(last_day.isoformat(), cached["source"])["qualified"]
+                            and freshness(max(local), last_day, "history")["qualified"]):
+                        series[ticker], splits[ticker] = local, cached["splits"]
+                        sources[ticker] = {**cached["source"], "storage": "MARKET_REFERENCE"}
+                        if cached.get("currency"):
+                            currencies[ticker] = cached["currency"]
+                        continue
+                except (OSError, ValueError, KeyError, TypeError):
+                    pass
                 instrument = yf.Ticker(ticker)
                 hist = instrument.history(
                     start=start,
@@ -430,6 +325,7 @@ def load_yahoo_reference_closes(
                     auto_adjust=False,
                     actions=True,
                 )
+                history_received_at = datetime.now(timezone.utc).isoformat()
                 if hist.empty or "Close" not in hist.columns:
                     missing.append(ticker)
                     continue
@@ -457,6 +353,24 @@ def load_yahoo_reference_closes(
                         # not a reason to discard an otherwise timestamped raw
                         # close when the metadata endpoint itself is down.
                         pass
+                    metadata = {}
+                    try:
+                        metadata = instrument.get_history_metadata() or {}
+                    except Exception:
+                        pass
+                    sources[ticker] = {
+                        "exchange": metadata.get("exchangeName"),
+                        "timezone": metadata.get("exchangeTimezoneName"),
+                        "fetched_at": history_received_at,
+                        "provider": "YAHOO_FINANCE", "price_type": "UNADJUSTED_CLOSE",
+                    }
+                    try:
+                        with market_storage.transaction() as pending:
+                            pending.require_unchanged(expected)
+                            pending.json(cache_path, {"requested_start": start, "series": closes,
+                                "splits": split_rows, "currency": currencies.get(ticker), "source": sources[ticker]})
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        logger.warning("Reference close cache not published: %s", exc)
                 else:
                     missing.append(ticker)
             except Exception as exc:
@@ -471,6 +385,8 @@ def load_yahoo_reference_closes(
             "series": series,
             "splits": splits,
             "currencies": currencies,
+            "sources": sources,
+            "finality_policy": POLICY_VERSION,
             "missing": sorted(set(missing)),
         }
     except Exception as exc:
@@ -546,6 +462,7 @@ def probe_ticker(ticker: str) -> dict:
         return {"ok": False, "error": f"Ticker injoignable : {exc}"}
 
 
+@market_storage.consistent_read
 def dividend_profile(ticker: str, asof: Optional[str] = None,
                       window_years: float = 1.0) -> dict:
     """Rendement de dividende d'un titre, à une date donnée, par deux voies.
@@ -570,13 +487,26 @@ def dividend_profile(ticker: str, asof: Optional[str] = None,
     opération sur titre, typiquement. Le signaler vaut mieux qu'un chiffre
     silencieusement faux.
     """
-    if not _HAS_YF:
-        return {"ok": False, "error": "yfinance non installé"}
     symbole = (ticker or "").strip()
     if not symbole:
         return {"ok": False, "error": "Ticker vide"}
     try:
-        fin = date.fromisoformat(asof) if asof else date.today()
+        from ..runtime import business_today
+        from ..core.market_policy import freshness
+        from .market_history import local_profile, store_profile, store_history, local_history
+        fin = date.fromisoformat(asof) if asof else business_today()
+        if not math.isfinite(window_years) or window_years <= 0:
+            return {"ok": False, "error": "Fenêtre de dividendes invalide."}
+        cached = local_profile(symbole, fin.isoformat(), window_years)
+        if cached:
+            cached["freshness"] = freshness(cached.get("asof_effective"), fin, "history")
+            if cached["freshness"]["qualified"]:
+                return cached
+        if not _HAS_YF:
+            return {"ok": False, "error": "Profil de dividendes absent du stock local et fournisseur indisponible."}
+        from .market_history import _path as shared_path, _profile_path
+        expected = market_storage.versions([shared_path(symbole,True),shared_path(symbole,False),
+                                            _profile_path(symbole,fin.isoformat(),window_years)])
         debut = fin - timedelta(days=round(window_years * 365.25))
         # Marge amont : il faut une clôture avant le début de fenêtre pour
         # ancrer le rapport, et le premier jour peut être fermé.
@@ -584,8 +514,20 @@ def dividend_profile(ticker: str, asof: Optional[str] = None,
         borne = (fin + timedelta(days=1)).isoformat()
 
         instrument = yf.Ticker(symbole)
-        nu = instrument.history(start=marge, end=borne, auto_adjust=False)
-        ajuste = instrument.history(start=marge, end=borne, auto_adjust=True)
+        def observations(adjusted):
+            local, source = local_history(symbole, marge, fin.isoformat(), adjusted)
+            if local is not None:
+                local = local.loc[(local.index >= pd.Timestamp(marge)) & (local.index <= pd.Timestamp(fin))]
+                if (not local.empty and source.get('requested_start', marge) <= marge
+                        and freshness(local.index[-1].date(), fin, 'history')['qualified']):
+                    return local.to_frame('Close'), False
+            return instrument.history(start=marge, end=borne, auto_adjust=adjusted), True
+        nu, fetched_raw = observations(False)
+        ajuste, fetched_adjusted = observations(True)
+        if nu.empty or ajuste.empty or 'Close' not in nu or 'Close' not in ajuste:
+            return {"ok":False,"error":f"Cours bruts ou ajustés absents pour « {symbole} »."}
+        nu = market_storage.validate_frame(nu[['Close']], ('Close',))
+        ajuste = market_storage.validate_frame(ajuste[['Close']], ('Close',))
         if nu.empty or "Close" not in nu.columns:
             return {"ok": False, "error": f"Aucune cotation pour « {symbole} » sur la période."}
 
@@ -635,7 +577,7 @@ def dividend_profile(ticker: str, asof: Optional[str] = None,
         plafond = max(yield_declared, yield_implied or 0.0)
         suspect = bool(ecart is not None and ecart > 0.005
                        and plafond > 0 and ecart / plafond > 0.6)
-        return {
+        result = {
             "ok": True,
             "ticker": symbole,
             "asof": fin.isoformat(),
@@ -651,7 +593,28 @@ def dividend_profile(ticker: str, asof: Optional[str] = None,
             "pays_dividends": bool(detaches) or bool(yield_implied and yield_implied > 1e-6),
             "discrepancy": ecart,
             "suspect": suspect,
+            "provider": "YAHOO_FINANCE",
+            "method": "TRAILING_CASH_DIVIDENDS_OVER_SPOT",
+            "price_type": "UNADJUSTED_CLOSE",
+            "adjusted_cross_check": True,
+            "fetched_at": datetime.utcnow().isoformat(),
+            "storage": "PROVIDER",
+            "freshness": freshness(avant_fin.index[-1].date(), fin, "history"),
         }
+        if not result["freshness"]["qualified"]:
+            result.update(ok=False, error="Cours de référence du dividende hors politique de fraîcheur.")
+        if result["ok"]:
+            try:
+                with market_storage.transaction() as pending:
+                    pending.require_unchanged(expected)
+                    if fetched_raw:
+                        store_history(symbole, closes_nus, False, marge, fin.isoformat(), transaction=pending)
+                    if fetched_adjusted:
+                        store_history(symbole, closes_aj, True, marge, fin.isoformat(), transaction=pending)
+                    store_profile(symbole, fin.isoformat(), window_years, result, transaction=pending)
+            except (OSError, ValueError) as exc:
+                result["storage_error"] = str(exc)
+        return result
     except Exception as exc:
         logger.debug("dividend_profile %s: %s", symbole, exc)
         return {"ok": False, "error": f"Dividendes indisponibles : {exc}"}

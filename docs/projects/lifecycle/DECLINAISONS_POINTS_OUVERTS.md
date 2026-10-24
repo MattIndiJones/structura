@@ -1,5 +1,15 @@
 # Déclinaisons — trois points ouverts
 
+> **État au 22 octobre 2026 :** les points 1 et 2 sont traités localement par
+> [C19](../../audits/REMEDIATION_C19_2026-10-21.md), avec gel manuel explicite et
+> archives conservées. Le point 3 est traité par
+> [C25](../../audits/REMEDIATION_C25_2026-10-22.md) : bid saisi ou hypothèse modèle,
+> décote et frais explicites, quantité et récupération séparées. Un plafond
+> n’est publié que s’il est démontré. La recette graphique et la qualification
+> déployée restent ouvertes. Le cadrage ci-dessous est historique ; le rapport
+> des prix qu’il appelait « plafond » est une quantité de nominal réinvesti.
+> La convention commerciale D09 est confirmée par Philippe le 22/10/2026.
+
 > Document de cadrage. Rien de ce qui suit n'est implémenté à la date de
 > rédaction. Le mécanisme des déclinaisons (avenant / roll, filiation,
 > marquage des écarts, comparateur) est en place et livré au commit `8bb331a`.

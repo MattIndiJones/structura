@@ -70,6 +70,9 @@
               </td>
               <td class="px-3 py-3 text-right font-mono">
                 <SensitiveValue>{{ formatPrice(product.latest_price) }}</SensitiveValue>
+                <div v-if="product.historical_price_terms_version" class="text-[10px]" style="color: var(--muted);">
+                  Historique v{{ product.historical_price_terms_version }} : <SensitiveValue>{{ formatPrice(product.historical_price) }}</SensitiveValue>
+                </div>
               </td>
               <td class="px-3 py-3" style="color: var(--muted);">{{ product.maturity_date || 'À préciser' }}</td>
               <td class="px-3 py-3">
@@ -97,6 +100,28 @@
                     {{ detailErrors[product.id] }}
                   </AlertMessage>
                   <template v-else>
+                    <div class="mb-4 space-y-2 text-xs" v-if="detailsByProduct[product.id]">
+                      <h2 class="font-semibold">Dossier · termes v{{ detailsByProduct[product.id].terms_version }} · révision {{ detailsByProduct[product.id].revision }}</h2>
+                      <div class="flex flex-wrap gap-2">
+                        <RouterLink v-for="request in detailsByProduct[product.id].rfqs" :key="request.id" class="btn-secondary text-xs"
+                          :to="{path:'/rfq',query:{rfq:request.id}}">RFQ #{{ request.id }} · {{ request.name }} · v{{ request.product_terms_version }}</RouterLink>
+                        <RouterLink v-if="detailsByProduct[product.id].execution?.deal_id" class="btn-secondary text-xs"
+                          :to="{path:'/booking',query:{deal:detailsByProduct[product.id].execution.deal_id}}">Exécution {{ detailsByProduct[product.id].execution.reference }}</RouterLink>
+                      </div>
+                      <div v-for="doc in detailsByProduct[product.id].documents" :key="`${doc.kind}-${doc.record_id}`">
+                        <button v-if="doc.kind === 'DOCUMENT'" class="btn-ghost text-xs" @click="downloadDocument(doc)">{{ doc.title || doc.filename || 'Document' }} · v{{ doc.terms_version }}</button>
+                        <span v-else>{{ doc.kind }} #{{ doc.record_id }} · termes v{{ doc.terms_version }} · {{ formatDateTime(doc.created_at) }}</span>
+                      </div>
+                      <details><summary class="cursor-pointer">Versions et actions conservées</summary>
+                        <p v-for="entry in historyByProduct[product.id]?.items || []" :key="entry.revision" class="mt-1">
+                          Révision {{ entry.revision }} · termes v{{ entry.terms_version }} · {{ formatDateTime(entry.created_at) }} · {{ entry.reason }}
+                        </p>
+                        <div class="flex gap-2 mt-2">
+                          <button class="btn-secondary text-xs" :disabled="!historyByProduct[product.id]?.offset" @click="loadHistory(product.id, -20)">Précédent</button>
+                          <button class="btn-secondary text-xs" :disabled="!historyByProduct[product.id]?.has_more" @click="loadHistory(product.id, 20)">Suivant</button>
+                        </div>
+                      </details>
+                    </div>
                     <div class="flex items-center justify-between gap-3 mb-3">
                       <div>
                         <h2 class="text-xs font-bold uppercase tracking-wider" style="color: var(--text);">
@@ -168,6 +193,10 @@
                         </tbody>
                       </table>
                     </div>
+                    <div class="flex justify-end gap-2 mt-2">
+                      <button class="btn-secondary text-xs" :disabled="!detailsByProduct[product.id]?.calculation_page?.offset" @click="loadCalculationPage(product.id, -20)">Calculs précédents</button>
+                      <button class="btn-secondary text-xs" :disabled="!detailsByProduct[product.id]?.calculation_page?.has_more" @click="loadCalculationPage(product.id, 20)">Calculs plus anciens</button>
+                    </div>
                   </template>
                 </section>
               </td>
@@ -175,6 +204,11 @@
           </template>
         </tbody>
       </table>
+    </div>
+    <div v-if="products.items.length || products.offset" class="flex items-center justify-end gap-3 mx-6 mb-4 text-xs">
+      <span>Dossiers {{ products.offset + 1 }} à {{ products.offset + products.items.length }}</span>
+      <button class="btn-secondary text-xs" :disabled="products.loading || !products.offset" @click="changePage(-products.pageSize)">Précédent</button>
+      <button class="btn-secondary text-xs" :disabled="products.loading || !products.hasMore" @click="changePage(products.pageSize)">Suivant</button>
     </div>
 
     <BaseModal v-model="calculationDialog.open" title="Résultat conservé" max-width="720px">
@@ -334,11 +368,13 @@ import PriceComparisonPanel from '../components/PriceComparisonPanel.vue'
 import { useProductsStore } from '../stores/products.js'
 import { formatBps, formatDate, formatDateTime, formatInt, formatNumber, formatPercent } from '../utils/format.js'
 import { compareMarketSnapshots, compareMarketSnapshotSeries } from '../utils/productCalculations.js'
+import { apiFetch } from '../utils/api.js'
 
 const products = useProductsStore()
 const archived = ref(false)
 const expandedProductId = ref(null)
 const detailsByProduct = reactive({})
+const historyByProduct = reactive({})
 const loadingDetails = reactive({})
 const detailErrors = reactive({})
 const selectedCalculations = reactive({})
@@ -411,12 +447,39 @@ async function toggleCalculations(product) {
   loadingDetails[product.id] = true
   detailErrors[product.id] = ''
   try {
-    detailsByProduct[product.id] = await products.fetchDetails(product.id)
+    const [details, history] = await Promise.all([
+      products.fetchDetails(product.id, { offset: 0 }), products.fetchHistory(product.id),
+    ])
+    detailsByProduct[product.id] = details; historyByProduct[product.id] = history
   } catch (error) {
     detailErrors[product.id] = error.message
   } finally {
     loadingDetails[product.id] = false
   }
+}
+
+async function changePage(delta) {
+  expandedProductId.value = null
+  await products.fetchAll({ archived: archived.value, pageOffset: Math.max(0, products.offset + delta) })
+}
+async function loadHistory(id, delta) {
+  try { historyByProduct[id] = await products.fetchHistory(id, Math.max(0, (historyByProduct[id]?.offset || 0) + delta)) }
+  catch (error) { products.error = error.message }
+}
+async function loadCalculationPage(id, delta) {
+  try {
+    const pageOffset = Math.max(0, (detailsByProduct[id]?.calculation_page?.offset || 0) + delta)
+    detailsByProduct[id] = await products.fetchDetails(id, { offset: pageOffset })
+    selectedCalculations[id] = []
+  } catch (error) { products.error = error.message }
+}
+async function downloadDocument(doc) {
+  try {
+    const response = await apiFetch(`/api/documents/${doc.record_id}/download`)
+    if (!response.ok) throw new Error('Ce document n’est pas accessible avec vos habilitations.')
+    const url = URL.createObjectURL(await response.blob()), link = document.createElement('a')
+    link.href = url; link.download = doc.filename || 'document'; link.click(); URL.revokeObjectURL(url)
+  } catch (error) { products.error = error.message }
 }
 
 function calculationRows(productId) {
@@ -465,7 +528,8 @@ async function showCalculation(product, calculation) {
       previous ? loadCalculationDetail(product.id, previous.id) : Promise.resolve(null),
     ])
     calculationDialog.detail = detail
-    calculationDialog.previousDetail = previousDetail
+    calculationDialog.previousDetail = previousDetail || (detail.previous_calculation_id
+      ? await loadCalculationDetail(product.id, detail.previous_calculation_id) : null)
   } catch (error) {
     calculationDialog.error = error.message
   } finally {
@@ -527,6 +591,7 @@ function marketMovementCount() {
 
 function formatMarketValue(row, value) {
   if (value == null) return '—'
+  if (row.unit === 'text') return String(value)
   if (row.unit === 'bps') return formatBps(value, 1)
   if (row.unit === 'correlation') return formatNumber(value, 2)
   if (row.unit === 'number') return formatNumber(value, 2)

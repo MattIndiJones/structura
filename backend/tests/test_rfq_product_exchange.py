@@ -12,19 +12,14 @@ from backend.app.core.product.inputs import terms_from_input
 from backend.app.core.schemas import PricingRequest
 from backend.app.db.models import AuditEvent, Entity, ProductRecord, RfqProvider, RfqRequest
 from backend.app.services.product_repository import load_product, stage_revision, stage_terms
-from backend.tests.test_rfq import _make_session, _new_rfq, _rfq_params
-
-USER = SimpleNamespace(id=1, entity_id=1, role='user', username='requester', email='requester@example.test')
-
-@pytest.fixture(autouse=True)
-def historical_rfq_cases(monkeypatch):
-    """Lot-0 fixtures model existing creator-owned test dossiers."""
-    monkeypatch.setattr(rfq_api, "require_create_desk", lambda *_: None)
+from backend.tests.test_rfq import _make_session, _new_rfq, _rfq_params, USER, OTHER
 
 @pytest.fixture
 def dossier():
     with _make_session() as session:
-        session.add(Entity(id=1, name='ClientTech'))
+        entity = session.get(Entity, 1)
+        entity.name = 'ClientTech'
+        session.add(entity)
         session.add(RfqProvider(id=1, label='Banque A'))
         session.add(RfqProvider(id=2, label='Banque B'))
         session.commit()
@@ -101,7 +96,7 @@ def test_inactive_recipient_and_past_or_unzoned_deadlines_are_refused(dossier):
 
 def test_another_user_cannot_read_either_projection(dossier):
     session, rfq = dossier
-    stranger = SimpleNamespace(id=2, entity_id=1, role='user')
+    stranger = OTHER
     with pytest.raises(HTTPException) as failure:
         rfq_api.preview_rfq_exchange(rfq['id'], preview_body(rfq), stranger, session)
     assert failure.value.status_code == 404
@@ -111,7 +106,9 @@ def test_another_user_cannot_read_either_projection(dossier):
 
 def test_native_pricing_uses_the_current_engine_and_persisted_private_inputs(dossier):
     session, rfq = dossier
-    rfq_api.update_rfq(rfq['id'], rfq_api.RfqUpdate(pricing_params={'r': 0.02, 'N': 1000, 'funding_spread': 0.01}), USER, session)
+    rfq_api.update_rfq(rfq['id'], rfq_api.RfqUpdate(pricing_params={
+        'r': 0.02, 'N': 1000, 'funding_spread': 0.01,
+        'valuation_date': rfq['params']['strike_date']}), USER, session)
     packet = rfq_api.compose_rfq_pricing_input(rfq['id'], rfq_api.RfqPricingInput(expected_terms_version=1), USER, session)
     fields = packet['pricing_input']
     assert fields['script'] == load_product(session, rfq['product_id']).terms.script
@@ -119,7 +116,12 @@ def test_native_pricing_uses_the_current_engine_and_persisted_private_inputs(dos
     priced = price_endpoint(PricingRequest(**fields)).model_dump(mode='json')
     assert 0 < priced['price'] < 1
     assert priced['pricing_receipt']['server_signature']
-    recorded = rfq_api.update_rfq(rfq['id'], rfq_api.RfqUpdate(model_price=priced['price'] * 100, expected_model_input_hash=packet['input_hash']), USER, session)
+    recorded = rfq_api.update_rfq(rfq['id'], rfq_api.RfqUpdate(model_price=priced['price'] * 100,
+        pricing_receipt=priced['pricing_receipt'], expected_model_input_hash=packet['input_hash']), USER, session)
+    assert recorded['model_input_hash'] == packet['input_hash']
+    refreshed = rfq_api.get_rfq(rfq['id'], USER, session)
+    assert (refreshed['model_price'], refreshed['model_price_at'], refreshed['model_input_hash']) == (
+        recorded['model_price'], recorded['model_price_at'], packet['input_hash'])
     assert recorded['model_price'] == pytest.approx(priced['price'] * 100)
 
 def test_price_is_not_recorded_after_inputs_change(dossier):
@@ -130,6 +132,23 @@ def test_price_is_not_recorded_after_inputs_change(dossier):
         rfq_api.update_rfq(rfq['id'], rfq_api.RfqUpdate(model_price=98.0, expected_model_input_hash=packet['input_hash']), USER, session)
     assert failure.value.status_code == 409
     assert session.get(RfqRequest, rfq['id']).model_price is None
+
+
+def test_inception_receipt_cannot_attest_a_later_rfq_valuation(dossier):
+    from datetime import date
+    from backend.app.db.models import RfqBookingEvidence
+    session, rfq = dossier
+    later = (date.fromisoformat(rfq['params']['strike_date']) + timedelta(days=1)).isoformat()
+    rfq_api.update_rfq(rfq['id'], rfq_api.RfqUpdate(pricing_params={
+        'valuation_date': later, 'N': 1000}), USER, session)
+    packet = rfq_api.compose_rfq_pricing_input(rfq['id'], rfq_api.RfqPricingInput(expected_terms_version=1), USER, session)
+    priced = price_endpoint(PricingRequest(**packet['pricing_input'])).model_dump(mode='json')
+    with pytest.raises(HTTPException, match='valuation_date') as error:
+        rfq_api.update_rfq(rfq['id'], rfq_api.RfqUpdate(model_price=priced['price'] * 100,
+            pricing_receipt=priced['pricing_receipt'], expected_model_input_hash=packet['input_hash']), USER, session)
+    assert error.value.status_code == 422
+    assert session.get(RfqRequest, rfq['id']).model_price is None
+    assert session.get(RfqBookingEvidence, rfq['id']) is None
 
 def test_pricer_can_change_private_context_but_not_contractual_terms(dossier):
     session, rfq = dossier

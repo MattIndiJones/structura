@@ -5,7 +5,23 @@ Date : 13/10/2026, Europe/Berlin.
 Statut : décisions et plan d'action validés dans la conversation avec Philippe ;
 complément RFQ central intégré le 13/10/2026. La règle tarifaire reste une proposition
 à valider avant activation de la facturation.
-Le nouveau socle décrit ici n'est pas encore implémenté. Ce document accompagne
+**Avancement du 13/10 :** [étapes 1 et 2 du socle hybride](../projects/platform/HYBRID_SAAS_FOUNDATION_2026-10-13.md)
+implémentées sur `codex/hybrid-saas-foundation`, avec installations privées,
+initialisation et droits. Les [étapes 3 et 4](../projects/platform/HYBRID_SAAS_ACCESS_2026-10-13.md)
+sont désormais livrées : retrait ciblé des anciens jeux fictifs, sept cartes,
+sélecteur et sessions par onglet. Les étapes 5 à 8 restent à reprendre ; ce handoff
+conserve le cadrage et les décisions, sans les présenter comme livrées.
+Complément : [lanceur Python et retour Admin complet](../projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md).
+L'application Admin habituelle est séparée des six bases et de la console SaaS.
+Étape 5 partielle ; les tests sont suspendus à la demande de Philippe après ce
+correctif, compilation frontend seule réalisée. Étapes 6 à 8 toujours ouvertes.
+La [simulation RFQ native](../projects/platform/AGENT_WORKSHOP_NATIVE_RFQ_2026-10-13.md)
+réutilise désormais les contreparties existantes, les Product et le transport signé.
+Choix confirmé pour cette campagne : Kepler demandeur ; Leonteq répondant avec
+BNP, SG, Citi et UBS. Qualification dirigée réussie sur cinq cotations et quatre
+jambes rapprochées ; campagne annuelle et cycle final à relever séparément.
+
+Ce document accompagne
 la livraison de la branche `codex/rfq-network-lot-0` vers `main` et prépare un
 nouveau chat dédié à cette évolution.
 
@@ -303,9 +319,11 @@ son propre schéma, et les imports d'autres systèmes sont un sujet distinct.
 
 ## 9. État du code à reprendre et documentation
 
-Les lots RFQ 0 à 8 sont présents dans la branche livrée ; le nouveau socle hybride,
-les six installations permanentes, les super utilisateurs, les accès rapides
-et le registre central RFQ ne le sont pas. Ne pas recommencer les lots RFQ.
+Les lots RFQ 0 à 8 sont présents dans la branche livrée. Les six installations
+permanentes et leurs super utilisateurs sont désormais initialisés par les
+[étapes 1 et 2](../projects/platform/HYBRID_SAAS_FOUNDATION_2026-10-13.md).
+Les accès rapides, sessions par onglet, supervision centrale, partage collectif
+et registre central RFQ restent à construire. Ne pas recommencer les lots RFQ.
 
 Références à lire après `CLAUDE.md` et `docs/README.md` :
 

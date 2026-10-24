@@ -9,19 +9,30 @@
         {{ pricing.currentProduct.reference }}
       </span>
       <span class="text-xs font-semibold truncate">{{ pricing.currentProduct.name }}</span>
+      <RouterLink v-if="pricing.currentProduct.origin_product_id"
+                  :to="`/products/${pricing.currentProduct.origin_product_id}/pricer`"
+                  class="text-xs underline">Dossier d’origine #{{ pricing.currentProduct.origin_product_id }}</RouterLink>
       <span class="text-[10px] rounded px-2 py-0.5" style="background: var(--surface2); color: var(--muted);">
         Termes v{{ pricing.currentProduct.terms_version }} · révision {{ pricing.currentProduct.revision }}
       </span>
+      <button v-if="canEditTerms && !pricing.editingProductTerms" class="btn-secondary text-xs"
+              @click="pricing.beginProductTermsEdit()">Modifier les termes</button>
+      <template v-if="pricing.editingProductTerms">
+        <input v-model.trim="termsReason" class="input text-xs" aria-label="Motif de la nouvelle version" placeholder="Motif de la nouvelle version" />
+        <button class="btn-primary text-xs" :disabled="products.saving || termsReason.length < 3" @click="saveTerms">Conserver la nouvelle version</button>
+        <button class="btn-secondary text-xs" :disabled="products.saving" @click="cancelTerms">Annuler les modifications</button>
+        <span class="text-xs">Copie de travail : sauvegardez la version avant calcul ou RFQ.</span>
+      </template>
       <button v-if="canRetainCalculation" class="btn-secondary text-xs ml-auto"
               :disabled="products.saving" @click="retainCalculation">
         {{ products.saving ? 'Conservation…' : receivedRfq ? 'Conserver ce calcul privé' : 'Conserver ce calcul' }}
       </button>
-      <button v-if="!receivedRfq && !pricing.currentProduct.listed" class="btn-secondary text-xs"
+      <button v-if="!receivedRfq && !pricing.currentProduct.listed && !pricing.editingProductTerms" class="btn-secondary text-xs"
               :class="canRetainCalculation ? '' : 'ml-auto'"
               :disabled="products.saving" @click="openRetention">
         Conserver le produit
       </button>
-      <RouterLink v-if="!receivedRfq" :to="{ path: '/rfq', query: { product: pricing.currentProduct.product_id } }"
+      <RouterLink v-if="!receivedRfq && !pricing.editingProductTerms" :to="{ path: '/rfq', query: { product: pricing.currentProduct.product_id } }"
                   :class="['btn-secondary text-xs', canRetainCalculation || !pricing.currentProduct.listed ? '' : 'ml-auto']">
         Ouvrir une RFQ
       </RouterLink>
@@ -48,6 +59,8 @@
         {{ products.error }}
       </span>
     </template>
+    <p v-if="pricing.productLoadNotice" class="w-full text-xs" role="status">{{ pricing.productLoadNotice }}</p>
+    <p v-if="products.error && pricing.currentProduct" class="w-full text-xs" role="alert">{{ products.error }}</p>
   </div>
 
   <BaseModal v-model="modal" title="Conserver ce produit" max-width="480px">
@@ -82,6 +95,7 @@ import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useProductsStore } from '../stores/products.js'
+import { useAuthStore } from '../stores/auth.js'
 import BaseModal from './ui/BaseModal.vue'
 import AlertMessage from './ui/AlertMessage.vue'
 
@@ -92,6 +106,35 @@ const route = useRoute()
 const receivedRfq = computed(() => Number(route.query.receivedRfq) || null)
 const modal = ref(false)
 const name = ref('')
+const termsReason = ref('')
+const auth = useAuthStore()
+const canEditTerms = computed(() => !receivedRfq.value && !pricing.currentProduct?.execution && !pricing.openedDeal
+  && !pricing.currentRfqId && !auth.readOnly && (auth.user?.installation
+    ? auth.user.capabilities?.includes('business.prepare') : ['admin', 'organization_admin', 'user'].includes(auth.user?.role)))
+
+async function saveTerms() {
+  try {
+    if (!await pricing.validateScript()) throw new Error('Validez le script avant de conserver les termes.')
+    const input = pricing.draftProductBody(), before = JSON.stringify(input)
+    const target = pricing.currentProduct, previousVersion = target.terms_version
+    const product = await products.reviseTerms(target, input, termsReason.value)
+    if (pricing.currentProduct !== target) {
+      products.error = 'La version a été conservée sur son dossier d’origine ; le dossier actuellement affiché est inchangé.'
+      return
+    }
+    const newerEdits = JSON.stringify(pricing.draftProductBody()) !== before
+    pricing.currentProduct = product; pricing.editingProductTerms = newerEdits
+    if (!newerEdits) termsReason.value = ''
+    pricing.productLoadNotice = newerEdits
+      ? 'Version conservée. Des saisies plus récentes restent en copie de travail : conservez-les avant de calculer.'
+      : product.terms_version === previousVersion ? 'Termes inchangés : aucune nouvelle version créée.'
+        : 'Version conservée. Les calculs antérieurs restent rattachés à leurs termes ; relancez le pricing.'
+  } catch (e) { products.error = e.message }
+}
+async function cancelTerms() {
+  try { await pricing.loadFromProduct(pricing.currentProduct); termsReason.value = '' }
+  catch (e) { products.error = e.message }
+}
 
 const legacyReceipt = computed(() => !!(
   pricing.result?.pricing_receipt?.server_signature

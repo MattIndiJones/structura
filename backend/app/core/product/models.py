@@ -54,7 +54,7 @@ class UnderlyingIdentity(FrozenModel):
 
 class ContractParameter(FrozenModel):
     name: str = Field(min_length=1)
-    value: float | tuple[float, ...] | None
+    value: float | tuple[float | None, ...] | None
     is_pct: bool
     kind: Literal["scalar", "array"]
     description: str = ""
@@ -107,6 +107,9 @@ class ProductTerms(FrozenModel):
 
     def require_complete(self):
         missing = [p.name for p in self.parameters if p.value is None]
+        for p in self.parameters:
+            if isinstance(p.value, tuple):
+                missing.extend(f'{p.name}[{i + 1}]' for i, value in enumerate(p.value) if value is None)
         if not self.underlyings:
             missing.append('panier de sous-jacents')
         if self.T is None:

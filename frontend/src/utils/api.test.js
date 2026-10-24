@@ -37,19 +37,21 @@ describe('authentification des appels API', () => {
   it('relit le jeton à chaque appel et conserve les options JSON et multipart', async () => {
     const fetch = vi.fn(async () => ({ ok: true }))
     vi.stubGlobal('fetch', fetch)
-    localStorage.setItem('auth_token', 'first-session')
+    sessionStorage.setItem('auth_token', 'first-session')
     await apiFetch('/api/parse', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     })
     expect(fetch.mock.calls[0][1]).toEqual({
       method: 'POST', body: '{}',
+      signal: expect.any(AbortSignal),
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer first-session' },
     })
-    localStorage.setItem('auth_token', 'renewed-session')
+    sessionStorage.setItem('auth_token', 'renewed-session')
     const form = new FormData()
     await apiFetch('/api/script/transcribe', { method: 'POST', body: form })
     expect(fetch.mock.calls[1][1]).toEqual({
       method: 'POST', body: form, headers: { Authorization: 'Bearer renewed-session' },
+      signal: expect.any(AbortSignal),
     })
   })
 
@@ -57,7 +59,7 @@ describe('authentification des appels API', () => {
     // A raw fetch silently broke pricing when server authentication was enabled.
     // Login/register and the auth store have their own explicit auth contract.
     const root = fileURLToPath(new URL('../', import.meta.url))
-    const allowed = new Set(['utils/api.js', 'stores/auth.js', 'views/LoginView.vue'])
+    const allowed = new Set(['utils/api.js', 'utils/session.js', 'stores/auth.js', 'views/LoginView.vue'])
     const offenders = []
     function inspect(directory) {
       for (const entry of readdirSync(directory, { withFileTypes: true })) {

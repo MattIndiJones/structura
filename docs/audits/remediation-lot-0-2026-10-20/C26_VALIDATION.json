@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "corrective": "C26",
+  "date": "2026-10-22",
+  "findings": [
+    "M12-03",
+    "M12-04"
+  ],
+  "status": "locally_validated",
+  "production_qualified": false,
+  "report": "../REMEDIATION_C26_2026-10-22.md",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "dependencies": [
+    "C01",
+    "C11",
+    "C13"
+  ],
+  "backend": {
+    "passed": 101,
+    "distinct": true,
+    "new_cases": 44,
+    "files": 8,
+    "cases_by_file": {
+      "backend.tests.test_lifecycle_c26": 44,
+      "backend.tests.test_portfolio_barriers": 6,
+      "backend.tests.test_lifecycle_fenetres": 15,
+      "backend.tests.test_lifecycle_alerts": 3,
+      "backend.tests.test_fixings_releves": 8,
+      "backend.tests.test_fixing_finality_registry": 22,
+      "backend.tests.test_business_permissions": 2,
+      "backend.tests.test_lot7_operational": 1
+    },
+    "new_failures": 0,
+    "preexisting_failures": [
+      {
+        "classname": "backend.tests.test_fixings_releves",
+        "name": "test_la_fenetre_de_depart_a_ses_releves_bookes_sous_le_strike",
+        "message": "AttributeError: 'types.SimpleNamespace' object has no attribute 'role'"
+      }
+    ],
+    "raw_runs": [
+      "final-backend.xml",
+      "core-final.xml"
+    ],
+    "manifest": "qualified-distinct.xml",
+    "baseline_passed": 33,
+    "baseline_failed": 1,
+    "reproduction_failed": 4,
+    "reproduction_passed": 1
+  },
+  "frontend": {
+    "passed": 720,
+    "files": 81,
+    "new_cases": 8,
+    "build_succeeded": true,
+    "vite_seconds": 10.18,
+    "out_dir": "C:/Users/phili/AppData/Local/Temp/structura-c26-vite-build",
+    "log": "frontend-final.log"
+  },
+  "acceptance": {
+    "tests": {
+      "M12-03": [
+        "test_missing_first_underlying_never_becomes_second",
+        "test_indexed_extrema_read_the_history",
+        "test_missing_member_leaves_basket_and_its_own_extrema_unavailable",
+        "test_current_price_respects_c11_source_age",
+        "test_t08_official_correction_updates_watchlist_without_rewriting_previous_result",
+        "test_full_watchlist_to_alert_retry_never_crosses_on_the_wrong_constituent"
+      ],
+      "M12-04": [
+        "test_all_failed_run_is_failed_and_same_slot_can_retry",
+        "test_partial_run_has_explicit_coverage_and_is_retryable",
+        "test_database_flush_failure_is_rolled_back_before_next_deal",
+        "test_settlement_failure_is_per_deal_and_does_not_leave_audit_or_status",
+        "test_successful_alerts_are_deduplicated_on_partial_retry",
+        "test_legacy_false_success_with_errors_can_be_reclaimed",
+        "test_old_worker_cannot_overwrite_a_new_claim",
+        "frontend/src/components/LifecycleRefreshSummary.test.js"
+      ]
+    },
+    "positional_underlying_identity": true,
+    "incomplete_baskets_unavailable": true,
+    "extrema_window": "official initial level and unadjusted sampled closes from strike through asof",
+    "continuous_monitoring_certified": false,
+    "missing_history_unavailable": true,
+    "current_price_max_carry_days": 3,
+    "official_registry_validated_and_overlaid": true,
+    "official_source_dates_outrank_aligned_carry_dates": true,
+    "terminal_and_pending_official_records_preserved": true,
+    "run_states": [
+      "SUCCESS",
+      "PARTIAL",
+      "FAILED",
+      "SKIPPED",
+      "SUPERSEDED"
+    ],
+    "per_deal_stage_coverage": true,
+    "failed_and_partial_slots_retryable": true,
+    "legacy_false_success_retryable": true,
+    "alert_deduplication_preserved": true,
+    "dirty_failed_transactions_rolled_back": true,
+    "claim_owner_guard": true,
+    "manual_scope_c01_revalidated": true,
+    "t08_local_surveillance": true,
+    "d07_unchanged": "Calendar transition retained; no bank payment confirmation implied"
+  },
+  "network": {
+    "external_http_disabled": true,
+    "blocked_attempts": 0
+  },
+  "limits": [
+    "No full backend suite",
+    "Preexisting missing-role fixture still fails",
+    "Sampled closes do not certify continuous barriers",
+    "T08 full deployed chain remains partial",
+    "No interactive GUI or deployed qualification",
+    "D07 remains open",
+    "Remaining C27 open"
+  ],
+  "artifact_root": ".runtime/diagnostic-acceptance/c26-2026-10-22",
+  "commit": false,
+  "push": false,
+  "server_started": false,
+  "preservation": {
+    "initial_files": 1270,
+    "unchanged": 1260,
+    "expected_changed": [
+      "backend/app/api/deals.py",
+      "backend/app/services/lifecycle_alerts.py",
+      "backend/tests/test_portfolio_barriers.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "frontend/src/utils/barriers.js",
+      "frontend/src/utils/barriers.test.js",
+      "frontend/src/views/BookingView.vue"
+    ],
+    "new": [
+      "backend/app/core/watchlist_observations.py",
+      "backend/tests/test_lifecycle_c26.py",
+      "docs/audits/REMEDIATION_C26_2026-10-22.md",
+      "docs/audits/remediation-lot-0-2026-10-20/C26_VALIDATION.json",
+      "frontend/src/components/LifecycleRefreshSummary.test.js",
+      "frontend/src/components/LifecycleRefreshSummary.vue"
+    ],
+    "all_other_versioned_and_untracked_files_unchanged": true,
+    "previous_audit_evidence_unchanged": true,
+    "dist_unchanged": true,
+    "real_db_absent": true,
+    "branch_unchanged": true,
+    "head_unchanged": true,
+    "unrelated_registry_entries_unchanged": true,
+    "incremental_whitespace_errors": 0
+  },
+  "source_sha256": {
+    "backend/app/api/deals.py": "48ae77deb6af165d2b85c5af9da37e96ce503d5a087d6145bdbab0327b619518",
+    "backend/app/core/watchlist_observations.py": "fcb4b104e8a79e466e4d3c2b3401eb15ef07214b196b85dcaaeff70e202ceb4f",
+    "backend/app/services/lifecycle_alerts.py": "3f21ce9c67af01cab332d6efb1d07ce7f9396ddc1451611a1ef00368f4bba5fc",
+    "backend/tests/test_lifecycle_c26.py": "4c9c94724bc3a1cdb67a5fa1f97ff60ea99c7b2598cf5d64c3d3301a21078af2",
+    "backend/tests/test_portfolio_barriers.py": "65da10661097edb752d3b14cbc2a240ddc0261bf9305a640fab1caf4f26ac795",
+    "frontend/src/components/LifecycleRefreshSummary.test.js": "b9a5418813ca5b93335fa8f1520a2e5a49759de7e092576685237d3e5dc02439",
+    "frontend/src/components/LifecycleRefreshSummary.vue": "f574cfd37453fbe3364c6bdb7b11faa375068d40925b8e4ecb5b200901b6f369",
+    "frontend/src/utils/barriers.js": "3c635047c39a4092864d2e05ac30a63e98f4691a22169e065259ffad7efa035c",
+    "frontend/src/utils/barriers.test.js": "6970327001bc4e0dc742b81ba369606646affea3464e552120895d5daca41c2e",
+    "frontend/src/views/BookingView.vue": "d5f38ecc8a23466f285a7a4ad718721bfe7884fab6b35fe607099e952b3f66a5"
+  }
+}

@@ -1,0 +1,291 @@
+{
+  "date": "2026-10-20",
+  "workstream": "C03",
+  "decision": "D01",
+  "confirmed_user_answer": "Prévoir une exception administrateur explicite, motivée et auditée",
+  "user_approval_received": true,
+  "status": "Implemented and targeted validation passed locally; graphical/cross-workstream/production acceptance remains open",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "baseline": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c03-d01-baseline-0df873b31a4941b9888a413f11b064ff",
+  "authorization": {
+    "code_and_targeted_tests": true,
+    "commit": false,
+    "push": false,
+    "live_business_database_mutation": false
+  },
+  "policy": "ID actif par défaut ; exception administrateur pour booking direct hors référentiel, sans ID ni netting set ni RFQ/accord ; nom et motif requis, crédit non évalué, attestation et audit transactionnels, régularisation par amendement sous contrôle crédit.",
+  "backend": {
+    "distinct_passed": 93,
+    "distinct_files": 6,
+    "exception_cases_passed": 18,
+    "regression_cases_passed": 75,
+    "qualification_method": "75 regression cases passed in backend-targeted.log; all 18 exception cases passed in backend-exception-final.log after correcting test assertions. Counts are a union, not the sum of attempts.",
+    "consolidated_attempt": {
+      "passed": 92,
+      "failed": 1,
+      "duration_seconds": 48.5,
+      "failure": "Regularization assertion expected the internal credit error instead of the amendment boundary error; corrected in final exception run."
+    },
+    "exception_final_run": {
+      "passed": 18,
+      "failed": 0,
+      "duration_seconds": 12.16,
+      "log": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/backend-exception-final.log"
+    },
+    "test_ids": [
+      "backend/tests/test_booking_legal_exception.py::test_http_permissions_default_refusal_and_admin_atomic_acceptance[standalone]",
+      "backend/tests/test_booking_legal_exception.py::test_http_permissions_default_refusal_and_admin_atomic_acceptance[organization]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes0]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes1]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes2]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes3]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes4]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes5]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes6]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes7]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_invalid_inputs_are_audited_and_never_booked[changes8]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_cannot_reactivate_inactive_bank_or_skip_known_credit_limit",
+      "backend/tests/test_booking_legal_exception.py::test_exception_never_replaces_rfq_or_pricing_or_economics[changes0]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_never_replaces_rfq_or_pricing_or_economics[changes1]",
+      "backend/tests/test_booking_legal_exception.py::test_exception_never_replaces_rfq_or_pricing_or_economics[changes2]",
+      "backend/tests/test_booking_legal_exception.py::test_regularization_checks_credit_preserves_exception_and_original_contract",
+      "backend/tests/test_booking_legal_exception.py::test_exception_column_migration_is_additive_idempotent_and_does_not_qualify_legacy",
+      "backend/tests/test_booking_legal_exception.py::test_audit_failure_rolls_back_deal_product_and_exception",
+      "backend/tests/test_legal_identity_workflows.py::test_provider_rename_and_reassignment_never_reassign_historical_quotes",
+      "backend/tests/test_legal_identity_workflows.py::test_unfrozen_quote_requires_explicit_audited_qualification",
+      "backend/tests/test_legal_identity_workflows.py::test_network_mapping_accepts_different_local_name_and_refuses_inactive_id",
+      "backend/tests/test_legal_identity_workflows.py::test_direct_booking_rejects_missing_unknown_or_inconsistent_legal_identity[changes0]",
+      "backend/tests/test_legal_identity_workflows.py::test_direct_booking_rejects_missing_unknown_or_inconsistent_legal_identity[changes1]",
+      "backend/tests/test_legal_identity_workflows.py::test_direct_booking_rejects_missing_unknown_or_inconsistent_legal_identity[changes2]",
+      "backend/tests/test_legal_identity_workflows.py::test_legal_amendment_updates_deal_product_and_keeps_original_snapshot",
+      "backend/tests/test_legal_identity_workflows.py::test_legal_amendment_credit_refusal_has_no_partial_mutation",
+      "backend/tests/test_legal_identity_workflows.py::test_real_credit_limit_blocks_bank_transfer_without_rewriting_contract",
+      "backend/tests/test_legal_identity_workflows.py::test_trailing_space_cannot_bypass_a_real_booking_credit_limit",
+      "backend/tests/test_reference_governance.py::test_catalog_uses_local_metadata_offline_and_prevents_currency_divergence",
+      "backend/tests/test_reference_governance.py::test_invalid_reference_metadata_is_rejected[counterparties-body0]",
+      "backend/tests/test_reference_governance.py::test_invalid_reference_metadata_is_rejected[counterparties-body1]",
+      "backend/tests/test_reference_governance.py::test_invalid_reference_metadata_is_rejected[rfq-providers-body2]",
+      "backend/tests/test_reference_governance.py::test_invalid_reference_metadata_is_rejected[underlyings-body3]",
+      "backend/tests/test_reference_governance.py::test_invalid_reference_metadata_is_rejected[underlyings-body4]",
+      "backend/tests/test_reference_governance.py::test_reference_reason_authorization_soft_delete_and_explicit_revalidation",
+      "backend/tests/test_reference_governance.py::test_restart_preserves_catalog_moves_deactivations_and_even_an_empty_catalog",
+      "backend/tests/test_reference_governance.py::test_explicit_invalid_provider_link_never_falls_back_to_homonymous_bank",
+      "backend/tests/test_reference_governance.py::test_credit_control_never_silently_skips_unknown_or_inactive_identity[None]",
+      "backend/tests/test_reference_governance.py::test_credit_control_never_silently_skips_unknown_or_inactive_identity[999]",
+      "backend/tests/test_reference_governance.py::test_credit_control_never_silently_skips_unknown_or_inactive_identity[2]",
+      "backend/tests/test_reference_governance.py::test_legacy_quote_migration_never_invents_a_historical_identity",
+      "backend/tests/test_rfq_execution.py::test_network_booking_requires_exact_confirmation_without_rewriting_publication",
+      "backend/tests/test_rfq_execution.py::test_relationship_suspension_blocks_new_confirmation",
+      "backend/tests/test_rfq_execution.py::test_requested_is_not_confirmation_and_cancel_preserves_history",
+      "backend/tests/test_rfq_execution.py::test_external_confirmation_freezes_terms_and_preserves_manual_route",
+      "backend/tests/test_rfq_execution.py::test_confirmed_trade_books_after_quote_expiry_and_replays_once",
+      "backend/tests/test_rfq_execution.py::test_expired_offer_cannot_be_backdated_into_a_new_treatment",
+      "backend/tests/test_rfq_execution.py::test_acceptance_after_expiry_or_future_confirmation_is_rejected",
+      "backend/tests/test_rfq_execution.py::test_booking_refusal_preserves_confirmation_and_block_reason",
+      "backend/tests/test_rfq_execution.py::test_no_book_right_and_foreign_organization_cannot_confirm",
+      "backend/tests/test_rfq_execution.py::test_immutable_evidence_and_duplicate_execution_reference",
+      "backend/tests/test_rfq_execution.py::test_manual_booking_without_new_confirmation_keeps_existing_workflow",
+      "backend/tests/test_rfq_execution.py::test_duplicate_execution_reference_across_rfqs_has_conflict",
+      "backend/tests/test_rfq_execution.py::test_external_conflict_keeps_confirmed_trade_and_blocks_booking",
+      "backend/tests/test_rfq_execution.py::test_concurrent_booking_of_same_execution_returns_one_deal",
+      "backend/tests/test_ccr_api.py::test_http_configuration_calculation_replay_and_scope",
+      "backend/tests/test_ccr_api.py::test_anonymous_ccr_is_not_accessible",
+      "backend/tests/test_ccr_api.py::test_rfq_uses_explicit_provider_mapping_and_frozen_engine_units",
+      "backend/tests/test_business_permissions.py::test_agreement_permission_matrix_and_audited_denials[standalone]",
+      "backend/tests/test_business_permissions.py::test_agreement_permission_matrix_and_audited_denials[organization]",
+      "backend/tests/test_business_permissions.py::test_settlement_is_operations_only_idempotent_and_dates_are_distinct[standalone]",
+      "backend/tests/test_business_permissions.py::test_settlement_is_operations_only_idempotent_and_dates_are_distinct[organization]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price/in-life]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price/implied-funding]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/solve]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/grid]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/scenarios]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/product-optimizer/run]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/compute/batches]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price/in-life]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price/implied-funding]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/solve]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/grid]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/scenarios]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/product-optimizer/run]",
+      "backend/tests/test_business_permissions.py::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/compute/batches]",
+      "backend/tests/test_business_permissions.py::test_front_colleague_operations_controller_handoff_and_revocation[standalone]",
+      "backend/tests/test_business_permissions.py::test_front_colleague_operations_controller_handoff_and_revocation[organization]",
+      "backend/tests/test_business_permissions.py::test_manual_refresh_only_processes_the_shared_visible_book[standalone]",
+      "backend/tests/test_business_permissions.py::test_manual_refresh_only_processes_the_shared_visible_book[organization]",
+      "backend/tests/test_business_permissions.py::test_booking_review_refuses_stale_or_missing_evidence[standalone]",
+      "backend/tests/test_business_permissions.py::test_booking_review_refuses_stale_or_missing_evidence[organization]",
+      "backend/tests/test_business_permissions.py::test_historical_rfq_without_desk_keeps_personal_access[standalone]",
+      "backend/tests/test_business_permissions.py::test_historical_rfq_without_desk_keeps_personal_access[organization]",
+      "backend/tests/test_business_permissions.py::test_operational_valuation_keeps_contract_scope[standalone]",
+      "backend/tests/test_business_permissions.py::test_operational_valuation_keeps_contract_scope[organization]",
+      "backend/tests/test_business_permissions.py::test_shared_collections_and_documents_keep_contract_authorization[standalone]",
+      "backend/tests/test_business_permissions.py::test_shared_collections_and_documents_keep_contract_authorization[organization]",
+      "backend/tests/test_business_permissions.py::test_crm_details_aggregates_signals_and_alerts_follow_deal_scope[standalone]",
+      "backend/tests/test_business_permissions.py::test_crm_details_aggregates_signals_and_alerts_follow_deal_scope[organization]",
+      "backend/tests/test_business_permissions.py::test_scope_migration_freezes_owner_and_keeps_unknown_settlement_dates"
+    ],
+    "full_backend_suite_run": false
+  },
+  "frontend": {
+    "passed": 470,
+    "failed": 0,
+    "files": 61,
+    "command": "npm.cmd run build -- --outDir <temporary directory>",
+    "vite_build_succeeded": true,
+    "build_seconds": 12.1,
+    "output_directory": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c03-d01-build-75daa11082da4bac82efa69b530e5280",
+    "latest_exception_test_run": {
+      "passed": 9,
+      "failed": 0,
+      "reason": "Replayed after strengthening the unauthorized submission assertion; Vue sources unchanged after build.",
+      "log": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/frontend-exception-final.log"
+    }
+  },
+  "limits": [
+    "Direct booking only; RFQ and agreement identities must be qualified using their existing workflow",
+    "No counterparty identity certification or commercial-alias inference",
+    "CCR NOT_ASSESSED at booking; no favorable credit decision inferred",
+    "Consolidated follow-up and exposure of uncatalogued dossiers remain in C04/C21",
+    "No manual graphical acceptance, real installation migration or full backend suite",
+    "Initial C03 189-test campaign not rerun in its entirety; overlapping phases must not be added"
+  ],
+  "integrity": {
+    "incremental_diff_check_exit_code": 0,
+    "deleted_files": [],
+    "dist_unchanged": true,
+    "prior_c01_c02_reports_and_evidence_unchanged": true,
+    "d01_baseline": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c03-d01-baseline-0df873b31a4941b9888a413f11b064ff",
+    "d01_changed_files_within_scope": true,
+    "d01_incremental_whitespace_check_passed": true,
+    "d01_process_cleanup": {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/process-cleanup.json",
+      "sha256": "11bd1a8fc5d4fdda2f027d852453f9d60b001d51708ccd3527daf966fd14bfd4",
+      "remaining_python_processes": 0,
+      "manually_started_services": 0
+    },
+    "preexisting_global_diff_check_issue": "backend/app/api/opportunities.py:625 extra blank line at EOF; unchanged from the D01 baseline"
+  },
+  "logs": [
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/backend-exception-assertion-attempt.log",
+      "sha256": "518a125ea0808c5ebc7a43efa3627bbf2ff7769b3c29b8f6fb948a6bbeebb4d2",
+      "primary_positive_evidence": false,
+      "partial_regression_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/backend-exception-final.log",
+      "sha256": "41205677b6230d290f2215c97c585e02f818bff0f30898e57271f7988e1f345f",
+      "primary_positive_evidence": true,
+      "partial_regression_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/backend-initial.log",
+      "sha256": "703be6af2be1f0955dbb8389731971fd1ae1d75274501300819050290f32ce71",
+      "primary_positive_evidence": false,
+      "partial_regression_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/backend-targeted.log",
+      "sha256": "6f0a269efc1fa8f725c5125c20777d0b89dd0d4c9c9e323b3eb2a6218a49dd6c",
+      "primary_positive_evidence": false,
+      "partial_regression_evidence": true
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/collected-tests.log",
+      "sha256": "2f8151234c71fc8b6cdcd51dcb565f149ccfc2d7067f7a64ddaf0a8e4954e85b",
+      "primary_positive_evidence": false,
+      "partial_regression_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/frontend-build.log",
+      "sha256": "13e99da0dced5f4de392b8f11bbcae7cb5de1290532b2c46506c0f9de91c7f35",
+      "primary_positive_evidence": true,
+      "partial_regression_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/frontend-exception-final.log",
+      "sha256": "6a089ddd9eea60f829dca5994187ca5e3b1314fef44e2f7438ca7a71c33cb81a",
+      "primary_positive_evidence": true,
+      "partial_regression_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/frontend-targeted.log",
+      "sha256": "7f9dce75a8aee48e5fde61c8d92bc2a30a56b45b82d2e037cc82645c47c87595",
+      "primary_positive_evidence": false,
+      "partial_regression_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/global-diff-check.log",
+      "sha256": "a886ef4300b9bdb63d6fdd798b6eb022e9a3311b5e8ea96b7a81848ed6f1f9b9",
+      "primary_positive_evidence": false,
+      "partial_regression_evidence": false
+    },
+    {
+      "path": ".runtime/diagnostic-acceptance/c03-d01-2026-10-20/incremental-diff-check.log",
+      "sha256": "7060ed498d9003bc57e3f87d25f24febdb2121b497154442f45c25bd180c8600",
+      "primary_positive_evidence": false,
+      "partial_regression_evidence": false
+    }
+  ],
+  "source_and_document_files": [
+    {
+      "path": "backend/app/api/deals.py",
+      "sha256": "921909bb547acb49359716253ddee64d3507d8977f529765110da4ea125d2e7a"
+    },
+    {
+      "path": "backend/app/core/ccr/service.py",
+      "sha256": "2fe980c43e0efa488a4609822df046959dd5a78d9dac18dacb1d35b5a96d3e5d"
+    },
+    {
+      "path": "backend/app/db/database.py",
+      "sha256": "c45908991f8711f0b797691f0460ba9c5236f68f3389536fbecdedf11b58c714"
+    },
+    {
+      "path": "backend/app/db/models.py",
+      "sha256": "3e6951b9ebb97d352b47ccaf5a25c2ccc34fc4533069ed4fa45b0de0657f7f7a"
+    },
+    {
+      "path": "backend/app/services/legal_identity.py",
+      "sha256": "8c8cc0bc9efecf477850bfe534dcd77ac7e5e80f207008506f7db155286959da"
+    },
+    {
+      "path": "backend/tests/test_booking_legal_exception.py",
+      "sha256": "aed8464fe152cf450b0c496e499581db8a9f4461ef5a16358750c4d99ee2ba7a"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "fa12d227771c3686b185e6c8020defd07eb186ba2338655bd0d8bcf4023bab7e"
+    },
+    {
+      "path": "docs/audits/REMEDIATION_C03_2026-10-20.md",
+      "sha256": "0d9dae47118ddc915c0228a1b884effa1b116c757a77ae0827440b2c0eec1093"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "sha256": "f8353493871278a41e99544279ae58cc66f083aae6231bd8edf552ef88ed244a"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "sha256": "64dc8cdccc7bdb37b61f0b3f7d2a871310a7b1a57349d31a1c219b21c63b3494"
+    },
+    {
+      "path": "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "sha256": "af56198e9b731f16de315900c30bb1f303562f407fca00c025df08e8f6f0fa17"
+    },
+    {
+      "path": "frontend/src/components/DealTab.test.js",
+      "sha256": "05557e66c2b75d0c007e9f181fc045e4594f1ad0e8e3305a27e9f94611e6c852"
+    },
+    {
+      "path": "frontend/src/components/DealTab.vue",
+      "sha256": "a8e80c288ab2569646f0cd3051160f72fcaa43209cf026df6272e5239d90eb64"
+    },
+    {
+      "path": "frontend/src/views/BookingView.vue",
+      "sha256": "f350691fd70bdac52d08220e4cee8fe323bba4a48962d05c33d0c075dfe7ad50"
+    }
+  ]
+}

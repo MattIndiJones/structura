@@ -43,4 +43,21 @@ describe('Provisional versus final research outcomes',()=>{
     data.request.search.simulations=20000
     expect(researchOutcome(data).nextSimulations).toBeNull()
   })
+  it('shows the measured overrun even when every candidate was evaluated and confirmed',()=>{
+    const data=record('PARTIAL',[priced('GOOD','PASS','PASSED')],{selected:1,evaluated:1,complete:true})
+    Object.assign(data.result,{complete:false,interruption:'TIME_BUDGET',elapsed_seconds:60,
+      time_budget:{limit_seconds:30,exceeded_seconds:30,policy:'between_calculations'}})
+    const result=researchOutcome(data)
+    expect(result.confirmed).toBe(1)
+    expect(result.text).toContain('budget temps atteint')
+    expect(result.text).toContain('60 s écoulées pour 30 s prévues')
+    expect(result.text).toContain('Dépassement de 30 s')
+    expect(result.text).not.toContain('restants ne sont pas terminés')
+  })
+  it('keeps historical partial results readable without inventing an elapsed time',()=>{
+    const data=record('PARTIAL',[])
+    data.result.interruption='TIME_BUDGET';data.result.complete=false
+    expect(researchOutcome(data).text).toContain('budget temps atteint')
+    expect(researchOutcome(data).text).not.toContain('s écoulées')
+  })
 })

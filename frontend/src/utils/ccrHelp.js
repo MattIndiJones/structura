@@ -27,7 +27,7 @@ export const ccrHelp = {
   analysisDeal: 'Analyse un deal du périmètre. Les chiffres du deal seul ne représentent pas nécessairement sa contribution au risque du portefeuille.',
   nOuter: 'Nombre de scénarios de marché communs aux deals. Ils déterminent la distribution des expositions et la précision des quantiles PFE. Plus de scénarios augmente le temps de calcul.',
   nInner: 'Nombre de trajectoires utilisées pour revaloriser le payoff résiduel à chaque horizon et scénario extérieur. Plus de trajectoires réduit le bruit de valorisation mais augmente le coût du calcul.',
-  nDates: 'Nombre d’horizons demandés. Le moteur ajoute les observations et paiements nécessaires, sur sa grille hebdomadaire : le nombre effectif peut être supérieur.',
+  nDates: 'Nombre d’horizons demandés. Le moteur conserve leurs dates exactes et ajoute les observations et paiements contractuels : le nombre effectif peut être supérieur.',
   seed: 'Graine du générateur aléatoire. Des entrées, une version moteur et une graine identiques permettent de reproduire le calcul ; ce n’est pas un paramètre économique.',
   mtmPaths: 'Nombre de trajectoires du Monte-Carlo pour le MtM à la date d’arrêté, distinct des simulations imbriquées utilisées pour les PFE.',
   commonRate: 'Taux annuel commun, en pourcentage, utilisé pour le drift et l’actualisation. Par défaut 3 % à titre provisoire, en attendant les taux du jour ; il remplace les taux et courbes des bookings pour ce calcul.',
