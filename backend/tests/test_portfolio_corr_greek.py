@@ -13,7 +13,7 @@ from sqlmodel import SQLModel, Session, create_engine
 from backend.app.api import portfolios as portfolios_api
 from backend.app.db.models import Deal, Portfolio, ValuationRun
 
-USER = SimpleNamespace(id=1)
+USER = SimpleNamespace(id=1, role='user', entity_id=None)
 
 
 def _make_session():

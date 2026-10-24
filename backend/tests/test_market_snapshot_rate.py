@@ -162,6 +162,21 @@ def test_zero_rate_deal_is_not_discounted(session_with_flat_history):
     assert payload["mtm"] == pytest.approx(1.0, abs=1e-6)
 
 
+def test_mtm_preserves_the_booked_continuous_monitoring_policy(session_with_flat_history):
+    session = session_with_flat_history
+    deal = _zero_coupon_deal(session, 3.0)
+    market = json.loads(deal.market_snapshot_json)
+    market["barrierMonitoring"] = "continuous"
+    deal.market_snapshot_json = json.dumps(market)
+    session.add(deal)
+    session.commit()
+    payload, _ = deals_api._mtm_core(deal, session, n_paths=2000)
+    details = payload["market_used"]["barrier_monitoring_details"]
+    assert details["method"] == "analytic_marginals"
+    assert details["per_run_error_bound"] is None
+    assert "minimum/maximum" in payload["market_used"]["barrier_monitoring_note"]
+
+
 def test_three_percent_deal_still_discounts(session_with_flat_history):
     session = session_with_flat_history
     deal = _zero_coupon_deal(session, 3.0)

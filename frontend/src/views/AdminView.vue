@@ -1,7 +1,7 @@
 <template>
   <div class="flex-1 flex flex-col min-h-0">
 
-    <main class="flex-1 flex flex-col items-center gap-10 px-6 py-16">
+    <main class="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-10 px-6 py-16">
       <div class="w-full max-w-xl">
         <BackLink fallback="/" />
       </div>
@@ -15,7 +15,7 @@
           <div class="font-bold text-slate-100">Relations RFQ</div>
           <p class="text-xs text-slate-400 mt-2">Reconnaître les partenaires autorisés, leurs desks de réception et le périmètre des demandes de prix.</p>
         </RouterLink>
-        <RouterLink to="/admin/agent-workshop" class="card border-t-2 border-t-blue-500 hover:bg-blue-950/20 transition-colors">
+        <RouterLink v-if="auth.isAdmin" to="/admin/agent-workshop" class="card border-t-2 border-t-blue-500 hover:bg-blue-950/20 transition-colors">
           <div class="font-bold text-slate-100">Simulation entre agents</div>
           <p class="text-xs text-slate-400 mt-2">Créer et suivre une partie avec Hector, les banques, le client et Achille. Avancement, opérations et erreurs observées.</p>
         </RouterLink>
@@ -71,7 +71,7 @@
           <p class="text-xs text-slate-600">Créez ou renommez les entités auxquelles les utilisateurs sont rattachés.</p>
         </RouterLink>
 
-        <RouterLink to="/admin/browse"
+        <RouterLink v-if="auth.isAdmin" to="/admin/browse"
           class="card flex flex-col gap-3 hover:border-purple-700 hover:bg-purple-950/20 hover:shadow-xl hover:shadow-black/30 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-purple-900/50 flex items-center justify-center text-xl">🗄️</div>
@@ -138,4 +138,6 @@
 <script setup>
 import BackLink from '../components/ui/BackLink.vue'
 import { RouterLink } from 'vue-router'
+import { useAuthStore } from '../stores/auth.js'
+const auth = useAuthStore()
 </script>

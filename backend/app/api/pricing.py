@@ -30,14 +30,16 @@ from ..core.compute_budget import (
     validate_problem_dimensions,
 )
 from ..core.valuation_context import (
-    ValuationContext, build_pricing_receipt, run_valuation,
+    ValuationContext, build_pricing_receipt, run_valuation, run_analysis,
+    valuation_context_from_request, validate_mtf_context,
 )
 from ..services.product_receipts import signed_receipt
-from .auth import get_current_user, receipt_signing_secret
+from ..services.calibration_evidence import validate_pricing_calibrations
+from .auth import get_current_pricer, receipt_signing_secret
 
 router = APIRouter(
     prefix="/api", tags=["pricing"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_pricer)],
 )
 
 
@@ -79,6 +81,7 @@ def parse_endpoint(req: ParseRequest):
                 "desc": p.desc,
                 "kind": p.kind,
                 "required": p.required,
+                "observation_calendar": p.observation_calendar,
             } for p in compiled.params],
             constats=[{"name": c.name, "kind": c.kind, "reduction": c.reduction,
                        "window_scope": c.window_scope, "role": c.role} for c in compiled.constats],
@@ -140,8 +143,10 @@ def price_endpoint(req: PricingRequest):
     T_eff = effective_T_max(compiled, req.T)
 
     try:
+        validate_pricing_calibrations(req, T_eff, secret=receipt_signing_secret())
         validate_compiled_dates(compiled)
         calculation_budget = estimate_pricing_request(
+            corr_matrix=corr,
             maturity_years=T_eff,
             underlyings=n,
             paths=req.N,
@@ -154,27 +159,7 @@ def price_endpoint(req: PricingRequest):
             expanded_dates=count_compiled_dates(compiled),
         )
         ensure_budget(calculation_budget)
-        valuation_context = ValuationContext(
-            underlyings=uls,
-            corr_matrix=corr,
-            r=req.r,
-            T=T_eff,
-            N=req.N,
-            model=req.model,
-            seed=req.seed,
-            antithetic=req.antithetic,
-            user_params=req.user_params,
-            yield_curve=req.yield_curve or [],
-            funding_curve=req.funding_curve or [],
-            funding_spread=req.funding_spread,
-            sigma_r=req.sigma_r,
-            a_r=req.a_r,
-            barrier_monitoring=req.barrier_monitoring,
-            maturity_payment_t=maturity_payment_t,
-            value_date_t=value_date_t,
-            script_text=req.script,
-            constats=req.constats,
-        )
+        valuation_context = valuation_context_from_request(req, compiled)
         result = run_valuation(compiled, valuation_context)
 
         greeks: dict = {}
@@ -183,6 +168,7 @@ def price_endpoint(req: PricingRequest):
                 compiled, uls, corr, req.r, T_eff,
                 req.N, req.model, req.seed, req.user_params,
                 selected=req.selected_greeks, sigma_r=req.sigma_r, a_r=req.a_r,
+                antithetic=req.antithetic,
                 yield_curve=req.yield_curve or [],
                 funding_curve=req.funding_curve or [],
                 funding_spread=req.funding_spread,
@@ -225,6 +211,7 @@ def price_endpoint(req: PricingRequest):
         corr_repair=result.get("corr_repair"),
         barrier_monitoring=result.get("barrier_monitoring", req.barrier_monitoring),
         barrier_monitoring_note=result.get("barrier_monitoring_note"),
+        barrier_monitoring_details=result.get("barrier_monitoring_details"),
     )
 
 
@@ -270,7 +257,7 @@ def profile_endpoint(req: ProfileRequest):
     res["in_life"] = ctx is not None
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
-        res["years_remaining"] = round(ctx.T_remaining, 4)
+        res["years_remaining"] = round(ctx.T_remaining, 12)
     return res
 
 
@@ -292,16 +279,16 @@ def residual_context_or_none(req):
     valuation = getattr(req, "valuation_date", None)
     strike = getattr(req, "strike_date", None)
     maturity = getattr(req, "maturity_date", None)
-    if not (valuation and strike and maturity and valuation > strike):
+    if not (valuation and strike and maturity) or valuation == strike:
         return None
     from .inlife import build_request_residual, variant_terms_or_none
     # La variante suit le prix jusque dans les analytiques : sans ça l'onglet
     # Probabilités décrirait le produit d'origine sous un prix d'avenant, ce
     # qui est exactement l'écart qu'on vient de fermer partout ailleurs.
     ctx = build_request_residual(req, variant_terms_or_none(req))
-    # Un rappel anticipé détecté dans le passé : il n'y a plus rien à analyser
-    # sur la vie restante, on retombe sur l'analyse à l'émission.
-    return None if ctx.residuel.early_recall else ctx
+    if ctx.residuel.early_recall:
+        raise HTTPException(422, 'Produit rappelé : aucune optionalité résiduelle à analyser.')
+    return ctx
 
 
 @router.post("/paths")
@@ -334,27 +321,22 @@ def paths_endpoint(req: PathsRequest):
             paths_per_run=req.N_stat,
             total_runs=1,
             model=req.model,
-            antithetic=False,
+            antithetic=req.antithetic,
+            stochastic_rates=req.sigma_r > 0,
             continuous_monitoring=req.barrier_monitoring == "continuous",
             expanded_dates=count_compiled_dates(compiled),
         )
         ensure_budget(calculation_budget)
-        res = run_mc_paths(
-            compiled, uls, corr, r_eff, T_eff,
-            N_display=req.N_display,
-            N_stat=req.N_stat,
-            model=req.model,
-            seed=req.seed,
-            user_params=analysis_user_params(req, ctx),
-            barrier_monitoring=req.barrier_monitoring,
-            state=etat,
-        )
+        calculation_context = valuation_context_from_request(req, compiled, residual=ctx, paths=req.N_stat)
+        if ctx is None:
+            validate_pricing_calibrations(req, T_eff, secret=receipt_signing_secret())
+        res = run_analysis(compiled, calculation_context, 'paths', N_display=req.N_display)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     res["in_life"] = ctx is not None
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
-        res["years_remaining"] = round(ctx.T_remaining, 4)
+        res["years_remaining"] = round(ctx.T_remaining, 12)
     res["calculation_budget"] = calculation_budget.to_dict()
     return res
 
@@ -390,27 +372,22 @@ def proba_endpoint(req: ProbaRequest):
             paths_per_run=paths_used,
             total_runs=1,
             model=req.model,
-            antithetic=False,
+            antithetic=req.antithetic,
+            stochastic_rates=req.sigma_r > 0,
             continuous_monitoring=req.barrier_monitoring == "continuous",
             expanded_dates=count_compiled_dates(compiled),
         )
         ensure_budget(calculation_budget)
-        res = run_mc_proba(
-            compiled, uls, corr, r_eff, T_eff,
-            N=req.N,
-            model=req.model,
-            seed=req.seed,
-            user_params=analysis_user_params(req, ctx),
-            yield_curve=yc,
-            barrier_monitoring=req.barrier_monitoring,
-            state=etat,
-        )
+        calculation_context = valuation_context_from_request(req, compiled, residual=ctx, paths=req.N)
+        if ctx is None:
+            validate_pricing_calibrations(req, T_eff, secret=receipt_signing_secret())
+        res = run_analysis(compiled, calculation_context, 'proba')
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     res["in_life"] = ctx is not None
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
-        res["years_remaining"] = round(ctx.T_remaining, 4)
+        res["years_remaining"] = round(ctx.T_remaining, 12)
     res["calculation_budget"] = calculation_budget.to_dict()
     return res
 
@@ -446,6 +423,8 @@ def mtf_endpoint(req: MtfRequest):
     if T_eff is None:
         T_eff = effective_T_max(compiled, req.T)
     try:
+        validate_mtf_context(compiled, valuation_context_from_request(
+            req, compiled, residual=ctx, paths=req.n_inner))
         validate_compiled_dates(compiled)
         peak_paths = max(req.n_outer, min(MTF_MAX_BATCH, req.n_outer * req.n_inner))
         total_paths = req.n_outer + req.n_outer * req.n_inner * req.n_dates
@@ -483,7 +462,7 @@ def mtf_endpoint(req: MtfRequest):
     res["in_life"] = ctx is not None
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
-        res["years_remaining"] = round(ctx.T_remaining, 4)
+        res["years_remaining"] = round(ctx.T_remaining, 12)
     res["calculation_budget"] = calculation_budget.to_dict()
     return res
 
@@ -711,6 +690,8 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
 
     T_eff = effective_T_max(compiled, req.T)
     try:
+        validate_mtf_context(compiled, valuation_context_from_request(
+            req, compiled, paths=req.n_inner))
         validate_compiled_dates(compiled)
         outer_per_chunk = max(1, MTF_MAX_BATCH // req.n_inner)
         chunk_starts = {
@@ -857,6 +838,7 @@ def backtest_endpoint(req: BacktestRequest):
     overlap_pct = round(100 * max(0, days_T - req.freq) / days_T, 1) if days_T else 0.0
 
     return {
+        "market_data": {key:px_data.get(key) for key in ("coverage","freshness","warnings","effective_dates","sources")},
         "rows": results,
         "n_windows": n,
         "mean_irr": round(mean_irr, 4),
@@ -944,25 +926,13 @@ def _windowed_backtest(compiled, dates, prices, tickers, T_eff, freq, r, invest_
 
 
 def _realized_corr(prices: dict, tickers: list) -> list:
-    """Pairwise correlation of daily log returns — the actual historical
-    joint behaviour of this basket, not an assumed/default matrix, since
-    the price history needed is already in hand from the backtest."""
-    n = len(tickers)
-    if n == 1:
-        return [[1.0]]
-    min_len = min(len(prices[tk]) for tk in tickers)
-    series = []
-    for tk in tickers:
-        px = np.array(prices[tk][-min_len:], dtype=np.float64)
-        px = np.where(px > 0, px, np.nan)
-        series.append(np.diff(np.log(px)))
-    mat = np.array(series)
-    valid = ~np.isnan(mat).any(axis=0)
-    mat = mat[:, valid]
-    if mat.shape[1] < 10:
-        return [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
-    corr = np.corrcoef(mat)
-    return [[round(float(corr[i][j]), 4) for j in range(n)] for i in range(n)]
+    """Common full-backtest sample, checked by the shared realized estimator."""
+    from ..core.calibration import realized_market
+    window = min((len(prices.get(tk, [])) for tk in tickers), default=0)-1
+    try:
+        return realized_market(prices, tickers, window_days=window)["corr"]
+    except ValueError as exc:
+        raise HTTPException(422, f"Corrélation de backtest non qualifiée : {exc}") from exc
 
 
 @router.post("/backtest/compare")
@@ -992,11 +962,13 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    px_data = load_hist_prices(tickers, req.start_date, req.end_date)
+    px_data = load_hist_prices(tickers, req.start_date, req.end_date, allow_partial=True)
     if "error" in px_data:
         raise HTTPException(status_code=422, detail=px_data["error"])
     dates = px_data.get("dates", [])
     prices = px_data.get("prices", {})
+    requested_tickers = list(tickers)
+    excluded_universe = px_data.get("missing_reasons", {tk:{"ticker":tk,"reason":"NO_OBSERVATIONS"} for tk in tickers if tk not in prices})
     tickers = [tk for tk in tickers if tk in prices]
     if not tickers:
         raise HTTPException(status_code=422, detail="Aucun historique trouvé pour ces tickers.")
@@ -1012,7 +984,7 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
     stage1.sort(key=lambda r_: r_["median_irr"], reverse=True)
 
     if req.basket_size == 1:
-        return {"stage": "individual", "results": stage1, "shortlist": [r_["tickers"][0] for r_ in stage1]}
+        return {"requested_tickers": requested_tickers, "excluded_universe": excluded_universe, "market_coverage":px_data.get("coverage"), "stage": "individual", "results": stage1, "shortlist": [r_["tickers"][0] for r_ in stage1]}
 
     # Stage 2 — combinations, but only within the top performers of stage 1
     shortlist = [r_["tickers"][0] for r_ in stage1[:req.shortlist_n]]
@@ -1040,4 +1012,4 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
         raise HTTPException(status_code=422, detail="Aucune combinaison exploitable (historique insuffisant).")
     combos.sort(key=lambda r_: r_["median_irr"], reverse=True)
 
-    return {"stage": "combinations", "results": combos, "shortlist": shortlist, "individual": stage1}
+    return {"requested_tickers": requested_tickers, "excluded_universe": excluded_universe, "market_coverage":px_data.get("coverage"), "stage": "combinations", "results": combos, "shortlist": shortlist, "individual": stage1}

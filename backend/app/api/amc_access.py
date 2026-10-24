@@ -10,6 +10,18 @@ _slots = threading.BoundedSemaphore(2)
 
 def study_folder(folder, current):
     path = Path(folder).resolve()
+    from ..hybrid.config import current_config
+    from ..core.access import is_organization_superuser
+    config = current_config()
+    if config:
+        root = config.data_dir / "studies"
+        if not is_organization_superuser(current):
+            root /= str(current.id)
+        if not path.is_relative_to(root.resolve()):
+            raise HTTPException(403, "Dossier extérieur à l'espace Studies privé de cette installation.")
+        if not path.is_dir():
+            raise HTTPException(422, "Dossier Studies introuvable.")
+        return str(path)
     if current.role != "admin":
         configured = os.environ.get("STRUCTURA_STUDIES_ROOT")
         if not configured or current.id is None:

@@ -62,8 +62,9 @@ def summarize_paths(result, pairs, terminal, issue_price, alpha=.05, simultaneou
         if labels is None or len(labels) != len(paths) or observation_times is None:
             raise ValueError("Flux de coupons ou dates de constatation indisponibles.")
         coupon_period = candidate.coupon*candidate.observation_months/12
-        dt = terminal/max(1, round(terminal*52))
-        dates = [round(t/dt)*dt for t in observation_times]
+        # C14 records STOP and cash flows at contractual observation times.
+        # Rounding an observation up to the grid could erase a paid coupon.
+        dates = observation_times
         paid, unpaid = [], []
         for path, names, life in zip(paths, labels, lives):
             if len(path) != len(names): raise ValueError("Libellés de flux incohérents.")

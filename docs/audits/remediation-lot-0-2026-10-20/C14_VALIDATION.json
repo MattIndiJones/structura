@@ -1,0 +1,1302 @@
+{
+  "workstream": "C14",
+  "validated_on": "2026-10-21",
+  "scope": [
+    "M06-05",
+    "M06-06",
+    "M13-02"
+  ],
+  "global_closure": false,
+  "production_qualified": false,
+  "backend": {
+    "unique_passed": 241,
+    "files": 12,
+    "new_c14_cases": 25,
+    "batches": [
+      {
+        "junit": ".runtime/diagnostic-acceptance/c14-2026-10-21/final.xml",
+        "passed": 237,
+        "time_seconds": 39.737
+      },
+      {
+        "junit": ".runtime/diagnostic-acceptance/c14-2026-10-21/residual-final.xml",
+        "passed": 29,
+        "time_seconds": 6.358
+      }
+    ],
+    "successful_cases": [
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_basket_rule_is_explicit_and_shared_with_windows[all_open-2026-07-06-2026-07-07]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_basket_rule_is_explicit_and_shared_with_windows[any_open-2026-07-03-2026-07-06]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_calendar_http_routes_keep_c01_business_price_permissions[organization]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_calendar_http_routes_keep_c01_business_price_permissions[standalone]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_frozen_pre_c05_calendar_is_restored_verbatim_even_with_old_drift",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_http_previews_refuse_invalid_settlement_lag[-3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_http_previews_refuse_invalid_settlement_lag[1.8]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_http_previews_refuse_invalid_settlement_lag[100]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_lag_rejected_without_coercion_at_every_boundary[-3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_lag_rejected_without_coercion_at_every_boundary[1.8]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_lag_rejected_without_coercion_at_every_boundary[100]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_lag_rejected_without_coercion_at_every_boundary[3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_lag_rejected_without_coercion_at_every_boundary[None]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_lag_rejected_without_coercion_at_every_boundary[True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_policy_is_refused_even_without_business_adjustment[changes0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_policy_is_refused_even_without_business_adjustment[changes1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_policy_is_refused_even_without_business_adjustment[changes2]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_policy_is_refused_even_without_business_adjustment[changes3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_policy_is_refused_even_without_business_adjustment[changes4]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_invalid_policy_is_refused_even_without_business_adjustment[changes5]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_long_stub_always_merges_irregular_boundary_without_half_period_threshold[long_first-2026-03-05-expected3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_long_stub_always_merges_irregular_boundary_without_half_period_threshold[long_last-2026-01-15-expected1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_long_stub_always_merges_irregular_boundary_without_half_period_threshold[short_first-2026-03-05-expected2]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_long_stub_always_merges_irregular_boundary_without_half_period_threshold[short_last-2026-01-15-expected0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_long_stub_does_not_merge_regular_boundary[long_first]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_long_stub_does_not_merge_regular_boundary[long_last]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_month_end_is_anchored_in_both_directions_and_leap_year[short_first-2026-28]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_month_end_is_anchored_in_both_directions_and_leap_year[short_first-2028-29]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_month_end_is_anchored_in_both_directions_and_leap_year[short_last-2026-28]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_month_end_is_anchored_in_both_directions_and_leap_year[short_last-2028-29]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_nested_monthly_grid_keeps_original_roll_before_business_adjustment",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_nyse_closure_does_not_close_target_settlement_and_policy_is_retained",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_param_arrays_expose_their_own_named_calendar_to_economics",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_preview_product_pricing_and_booking_share_dates_and_defaults[None]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_preview_product_pricing_and_booking_share_dates_and_defaults[following]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_preview_product_pricing_and_booking_share_dates_and_defaults[modified_following]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_preview_product_pricing_and_booking_share_dates_and_defaults[none]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_preview_product_pricing_and_booking_share_dates_and_defaults[preceding]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_product_price_and_booking_retain_the_explicit_calendar_and_dates",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_reinvestment_refuses_extra_observation_created_by_month_end_roll",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_reinvestment_refuses_partial_calendar_resizing_without_mutating_source[False-1.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_reinvestment_refuses_partial_calendar_resizing_without_mutating_source[False-5.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_reinvestment_refuses_partial_calendar_resizing_without_mutating_source[True-1.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_reinvestment_refuses_partial_calendar_resizing_without_mutating_source[True-5.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_rfq_retains_explicit_policy_and_frozen_dates_with_real_desk",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_calendars",
+        "name": "test_target_payment_proposal_crosses_easter_and_thirty_is_supported",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_calendar_rounding_is_admitted_without_executing_a_future_date",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_dated_blocks_precede_maturity_even_if_declared_after_it",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[paths]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[price]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[probabilities]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_distinct_dates_execute_chronologically_in_one_diffusion_step[profile]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_flow_times_are_contractual_and_stop_prevents_later_cashflows",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_frozen_calendar_january_31_then_february_1_matches_historical_replay",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_occurrences_keep_their_rank_window_and_payment_without_mutating_terms",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_one_day_horizon_reaches_var_worker_and_offline_run",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_one_day_mtm_uses_contractual_horizon_and_converges",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.0027378507871321013]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.0054757015742642025]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.037]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_price_probabilities_and_paths_share_exact_terminal_time[0.37]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_realvol_annualization_matches_dated_and_maturity_blocks[0.0027378507871321013]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_realvol_annualization_matches_dated_and_maturity_blocks[0.037]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_realvol_annualization_matches_dated_and_maturity_blocks[0.37]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_same_date_retains_explicit_source_order",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[constant]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[heston]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[localvol]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[lsv]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_short_axis_is_shared_by_every_supported_model[sabr]",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_contractual_timeline",
+        "name": "test_unbooked_inlife_pricing_keeps_the_same_one_day_horizon",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_absence_de_courbe_se_reconnait_a_step_fwd_none",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_courbe_plate_au_niveau_r_equivaut_au_taux_plat",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_dr_decale_la_courbe_entiere_en_parallele",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_sigma_nulle_sur_maturite_non_ronde_est_exact",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_sous_modeles_a_vol_locale[localvol]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_sous_modeles_a_vol_locale[lsv]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_vaut_exp_moins_qt_sous_courbe_pentue",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_forward_prepaye_vaut_exp_moins_qt_sous_courbe_plate",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_la_grille_de_vol_locale_suit_la_courbe",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_le_taux_stochastique_reprice_sa_propre_courbe[0.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_le_taux_stochastique_reprice_sa_propre_courbe[0.3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_les_forwards_reconstituent_exactement_les_facteurs_d_actualisation",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_les_probabilites_utilisent_la_courbe_pour_la_derive",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_parite_call_put_sous_courbe",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_rho_du_zero_coupon_vaut_moins_t_fois_le_df",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_rho_non_nul_sous_courbe_et_taux_stochastiques",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_curve_consistency",
+        "name": "test_theta_zero_coupon_est_le_portage_quotidien_du_df",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_greeks_pretrade_inchanges",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_autocall",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_barriere_continue",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_barriere_continue_heston",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_etat_residuel_complet",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_fenetre_strike_fix",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_produit_a_barriere",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchange_produit_a_barriere_heston",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[constant-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[constant-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[heston-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[heston-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[localvol-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[localvol-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[lsv-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[lsv-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[sabr-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_sans_courbe_tous_modeles[sabr-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[curve-0.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[curve-0.3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[flat-0.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_engine_golden",
+        "name": "test_prix_inchanges_taux_stochastique[flat-0.3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_correction_invalidates_current_but_preserves_frozen_run",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_exception_decision_rolls_back_and_same_request_can_retry",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_failure_during_application_rolls_back_fixing_and_product",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-21-metadata2-VENUE_UNKNOWN]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-21-metadata3-TIMEZONE_MISMATCH]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-21-metadata4-PUBLICATION_UNVERIFIED]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-10-24-metadata1-NON_SESSION]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_finality_fails_closed[2026-12-25-metadata0-NON_SESSION]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_intraday_cannot_create_official_version_or_coupon",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_mtm_uses_official_90_for_coupon_not_provider_40",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[JPX-Asia/Tokyo-2026-10-21-2026-10-21T06:30:00+00:00]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[NYQ-America/New_York-2026-03-02-2026-03-02T21:00:00+00:00]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[NYQ-America/New_York-2026-03-09-2026-03-09T20:00:00+00:00]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[NYQ-America/New_York-2026-11-27-2026-11-27T18:00:00+00:00]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_no_delay_but_no_intraday_bar[PAR-Europe/Paris-2026-10-21-2026-10-21T15:30:00+00:00]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_official_automatic_fixing_survives_missing_provider_row",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_pending_version_is_not_a_provider_fallback",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_reference_feed_uses_atomic_local_copy_before_network",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_three_calendar_day_carry_boundary[2026-01-08-True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_three_calendar_day_carry_boundary[2026-01-09-False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_total_outage_keeps_official_prefix_and_diagnoses_source",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_fixing_finality_registry",
+        "name": "test_unversioned_candidate_is_never_a_legacy_strike_reference",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtf_fenetres",
+        "name": "test_la_grille_de_stress_reprice_la_meme_fenetre_que_le_mtm",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtf_fenetres",
+        "name": "test_la_vol_realisee_se_raccorde_a_la_date_de_marque",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtf_fenetres",
+        "name": "test_le_drill_down_explique_le_meme_mark_que_l_eventail",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtf_fenetres",
+        "name": "test_le_mark_d_une_fenetre_a_cheval_compte_les_releves_deja_constates",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtf_fenetres",
+        "name": "test_le_mark_to_future_d_un_deal_vivant_repart_de_son_etat_rejoue[10]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtf_fenetres",
+        "name": "test_le_mark_to_future_d_un_deal_vivant_repart_de_son_etat_rejoue[4]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtf_fenetres",
+        "name": "test_le_mtm_d_une_fenetre_a_cheval_compte_les_releves_deja_constates",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtf_fenetres",
+        "name": "test_le_worker_de_var_reprice_la_meme_fenetre_que_le_mtm",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_chain_telescopes_exactly",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_flat_market_only_time_effect",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_guards",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_phrases_present",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_report_returns_pdf",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_explain_spot_ramp_spot_effect_dominates",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_mtm_explain",
+        "name": "test_payloads_are_json_serializable",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_all_approved_sources_pass_independent_cashflow_panels[autocall_athena]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_all_approved_sources_pass_independent_cashflow_panels[autocall_barriere_degressive]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_all_approved_sources_pass_independent_cashflow_panels[autocall_gear_put]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_all_approved_sources_pass_independent_cashflow_panels[booster]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_all_approved_sources_pass_independent_cashflow_panels[capital_garanti]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_all_approved_sources_pass_independent_cashflow_panels[phoenix]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_all_approved_sources_pass_independent_cashflow_panels[phoenix_memoire]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_all_approved_sources_pass_independent_cashflow_panels[reverse_convertible]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_assistant_does_not_qualify_unused_or_missing_memory[AT MATURITY:\\n  PAY 1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_assistant_does_not_qualify_unused_or_missing_memory[SET MEMO = 0\\nAT MATURITY:\\n  PAY 1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_assistant_recognizes_only_the_tested_memory_source",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_diagnostic_requires_compiled_and_input_identity[compiled]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_diagnostic_requires_compiled_and_input_identity[input]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_diagnostic_requires_compiled_and_input_identity[missing]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_economic_change_invalidates_source_approval_even_with_identical_declarations[autocall_athena]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_economic_change_invalidates_source_approval_even_with_identical_declarations[autocall_barriere_degressive]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_economic_change_invalidates_source_approval_even_with_identical_declarations[autocall_gear_put]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_economic_change_invalidates_source_approval_even_with_identical_declarations[booster]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_economic_change_invalidates_source_approval_even_with_identical_declarations[capital_garanti]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_economic_change_invalidates_source_approval_even_with_identical_declarations[phoenix]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_economic_change_invalidates_source_approval_even_with_identical_declarations[phoenix_memoire]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_economic_change_invalidates_source_approval_even_with_identical_declarations[reverse_convertible]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_empty_blocks_tabs_and_bad_dedents_are_explicit_errors[AT MATURITY:-1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_empty_blocks_tabs_and_bad_dedents_are_explicit_errors[AT MATURITY:\\n    PAY 1\\n  PAY .08-3]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_empty_blocks_tabs_and_bad_dedents_are_explicit_errors[AT MATURITY:\\n  IF WOF >= 1:\\n  PAY 1-2]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_empty_blocks_tabs_and_bad_dedents_are_explicit_errors[AT MATURITY:\\n\\tPAY 1-2]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_memory_panel_has_known_missed_catchup_reset_unpaid_and_recall_cashflows",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_modified_athena_is_refused_by_request_and_existing_candidate",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_nonfinite_reference_price_is_never_qualified",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_reference_failure_cannot_keep_a_green_approval",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_source_proof_normalization_is_narrow_and_cache_cannot_be_mutated",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[else-ACCRUE .08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[else-PAY .08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[else-SET X = 1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[else-STOP]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[else_if-ACCRUE .08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[else_if-PAY .08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[else_if-SET X = 1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[else_if-STOP]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[event-ACCRUE .08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[event-PAY .08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[event-SET X = 1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[event-STOP]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[if-ACCRUE .08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[if-PAY .08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[if-SET X = 1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_unexpected_indent_never_discards_an_instruction[if-STOP]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payoff_qualification",
+        "name": "test_valid_coupon_is_paid_and_stop_cancels_maturity_flows",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_basket_observables_use_contractual_order_and_units[AVG(Basket.spot / Basket.spot0)-0.75]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_basket_observables_use_contractual_order_and_units[AVG(Basket.spot)-95.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_basket_observables_use_contractual_order_and_units[AVG(Basket.spot0)-150.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_basket_observables_use_contractual_order_and_units[AVG(Basket.yield)-0.75]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_basket_observables_use_contractual_order_and_units[BESTOF(Basket.yield)-1.1]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_basket_observables_use_contractual_order_and_units[WORSTOF(Basket.yield)-0.4]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_conditional_alias_does_not_misclassify_the_observable",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_explicit_fixing_and_put_survive_residual_pricing",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_explicit_raw_default_and_required_array_are_distinct",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_fixing_is_separate_from_coupon_rank_and_first_observation_is_included",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_frozen_calendar_binds_the_payoff_version_and_preserves_initial_fixing",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_generic_draft_does_not_invent_economics",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_history_uses_individual_initial_levels",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_initial_date_conflicts_and_observation_at_strike_are_rejected",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_mc_recall_or_maturity_has_distinct_cash_legs[1.0-1.08]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_mc_recall_or_maturity_has_distinct_cash_legs[1.1-1.0]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_missing_parameter_fails_in_engine_instead_of_defaulting_to_zero",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_pricing_api_returns_actionable_error_for_missing_economics",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_raw_levels_are_carried_from_initial_window_into_mc",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_reinvestment_moves_initial_and_observation_dates_together[False]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_reinvestment_moves_initial_and_observation_dates_together[True]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_reinvestment_risk_flags_use_booked_values_of_required_parameters",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_unsupported_property_or_future_reference_fails[Basket.secret]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_unsupported_property_or_future_reference_fails[Basket.spot@Tomorrow]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_payscript_binding",
+        "name": "test_unsupported_property_or_future_reference_fails[Basket.yield.__class__]",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_prestrike_mtm",
+        "name": "test_apres_le_strike_le_regime_ordinaire_est_intact",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_prestrike_mtm",
+        "name": "test_avant_le_strike_les_constatations_reculent_de_l_ecart_au_strike",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_prestrike_mtm",
+        "name": "test_avant_le_strike_rien_n_est_realise",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_prestrike_mtm",
+        "name": "test_un_stock_absent_ne_bloque_plus_avant_le_strike",
+        "junit": "residual-final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_avec_devise_chaque_observation_porte_sa_date_de_paiement",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_avec_devise_les_observations_tombent_un_jour_ouvre",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_chaque_calendrier_porte_sa_propre_convention",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_convention_inconnue_est_refusee",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_convention_none_laisse_le_calendrier_brut",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_deux_dates_ajustees_sur_le_meme_jour_fusionnent",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_le_decalage_de_reglement_produit_les_dates_de_paiement",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_le_qualificatif_selectionne_la_meme_ligne_des_deux_cotes",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_le_roll_se_fait_avant_ajustement",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_sans_convention_la_date_du_term_sheet_ne_bouge_pas",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_sans_devise_les_dates_restent_calendaires",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_sans_devise_les_flux_sont_payes_a_la_constatation",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_un_decalage_sans_calendrier_est_refuse",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_schedule_settlement",
+        "name": "test_un_decalage_sans_devise_est_refuse_aussi_au_niveau_du_script",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_build_deal_scenario_base_is_json_serializable_and_matches_mtm",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_build_deal_scenario_base_skips_matured_deal",
+        "junit": "final.xml"
+      },
+      {
+        "class": "backend.tests.test_var_engine",
+        "name": "test_var_scenario_pricer_reacts_to_spot_shock",
+        "junit": "final.xml"
+      }
+    ],
+    "full_backend_suite_executed": false,
+    "deselected_final_test": "backend/tests/test_mtm_explain.py::test_residual_greeks_sane",
+    "commands": [
+      ".venv/Scripts/python.exe -X utf8 -m pytest backend/tests/test_contractual_timeline.py backend/tests/test_payscript_binding.py backend/tests/test_contractual_calendars.py backend/tests/test_engine_golden.py backend/tests/test_curve_consistency.py backend/tests/test_payoff_qualification.py backend/tests/test_mtf_fenetres.py backend/tests/test_fixing_finality_registry.py backend/tests/test_schedule_settlement.py backend/tests/test_mtm_explain.py backend/tests/test_var_engine.py::test_build_deal_scenario_base_is_json_serializable_and_matches_mtm backend/tests/test_var_engine.py::test_build_deal_scenario_base_skips_matured_deal backend/tests/test_var_engine.py::test_var_scenario_pricer_reacts_to_spot_shock -q -k 'not residual_greeks_sane' -p c14_network_guard -o junit_family=xunit1",
+      ".venv/Scripts/python.exe -X utf8 -m pytest backend/tests/test_contractual_timeline.py backend/tests/test_prestrike_mtm.py::test_avant_le_strike_les_constatations_reculent_de_l_ecart_au_strike backend/tests/test_prestrike_mtm.py::test_avant_le_strike_rien_n_est_realise backend/tests/test_prestrike_mtm.py::test_un_stock_absent_ne_bloque_plus_avant_le_strike backend/tests/test_prestrike_mtm.py::test_apres_le_strike_le_regime_ordinaire_est_intact -q -p c14_network_guard -o junit_family=xunit1"
+    ]
+  },
+  "frontend": {
+    "passed": 18,
+    "files": 1,
+    "command": "npm.cmd test -- src/composables/useBookingMtm.test.js",
+    "duration_seconds": 0.591,
+    "evidence": "Verified tool output in current chat; no Vue changes and no build"
+  },
+  "baseline_reproduction": {
+    "source_snapshot": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c14-baseline-8cjwx4j1\\sources",
+    "junit": ".runtime/diagnostic-acceptance/c14-2026-10-21/baseline-reproduction.xml",
+    "failed": 12,
+    "passed": 1,
+    "method": "Executes saved pre-C14 engine, deal valuation and inlife module sources in a separate process; runs the same corrected acceptance fixtures without changing workspace files."
+  },
+  "quantitative_convergence": null,
+  "time_policy": {
+    "version": "C14-EXACT-HORIZON-CHRONOLOGICAL-2026-10-21",
+    "diffusion_steps": "max(1, round(T*52))",
+    "dt": "T/steps",
+    "event_order": "Contract time then source order for simultaneous dated blocks; maturity blocks last; STOP cancels all later blocks",
+    "calendar_representation_tolerance_years": 1e-06,
+    "synthetic_reference_clock": "C09 direct evaluator maps retain their independent rank clock"
+  },
+  "network": {
+    "external_http_disabled": true,
+    "blocked_attempts": []
+  },
+  "preservation": {
+    "baseline_directory": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c14-baseline-8cjwx4j1",
+    "baseline_files": 1287,
+    "changed_existing": [
+      "backend/app/api/inlife.py",
+      "backend/app/core/deal_valuation.py",
+      "backend/app/core/payscript/engine.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/reference/PAYSCRIPT_REFERENCE.md"
+    ],
+    "unrelated_files_preserved": 1281,
+    "unexpected_modified_files": [],
+    "business_db_present": false,
+    "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+    "branch": "codex/hybrid-saas-foundation",
+    "no_commit_no_push": true,
+    "register_counts_unchanged": true,
+    "decisions_unchanged": true,
+    "unrelated_findings_and_workstreams_unchanged": true
+  },
+  "sources_sha256": {
+    "backend/app/core/payscript/engine.py": "421fdda4332fe462d0b94de19b52a9a13c8726805d9a8da94555acb469e3712b",
+    "backend/app/core/deal_valuation.py": "04dd9051f2ecd0e9b56f198715a8c342dcf35ab20783361a5c1130aac71db677",
+    "backend/app/api/inlife.py": "bb6b2d838e9fe79c5788f506abe77ced86a42fc6819e5026c003cc24aeb29fbe",
+    "backend/tests/test_contractual_timeline.py": "7259fba011b6113e1290ce2f3b40dd2c671121d917ce375cb84bebd7395d7a12"
+  },
+  "limits": [
+    "No additional diffusion or barrier monitoring nodes; nearby dates can still share a simulated spot",
+    "C15/C16/C18 full market conventions, stochastic rates and barriers remain open",
+    "MTF outer weekly-grid/exposure/CVA qualification remains C21/C22 scope",
+    "T03 locally validated; T09 short horizon only; T06/T07 not closed",
+    "No business data backfill, no global closure and no production graphical acceptance"
+  ]
+}

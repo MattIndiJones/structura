@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "corrective": "C25",
+  "date": "2026-10-22",
+  "findings": [
+    "M17-02",
+    "M17-03"
+  ],
+  "status": "locally_validated",
+  "production_qualified": false,
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "report": "../REMEDIATION_C25_2026-10-22.md",
+  "commercial_convention": {
+    "decision": "D09",
+    "confirmed": true,
+    "explicit_reply": {
+      "confirmed_on": "2026-10-22",
+      "confirmed_by": "Philippe",
+      "answer": "Retenir cette convention (recommandé)",
+      "source": "Réponse explicite dans le chat courant",
+      "question_item_id": "[\"request_user_input_async\",\"call_ae532e792feb49c99de06995e2aa1981\",0]"
+    }
+  },
+  "backend": {
+    "passed": 182,
+    "distinct": true,
+    "files": 8,
+    "new_cases": 34,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "raw_runs": [
+      "variants-final.xml",
+      "contexts-archives-final.xml",
+      "core-final.xml"
+    ],
+    "selected_artifacts": [
+      "variants-final.xml",
+      "dependencies-selected.xml",
+      "core-final.xml"
+    ],
+    "cases_by_file": {
+      "backend.tests.test_c19_archives": 6,
+      "backend.tests.test_roll_c25": 34,
+      "backend.tests.test_valuation_context": 2,
+      "backend.tests.test_valuation_semantics": 2,
+      "backend.tests.test_variantes_avenant": 20,
+      "backend.tests.test_variantes_comparaison": 31,
+      "backend.tests.test_variantes_filiation": 59,
+      "backend.tests.test_variantes_roll": 28
+    },
+    "manifest": "latest-distinct.xml",
+    "superseded_fixture_expectation": "403 for inaccessible Script, 404 for another owner proof; corrected in final core run"
+  },
+  "frontend": {
+    "passed": 712,
+    "files": 80,
+    "new_cases": 15,
+    "build_succeeded": true,
+    "vite_seconds": 10.16,
+    "out_dir": "C:/Users/phili/AppData/Local/Temp/structura-c25-vite-build-delivery",
+    "log": "frontend-final.log"
+  },
+  "baseline": {
+    "existing_passed": 138,
+    "initial_expected_failures": 2,
+    "additional_frontend_archive_expected_failures": 2,
+    "additional_aware_clock_expected_failures": 1
+  },
+  "network": {
+    "requests_and_curl_cffi_disabled": true,
+    "blocked_attempts": 0,
+    "new_external_fetch": false
+  },
+  "acceptance": {
+    "tests": {
+      "M17-02": [
+        "test_observed_bid_and_entry_costs_really_change_quantity_and_recovery",
+        "test_each_cost_changes_recovery_without_changing_model_prices_or_amendments",
+        "test_incomplete_or_ambiguous_financing_is_rejected_before_pricing",
+        "test_t16_costs_funding_calendar_and_frozen_study_survive_market_and_variant_changes",
+        "test_model_timestamp_preserves_the_instant_of_an_aware_business_clock"
+      ],
+      "M17-03": [
+        "test_fixed_120_percent_payoff_is_distinct_from_quantity_and_recovers_above_par",
+        "test_only_proven_literal_contracts_publish_a_cap",
+        "test_finite_sample_max_is_never_a_contractual_cap",
+        "test_recovery_threshold_changes_when_costs_make_par_unaffordable",
+        "frontend/src/utils/rollEconomics.test.js"
+      ]
+    },
+    "price_units": "engine fractions; input prices percent nominal; haircut/fees price points",
+    "budget": "(gross exit - exit cost points/100)/(new model price + entry cost points/100)",
+    "exit_basis": [
+      "model",
+      "model_haircut",
+      "observed_bid"
+    ],
+    "bid_source_and_aware_timestamp_required": true,
+    "quote_after_valuation_date_refused": true,
+    "age_visible_without_new_automatic_bid_qualification": true,
+    "entry_cost_basis": "new nominal",
+    "exit_cost_basis": "original nominal",
+    "recovery": "sum future undiscounted flows times reinvested nominal; excludes past paid coupons",
+    "cap_domain": "literal fixed PAY instructions at maturity only; otherwise not proven",
+    "sample_max_not_a_cap": true,
+    "example": {
+      "origin_fixed_payoff": 1.147961,
+      "new_fixed_payoff": 1.2,
+      "rate": 0,
+      "funding": 0,
+      "reinvested_notional": 0.9566341666666667,
+      "recovery": 1.147961,
+      "probability_of_par": 1
+    },
+    "zero_budget_zero_position": true,
+    "zero_entry_price_refused": true,
+    "assumptions_sealed_and_old_archives_unchanged": true,
+    "costs_do_not_change_model_prices_or_amendments": true,
+    "tenor_1_and_5_years_tested": true,
+    "inherited_funding_and_pdf_archive_revalidated": true,
+    "values_retained_after_tab_remount_and_after_recompute_from_archive": true,
+    "late_responses_ignored": true,
+    "legacy_cap_unqualified_in_view_only": true
+  },
+  "limits": [
+    "Comparator study only; no execution order or booking",
+    "No actual supplier bid qualification",
+    "No general symbolic payoff-cap prover",
+    "No full backend suite",
+    "No interactive GUI or deployed qualification",
+    "T16 local components qualified; frozen proposal PDF checked independently",
+    "C26 and remaining C27 open"
+  ],
+  "artifact_root": ".runtime/diagnostic-acceptance/c25-2026-10-22",
+  "commit": false,
+  "push": false,
+  "server_started": false,
+  "preservation": {
+    "initial_files": 2722,
+    "unchanged": 2713,
+    "expected_changed": 9,
+    "changed": [
+      "backend/app/api/variants.py",
+      "backend/tests/test_variantes_comparaison.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/projects/lifecycle/DECLINAISONS_POINTS_OUVERTS.md",
+      "frontend/src/components/VariantCompareTab.vue",
+      "frontend/src/stores/pricing.js"
+    ],
+    "new": [
+      "backend/app/core/roll_economics.py",
+      "backend/tests/test_roll_c25.py",
+      "docs/audits/REMEDIATION_C25_2026-10-22.md",
+      "docs/audits/remediation-lot-0-2026-10-20/C25_VALIDATION.json",
+      "frontend/src/components/VariantCompareTab.test.js",
+      "frontend/src/utils/rollEconomics.js",
+      "frontend/src/utils/rollEconomics.test.js"
+    ],
+    "source_copies_verified": 1098,
+    "previous_artifacts_unchanged": true,
+    "dist_unchanged": true,
+    "real_db_absent": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "registry_unrelated_entries_unchanged": true,
+    "incremental_whitespace_errors": 0
+  },
+  "source_sha256": {
+    "backend/app/api/variants.py": "6a69611587fd5dfb3d8feb4dde7ad132b3fea3458a88f92af04fe1e1116178d3",
+    "backend/app/core/roll_economics.py": "435456c019d8d7bf0d35b1a6d175b67aa4f4bed756b88c0fe27399205dfd54ee",
+    "backend/tests/test_roll_c25.py": "1d2b1a584be24b07427b58c2b4541d7ff9095b9f32cad4616d70ab9912649797",
+    "backend/tests/test_variantes_comparaison.py": "968ef871dde77670156eca937a9f0424364ff4336334d9a88a4c8f9c09cc5ff0",
+    "frontend/src/components/VariantCompareTab.test.js": "0dbb30222e3f7cd7f531b9239b87aed3d16d3348f3019201f07a0be2ccebd9c4",
+    "frontend/src/components/VariantCompareTab.vue": "6f58513bfc558844df466f6a440a4b0f720bac6abf8c01526f9dc72a36ecd348",
+    "frontend/src/stores/pricing.js": "2123f5e8b6fe3bd1366cf36c0b21381074c08b6ab89c333420cfa529b141e63b",
+    "frontend/src/utils/rollEconomics.js": "f456cae9cfac89212ad1be91150c19347a80dd2cee0f04b5030891449e96179c",
+    "frontend/src/utils/rollEconomics.test.js": "f41856c6732ce48e2f48907d7e7630f4c033b1149ffbb71a53a45c5263328157"
+  }
+}

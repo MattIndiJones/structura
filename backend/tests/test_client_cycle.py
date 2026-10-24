@@ -152,14 +152,14 @@ def test_beaucoup_d_observations_irregulieres_ne_suffisent_pas():
 
 def test_peu_d_observations_regulieres_donnent_une_confiance_moyenne():
     cycle = compute_cycle(_serie("2026-01-01", [60, 62, 58]),
-                          asof=date(2026, 6, 1))
+                          asof=date(2026, 7, 1))
     assert cycle.confidence == CONFIANCE_MOYENNE
 
 
 def test_chaque_resultat_porte_ses_observations_en_clair():
     """§47 — une confiance doit toujours pouvoir s'expliquer."""
     cycle = compute_cycle(_serie("2025-01-01", [92, 90, 91, 89, 93]),
-                          asof=date(2026, 3, 1))
+                          asof=date(2026, 5, 1))
     texte = " ".join(cycle.explanation)
     assert "6 transactions observées" in texte
     assert "Intervalle médian" in texte

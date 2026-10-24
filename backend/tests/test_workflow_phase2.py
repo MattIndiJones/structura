@@ -20,7 +20,7 @@ from backend.app.core.payscript.parser import parse_script
 from backend.app.core.product.models import FrozenObject, ProductTerms, UnderlyingIdentity
 from backend.app.core.workflow import DataCategory, FixingStatus
 from backend.app.db.models import (
-    Alert, AuditEvent, Client, ClientMandate, Deal, DealContractVersion,
+    Alert, AuditEvent, Client, ClientMandate, Counterparty, Deal, DealContractVersion,
     DealEvent, LifecycleProposal, OfficialFixingVersion, TradeAmendmentRequest,
 )
 from backend.app.services.product_lifecycle import lifecycle_snapshot
@@ -41,6 +41,9 @@ def _session() -> Session:
 
 
 def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
+    if session.get(Counterparty, 1) is None:
+        session.add(Counterparty(id=1, name="Bank"))
+        session.flush()
     today = date.today()
     terms = ProductTerms(
         script=script,
@@ -67,6 +70,7 @@ def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
         script_snapshot=script,
         sens="vente",
         contrepartie="Bank",
+        counterparty_id=1,
         devise="EUR",
         nominal=1_000_000,
         fair_value=99.0,
@@ -361,7 +365,7 @@ def test_admin_can_run_mtm_and_greeks_on_a_foreign_uat_deal(monkeypatch):
     assert deals_api.deal_greeks(deal.id, admin, session) == payload
 
 
-def test_admin_book_refresh_and_alerts_cover_uat_target_users(monkeypatch):
+def test_admin_refresh_uses_current_scope_without_foreign_unbound_alerts(monkeypatch):
     session = _session()
     session.add(Alert(
         user_id=1, deal_id=None, deal_reference="UAT-TARGET",
@@ -371,16 +375,15 @@ def test_admin_book_refresh_and_alerts_cover_uat_target_users(monkeypatch):
     admin = SimpleNamespace(id=99, entity_id=None, role="admin")
     captured = {}
 
-    def fake_refresh(_session, user_id):
-        captured["user_id"] = user_id
+    def fake_refresh(_session, *, current):
+        captured["current"] = current
         return {"deals": 1}
 
     monkeypatch.setattr(alerts_api, "refresh_book", fake_refresh)
 
     assert alerts_api.refresh_whole_book(admin, session) == {"deals": 1}
-    assert captured["user_id"] is None
-    assert alerts_api.list_alerts(admin, session)["alerts"][0]["deal_reference"] \
-        == "UAT-TARGET"
+    assert captured["current"] is admin
+    assert alerts_api.list_alerts(admin, session)["alerts"] == []
 
 
 def test_admin_watchlist_includes_foreign_uat_deals(monkeypatch):

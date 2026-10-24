@@ -20,6 +20,8 @@ from ..db.models import Deal, Document, User
 from ..core.product.models import FrozenObject
 from ..services.product_repository import ProductError, load_product, owned_record, stage_revision
 from .auth import get_current_user
+from ..services.business_access import can_read_deal, can_read_product_contract
+from ..core.document_uploads import copy_document
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -54,6 +56,18 @@ def _doc_row(d: Document) -> dict:
     }
 
 
+def _accessible(doc, current, session):
+    if doc is None:
+        return False
+    if doc.deal_id is not None:
+        deal = session.get(Deal, doc.deal_id)
+        if not deal or not can_read_deal(deal, current, session):
+            return False
+    if doc.product_id is not None:
+        return can_read_product_contract(session, doc.product_id, current)
+    return doc.user_id == current.id
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.get("")
@@ -63,13 +77,13 @@ def list_documents(
     deal_id: Optional[int] = None,
     product_id: Optional[int] = None,
 ):
-    q = select(Document).where(Document.user_id == current.id)
+    q = select(Document)
     if deal_id is not None:
         q = q.where(Document.deal_id == deal_id)
     if product_id is not None:
         q = q.where(Document.product_id == product_id)
     docs = session.exec(q.order_by(Document.created_at.desc())).all()
-    return [_doc_row(d) for d in docs]
+    return [_doc_row(d) for d in docs if _accessible(d, current, session)]
 
 
 @router.post("", status_code=201)
@@ -87,7 +101,7 @@ async def upload_document(
     """Upload a file (PDF/HTML/etc.) and store its metadata."""
     if deal_id is not None:
         deal = session.get(Deal, deal_id)
-        if deal is None or deal.user_id != current.id:
+        if deal is None or not can_read_deal(deal, current, session):
             raise HTTPException(404, "Deal introuvable")
         if deal.product_id is None:
             raise HTTPException(409, detail={
@@ -105,7 +119,8 @@ async def upload_document(
     product = None
     if product_id is not None:
         try:
-            owned_record(session, product_id, current)
+            if not can_read_product_contract(session, product_id, current):
+                raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
             product = load_product(session, product_id)
         except ProductError as exc:
             raise HTTPException(exc.status, detail={"code": exc.code, "message": str(exc)})
@@ -126,7 +141,7 @@ async def upload_document(
     original_name = Path(file.filename or "document").name
     safe_name = f"{ts}_{uuid4().hex}_{original_name}"
     dest = user_dir / safe_name
-    dest.write_bytes(await file.read())
+    await copy_document(file, dest)
 
     doc = Document(
         user_id=current.id,
@@ -169,7 +184,7 @@ def download_document(
     session: Annotated[Session, Depends(get_session)],
 ):
     doc = session.get(Document, doc_id)
-    if not doc or doc.user_id != current.id:
+    if not _accessible(doc, current, session):
         raise HTTPException(404, "Document introuvable")
     path = _DOCS_DIR / doc.file_path
     if not path.exists():
@@ -184,7 +199,7 @@ def delete_document(
     session: Annotated[Session, Depends(get_session)],
 ):
     doc = session.get(Document, doc_id)
-    if not doc or doc.user_id != current.id:
+    if not _accessible(doc, current, session):
         raise HTTPException(404, "Document introuvable")
     if doc.product_id is not None:
         raise HTTPException(

@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from sqlmodel import SQLModel, Session, create_engine
 
 from backend.app.api import deals as deals_api
@@ -20,7 +21,17 @@ VALUE_D = TODAY - timedelta(days=100)
 MATURITY = VALUE_D + timedelta(days=1096)
 NEXT_OBS = TODAY + timedelta(days=20)
 
-USER = SimpleNamespace(id=1)
+USER = SimpleNamespace(id=1, role="user", entity_id=None)
+
+
+def test_portfolio_barriers_without_a_business_role_remains_denied():
+    with _make_session() as session:
+        portfolio = Portfolio(name="Book privé", user_id=1)
+        session.add(portfolio)
+        session.commit()
+        with pytest.raises(HTTPException) as exc:
+            portfolios_api.portfolio_barriers(portfolio.id, SimpleNamespace(id=1), session)
+        assert exc.value.status_code == 404
 
 KI_SCRIPT = """
 PARAM M_KI_BAR = 0.6 "KI barrier"
@@ -75,7 +86,8 @@ def _fake_prices_by_ticker(ticker_spot: dict):
     """Flat price series per ticker — build_watchlist_row calls
     load_hist_prices once per deal with only that deal's own tickers, so a
     per-ticker constant is enough to control each deal's WOF precisely."""
-    def fake(tickers, start, end):
+    def fake(tickers, start, end, **kwargs):
+        assert kwargs == {"adjusted": False, "allow_partial": True}
         d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
         days = [d0 + timedelta(days=k) for k in range((d1 - d0).days + 1)]
         return {"dates": [d.isoformat() for d in days],
@@ -168,10 +180,10 @@ def test_barriers_bucket_unexpected_failure_without_aborting_book(monkeypatch):
 
     good_fake = _fake_prices_by_ticker({"TK-OK": 100.0, "TK-BOOM": 100.0})
 
-    def flaky(tickers, start, end):
+    def flaky(tickers, start, end, **kwargs):
         if "TK-BOOM" in tickers:
             raise RuntimeError("yfinance timeout")
-        return good_fake(tickers, start, end)
+        return good_fake(tickers, start, end, **kwargs)
 
     monkeypatch.setattr(deals_api, "load_hist_prices", flaky)
     try:

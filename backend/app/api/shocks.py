@@ -29,6 +29,9 @@ from .auth import get_current_user
 from .deals import _can_access_deal, _mtm_core, MtmRequest
 from ..core.amc_prices import fx_rate_to
 from ..core.valuation_context import run_valuation
+from ..core.risk_scope import (DataScope, HistoryDataScope, archived_data_scope,
+    deal_data_scope, select_risk_deals, risk_scope_metadata)
+from ..services.business_access import visible_deals
 
 router = APIRouter(tags=["shocks"])
 
@@ -44,6 +47,7 @@ class ShockRequest(MtmRequest):
     assumptions (same as a MtM/Greeks call) — the fields below are the shock
     itself, layered on top via run_mc's own bump kwargs. Global by default,
     shock_overrides lets one underlying deviate from the global amplitude."""
+    data_scope: DataScope = "PRODUCTION"
     spot_shock_pct: float = 0.0
     vol_shock_pts: float = 0.0
     rate_shock_bp: float = 0.0
@@ -72,6 +76,7 @@ class SmileUnderlyingOverride(BaseModel):
 
 
 class SmileRiskRequest(MtmRequest):
+    data_scope: DataScope = "PRODUCTION"
     atm_vol_pts: float = 0.0
     skew_pts: float = 0.0
     curvature_pts: float = 0.0
@@ -189,7 +194,12 @@ def _run_shock_on_deal(deal: Deal, session: Session, n_paths: int, shock: ShockR
     # Observed but not yet paid coupons are already part of the baseline MtM.
     # They carry no spot/vol/correlation optionality and must remain in the
     # shocked value; otherwise even a zero shock creates a fictitious loss.
-    result["price"] += float(ctx.get("unsettled_pv", 0.0))
+    from ..core.valuation_context import unsettled_cashflows_pv
+    receivables_before = unsettled_cashflows_pv(ctx)
+    receivables_after = unsettled_cashflows_pv(ctx, dr=dr)
+    result["price"] += receivables_after
+    result['receivables_before'] = receivables_before
+    result['receivables_after'] = receivables_after
 
     fx_rate = fx_rate_to(deal.devise, "EUR")
     if fx_rate is None:
@@ -209,6 +219,9 @@ def _run_shock_on_deal(deal: Deal, session: Session, n_paths: int, shock: ShockR
         # on the cash figure, which is the one that gets summed across a book.
         "delta_eur": round(delta_pts * position_sign(deal) * deal.nominal * fx_rate, 2),
         "n_paths": result["n_paths"],
+        'receivables_before': receivables_before,
+        'receivables_after': receivables_after,
+        'receivables_delta': receivables_after-receivables_before,
         # Ce que le choc de spot a REELLEMENT fait a ce deal. Avant le strike
         # il ne met pas le produit dans ou hors de la monnaie : le strike suit
         # le spot, seul le skew qui s'appliquera se deplace.
@@ -500,7 +513,8 @@ def _persist_shock(session: Session, user_id: int, scope: str, shock: ShockReque
     run = ShockRun(
         user_id=user_id, scope=scope, deal_id=deal_id, portfolio_id=portfolio_id,
         label=_describe_shock(shock),
-        params_json=shock.model_dump_json(),
+        params_json=json.dumps({**json.loads(shock.model_dump_json()), **{k:result[k] for k in
+            ("data_scope", "is_test", "scope_version", "requested_deals", "scope", "portfolio_id", "portfolio_name") if k in result}}),
         result_json=json.dumps(result),
     )
     session.add(run)
@@ -511,7 +525,9 @@ def _persist_shock(session: Session, user_id: int, scope: str, shock: ShockReque
 
 def _shock_run_row(r: ShockRun) -> dict:
     return {
-        "id": r.id, "scope": r.scope, "deal_id": r.deal_id, "portfolio_id": r.portfolio_id,
+        "data_scope": archived_data_scope(json.loads(r.params_json)),
+        "id": r.id, "scope": r.scope, "deal_id": r.deal_id,
+        "portfolio_id": json.loads(r.params_json).get("portfolio_id", r.portfolio_id),
         "label": r.label, "params": json.loads(r.params_json), "result": json.loads(r.result_json),
         "created_at": r.created_at.isoformat(),
     }
@@ -528,7 +544,12 @@ def shock_deal(
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
+    actual_scope = deal_data_scope(deal)
+    if "data_scope" in body.model_fields_set and body.data_scope != actual_scope:
+        raise HTTPException(422, "Le périmètre demandé ne correspond pas au deal sélectionné.")
+    body = body.model_copy(update={"data_scope": actual_scope})
     result = _run_shock_on_deal(deal, session, n_paths, body)
+    result.update(risk_scope_metadata([deal], actual_scope))
     run = _persist_shock(session, current.id, "deal", body, result, deal_id=deal_id)
     return {**result, "run_id": run.id, "label": run.label}
 
@@ -542,11 +563,15 @@ def shock_portfolio(
     n_paths: int = 20000,
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or (getattr(current, "role", "user") != "admin" and p.user_id != current.id):
+    from .portfolios import _portfolio_accessible
+    if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
     from .portfolios import _portfolio_deals
-    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"))
+    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"), current=current)
+    deals = select_risk_deals(deals, body.data_scope)
     result = _run_shock_on_book(list(deals), session, n_paths, body)
+    result.update(risk_scope_metadata(deals, body.data_scope))
+    result.update(scope="portfolio", portfolio_id=portfolio_id, portfolio_name=p.name)
     run = _persist_shock(session, current.id, "portfolio", body, result, portfolio_id=portfolio_id)
     return {**result, "run_id": run.id, "label": run.label}
 
@@ -559,10 +584,11 @@ def shock_global(
     n_paths: int = 20000,
 ):
     statement = select(Deal).where(Deal.status.in_(["actif", "en_reglement"]))
-    if getattr(current, "role", "user") != "admin":
-        statement = statement.where(Deal.user_id == current.id)
-    deals = session.exec(statement).all()
+    deals = visible_deals(session, session.exec(statement).all(), current)
+    deals = select_risk_deals(deals, body.data_scope)
     result = _run_shock_on_book(list(deals), session, n_paths, body)
+    result.update(risk_scope_metadata(deals, body.data_scope))
+    result.update(scope="global")
     run = _persist_shock(session, current.id, "global", body, result)
     return {**result, "run_id": run.id, "label": run.label}
 
@@ -580,7 +606,8 @@ def _persist_smile(
         scope=scope,
         portfolio_id=portfolio_id,
         label=_describe_smile(body),
-        params_json=body.model_dump_json(),
+        params_json=json.dumps({**json.loads(body.model_dump_json()), **{k:result[k] for k in
+            ("data_scope", "is_test", "scope_version", "requested_deals", "scope", "portfolio_id", "portfolio_name") if k in result}}),
         result_json=json.dumps(result),
     )
     session.add(run)
@@ -598,11 +625,15 @@ def smile_risk_portfolio(
     n_paths: int = 20000,
 ):
     p = session.get(Portfolio, portfolio_id)
-    if not p or (getattr(current, "role", "user") != "admin" and p.user_id != current.id):
+    from .portfolios import _portfolio_accessible
+    if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
     from .portfolios import _portfolio_deals
-    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"))
+    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"), current=current)
+    deals = select_risk_deals(deals, body.data_scope)
     result = _run_smile_on_book(deals, session, n_paths, body)
+    result.update(risk_scope_metadata(deals, body.data_scope))
+    result.update(scope="smile_portfolio", portfolio_id=portfolio_id, portfolio_name=p.name)
     run = _persist_smile(
         session, current.id, "smile_portfolio", body, result,
         portfolio_id=portfolio_id,
@@ -618,10 +649,11 @@ def smile_risk_global(
     n_paths: int = 20000,
 ):
     statement = select(Deal).where(Deal.status.in_(["actif", "en_reglement"]))
-    if getattr(current, "role", "user") != "admin":
-        statement = statement.where(Deal.user_id == current.id)
-    deals = session.exec(statement).all()
+    deals = visible_deals(session, session.exec(statement).all(), current)
+    deals = select_risk_deals(deals, body.data_scope)
     result = _run_smile_on_book(list(deals), session, n_paths, body)
+    result.update(risk_scope_metadata(deals, body.data_scope))
+    result.update(scope="smile_global")
     run = _persist_smile(session, current.id, "smile_global", body, result)
     return {**result, "run_id": run.id, "label": run.label}
 
@@ -634,14 +666,18 @@ def list_shocks(
     deal_id: Optional[int] = None,
     portfolio_id: Optional[int] = None,
     limit: int = 20,
+    data_scope: HistoryDataScope = "PRODUCTION",
+    all_views: bool = False,
 ):
     q = select(ShockRun).where(ShockRun.user_id == current.id)
     if scope:
-        q = q.where(ShockRun.scope == scope)
+        kinds = {"global", "portfolio"} if scope in {"global", "portfolio"} else {"smile_global", "smile_portfolio"}
+        q = q.where(ShockRun.scope.in_(kinds) if all_views and scope != "deal" else ShockRun.scope == scope)
     if deal_id is not None:
         q = q.where(ShockRun.deal_id == deal_id)
-    if portfolio_id is not None:
-        q = q.where(ShockRun.portfolio_id == portfolio_id)
-    q = q.order_by(ShockRun.created_at.desc()).limit(limit)
+    q = q.order_by(ShockRun.created_at.desc(), ShockRun.id.desc())
     runs = session.exec(q).all()
-    return [_shock_run_row(r) for r in runs]
+    return [_shock_run_row(r) for r in runs
+            if archived_data_scope(json.loads(r.params_json)) == data_scope
+            and (all_views or portfolio_id is None or json.loads(r.params_json).get("portfolio_id", r.portfolio_id) == portfolio_id)
+            ][:max(1, min(limit, 100))]

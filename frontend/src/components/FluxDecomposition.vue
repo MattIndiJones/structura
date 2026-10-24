@@ -189,8 +189,8 @@ const formatSignedPercent = (value, decimals) =>
   (value >= 0 ? '+' : '') + formatPercent(value, decimals)
 
 function addDaysStr(isoDate, days) {
-  const d = new Date(isoDate)
-  d.setDate(d.getDate() + Math.round(days))
+  const d = new Date(`${isoDate.slice(0, 10)}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + Math.round(days))
   return d.toISOString().split('T')[0]
 }
 

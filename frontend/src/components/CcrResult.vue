@@ -82,7 +82,7 @@
       <details v-for="d in result.valuation_assumptions.filter(d => d.effective_context)" :key="d.reference" class="mt-2"><summary>{{ d.reference }} — paramètres complets, corrélations et provenance</summary><pre class="ccr-assumptions-json">{{ JSON.stringify({source:d.source,as_of_date:d.as_of_date,market_provenance:d.market_provenance,parameters:d.effective_context}, null, 2) }}</pre></details>
     </details>
     <details class="card text-xs"><summary class="cursor-pointer font-semibold">Hypothèses, crédit et réglementaire</summary>
-      <p class="mt-2">PFE des limites = maximum sur les horizons. EPE = moyenne temporelle de l’EE. Scénarios risk-neutral, grille hebdomadaire, quantiles interpolés. CVA unilatérale avec indépendance crédit/marché ; intégration à droite.</p>
+      <p class="mt-2">PFE des limites = maximum sur les horizons. EPE = moyenne temporelle de l’EE. Scénarios risk-neutral, observations et paiements aux dates contractuelles, quantiles interpolés. CVA unilatérale avec indépendance crédit/marché ; intégration à droite.</p>
       <p class="mt-2">PD : {{ result.credit_profile?.curve_source || 'UNKNOWN' }} / {{ result.credit_profile?.pd_measure || 'UNKNOWN' }}. Recouvrement : {{ percent(result.credit_profile?.recovery) }} / {{ result.credit_profile?.recovery_source || 'UNKNOWN' }}.</p>
       <p class="mt-2">Courbe de spreads : approximation explicite intensité = spread / LGD, sans bootstrap CDS.</p>
       <p class="mt-2">{{ result.regulatory.reason }}</p>

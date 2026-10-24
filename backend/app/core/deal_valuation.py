@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from typing import List, Literal, Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
 from ..db.models import Deal, DealEvent
@@ -47,10 +47,36 @@ class MtmRequest(BaseModel):
     r: Optional[float] = None
     window_days: int = 252
     valuation_date: Optional[date] = None
+    funding_curve: Optional[List[List[float]]] = None
+    funding_spread: Optional[float] = Field(default=None, ge=-0.05, le=0.50)
+    funding_source_reference: Optional[str] = Field(default=None, max_length=300)
+
+    @field_validator('funding_curve')
+    @classmethod
+    def validate_funding(cls, value):
+        from .schemas import validate_term_curve
+        return None if value is None else validate_term_curve(value, 'courbe de funding')
+
+
+def valuation_funding(body, market, elapsed):
+    """Current curve is in decimal units at valuation date; booking remains frozen."""
+    if body.funding_curve is not None or body.funding_spread is not None:
+        return body.funding_curve or [], body.funding_spread or 0.0
+    return funding_from_market_snapshot(market, elapsed)
 
 
 class DealGreeksRequest(MtmRequest):
     selected: List[str] = ["delta", "gamma", "vega", "theta", "rho"]
+
+
+def standard_mtm_request(request: dict, recalibrate: str = 'none') -> bool:
+    """Only a default Booking request can be restored into the compact form."""
+    return (request.get('recalibrate', 'none') == recalibrate
+            and request.get('r') is None and not request.get('overrides')
+            and request.get('window_days', 252) == 252
+            and all(request.get(k) is None for k in (
+                'funding_curve', 'funding_spread', 'funding_source_reference'))
+            and not (set(request) - set(MtmRequest.model_fields)))
 
 
 def _get_events(deal_id: int, session: Session) -> list:
@@ -132,19 +158,23 @@ def mtm_core(
     # Once the contractual payoff is known, there is no path left to simulate.
     # The receivable nevertheless remains a live credit exposure until cash
     # settlement, so it has a deterministic MtM during this short window.
-    if deal.status == "en_reglement" and today >= (terminal_date or today):
+    if ((terminal_date is not None and today >= terminal_date
+         and deal.settlement_amount is not None)
+            or (deal.status == "en_reglement" and today >= (terminal_date or today))):
         if terms.payment_date is None or terms.strike_date is None:
             raise HTTPException(409, {
                 "code": "PRODUCT_TERMS_INCOMPLETE",
                 "message": "Le Product ne porte pas les dates nécessaires au règlement.",
             })
-        payment = terms.payment_date
+        payment = date.fromisoformat(deal.settlement_date) if deal.settlement_date else terms.payment_date
         if today >= payment:
-            raise HTTPException(422, "Règlement atteint — l'exposition est soldée")
+            raise HTTPException(422,
+                "Date contractuelle de paiement atteinte — valorisation contractuelle hors périmètre. "
+                "Le règlement bancaire n'est pas confirmé ici ; le suivi des impayés relève du rapprochement de trésorerie.")
         market = json.loads(deal.market_snapshot_json or "{}")
         elapsed_origin = terms.strike_date
         elapsed = max(0.0, (today - elapsed_origin).days / 365.25)
-        funding_curve, funding_spread = funding_from_market_snapshot(market, elapsed)
+        funding_curve, funding_spread = valuation_funding(body, market, elapsed)
         r_frac = body.r / 100.0 if body.r is not None else snapshot_rate(market)
         yield_curve = ([] if body.r is not None else
                        [[p["T"], p["rate"] / 100.0]
@@ -180,6 +210,7 @@ def mtm_core(
                 "model": "deterministic_cashflow",
                 "r": round(r_frac * 100.0, 4),
                 "funding_spread": round(funding_spread * 100.0, 6),
+                "funding_source_reference": body.funding_source_reference,
                 "funding_curve": [[round(t, 6), round(s * 100.0, 6)]
                                   for t, s in funding_curve],
                 "data": {
@@ -191,6 +222,10 @@ def mtm_core(
         }
         return payload, {
             "settlement_claim": True, "fixed_price": mtm,
+            "claim_inputs": {"amount": amount, "payment_date": payment.isoformat(),
+                             "valuation_date": today.isoformat(), "r": r_frac,
+                             "yield_curve": yield_curve, "funding_curve": funding_curve,
+                             "funding_spread": funding_spread},
             "tickers": [], "payment_date": payment.isoformat(),
             "settlement_amount": amount, "time_to_payment": remaining,
         }
@@ -224,14 +259,14 @@ def mtm_core(
     # reste — `strike_set_t` dit au moteur à quel pas il tombe.
     pre_strike = today < _elapsed_origin
     T_elapsed = (today - _elapsed_origin).days / 365.25
-    T_remaining = max(1 / 52, (maturity - today).days / 365.25)
+    T_remaining = (maturity - today).days / 365.25
     residual_payment_t = (terms.payment_date - today).days / 365.25
     strike_set_t = -T_elapsed if pre_strike else None
 
     # Le rejeu du passé et la construction du résiduel vivent dans le cœur
     # (core/inlife_valuation) : le Pricer doit pouvoir les appeler sans qu'un
     # deal existe. Ici on ne fait que traduire un deal en paramètres.
-    strike_event = next((e for e in _get_events(deal_id, session) if e.t_years == 0.0), None)
+    events = _get_events(deal_id, session)
     deal_market = json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {}
     deal_market = {
         **deal_market,
@@ -241,7 +276,7 @@ def mtm_core(
     produit = InLifeProduct(
         script_snapshot=terms.script,
         underlyings=[u.model_dump(mode="json") for u in terms.underlyings],
-        strike_levels=json.loads(strike_event.spots_json) if strike_event else {},
+        strike_levels={},
         strike_date=terms.strike_date,
         value_date=value_d,
         tenor=terms.T,
@@ -274,9 +309,18 @@ def mtm_core(
         px_data = load_prices(tickers, fetch_start, today.isoformat())
     if "error" in px_data:
         raise HTTPException(422, px_data["error"])
+    from .official_history import official_history
+    replay_prices, replay_dates, official_strike, fixing_evidence = official_history(
+        session, deal, events, px_data.get("prices", {}), px_data.get("dates", []), today)
+    produit.strike_levels = official_strike
+    # Legacy unversioned strike rows remain an explicit indicative reference,
+    # never an official fixing; governed candidates were rejected above.
+    if not official_strike:
+        legacy_strike = next((e for e in events if e.t_years == 0 and not e.current_fixing_version_id), None)
+        produit.strike_levels = json.loads(legacy_strike.spots_json or "{}") if legacy_strike else {}
+        fixing_evidence["strike_authority"] = "LEGACY_UNVERIFIED" if produit.strike_levels else "PROVIDER_HISTORY"
     try:
-        residuel = build_residual(produit, px_data.get("prices", {}),
-                                  px_data.get("dates", []), T_elapsed, today)
+        residuel = build_residual(produit, replay_prices, replay_dates, T_elapsed, today)
     except ValuationError as exc:
         raise HTTPException(422, str(exc))
 
@@ -321,8 +365,7 @@ def mtm_core(
     sigma_r = (market.get("sigma_r", 0.0) or 0.0) / 100.0 if rate_model != "deterministic" else 0.0
     a_r = (market.get("a_r", 0.0) or 0.0) if rate_model == "hull_white" else 0.0
     yc = [[p["T"], p["rate"] / 100.0] for p in market.get("yieldCurve") or []]
-    funding_curve, funding_spread = funding_from_market_snapshot(
-        market, max(0.0, T_elapsed))
+    funding_curve, funding_spread = valuation_funding(body, market, max(0.0, T_elapsed))
 
     # ── Market recalibration (opt-in) — only the FUTURE MC leg is affected,
     # the historical replay and the inherited state never depend on σ/corr.
@@ -482,6 +525,7 @@ def mtm_core(
                 float(flow["cf"]), remaining, r=r_frac, yield_curve=yc,
                 funding_curve=funding_curve, funding_spread=funding_spread)
             enriched["pv"] = pv
+            enriched['time_to_payment'] = remaining
             unsettled_flows.append(enriched)
             unsettled_pv += pv
     if unsettled_pv:
@@ -513,7 +557,7 @@ def mtm_core(
         # JSON encoder.
         pv_max, pv_p95 = float(pv_max), float(pv_p95 or 0.0)
         capped = bool((pv_max - pv_p95) / pv_max < 0.005)
-        horizon = max(result.get("fugit") or T_remaining, 1 / 52)
+        horizon = max(result.get("fugit") or T_remaining, 1e-12)
         upside = pv_max - result["price"]
         capture = result["price"] / pv_max
         best_case = {
@@ -523,7 +567,7 @@ def mtm_core(
             "capture_ratio": round(capture, 4),
             "upside_pts": round(upside * 100, 2),
             "upside_annualized_pct": round(upside / horizon * 100, 2),
-            "horizon_years": round(horizon, 2),
+            "horizon_years": round(horizon, 10),
             "exit_signal": bool(capped and capture >= _EXIT_CAPTURE),
         }
 
@@ -575,6 +619,7 @@ def mtm_core(
         # Effective market parameters of the future MC leg — always present so
         # a MtM number can never be quoted without knowing what priced it.
         "market_used": {
+            "time_axis": result.get("time_axis"),
             "source": source,
             "model": model_used,
             "r": round(r_frac * 100.0, 4),
@@ -596,24 +641,30 @@ def mtm_core(
             },
             "corr": [[round(v, 4) for v in row] for row in corr],
             "funding_spread": round(funding_spread * 100.0, 6),
+            "funding_source_reference": body.funding_source_reference,
             "funding_curve": [[round(t, 6), round(s * 100.0, 6)]
                               for t, s in funding_curve],
             "funding_is_legacy_default": (
-                "funding" not in market
+                body.funding_curve is None and body.funding_spread is None
+                and "funding" not in market
                 and "funding_spread" not in market
                 and "funding_curve" not in market
             ),
             "seed": seed,
             "antithetic": antithetic,
             "barrier_monitoring": barrier_monitoring,
+            "barrier_monitoring_note": result.get("barrier_monitoring_note"),
+            "barrier_monitoring_details": result.get("barrier_monitoring_details"),
             "data": {
                 "provider": market_provider,
                 "contractual_history": data_provenance(px_data),
+                "fixing_registry": fixing_evidence,
                 "statistical_history": data_provenance(statistical_px_data),
             },
         },
     }
     ctx = {
+        "fixing_registry": fixing_evidence,
         "product_terms": {
             "script": terms.script,
             "value_date": terms.value_date.isoformat(),
@@ -656,6 +707,7 @@ def mtm_core(
         "funding_curve": funding_curve,
         "funding_spread": funding_spread,
         "unsettled_pv": unsettled_pv,
+        "unsettled_cash_flows": unsettled_flows,
         "seed": seed,
         "N_used": N_used,
         "valuation_context": valuation_context.to_dict(),

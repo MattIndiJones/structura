@@ -1,5 +1,15 @@
 # Notes du projet Structura
 
+[Corrections des trois défauts majeurs — 24/10](audits/INSTITUTIONAL_MAJOR_FIXES_2026-10-24.md)
+— Booking OTC avec accord effectif, diffusion aux dates contractuelles et horloge
+CCR métier ; 531 tests backend ciblés, 784 frontend, parcours UI isolés et rejeu CCR.
+
+[Recette institutionnelle 100 M EUR — 24/10](audits/INSTITUTIONAL_ACCEPTANCE_2026-10-24.md)
+— Douze achats RFQ et six banques fictives sur installations isolées ; preuves UI,
+oracles indépendants et rapprochements. Booking OTC sans accord effectif,
+observation hors grille et horloge CCR historique corrigés dans le suivi ci-dessus ; mandat autonome
+non qualifié. Rapport local, limites et preuves d'arrêt dans le dossier d'audit.
+
 Toutes les notes de travail du dépôt, rangées par nature. Chaque note garde son nom
 d'origine : seul son dossier a changé, le 14/09/2026. **Revue documentaire du
 05/10/2026**, sur `main`, commit `15d7ccf` : les points revérifiés et leurs preuves
@@ -10,6 +20,10 @@ le contrôle historique du 14/09, pas une validation actuelle.
 
 **Une nouvelle note va dans le dossier de sa nature et entre dans cet index.** Rien à la
 racine du dépôt, à part `CLAUDE.md`.
+
+[Correction des quatre défauts de la contre-revue livrée - édition consolidée](audits/REVIEW_FIXES_2026-10-24.md)
+
+Rapport d'application et contre-revue actualisés après deux phases ; ZIP consolidé avec preuves existantes de 285 tests backend ciblés, 782 tests frontend et compilation, limites restantes et sources avant/après. Les 118 cas de première phase restent historiques, sans addition de couvertures. Actualisation documentaire sans relance des tests, commit ni push.
 
 ## Arborescence
 
@@ -44,13 +58,423 @@ restent ouverts. *Dépassé* : repris par une note plus récente. *Référence* 
 
 ## Ce qui reste à faire
 
+[Archives KID, uploads et bootstrap legacy — confrontation et corrections — 24/10](audits/REVIEW_PROBABLE_FIXES_2026-10-24.md)
+— Trois défauts de contrôle établis et corrigés : preuve serveur des archives KID,
+budgets documentaires et retrait des comptes implicites. 170 cas backend distincts
+réussis, 784 tests frontend et compilation ; limites et compatibilité explicites.
+La suite backend complète n'est pas relancée ; le ZIP précédent n'est pas régénéré.
+
+[Rapport complet de l'application pour revue indépendante — 24/10](audits/APPLICATION_REVIEW_2026-10-24.md)
+— 44 chapitres : fonctions, modèles, calculs, données, RFQ, lifecycle, risque,
+CRM, AMC/FIFO, documents, IA et exploitation. Inspection statique du checkout
+local, limites explicites, 25 points prioritaires et 90 scénarios proposés ;
+[annexes](audits/application-review-2026-10-24/ANNEXES.md), inventaires et extraits de source.
+Aucun nouveau test métier, service ou accès à une base privée.
+
+[Contre-revue indépendante du rapport d'application — 24/10](audits/CONTRE_REVUE_APPLICATION_2026-10-24.md)
+— Application du prompt de contre-revue : 22 constats classés A–F, six établis en catégorie A, cinq
+sondes sur le moteur seul. Points durs : VEV du KID hors expression RTS sous les bandes MRM
+réglementaires, funding ni porté ni refusé en Mark-to-Future, `converged` du solveur général satisfait
+par la largeur d'intervalle. Les quatorze fichiers concernés sont inchangés depuis le gel d'empreintes
+du passage de 3 943 tests : le point aveugle de la suite est localisé. Aucune correction appliquée.
+
+[Correction des quatre défauts de la contre-revue livrée — 24/10](audits/REVIEW_FIXES_2026-10-24.md)
+— CR01–CR04 du rapport `output/structura-counter-review-2026-10-24/COUNTER_REVIEW_FR.md` :
+contexte KID/MTF transmis ou refusé, convergence du solveur au paramètre publié,
+levier EMT indépendant de la notation et créances KID après STOP. Tests ciblés et
+limites explicites ; ces identifiants sont distincts de ceux de la contre-revue ci-dessus.
+
+[Corrections de la seconde confrontation — 24/10](audits/REVIEW_FOLLOWUP_FIXES_2026-10-24.md)
+— Refus des observations non futures, y compris calendriers figés ; message de
+règlement contractuel, seed MTF fixe explicite et métriques CCR distinctes.
+285 tests backend ciblés, 782 tests frontend et compilation réussis ; limites
+et preuves conservées, sans suite backend complète, commit ni push.
+
+[Changement de compte depuis Admin — 24/10](audits/ADMIN_ACCOUNT_SWITCH_2026-10-24.md)
+— Sélecteur Admin actif, profil explicite, organisation démarrée à la demande,
+retour après panne et session conservée ; tests et build, cas à froid obtenu à l’écran.
+Le portail utilisateur déjà ouvert est préservé et doit être relancé pour charger le serveur modifié.
+
+[Recette des accès du launcher — 24/10](audits/LAUNCHER_ACCESS_ACCEPTANCE_2026-10-24.md)
+— Six organisations et 24 profils, console SaaS et deux chemins de simulation
+vérifiés sur copies puis runtime permanent ; script de recette corrigé,
+45 tests ciblés et 19 jalons navigateur. Aucune IA démarrée ; services arrêtés.
+
+[Reprise du launcher et du workspace Admin — 24/10](audits/LAUNCHER_RECOVERY_2026-10-24.md)
+— Ancienne identité Admin reprise explicitement avec sauvegarde et audit, sans
+assouplir C02 ; démarrage natif et connexion vérifiés, limites dans les preuves.
+
+[Rapprochement RFQ et reprise des bookings — 24/10](audits/RFQ_RECONCILIATION_2026-10-24.md)
+— États réciproques datés, champs divergents explicites, inventaire habilité et
+reprise bancaire après clôture d’un accord confirmé. Panne réelle, déclaration
+négative et retour à la concordance exercés entre deux installations isolées.
+Tests ciblés dédupliqués, build et limites dans les preuves ; pas de qualification déployée.
+
+[Confirmation électronique RFQ — 24/10](audits/ELECTRONIC_RFQ_EXECUTION_2026-10-24.md)
+— Intention et décision bancaire natives, reprises après arrêt de chaque destinataire,
+preuves authentifiées conservées et un seul Deal par installation. Tests ciblés,
+756 tests frontend et build, 15 jalons graphiques ; périmètre et limites de
+qualification locale décrits dans les preuves. La recette précédente reste historique.
+
+[Recette RFQ bilatérale — 24/10](audits/BILATERAL_RFQ_ACCEPTANCE_2026-10-24.md)
+— Transport natif entre deux installations isolées, reprise sur indisponibilité,
+deux révisions puis deux bookings concordants de 1 M EUR à 98,50 %. Quatre anomalies
+d’interface corrigées ; 138 tests backend et 149 tests frontend ciblés distincts,
+build et rapprochement réussis. Accord externe fictif consigné, sans confirmation
+électronique d’exécution native ni qualification TLS ; services arrêtés.
+
+[Recette graphique des parcours métier — 23/10](audits/GRAPHICAL_ACCEPTANCE_2026-10-23.md)
+— Neuf anomalies corrigées et revérifiées sur installations isolées ; 151 tests backend
+ciblés distincts, 737 tests frontend et build réussis. Parcours obtenus à l’écran,
+preuves conservées et compléments de qualification explicités ; services arrêtés.
+
+
+[Suite backend complète et correctifs F08-F21 — 23/10](audits/BACKEND_FULL_VALIDATION_2026-10-23.md)
+— Premier passage : 59 cas en échec ou erreur, corrigés et suivis séparément
+des 121 cas historiques. 817 succès ciblés distincts, puis **3 943 succès,
+3 ignorés conditionnels inchangés, aucun échec ni erreur** au passage complet final.
+Registre courant : 0 cas ouvert sur 180 documentés ; preuves antérieures
+conservées, recette graphique et qualification déployée distinctes. Sans commit ni push.
+
+[F01 — inscription publique : fixture et sécurité — 23/10](audits/REMEDIATION_F01_2026-10-23.md)
+— Dernier échec historique résolu : fixture de mot de passe conforme, refus précis
+et 21 tests ciblés distincts réussis, dont 14 nouveaux cas HTTP. Aucun changement
+applicatif ni assouplissement C02.
+[Solde après F01](audits/remediation-lot-0-2026-10-20/FAILURE_REGISTER.json) :
+0 cas historique ouvert, 121 résolus localement sur preuves F01–F07 datées ;
+recette transverse et qualification déployée distinctes. Sans commit ni push.
+
+[F07 — relevés/lifecycle : fixture et contrôles d’accès — 23/10](audits/REMEDIATION_F07_2026-10-23.md)
+— Échec du faux utilisateur sans rôle résolu ; dix dates sans doublon au strike,
+droits réels et autorité du registre officiel vérifiés. 20 tests ciblés distincts
+réussis ; aucun changement applicatif.
+[Solde après F07](audits/remediation-lot-0-2026-10-20/FAILURE_REGISTER.json) :
+1 cas ouvert (F01), non relancé ici. Sans commit ni push.
+
+[F06 — chaîne CRM historique et booking canonique — 23/10](audits/REMEDIATION_F06_2026-10-23.md)
+— Quatorze échecs résolus par des fixtures conformes et des assertions renforcées.
+Chaîne RFQ-Deal sur un seul Product/version, droits réels, identité juridique et
+reprise après refus vérifiés. 32 tests ciblés distincts réussis ; aucun changement applicatif.
+[Solde après F06](audits/remediation-lot-0-2026-10-20/FAILURE_REGISTER.json) :
+2 cas dans 2 groupes ouverts (F01/F07), non relancés ici. Sans commit ni push.
+
+[F05 — analyses Product : fixture et permissions — 23/10](audits/REMEDIATION_F05_2026-10-23.md)
+— Cinq refus 403 résolus par une identité JWT réelle et une base isolée. Aucun
+changement applicatif ni élargissement des droits ; 58 tests ciblés distincts réussis,
+dont 34 nouveaux contrôles des accès, sessions et aperçu/envoi/provenance.
+[Solde après F05](audits/remediation-lot-0-2026-10-20/FAILURE_REGISTER.json) :
+16 cas dans 3 groupes ouverts (F01/F06/F07), non relancés ici. Sans commit ni push.
+
+[F03 — tests RFQ et intégrité des suppressions — 23/10](audits/REMEDIATION_F03_2026-10-23.md)
+— 90 échecs reproduits puis couverts ; acteurs/desks et identités qualifiés, attentes
+alignées sur C03/C08/C23. Suppression du last look sous clés étrangères et protection
+des réponses des tours clos corrigées. 212 cas ciblés distincts réussis, dont trois
+correspondances de tests renommés documentées ; aucun appel HTTP externe.
+[Solde après F03](audits/remediation-lot-0-2026-10-20/FAILURE_REGISTER.json) :
+21 cas dans 4 groupes ouverts, non relancés ici. Sans commit ni push.
+
+[F04 — générateur UAT, fixings et calendrier figé — 23/10](audits/REMEDIATION_F04_2026-10-23.md)
+— Neuf échecs initiaux résolus, flux fournisseur simulé dans les tests, rollback du
+refresh, couverture explicite et suppression du déplacement de dates après booking.
+55 cas ciblés distincts réussis (37 générateur + 18 voisins), nettoyage sous clés
+étrangères et données natives préservées. [Solde après F04](audits/remediation-lot-0-2026-10-20/FAILURE_REGISTER.json) :
+111 cas dans 5 groupes ouverts. Sans commit ni push.
+
+[F02 — fixture de migration historique — 23/10](audits/REMEDIATION_F02_2026-10-23.md)
+— Omission de `create_all()` dans le test, démarrage réel confirmé sur base isolée.
+7 tests ciblés réussis ; données anciennes et protections Product conservées,
+aucune migration applicative modifiée. Solde après F02 : 120 cas documentés dans 6 groupes ouverts. Référence de l’étape 1 conservée.
+Sans commit ni push.
+
+[Étape 1 — référence et registre consolidés — 23/10](audits/REFERENCE_CONSOLIDATION_2026-10-23.md)
+— 27 livraisons locales rapprochées, dépendances actualisées et référence de travail
+figée par empreintes. 190 XML dépouillés : 14 304 occurrences ramenées à 3 046
+identités de cas ; 121 échecs historiques sans succès ultérieur conservé, en 7 groupes.
+Dernière preuve frontend utilisée une seule fois : 731 succès. Travail documentaire,
+sans modification de code, nouvelle exécution, commit ni push ; qualification déployée ouverte.
+
+[Lot 1 — solde C27 : Production, UAT et historiques — 22/10](audits/REMEDIATION_C27_2026-10-22.md)
+— Production par défaut, UAT explicite sur les agrégats, chocs/smile/P&L et leurs
+historiques ; univers et vues figés, anciennes études non qualifiées consultables,
+archives de portefeuilles supprimés préservées et réponses tardives ignorées.
+65 tests backend ciblés (26 nouveaux), 731 tests frontend et build temporaire réussis.
+C21/C24/C26 réexercés, import Demo conservé. Les 27 chantiers ont leur livraison
+locale ; recettes transverses, graphique et qualification déployée restantes.
+Sans commit ni push.
+
+[Lot 3 — C26 : surveillance lifecycle et comptes rendus — 22/10](audits/REMEDIATION_C26_2026-10-22.md)
+— Sous-jacents stables, minima/maxima sur clôtures indicatives, registre officiel
+prioritaire ; bilans SUCCESS/PARTIAL/FAILED, couverture et reprises sans doublons.
+101 cas backend distincts réussis (44 nouveaux), un échec antérieur de fixture
+conservé ; 720 tests frontend et build temporaire réussis. C01/C11/C13 et T08 local
+réexercés ; D07 conservée sans preuve implicite de paiement. Recette graphique et
+qualification déployée restantes. Il reste le solde C27. Sans commit ni push.
+
+[Lot 7 — C25 : économie du roll et récupération — 22/10](audits/REMEDIATION_C25_2026-10-22.md)
+— Bid/hypothèse, décote et frais alimentent la quantité achetée ; récupération et
+plafond démontré sont séparés. Anciennes études conservées et plafond historique
+non qualifié à l’affichage. 182 cas backend ciblés (34 nouveaux), 712 tests frontend
+et build temporaire réussis. C05/C18/C19 et reprise C07/C10 réexercés ; recette
+graphique et qualification déployée restantes. Il reste C26 et le solde C27.
+Convention commerciale D09 confirmée par Philippe le 22/10/2026.
+Sans commit ni push.
+
+[Lot 6 — C08 : idempotence des commandes et filiation — 22/10](audits/REMEDIATION_C08_2026-10-22.md)
+— Trois constats traités localement : clés reprises après réponse perdue, booking
+atomique et nouvelle opération dans un dossier dérivé explicite. 317 cas backend
+ciblés, 697 tests frontend et build temporaire réussis. C01/C06, interfaces
+C03/C04/C07/C10/C19/C20/C23 et nettoyage UAT réexercés ; qualification graphique et
+déployée restante. Il reste C25, C26 et le solde C27. Sans commit ni push.
+
+[Lot 7 — C24 : attribution CRM, analyses datées et devises — 22/10](audits/REMEDIATION_C24_2026-10-22.md)
+— Trois constats et le prérequis CRM M16-05/C27 traités localement : rattachements
+protégés, futurs exclus, états courants identifiés, montants par devise et Demo
+hors profil réel. 342 cas backend qualifiés, 681 tests frontend et build réussis ;
+14 échecs anciens de chaîne client reproduits à l’identique. C27 global et
+qualification déployée restent ouverts. Sans commit ni push.
+
+[Lot 6 — C23 : cotations, tours RFQ et exécutions réseau — 22/10](audits/REMEDIATION_C23_2026-10-22.md)
+— Six constats traités localement : sélection liée à la révision, devise Product,
+horaires fusionnés, clôture définitive et nouveau tour explicite, historique conservé,
+moyenne quotidienne explicite. 271 cas backend (32 nouveaux), 674 tests frontend
+et build temporaire réussis. Deux bases avec HTTP simulé ; C08 global, recette
+graphique et qualification déployée restants. Sans commit ni push.
+
+[Lot 5 — C22 : P&L cash et attribution — 22/10](audits/REMEDIATION_C22_2026-10-22.md)
+— Deux constats traités localement : cash à échéance contractuelle, créances
+conservées dans le roll et dividendes isolés de la volatilité. 161 cas backend
+distincts, dont 22 nouveaux ; 662 tests frontend et build temporaire réussis.
+PDF synthétiques inspectés, archives préservées. T08/T09 et production restent
+partiels ; aucune preuve de virement bancaire déduite. Sans commit ni push.
+
+[Lot 5 — C21 : couverture des risques, CVA et fraîcheur — 22/10](audits/REMEDIATION_C21_2026-10-22.md)
+— Quatre constats traités localement : facteurs VaR manquants refusés, Greeks
+indisponibles distincts de zéro, CVA des créances à paiements exacts et moniteur
+invalidation par les fixings. 226 cas backend, 660 tests frontend et build temporaire
+réussis. C27 partiel, domaines CCR bornés, recette transverse et production restantes.
+Sans commit ni push.
+
+[Lot 7 — C20 : recherche Optimizer et budgets — 22/10](audits/REMEDIATION_C20_2026-10-22.md)
+— Quatre constats traités : 20 modes sauvegardés lançables, résolution dimensionnée,
+contrôle économique après arrondi, dépassements partiels explicites et messages de conservation cohérents.
+Interaction Phoenix/C14 corrigée ; 219 cas backend et 28 tests frontend réussis, build temporaire validé.
+Budget séquentiel souple, recette graphique et production restantes. Sans commit ni push.
+
+
+[Lot 5 — C19 : archives, rejeu et documents figés — 21/10](audits/REMEDIATION_C19_2026-10-21.md)
+— Neuf constats traités localement : identités de calcul, preuves SQL, historique RFQ daté,
+calendriers de rejeu, créances, PDF et études conservés. D10/D11 confirmées.
+444 cas backend et 55 tests frontend réussis ; 104 échecs antérieurs reproduits.
+Compilation temporaire validée ; recette graphique et production restantes. Sans commit ni push.
+
+
+[Lot 5 — C18 : contexte commun de valorisation et sémantique — 21/10](audits/REMEDIATION_C18_2026-10-21.md)
+— Sept constats corrigés localement : prix et analyses alignés, Greeks explicites,
+statistiques correctement nommées, sources effectives, créances réactualisées et
+scan raccordé au modèle/funding du booking. 479 cas backend et 652 tests frontend
+réussis ; compilation temporaire validée. Domaines C15–C17 préservés ; scénarios
+transverses dépendants et recette graphique/production restants. Sans commit ni push.
+
+[Lot 4 — C17 : surfaces, calibration et diagnostics — 21/10](audits/REMEDIATION_C17_2026-10-21.md)
+— Cinq constats corrigés localement : piliers matériels, refus du Local Vol legacy
+invalide, qualification distincte de la convergence, Fourier Heston adaptatif et
+dossier signé conservé avec le prix. Seuils confirmés : 5 pb vanilles, 10 pb digitales.
+323 cas backend et 643 tests frontend réussis ; compilation temporaire validée.
+Qualification des contextes élargis C18 et recette graphique/production restantes.
+Sans commit ni push.
+
+[Lot 4 — C16 : dépendance des extrema et barrières — 21/10](audits/REMEDIATION_C16_2026-10-21.md)
+— Copies équivalentes cohérentes avec le mono ; approximation panier corrélée
+et domaine d'admission explicites. Seuil de qualification de 10 pb confirmé ;
+319 cas backend ciblés et 7 tests frontend réussis, plus deux panels quantitatifs.
+T07 partiel, extension de D04 et raccordement C18 ouverts. Sans commit ni push.
+
+[Lot 4 — C15 : taux stochastiques, funding et corrélations — 21/10](audits/REMEDIATION_C15_2026-10-21.md)
+— Trois constats corrigés localement : funding en actualisation seule, variance
+mono préservée et limite Hull-White stable. 231 cas backend ciblés réussis,
+dont 105 cas C15 ; références nominales conservées. T06 partiel, C18 et
+qualification D04 ouverts. Sans commit ni push.
+
+[Lot 4 — C14 : axe temporel et ordre des événements — 21/10](audits/REMEDIATION_C14_2026-10-21.md)
+— Trois constats corrigés localement : chronologie par date, axe partagé entre
+prix et analyses, retrait du plancher hebdomadaire du résiduel. 241 cas backend
+ciblés et 18 tests frontend réussis. T03 validé localement ; T09 partiel et
+qualification de production restante. Sans commit ni push.
+
+[Lot 3 — C13 : finalité des cours et registre officiel — 21/10](audits/REMEDIATION_C13_2026-10-21.md)
+— Cinq constats traités localement : clôture disponible sans délai ajouté après
+séance, autorité du registre, décision atomique et passé du MtM cohérent avec les
+versions officielles. 232 cas backend ciblés et 22 tests frontend réussis.
+T08 partiel, un défaut préexistant de migration isolé ; recette de production ouverte.
+Sans commit ni push.
+
+[Lot 3 — C12 : stockage atomique des séries et caches — 21/10](audits/REMEDIATION_C12_2026-10-21.md)
+— Deux constats traités localement : imports stricts et conventions explicites,
+publication groupée, reprise après panne et caches indépendants. 160 tests backend
+ciblés, 637 tests frontend et build réussis. T04 combiné validé localement ;
+C11 conservé à 3 jours, recette graphique/production restante. Sans commit ni push.
+
+[Lot 3 — C11 : données de marché datées et couverture — 21/10](audits/REMEDIATION_C11_2026-10-21.md)
+— Sept constats traités et validés localement : références/surcharges conservées,
+historiques et FX avec couverture explicite, stock local partagé, estimateur commun.
+D03/C11 confirmé : reports de 3 jours calendaires maximum, borne incluse.
+235 cas backend ciblés, 631 tests frontend et build réussis. Finalité prolongée
+par C13 ci-dessus ; recettes transverses et qualification production ouvertes.
+Sans commit ni push.
+
+[Lot 2 — C10 : réponses tardives et erreurs dans les interfaces — 21/10](audits/REMEDIATION_C10_2026-10-21.md)
+— Huit constats traités localement : réponses liées au contexte, erreurs RFQ restituées,
+preuves d’exécution cloisonnées et acquittements confirmés. 69 nouveaux tests frontend,
+615 tests frontend et build réussis ; 37 tests backend ciblés. T11/C17 et recette
+graphique/production restent ouverts ; sans commit ni push.
+
+[Lot 2 — C09 : compilation PayScript et qualification du payoff — 21/10](audits/REMEDIATION_C09_2026-10-21.md)
+— Trois constats traités localement : indentation refusée, contrôles structurels explicites,
+qualification du script par empreinte et 552 trajectoires de référence. 845 cas backend
+distincts validés, un cas ignoré, 546 tests frontend et build réussis. T03/C14, T15/C19/C20
+et recette graphique/production restent ouverts ; sans commit ni push.
+
+[Lot 2 — C07 : conservation et reprise des saisies — 21/10](audits/REMEDIATION_C07_2026-10-21.md)
+— Douze constats traités localement : brouillons partiels, configurations atomiques,
+versions explicites, précision et reprise du funding. 303 cas backend distincts,
+541 tests frontend et build réussis. Budget de volumétrie M04-10, T11/T15 et recette
+graphique/production restants ; sans commit ni push.
+
+[Lot 2 — C06 : versions Product et intégrité des transitions — 20/10](audits/REMEDIATION_C06_2026-10-20.md)
+— Cinq constats traités localement : RFQ historique sans rétrogradation, contexte
+conservé, dossier booké protégé, références Product/version et pricing cloisonné.
+307 cas backend distincts, 494 tests frontend et build réussis ; C01 à C05 préservés.
+Reprise historique et recettes T02/T12/T13 complètes restantes ; sans commit ni push.
+
+[Lot 2 — C05 : calendriers contractuels et règlement — 20/10](audits/REMEDIATION_C05_2026-10-20.md)
+— Huit constats traités localement ; D02 confirmée : combinaison choisie par produit,
+stubs longs systématiques et conservation des dates figées. 454 cas backend ciblés
+validés après alignement de quatre fixtures C03, 491 tests frontend et build réussis.
+Recettes T03/T04/T16 complètes et qualification graphique/production restantes ; sans commit ni push.
+
+[Lot 1 — C04 : limites et amendements économiques — 20/10](audits/REMEDIATION_C04_2026-10-20.md)
+— Trois constats traités localement : concentration par ID, contrôle du portefeuille
+après amendement et décision liée à la nouvelle version. 164 tests backend ciblés,
+475 tests frontend et build réussis. T05 complet, recette graphique et qualification
+numérique C21 encore ouverts ; sans commit ni push.
+
+[Lot 1 — C03 : identifiants juridiques et référentiels — 20/10](audits/REMEDIATION_C03_2026-10-20.md)
+— Neuf constats traités localement : identités figées, booking par ID actif ou
+exception administrateur D01 explicite, motivée et auditée,
+amendement juridique cohérent et référentiels gouvernés. Tests ciblés et build Vue ;
+D01 confirmée par Philippe ; recette graphique et scénarios transverses encore ouverts.
+
+[Lot 1 — C02 : sessions, portail et identité — 20/10](audits/REMEDIATION_C02_2026-10-20.md)
+— Sept constats traités localement ; révocation, mots de passe, portail normal,
+nom canonique verrouillé et contrôles avant migration. Tests ciblés et build Vue ;
+recette graphique/transverse et reprise explicite des anciens workspaces Admin restantes.
+
+[Lot 1 — C01 : permissions et confidentialité — 20/10](audits/REMEDIATION_C01_2026-10-20.md)
+— Sept constats corrigés localement ; tests ciblés et build Vue. Revue D05 et recettes graphique/transverse restantes ; sans commit ni push.
+
+[Lot 0 de remédiation des modules 1 à 17 — 20/10](audits/REMEDIATION_LOT_0_2026-10-20.md)
+— Registre de 132 constats d'audit, 27 chantiers, dépendances et critères de validation.
+Préparation documentaire livrée ; aucune correction du code ni mutation de données métier.
+
+[Recette déterministe sans IA — 15/10](audits/RECETTE_DETERMINISTE_SANS_IA_2026-10-15.md)
+— Pilote isolé de trois payoffs : trois RFQ, neuf cotations, douze jambes
+rapprochées, refus juridique et limite de notionnel attendus, zéro appel IA.
+Reste à exercer un panier multi-sous-jacents et les gestes utilisateur dans les écrans.
+
+[Reprise de la campagne multi-produits — 15/10](audits/CAMPAIGN_MULTI_PRODUCT_RESUME_2026-10-15.md)
+— Reprise contrôlée au dossier SG après deux réponses OpenAI non décodables ; six deals
+sur six rapprochés au deuxième mois, suivi historique encore en cours. Les sorties
+invalides futures sont conservées dans le dossier privé de campagne ; le bilan
+de cinq ans et les contrôles visuels restent à faire.
+
+[Préparation du rejeu historique et recette courte — 14/10](audits/CAMPAIGN_HISTORICAL_PREPARATION_2026-10-14.md)
+— Historiques locaux et dernier cours connu, cutoff strict 2021–2026, décisions
+IA enregistrées sans retries automatiques, calendriers et cash du rappel à J+3.
+Recette isolée : trois RFQ, neuf cotations, douze bookings, zéro appel IA ; services
+fermés. Brouillon historique enregistré depuis Simulation, non démarré.
+CCR OTC, Valo Explain entre deux valorisations et qualification humaine restent
+à exercer ; les 46 tests ciblés ne certifient pas la campagne complète.
+
+[Bilan de la campagne de cinq ans — 14/10](audits/CAMPAIGN_DIAGNOSTIC_5Y_BILAN_2026-10-14.md)
+— Terminaison technique sur marché synthétique, 4 RFQ, 16 bookings, 120 MtM,
+48 appels IA ; les six installations sont fermées. Le rejeu historique attendu
+2021–2026 n'est pas validé. Date/source de marché, preuves visuelles, limites de
+couverture et règlement après rappel à reprendre avant une nouvelle campagne.
+
+[Campagne courte RFQ jusqu'à maturité — 14/10](audits/CAMPAIGN_LIFECYCLE_SHORT_2026-10-14.md)
+— Une reverse convertible, cinq cotations, quatre bookings rapprochés,
+52 MtM natifs, fixings finaux appliqués et quatre deals `échu` après paiement
+contractuel. 67 appels IA, coût estimé 0,0210054 $. Campagne `COMPLETED` après
+reprise, mais cinq erreurs de format de décision, AR produit non exercée et
+absence de preuve externe du virement final ; qualification globale non acquise.
+
+[Pilotes OpenAI RFQ natif — 14/10](audits/CAMPAIGN_OPENAI_PILOT_2026-10-14.md)
+— GPT-6 Luna : après correction des sollicitations inutiles et du schéma des
+arguments, 19 appels contre 69, coût estimé 0,0063816 $ contre 0,0179933 $ ;
+cinq cotations et quatre bookings rapprochés sur une RFQ, sans erreur de format.
+Campagne longue, paiements et autres payoffs encore à qualifier. Services arrêtés.
+
+[Choix Ollama/OpenAI et plafond IA dans les campagnes — 14/10](projects/platform/AGENT_WORKSHOP_NATIVE_RFQ_2026-10-13.md#choix-du-modèle-et-plafond-de-campagne--14102026)
+— sélection du modèle dans l'atelier admin, réutilisation de la clé existante,
+compteur de jetons/coût estimé et arrêt au plafond local ; jusqu'à 60 mois
+commerciaux et 60 mois de durée contractuelle, sur les deux payoffs RFQ natifs.
+Contrôles ciblés et appel API minimal réussis ; campagne complète OpenAI à qualifier.
+
+[Campagnes agents — consignes hybrides et parcours RFQ natif, 13/10](projects/platform/AGENT_WORKSHOP_NATIVE_RFQ_2026-10-13.md)
+— Kepler demandeur, BNP/SG/Citi/UBS/Leonteq répondants ; catalogue réutilisé,
+réception et publication natives, Contrôleur distinct, confirmation avant booking
+et suivi jusqu'au dernier paiement. Qualification dirigée réussie : cinq cotations,
+quatre jambes rapprochées et rejeux sans doublon.
+[Campagne complète lancée](audits/CAMPAIGN_NATIVE_RFQ_FULL_2026-10-13.md)
+le 13/10 à 18:23:50 UTC, résultats annuels en cours.
+Registre central et facturation non livrés par cette campagne.
+
+[Vérification des corrections — pilote court du 13/10](audits/CAMPAIGN_CORRECTIONS_PILOT_2026-10-13.md)
+— Blocage avant connexion : conflit entre l'attente IA annulable et Playwright,
+corrigé après arrêt et vérifié par un diagnostic ponctuel. Création RFQ et rejeu
+restent non exercés. Arrêt du pilote en 5,719 s ; tous les processus de recette
+fermés, preuves conservées. Nouvelle campagne de qualification à reprendre.
+
+[Campagne réelle de diagnostic — pilote du 13/10](audits/CAMPAIGN_PILOT_2026-10-13.md)
+— 39 tours et 45 appels IA en 12 min 21 s. Création RFQ bloquée par l'absence
+de desks et de `pilot_desk_id` ; aucun booking. Correctifs du bootstrap, du rejeu,
+de la connexion, de la provenance IA et de l'arrêt implémentés ensuite,
+sans nouvelle campagne : qualification en exécution à reprendre.
+Sept services de recette arrêtés, preuves conservées ; année complète non lancée.
+
+[Navigation RFQ — demandes et réception, 13/10](projects/platform/RFQ_NAVIGATION_2026-10-13.md)
+— Entrée directe « RFQ reçues » dans le menu RFQ, au même niveau que les demandes
+aux fournisseurs ; écran et droits existants réutilisés. Compilation seule, tests suspendus.
+
+[Lanceur Python et Structura Admin complet — 13/10](projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md)
+— Double-clic et `backend/run.py` sans arguments ouvrent un menu ; accès Admin complet,
+administration et simulation dans un workspace séparé des six organisations.
+Lanceur modernisé avec aides « ? » ; arrêt en parallèle limité aux espaces ouverts
+depuis cette fenêtre, vérifications de ports bornées et durée réelle affichée.
+Console SaaS distincte. Compilation seule après le dernier correctif, tests suspendus
+à la demande de Philippe ; recette de ce parcours différée. Étape 5 partielle, étapes 6 à 8 ouvertes.
+
+[SaaS hybride — remise à zéro et accès commun, 13/10](projects/platform/HYBRID_SAAS_ACCESS_2026-10-13.md)
+— Étapes 3 et 4 livrées : retrait ciblé des anciens jeux fictifs, login à sept cartes,
+sélecteur organisation/profil, sessions par onglet, accès développeur explicites
+et audités. Recettes backend/frontend et navigateur réalisées ; services arrêtés.
+Partage, parcours Opérations complet, simulation centrale, RFQ entre les six bases
+et registre restent à réaliser. Facturation désactivée.
+
+[Socle SaaS hybride — étapes 1 et 2, 13/10](projects/platform/HYBRID_SAAS_FOUNDATION_2026-10-13.md)
+— Six installations privées et service central d'annuaire, 24 comptes métier et
+un admin central, bootstrap idempotent, droits et signatures par installation.
+Recette locale sur sept serveurs réussie ; runtime permanent initialisé, arrêté.
+Nettoyage et login commun repris par la livraison ci-dessus ; supervision/partage,
+configuration RFQ des six bases et registre central restent à réaliser. Aucun tarif ni débit activé.
+
 [Reprise SaaS hybride et prompt pour un nouveau chat — 13/10](handoffs/HYBRID_SAAS_HANDOFF_2026-10-13.md)
 — Décisions retenues : données et traitements privés chez le client, six installations
 isolées, super utilisateurs, profils secondaires, accès rapides, supervision et
 simulation réservée à l'admin. Registre RFQ central pour facturation et litiges,
 avec contenu des échanges, droits, reprise et comptage sans doublons ; unité tarifaire
 proposée à valider. Plan en huit étapes, remise à zéro des données fictives sans
-migration et prompt prêt à copier. Cadrage, non implémenté ;
+migration et prompt prêt à copier. Cadrage repris par la livraison des étapes 1 et 2 ci-dessus ;
 compilation commerciale et calcul confidentiel différés.
 
 [Atlas de l'application et des comptes — 13/10](projects/platform/STRUCTURA_APPLICATION_OVERVIEW_2026-10-13.md)
@@ -476,6 +900,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 | [AUDIT_CALLS_MODELES_2026-10-07.md](audits/AUDIT_CALLS_MODELES_2026-10-07.md) | 07/10 | Première grille calls / puts sur cinq modèles et cas limites | Diagnostic initial | Prolongé par la validation du même jour |
 | [VALIDATION_MODELES_VOL_2026-10-07.md](audits/VALIDATION_MODELES_VOL_2026-10-07.md) | 07/10 | Correction LSV, référence SABR/PDE, vanilles et digitaux mono / marginales multi | Premier lot historique ; prolongé par le benchmark de cible commune | Limites de précision initiales traitées à 208 pas/an sur la grille du benchmark |
 | [AUTOCALL_SURFACE_COMMUNE_2026-10-07.md](audits/AUTOCALL_SURFACE_COMMUNE_2026-10-07.md) | 07/10 | SSVI sans arbitrage, calibration, vanilles, convergence, dix autocalls et flux séparés | Benchmark hors interface exécuté ; 29 tests ciblés passent | Ajustements Heston/SABR imparfaits ; workflow surface et précision à intégrer |
+| [CONTRE_REVUE_APPLICATION_2026-10-24.md](audits/CONTRE_REVUE_APPLICATION_2026-10-24.md) | 24/10 | Contre-revue du rapport d'application : 22 constats A–F, carte de validité par domaine, plan de validation et critique du rapport | Six constats de catégorie A établis, aucun corrigé | CR01–CR08 ouverts ; arbitrages CR02 (statistique VEV), CR10 (graine), CR19 ; E.1 et N3/N5/W1 à exécuter |
 
 ### `projects/pricing/`
 
@@ -506,7 +931,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 | `IMPLEMENTATION_RFQ_BOOKING_LIFECYCLE_PHASE_0_1_2026-07-31.md` | 31/07 | Contrôles RFQ, booking gate, statuts de fixing, audit persistant | Fait | Risques résiduels repris par la phase 2 |
 | `RAPPORT_IMPLEMENTATION_LOT_1_FIXING_LIFECYCLE_HORS_AMC_2026-07-31.md` | 31/07 | Registre immuable des fixings, pièces sources, décision Checker, application atomique | Fait | Durcissement (§5) : stockage chiffré des pièces, référentiel fournisseurs, migrations versionnées, tests E2E, identifiant de corrélation |
 | `IMPLEMENTATION_RFQ_BOOKING_LIFECYCLE_PHASE_2_2026-07-31.md` | 31/07 | Rejeu officiel, sémantique KI/final, amendements maker-checker, consultation de l'audit | Fait | Source officielle de chemin, annulation/remplacement, propagation aval, file Checker |
-| `DECLINAISONS_POINTS_OUVERTS.md` | 29/08 | Trois manques autour des variantes (avenant, roll) | À faire | Coût de débouclage, gel d'une proposition, traçabilité ; deux questions à trancher. Rien de codé (vérifié) |
+| `DECLINAISONS_POINTS_OUVERTS.md` | 29/08 ; état 22/10 | Historique des manques autour des variantes et état courant | Traité localement C19/C25 | Gel manuel, traçabilité et économie du roll livrés ; qualification graphique et déployée restante |
 
 ### `projects/clients/`
 
@@ -521,6 +946,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md](projects/platform/WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md) | 14/10 | Paramètres pleine largeur, calendrier multi-RFQ, funding/marges, cadences, estimation et reprise | Raccordé localement ; recette ciblée sans IA | Lancer explicitement le suivi de cinq ans ; qualifier les branches non exercées et l’ergonomie détaillée |
 | [RFQ_NETWORK_ACTION_PLAN_2026-10-12.md](projects/platform/RFQ_NETWORK_ACTION_PLAN_2026-10-12.md) | 12/10 | Destinataires par organisation, réception bancaire, publication contrôlée, retour automatique et manuel ; lots 0 à 8 | Lot 0 cadré avec premier prototype ; lot 1 cadré | Compléments d'écran, choix du pilote, réalisation des lots 1 à 8 et recette réseau ; aucune reprise des anciens tests |
 | [RFQ_NETWORK_LOT_0_IMPLEMENTATION_2026-10-12.md](projects/platform/RFQ_NETWORK_LOT_0_IMPLEMENTATION_2026-10-12.md) | 12/10 | Prototype demandeur/banque ; préparation RFQ depuis Product, moteurs actuels, Pricer et scroll interne | Raccordement livré sur branche ; 154 tests backend ciblés, 424 frontend et build ; recette isolée | Propriété, droits, partenaires, réception bancaire, transport et booking réseau dans les lots suivants |
 | [RFQ_NETWORK_LOT_0_SPECIFICATION_2026-10-12.md](projects/platform/RFQ_NETWORK_LOT_0_SPECIFICATION_2026-10-12.md) | 12/10 | Parcours, demandes/réponses, droits, transitions, confidentialité, fermeté, retrait et confirmation avant booking | Règles fonctionnelles actées, non implémentées | Maquettes, paramètres opérationnels et transport ; confirmation native et rapprochement ultérieurs |

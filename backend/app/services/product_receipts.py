@@ -36,7 +36,9 @@ def _claims(evidence: dict) -> dict:
 
 
 def signed_receipt(receipt: dict, *, secret: str, result: dict | None = None) -> dict:
-    result_payload = result or {"price": receipt["price_pct"] / 100.0}
+    from ..core.valuation_runs import calculation_identity
+    result_payload = {**(result or {"price": receipt["price_pct"] / 100.0}),
+                      "calculation_identity": calculation_identity()}
     evidence = {
         **receipt,
         "signature_version": _SIGNATURE_VERSION,

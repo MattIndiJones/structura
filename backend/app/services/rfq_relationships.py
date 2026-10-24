@@ -106,7 +106,8 @@ class RelationshipSuspension(RelationshipDecision):
 
 
 def organization_admin(user: User) -> int:
-    if user.role != "admin" or not user.is_active or user.entity_id is None:
+    from ..core.access import is_local_admin
+    if not is_local_admin(user) or not user.is_active or user.entity_id is None:
         raise HTTPException(403, "Un administrateur rattaché à l'organisation est requis")
     return user.entity_id
 

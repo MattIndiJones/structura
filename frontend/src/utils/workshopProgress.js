@@ -2,7 +2,7 @@
 export const workshopLabels = {
   DRAFT:'Prête à démarrer', RUNNING:'En cours', PAUSING:'Pause en cours', PAUSED:'En pause',
   STOPPING:'Fermeture en cours', STOPPED:'Arrêtée', COMPLETED:'Terminée', ATTENTION:'Diagnostic nécessaire',
-  SUCCESS:'Réussite', FAILED:'Échec', EXPECTED_REFUSAL:'Refus attendu', PENDING:'En attente',
+  SUCCESS:'Réussite', FAILED:'Échec', CANCELLED:'Décision annulée', EXPECTED_REFUSAL:'Refus attendu', PENDING:'En attente',
   NO_TRADE:'Aucun trade — refus', MATCHED:'Rapprochement partiel', COMPLETE:'Quatre écritures rapprochées', MISMATCH:'Écart entre books', UNVERIFIED:'Preuves à compléter',
 }
 const toolLabels = {
@@ -10,11 +10,11 @@ const toolLabels = {
   propose:'Proposer une structure au client', request:'Exprimer un besoin client', rfq:'Lancer l’appel d’offres',
   quote:'Calculer et envoyer un prix', decline:'Refuser de coter', reprice:'Recalculer dans le Pricer',
   offer:'Proposer un prix au client', client_accept:'Répondre à l’offre client', accept_quote:'Confirmer le choix de banque',
-  book:'Booker une opération', settle:'Enregistrer le règlement', review:'Suivre la vie des produits',
+  confirm_trade:'Confirmer les termes avant booking', book:'Booker une opération', settle:'Enregistrer le règlement', review:'Suivre la vie des produits',
   risk:'Calculer le risque OTC hypothétique', mail:'Envoyer un message', browser:'Utiliser un écran',
   api:'Appeler Structura', report:'Signaler un problème', help:'Consulter les capacités de Structura', wait:'Attendre une réponse', model:'Interroger le modèle IA',
 }
-const legLabels = {BANK_SELL:'Vente banque → Hector', HECTOR_BUY:'Achat Hector ← banque', HECTOR_SELL:'Vente Hector → client', CLIENT_BUY:'Achat client ← Hector'}
+const legLabels = {BANK_SELL:'Vente banque → demandeur', HECTOR_BUY:'Achat demandeur ← banque', HECTOR_SELL:'Vente demandeur → client', CLIENT_BUY:'Achat client ← demandeur'}
 export const actorName = (state, id) => state?.actors?.[id]?.name || id || 'Contrôleur'
 export const actionTitle = action => action?.tool === 'book' ? legLabels[action.args?.leg] || toolLabels.book : toolLabels[action?.tool] || action?.tool || 'Décision IA'
 export const money = value => new Intl.NumberFormat('fr-FR', {style:'currency',currency:'EUR',maximumFractionDigits:0}).format(value || 0)
@@ -46,6 +46,7 @@ export function actionOutcome(action, state) {
     case 'rfq': return `RFQ ${r.rfq_id ?? '—'} envoyée à ${(r.recipients || []).map(id=>actorName(state,id)).join(', ')}`
     case 'accept_quote': return `Cotation retenue dans la RFQ ${r.rfq_id ?? '—'}`
     case 'client_accept': return r.accepted ? 'Le client accepte l’offre' : 'Le client refuse l’offre'
+    case 'confirm_trade': return r.trade_confirmed ? 'Confirmation bancaire consignée dans la RFQ' : 'Accord explicite donné par la banque retenue'
     case 'settle': return `${r.settled ?? 0} règlement(s) enregistré(s)`
     case 'review': return `${r.deals ?? 0} deal(s) revu(s) au ${r.date || action.date}`
     case 'risk': return `Calcul CCR ${r.run_id ?? '—'} · OTC hypothétique, distinct du risque des notes`
@@ -93,7 +94,7 @@ export function liveSummary(state) {
   if (status === 'PAUSED') return {title:'Simulation en pause', detail:'Aucune nouvelle décision. Les installations restent disponibles pour inspection.', active:false}
   if (status === 'STOPPING') return {title:'Arrêt demandé : fermeture des installations', detail:'L’action en cours peut devoir se terminer avant la fermeture.', active:false}
   const prefix = status === 'PAUSING' ? 'Pause demandée · ' : ''
-  if (activity?.phase === 'PREPARING') return {title:prefix+'Préparation des Structura des acteurs', detail:'Le contrôleur démarre les installations privées avant les inscriptions.', active:true}
+  if (activity?.phase === 'PREPARING') return {title:prefix+'Préparation des Structura des acteurs', detail:'Le contrôleur démarre les installations privées avec les identités et référentiels réutilisés.', active:true}
   if (activity?.phase === 'THINKING') return {title:prefix+actorName(state,activity.actor)+' réfléchit à sa prochaine action', detail:'Le modèle IA est interrogé. Aucune nouvelle opération métier n’est encore exécutée pendant cette décision.', active:true}
   if (activity?.phase === 'EXECUTING') return {title:prefix+actorName(state,activity.actor)+' · '+actionTitle(activity), detail:activity.reason || 'Exécution de la décision choisie par l’IA.', active:true}
   return {title:prefix+'Campagne en cours · attente de la prochaine preuve', detail:'Le contrôleur n’a pas encore publié le détail de l’action courante. Les dernières actions terminées restent visibles.', active:true}
@@ -101,12 +102,14 @@ export function liveSummary(state) {
 
 export function workflowSteps(state, caseId) {
   const actors = Object.entries(state?.actors || {}).map(([id,a])=>({id,...a})).filter(a=>a.role !== 'supervisor')
-  const banks = actors.filter(a=>a.role === 'bank')
-  const expectedRelations = banks.length * 2 + 2
+  let banks = actors.filter(a=>a.role === 'bank')
+  const participants = state?.config?.participants?.filter(p=>p.active) || []
+  const expectedRelations = state?.config?.schema_version===2 ? participants.reduce((n,p)=>n+1+participants.filter(o=>o.key!==p.key&&(p.request_rfq||p.respond_rfq)&&(o.request_rfq||o.respond_rfq)).length,0)+participants.filter(p=>p.request_rfq).length : banks.length * 2 + 2
   const relationCount = actors.reduce((n,a)=>n + Object.keys(a.relations || {}).length,0)
   const pending = actors.reduce((n,a)=>n + Object.values(a.relations || {}).filter(r=>r.status === 'PENDING').length,0)
   const cases = Object.values(state?.cases || {}).sort((a,b)=>(a.month-b.month) || a.id.localeCompare(b.id))
   const c = cases.find(c=>c.id === caseId) || cases.find(c=>c.month === state?.month) || cases.at(-1)
+  if(c?.recipients) banks=actors.filter(a=>c.recipients.includes(a.id))
   const quotes = (state?.quotes || []).filter(q=>q.case_id === c?.id)
   const responded = banks.filter(b=>quotes.some(q=>q.bank===b.id) || c?.declines?.includes(b.id)).length
   const check = state?.book_checks?.find(b=>b.case_id === c?.id)
@@ -118,7 +121,7 @@ export function workflowSteps(state, caseId) {
     {title:'Contrats', done:relationCount>=expectedRelations, warning:pending>0, detail:`${relationCount} / ${expectedRelations} relations enregistrées${pending ? ' · '+pending+' incomplète(s)' : ''}`},
     {title:'Besoin client', done:!!c, detail:c ? `${c.id} · ${money(c.nominal)}` : 'Aucun besoin reçu'},
     {title:'Appel d’offres', done:!!c?.rfq_sent && responded === banks.length, detail:c?.rfq_sent ? `${responded} / ${banks.length} réponses · ${quotes.length} prix` : 'Pas encore envoyé'},
-    {title:'Accords', done:!!state?.accepted?.[c?.id], skipped:declined, detail:c?.outcome==='NO_QUOTE' ? 'Aucune banque ne cote' : c?.outcome==='CLIENT_DECLINED' ? 'Le client a refusé' : state?.accepted?.[c?.id] ? 'Client et banque confirmés' : state?.client_acceptances?.includes(c?.id) ? 'Accord client · banque à confirmer' : state?.client_offers?.[c?.id] ? 'Offre client envoyée' : 'Offre client attendue'},
+    {title:'Accords', done:!!state?.accepted?.[c?.id]&&(state?.config?.schema_version!==2||!!c?.trade_confirmed), skipped:declined, detail:c?.outcome==='NO_QUOTE' ? 'Aucune banque ne cote' : c?.outcome==='CLIENT_DECLINED' ? 'Le client a refusé' : state?.accepted?.[c?.id] ? (state?.config?.schema_version===2&&!c?.trade_confirmed?'Confirmation bancaire attendue':'Client et banque confirmés') : state?.client_acceptances?.includes(c?.id) ? 'Accord client · banque à confirmer' : state?.client_offers?.[c?.id] ? 'Offre client envoyée' : 'Offre client attendue'},
     {title:'Booking', done:check?.status==='COMPLETE', skipped:declined, warning:['MISMATCH','UNVERIFIED'].includes(check?.status), detail:declined ? 'Sans trade' : `${check?.legs || 0} / 4 écritures${check?.status==='MISMATCH' ? ' · écart' : check?.status==='UNVERIFIED' ? ' · preuve incomplète' : ''}`},
     {title:'Suivi de vie', done:reviewed, skipped:declined && !bookActors.length, detail:reviewed ? `Books revus au ${state.business_date}` : bookActors.length ? 'Règlements / revue en attente' : 'Aucun book à revoir'},
   ]

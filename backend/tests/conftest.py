@@ -86,3 +86,45 @@ def fabrique_moteur():
     """Pour un test qui a besoin de PLUSIEURS moteurs — comparer le
     comportement avec et sans contrainte, par exemple."""
     return _moteur_sqlite
+
+
+@pytest.fixture
+def authenticated_client(monkeypatch):
+    """Standalone Front session with real JWT validation and private SQLite."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from sqlalchemy.pool import StaticPool
+    from sqlmodel import Session
+    from backend.app.api import auth
+    from backend.app.db.database import get_session
+    from backend.app.db.models import Entity, User
+
+    monkeypatch.delenv("STRUCTURA_INSTALLATION_CONFIG", raising=False)
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+    @event.listens_for(engine, "connect")
+    def integrity(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(Entity(id=1, name="Authenticated test organization"))
+        session.flush()
+        user = User(id=1, username="front", email="front@example.test",
+                    password_hash="test-only", role="user", entity_id=1)
+        session.add(user)
+        session.commit()
+        token = auth._make_token(user.id, user.role, user.entity_id, auth_version=user.auth_version)
+    app = FastAPI()
+    app.include_router(auth.router)
+
+    def sessions():
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = sessions
+    try:
+        with TestClient(app, headers={"Authorization": "Bearer " + token}) as client:
+            yield client
+    finally:
+        engine.dispose()

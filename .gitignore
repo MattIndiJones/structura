@@ -78,3 +78,5 @@ artifacts/
 # Local validation snapshots, screenshots and intermediate reports
 /tmp/
 /output/
+/.runtime/
+backend/data/.hybrid-retired.json

@@ -1,11 +1,5 @@
 """
-Schedule generation — the "expert mode" calendar/CONSTAT system.
-
-This is additive and independent of the PayScript engine, which keeps working
-in relative-year offsets via `AT 1, 2, 3:` (the "simple mode"). A later phase
-will let PayScript's AT statement reference a named schedule generated here
-instead of inline year offsets; for now this module only builds and previews
-real-date calendars.
+Schedule generation shared by preview, PayScript and contractual Products.
 
 Three levels, mirroring the spec:
   CONSTAT      — a single date.
@@ -24,8 +18,7 @@ Stub convention (ISDA-style):
             start_date and the first regular date.
   SHORT_* — that boundary period is left as-is (shorter than a regular period).
   LONG_*  — that boundary period is merged into its regular neighbor (dropping
-            the adjoining grid point) whenever it would otherwise be shorter
-            than half a regular period — producing one longer period instead.
+            the adjoining grid point) whenever the boundary is irregular.
 start_date and end_date are always part of the resulting schedule.
 """
 from __future__ import annotations
@@ -36,7 +29,7 @@ from enum import Enum
 
 from dateutil.relativedelta import relativedelta
 
-from .calendars import BusinessDayConvention, add_business_days, adjust
+from .calendars import BusinessDayConvention, add_business_days, adjust, validate_settlement_lag
 
 DAYS_PER_YEAR = 365.25   # simple ACT/365.25 day count for the year-fraction preview
 
@@ -90,53 +83,44 @@ def generate_main_schedule(start: date, end: date, roll_date: date,
     if end <= start:
         raise ValueError("end_date doit être strictement après start_date.")
 
-    if stub in (StubConvention.SHORT_LAST, StubConvention.LONG_LAST):
-        # Forward generation anchored on roll_date: walk roll_date forward by
-        # whole steps until past start_date, then keep stepping up to end_date.
-        d = roll_date
-        if d <= start:
-            while d <= start:
-                d = _step(d, frequency)
-        else:
-            while _step(d, frequency, -1) > start:
-                d = _step(d, frequency, -1)
+    # Every point is computed from the ORIGINAL anchor. Iteratively stepping
+    # from 28 February would permanently lose a 31st-of-month roll.
+    def index_near(day):
+        if frequency.unit in ('M', 'Y'):
+            months = (day.year-roll_date.year)*12 + day.month-roll_date.month
+            return months // (frequency.value * (12 if frequency.unit == 'Y' else 1))
+        return (day-roll_date).days // (frequency.value * (7 if frequency.unit == 'W' else 1))
 
+    forward = stub in (StubConvention.SHORT_LAST, StubConvention.LONG_LAST)
+    n = index_near(start if forward else end)
+    if forward:
+        while _step(roll_date, frequency, n) <= start:
+            n += 1
         dates = [start]
+        d = _step(roll_date, frequency, n)
         while d < end:
             dates.append(d)
-            d = _step(d, frequency)
+            n += 1
+            d = _step(roll_date, frequency, n)
+        irregular = d != end
         dates.append(end)
-
-        if stub == StubConvention.LONG_LAST and len(dates) >= 3:
-            last_period = (dates[-1] - dates[-2]).days
-            regular_period = (dates[-2] - dates[-3]).days
-            if last_period < regular_period / 2:
-                dates.pop(-2)
-        return dates
-
+        if stub == StubConvention.LONG_LAST and irregular and len(dates) >= 3:
+            dates.pop(-2)
     else:
-        # Backward generation anchored on roll_date: walk roll_date backward by
-        # whole steps until past end_date, then keep stepping down to start_date.
-        d = roll_date
-        if d >= end:
-            while d >= end:
-                d = _step(d, frequency, -1)
-        else:
-            while _step(d, frequency) < end:
-                d = _step(d, frequency)
-
+        while _step(roll_date, frequency, n) >= end:
+            n -= 1
         dates = [end]
+        d = _step(roll_date, frequency, n)
         while d > start:
-            dates.insert(0, d)
-            d = _step(d, frequency, -1)
-        dates.insert(0, start)
-
-        if stub == StubConvention.LONG_FIRST and len(dates) >= 3:
-            first_period = (dates[1] - dates[0]).days
-            regular_period = (dates[2] - dates[1]).days
-            if first_period < regular_period / 2:
-                dates.pop(1)
-        return dates
+            dates.append(d)
+            n -= 1
+            d = _step(roll_date, frequency, n)
+        irregular = d != start
+        dates.append(start)
+        dates.reverse()
+        if stub == StubConvention.LONG_FIRST and irregular and len(dates) >= 3:
+            dates.pop(1)
+    return dates
 
 
 def _fill_interval(lo: date, hi: date, sub_frequency: Tenor) -> list[date]:
@@ -144,18 +128,21 @@ def _fill_interval(lo: date, hi: date, sub_frequency: Tenor) -> list[date]:
     No stub handling at this level — the last sub-step before hi simply closes
     out at hi, by construction (see module docstring)."""
     out = [lo]
-    d = _step(lo, sub_frequency)
+    n = 1
+    d = _step(lo, sub_frequency, n)
     while d < hi:
         out.append(d)
-        d = _step(d, sub_frequency)
+        n += 1
+        d = _step(lo, sub_frequency, n)
     return out
 
 
 def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
                        stub: StubConvention, sub_frequency: Tenor | None = None,
                        currency: str | None = None,
-                       convention: BusinessDayConvention = BusinessDayConvention.MODIFIED_FOLLOWING,
-                       settlement_lag: int = 0) -> dict:
+                       convention: BusinessDayConvention = BusinessDayConvention.NONE,
+                       settlement_lag: int = 0, *,
+                       observation_calendar=None, settlement_calendar=None) -> dict:
     """Build a full CONSTAT() or CONSTAT()() schedule.
 
     The grid is rolled on unadjusted dates first, then each resulting date is
@@ -163,11 +150,9 @@ def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
     a quarterly schedule quarterly: adjusting before rolling would compound
     each shift into the next period.
 
-    `currency` names the settlement calendar (the currency the cash moves in).
-    Without it nothing is adjusted and no payment date is produced: a schedule
-    is then a bare calendar grid, as it was before business days existed here.
-    A settlement lag without a currency is refused rather than counted in
-    calendar days behind the caller's back.
+    Explicit observation and settlement calendars override the historical
+    currency mapping independently. Missing convention means no observation
+    adjustment. A settlement lag without a payment calendar is refused.
 
     Returns a dict with:
       main_dates — the CONSTAT() roll schedule (always includes start/end).
@@ -179,7 +164,10 @@ def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
       year_fractions — each date's ACT/365.25 offset from start, for preview
                    purposes (this is what a future phase would feed to AT).
     """
-    if settlement_lag and not currency:
+    settlement_lag = validate_settlement_lag(settlement_lag)
+    observed_calendar = observation_calendar or currency
+    paid_calendar = settlement_calendar or currency
+    if settlement_lag and not paid_calendar:
         raise ValueError(
             "Un décalage de règlement suppose un calendrier : précisez la devise "
             "de règlement du calendrier CONSTAT.")
@@ -195,12 +183,12 @@ def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
         dates.append(main_dates[-1])
 
     raw_dates = list(dates)
-    if currency:
-        main_dates = _dedupe([adjust(d, currency, convention) for d in main_dates])
+    if observed_calendar:
+        main_dates = _dedupe([adjust(d, observed_calendar, convention) for d in main_dates])
         # Les deux listes restent appariées : on déduplique sur la date ajustée
         # en gardant la première date brute qui y mène, pour pouvoir dire d'où
         # chaque constatation vient.
-        pairs = [(adjust(d, currency, convention), d) for d in dates]
+        pairs = [(adjust(d, observed_calendar, convention), d) for d in dates]
         seen: set[date] = set()
         kept = []
         for adjusted, original in pairs:
@@ -209,9 +197,8 @@ def generate_schedule(start: date, end: date, roll_date: date, frequency: Tenor,
                 kept.append((adjusted, original))
         dates = [a for a, _ in kept]
         raw_dates = [o for _, o in kept]
-        payment_dates = [add_business_days(d, settlement_lag, currency) for d in dates]
-    else:
-        payment_dates = list(dates)
+    payment_dates = ([add_business_days(d, settlement_lag, paid_calendar) for d in dates]
+                     if paid_calendar else list(dates))
 
     year_fractions = [round((d - start).days / DAYS_PER_YEAR, 6) for d in dates]
 
@@ -232,16 +219,21 @@ def generate_observation_schedule(first: date, end: date, roll_date: date,
                                   sub_frequency: Tenor | None = None, *,
                                   currency: str | None = None,
                                   convention=BusinessDayConvention.NONE,
-                                  settlement_lag: int = 0) -> dict:
+                                  settlement_lag: int = 0,
+                                  observation_calendar=None, settlement_calendar=None) -> dict:
     """An inclusive observation calendar, including the one-observation case."""
     if end != first:
         return generate_schedule(first, end, roll_date, frequency, stub, sub_frequency,
                                  currency=currency, convention=convention,
-                                 settlement_lag=settlement_lag)
-    if settlement_lag and not currency:
+                                 settlement_lag=settlement_lag, observation_calendar=observation_calendar,
+                                 settlement_calendar=settlement_calendar)
+    settlement_lag = validate_settlement_lag(settlement_lag)
+    observation_calendar = observation_calendar or currency
+    settlement_calendar = settlement_calendar or currency
+    if settlement_lag and not settlement_calendar:
         raise ValueError('Un décalage de règlement exige une devise.')
-    observed = adjust(first, currency, convention) if currency else first
-    paid = add_business_days(observed, settlement_lag, currency) if currency else observed
+    observed = adjust(first, observation_calendar, convention) if observation_calendar else first
+    paid = add_business_days(observed, settlement_lag, settlement_calendar) if settlement_calendar else observed
     return dict(main_dates=[observed], dates=[observed], raw_dates=[first],
                 payment_dates=[paid], year_fractions=[(observed-first).days / DAYS_PER_YEAR])
 

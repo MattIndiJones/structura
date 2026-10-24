@@ -7,7 +7,7 @@ import numpy as np
 from ..calendars import add_business_days, business_days_between
 from .contracts import CreditProfile, CreditLimit, CSAAgreement
 
-VERSION = "ccr-1.2"
+VERSION = "ccr-1.5-business-clock-exact-contract-dates"
 METRICS = ("gross_notional", "current_exposure", "pfe95", "pfe99", "ead", "cva", "stressed_exposure")
 
 
@@ -21,6 +21,7 @@ def eligible_set(trade, netting_sets, agreements, as_of):
                     and agreement and agreement["status"] == "ACTIVE"
                     and agreement["close_out_netting_enforceable"] is True
                     and agreement["effective_date"] <= str(as_of)
+                    and (not agreement.get("expiry_date") or agreement["expiry_date"] >= str(as_of))
                     and trade["currency"] == ns["currency"]
                     and trade.get("product_type") in ns["product_scope"])
         if eligible:
@@ -107,7 +108,11 @@ def cva(times, ee, discount_rate, profile: CreditProfile | None, spread_multipli
                 prev = end
             cumulative.append(1 - math.exp(-integrated))
         pd = np.array(cumulative)
-    loss = (1 - profile.recovery) * np.sum(np.exp(-discount_rate * np.array(times[1:])) * ee[1:] * np.diff(pd))
+    # Exposure at a payment date is ex-payment. Integrating that zero over the
+    # preceding interval deletes a real claim. Hold discounted EE from the
+    # left endpoint until the next boundary; deterministic receivables then
+    # integrate exactly, including a payment inside the first week.
+    loss = (1 - profile.recovery) * np.sum(np.exp(-discount_rate * np.array(times[:-1])) * ee[:-1] * np.diff(pd))
     return float(loss), None
 
 
@@ -116,11 +121,12 @@ def summarize(exposures, uncollateralised, times, rate, profile, spread_multipli
     p95, p99 = np.quantile(exposures, [0.95, 0.99], axis=1, method="linear")
     uncoll = uncollateralised.mean(axis=1)
     adjustment, reason = cva(times, ee, rate, profile, spread_multiplier)
-    # Trapezoidal time weights on the actual, irregular grid.
-    epe = float(np.sum((ee[:-1] + ee[1:]) / 2 * np.diff(times)) / times[-1])
+    # Same ex-payment convention as CVA: do not average a post-payment zero
+    # backwards over the interval during which the claim is still outstanding.
+    epe = float(np.sum(ee[:-1] * np.diff(times)) / times[-1])
     maximum = int(np.argmax(p95))
     return {
-        "current_exposure": float(ee[0]), "ee": epe, "epe": epe,
+        "current_exposure": float(ee[0]), "epe": epe,
         "pfe95": float(p95.max()), "pfe99": float(p99.max()),
         "maximum_pfe": float(p95[maximum]), "maximum_pfe_t": float(times[maximum]),
         "cva": adjustment, "cva_missing_reason": reason,

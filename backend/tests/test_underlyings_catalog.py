@@ -19,6 +19,16 @@ from backend.app.db.models import Underlying
 ADMIN = SimpleNamespace(id=1, entity_id=1, role="admin")
 
 
+def _underlying_create(**values):
+    values.setdefault('reason', 'Admission du titre dans le référentiel')
+    values.setdefault('label', values.get('ticker', 'Titre de test'))
+    return admin_api.UnderlyingCreate(**values)
+
+
+def _underlying_update(**values):
+    return admin_api.UnderlyingUpdate(reason='Modification motivée du référentiel', **values)
+
+
 def _session() -> Session:
     engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(engine)
@@ -56,7 +66,7 @@ def test_le_semis_reprend_la_liste_du_front(monkeypatch):
     assert next(u for u in rows if u.ticker=='000300.SS').asset_class=='index'
 
 
-def test_seed_corrects_original_axa_symbol_without_changing_its_id(monkeypatch):
+def test_seed_adopts_legacy_catalog_without_silent_symbol_rewrite(monkeypatch):
     engine = create_engine('sqlite://')
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(db, 'engine', engine)
@@ -67,8 +77,8 @@ def test_seed_corrects_original_axa_symbol_without_changing_its_id(monkeypatch):
     db._seed_underlyings()
     db._seed_underlyings()
     with Session(engine) as session:
-        assert session.get(Underlying, original_id).ticker == 'CS.PA'
-        assert len(session.exec(select(Underlying)).all()) == 65
+        assert session.get(Underlying, original_id).ticker == 'AXA.PA'
+        assert len(session.exec(select(Underlying)).all()) == 1
 
 
 def test_seed_keeps_existing_correct_axa_and_custom_catalogue_entries(monkeypatch):
@@ -85,14 +95,14 @@ def test_seed_keeps_existing_correct_axa_and_custom_catalogue_entries(monkeypatc
     with Session(engine) as session:
         rows = session.exec(select(Underlying)).all()
         old = next(u for u in rows if u.label == 'AXA')
-        assert old.active is False
+        assert old.active is True
         assert next(u for u in rows if u.label == 'AXA vérifié').active is True
         assert next(u for u in rows if u.label == 'Saisie personnelle').ticker == 'AXA.PA'
 
 
 def test_ajouter_un_titre_verifie_qu_il_repond(s, yahoo_ok):
     row = admin_api.create_underlying(
-        admin_api.UnderlyingCreate(ticker="UCG.MI", label="UniCredit",
+        _underlying_create(ticker="UCG.MI", label="UniCredit",
                                     group="Actions IT (FTSE MIB)"),
         ADMIN, s)
     assert row["ticker"] == "UCG.MI"
@@ -106,7 +116,7 @@ def test_un_ticker_muet_est_refuse(s, monkeypatch):
                         lambda t: {"ok": False, "error": f"Aucune cotation pour « {t} »."})
     with pytest.raises(HTTPException) as exc:
         admin_api.create_underlying(
-            admin_api.UnderlyingCreate(ticker="ZZZZ.XX", group="Autres"), ADMIN, s)
+            _underlying_create(ticker="ZZZZ.XX", group="Autres"), ADMIN, s)
     assert exc.value.status_code == 422
     assert "ZZZZ.XX" in exc.value.detail
     assert s.exec(select(Underlying)).all() == []
@@ -114,20 +124,20 @@ def test_un_ticker_muet_est_refuse(s, monkeypatch):
 
 def test_le_meme_ticker_peut_vivre_dans_deux_groupes(s, yahoo_ok):
     admin_api.create_underlying(
-        admin_api.UnderlyingCreate(ticker="BNP.PA", label="BNP Paribas",
+        _underlying_create(ticker="BNP.PA", label="BNP Paribas",
                                     group="Banques"), ADMIN, s)
     admin_api.create_underlying(
-        admin_api.UnderlyingCreate(ticker="BNP.PA", label="BNP Paribas",
+        _underlying_create(ticker="BNP.PA", label="BNP Paribas",
                                     group="Actions FR (CAC)"), ADMIN, s)
     assert len(s.exec(select(Underlying)).all()) == 2
 
 
 def test_le_meme_couple_ticker_groupe_est_refuse(s, yahoo_ok):
     admin_api.create_underlying(
-        admin_api.UnderlyingCreate(ticker="BNP.PA", group="Banques"), ADMIN, s)
+        _underlying_create(ticker="BNP.PA", group="Banques"), ADMIN, s)
     with pytest.raises(HTTPException) as exc:
         admin_api.create_underlying(
-            admin_api.UnderlyingCreate(ticker="BNP.PA", group="Banques"), ADMIN, s)
+            _underlying_create(ticker="BNP.PA", group="Banques"), ADMIN, s)
     assert exc.value.status_code == 409
 
 
@@ -136,7 +146,7 @@ def test_la_liste_sort_triee_par_groupe_puis_libelle(s, yahoo_ok):
                                    ("AAA", "Alpha", "Luxe"),
                                    ("MMM", "Milieu", "Banques")]:
         admin_api.create_underlying(
-            admin_api.UnderlyingCreate(ticker=ticker, label=label, group=groupe), ADMIN, s)
+            _underlying_create(ticker=ticker, label=label, group=groupe), ADMIN, s)
     rows = admin_api.list_underlyings(ADMIN, s)
     assert [(r["group"], r["label"]) for r in rows] == [
         ("Banques", "Milieu"), ("Banques", "Zebra"), ("Luxe", "Alpha")]
@@ -144,8 +154,8 @@ def test_la_liste_sort_triee_par_groupe_puis_libelle(s, yahoo_ok):
 
 def test_desactiver_retire_des_menus_sans_perdre_la_ligne(s, yahoo_ok):
     row = admin_api.create_underlying(
-        admin_api.UnderlyingCreate(ticker="UCG.MI", group="Banques"), ADMIN, s)
-    admin_api.update_underlying(row["id"], admin_api.UnderlyingUpdate(active=False), ADMIN, s)
+        _underlying_create(ticker="UCG.MI", group="Banques"), ADMIN, s)
+    admin_api.update_underlying(row["id"], _underlying_update(active=False), ADMIN, s)
     restant = s.exec(select(Underlying)).one()
     assert restant.active is False
     assert restant.ticker == "UCG.MI"

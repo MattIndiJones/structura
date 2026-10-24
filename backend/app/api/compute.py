@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import ComputeBatch, ComputeJob, User
-from .auth import get_current_user, get_current_admin
+from .auth import get_current_user, get_current_admin, get_current_pricer
 from ..core.compute.queue_store import enqueue_batch, cancel_batch, relaunch_batch, delete_batch
 
 router = APIRouter(prefix="/api/compute", tags=["compute"])
@@ -72,7 +72,7 @@ def _job_row(j: ComputeJob) -> dict:
 @router.post("/batches", status_code=201)
 def create_batch(
     body: ComputeBatchCreate,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
 ):
     if body.kind not in _ALLOWED_KINDS:
@@ -174,6 +174,7 @@ def admin_relaunch_batch(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    get_current_pricer(admin)
     existing = session.get(ComputeBatch, batch_id)
     if not existing:
         raise HTTPException(404, "Batch introuvable")

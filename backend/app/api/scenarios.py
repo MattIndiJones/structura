@@ -10,11 +10,11 @@ from ..core.compute_budget import (
     validate_compiled_dates,
 )
 
-from .auth import get_current_user
+from .auth import get_current_pricer
 
 router = APIRouter(
     prefix="/api", tags=["scenarios"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_pricer)],
 )
 
 

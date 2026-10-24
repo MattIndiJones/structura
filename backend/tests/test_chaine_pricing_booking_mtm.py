@@ -13,7 +13,7 @@ from backend.app.api.deals import (
 )
 from backend.app.api.pricing import price_endpoint
 from backend.app.core.schemas import PricingRequest
-from backend.app.db.models import Counterparty, Deal, DealEvent
+from backend.app.db.models import Counterparty, Deal, DealEvent, User
 
 
 SCRIPT = "AT MATURITY\n  PAY 1\n"
@@ -28,7 +28,7 @@ def test_pricing_booking_mtm_au_strike_conservent_le_meme_produit(monkeypatch):
         script=SCRIPT,
         underlyings=[{
             "name": "AAA", "ticker": "AAA", "ccy": "EUR",
-            "sigma": 0.20, "q": 0.01, "skew": -0.10, "curvature": 0.05,
+            "sigma": 0.20, "q": 0.01, "skew": -0.01, "curvature": 0.01,
         }],
         corr_matrix=[[1.0]], r=0.03, T=tenor, N=2000, model="localvol",
         funding_spread=0.015, barrier_monitoring="continuous",
@@ -37,7 +37,7 @@ def test_pricing_booking_mtm_au_strike_conservent_le_meme_produit(monkeypatch):
     )
     priced = price_endpoint(request)
     body = DealCreate(
-        contrepartie="Banque", nominal=1_000_000,
+        contrepartie="Banque", counterparty_id=1, nominal=1_000_000,
         fair_value=priced.price * 100, price_traded=priced.price * 100,
         trade_date=strike.isoformat(), strike_date=strike.isoformat(),
         value_date=strike.isoformat(), maturity_date=maturity.isoformat(),
@@ -61,10 +61,13 @@ def test_pricing_booking_mtm_au_strike_conservent_le_meme_produit(monkeypatch):
     )
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
-        session.add(Counterparty(name="Banque", active=True))
+        actor = User(id=1, username="chain-front", email="chain@example.test",
+                     password_hash="test-only", role="user")
+        session.add(actor)
+        session.add(Counterparty(id=1, name="Banque", active=True))
         session.commit()
         booked = deals_api.book_deal(
-            body, SimpleNamespace(id=1, entity_id=None), session)
+            body, actor, session)
         deal = session.get(Deal, booked["id"])
         assert deal.product_id is not None
         strike_event = next(
@@ -86,5 +89,5 @@ def test_pricing_booking_mtm_au_strike_conservent_le_meme_produit(monkeypatch):
     assert mtm["market_used"]["funding_spread"] == 1.5
     assert mtm["market_used"]["barrier_monitoring"] == "continuous"
     assert body.market_snapshot["model"] == "localvol"
-    assert body.market_snapshot["underlyings"][0]["skew"] == -10.0
+    assert body.market_snapshot["underlyings"][0]["skew"] == -1.0
     assert mtm["market_used"]["model"] == "localvol"

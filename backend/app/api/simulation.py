@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..core.schemas import SolverRequest, GridRequest
 from ..core.payscript.parser import parse_script, resolve_analysis_constats, resolve_constats, effective_T_max
 from ..core.payscript.simulation import solve_for_param, compute_price_grid
+from ..core.valuation_context import valuation_context_from_request
+from ..services.calibration_evidence import validate_pricing_calibrations
 from ..core.compute_budget import (
     count_compiled_dates,
     ensure_budget,
@@ -15,11 +17,11 @@ from ..core.compute_budget import (
     validate_compiled_dates,
 )
 
-from .auth import get_current_user
+from .auth import get_current_pricer, receipt_signing_secret
 
 router = APIRouter(
     prefix="/api", tags=["simulation"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_pricer)],
 )
 
 
@@ -81,14 +83,17 @@ def solve_endpoint(req: SolverRequest):
     _check_param_exists(compiled, req.param_name)
 
     try:
+        context = valuation_context_from_request(req, compiled, residual=ctx)
+        if ctx is None:
+            validate_pricing_calibrations(req, T_eff, secret=receipt_signing_secret())
         calculation_budget = estimate_mc_batch(
             operation="solver",
             maturity_years=T_eff,
             underlyings=len(uls),
             paths_per_run=req.N,
-            total_runs=req.max_iter + 2,
+            total_runs=req.max_iter + 3,  # endpoints, iterations, published-parameter reprice
             model=req.model,
-            antithetic=True,
+            antithetic=req.antithetic,
             continuous_monitoring=req.barrier_monitoring == "continuous",
             stochastic_rates=req.sigma_r > 0,
             expanded_dates=count_compiled_dates(compiled),
@@ -103,13 +108,14 @@ def solve_endpoint(req: SolverRequest):
             # variante.
             analysis_user_params(req, ctx),
             req.param_name, req.target_price, req.lo, req.hi,
-            N=req.N, tol=req.tol, max_iter=req.max_iter,
+            N=req.N, tol=req.tol, param_tol=req.param_tol, max_iter=req.max_iter,
             yield_curve=yc, sigma_r=req.sigma_r, a_r=req.a_r,
-            barrier_monitoring=req.barrier_monitoring, state=etat,
+            barrier_monitoring=req.barrier_monitoring, state=etat, valuation_context=context,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     res["in_life"] = ctx is not None
+    res['base_valuation_context'] = context.to_dict()
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
         res["years_remaining"] = round(ctx.T_remaining, 4)
@@ -129,6 +135,9 @@ def grid_endpoint(req: GridRequest):
                              detail="Les deux axes doivent porter sur des paramètres différents.")
 
     try:
+        context = valuation_context_from_request(req, compiled, residual=ctx)
+        if ctx is None:
+            validate_pricing_calibrations(req, T_eff, secret=receipt_signing_secret())
         calculation_budget = estimate_mc_batch(
             operation="parameter_grid",
             maturity_years=T_eff,
@@ -136,7 +145,7 @@ def grid_endpoint(req: GridRequest):
             paths_per_run=req.N,
             total_runs=req.x_steps * req.y_steps,
             model=req.model,
-            antithetic=True,
+            antithetic=req.antithetic,
             continuous_monitoring=req.barrier_monitoring == "continuous",
             stochastic_rates=req.sigma_r > 0,
             expanded_dates=count_compiled_dates(compiled),
@@ -154,11 +163,12 @@ def grid_endpoint(req: GridRequest):
             req.param_y, req.y_min, req.y_max, req.y_steps,
             N=req.N,
             yield_curve=yc, sigma_r=req.sigma_r, a_r=req.a_r,
-            barrier_monitoring=req.barrier_monitoring, state=etat,
+            barrier_monitoring=req.barrier_monitoring, state=etat, valuation_context=context,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     res["in_life"] = ctx is not None
+    res['base_valuation_context'] = context.to_dict()
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
         res["years_remaining"] = round(ctx.T_remaining, 4)

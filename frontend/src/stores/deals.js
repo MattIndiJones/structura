@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { durableCommand } from '../utils/commands.js'
 import { ref } from 'vue'
 import { apiFetch } from '../utils/api.js'
 
@@ -69,17 +70,21 @@ export const useDealsStore = defineStore('deals', () => {
   async function bookDeal(payload) {
     loading.value = true; error.value = null
     try {
-      const res = await apiFetch('/api/deals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      const deal = await durableCommand('book-deal', payload, async key => {
+        const res = await apiFetch('/api/deals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, command_key: payload.command_key || key }),
+        })
+        if (!res.ok) {
+          const err = await res.json()
+          throw erreurDetaillee(err, 'Erreur booking')
+        }
+        const result = await res.json()
+        if (!result?.id) throw new Error('Réponse de booking incomplète ; reprenez la même commande pour vérifier son résultat.')
+        return result
       })
-      if (!res.ok) {
-        const err = await res.json()
-        throw erreurDetaillee(err, 'Erreur booking')
-      }
-      const deal = await res.json()
-      deals.value.unshift(deal)
+      deals.value = [deal, ...deals.value.filter(item => item.id !== deal.id)]
       currentDeal.value = deal
       return deal
     } catch (e) {

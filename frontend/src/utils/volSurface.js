@@ -121,5 +121,6 @@ export function resizeSurfaceLevel(u) {
 
 export function surfaceCalibrationKey(u,model,horizon,rate) {
   return JSON.stringify([u.vol_surface,model,horizon,rate,u.q,u.smile_parameter_mode,
+    u.ticker,u.ccy,u.sigma,
     ['v0','theta','kappa','xi','rho_h','alpha','beta','rho','nu'].map(k=>u[k])])
 }

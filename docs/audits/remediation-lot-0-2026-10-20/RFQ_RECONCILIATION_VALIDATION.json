@@ -1,0 +1,2426 @@
+{
+  "date": "2026-10-24",
+  "report": "../RFQ_RECONCILIATION_2026-10-24.md",
+  "evidence": "RFQ_RECONCILIATION_VALIDATION.json",
+  "targeted_backend_passed_distinct": 282,
+  "new_backend_cases": 42,
+  "frontend_passed": 764,
+  "frontend_files": 85,
+  "new_frontend_cases": 8,
+  "frontend_build_passed": true,
+  "checkpoint_count": 15,
+  "read_only_reconciliation_checks": 36,
+  "both_local_bookings_obtained": true,
+  "both_books_matched": true,
+  "negative_discrepancy_observed_and_resolved": true,
+  "anomalies_corrected": [
+    "RC01",
+    "RC02",
+    "RC03"
+  ],
+  "open_observed_anomalies": 0,
+  "services_stopped": true,
+  "tls_qualified": false,
+  "production_qualified": false,
+  "full_transverse_qualification": false,
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "backend": {
+    "runs": [
+      {
+        "artifact": "backend-targeted.xml",
+        "sha256": "aae9627c557689a7054993ad38484c15bbefa478ab02b1985d8e1f243fb35272",
+        "passed": 271
+      },
+      {
+        "artifact": "reconciliation-complete.xml",
+        "sha256": "8556439a384f203b1318e9c7facb54bc6767f2b188eeeb82bb180e429a4a9afa",
+        "passed": 40
+      },
+      {
+        "artifact": "reassignment-final.xml",
+        "sha256": "cb3e80f913eec6c66be613d07d3b50b84b197c8d3651df757a6eaf7b34bc9675",
+        "passed": 1
+      },
+      {
+        "artifact": "inventory-check.xml",
+        "sha256": "2a2afa57afd5663e7d7d8934d1c41f5661cf38454c5e0ca3b24b0b61399318ea",
+        "passed": 10
+      }
+    ],
+    "passed_distinct": 282,
+    "new_cases": [
+      "backend.tests.test_rfq_reconciliation::test_confirmation_alone_never_implies_a_booking_or_a_matched_book",
+      "backend.tests.test_rfq_reconciliation::test_incomplete_local_leg_resumes_after_remote_close_and_both_books_match[False]",
+      "backend.tests.test_rfq_reconciliation::test_incomplete_local_leg_resumes_after_remote_close_and_both_books_match[True]",
+      "backend.tests.test_rfq_reconciliation::test_refresh_reuses_command_and_never_creates_or_repairs_a_deal",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[price-99.0]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[nominal-2000000]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[currency-USD]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[side-BUY]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[terms_fingerprint-0000000000000000000000000000000000000000000000000000000000000000]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[documentation_reference-Other programme]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[strike_date-2099-01-01]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[value_date-2099-01-01]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[maturity_date-2099-01-01]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[payment_date-2099-01-01]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[legal_mapping_matches-False]",
+      "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change0]",
+      "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change1]",
+      "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change2]",
+      "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change3]",
+      "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change4]",
+      "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change5]",
+      "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change6]",
+      "backend.tests.test_rfq_reconciliation::test_lost_status_ack_and_restarts_recover_without_duplicate_statement_or_reply[False]",
+      "backend.tests.test_rfq_reconciliation::test_lost_status_ack_and_restarts_recover_without_duplicate_statement_or_reply[True]",
+      "backend.tests.test_rfq_reconciliation::test_statements_and_proofs_are_immutable",
+      "backend.tests.test_rfq_reconciliation::test_read_access_does_not_grant_resume_and_revocation_is_rechecked[False]",
+      "backend.tests.test_rfq_reconciliation::test_read_access_does_not_grant_resume_and_revocation_is_rechecked[True]",
+      "backend.tests.test_rfq_reconciliation::test_failed_booking_rolls_back_the_booking_statement_then_same_command_recovers",
+      "backend.tests.test_rfq_reconciliation::test_closed_or_expired_unconfirmed_rfq_does_not_gain_pricing_recovery",
+      "backend.tests.test_rfq_reconciliation::test_concurrent_same_resume_command_queues_one_snapshot",
+      "backend.tests.test_rfq_reconciliation::test_peer_booking_disappearance_is_a_discrepancy_kept_in_history",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[transaction_format-OTC]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[instrument_family-SWAP]",
+      "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[payoff_family-VANILLA]",
+      "backend.tests.test_rfq_reconciliation::test_resume_also_reschedules_a_closure_that_blocks_later_status_messages",
+      "backend.tests.test_rfq_reconciliation::test_existing_confirmed_bookings_gain_no_peer_certificate_until_refresh",
+      "backend.tests.test_rfq_reconciliation::test_foreign_organization_cannot_read_or_resume[False]",
+      "backend.tests.test_rfq_reconciliation::test_foreign_organization_cannot_read_or_resume[True]",
+      "backend.tests.test_rfq_reconciliation::test_bank_refusal_is_reconciled_without_inventing_bookings",
+      "backend.tests.test_rfq_reconciliation::test_different_booked_trade_dates_are_reported_without_choosing_a_date",
+      "backend.tests.test_rfq_reconciliation::test_confirmed_incomplete_bank_leg_can_be_explicitly_reassigned_after_close",
+      "backend.tests.test_rfq_reconciliation::test_operational_inventory_and_bank_queue_are_scoped_and_surface_incomplete_legs"
+    ],
+    "cases": [
+      {
+        "identity": "backend.tests.test_business_permissions::test_agreement_permission_matrix_and_audited_denials[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_agreement_permission_matrix_and_audited_denials[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_booking_review_refuses_stale_or_missing_evidence[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_booking_review_refuses_stale_or_missing_evidence[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_crm_details_aggregates_signals_and_alerts_follow_deal_scope[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_crm_details_aggregates_signals_and_alerts_follow_deal_scope[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_front_colleague_operations_controller_handoff_and_revocation[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_front_colleague_operations_controller_handoff_and_revocation[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_historical_rfq_without_desk_keeps_personal_access[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_historical_rfq_without_desk_keeps_personal_access[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_manual_refresh_only_processes_the_shared_visible_book[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_manual_refresh_only_processes_the_shared_visible_book[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_operational_valuation_keeps_contract_scope[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_operational_valuation_keeps_contract_scope[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_scope_migration_freezes_owner_and_keeps_unknown_settlement_dates",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/compute/batches]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/grid]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price/implied-funding]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price/in-life]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/product-optimizer/run]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/scenarios]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/solve]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/compute/batches]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/grid]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price/implied-funding]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price/in-life]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/product-optimizer/run]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/scenarios]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/solve]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_settlement_is_operations_only_idempotent_and_dates_are_distinct[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_settlement_is_operations_only_idempotent_and_dates_are_distinct[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_shared_collections_and_documents_keep_contract_authorization[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_business_permissions::test_shared_collections_and_documents_keep_contract_authorization[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_a_fork_can_book_a_second_trade_and_preserves_the_original_archive[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_a_fork_can_book_a_second_trade_and_preserves_the_original_archive[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_agreement_replay_with_another_key_is_still_bound_to_the_same_result",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_concurrent_retries_commit_exactly_one_result[direct_booking]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_concurrent_retries_commit_exactly_one_result[product]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_failed_command_rolls_back_every_business_row_and_can_be_retried[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_failed_command_rolls_back_every_business_row_and_can_be_retried[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_failed_product_command_is_atomic_and_retryable[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_failed_product_command_is_atomic_and_retryable[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_fork_keeps_old_rfq_terms_pinned_and_cannot_declassify_its_source[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_fork_keeps_old_rfq_terms_pinned_and_cannot_declassify_its_source[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_fork_refuses_stale_or_missing_terms_without_creating_a_dossier[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_fork_refuses_stale_or_missing_terms_without_creating_a_dossier[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_legacy_exact_retry_is_safe_but_two_explicit_intentions_are_distinct[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_legacy_exact_retry_is_safe_but_two_explicit_intentions_are_distinct[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_lost_direct_booking_response_reuses_one_product_and_deal[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_lost_direct_booking_response_reuses_one_product_and_deal[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_other_trade_forks_a_clean_product_without_changing_source[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_other_trade_forks_a_clean_product_without_changing_source[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_private_bank_calculation_cannot_be_forked_into_an_ordinary_product",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_retry_does_not_consume_limits_or_repeat_initial_audit_and_events[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_retry_does_not_consume_limits_or_repeat_initial_audit_and_events[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_same_booking_key_with_changed_content_is_an_audited_conflict[organization-change0]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_same_booking_key_with_changed_content_is_an_audited_conflict[organization-change1]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_same_booking_key_with_changed_content_is_an_audited_conflict[organization-change2]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_same_booking_key_with_changed_content_is_an_audited_conflict[organization-change3]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_same_booking_key_with_changed_content_is_an_audited_conflict[standalone-change0]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_same_booking_key_with_changed_content_is_an_audited_conflict[standalone-change1]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_same_booking_key_with_changed_content_is_an_audited_conflict[standalone-change2]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_same_booking_key_with_changed_content_is_an_audited_conflict[standalone-change3]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_commands_c08::test_uat_cleanup_keeps_filiation_in_batch_and_tombstones_successful_commands",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_allowed_market_inputs_preserve_the_frozen_calendar_and_context[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_allowed_market_inputs_preserve_the_frozen_calendar_and_context[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_another_products_version_does_not_qualify_a_link",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_generic_booked_context_mutation_is_refused_but_cosmetic_edit_is_allowed[organization-commercial]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_generic_booked_context_mutation_is_refused_but_cosmetic_edit_is_allowed[organization-intent]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_generic_booked_context_mutation_is_refused_but_cosmetic_edit_is_allowed[standalone-commercial]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_generic_booked_context_mutation_is_refused_but_cosmetic_edit_is_allowed[standalone-intent]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_migration_preserves_unqualified_historical_rows_without_inventing_a_version",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_null_product_is_rejected_even_with_a_valid_version_number[deals]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_null_product_is_rejected_even_with_a_valid_version_number[documents]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_null_product_is_rejected_even_with_a_valid_version_number[emt_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_null_product_is_rejected_even_with_a_valid_version_number[indicatives]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_null_product_is_rejected_even_with_a_valid_version_number[kid_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_null_product_is_rejected_even_with_a_valid_version_number[rfq_requests]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_old_rfq_sync_never_regresses_terms_or_overwrites_current_context[organization-change0]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_old_rfq_sync_never_regresses_terms_or_overwrites_current_context[organization-change1]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_old_rfq_sync_never_regresses_terms_or_overwrites_current_context[standalone-change0]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_old_rfq_sync_never_regresses_terms_or_overwrites_current_context[standalone-change1]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming0]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming10]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming1]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming2]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming3]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming4]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming5]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming6]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming7]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming8]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[organization-incoming9]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming0]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming10]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming1]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming2]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming3]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming4]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming5]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming6]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming7]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming8]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_pricing_patch_cannot_smuggle_contract_terms_and_is_atomic[standalone-incoming9]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_product_to_rfq_inherits_sell_nominal_and_commercial_context[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_product_to_rfq_inherits_sell_nominal_and_commercial_context[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_promoting_terms_from_obsolete_rfq_is_a_conflict_without_writes[organization]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_promoting_terms_from_obsolete_rfq_is_a_conflict_without_writes[standalone]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_repository_and_sql_refuse_retrograde_current_pointer",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_rfq_annotation_never_reverts_c04_governed_amendment",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_same_version_cannot_hide_changed_terms_or_an_invalid_revision",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_guards_allow_c04_payment_amendment_and_keep_rfq_on_old_version",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[999-deals]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[999-documents]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[999-emt_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[999-indicatives]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[999-kid_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[999-rfq_requests]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[None-deals]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[None-documents]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[None-emt_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[None-indicatives]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[None-kid_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_insert_requires_an_existing_product_version_pair[None-rfq_requests]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[999-deals]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[999-documents]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[999-emt_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[999-indicatives]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[999-kid_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[999-rfq_requests]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[None-deals]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[None-documents]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[None-emt_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[None-indicatives]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[None-kid_records]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_product_transition_integrity::test_sql_update_requires_a_valid_version_and_keeps_historical_link[None-rfq_requests]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_pricing::test_assignment_is_explicit_stale_protected_and_ownership_not_transferred",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_pricing::test_claim_creates_bank_product_once_with_identical_terms",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_pricing::test_closed_round_or_revoked_membership_blocks_new_private_calculations",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_pricing::test_foreign_admin_and_read_only_bank_member_cannot_read_private_product",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_pricing::test_native_engine_prices_and_retains_signed_bank_calculation_privately",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_pricing::test_terms_and_trade_intent_locked_even_through_product_apis",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_pricing::test_unsupported_terms_remain_readable_without_silent_default_product",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_changed_policy_or_revoked_validator_blocks_publication",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_conditional_response_not_ranked_as_compliant_and_stale_calculation_refused",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_editing_price_invalidates_validation_and_stale_recap_is_rejected",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_firm_offer_requires_recognized_treatment_permissions",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_newer_calculation_invalidates_approved_response",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_payload_fingerprint_is_recomputed_before_publication",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_price_received_is_readonly_and_manual_still_works",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_revision_keeps_original_and_does_not_move_selection",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_revoked_approval_is_not_current_in_workspace_and_history_is_preserved[expired_membership]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_revoked_approval_is_not_current_in_workspace_and_history_is_preserved[inactive_membership]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_revoked_approval_is_not_current_in_workspace_and_history_is_preserved[inactive_user]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_second_validator_required_and_configurable",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_sender_and_bank_without_explicit_grants_cannot_validate_or_publish",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_single_validator_publishes_commercial_price_once_without_private_inputs",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_suspended_relation_rechecked_at_publication",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_bank_publication::test_withdrawal_preserves_price_and_acceptance_prevents_withdrawal",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_bank_booking_cannot_change_the_confirmed_economics[counterparty_id-611]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_bank_booking_cannot_change_the_confirmed_economics[devise-USD]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_bank_booking_cannot_change_the_confirmed_economics[nominal-2000000]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_bank_booking_cannot_change_the_confirmed_economics[price_traded-99]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_bank_booking_cannot_change_the_confirmed_economics[product_terms_version-99]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_bank_booking_cannot_change_the_confirmed_economics[sens-vente]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_bank_decision_retry_is_idempotent_and_conflicting_decision_is_refused",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_bank_reception_time_cannot_be_backdated_while_decision_is_pending",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_changed_bank_context_cannot_be_confirmed_silently[closed]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_changed_bank_context_cannot_be_confirmed_silently[relation]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_changed_bank_context_cannot_be_confirmed_silently[replaced]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_changed_bank_context_cannot_be_confirmed_silently[withdrawn]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_concurrent_duplicate_transport_receipt_is_one_execution",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_exact_quote_confirmed_by_bank_not_by_delivery_ack",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_execution_requires_desk_book_right_not_just_price_or_publish[bank]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_execution_requires_desk_book_right_not_just_price_or_publish[requester]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_first_arrival_after_expiry_is_explicitly_rejected_not_backdated",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_immutable_execution_and_decision_survive_raw_mutation_attempts",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_lost_ack_recovered_by_status_without_reapplying_decision[confirmation]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_lost_ack_recovered_by_status_without_reapplying_decision[request]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_modified_quote_is_rejected_as_business_fact[currency-USD]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_modified_quote_is_rejected_as_business_fact[nominal-100]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_modified_quote_is_rejected_as_business_fact[price-101]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_modified_quote_is_rejected_as_business_fact[revision-999]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_modified_quote_is_rejected_as_business_fact[side-SELL]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_modified_quote_is_rejected_as_business_fact[terms_fingerprint-0000000000000000000000000000000000000000000000000000000000000000]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_other_message_id_cannot_create_a_second_intention",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_pending_electronic_request_blocks_each_linked_local_booking[False]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_pending_electronic_request_blocks_each_linked_local_booking[True]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_pending_request_prevents_replacement_withdrawal_and_local_forged_confirmation",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_request_retry_uses_same_intention_and_conflicts_are_rejected",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_revocation_before_delivery_blocks_without_inventing_a_bank_refusal",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_two_native_bookings_and_exact_replays_make_one_deal_per_local_leg",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_unbound_or_future_confirmation_cannot_confirm_local_agreement[decided_at-2099-01-01T00:00:00Z]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_unbound_or_future_confirmation_cannot_confirm_local_agreement[execution_id-47f3da8a-d5dd-48c2-a40b-acf46ce616d1]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_unbound_or_future_confirmation_cannot_confirm_local_agreement[received_at-2099-01-01T00:00:00Z]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_unbound_or_future_confirmation_cannot_confirm_local_agreement[request_hash-0000000000000000000000000000000000000000000000000000000000000000]",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_electronic_execution::test_valid_arrival_can_be_decided_after_expiry_without_rewriting_receipt",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_acceptance_after_expiry_or_future_confirmation_is_rejected",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_booking_refusal_preserves_confirmation_and_block_reason",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_concurrent_booking_of_same_execution_returns_one_deal",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_confirmed_trade_books_after_quote_expiry_and_replays_once",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_duplicate_execution_reference_across_rfqs_has_conflict",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_expired_offer_cannot_be_backdated_into_a_new_treatment",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_external_confirmation_freezes_terms_and_preserves_manual_route",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_external_conflict_keeps_confirmed_trade_and_blocks_booking",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_immutable_evidence_and_duplicate_execution_reference",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_manual_booking_without_new_confirmation_keeps_existing_workflow",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_network_booking_requires_exact_confirmation_without_rewriting_publication",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_no_book_right_and_foreign_organization_cannot_confirm",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_relationship_suspension_blocks_new_confirmation",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_execution::test_requested_is_not_confirmation_and_cancel_preserves_history",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_network_delivery::test_actual_delivery_read_receipt_and_same_command_replay",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_network_delivery::test_admin_without_desk_and_foreign_org_cannot_read_inbox",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_network_delivery::test_duplicate_organization_not_resent_under_fresh_key",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_network_delivery::test_extra_recipient_gets_same_frozen_request_without_competitor_identity",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_network_delivery::test_manual_solicitation_freezes_terms_even_after_quote_deletion",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_network_delivery::test_network_freeze_blocks_material_edits_but_allows_private_pricing",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_network_delivery::test_new_round_links_previous_without_moving_quotes_or_messages",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_network_delivery::test_send_rechecks_relation_and_preview_after_preparation",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_network_delivery::test_stale_request_cannot_be_sent_and_key_cannot_change_content",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[currency-USD]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[documentation_reference-Other programme]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[instrument_family-SWAP]",
+        "passing_artifacts": [
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[legal_mapping_matches-False]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[maturity_date-2099-01-01]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[nominal-2000000]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[payment_date-2099-01-01]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[payoff_family-VANILLA]",
+        "passing_artifacts": [
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[price-99.0]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[side-BUY]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[strike_date-2099-01-01]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[terms_fingerprint-0000000000000000000000000000000000000000000000000000000000000000]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[transaction_format-OTC]",
+        "passing_artifacts": [
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_authenticated_peer_economic_discrepancies_are_visible_not_auto_repaired[value_date-2099-01-01]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_bank_refusal_is_reconciled_without_inventing_bookings",
+        "passing_artifacts": [
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_closed_or_expired_unconfirmed_rfq_does_not_gain_pricing_recovery",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_concurrent_same_resume_command_queues_one_snapshot",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_confirmation_alone_never_implies_a_booking_or_a_matched_book",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_confirmed_incomplete_bank_leg_can_be_explicitly_reassigned_after_close",
+        "passing_artifacts": [
+          "reassignment-final.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_different_booked_trade_dates_are_reported_without_choosing_a_date",
+        "passing_artifacts": [
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_existing_confirmed_bookings_gain_no_peer_certificate_until_refresh",
+        "passing_artifacts": [
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_failed_booking_rolls_back_the_booking_statement_then_same_command_recovers",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_foreign_organization_cannot_read_or_resume[False]",
+        "passing_artifacts": [
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_foreign_organization_cannot_read_or_resume[True]",
+        "passing_artifacts": [
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_incomplete_local_leg_resumes_after_remote_close_and_both_books_match[False]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_incomplete_local_leg_resumes_after_remote_close_and_both_books_match[True]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_lost_status_ack_and_restarts_recover_without_duplicate_statement_or_reply[False]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_lost_status_ack_and_restarts_recover_without_duplicate_statement_or_reply[True]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_operational_inventory_and_bank_queue_are_scoped_and_surface_incomplete_legs",
+        "passing_artifacts": [
+          "inventory-check.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_peer_booking_disappearance_is_a_discrepancy_kept_in_history",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_read_access_does_not_grant_resume_and_revocation_is_rechecked[False]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_read_access_does_not_grant_resume_and_revocation_is_rechecked[True]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_refresh_reuses_command_and_never_creates_or_repairs_a_deal",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_resume_also_reschedules_a_closure_that_blocks_later_status_messages",
+        "passing_artifacts": [
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_statements_and_proofs_are_immutable",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change0]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change1]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change2]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change3]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change4]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change5]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_reconciliation::test_unbound_old_future_or_private_status_cannot_replace_the_peer_state[change6]",
+        "passing_artifacts": [
+          "backend-targeted.xml",
+          "reconciliation-complete.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_active_lease_prevents_second_worker_and_expired_lease_resumes",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_closed_unsent_request_is_cancelled_without_disclosing_terms",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_closure_after_delivery_reaches_bank_and_blocks_pricing",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_duplicate_request_and_conflicting_payload",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_https_and_redirect_policy",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_immutable_outbox_and_receipts_allow_worker_state_updates",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_lost_receipt_recovered_after_worker_restart_without_second_request",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_out_of_order_messages_are_not_applied",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_pairing_recognizes_exact_agreement_without_leaking_key",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_parallel_duplicate_receipts_create_one_bank_dossier",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_quote_publication_returns_automatically_and_withdrawal_is_ordered",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_remote_delivery_uses_local_ids_and_private_projection",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_revoked_sender_rights_prevent_first_delivery",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_signature_address_and_stale_envelope_rejected",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_stale_calculation_during_interruption_returns_history_only",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_wire_request_excludes_local_ids_and_private_fields",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_withdrawal_still_delivered_after_relationship_suspension",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      },
+      {
+        "identity": "backend.tests.test_rfq_transport::test_withdrawn_unsent_quote_is_cancelled_then_stream_continues",
+        "passing_artifacts": [
+          "backend-targeted.xml"
+        ]
+      }
+    ],
+    "full_suite_rerun": false,
+    "tests_rerun_during_archival": false
+  },
+  "frontend": {
+    "passed": 764,
+    "files": 85,
+    "build_passed": true,
+    "artifact": "build-final-complete.log",
+    "sha256": "dc5244392243627294f71b75c50f214bfbaf2b648bd9beb27b85da6cd68dac08"
+  },
+  "graphical_checkpoints": [
+    {
+      "id": "Q01-request-review",
+      "at": "2026-10-24T11:05:28.708Z",
+      "url": "http://127.0.0.1:18405/#/rfq?rfq=1",
+      "note": "Revue explicite préservée après correction du watcher.",
+      "screenshot": "screenshots/Q01-request-review.jpg",
+      "dom": "Q01-request-review.dom.txt"
+    },
+    {
+      "id": "Q02-decision-pending",
+      "at": "2026-10-24T11:05:31.309Z",
+      "url": "http://127.0.0.1:18405/#/rfq?rfq=1",
+      "note": "Décision bancaire attendue ; aucune concordance ni booking déclaré.",
+      "screenshot": "screenshots/Q02-decision-pending.jpg",
+      "dom": "Q02-decision-pending.dom.txt"
+    },
+    {
+      "id": "Q03-bank-review",
+      "at": "2026-10-24T11:05:37.441Z",
+      "url": "http://127.0.0.1:18401/#/rfq/recues?open=1",
+      "note": "Décision explicite sur les termes et prix exacts ; revue préservée pendant les actualisations.",
+      "screenshot": "screenshots/Q03-bank-review.jpg",
+      "dom": "Q03-bank-review.dom.txt"
+    },
+    {
+      "id": "Q04-both-unbooked",
+      "at": "2026-10-24T11:05:53.686Z",
+      "url": "http://127.0.0.1:18405/#/rfq?rfq=1",
+      "note": "Les deux états confirment l’accord ; aucun booking déclaré des deux côtés.",
+      "screenshot": "screenshots/Q04-both-unbooked.jpg",
+      "dom": "Q04-both-unbooked.dom.txt"
+    },
+    {
+      "id": "Q05-local-booked-peer-down",
+      "at": "2026-10-24T11:06:03.912Z",
+      "url": "http://127.0.0.1:18405/#/rfq?rfq=1",
+      "note": "Booking demandeur conservé pendant l’arrêt bancaire ; état distant encore incomplet.",
+      "screenshot": "screenshots/Q05-local-booked-peer-down.jpg",
+      "dom": "Q05-local-booked-peer-down.dom.txt"
+    },
+    {
+      "id": "Q06-bank-missing-after-close",
+      "at": "2026-10-24T11:06:58.388Z",
+      "url": "http://127.0.0.1:18401/#/rfq/recues?open=1",
+      "note": "Clôture reçue et booking local manquant ; reprise de l’accord confirmé disponible.",
+      "screenshot": "screenshots/Q06-bank-missing-after-close.jpg",
+      "dom": "Q06-bank-missing-after-close.dom.txt"
+    },
+    {
+      "id": "Q07-bank-pricer-resumed",
+      "at": "2026-10-24T11:07:10.944Z",
+      "url": "http://127.0.0.1:18401/#/products/2/pricer?receivedRfq=1",
+      "note": "Accès au Pricer depuis la reprise après clôture ; calcul frais et booking effectués par API native.",
+      "screenshot": "screenshots/Q07-bank-pricer-resumed.jpg",
+      "dom": "Q07-bank-pricer-resumed.dom.txt"
+    },
+    {
+      "id": "Q08-price-discrepancy",
+      "at": "2026-10-24T11:07:41.611Z",
+      "url": "http://127.0.0.1:18405/#/rfq?rfq=1",
+      "note": "Déclaration synthétique bancaire de prix 99 au lieu de 98,50 ; écart explicite, aucun Deal modifié.",
+      "screenshot": "screenshots/Q08-price-discrepancy.jpg",
+      "dom": "Q08-price-discrepancy.dom.txt"
+    },
+    {
+      "id": "Q09-price-discrepancy-final-build",
+      "at": "2026-10-24T11:09:58.842Z",
+      "url": "http://127.0.0.1:18405/#/rfq?rfq=1",
+      "note": "Même écart préservé après redémarrage des deux installations ; affichage français des prix.",
+      "screenshot": "screenshots/Q09-price-discrepancy-final-build.jpg",
+      "dom": "Q09-price-discrepancy-final-build.dom.txt"
+    },
+    {
+      "id": "Q10-bank-republish-current-book",
+      "at": "2026-10-24T11:10:02.008Z",
+      "url": "http://127.0.0.1:18401/#/rfq/recues?open=1",
+      "note": "Relance explicite depuis le livre bancaire intact ; nouvelle déclaration factuelle sans réécriture de l’ancienne.",
+      "screenshot": "screenshots/Q10-bank-republish-current-book.jpg",
+      "dom": "Q10-bank-republish-current-book.dom.txt"
+    },
+    {
+      "id": "Q11-requester-matched-final",
+      "at": "2026-10-24T11:10:15.106Z",
+      "url": "http://127.0.0.1:18405/#/rfq?rfq=1",
+      "note": "Nouvelle déclaration exacte reçue ; exécution et deux bookings rapprochés, ancien écart conservé dans le registre.",
+      "screenshot": "screenshots/Q11-requester-matched-final.jpg",
+      "dom": "Q11-requester-matched-final.dom.txt"
+    },
+    {
+      "id": "Q12-bank-matched-final",
+      "at": "2026-10-24T11:10:15.469Z",
+      "url": "http://127.0.0.1:18401/#/rfq/recues?open=1",
+      "note": "État final bancaire rapproché, livraison acquittée et un seul Deal local.",
+      "screenshot": "screenshots/Q12-bank-matched-final.jpg",
+      "dom": "Q12-bank-matched-final.dom.txt"
+    },
+    {
+      "id": "Q13-bank-operational-queue",
+      "at": "2026-10-24T11:19:19.067Z",
+      "url": "http://127.0.0.1:18401/#/rfq/recues?open=1",
+      "note": "La file bancaire affiche le rapprochement courant, même après clôture de la consultation.",
+      "screenshot": "screenshots/Q13-bank-operational-queue.jpg",
+      "dom": "Q13-bank-operational-queue.dom.txt"
+    },
+    {
+      "id": "Q14-keyboard-return",
+      "at": "2026-10-24T11:19:19.494Z",
+      "url": "http://127.0.0.1:18401/#/rfq/recues?open=1",
+      "note": "Ouverture Entrée puis Échap ; focus rendu au bouton Ouvrir.",
+      "screenshot": "screenshots/Q14-keyboard-return.jpg",
+      "dom": "Q14-keyboard-return.dom.txt"
+    },
+    {
+      "id": "Q15-complete-final",
+      "at": "2026-10-24T11:19:20.370Z",
+      "url": "http://127.0.0.1:18405/#/rfq?rfq=1",
+      "note": "Build et code finaux : deux bookings rapprochés, déclarations complètes et reçues.",
+      "screenshot": "screenshots/Q15-complete-final.jpg",
+      "dom": "Q15-complete-final.dom.txt"
+    }
+  ],
+  "reconciliation": {
+    "installations": {
+      "leonteq": {
+        "installation_id": "3d85373f-95b0-4633-8c5a-3541e4f17f1a",
+        "deal_id": 1,
+        "deal_reference": "LEON-20261024-001",
+        "product_id": 1,
+        "terms_version": 1,
+        "terms_fingerprint": "5c08020fb7c4aeadb6a4720b078039d094785e705c7b94a1cf4897d3cacba067",
+        "side": "BUY",
+        "nominal": 1000000.0,
+        "currency": "EUR",
+        "price_percent": 98.5,
+        "counterparty_id": 10,
+        "private_sigma_percent": 20.0,
+        "query_only": true,
+        "foreign_key_violations": 0,
+        "execution_id": "ba8bc1a9-ef73-4251-8061-4c31df0bb02e",
+        "request_hash": "73baf4fcd9176ce59548ddf9337e6a83fa513f2518e9f8525fe7ada6ebff6ad7",
+        "state": "CONFIRMED",
+        "execution_reference": "EXE-BA8BC1A9-EF73-4251-8061-4C31DF0BB02E",
+        "request_message_id": "ee51af47-ceed-45bc-a1f9-89e306fbf04b",
+        "decision_message_id": "1f2ab51f-9e93-4221-9227-a5381fb745df",
+        "received_at": "2026-10-24 11:05:29.549820",
+        "decision": {
+          "bank": {
+            "email": "superuser@bnp-paribas.example.test",
+            "name": "superuser"
+          },
+          "decided_at": "2026-10-24T11:05:37.545274Z",
+          "decision": "CONFIRMED",
+          "execution_id": "ba8bc1a9-ef73-4251-8061-4c31df0bb02e",
+          "format_version": 1,
+          "reason": "Recette fictive de rapprochement : confirmation des termes et du prix v1, sans opération réelle.",
+          "received_at": "2026-10-24T11:05:29.549820Z",
+          "request_hash": "73baf4fcd9176ce59548ddf9337e6a83fa513f2518e9f8525fe7ada6ebff6ad7"
+        },
+        "counts": {
+          "products": 1,
+          "product_terms_versions": 1,
+          "product_calculation_runs": 1,
+          "deals": 1,
+          "deal_events": 4,
+          "rfq_exchange_rounds": 1,
+          "rfq_execution_agreements": 1,
+          "rfq_execution_bookings": 1,
+          "rfq_electronic_executions": 1,
+          "rfq_electronic_bookings": 1,
+          "rfq_electronic_evidence": 8,
+          "rfq_transport_outbox": 9,
+          "rfq_transport_inbox": 10,
+          "rfq_transport_attempts": 11,
+          "rfq_booking_evidence": 1,
+          "trading_executions": 0,
+          "rfq_reconciliation_statements": 13
+        },
+        "transport": [
+          {
+            "id": "fe75aefd-0816-46b5-a11e-88e3cafd53cf",
+            "kind": "REQUEST",
+            "sequence": 1,
+            "payload_hash": "3dd430e3915fa4879b42e680db99297274aa063b7f98a90adbb18e9ad361b6d9",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:03:38.941509"
+          },
+          {
+            "id": "ee51af47-ceed-45bc-a1f9-89e306fbf04b",
+            "kind": "EXECUTION_REQUEST",
+            "sequence": 2,
+            "payload_hash": "73baf4fcd9176ce59548ddf9337e6a83fa513f2518e9f8525fe7ada6ebff6ad7",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:05:29.561818"
+          },
+          {
+            "id": "d595ac94-ac70-46ea-b15a-2bed6cc31448",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 3,
+            "payload_hash": "19f0c11290c762a706366c9fc460d223a7024629feb661821cf391ff44f2af84",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:05:39.655521"
+          },
+          {
+            "id": "440857d8-3eed-4d4f-a841-ca80bedbe1b0",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 4,
+            "payload_hash": "b2522ee0dfd04989c7c60aeaef8fee30850da585c381cab0a4cd40b74d21bcd8",
+            "state": "DELIVERED",
+            "attempts": 3,
+            "received_at": "2026-10-24 11:06:22.129933"
+          },
+          {
+            "id": "14fd8ec8-1072-4767-afff-1b690a2f449f",
+            "kind": "CLOSE",
+            "sequence": 5,
+            "payload_hash": "8f59aca64d4aa735cf07b23b2f88761149cffcb7a1c58c7d837f7626b8e72b76",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:06:22.189931"
+          },
+          {
+            "id": "4119e0e0-a363-46f2-9784-e03b60cbecdc",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 6,
+            "payload_hash": "4e7a393bc2aedce5d690bab8149459a10bbe61c447e93ed5fd01ddd17e23c3e8",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:06:56.332385"
+          },
+          {
+            "id": "032db749-820d-4ab0-827e-eea5e3ef8543",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 7,
+            "payload_hash": "8ac13773c59d78d4825b35b21ebc3cad04622471b85b4d343c3d6239e27d1e1e",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:07:06.473522"
+          },
+          {
+            "id": "0c30612b-c9b6-4ed9-8e46-6552d91a9e1a",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 8,
+            "payload_hash": "1094f2e69613006edda594ae16abf3ff3dc51cb6b6fafa7f91d13ce044054d5f",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:10:04.706003"
+          },
+          {
+            "id": "139cb98a-51be-456b-a04b-79aa0e4d8b0c",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 9,
+            "payload_hash": "769703cfdb546c94fb254b3e1f169edd7585a41b31b663febae2976529e3b13a",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:14:13.081342"
+          }
+        ]
+      },
+      "bnp-paribas": {
+        "installation_id": "6fe387c0-0e83-4672-921e-511fc7827a5a",
+        "deal_id": 1,
+        "deal_reference": "BNPX-20261024-001",
+        "product_id": 2,
+        "terms_version": 1,
+        "terms_fingerprint": "5c08020fb7c4aeadb6a4720b078039d094785e705c7b94a1cf4897d3cacba067",
+        "side": "SELL",
+        "nominal": 1000000.0,
+        "currency": "EUR",
+        "price_percent": 98.5,
+        "counterparty_id": 17,
+        "private_sigma_percent": 30.0,
+        "query_only": true,
+        "foreign_key_violations": 0,
+        "execution_id": "ba8bc1a9-ef73-4251-8061-4c31df0bb02e",
+        "request_hash": "73baf4fcd9176ce59548ddf9337e6a83fa513f2518e9f8525fe7ada6ebff6ad7",
+        "state": "CONFIRMED",
+        "execution_reference": "EXE-BA8BC1A9-EF73-4251-8061-4C31DF0BB02E",
+        "request_message_id": "ee51af47-ceed-45bc-a1f9-89e306fbf04b",
+        "decision_message_id": "1f2ab51f-9e93-4221-9227-a5381fb745df",
+        "received_at": "2026-10-24 11:05:29.549820",
+        "decision": {
+          "bank": {
+            "email": "superuser@bnp-paribas.example.test",
+            "name": "superuser"
+          },
+          "decided_at": "2026-10-24T11:05:37.545274Z",
+          "decision": "CONFIRMED",
+          "execution_id": "ba8bc1a9-ef73-4251-8061-4c31df0bb02e",
+          "format_version": 1,
+          "reason": "Recette fictive de rapprochement : confirmation des termes et du prix v1, sans opération réelle.",
+          "received_at": "2026-10-24T11:05:29.549820Z",
+          "request_hash": "73baf4fcd9176ce59548ddf9337e6a83fa513f2518e9f8525fe7ada6ebff6ad7"
+        },
+        "counts": {
+          "products": 2,
+          "product_terms_versions": 2,
+          "product_calculation_runs": 2,
+          "deals": 1,
+          "deal_events": 4,
+          "rfq_exchange_rounds": 1,
+          "rfq_execution_agreements": 0,
+          "rfq_execution_bookings": 0,
+          "rfq_electronic_executions": 1,
+          "rfq_electronic_bookings": 1,
+          "rfq_electronic_evidence": 7,
+          "rfq_transport_outbox": 10,
+          "rfq_transport_inbox": 9,
+          "rfq_transport_attempts": 10,
+          "rfq_booking_evidence": 0,
+          "trading_executions": 0,
+          "rfq_reconciliation_statements": 13
+        },
+        "transport": [
+          {
+            "id": "6009e705-e0eb-4185-98f3-13ec742902ba",
+            "kind": "READ",
+            "sequence": 1,
+            "payload_hash": "9f71a72bc3124ce424242c04b93dddce6f695b0d7b9a7c614fb3b27a302cb32a",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:03:39.489508"
+          },
+          {
+            "id": "019e60ff-86cc-4bd0-9c76-45af572f0063",
+            "kind": "QUOTE",
+            "sequence": 2,
+            "payload_hash": "fd064ccff7573e2c551dbe1b7ab1462150201f03a89cd3fddc89f57d01234c3e",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:03:41.837456"
+          },
+          {
+            "id": "1f2ab51f-9e93-4221-9227-a5381fb745df",
+            "kind": "EXECUTION_CONFIRMATION",
+            "sequence": 3,
+            "payload_hash": "179ceff5487982415ce7530a2fc5ebbf8bb450a2632fd390e2f8b1f03370e2c8",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:05:38.479105"
+          },
+          {
+            "id": "77a759a1-190f-4389-9ecc-51a6c76faedd",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 4,
+            "payload_hash": "23758a0c467a454ca0a25aa40267213919919b50493dd1931d41d4222fad4110",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:05:40.549123"
+          },
+          {
+            "id": "ebe05404-9f43-4c58-aae6-f577bde5ee4b",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 5,
+            "payload_hash": "73086dae988b48ad9f19bf1f562e7a05f3ac7d69df50b3159e4f43989c16fd21",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:06:23.826535"
+          },
+          {
+            "id": "fa762a68-9ad4-4bd3-8dc8-98794a6bcac1",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 6,
+            "payload_hash": "7e5d5dd6503d6fbdf54153a36cbb2c9c76804c76706629bcd5b8a45f5f5cee62",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:06:57.996418"
+          },
+          {
+            "id": "18492ef6-8dc9-44c6-8e95-e6993618d713",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 7,
+            "payload_hash": "f54176c0bdbeb607916a75bd6fba455676bbb0f2db43959356e29025aed9d34f",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:07:06.101524"
+          },
+          {
+            "id": "206de8be-7381-484f-8d99-1fc8dd057588",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 8,
+            "payload_hash": "f487a80830acbdcda8366297591f1920484f6e630fe7da98408d25080c0e5821",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:07:36.313114"
+          },
+          {
+            "id": "5984e20e-a2e4-414a-badd-609d850d8f61",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 9,
+            "payload_hash": "c7b68de78e5702c97ea66a11ce0099b34720c9b5e4ad39b0d7242414311b36b3",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:10:03.164973"
+          },
+          {
+            "id": "63519954-5b16-4ba4-94f9-1ba865bf825d",
+            "kind": "EXECUTION_STATUS",
+            "sequence": 10,
+            "payload_hash": "e58f08c0de7016dc4235f86e0470f16d679f8ff5410d1f118659634cda8839ec",
+            "state": "DELIVERED",
+            "attempts": 1,
+            "received_at": "2026-10-24 11:14:11.651668"
+          }
+        ]
+      }
+    },
+    "checks": {
+      "same_execution_id": true,
+      "same_request_hash": true,
+      "same_execution_reference": true,
+      "same_request_message_id": true,
+      "same_decision_message_id": true,
+      "same_received_at": true,
+      "same_decision": true,
+      "same_terms_fingerprint": true,
+      "same_nominal": true,
+      "same_currency": true,
+      "same_price_percent": true,
+      "exact_immutable_request_and_decision_equal": true,
+      "request_hash_recomputed": true,
+      "one_execution_and_one_deal_and_one_electronic_booking_per_installation": true,
+      "opposite_sides": true,
+      "contractual_events_equal": true,
+      "distinct_installations": true,
+      "private_pricing_hypotheses_distinct": true,
+      "no_private_pricing_fields_transported": true,
+      "all_outbox_messages_delivered_and_peer_hash_matched": true,
+      "signed_receipt_hmac_verified_offline": true,
+      "original_authenticated_envelopes_archived_and_hmac_verified_offline": true,
+      "native_electronic_confirmation": true,
+      "no_phone_declaration": true,
+      "no_written_confirmation_pending": true,
+      "foreign_key_check_clean": true,
+      "booking_closure_received": true,
+      "no_cash_or_settlement_performed": true,
+      "both_views_matched_on_final_native_api": true,
+      "statement_hashes_recomputed": true,
+      "peer_and_local_statement_versions_unique": true,
+      "negative_price_discrepancy_observed": true,
+      "negative_declaration_retained_in_both_histories": true,
+      "correct_latest_statements_after_explicit_resume": true,
+      "booked_trade_dates_and_formats_equal": true,
+      "bank_fresh_pricing_after_closed_consultation": true
+    },
+    "final_reconciliation_states": {
+      "leonteq": {
+        "state": "MATCHED",
+        "local_version": 6,
+        "peer_version": 7,
+        "differences": []
+      },
+      "bnp-paribas": {
+        "state": "MATCHED",
+        "local_version": 7,
+        "peer_version": 6,
+        "differences": []
+      }
+    },
+    "status": "PASS_WITH_EXPLICIT_LIMITS"
+  },
+  "native_inventory": {
+    "leonteq": {
+      "count": 1,
+      "states": [
+        "MATCHED"
+      ]
+    },
+    "bnp-paribas": {
+      "count": 1,
+      "states": [
+        "MATCHED"
+      ]
+    }
+  },
+  "negative_fixture": {
+    "message_id": "206de8be-7381-484f-8d99-1fc8dd057588",
+    "declared_price": 99.0,
+    "actual_deal_price": 98.5,
+    "method": "native_service_status_fault_fixture",
+    "no_deal_modified": true
+  },
+  "requester_booking": {
+    "deal": {
+      "id": 1,
+      "reference": "LEON-20261024-001"
+    },
+    "records": [
+      {
+        "installation": "leonteq",
+        "method": "GET",
+        "path": "/rfq/1",
+        "status": 200
+      },
+      {
+        "installation": "leonteq",
+        "method": "GET",
+        "path": "/rfq/1/booking-review",
+        "status": 200
+      },
+      {
+        "installation": "leonteq",
+        "method": "POST",
+        "path": "/rfq/1/book",
+        "status": 201
+      }
+    ]
+  },
+  "bank_booking_recovery": {
+    "deal": {
+      "id": 1,
+      "reference": "BNPX-20261024-001"
+    },
+    "fresh_pricing_after_close": true,
+    "exact_retry_same_deal": true,
+    "records": [
+      {
+        "installation": "leonteq",
+        "method": "GET",
+        "path": "/rfq/1",
+        "status": 200
+      },
+      {
+        "installation": "bnp-paribas",
+        "method": "GET",
+        "path": "/rfq-inbox/1",
+        "status": 200
+      },
+      {
+        "installation": "bnp-paribas",
+        "method": "GET",
+        "path": "/products/2",
+        "status": 200
+      },
+      {
+        "installation": "bnp-paribas",
+        "method": "POST",
+        "path": "/products/2/pricing-input",
+        "status": 200
+      },
+      {
+        "installation": "bnp-paribas",
+        "method": "POST",
+        "path": "/price/in-life",
+        "status": 200
+      },
+      {
+        "installation": "bnp-paribas",
+        "method": "POST",
+        "path": "/deals",
+        "status": 201
+      },
+      {
+        "installation": "bnp-paribas",
+        "method": "POST",
+        "path": "/deals",
+        "status": 201
+      }
+    ]
+  },
+  "cleanup": {
+    "checked_at_utc": "2026-10-24T13:25:03.2471084Z",
+    "checked_ports": [
+      18300,
+      18301,
+      18305,
+      18400,
+      18401,
+      18405
+    ],
+    "listening_ports": [],
+    "runtime_python_processes": [],
+    "all_ports_released": true,
+    "no_runtime_process_remaining": true
+  },
+  "no_commit_or_push": true,
+  "real_database_absent": true,
+  "qualification_limits": [
+    "HTTP loopback; no deployed TLS/PKI qualification.",
+    "Last dated peer declarations; no live remote-database guarantee.",
+    "HMAC shared key is not a qualified bank signature.",
+    "Whole electronic mono-EUR trade only; manual/partial executions, disputes and settlement remain separate."
+  ]
+}

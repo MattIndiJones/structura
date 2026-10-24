@@ -19,6 +19,7 @@ from backend.app.db.models import (Counterparty, Deal, Entity, RfqDesk, RfqDeskM
 from backend.app.db.rfq_execution_integrity import install_execution_guards
 from backend.app.db.trading_models import TradingRelationship
 from backend.app.services import rfq_execution as service, rfq_publication as publication, rfq_relationships as relations
+from backend.app.services import rfq_state
 from backend.app.services.product_repository import load_product
 from backend.tests.product_helpers import add_pricing_receipt
 from backend.tests.test_rfq_network_delivery import send_body
@@ -28,7 +29,7 @@ from backend.tests.test_rfq import _rfq_params
 def setup_case(engine, monkeypatch):
     install_execution_guards(engine)
     clock = {'now': datetime.utcnow()}
-    for module in (service, publication, api, deals):
+    for module in (service, publication, api, deals, rfq_state):
         monkeypatch.setattr(module, 'business_now', lambda: clock['now'])
     with Session(engine) as session:
         session.add_all([Entity(id=1, name='ClientTech'), Entity(id=2, name='BNP')])
@@ -108,7 +109,7 @@ def booking_body(rfq, agreement=None):
         payment_date=p['payment_date'], T=p['T'], underlyings=p['underlyings'], observation_times=[p['T']],
         script_snapshot=rfq['script_snapshot'], market_snapshot={'r':3, 'constats':p['constats'],
             'underlyings':[{'name':'UL1','ticker':'TK1','ccy':'EUR','sigma':20,'q':0}]})
-    return deals.DealCreate(**add_pricing_receipt(body))
+    return deals.DealCreate(**{**add_pricing_receipt(body), "counterparty_id": 1})
 
 
 @pytest.fixture

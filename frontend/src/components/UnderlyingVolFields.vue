@@ -75,6 +75,8 @@
           </div>
         </div>
 
+        <MarketDataProvenance :row="au" />
+
         <!-- Vol smile chart (Dupire / SABR / Heston) -->
         <VolSurfaceEditor :u="au" :model="model" :horizon="horizon" :rate="rate" />
         <VolSmile v-if="!au.vol_surface" :underlying="au" :model="model" :horizon="horizon" />
@@ -87,6 +89,7 @@ import VolSmile from './VolSmile.vue'
 import VolSurfaceEditor from './VolSurfaceEditor.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
+import MarketDataProvenance from './MarketDataProvenance.vue'
 
 const { au, model, horizon, rateModel, rate } = defineProps({
   au: { type: Object, required: true },

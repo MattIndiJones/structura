@@ -67,7 +67,7 @@ def _deal(session, current, deal_id):
 
 def _note(session, current, note_id):
     note = session.get(ValuationNote, note_id)
-    if not note or note.user_id != current.id:
+    if not note:
         raise HTTPException(404, "Note introuvable")
     _deal(session, current, note.deal_id)
     return note
@@ -145,7 +145,7 @@ def create_note(body: CreateNote, stream: bool = False,
 
 @router.get("")
 def list_notes(deal_id: int | None = None, current: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    query = select(ValuationNote).where(ValuationNote.user_id == current.id)
+    query = select(ValuationNote)
     if deal_id is not None:
         _deal(session, current, deal_id)
         query = query.where(ValuationNote.deal_id == deal_id)

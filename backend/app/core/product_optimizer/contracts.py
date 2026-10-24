@@ -13,7 +13,8 @@ from .families import family_schema
 MAX_CANDIDATES = 256
 MAX_WORK = 250_000_000
 MAX_SECONDS = 120
-SOLVER_ITERATIONS = 18
+SOLVER_TOLERANCE = 1e-6
+OPTIMIZER_METHOD_VERSION = "optimizer-v2-resolution-budget"
 MAX_PARALLEL_WORKERS = 4
 MAX_PARALLEL_MEMORY_BYTES = 256 * 1024**2
 VALIDATION_CANDIDATES = 5
@@ -333,5 +334,6 @@ class OptimizationCandidate(StrictModel):
     rejection_reasons: list[str] = Field(default_factory=list)
     rejection_details: list[dict] = Field(default_factory=list)
     pricing_input: dict | None = None
+    solver_diagnostics: dict | None = None
     validation_status: Literal["NOT_SELECTED", "PENDING", "PASSED", "REJECTED", "FAILED"] = "NOT_SELECTED"
     validation: dict | None = None

@@ -146,7 +146,7 @@ const normalizedGroups = computed(() => props.groups.map(group => ({
   rows: group.rows.map(row => ({
     ...row,
     values: orderedItems.value.map(item => row.values[itemOrderFromSource(item.id)] ?? null),
-  })).filter(row => row.values.some(Number.isFinite)),
+  })).filter(row => row.unit === 'text' ? row.values.some(v => v != null) : row.values.some(Number.isFinite)),
 })).filter(group => group.rows.length))
 
 function itemOrderFromSource(id) {
@@ -245,6 +245,7 @@ function parameterTotal(row) {
 }
 
 function formatParameterValue(row, value) {
+  if (row.unit === 'text') return value == null ? '—' : String(value)
   if (!Number.isFinite(value)) return '—'
   if (row.unit === '%' || row.unit === 'percent') return `${formatNumber(value, row.decimals ?? 2)} %`
   if (row.unit === 'bps') return `${formatNumber(value, row.decimals ?? 1)} bps`

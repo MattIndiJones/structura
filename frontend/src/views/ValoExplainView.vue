@@ -24,7 +24,7 @@
       </div>
       <template v-if="dealId">
         <div class="source-toolbar"><div><h2>MtM enregistrés</h2><p>Du calcul le plus récent au plus ancien. Sélectionnez un calcul pour une note, deux pour une explication.</p></div>
-          <div class="source-filters"><label>Base<select v-model="basisFilter" :disabled="busy"><option value="">Toutes</option><option value="booking">Paramètres du booking</option><option value="current">Marché actualisé</option></select></label>
+          <div class="source-filters"><label>Base<select v-model="basisFilter" :disabled="busy"><option value="">Toutes</option><option v-for="(label, code) in VALUATION_SOURCES" :key="code" :value="code">{{ label }}</option></select></label>
             <label>Du<input v-model="dateFrom" type="date" :disabled="busy" /></label><label>Au<input v-model="dateTo" type="date" :disabled="busy" /></label></div>
         </div>
         <div v-if="!runs.length" class="empty">{{ busy ? 'Chargement des MtM…' : 'Aucun MtM enregistré pour ce deal. Lancez un calcul du jour pour commencer.' }}</div>
@@ -126,6 +126,7 @@
 </template>
 
 <script setup>
+import { VALUATION_SOURCES, valuationSourceCode, valuationSourceLabel } from '../utils/valuationSource.js'
 import AiWorkbench from '../components/AiWorkbench.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
@@ -145,11 +146,11 @@ const { ids: selectedIds, selected: selectedRuns, reset: resetSelection, toggle:
 const basisFilter = ref(''), dateFrom = ref(''), dateTo = ref('')
 const selectionChecking = ref(false), selectionError = ref(''), selectionDetails = ref([])
 let selectionEpoch = 0
-const basisLabel = r => r.result.market_used?.source === 'booking' ? 'Paramètres du booking' : r.result.market_used?.source ? 'Marché actualisé' : 'Non renseignée'
+const basisLabel = valuationSourceLabel
 const modelLabel = m => ({ constant: 'GBM', heston: 'Heston', sabr: 'SABR', localvol: 'Local Vol', lsv: 'LSV' }[m] || m || '—')
 const filteredRuns = computed(() => runs.value.filter(r => {
   const date = r.result.valuation_date || ''
-  return (!basisFilter.value || (basisFilter.value === 'booking' ? r.result.market_used?.source === 'booking' : r.result.market_used?.source && r.result.market_used.source !== 'booking'))
+  return (!basisFilter.value || valuationSourceCode(r) === basisFilter.value)
     && (!dateFrom.value || date >= dateFrom.value) && (!dateTo.value || date <= dateTo.value)
 }).sort((a, b) => (runTimestamp(b.created_at)?.getTime() || 0) - (runTimestamp(a.created_at)?.getTime() || 0) || b.id - a.id))
 const selectionWarnings = computed(() => runSelectionWarnings(selectionDetails.value.length === 2 ? selectionDetails.value : selectedRuns.value))
@@ -187,7 +188,7 @@ const percent = v => `${(v * 100).toFixed(2)}%`
 const signed = (v, n = 2) => `${v >= 0 ? '+' : ''}${v.toFixed(n)}`
 const dateTime = v => runTimestamp(v)?.toLocaleString('fr-FR') || '—'
 const dealReference = id => deals.value.find(d => d.id === id)?.reference || `Deal ${id}`
-const marketLabel = m => `${m?.source === 'booking' ? 'Paramètres du booking' : m?.source ? 'Marché actualisé' : 'Source non renseignée'} · ${m?.model || 'Modèle non renseigné'}`
+const marketLabel = m => `${valuationSourceLabel(m?.source || 'unknown')} · ${m?.model || 'Modèle non renseigné'}`
 async function perform(label, action) {
   if (busy.value) return
   busy.value = true; error.value = ''; phase.value = label; seconds.value = 0

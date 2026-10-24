@@ -58,9 +58,16 @@ CALENDRIER = {"OBS": {"start_date": STRIKE.isoformat(),
 
 
 def _sous_jacent(skew: float = 0.0) -> dict:
-    return {"name": "SX5E", "ticker": "^STOXX50E", "sigma": 0.20, "q": 0.03,
+    underlying = {"name": "SX5E", "ticker": "^STOXX50E", "sigma": 0.20, "q": 0.03,
             "skew": skew, "curvature": 0.0,
             "rho_h": -0.7, "v0": 0.04, "kappa": 2.0, "theta_h": 0.04, "xi": 0.5}
+    if skew:
+        # C17 refuses the old unbounded polynomial. Use an admissible explicit
+        # SSVI target while retaining the financial skew/forward-start tests.
+        underlying['vol_surface'] = dict(version=1,profile='custom',mode='manual',
+            rho=-.75 if skew < 0 else .75,eta=min(1.4,abs(skew)*4),shape_scale=.04,
+            max_expiry=5,atm_nodes=[[.25,.2],[1,.2],[3,.2],[5,.2]])
+    return underlying
 
 
 def _produit(**over) -> InLifeProduct:
@@ -158,7 +165,9 @@ def _prix(strike_set_t=None, sigma: float = 0.20, model: str = "constant",
           skew: float = 0.0, T: float = 3.0007) -> float:
     u = _sous_jacent(skew)
     u["sigma"] = sigma
-    return run_mc(_compile(), [u], [[1.0]], 0.03, T, 40000, model, seed=42,
+    from backend.app.core.payscript.parser import effective_T_max
+    compiled = _compile()
+    return run_mc(compiled, [u], [[1.0]], 0.03, effective_T_max(compiled,T), 40000, model, seed=42,
                   user_params={}, strike_set_t=strike_set_t)["price"]
 
 

@@ -431,7 +431,7 @@
           </div>
         </div>
 
-        <div v-if="isDealOwner" class="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
+        <div v-if="canPrepareAmendment" class="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
           <select v-model="amendmentForm.field_name" class="select text-xs"
                   @change="onAmendmentFieldChange">
             <option value="nominal">Nominal</option>
@@ -440,7 +440,11 @@
             <option value="payment_date">Date de paiement</option>
             <option value="commercial_attribution">Attribution commerciale</option>
           </select>
-          <input v-if="amendmentForm.field_name !== 'commercial_attribution'"
+          <select v-if="amendmentForm.field_name === 'contrepartie'" v-model="amendmentForm.new_value" class="select text-xs">
+            <option value="">— Nouvelle contrepartie juridique —</option>
+            <option v-for="item in amendmentCounterparties" :key="item.id" :value="item.id">{{ item.name }}</option>
+          </select>
+          <input v-else-if="amendmentForm.field_name !== 'commercial_attribution'"
                  v-model="amendmentForm.new_value" class="input text-xs"
                  placeholder="Nouvelle valeur" />
           <div v-else class="sm:col-span-3 grid grid-cols-1 sm:grid-cols-4 gap-2">
@@ -494,6 +498,11 @@
                 {{ request.status }} · base v{{ request.base_contract_version }}
               </span>
               <div class="text-[10px] text-slate-600 mt-0.5">{{ request.reason }}</div>
+              <div v-if="request.credit_check" class="text-[10px] text-slate-500 mt-1">
+                Contrôle crédit à l’application : {{ creditDecisionLabel(request.credit_check.decision?.status) }}
+                · v{{ request.credit_check.to_contract_version }}
+                <span v-if="request.credit_check.measurement_status === 'MISSING_DATA'"> · mesures incomplètes</span>
+              </div>
             </div>
             <div v-if="canCheck(request)" class="flex gap-1 shrink-0">
               <button v-if="request.status === 'PENDING'" class="btn-secondary text-[10px] px-2 py-1"
@@ -598,6 +607,7 @@
               </tr>
             </thead>
             <tbody>
+              <tr v-if="calendarError"><td colspan="20" class="text-xs text-red-600 py-2" role="alert">{{ calendarError }}</td></tr>
               <tr v-if="!previewEvents.length">
                 <td :colspan="4 + store.underlyings.length + 1"
                   class="py-6 text-center text-slate-600 italic">
@@ -700,6 +710,7 @@ const savingEventId = ref(null)
 const saveMsg = ref('')
 const auditResult = ref('')
 const amendmentForm = reactive({ field_name: 'nominal', new_value: '', reason: '' })
+const amendmentCounterparties = ref([])
 const commercialAmendment = reactive({
   client_id: null, mandate_id: null, opportunity_id: null,
   primary_affiliation_id: null,
@@ -744,6 +755,8 @@ function attributionLabel(snapshot) {
     snapshot.opportunity?.reference, snapshot.contact?.name].filter(Boolean).join(' · ') || '—'
 }
 const isDealOwner = computed(() => deal.value?.user_id === authStore.user?.id)
+const canPrepareAmendment = computed(() => !!deal.value && (authStore.user?.installation
+  ? authStore.user.capabilities?.includes('operations.prepare') === true : isDealOwner.value))
 const fixingEvent = computed(() => deal.value?.events?.find(
   event => event.id === fixingEventId.value) ?? null)
 const autoExceptionStatuses = new Set([
@@ -774,7 +787,7 @@ const pricingObsTimes = computed(() => {
 // L'implémentation locale devinait la date de strike comme « value date moins
 // deux jours » et ancrait tout dessus — faux dès que les deux dates diffèrent,
 // et sans rapport avec l'axe du moteur en cours de vie.
-const { closesPassees, previewEvents } = useObservationPreview(
+const { closesPassees, previewEvents, calendarError } = useObservationPreview(
   store,
   () => store.globalParams.strike_date || store.globalParams.value_date || today,
   () => store.globalParams.deal_ccy || 'EUR',
@@ -951,7 +964,7 @@ function canValidateFixing(ev) {
 
 function canResolveAutoException(ev) {
   return deal.value?.fixing_policy === 'AUTO_YAHOO' &&
-    (isDealOwner.value || authStore.user?.role === 'admin') &&
+    (isDealOwner.value || authStore.canAdministerOrganization) &&
     ev.event_date <= today && autoExceptionStatuses.has(ev.fixing_status)
 }
 
@@ -1125,18 +1138,29 @@ function amendmentStatusClass(status) {
 }
 
 function canCheck(request) {
+  const strict = request.field_name === 'commercial_attribution' || authStore.user?.amendment_four_eyes
+  if (authStore.user?.installation) {
+    return authStore.user.capabilities?.includes(strict ? 'operations.validate' : 'operations.prepare') === true
+      && (!strict || request.requested_by !== authStore.user.id)
+  }
   // Le contrôle à quatre yeux est une politique de déploiement (voir
   // core/workflow.py:amendment_four_eyes_enabled, remontée par /auth/me).
   // Désactivé — le cas par défaut sur un poste mono-opérateur — celui qui a
   // ouvert la demande peut la mener à son terme ; tout le reste (versionnement
   // contractuel, refus sur version périmée, piste d'audit) est inchangé.
   if (request.field_name === 'commercial_attribution') {
-    return ['checker', 'admin'].includes(authStore.user?.role)
+    return ['checker', 'admin', 'organization_admin'].includes(authStore.user?.role)
       && request.requested_by !== authStore.user?.id
   }
-  if (!authStore.user?.amendment_four_eyes) return isDealOwner.value
-  return ['checker', 'admin'].includes(authStore.user?.role) &&
+  if (!authStore.user?.amendment_four_eyes) return isDealOwner.value || authStore.canAdministerOrganization
+  return ['checker', 'admin', 'organization_admin'].includes(authStore.user?.role) &&
     request.requested_by !== authStore.user?.id
+}
+
+function creditDecisionLabel(status) {
+  return { NO_LIMIT: 'aucune limite CCR définie', OK: 'dans les limites', WARNING: 'seuil d’alerte',
+    LIMIT_REACHED: 'limite atteinte', BREACH: 'dépassement selon la politique configurée',
+    MISSING_DATA: 'mesure non qualifiée', NOT_APPLICABLE: 'non applicable' }[status] || status
 }
 
 function auditResultClass(result) {
@@ -1199,6 +1223,7 @@ async function validateProposal(proposal) {
 }
 
 async function createAmendment() {
+  if (!canPrepareAmendment.value) return
   const isCommercial = amendmentForm.field_name === 'commercial_attribution'
   if (!deal.value || (!isCommercial && !amendmentForm.new_value)
       || amendmentForm.reason.trim().length < 10) {
@@ -1208,7 +1233,9 @@ async function createAmendment() {
   const numeric = ['nominal', 'price_traded'].includes(amendmentForm.field_name)
   const value = isCommercial
     ? { ...commercialAmendment }
-    : numeric ? Number(amendmentForm.new_value) : amendmentForm.new_value
+    : amendmentForm.field_name === 'contrepartie'
+      ? { counterparty_id: Number(amendmentForm.new_value), ccr_netting_set_id: null }
+      : numeric ? Number(amendmentForm.new_value) : amendmentForm.new_value
   if (numeric && (!Number.isFinite(value) || value <= 0)) {
     showSaveMsg('⚠ La nouvelle valeur doit être strictement positive')
     return
@@ -1229,6 +1256,15 @@ async function createAmendment() {
 }
 
 async function onAmendmentFieldChange() {
+  amendmentForm.new_value = ''
+  if (amendmentForm.field_name === 'contrepartie') {
+    amendmentCounterparties.value = []
+    try {
+      const response = await apiFetch('/api/deals/counterparties')
+      if (response.ok) amendmentCounterparties.value = (await response.json()).filter(item => item.id !== deal.value?.counterparty_id)
+    } catch { showSaveMsg('⚠ Référentiel indisponible ; réessayez avant de soumettre.') }
+    return
+  }
   if (amendmentForm.field_name !== 'commercial_attribution') return
   Object.assign(commercialAmendment, {
     client_id: deal.value?.client_id ?? null,

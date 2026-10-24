@@ -569,7 +569,7 @@ def test_sigma_r_refits_the_curve_on_zcb():
 def test_sigma_r_runs_on_every_model(model):
     """No crash and a sane (positive, finite) price for every model with both
     sigma_r and a nonzero rho_rS active."""
-    params = [dict(CALL_PARAMS[0], rho_rS=0.3, skew=-0.1, curvature=0.05)]
+    params = [dict(CALL_PARAMS[0], rho_rS=0.3, skew=-0.01, curvature=0.01)]
     cs = parse_script(CALL_SCRIPT)
     res = run_mc(cs, params, CORR, r=0.03, T_max=2.0, N=2000, model=model, seed=42,
                  antithetic=True, sigma_r=0.015, user_params={'K': 1.0})
@@ -599,25 +599,20 @@ def test_a_r_zero_is_default_and_matches_abm():
     assert omitted['price'] == explicit['price']
 
 
-def test_hull_white_jensen_convexity_on_zcb():
-    """Mean-reversion doesn't remove the Jensen convexity effect: a ZCB's price
-    must still increase with sigma_r and match the deterministic price at
-    sigma_r=0, even with a_r > 0."""
+def test_hull_white_zero_coupon_matches_curve_within_sampling_error():
+    """The convexity shift cancels Jensen's effect on the fitted zero coupon.
+    Changing rate volatility changes sampling noise, not the input bond curve.
+    """
     cs = parse_script(ZCB_SIMPLE)
     r, T = 0.03, 5.0
-    # 8k CRN paths are enough to keep the three rounded prices strictly
-    # ordered with this fixed seed. 40k made this single invariant retain more
-    # than 1.4 GB because stochastic-rate and antithetic matrices coexist.
+    # Keep memory bounded while checking the antithetic estimator's own error.
     kw = dict(r=r, T_max=T, N=8000, model='constant', seed=42, antithetic=True, a_r=0.3)
     deterministic = math.exp(-r * T)
 
-    prices = []
     for sr in (0.0, 0.01, 0.02):
         res = run_mc(cs, CALL_PARAMS, CORR, sigma_r=sr, **kw)
-        prices.append(res['price'])
-
-    assert prices[0] == pytest.approx(deterministic, abs=1e-6)
-    assert all(prices[i] < prices[i + 1] for i in range(len(prices) - 1)), prices
+        standard_error = (res['ic95'][1] - res['ic95'][0]) / 3.92
+        assert abs(res['price'] - deterministic) <= 5 * standard_error + 1e-6
 
 
 def test_hull_white_stationary_variance():
@@ -640,7 +635,7 @@ def test_hull_white_stationary_variance():
 
 @pytest.mark.parametrize("model", ["constant", "heston", "sabr", "localvol"])
 def test_hull_white_runs_on_every_model(model):
-    params = [dict(CALL_PARAMS[0], rho_rS=0.3, skew=-0.1, curvature=0.05)]
+    params = [dict(CALL_PARAMS[0], rho_rS=0.3, skew=-0.01, curvature=0.01)]
     cs = parse_script(CALL_SCRIPT)
     res = run_mc(cs, params, CORR, r=0.03, T_max=2.0, N=2000, model=model, seed=42,
                  antithetic=True, sigma_r=0.015, a_r=0.3, user_params={'K': 1.0})

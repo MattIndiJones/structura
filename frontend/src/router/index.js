@@ -2,9 +2,11 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const routes = [
+  { path: '/account/security', component: () => import('../views/AccountSecurityView.vue'), meta: { title: 'Sécurité du compte' } },
+  { path: '/platform', component: () => import('../views/PlatformView.vue'), meta: { requiresPlatformAdmin: true, fixedViewport: true, title: 'Administration centrale' } },
   { path: '/consultation', component: () => import('../views/ConsultationView.vue'), meta: { public: true, title: 'Ouverture en consultation' } },
-  { path: '/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { title: 'Simulation entre agents' } },
-  { path: '/admin/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { requiresAdmin: true, title: 'Simulation entre agents' } },
+  { path: '/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { requiresTechnicalAdmin: true, fixedViewport: true, title: 'Simulation entre agents' } },
+  { path: '/admin/agent-workshop', component: () => import('../views/AgentWorkshopView.vue'), meta: { requiresTechnicalAdmin: true, fixedViewport: true, title: 'Simulation entre agents' } },
   { path: '/trading', component: () => import('../views/TradingView.vue'), meta: { title: 'Relations et exécutions', fixedViewport: true } },
   {
     path: '/structuring',
@@ -29,7 +31,7 @@ const routes = [
   {
     path: '/login',
     component: () => import('../views/LoginView.vue'),
-    meta: { public: true },
+    meta: { public: true, fixedViewport: true },
   },
   {
     path: '/',
@@ -80,6 +82,11 @@ const routes = [
     path: '/documentation',
     component: () => import('../views/DocumentationView.vue'),
     meta: { title: 'Documentation' },
+  },
+  {
+    path: '/rfq/:rfqId/booking',
+    component: () => import('../views/RfqBookingView.vue'),
+    meta: { title: 'Revue du booking RFQ', requiresBooking: true },
   },
   {
     path: '/booking',
@@ -166,7 +173,7 @@ const routes = [
   {
     path: '/rfq/recues',
     component: () => import('../views/RfqInboxView.vue'),
-    meta: { title: 'RFQ reçues · banque', fixedViewport: true },
+    meta: { title: 'RFQ reçues', fixedViewport: true },
   },
   {
     path: '/rfq/analyse',
@@ -201,7 +208,7 @@ const routes = [
   {
     path: '/admin/browse/:table?',
     component: () => import('../views/AdminBrowseView.vue'),
-    meta: { requiresAdmin: true, title: "Données de l'application" },
+    meta: { requiresTechnicalAdmin: true, title: "Données de l'application" },
   },
   {
     path: '/admin/users',
@@ -248,10 +255,18 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (to.meta.public) return true
   if (!auth.isAuthenticated) return '/login'
+  if (auth.user?.password_change_required && to.path !== '/account/security') return '/account/security'
   // Restore user profile if missing (e.g. page refresh)
   if (!auth.user) await auth.fetchMe()
   if (!auth.isAuthenticated) return '/login'
-  if (to.meta.requiresAdmin && !auth.isAdmin) return '/'
+  if (auth.user?.password_change_required && to.path !== '/account/security') return '/account/security'
+  if (auth.isPlatformAdmin && !['/platform', '/admin', '/agent-workshop', '/admin/agent-workshop', '/account/security'].includes(to.path)) return '/platform'
+  if (auth.isPlatformAdmin && to.path === '/admin') return '/platform'
+  if (to.meta.requiresPlatformAdmin && !auth.isPlatformAdmin) return '/'
+  if ((to.path.includes('pricer') || to.path.startsWith('/structuring/')) && !auth.canPrice) return '/'
+  if (to.meta.requiresBooking && !auth.canBook) return '/'
+  if (to.meta.requiresAdmin && !auth.canAdministerOrganization) return '/'
+  if (to.meta.requiresTechnicalAdmin && !(to.path.includes('agent-workshop') ? auth.canManageSimulation : auth.isAdmin)) return '/'
 
   // Une déclinaison modifiée et non enregistrée se perd dès qu'on quitte
   // l'écran. La barre de déclinaisons prévenait pour SES propres boutons, donc

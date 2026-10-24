@@ -12,7 +12,10 @@ def consultation_mode() -> bool:
 
 
 def data_path(*parts: str) -> Path:
-    return Path(os.environ.get("STRUCTURA_DATA_DIR", DEFAULT_DATA_DIR)).resolve().joinpath(*parts)
+    from .hybrid.config import current_config
+    config = current_config()
+    root = config.data_dir if config else Path(os.environ.get("STRUCTURA_DATA_DIR", DEFAULT_DATA_DIR))
+    return root.resolve().joinpath(*parts)
 
 
 def business_now() -> datetime:

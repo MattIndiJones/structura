@@ -1,0 +1,457 @@
+{
+  "date": "2026-10-21",
+  "timezone": "Europe/Berlin",
+  "workstream": "C09",
+  "status": "VALIDATED_LOCALLY",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "baseline": "C:/Users/phili/AppData/Local/Temp/structura-c09-baseline-xp9canoh/baseline.json",
+  "authorization": {
+    "code_and_targeted_tests": true,
+    "commit": false,
+    "push": false,
+    "business_data_mutation": false
+  },
+  "scope": [
+    "M05-01",
+    "M05-08",
+    "M08-03"
+  ],
+  "before": {
+    "M05-01": {
+      "parsed": true,
+      "price": 1.0,
+      "expected": 1.08
+    },
+    "M05-08": [
+      {
+        "label": "Bloc de maturité",
+        "level": "ok",
+        "detail": "Présent."
+      },
+      {
+        "label": "Coupon à mémoire",
+        "level": "ok",
+        "detail": "Mémoire mise à jour après versement."
+      }
+    ],
+    "M08-03": {
+      "nonlinear_coupon_accepted": "SUPPORTED"
+    }
+  },
+  "after": {
+    "M05-01": {
+      "parsed": false,
+      "error": "Ligne 3: indentation inattendue (4 espaces ; 2 attendus dans ce bloc)."
+    },
+    "M05-08": {
+      "checks": [
+        {
+          "label": "Bloc de maturité",
+          "level": "ok",
+          "detail": "Bloc repéré ; son remboursement reste à vérifier sur les trajectoires."
+        },
+        {
+          "label": "Coupon à mémoire",
+          "level": "attention",
+          "detail": "Affectation MEMO repérée : indicateur structurel seul, sans preuve de rattrapage ni de remise à zéro."
+        },
+        {
+          "label": "Pricing de contrôle",
+          "level": "info",
+          "detail": "Non exécuté : renseignez la maturité et les dates des calendriers CONSTAT dans Economics."
+        }
+      ],
+      "payoff_qualification": {
+        "status": "STRUCTURAL_ONLY",
+        "source_hash": "b0e957ad9480ed1c8bb6a41cb3ec56dca319fa3dcb1282519360d1240b6c2fe2",
+        "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+      }
+    },
+    "M08-03": {
+      "product_family": "autocall_athena",
+      "status": "UNSUPPORTED",
+      "label": "autocall_athena",
+      "reason": "Script autocall_athena modifié ou non approuvé ; qualification du payoff requise."
+    }
+  },
+  "criterion_evidence": {
+    "M05-01": [
+      "backend/tests/test_payoff_qualification.py::test_unexpected_indent_never_discards_an_instruction",
+      "backend/tests/test_payoff_qualification.py::test_empty_blocks_tabs_and_bad_dedents_are_explicit_errors",
+      "backend/tests/test_payoff_qualification.py::test_valid_coupon_is_paid_and_stop_cancels_maturity_flows"
+    ],
+    "M05-08": [
+      "backend/tests/test_payoff_qualification.py::test_assistant_does_not_qualify_unused_or_missing_memory",
+      "backend/tests/test_payoff_qualification.py::test_assistant_recognizes_only_the_tested_memory_source",
+      "backend/tests/test_payoff_qualification.py::test_memory_panel_has_known_missed_catchup_reset_unpaid_and_recall_cashflows",
+      "frontend/src/components/ScriptAssistantModal.test.js"
+    ],
+    "M08-03": [
+      "backend/tests/test_payoff_qualification.py::test_economic_change_invalidates_source_approval_even_with_identical_declarations",
+      "backend/tests/test_payoff_qualification.py::test_modified_athena_is_refused_by_request_and_existing_candidate",
+      "backend/tests/test_payoff_qualification.py::test_diagnostic_requires_compiled_and_input_identity",
+      "backend/tests/test_payoff_qualification.py::test_reference_failure_cannot_keep_a_green_approval",
+      "backend/tests/test_payoff_qualification.py::test_nonfinite_reference_price_is_never_qualified",
+      "backend/tests/test_product_optimizer_validation.py",
+      "backend/tests/test_product_optimizer_payoffs.py"
+    ]
+  },
+  "backend": {
+    "distinct_passed": 845,
+    "distinct_skipped": 1,
+    "files": 19,
+    "new_c09_cases": 48,
+    "runs": [
+      {
+        "report": ".runtime/diagnostic-acceptance/c09-2026-10-21/backend.xml",
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "1",
+        "tests": "845",
+        "time": "153.908",
+        "timestamp": "2026-10-21T10:21:19.636131+02:00",
+        "hostname": "PC-Bureau"
+      },
+      {
+        "report": ".runtime/diagnostic-acceptance/c09-2026-10-21/backend-complement.xml",
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "63",
+        "time": "5.581",
+        "timestamp": "2026-10-21T10:23:19.770369+02:00",
+        "hostname": "PC-Bureau"
+      }
+    ],
+    "skip_reason": "EXTRA_EXAMPLES empty parameter set; no live LLM call",
+    "command_manifest": ".runtime/diagnostic-acceptance/c09-2026-10-21/backend-command.json"
+  },
+  "frontend": {
+    "passed": 546,
+    "files": 68,
+    "new_c09_cases": 5,
+    "build": "PASS",
+    "vite_seconds": 11.98,
+    "output_dir": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c09-build-fyy7hurz",
+    "log": ".runtime/diagnostic-acceptance/c09-2026-10-21/frontend-build.log"
+  },
+  "reference_panels": {
+    "total_cases": 552,
+    "families": [
+      {
+        "status": "REFERENCE_PATHS_PASSED",
+        "family": "autocall_athena",
+        "source_hash": "e072633239f8e58d37ee96ec7bd716a76c7152fff8d5de7f141a6d97a104f9eb",
+        "panel_version": "C09-v1",
+        "reference_panel_hash": "aac377c785a93baff011bbd4560678adab906e77ed5074df2a9cc9dd127d1d28",
+        "case_count": 78,
+        "parameter_affinity": {
+          "coupon": "AFFINE"
+        },
+        "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+      },
+      {
+        "status": "REFERENCE_PATHS_PASSED",
+        "family": "phoenix",
+        "source_hash": "f7e3ef898dd55e1491279e486714bb8e10c3007e118e3acc1989de9c85a2ccab",
+        "panel_version": "C09-v1",
+        "reference_panel_hash": "5870449607ab7742f89ef5e2243b6d1a47453bafa54753e30535f98649602e5c",
+        "case_count": 78,
+        "parameter_affinity": {
+          "coupon": "AFFINE"
+        },
+        "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+      },
+      {
+        "status": "REFERENCE_PATHS_PASSED",
+        "family": "phoenix_memoire",
+        "source_hash": "8a33f01e5db1a6824ccb57e427f7797da294b4050435f152c673569633af6d60",
+        "panel_version": "C09-v1",
+        "reference_panel_hash": "1dd5e899f62939e29292cc83ef846beb8f564bec7cbcf10f6568a67e0a9a429f",
+        "case_count": 78,
+        "parameter_affinity": {
+          "coupon": "AFFINE"
+        },
+        "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+      },
+      {
+        "status": "REFERENCE_PATHS_PASSED",
+        "family": "autocall_barriere_degressive",
+        "source_hash": "0b50f698da4235ee42159b9b874bb79dcecdb78d918ccca1242dfef6c1615474",
+        "panel_version": "C09-v1",
+        "reference_panel_hash": "836ad8e8e271ce9fc87d266d6bfc768ce319a5430a643c1cdb898f863963c524",
+        "case_count": 78,
+        "parameter_affinity": {
+          "coupon": "AFFINE"
+        },
+        "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+      },
+      {
+        "status": "REFERENCE_PATHS_PASSED",
+        "family": "reverse_convertible",
+        "source_hash": "0f7b287e28377314587981c7fd5eea6f6d7621812ecc789ab3a6c2c04ad2ec7e",
+        "panel_version": "C09-v1",
+        "reference_panel_hash": "06ad2d2d7c6ef845d90dbce1911da937fa35296eec2da0b6d97a0c896eafe24c",
+        "case_count": 54,
+        "parameter_affinity": {
+          "coupon": "AFFINE"
+        },
+        "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+      },
+      {
+        "status": "REFERENCE_PATHS_PASSED",
+        "family": "capital_garanti",
+        "source_hash": "8e6b78e68e0789ca8b9d1b3ad0c440f57201405aeafdd0ab82f25ab5828cf651",
+        "panel_version": "C09-v1",
+        "reference_panel_hash": "815eb8c6a3926eac5bc11d9f1926d4139cd8194303b2848d6bb9c90a211e58c9",
+        "case_count": 54,
+        "parameter_affinity": {
+          "participation": "AFFINE"
+        },
+        "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+      },
+      {
+        "status": "REFERENCE_PATHS_PASSED",
+        "family": "booster",
+        "source_hash": "2ee5adb2581170bc3f4949cc55576e6dc89e61bfbacb980c9303e1380460e787",
+        "panel_version": "C09-v1",
+        "reference_panel_hash": "6cb4a39a37bb3318c4e7e3605c4e5b57c3511808ea61d0bc665d0c144eb95ae6",
+        "case_count": 54,
+        "parameter_affinity": {
+          "participation": "PIECEWISE_AFFINE",
+          "redemption_cap": "PIECEWISE_AFFINE"
+        },
+        "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+      },
+      {
+        "status": "REFERENCE_PATHS_PASSED",
+        "family": "autocall_gear_put",
+        "source_hash": "24eab56a2f920661dc44c1cbae44f3356c09916c1065313f526b2e7736003e3b",
+        "panel_version": "C09-v1",
+        "reference_panel_hash": "8874f62d9952ee29ba2a4ac22017b294b43b2b015f82221dc3dd6499f29724fc",
+        "case_count": 78,
+        "parameter_affinity": {
+          "coupon": "AFFINE"
+        },
+        "scope": "Logique des flux sur trajectoires de référence et grille synthétique ; ne valide ni les termes du produit, ni les calendriers de production, ni le modèle de pricing."
+      }
+    ],
+    "artifact": ".runtime/diagnostic-acceptance/c09-2026-10-21/reference-panels.json",
+    "sha256": "3812d7fdd2863db48d05992036b0b7cc05cf3890fb51e1c34837709ddfcc6769"
+  },
+  "limits": [
+    "No full backend suite",
+    "No manual graphical acceptance",
+    "Reference panel uses explicit synthetic observation grid; not stochastic pricing certification",
+    "T03 C14 chronology remains open",
+    "T15 C19 archives and C20 budgets remain open",
+    "Changing source requires explicit review of pinned approval and reference formulas; formatting changes also require requalification except normalized line endings and final newlines",
+    "AI provenance records the adopted source; subsequent changes retain modified_after_adoption and do not inherit its qualification",
+    "No production qualification, business-data migration, server startup, commit or push"
+  ],
+  "preservation": {
+    "existing_files_removed": [],
+    "protected_prior_reports_and_evidence_and_dist_files": 121,
+    "protected_hashes": {
+      "frontend/dist/assets/PersonDetailView-CkzcL7XY.js": "2984ee2fa335ab5eba0f2cba7b60c06fd8e7b9e484bf7e3a67ecfde036848dd5",
+      "frontend/dist/assets/CcrView-D5_wUVMa.js": "365b5d8c55280001a1668637439ae3a0d6bfafc8703a56618a295669b3c0a272",
+      "frontend/dist/assets/OptimizerCurveInput-73p7R-8b.js": "229e71c891ba1e60584823fd2ebc5f73d736783ca0c0b9868064968dff743d5d",
+      "frontend/dist/assets/AiWorkbench-DnkO_jXH.js": "bf3beda122699d5b984387e49f78ca7b872157d2999332276bd12e280c37b7e7",
+      "frontend/dist/assets/RiskManagementView-Bu-jRmb5.js": "231b38981657404ad765d2b807d6e0cf0657a466bc149925cd1387b27418c8d6",
+      "frontend/dist/assets/PersonFormModal-Dd41PRVM.js": "8749aafafd736ae392f43828c2499f5c4e80c424786c300f7869ee8ecb0e442b",
+      "docs/audits/remediation-lot-0-2026-10-20/C01_VALIDATION.json": "25f2fd246075e04ddc084be48ffc44ec105aea4740b4e678e0d46f65e702ed44",
+      "frontend/dist/assets/ProductModelsView-U8TRYY8f.js": "272dfc496622b69dc822ff0f2db054a6dc56d8d56cdd4ec8dde62de934b22d7d",
+      "frontend/dist/assets/StructuringView-DJNd9Clf.js": "d788b24f3b45522fc5f193b60f1966545318d9d1924197cb95c737716cc19fd2",
+      "frontend/dist/assets/AmcView--JjgOD99.js": "2ed98f02b3e20d4699a00f4bd02356d4263e77511ee47a2d1127976de270ea9b",
+      "frontend/dist/assets/useDataFilter-B-YCu5bf.js": "178ce4eafe0a51619fa817387695c132f430bdbd82af15a19c9e10730ee13886",
+      "frontend/dist/assets/RfqView-DO9iKyz4.css": "399d4e876f539f8908ba9f74f8d655d3a53dff2a56eb745223412652588114f9",
+      "frontend/dist/assets/AdminUnderlyingsView-CZvqmH4i.js": "84ca41638135ae014810d4824fd3dbab7b8f379304e62dc1ac09442cc85aa654",
+      "frontend/dist/assets/ValoExplainView-Lqi_99IG.js": "90abcc26460632753d9bc17d2a3388ce133caf66b4cf3f40c14169e378975f1c",
+      "frontend/dist/assets/index-DWuKu8Lz.css": "d79e9d1b8cad4832187db9b636bd7295f65602b612a29f91732496aee525021f",
+      "frontend/dist/assets/RfqNetworkPrototypeView-COi6SKVI.js": "b322d18a078e08057e9da506138ee46ebea8b4a2952c9b1330b92a08eb7b8ef7",
+      "docs/audits/REMEDIATION_C04_2026-10-20.md": "61ce36835ce4da23bc4f119691f1494a6c4de50ce582df8a96b665c3c1be6c8e",
+      "docs/audits/remediation-lot-0-2026-10-20/C07_VALIDATION.json": "213cecd86630d21b2d08c0b20a2a423bc9398677900c6e7cbe2ceb63a0f0f689",
+      "frontend/dist/assets/PriceComparisonPanel-clTrsS_4.js": "4f8176facea5d7d365bd2173c0a846d24283628f28b84372291bca6f4ff2d3ad",
+      "frontend/dist/assets/SensitiveValue-DLQcP5OO.css": "07dc182def4f1462b498ce322c1baa850765b53c3035aa70f2ea88b74b99cd9e",
+      "frontend/dist/assets/RiskManagementView-pnATlip4.css": "ab6603cde30a856f8d9ee981f31ba010c7aa5eac042e5c93dd265f0964225a1e",
+      "frontend/dist/index.html": "fe129fbb8a10a746654394863c8dbcdfe3434641daa21c5eeffa073ac8c7d074",
+      "frontend/dist/assets/ProductsView-CMlaVN1C.js": "c2212819729ebe51273783e036dabea8bbe25869726ef75b877af730fda5c0e9",
+      "docs/audits/REMEDIATION_C07_2026-10-21.md": "6279ff8949e64e7a925e63cc3f6f13c7eb159e23da4143396321ffcabf7e4f23",
+      "frontend/dist/assets/CcrResult-BRQhfOfQ.css": "65c5e0bc8c9d14067d81918f5936332d1f487adcd9ba88bcc7388c739f6529a7",
+      "frontend/dist/assets/ValoExplainView-FTRlH_th.css": "f5a8ab88a5902514e229d9c76c32308c598eeda8ff116dd9d11bec7182d045b8",
+      "frontend/dist/assets/clients-gqMaz2dX.js": "bba6e1965d97f7531c0d1fce53717c6c2da791b243a9fdec47488430f3f62ec1",
+      "frontend/dist/assets/ProductModelsView-pRSBGExg.css": "4a6498178e2def99108f7e6f042f33f43d281bfb069148abdbaaeec7a083581f",
+      "frontend/dist/assets/PricerView-Cp7fz82s.css": "e70228764ca3cf656e047e9a29f5df67f6167486148c45f80b3ac9b076f084f9",
+      "frontend/dist/assets/ProductOptimizerView-BuJXDWnO.js": "cd8de88207e5aee8b072a086afb0c41033f295d1a6b9bc45cc329ed9b6675a7d",
+      "frontend/dist/assets/SensitiveValue-DBikijxS.js": "534fbcdd16cd65d51f888c9e6d9cbf408d1b93b5c6fee63ccc6f4ec567c37ac9",
+      "frontend/dist/assets/ClientDetailView-BNIPn8at.css": "c483f0802a1106b86803855658c4c21d7fa48d8cc48b5bea23e7d36a48d17fa2",
+      "frontend/dist/assets/barriers-ddfFbG7b.css": "6757f737f52a65b9ca59f786e183c17c668e1fa8552ebbdd8fceb3dae752f3d6",
+      "frontend/dist/assets/RfqNetworkPrototypeView-dPDR1DqT.css": "d968f18d0c1a09e819ab85e47488b73fe09ec90dd7e75ed55473e3cb62c20870",
+      "frontend/dist/assets/AdminMarketDataView-UYdSLDo7.js": "a98cd84ca48c2aeb2f3456344d8f451206f3ade85631e75653c8d87ed3e21c3c",
+      "frontend/dist/assets/AdminRfqRelationsView-Dx7e9ZEj.js": "99e300f54db7ce3c6fa9625de8b2514b5325bc172da01fa1c5bec1bb66c45444",
+      "frontend/dist/assets/OptimizerCurveInput-C--yjPKe.css": "0b6404a3571af69c734dd8b0a3cea5aaa4de0d4e7affe673c982c24d9c9a7319",
+      "frontend/dist/assets/format-DTcMLInZ.js": "c6931c4973537a017c833597dec514c97995db537272ef2c3e3fed9badf8cd97",
+      "frontend/dist/assets/AdminEntitiesView-CVk6J4ux.js": "86b5c7a882d2207390e2d68f7ffbe3b03afe2f4ecb99b1cc78c6ab6f3f560953",
+      "frontend/dist/assets/deals-SqrTdfza.js": "55f677b6767d9ad1f95ae80400f27c5c1368fb7770a26d0a1d7b2c358c2f96b1",
+      "frontend/dist/assets/payoffFamilies-DTB3SPz5.js": "f9d0ea9b9baed1e684c18fbc566e80b12fced0e3802133f3c5eededaa59396ca",
+      "frontend/dist/assets/PlatformView-wDAygylX.css": "faa633a932ed2652bc3b3e29ca00959b92f58e042419b930a461a1aa516da5d2",
+      "frontend/dist/assets/ProductOptimizerView-BOZV0F5Y.css": "40bbe91f3c5c6219c91f0c53ee098bf7f11c6b274ef571ff4593a3f5fb015873",
+      "docs/audits/remediation-lot-0-2026-10-20/C04_VALIDATION.json": "ac81e17557ab96df92f324fd34cf3f1f7139205bae0cd8ccd5ecff374df6b725",
+      "frontend/dist/assets/AdminBrowseView-G37zB0c-.js": "be3b838c0be8e7fe9ec4b676eebdae95e973fc0749d6d32a0a67f7cc73008768",
+      "frontend/dist/assets/optimizerResearch-pl8asrxn.js": "03f2360206f8094ee862de2e7284b7f7bd5824185ffd4763089a687ef9498a16",
+      "frontend/dist/assets/AiWorkbench-B1FWlsOO.css": "72cea1a49ce450de6fb3791a5d9c09d1a5fbbbae18e4592fc27d10719ff0d461",
+      "frontend/dist/assets/TradingView-BmP02Ka7.css": "a6dd64512450134d7c075cf56210b4ba3d3bc2f26c7599ed744aa4e58bec16d8",
+      "docs/audits/remediation-lot-0-2026-10-20/C02_VALIDATION.json": "d81bc13cd0fa0354abeb50f9deaf75ee6d92039cc4ffb6fb92c295a49c9912c7",
+      "frontend/dist/assets/ClientDetailView-Cslxz3Jn.js": "92e757ee82eb9b8232cdff34507e19049ffd22ffdb6921723d0b114c25103889",
+      "frontend/dist/assets/AgentWorkshopView-B2skLHY1.js": "8317fdb570e86c94a4be293cae1c75f473a18ba3d64fbf0a32aa8b7afa78808d",
+      "frontend/dist/tp_logo.png": "f8b5d65aeb603c497dfd6e3e94a0677505cd6769b36c48cb4ef277621d34d493",
+      "frontend/dist/assets/ProductsView-BkF9Cl2E.css": "1f4bfcc67b75082f019fd87915172b3b341594e9765dbec8ca1cad515e6b5de4",
+      "frontend/dist/assets/AdminUatGeneratorView-Bh3nE79b.js": "c80479a4da3e2ec94a73274c9e44b101c6efe242bfa8f906ee472fcd780c2060",
+      "frontend/dist/assets/AdminCounterpartiesView-BpJqy0yT.js": "a13a1181dd1e777324e73482f58b77e1fcbb021fa7c53025ac59cc9104158299",
+      "frontend/dist/assets/LoadingSpinner-HxxSpFuy.js": "ceac86fbf2589eba024dfc50f9b4480051e272d85f639d9210f949a46a0c16f3",
+      "frontend/dist/assets/CyclePanel-D-kR4Vhu.js": "26120b5beaed866dfe2d9cf560a501cccdbe9d371cde84263aacfd60722aabbc",
+      "frontend/dist/assets/CcrView-DmIB6yQA.css": "4b767f603e48417e318a1d2c1c73738fa818e87774cba9f5dba6e43a9b60a17c",
+      "frontend/dist/assets/HomeView-D2MHLdLe.js": "ad3e79763a8efecd3eb3475fc23f9f5f175a675c831e502ec89e4ba5ac651b71",
+      "frontend/dist/assets/TradingView-C-VadlX6.js": "f9c27972ddb4ba227e590cfb8df5f90d1ed92042bee18e296bdae6fd3c3cbd27",
+      "frontend/dist/assets/OpportunityFormModal-Dj4Y90aS.js": "d5c725bc469d5956fdf1bf42fc9f67d69f48928f0d752bb664d68c592efffcc7",
+      "docs/audits/REMEDIATION_C01_2026-10-20.md": "dd77735dec8a3e7d040e24a94ab56cdead0fc19f1295ae7e107665b9ab958efd",
+      "frontend/dist/assets/OpportunityDetailView-DHrK5hJu.js": "42b064fa539bef3211806541cbc0e8adec63c1f5ee6170bec1055c0babd589de",
+      "frontend/dist/assets/LoginView-C8ibtsfR.js": "59181e434e807c35c442fe86800d990334b3bfccf90d702febec6c9e334e502d",
+      "frontend/dist/assets/RfqView-BTAx8nsM.js": "94f7b443671a368f9864f60fb068ad9f9c53e4bad429291dbcfb8a8131d1bcbd",
+      "frontend/dist/assets/DocumentationView-Bfu9PK7S.js": "e0217cc20afc4273207087cbbea93013431b7979a71186f156a2fe64934f9837",
+      "docs/audits/remediation-lot-0-2026-10-20/C05_VALIDATION.json": "2c8547381c2c1b07295bfa70acb106249e31a61b7cd116ec6578d426d6eab4b5",
+      "docs/audits/REMEDIATION_C02_2026-10-20.md": "eebedc54ed0df7dc0d72c918b833e77cbcb03b81db5d3ddcfdb9c647a639c438",
+      "frontend/dist/assets/BookingView-CnEAOwZ7.css": "7c3b041d04509344e795ca54cc9453b5a553ec00e742fb2441c86cc30d523d83",
+      "frontend/dist/assets/theme-CFwEg9ph.js": "90d32572bdbf5d8ed6d0ee650cf2665a2dcff3756348a707c2addf90d8b7e095",
+      "frontend/dist/assets/DealValuationsView-AuENCUGE.js": "817fe28b0fafbd0c90ee48ed73894a300394609c816cae08b7be2e7a7b4d9395",
+      "docs/audits/remediation-lot-0-2026-10-20/C06_VALIDATION.json": "3be5792bb7dfa0e05479f862c6977ce6c94df5a826bcb4ee6e6f3eb8f60e8f06",
+      "frontend/dist/assets/optimizerPayoff-BGSAZFLi.js": "cdbfec066729db91d1abb47214410e7fd4475d6038c3133424f1b634f519398b",
+      "frontend/dist/assets/RfqInboxView-CwIzgj87.css": "0ad2d98205fda962492fbada210efaec712d43594afd457400862d2c7398fbde",
+      "frontend/dist/assets/EmptyState-CobusW1W.js": "ff589437ff152cb94865a90d34e006dc9a3373f69b4881564a71de6fbf71c5b9",
+      "docs/audits/remediation-lot-0-2026-10-20/C03_VALIDATION.json": "0e291f783c1b7c2219650684edc1e6c420ae3091be4245fdde177594ce2a2542",
+      "frontend/dist/assets/index-Bx2vCey3.js": "0862a5e36f8809e1d6a57f2d470932220dcac9cf9d283a371e4f219056a92369",
+      "frontend/dist/assets/ReinvestView-Dgtng-4q.js": "68a0be0296fb7d5e2db74eac0ed958c8a8373e9e03ef00c2d00caa4a1cb8a37b",
+      "frontend/dist/assets/OptimizerResearchListView-Cd0qwvP7.js": "42211ab81eedbf667d35589ee8a2f86cad469d11c1f24fd4a6febb08886bfff2",
+      "frontend/dist/assets/optimizerPayoff-BzMAuHbl.css": "72e99454acc0bf207c8b4825b2a2f95138e4a65a47901fd0562e5b9c85941107",
+      "frontend/dist/assets/HelpTip-BevNG-Cz.js": "02ba1a1470213e6f6a84275033fe7f414e7966c25755344b6b796c88c2d58e7a",
+      "frontend/dist/assets/useSensitiveChart-CLCGRjBs.js": "83d29dd9a318b2c0a56a1c3f9a8fcd5238cb9fb9d14e591135ba4fd19d158ab5",
+      "frontend/dist/assets/barriers-DEXimm7X.js": "aefdf34a67147a0880c05871bc446970468def3f0ab97415490961cbda23c2d4",
+      "frontend/dist/assets/ClientsView-8CTO4oKR.js": "7656f11223aae7dcfded11ab2dae9ab905215a46f7d0af2528380e09961a4b67",
+      "frontend/dist/assets/FluxDecomposition-BFDXMHck.css": "47a10347b120a1d5db91d23f35cf1a73754ac59554894d91fc55dde14118f8ea",
+      "frontend/dist/assets/ScriptsView-C8JJsEv2.js": "d1a50f9d0a2376b5592cc8e5eee5c15ddafc2d6ad6c5a95df0239583304f46e6",
+      "frontend/dist/assets/PlatformView-CdsgkT05.js": "cf1911a540951d77ee88e59c879a8f60ad00f3b0c158abba3097e3edf76bbd97",
+      "frontend/dist/assets/OptimizerResultsView-CjtVN0Es.js": "aeb4faf39fa1e556e9f37e18c9a9bd2eeebb8dbdbcb5c7371b7acdad9ec87629",
+      "docs/audits/remediation-lot-0-2026-10-20/C03_D01_VALIDATION.json": "f2866ba7d2170e3da2216dc815a16dc2b35aa263c40ad74f3fb6ca2408b5abcb",
+      "frontend/dist/assets/DealValuationsView-BZxnp1_P.css": "74ff95d66b5d9a0c2c3330cc5783d28f248d19fd5511a8baca877d541346388d",
+      "frontend/dist/assets/FifoView-Df8uZGhA.js": "970918d8ac8e50170b67e89f360b2bdc9c5d35f0ff28b7ac1e162b50009d3c95",
+      "frontend/dist/assets/dealEvents-BZIEselI.js": "8334117cd2686d25c146c2209455ef351f7f135863f55ccaecbe92245f32cb19",
+      "frontend/dist/assets/AmcView-n7Ic_tWG.css": "50a4ede252fe5cbc173d154c0ed7f1ef6347da972c2cfb65cee1f48da7b3b55c",
+      "frontend/dist/assets/RfqInboxView-ojO71dlX.js": "d0256b6d1957ce4e15e2335674b6cfa070904dff57c165c19c08b5c784aac1b2",
+      "frontend/dist/assets/AdminRfqProvidersView-C6trYVGw.js": "c97a86ebe0029f446b0d2ca5ac2794201ef57315992e72c60cedf055361a1fbf",
+      "frontend/dist/assets/AdminView-Dha91_r3.js": "70b71503b8a6acb031fec167f63d19c494e842a05b2bc7aa0c6c1a68ccf2871c",
+      "docs/audits/REMEDIATION_C06_2026-10-20.md": "250c0da7c768b9e93da932c5859f0ba5a26a15251b96e9c933db75e0296901b0",
+      "frontend/dist/assets/RfqAnalysisView-Cj0xvaly.js": "716c450c0189b833f1967828b45b0c5d15b9ce7fbc39410ce1b199151e7eff5c",
+      "frontend/dist/assets/LoginView-BCPoCLqD.css": "4170b97f393f4569a3d0d69964707b045b3acb22b010b745e3574bdf60aec3e1",
+      "frontend/dist/assets/ConsultationView-B-terOSz.js": "22284034ba496bb6d72dfe1aab54b37505bf01e5c465b0ce55370cb462246ad0",
+      "frontend/dist/assets/AgentWorkshopView-NmyrwG8c.css": "b1bf78e8995ea21bd0143d40296220b362d1d48f7ed3fd59354502c841ef3938",
+      "frontend/dist/assets/PriceComparisonPanel-Cu28oTNR.css": "094b3986c63c905e59e1fa6030684bcbd667f2f5d4f4937c1c170918f2a0c48d",
+      "frontend/dist/assets/OptimizerResultsView-DPV9EB6k.css": "b6e94e794d58d4bdf18c734c3cd42f7236cf6cac4e2a2607999f10ed7e6811a6",
+      "frontend/dist/assets/FluxDecomposition-BTJLcAov.js": "be78af52ac508399097d82709e220dc11f8086e7009501e12584cf12b516fd86",
+      "frontend/dist/assets/AdminComputeView-CHn5pekI.js": "73cc933c11e8410517e4f1b8e4f00b351bf7d48459a1f72597561fb22d7db9ab",
+      "frontend/dist/assets/BookingView-2iwPMGEJ.js": "4b69996210540cc4a1b870d10a928d22631317fe14f655e6ea9a8e8379c1ed7a",
+      "frontend/dist/assets/InteractionFormModal-YRX8uAwb.js": "93682d3776f4d4c352ee08a5c25133e7c98bbc6d127d91ea921c1c8256d055a7",
+      "frontend/dist/assets/BackLink-DZMytWO-.js": "00f08e9912042042b24455fce7c351c34a653f22cf7e2494a13a2dcd10d582aa",
+      "frontend/dist/assets/LoadingSpinner-CR1tj8Oc.css": "97a3432934785cf62401fd448e85a9b2360c7c6994aca8bbca76777469506696",
+      "frontend/dist/assets/RfqTransportStatus-s27nwqwf.js": "9241b8b3a326dde7d653151ece976b69cfe5af7e500fd28b7028d6ccd13edea1",
+      "frontend/dist/assets/useBookingMtm-BkN64thq.js": "80f4fa81cb2e59c3bd1d8dac0cb6c8c9abc0f1a52a7853a6b345f434bfb2761b",
+      "frontend/dist/assets/chart-19k6OvwP.js": "455f8b9747e87f8dd425497bd02bc13785712f52b880f0911c914fed2ba28851",
+      "docs/audits/REMEDIATION_C03_2026-10-20.md": "0d9dae47118ddc915c0228a1b884effa1b116c757a77ae0827440b2c0eec1093",
+      "frontend/dist/assets/PricerView-BFl0il-V.js": "b94cfee31ce0bbf296f5d4009913de2b5961c2f83440b6fad7332d0585e6dc54",
+      "frontend/dist/assets/valuationComparison-CBPCD7Ek.js": "36b9bf60d4bf6f646feef7f48a03de73b7b803489d2287f589d2341e7d6248f0",
+      "frontend/dist/assets/AdminUsersView-gmvoycQB.js": "d2b9d51071bdd08109317d7c33d8c8ccdbe97294464d6757fb88c51b5221011b",
+      "frontend/dist/assets/CcrResult-tpD5rMx1.js": "c0d277045f948675c4e1f90e86c444a797fea7365963dd8cfa20acd7714a1d92",
+      "docs/audits/REMEDIATION_C05_2026-10-20.md": "92dee388077d9cdbdaf988477369605a46d0f42951a348ea3a9e7e4b0f9c2a0e",
+      "frontend/dist/assets/OptimizerResearchListView-CAflqmDU.css": "820cb7407cd88addc41f0d2ed0d1bd5cf20460fe25acfe6fabdcb76e9f591fef",
+      "frontend/dist/assets/DealReferenceLink-CZGOPi95.js": "51ce0507e180fbe954748dcabbd7aa4b94e13dff60dc153f71ff1e833446daec",
+      "frontend/dist/assets/EmptyState-oRkKegCC.css": "504db178b83e9e1277e4cbdb96b44a831efd19f3824ccdb276098bcb2ab9e2bf"
+    },
+    "only_registry_items_updated": {
+      "findings": [
+        "M05-01",
+        "M05-08",
+        "M08-03"
+      ],
+      "workstreams": [
+        "C09"
+      ],
+      "cross_validation_cases": [
+        "T03",
+        "T15"
+      ]
+    },
+    "counts_decisions_and_dependencies_unchanged": true,
+    "baseline_business_db_present": false,
+    "current_business_db_present": false,
+    "services_started": false,
+    "head_unchanged": true,
+    "branch_unchanged": true
+  },
+  "changed_files": [
+    "backend/app/core/payscript/parser.py",
+    "backend/app/core/payscript/qualification.py",
+    "backend/app/core/product_optimizer/families.py",
+    "backend/app/core/product_optimizer/validation.py",
+    "backend/app/services/llm/validate.py",
+    "backend/tests/test_payoff_qualification.py",
+    "docs/README.md",
+    "docs/audits/REMEDIATION_C09_2026-10-21.md",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+    "docs/audits/remediation-lot-0-2026-10-20/C09_VALIDATION.json",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+    "docs/reference/PAYSCRIPT_REFERENCE.md",
+    "frontend/src/components/ScriptAssistantModal.test.js",
+    "frontend/src/components/ScriptAssistantModal.vue",
+    "frontend/src/stores/pricing.js",
+    "frontend/src/utils/__fixtures__/optimizerFamilies.json"
+  ],
+  "source_and_test_hashes": {
+    "backend/app/core/payscript/parser.py": "9061ef23e7bc6943bfd37231f294fd4748b6fb5f753772463b22e9e9155c3f98",
+    "backend/app/core/payscript/qualification.py": "cb48c5b7afade58947ee8140814d03083bc45b8e1e5a9537a6037b39ed9200b9",
+    "backend/app/core/product_optimizer/families.py": "8e8de0a0905f60eae7e92bc3588b2b26992faa8993267c9dc0b2b656c0b4961d",
+    "backend/app/core/product_optimizer/validation.py": "fbc16eae801fd23d854a662c1fd2c9cb6afc3a40e36e07c001f6eda18f0b5826",
+    "backend/app/services/llm/validate.py": "05470710bdf54d66c35aabc0140726cd64a1bd1855553f4c6c3670544bdf1883",
+    "backend/tests/test_payoff_qualification.py": "c871839e620aa3fc97e535221c26b7db6818fbed3b3345828295ad18a24df019",
+    "frontend/src/components/ScriptAssistantModal.test.js": "b7c909e08415c451b05e40841faaa129fac1375d912a1a763488da1c34dc0ed5",
+    "frontend/src/components/ScriptAssistantModal.vue": "b727a2049b3119fcb7c10ec97cd5aa38fcf644e3ef47a6830cb263d24e2ba9b2",
+    "frontend/src/stores/pricing.js": "5a44d1176e11e81d2a00ff47a6c410aae28677f0716291e5ac06e29bb7dbab2a",
+    "frontend/src/utils/__fixtures__/optimizerFamilies.json": "97a533e3932208f486076a848b85a470153d6d25febb71300bc54e50a1763280"
+  },
+  "document_hashes": {
+    "docs/README.md": "a3d6d6e5f9c690437e15d828cec75da2f806d916406c0767e133e81fa03aa8a8",
+    "docs/audits/REMEDIATION_C09_2026-10-21.md": "6d637bd18863b091401a3b5a2ce6226fd27b49dc0d409b3e6aa7b278b65a87b7",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md": "3dcfef1a5ece9506b59eb7ca7ff0949c0922cda18cc757d498a725425173c7ab",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md": "9297ab4dcf27195d0796f7f6904ed614ffa851962b3289dd581df05d35311066",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json": "6e6b97badc13bd8ae8830354080a336eb1da777bedf5199006b12e0527812b91",
+    "docs/reference/PAYSCRIPT_REFERENCE.md": "4640808477ff061d1d670b2199a6baa6345bf850c98b187c8232e6a5325efb22"
+  },
+  "document_hashes_exclude_this_evidence": true,
+  "runtime_artifact_hashes": {
+    "after.json": "6af7344fa3729ed16b831f450d610ec0207f757c307bef20e82f0486d4011c06",
+    "backend-command.json": "84118e698a8b1192fe06fadc7ad96a695cf3631cd0e9315914fa02dab8af9e94",
+    "backend-complement.log": "911012e63d0a2edc474460e18f65d18436c2ea0a4068b9161dfcaa6bc73860d2",
+    "backend-complement.xml": "1c84c2735adf74233257110481a6705cd09e1a600c6f3eaccb2a0b1cbd45c558",
+    "backend-initial.log": "1ba2cbe9bfd8aeb0288f6c67ae4d725e0d731fb16ae3bc5887c9fc1a8bdc2a92",
+    "backend-initial.xml": "cff9f163d06f701af59fe31c165f2ffc7a711f3ade559ec29ee4df23c13ded8d",
+    "backend.log": "d2299f4ea67e208035f7b622f6c73022fe4852f3b6166c456155856a12af5722",
+    "backend.xml": "928b85f10096c743b86ff6dfa9679a111aa2b2c10419131a4c1c48f5a1d2fa4d",
+    "before.json": "95de85e492c982f7918ea9c76d3e2f2d9f7945fac40e6ba525685ea47e26fd26",
+    "frontend-build-path.json": "acc41cbce76d43f31059956add5905481cb3d59566f7d7be151165cd586ab046",
+    "frontend-build.log": "9133ffef5801130a0dad00b1bb3460c0667021a598c6a5c45718a902854237f4",
+    "frontend-targeted.log": "2b00cbd6d7dafec7355b4dbd46ef12e342dcabb84aa67b4c72795cdf53e5c9db",
+    "parser-initial.log": "690c5b5b0ffd0f2053276d9d0474b9283271487d0cc23ff79298dc04e25da70e",
+    "reference-panels.json": "3812d7fdd2863db48d05992036b0b7cc05cf3890fb51e1c34837709ddfcc6769"
+  }
+}

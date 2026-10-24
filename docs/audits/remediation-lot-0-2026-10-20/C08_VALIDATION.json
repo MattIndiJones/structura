@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "corrective": "C08",
+  "date": "2026-10-22",
+  "findings": [
+    "M04-06",
+    "M11-04",
+    "M11-05"
+  ],
+  "status": "locally_validated",
+  "production_qualified": false,
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "report": "../REMEDIATION_C08_2026-10-22.md",
+  "backend": {
+    "passed": 317,
+    "distinct": true,
+    "files": 14,
+    "new_cases": 31,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "runs": [
+      "dependencies-final.xml",
+      "network-optimizer-final.xml",
+      "commands-permissions-final.xml"
+    ],
+    "cases_by_file": {
+      "backend.tests.test_booking_legal_exception": 18,
+      "backend.tests.test_business_permissions": 35,
+      "backend.tests.test_commands_c08": 31,
+      "backend.tests.test_economic_amendments": 30,
+      "backend.tests.test_optimizer_c20": 20,
+      "backend.tests.test_product_transition_integrity": 72,
+      "backend.tests.test_products": 3,
+      "backend.tests.test_rfq_bank_pricing": 7,
+      "backend.tests.test_rfq_c23": 32,
+      "backend.tests.test_rfq_execution": 14,
+      "backend.tests.test_rfq_network_delivery": 9,
+      "backend.tests.test_rfq_product_exchange": 11,
+      "backend.tests.test_rfq_relationships": 17,
+      "backend.tests.test_rfq_transport": 18
+    },
+    "manifest": "latest-distinct.xml"
+  },
+  "frontend": {
+    "passed": 697,
+    "files": 78,
+    "new_cases": 16,
+    "build_succeeded": true,
+    "vite_seconds": 12.43,
+    "out_dir": "C:/Users/phili/AppData/Local/Temp/structura-c08-vite-build",
+    "log": "frontend-final.log"
+  },
+  "baseline": {
+    "existing_passed": 104,
+    "backend_valid_expected_failures": 4,
+    "frontend_valid_expected_failures": 2,
+    "copied_frontend_rearm_reproduction": true
+  },
+  "network": {
+    "requests_and_curl_cffi_disabled": true,
+    "blocked_attempts": 0,
+    "transport": "existing signed MockTransport/local deterministic fixtures"
+  },
+  "acceptance": {
+    "tests": {
+      "M04-06": [
+        "frontend/src/stores/products.test.js",
+        "frontend/src/utils/commands.test.js",
+        "test_concurrent_retries_commit_exactly_one_result[product]"
+      ],
+      "M11-04": [
+        "test_lost_direct_booking_response_reuses_one_product_and_deal",
+        "test_concurrent_retries_commit_exactly_one_result[direct_booking]",
+        "test_failed_command_rolls_back_every_business_row_and_can_be_retried",
+        "test_same_booking_key_with_changed_content_is_an_audited_conflict"
+      ],
+      "M11-05": [
+        "test_other_trade_forks_a_clean_product_without_changing_source",
+        "test_a_fork_can_book_a_second_trade_and_preserves_the_original_archive",
+        "test_fork_keeps_old_rfq_terms_pinned_and_cannot_declassify_its_source",
+        "frontend/src/components/DealTab.test.js"
+      ]
+    },
+    "concurrent_file_databases_fk_enabled": true,
+    "clean_fork": true,
+    "origin_restrictions_inherited": true,
+    "old_terms_pinned": true,
+    "rollback_and_retry": true,
+    "uat_cleanup_tombstone": true,
+    "original_requests_not_mutated": true
+  },
+  "compatibility": {
+    "existing_product_command_hash_format_preserved": true,
+    "old_keyless_bookings": "exact-body-and-receipt deduplication; explicit keys distinguish identical independent trades",
+    "historical_booking_journal_backfill": false,
+    "deployment_migration_executed": false
+  },
+  "limits": [
+    "No full backend suite",
+    "No interactive GUI",
+    "No real remote services/TLS",
+    "No load test",
+    "No deployment-data migration",
+    "Tab-lifetime retry metadata; same-content retry",
+    "T02/T12 production qualification remains partial",
+    "C25/C26/C27 remain open"
+  ],
+  "artifact_root": ".runtime/diagnostic-acceptance/c08-2026-10-22",
+  "commit": false,
+  "push": false,
+  "server_started": false,
+  "preservation": {
+    "initial_files": 2673,
+    "unchanged": 2655,
+    "expected_changed": 18,
+    "changed": [
+      "backend/app/api/deals.py",
+      "backend/app/api/products.py",
+      "backend/app/db/models.py",
+      "backend/app/services/business_access.py",
+      "backend/app/services/product_repository.py",
+      "backend/app/services/rfq_execution.py",
+      "backend/app/services/uat_generation.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "frontend/src/components/DealTab.test.js",
+      "frontend/src/components/DealTab.vue",
+      "frontend/src/components/ProductContextBar.vue",
+      "frontend/src/stores/deals.js",
+      "frontend/src/stores/pricing.js",
+      "frontend/src/stores/products.js",
+      "frontend/src/stores/products.test.js"
+    ],
+    "new": [
+      "backend/app/services/booking_commands.py",
+      "backend/tests/test_commands_c08.py",
+      "docs/audits/REMEDIATION_C08_2026-10-22.md",
+      "docs/audits/remediation-lot-0-2026-10-20/C08_VALIDATION.json",
+      "frontend/src/utils/commands.js",
+      "frontend/src/utils/commands.test.js"
+    ],
+    "source_copies_verified": 1092,
+    "previous_artifacts_unchanged": true,
+    "dist_unchanged": true,
+    "real_db_absent": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "registry_unrelated_entries_unchanged": true,
+    "incremental_whitespace_errors": 0
+  },
+  "source_sha256": {
+    "backend/app/api/deals.py": "9119d2f5ffd22f0fa194a32dbf96337eecd54039a8445ab01c52e450da3f8f50",
+    "backend/app/api/products.py": "d53deee92aa2c349bd843b88d1c298d2f36d2cbbc13f1f9fa4e426438474ce9c",
+    "backend/app/db/models.py": "70c2f790698e890463a763c381242041679397658b6c7785b9917d8d998d9c96",
+    "backend/app/services/business_access.py": "54f7e7b5d883207b438c68314af3d23b80dd82a7faaee998304f3f6e854efc8e",
+    "backend/app/services/product_repository.py": "286b7056f698aa17aaaa3d00fdddaecdfd3ae79538bc9d5f4a26b9289ab48ad6",
+    "backend/app/services/rfq_execution.py": "399d93ed8f8234344211243ac733e58857eebb66d995cd002b5481358a229272",
+    "backend/app/services/uat_generation.py": "fd7c443e3de55fa776e214613dd2dfe14b6fb59145419753542ef782082ef5e4",
+    "frontend/src/components/DealTab.test.js": "ca6241b49a36c56a7d6a2d4ab8c329aa87eca723ab48a81d119b5dcb68e86288",
+    "frontend/src/components/DealTab.vue": "f85ae4dc9e124d46a9160fd84b2befe47017a911d2a2e84f8a0bf204dbc7c44b",
+    "frontend/src/components/ProductContextBar.vue": "4c94b330390bd319760c7ad52c927d4af637101b9bbff36be2520fb0a1890022",
+    "frontend/src/stores/deals.js": "a077556dc1b171e6c215a4e0f322503d52675a69c52fa3147058905ea0921ee6",
+    "frontend/src/stores/pricing.js": "29aebe8bc58ab45688b5a87a1cb281e28b8211ac16e1fe6064abf44844ce910a",
+    "frontend/src/stores/products.js": "2ed31cfc7411e13607339e26442e291305a3148ca917dba82dbb8c8ad97b4425",
+    "frontend/src/stores/products.test.js": "c1cf11c2ec895685514218c38c6d5e8b4a55958a26e1f8b09a9e29106cd40423",
+    "backend/app/services/booking_commands.py": "0a140490b7cac65d2df7ea0e23876c662211532b5258d4fa2d7899472fa26925",
+    "backend/tests/test_commands_c08.py": "5202d153b86ad1e8148a1b0af159f90c4b516f9b705e682725053ccbe3afc65f",
+    "frontend/src/utils/commands.js": "5ea1ede234380b37931de79bb3ef9b6e5bcc1dfe84c7d3c44af594bcdba7e4b8",
+    "frontend/src/utils/commands.test.js": "fbe497c863809bb4a3b83b75120d009fe2aa71b38005ff188e22f60cbe9d777f"
+  }
+}

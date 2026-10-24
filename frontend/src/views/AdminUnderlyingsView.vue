@@ -14,6 +14,8 @@
       <AlertMessage v-if="notice" kind="success" dismissible @dismiss="notice = ''">{{ notice }}</AlertMessage>
 
       <!-- ── Ajouter : on cherche chez Yahoo plutôt que de taper un code ── -->
+      <label class="card label">Motif de la modification du référentiel<input v-model="changeReason" class="input" minlength="3" maxlength="500" placeholder="Motif explicite, conservé dans l’audit" /></label>
+      <p class="text-xs text-slate-500">La devise et le type d’un instrument sont partagés entre ses groupes. La désactivation conserve l’historique.</p>
       <div class="card flex flex-col gap-3">
         <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Ajouter un sous-jacent</div>
         <div class="flex flex-wrap items-end gap-2">
@@ -93,7 +95,7 @@
                 <tr>
                   <th class="w-32">Ticker</th><th>Libellé</th>
                   <th class="w-24">Devise</th><th>Type</th><th class="w-40">Groupe</th>
-                  <th class="w-20">Actif</th><th class="w-10"></th>
+                  <th>Qualification</th><th class="w-20">Actif</th><th class="w-10"></th>
                 </tr>
               </thead>
               <tbody>
@@ -120,8 +122,10 @@
                       <option value="non">Non</option>
                     </select>
                   </td>
+                  <td>{{ u.metadata_status === 'TO_QUALIFY' ? 'À qualifier' : 'Qualifié' }}</td>
                   <td class="text-right">
-                    <button class="icon-btn-danger" title="Supprimer" @click="remove(u)">🗑</button>
+                    <button class="btn-ghost btn-sm" @click="revalidate(u)">Revalider en externe</button>
+                    <button class="icon-btn-danger" title="Désactiver" @click="remove(u)">🗑</button>
                   </td>
                 </tr>
               </tbody>
@@ -136,6 +140,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { ensureUnderlyings } from '../data/commonUnderlyings.js'
+import { confirmer } from '../composables/useConfirm.js'
 import { apiFetch } from '../utils/api.js'
 import AlertMessage from '../components/ui/AlertMessage.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
@@ -143,6 +149,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 const rows = ref([])
 const loading = ref(true)
 const error = ref('')
+const changeReason = ref('')
 const notice = ref('')
 const filtre = ref('')
 
@@ -223,6 +230,12 @@ function groupeSuggere(r) {
 async function search() {
   const q = query.value.trim()
   if (q.length < 2) return
+  const local = [...new Map(rows.value.filter(row => row.ticker.toLowerCase().includes(q.toLowerCase()) || row.label.toLowerCase().includes(q.toLowerCase())).map(row => [row.ticker, row])).values()]
+  if (local.length) {
+    results.value = local.map(row => ({ ...row, group: '', type: row.asset_class === 'equity' ? 'EQUITY' : row.asset_class === 'index' ? 'INDEX' : 'UNKNOWN' }))
+    notice.value = 'Résultats locaux ; les métadonnées existantes seront réutilisées.'
+    return
+  }
   searching.value = true
   error.value = ''
   try {
@@ -241,20 +254,21 @@ async function search() {
 }
 
 async function add(r) {
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite (3 caractères minimum).'; return }
   adding.value = r.ticker
   error.value = ''
   try {
     const res = await apiFetch('/api/admin/underlyings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticker: r.ticker, label: r.label,
+      body: JSON.stringify({ reason: changeReason.value, ticker: r.ticker, label: r.label,
                              group: r.group || 'Autres', exchange: r.exchange,
                              asset_class: r.type==='EQUITY'?'equity':r.type==='INDEX'?'index':'unknown' }),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || 'Ajout impossible')
-    notice.value = `${data.ticker} ajouté — dernière cotation ${data.probe?.last_close} `
-                 + `${data.ccy} le ${data.probe?.last_date}.`
+    notice.value = data.probe?.source === 'LOCAL_REFERENCE' ? `${data.ticker} ajouté avec ses métadonnées locales.` : `${data.ticker} ajouté — devise ${data.ccy || 'à qualifier'}.`
+    await ensureUnderlyings({ force: true })
     await load()
   } catch (e) {
     error.value = e.message
@@ -264,15 +278,18 @@ async function add(r) {
 }
 
 async function update(u, patch) {
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite (3 caractères minimum).'; return }
   error.value = ''
   try {
     const res = await apiFetch(`/api/admin/underlyings/${u.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
+      body: JSON.stringify({ ...patch, reason: changeReason.value }),
     })
     if (!res.ok) throw new Error((await res.json()).detail || 'Mise à jour impossible')
     Object.assign(u, await res.json())
+    await load()
+    await ensureUnderlyings({ force: true })
   } catch (e) {
     error.value = e.message
     await load()
@@ -280,15 +297,27 @@ async function update(u, patch) {
 }
 
 async function remove(u) {
+  if (!await confirmer({ titre: 'Désactiver ce sous-jacent ?', message: 'Les produits historiques restent inchangés.', confirmer: 'Désactiver', danger: true })) return
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite (3 caractères minimum).'; return }
   error.value = ''
   try {
-    const res = await apiFetch(`/api/admin/underlyings/${u.id}`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/admin/underlyings/${u.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: changeReason.value }) })
     if (!res.ok && res.status !== 204) throw new Error('Suppression impossible')
-    rows.value = rows.value.filter(x => x.id !== u.id)
+    await load()
+    await ensureUnderlyings({ force: true })
   } catch (e) {
     error.value = e.message
   }
 }
 
+async function revalidate(u) {
+  if (changeReason.value.trim().length < 3) { error.value = 'Renseignez un motif explicite.'; return }
+  try {
+    const res = await apiFetch(`/api/admin/underlyings/${u.id}/revalidate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: changeReason.value }) })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || 'Revalidation impossible')
+    notice.value = data.probe?.ok ? `Source externe : ${data.probe.ccy || 'devise absente'}. Référentiel conservé ; appliquez une modification motivée si nécessaire.` : (data.probe?.error || 'Revalidation externe non concluante ; référentiel conservé.')
+  } catch(e) { error.value = e.message }
+}
 onMounted(load)
 </script>

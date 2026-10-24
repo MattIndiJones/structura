@@ -18,12 +18,10 @@ BASE = {
 }
 
 
-@pytest.fixture(scope="module")
-def client():
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[get_current_user] = lambda: object()
-    return TestClient(app)
+@pytest.fixture
+def client(authenticated_client):
+    authenticated_client.app.include_router(router)
+    return authenticated_client
 
 
 def test_pricing_route_refuses_anonymous_access():
@@ -50,6 +48,14 @@ def test_matrice_de_correlation_malformee_est_refusee(corr):
 
 
 def test_reparation_correlation_et_approximation_barriere_traversent_api(client):
+    correlation = [[1.0 if i == j else -0.5000001 for j in range(3)] for i in range(3)]
+    repaired = client.post("/api/price", json={
+        **BASE, "underlyings": [dict(BASE["underlyings"][0], name=f"S{i}") for i in range(3)],
+        "corr_matrix": correlation,
+    })
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json()["corr_repair"]["max_shift"] > 0
+    assert repaired.json()["corr_repair"]["matrix_used"]
     payload = {
         **BASE,
         "underlyings": [
@@ -63,7 +69,7 @@ def test_reparation_correlation_et_approximation_barriere_traversent_api(client)
     response = client.post("/api/price", json=payload)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["corr_repair"]["max_shift"] > 0
-    assert body["corr_repair"]["matrix_used"]
+    # Perfect copies use the exact semidefinite factor, without added noise.
+    assert not body["corr_repair"]
     assert body["barrier_monitoring"] == "continuous"
-    assert "pont brownien" in body["barrier_monitoring_note"]
+    assert "brownien" in body["barrier_monitoring_note"]

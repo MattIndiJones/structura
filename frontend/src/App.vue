@@ -1,11 +1,11 @@
 <template>
-  <div class="flex flex-col" :class="route.meta.fixedViewport ? 'h-dvh overflow-hidden' : 'min-h-screen'">
+  <div class="flex flex-col" :class="route.meta.fixedViewport || auth.installation ? 'h-dvh overflow-hidden' : 'min-h-screen'">
     <AppHeader v-if="!route.meta.public" class="shrink-0" />
     <div v-if="auth.readOnly && !route.meta.public" role="status" class="consultation-banner">
       Consultation — {{ auth.user.consultation?.entity }} · Données au {{ auth.user.consultation?.date }}
       <span>IA arrêtées · Écriture et recalcul désactivés</span>
     </div>
-    <RouterView />
+    <div class="flex-1 min-h-0 flex flex-col" :class="route.meta.fixedViewport ? 'overflow-hidden' : 'overflow-auto'"><RouterView /></div>
     <!-- Montée UNE fois, ici : le service de confirmation rend une promesse
          qu'il faut pouvoir résoudre depuis n'importe où, y compris depuis un
          garde de route, qui n'a aucun composant sous la main. -->
@@ -20,6 +20,7 @@ import AppHeader from './components/AppHeader.vue'
 import ConfirmDialog from './components/ui/ConfirmDialog.vue'
 import { usePricingStore } from './stores/pricing.js'
 import { useAuthStore } from './stores/auth.js'
+import { hasContextChanges, trackContextChanges } from './composables/useContextChanges.js'
 
 const route = useRoute()
 const pricing = usePricingStore()
@@ -30,13 +31,14 @@ const auth = useAuthStore()
 // que déclencher son invite, pas la rédiger. C'est la seule confirmation de
 // l'application qui reste native, et c'est parce qu'aucune autre n'est possible.
 function avantFermeture(e) {
-  if (!pricing.variantDirty) return
+  if (!pricing.variantDirty && !pricing.hasUnsavedSession() && !hasContextChanges()) return
   e.preventDefault()
   e.returnValue = ''
 }
 
-onMounted(() => window.addEventListener('beforeunload', avantFermeture))
-onUnmounted(() => window.removeEventListener('beforeunload', avantFermeture))
+let releaseTracking
+onMounted(() => { window.addEventListener('beforeunload', avantFermeture); releaseTracking = trackContextChanges() })
+onUnmounted(() => { window.removeEventListener('beforeunload', avantFermeture); releaseTracking?.() })
 </script>
 
 <style scoped>

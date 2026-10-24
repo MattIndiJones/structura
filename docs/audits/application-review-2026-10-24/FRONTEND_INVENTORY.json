@@ -1,0 +1,5269 @@
+[
+  {
+    "path": "frontend/src/App.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "./components/AppHeader.vue",
+      "./components/ui/ConfirmDialog.vue",
+      "./stores/pricing.js",
+      "./stores/auth.js",
+      "./composables/useContextChanges.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/charts/theme.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/AiWorkbench.vue",
+    "imports": [
+      "./ui/AlertMessage.vue",
+      "../composables/useAiWorkbench"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/AppHeader.vue",
+    "imports": [
+      "vue-router",
+      "../stores/auth.js",
+      "../stores/pricing.js",
+      "./DemoModeToggle.vue",
+      "./ContextSelector.vue",
+      "../composables/useConfirm.js",
+      "../composables/useContextChanges.js",
+      "../utils/session.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/AutoFixingExceptionModal.vue",
+    "imports": [
+      "vue",
+      "../stores/deals.js",
+      "./ui/BaseModal.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/BacktestTab.vue",
+    "imports": [
+      "./InLifeNotAlignedBanner.vue",
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "./SensitiveValue.vue",
+      "./SensitiveChart.vue",
+      "./ComparatorTab.vue",
+      "./HelpTip.vue",
+      "../utils/format.js",
+      "chart.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/BookingPricingReview.vue",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/CalendarPolicyFields.vue",
+    "imports": [
+      "vue",
+      "../utils/api.js"
+    ],
+    "api_literals": [
+      "/api/calendar/catalog"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/CcrAmount.vue",
+    "imports": [
+      "vue",
+      "./SensitiveValue.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/CcrCreditCheck.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/ccr.js",
+      "./HelpTip.vue",
+      "../utils/ccrHelp.js",
+      "./CcrResult.vue",
+      "./ui/AlertMessage.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/CcrProgress.vue",
+    "imports": [
+      "../utils/ccr.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/CcrResult.vue",
+    "imports": [
+      "vue",
+      "chart.js",
+      "../composables/useBookingMtm.js",
+      "./HelpTip.vue",
+      "../utils/ccrHelp.js",
+      "./SensitiveValue.vue",
+      "./CcrAmount.vue",
+      "./ui/AlertMessage.vue",
+      "../utils/ccr.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ComparatorTab.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../utils/api.js",
+      "../utils/underlyingDefaults.js",
+      "../utils/marketProvenance.js",
+      "../data/commonUnderlyings.js",
+      "../utils/format.js",
+      "./HelpTip.vue",
+      "./SensitiveValue.vue"
+    ],
+    "api_literals": [
+      "/api/finance/hist_vol?tickers=${encodeURIComponent(row.tickers.join(",
+      "/api/price"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ConstatWindowFields.vue",
+    "imports": [
+      "vue",
+      "./HelpTip.vue",
+      "./SensitiveValue.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ContextSelector.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "./ContextSelector.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "choix de compte depuis Admin",
+      "rend le passage au portail disponible sans requête inter-origines ni remplacement du compte",
+      "conserve le contexte si l’utilisateur annule l’abandon de saisies",
+      "autorise le départ après confirmation explicite",
+      "garde la bascule privilégiée désactivée hors mode développeur"
+    ]
+  },
+  {
+    "path": "frontend/src/components/ContextSelector.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/auth.js",
+      "../stores/pricing.js",
+      "../composables/useConfirm.js",
+      "../composables/useContextChanges.js",
+      "../utils/contextSwitch.js",
+      "./ui/AlertMessage.vue",
+      "./ui/BaseModal.vue",
+      "../utils/session.js",
+      "../utils/session.js",
+      "../utils/accessErrors.js"
+    ],
+    "api_literals": [
+      "/api/platform/development/access",
+      "/api/platform/development/admin-workbench"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/DealReferenceLink.vue",
+    "imports": [
+      "vue-router"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/DealTab.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "./DealTab.vue",
+      "../stores/pricing.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "exception juridique au booking",
+      "exige une autorisation explicite et conserve le refus sans identifiant par défaut",
+      "efface le netting set et la banque sélectionnée avant l’exception",
+      "refuse une tentative de soumission par un profil non administrateur",
+      "transmet l’exception et le motif, puis conserve la contrepartie du booking confirmé",
+      "autre opération et filiation",
+      "crée un dossier relié puis détache les anciennes preuves et le contexte commercial",
+      "garde le dossier exécuté après un échec et reprend la même commande de filiation",
+      "ne remplace pas une autre session ouverte pendant la préparation",
+      "première exécution d’un Product conservé",
+      "reprend le sens bancaire et la documentation sans réutiliser l’exécution du dossier précédent",
+      "laisse compléter l’exécution et la contrepartie manquante tout en figeant les termes du Product",
+      "reconnaît le deal déjà booké à la réouverture et ne propose pas un second booking"
+    ]
+  },
+  {
+    "path": "frontend/src/components/DealTab.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "vue-router",
+      "../stores/pricing.js",
+      "../stores/deals.js",
+      "../stores/products.js",
+      "../stores/auth.js",
+      "../utils/api.js",
+      "./HelpTip.vue",
+      "./CcrCreditCheck.vue",
+      "./ui/BaseModal.vue",
+      "./BookingPricingReview.vue",
+      "./DealReferenceLink.vue",
+      "../utils/format.js",
+      "../utils/productModels.js",
+      "../utils/payoffFamilies.js"
+    ],
+    "api_literals": [
+      "/api/clients",
+      "/api/clients/${clientId}/contacts",
+      "/api/clients/${clientId}/mandates",
+      "/api/deals/counterparties",
+      "/api/opportunities?client_id=${clientId}&open_only=true",
+      "/api/products/${deal.product_id}",
+      "/api/rfq/${store.currentRfqId}/terms",
+      "/api/trading/book-note",
+      "/api/trading/relationships"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/DemoModeToggle.vue",
+    "imports": [
+      "../stores/demoMode.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/DividendCurveCard.vue",
+    "imports": [
+      "vue",
+      "chart.js",
+      "../stores/pricing.js",
+      "../composables/useDividendCurve.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "./HelpTip.vue",
+      "./SensitiveChart.vue",
+      "./SensitiveValue.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/EconomicsCalendars.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "pinia",
+      "./EconomicsTab.vue",
+      "../stores/pricing.js",
+      "../composables/useObservationPreview.js",
+      "./CalendarPolicyFields.vue",
+      "./ObservationSchedule.vue",
+      "../utils/payscriptEconomics.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "règlement final qualifié par le calendrier serveur",
+      "laisse la date vide et affiche une erreur si le calendrier est indisponible",
+      "utilise J+3 TARGET retourné par le serveur, y compris les fériés",
+      "préserve une date manuelle et un calendrier booké",
+      "refuse toute proposition pour un contrat rouvert et conserve sa maturité figée",
+      "emploie les centres de règlement terminaux choisis dans Economics",
+      "ignore une réponse obsolète et efface la proposition automatique devenue périmée",
+      "PARAM() et calendriers propres à chaque observation",
+      "transmet le calendrier de la version bookée au pricing et à la vie résiduelle",
+      "bloque le repricing si le serveur ne peut qualifier le calendrier figé",
+      "le cache de maturité distingue les règles de combinaison",
+      "conserve les dates trimestrielles et annuelles séparément et transmet la règle choisie",
+      "retire les anciennes étiquettes lorsque le calendrier est refusé",
+      "Economics étiquette un PARAM annuel à partir de son calendrier annuel",
+      "affiche les dates historiques figées sans appeler le générateur C05",
+      "le tableau déplié lit le snapshot figé et conserve les dates de paiement",
+      "un ancien aperçu ne remplace pas le snapshot figé arrivé entre-temps",
+      "choix contractuel de combinaison",
+      "ne choisit aucune règle à la place du structureur et conserve les termes sérialisés"
+    ]
+  },
+  {
+    "path": "frontend/src/components/EconomicsTab.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "./EconomicsTab.vue",
+      "./RfqParamsEditor.vue",
+      "../stores/pricing.js",
+      "../utils/payscriptPresets.js",
+      "../utils/__fixtures__/payscriptPresetServer.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "un exemple dégressif rend les tableaux de paramètres",
+      "Economics affiche les cinq barrières et les réglages avancés sans erreur de rendu",
+      "RFQ affiche les cinq barrières et le même calendrier"
+    ]
+  },
+  {
+    "path": "frontend/src/components/EconomicsTab.vue",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useVariantMark.js",
+      "../data/commonUnderlyings.js",
+      "../utils/format.js",
+      "./PayScriptCalendars.vue",
+      "../utils/payscriptEconomics.js",
+      "./HelpTip.vue",
+      "../composables/useObservationPreview.js",
+      "./SensitiveValue.vue"
+    ],
+    "api_literals": [
+      "/api/calendar/resolve"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/EmtPanel.vue",
+    "imports": [
+      "./AiWorkbench.vue",
+      "vue",
+      "../stores/pricing.js",
+      "../utils/api.js",
+      "./HelpTip.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/emt/compute",
+      "/api/emt/save",
+      "/api/emt/synthesize"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/EventsTab.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "pinia",
+      "./EventsTab.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "amendements économiques gouvernés",
+      "permet aux Opérations de préparer un dossier partagé et conserve les quatre yeux",
+      "refuse la préparation par le Front et le Contrôle en installation gérée",
+      "soumet l’identifiant juridique et retire le netting set de la banque source",
+      "conserve le mode autonome propriétaire et refuse une valeur économique non finie"
+    ]
+  },
+  {
+    "path": "frontend/src/components/EventsTab.vue",
+    "imports": [
+      "vue",
+      "../stores/deals.js",
+      "../stores/pricing.js",
+      "../stores/auth.js",
+      "./HelpTip.vue",
+      "./AutoFixingExceptionModal.vue",
+      "./DealReferenceLink.vue",
+      "../utils/format.js",
+      "../utils/api.js",
+      "../composables/useObservationPreview.js",
+      "../utils/dealEvents.js"
+    ],
+    "api_literals": [
+      "/api/clients",
+      "/api/clients/${clientId}/contacts",
+      "/api/clients/${clientId}/mandates",
+      "/api/deals/${deal.value.id}/events/${ev.id}/fixing-versions/${version.id}/evidence",
+      "/api/deals/counterparties",
+      "/api/opportunities?client_id=${clientId}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/FluxDecomposition.vue",
+    "imports": [
+      "vue",
+      "./SensitiveValue.vue",
+      "./HelpTip.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/FundingCurveCard.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "./HelpTip.vue",
+      "./SensitiveValue.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/HelpTip.vue",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/InLifeNotAlignedBanner.vue",
+    "imports": [
+      "../stores/pricing.js",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/InputRetentionUi.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "vue-router",
+      "./VolSurfaceEditor.vue",
+      "./ProductContextBar.vue",
+      "./PayScriptConfigurations.vue",
+      "./OptimizerNumberInput.vue",
+      "../views/ProductsView.vue",
+      "../views/PricerView.vue",
+      "../utils/volSurface.js",
+      "../stores/pricing.js",
+      "../stores/products.js",
+      "../stores/auth.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "saisir explicitement zéro reste une modification valide du smile",
+      "l’aperçu des configurations décrit devise, taux, courbes, funding et modèles",
+      "un refus de sauvegarde conserve la copie de travail et sa version attendue",
+      "la barre Product affiche exclusivement le dossier ouvert",
+      "le simple focus d’un nombre arrondi à l’écran ne remplace pas sa précision conservée",
+      "le dossier et ses calculs utilisent des pages bornées, avec les liens métier conservés",
+      "une ouverture refusée garde la session et permet une nouvelle tentative sur la même route"
+    ]
+  },
+  {
+    "path": "frontend/src/components/KidPanel.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../utils/api.js",
+      "../utils/format.js",
+      "./HelpTip.vue"
+    ],
+    "api_literals": [
+      "/api/kid/compute",
+      "/api/kid/save"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/LifecycleRefreshSummary.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "./LifecycleRefreshSummary.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "bilan du traitement lifecycle",
+      "distingue couverture complète, rafraîchissement et règlement",
+      "rend les erreurs partielles consultables et ne donne pas de coche de succès",
+      "annonce un échec même si tous les refresh ont précédé une surveillance en erreur",
+      "ne masque pas les erreurs d’un ancien résumé déclaré SUCCESS",
+      "échappe le message technique dans le détail",
+      "présente un book vide comme un traitement terminé de couverture nulle"
+    ]
+  },
+  {
+    "path": "frontend/src/components/LifecycleRefreshSummary.vue",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/MarketDataProvenance.vue",
+    "imports": [
+      "vue",
+      "./SensitiveValue.vue",
+      "../utils/marketProvenance.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/MarketParams.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../composables/useVariantMark.js",
+      "../stores/demoMode.js",
+      "./UnderlyingVolFields.vue",
+      "./DividendCurveCard.vue",
+      "./YieldCurveCard.vue",
+      "./FundingCurveCard.vue",
+      "./SensitiveValue.vue",
+      "./HelpTip.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/MicDictation.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/MtfDrilldownModal.vue",
+    "imports": [
+      "vue",
+      "./ui/BaseModal.vue",
+      "./HelpTip.vue",
+      "./ui/AlertMessage.vue",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "../utils/format.js",
+      "chart.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/MtfTab.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "./SensitiveValue.vue",
+      "./SensitiveChart.vue",
+      "./HelpTip.vue",
+      "./MtfDrilldownModal.vue",
+      "../utils/format.js",
+      "chart.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ObservationSchedule.vue",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "./SensitiveValue.vue"
+    ],
+    "api_literals": [
+      "/api/schedule/generate",
+      "/api/schedule/period-window"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/OptimizerCurveInput.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "./OptimizerCurveInput.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Optimizer curve table",
+      "renders percentages and tenors as editable numeric fields with accessible labels",
+      "shows a flat fallback for an empty curve without manufacturing a node"
+    ]
+  },
+  {
+    "path": "frontend/src/components/OptimizerCurveInput.vue",
+    "imports": [
+      "./OptimizerNumberInput.vue",
+      "../utils/optimizerMarket.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/OptimizerNumberInput.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "./OptimizerNumberInput.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Optimizer decimal input",
+      "renders two decimals with a matching step and preserves native constraints",
+      "keeps intermediate entry editable, rounds extra digits and leaves an empty field missing"
+    ]
+  },
+  {
+    "path": "frontend/src/components/OptimizerNumberInput.vue",
+    "imports": [
+      "vue",
+      "../utils/optimizerMarket.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/OptimizerPanel.vue",
+    "imports": [
+      "./HelpTip.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/OptimizerPayoffFields.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "../utils/__fixtures__/optimizerFamilies.json",
+      "../utils/optimizerPayoff.js",
+      "./OptimizerPayoffFields.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Dynamic payoff form",
+      "renders each required Phoenix parameter and no step-down control",
+      "removes inapplicable coupon barrier, autocall and frequency fields",
+      "array parameter exposes explicit schedule-generation controls only on step-down"
+    ]
+  },
+  {
+    "path": "frontend/src/components/OptimizerPayoffFields.vue",
+    "imports": [
+      "vue",
+      "./HelpTip.vue",
+      "../utils/optimizerResearch.js",
+      "../utils/productOptimizer.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/OptimizerPricingResults.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "./OptimizerPricingResults.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Visible priced alternatives",
+      "paginates every price without losing selection between pages and resets paging when sorting changes",
+      "renders three rejected Monte-Carlo prices with red backgrounds and actionable diagnostics",
+      "colours only confirmed results green and shows actual failed runs separately"
+    ]
+  },
+  {
+    "path": "frontend/src/components/OptimizerPricingResults.vue",
+    "imports": [
+      "vue",
+      "./HelpTip.vue",
+      "./OptimizerPanel.vue",
+      "../utils/optimizerResearch.js",
+      "../utils/optimizerDiagnostics.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/OptimizerRadar.vue",
+    "imports": [
+      "vue",
+      "chart.js/auto",
+      "../utils/optimizerRadar.js",
+      "../utils/optimizerDiagnostics.js",
+      "../utils/optimizerResearch.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/OptimizerResearchResults.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "./OptimizerResearchResults.vue",
+      "./OptimizerPanel.vue",
+      "../utils/__fixtures__/optimizerFamilies.json",
+      "../utils/optimizerPayoff.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Research result workspace",
+      "shows saved demand and rejected prices before expandable diagnostics, with accessible help",
+      "announces provisional solutions during exploration instead of an absence of solutions",
+      "updates default comparison as background prices arrive and preserves user selection"
+    ]
+  },
+  {
+    "path": "frontend/src/components/OptimizerResearchResults.vue",
+    "imports": [
+      "vue",
+      "chart.js/auto",
+      "./HelpTip.vue",
+      "./OptimizerPanel.vue",
+      "./OptimizerPricingResults.vue",
+      "./OptimizerRadar.vue",
+      "../utils/optimizerDiagnostics.js",
+      "../utils/productOptimizer.js",
+      "../utils/optimizerPayoff.js",
+      "../utils/optimizerOutcome.js",
+      "../utils/optimizerResearch.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/PathsTab.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "./SensitiveValue.vue",
+      "./SensitiveChart.vue",
+      "./HelpTip.vue",
+      "../utils/format.js",
+      "chart.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/PayScriptCalendars.vue",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "./ConstatWindowFields.vue",
+      "./ObservationSchedule.vue",
+      "./CalendarPolicyFields.vue",
+      "../utils/payscriptEconomics.js"
+    ],
+    "api_literals": [
+      "/api/schedule/window"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/PayScriptConfigurations.vue",
+    "imports": [
+      "vue",
+      "../data/payscriptTemplates.js",
+      "../utils/payscriptEconomics.js",
+      "../utils/api.js",
+      "../stores/pricing.js",
+      "./ui/BaseModal.vue",
+      "./ui/AlertMessage.vue"
+    ],
+    "api_literals": [
+      "/api/db/scripts"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/PayScriptEditor.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "./SensitiveValue.vue",
+      "./HelpTip.vue",
+      "./ui/BaseModal.vue",
+      "./ui/AlertMessage.vue",
+      "./ScriptAssistantModal.vue",
+      "./PayScriptConfigurations.vue",
+      "./PayScriptPresetPicker.vue",
+      "../data/payscriptTemplates.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/PayScriptPresetPicker.vue",
+    "imports": [
+      "vue",
+      "./ui/BaseModal.vue",
+      "./ui/AlertMessage.vue",
+      "../utils/productModels.js",
+      "../utils/payscriptPresets.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/PriceComparisonPanel.vue",
+    "imports": [
+      "vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/PriceGridHeatmap.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "./SensitiveValue.vue",
+      "./HelpTip.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/PriceSeriesImport.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "./PriceSeriesImport.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "le choix du fichier reste désactivé tant que les conventions sont absentes"
+    ]
+  },
+  {
+    "path": "frontend/src/components/PriceSeriesImport.vue",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ProbaTab.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "./SensitiveValue.vue",
+      "./SensitiveChart.vue",
+      "./HelpTip.vue",
+      "../utils/format.js",
+      "chart.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ProductContextBar.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/pricing.js",
+      "../stores/products.js",
+      "../stores/auth.js",
+      "./ui/BaseModal.vue",
+      "./ui/AlertMessage.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ProfileTab.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "./SensitiveValue.vue",
+      "./SensitiveChart.vue",
+      "./HelpTip.vue",
+      "../utils/format.js",
+      "chart.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ResultsPanel.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "./ResultsPanel.vue",
+      "../stores/pricing.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "un strike futur reste à constater et ne charge aucun cours historique"
+    ]
+  },
+  {
+    "path": "frontend/src/components/ResultsPanel.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "chart.js",
+      "./SummaryTab.vue",
+      "./VariantCompareTab.vue",
+      "./ProfileTab.vue",
+      "./PathsTab.vue",
+      "./ProbaTab.vue",
+      "./BacktestTab.vue",
+      "./MtfTab.vue",
+      "./SimulationTab.vue",
+      "./ScenarioGrid.vue",
+      "./SensitiveValue.vue",
+      "./SensitiveChart.vue",
+      "./HelpTip.vue",
+      "./FluxDecomposition.vue",
+      "../utils/format.js",
+      "../utils/greekDisplay.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/RfqBankQuotePanel.vue",
+    "imports": [
+      "vue",
+      "../stores/auth.js",
+      "../utils/api.js",
+      "../utils/format.js",
+      "../utils/rfqQuoteStates.js",
+      "./ui/AlertMessage.vue",
+      "./RfqTransportStatus.vue"
+    ],
+    "api_literals": [
+      "/api/rfq-inbox/${id}",
+      "/api/rfq-inbox/${id}/${path}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/RfqElectronicExecutionPanel.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "./RfqElectronicExecutionPanel.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "décision bancaire électronique",
+      "conserve la revue et le motif pendant une actualisation du même dossier",
+      "exige droit book, revue explicite et motif avant tout envoi",
+      "transmet l’empreinte exacte et rend le dossier au contexte bancaire courant",
+      "conserve le refus serveur sans afficher un accord fictif",
+      "ne restaure pas les termes d’une ancienne ouverture après fermeture et réouverture",
+      "un accusé livré conserve le statut de demande en attente de décision bancaire"
+    ]
+  },
+  {
+    "path": "frontend/src/components/RfqElectronicExecutionPanel.vue",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "../stores/rfq.js",
+      "../utils/format.js",
+      "./ui/BaseModal.vue",
+      "./ui/AlertMessage.vue",
+      "./SensitiveValue.vue",
+      "./RfqTransportStatus.vue",
+      "./RfqReconciliationPanel.vue"
+    ],
+    "api_literals": [
+      "/api/rfq-inbox/${id}",
+      "/api/rfq-inbox/${id}/electronic-execution/${entry.value.id}/decision",
+      "/api/rfq/${id}/terms"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/RfqExchangePanel.vue",
+    "imports": [
+      "vue",
+      "../stores/rfq.js",
+      "./ui/AlertMessage.vue",
+      "./RfqPricingPanel.vue",
+      "./RfqTransportStatus.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/RfqExecutionPanel.vue",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "../stores/rfq.js",
+      "./ui/BaseModal.vue",
+      "./ui/AlertMessage.vue",
+      "./SensitiveValue.vue",
+      "./RfqElectronicExecutionPanel.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/rfq/${id}/terms"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/RfqNetworkSettings.vue",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "./ui/BaseModal.vue",
+      "./ui/AlertMessage.vue"
+    ],
+    "api_literals": [
+      "/api/rfq-transport${path}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/RfqParamsEditor.vue",
+    "imports": [
+      "./PayScriptCalendars.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/RfqPricingPanel.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "./RfqPricingPanel.vue",
+      "./FluxDecomposition.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "restitution du calcul privé RFQ",
+      "ancre les flux forward sur la valorisation et conserve les dates contractuelles au strike",
+      "convertit les années en jours calendaires UTC même à travers le changement d’heure",
+      "explique la restriction sans proposer une commande indisponible",
+      "conserve le guidage du profil habilité sans calcul"
+    ]
+  },
+  {
+    "path": "frontend/src/components/RfqPricingPanel.vue",
+    "imports": [
+      "vue",
+      "./FluxDecomposition.vue",
+      "./HelpTip.vue",
+      "./SensitiveValue.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/RfqReconciliationPanel.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "./RfqReconciliationPanel.vue"
+    ],
+    "api_literals": [
+      "/api/rfq-reconciliation/a"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "la consultation seule ne peut pas relancer des échanges",
+      "utilise une commande durable et n’envoie aucun calcul privé",
+      "un refus serveur ne devient pas une concordance",
+      "accepte la réponse en cours si une actualisation conserve la même identité",
+      "affiche les écarts et la date distante sans déclarer les livres rapprochés"
+    ]
+  },
+  {
+    "path": "frontend/src/components/RfqReconciliationPanel.vue",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "../utils/commands.js",
+      "../utils/format.js",
+      "./ui/AlertMessage.vue",
+      "./SensitiveValue.vue",
+      "./RfqTransportStatus.vue",
+      "../utils/rfqReconciliationLabels.js"
+    ],
+    "api_literals": [
+      "/api/rfq-reconciliation/${id}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/RfqTransportStatus.vue",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/rfq-transport/messages/${props.transport.message_id}/retry"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ScenarioGrid.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "./SensitiveValue.vue",
+      "./HelpTip.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ScriptAssistantModal.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "./ScriptAssistantModal.vue",
+      "../stores/pricing.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "la preuve de trajectoires affiche sa portée limitée",
+      "la provenance adoptée conserve une copie de la preuve et trace les modifications ultérieures"
+    ]
+  },
+  {
+    "path": "frontend/src/components/ScriptAssistantModal.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "./ui/BaseModal.vue",
+      "./AiWorkbench.vue",
+      "./HelpTip.vue",
+      "./MicDictation.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/script/generate",
+      "/api/script/prompt"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/SensitiveChart.vue",
+    "imports": [
+      "../stores/demoMode.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/SensitiveValue.vue",
+    "imports": [
+      "../stores/demoMode.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/SimulationTab.vue",
+    "imports": [
+      "./SolverPanel.vue",
+      "./PriceGridHeatmap.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/SolverPanel.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "./SensitiveValue.vue",
+      "./SensitiveChart.vue",
+      "./HelpTip.vue",
+      "chart.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/SummaryTab.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../composables/useProductSummary.js",
+      "../utils/format.js",
+      "./AiWorkbench.vue",
+      "./HelpTip.vue"
+    ],
+    "api_literals": [
+      "/api/product/analyse"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/UnderlyingVolFields.vue",
+    "imports": [
+      "./VolSmile.vue",
+      "./VolSurfaceEditor.vue",
+      "./SensitiveValue.vue",
+      "./HelpTip.vue",
+      "./MarketDataProvenance.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/VariantBar.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/pricing.js",
+      "../utils/api.js",
+      "../composables/useConfirm.js",
+      "../composables/useVariantMark.js",
+      "./ui/AlertMessage.vue",
+      "./ui/BaseModal.vue",
+      "./HelpTip.vue"
+    ],
+    "api_literals": [
+      "/api/db/scripts/${parentId.value}/variants",
+      "/api/db/scripts/${v.id}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/VariantCompareTab.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "pinia",
+      "vue-router",
+      "./VariantCompareTab.vue",
+      "../stores/pricing.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "comparaison et reprise des hypothèses de roll",
+      "envoie le bid, sa provenance et les coûts dans la commande de comparaison",
+      "conserve la saisie au changement d’onglet puis au remontage",
+      "ne transporte pas les coûts vers un autre dossier source",
+      "invalide les chiffres affichés et leur preuve après modification des coûts",
+      "ignore une réponse calculée avant la modification du bid",
+      "réouvre les coûts archivés et les chiffres conservés sans relancer le moteur",
+      "conserve les hypothèses d’une nouvelle comparaison reprise depuis une archive"
+    ]
+  },
+  {
+    "path": "frontend/src/components/VariantCompareTab.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/pricing.js",
+      "../utils/api.js",
+      "../utils/rollEconomics.js",
+      "./ui/AlertMessage.vue",
+      "./SensitiveValue.vue",
+      "./HelpTip.vue"
+    ],
+    "api_literals": [
+      "/api/db/scripts/${parentId.value}/variants",
+      "/api/variants/archives",
+      "/api/variants/archives/${id}",
+      "/api/variants/compare"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/VolSmile.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "./SensitiveValue.vue",
+      "./SensitiveChart.vue",
+      "chart.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/VolSurfaceEditor.vue",
+    "imports": [
+      "vue",
+      "../stores/demoMode.js",
+      "../utils/api.js",
+      "../data/commonUnderlyings.js",
+      "../utils/volSurface.js",
+      "../utils/smileCalibration.js",
+      "./SensitiveChart.vue",
+      "./SensitiveValue.vue"
+    ],
+    "api_literals": [
+      "/api/volatility/validate"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/WorkshopBooks.vue",
+    "imports": [
+      "vue",
+      "./WorkshopHelp.vue",
+      "../utils/workshopProgress"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/WorkshopConfiguration.vue",
+    "imports": [
+      "vue",
+      "./HelpTip.vue",
+      "./OptimizerCurveInput.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/WorkshopHelp.vue",
+    "imports": [
+      "./HelpTip.vue",
+      "../utils/workshopHelp"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/WorkshopIssues.vue",
+    "imports": [
+      "vue",
+      "./WorkshopHelp.vue",
+      "../utils/workshopIssues",
+      "../utils/workshopProgress"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/WorkshopMonitor.vue",
+    "imports": [
+      "vue",
+      "./WorkshopHelp.vue",
+      "../utils/workshopHelp",
+      "../utils/workshopPilot",
+      "../utils/workshopProgress"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/YieldCurveCard.vue",
+    "imports": [
+      "vue",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "./SensitiveValue.vue",
+      "./SensitiveChart.vue",
+      "../utils/format.js",
+      "../composables/useYieldCurveAnchor.js",
+      "./HelpTip.vue",
+      "chart.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/ChangeCompanyModal.vue",
+    "imports": [
+      "vue",
+      "../../stores/clients.js",
+      "../ui/BaseModal.vue",
+      "../ui/AlertMessage.vue",
+      "../../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/ClientCard.vue",
+    "imports": [
+      "vue",
+      "../../stores/clients.js",
+      "../ui/EmptyState.vue",
+      "./CyclePanel.vue",
+      "./DimensionGrid.vue",
+      "./RangeRail.vue",
+      "../../utils/format.js",
+      "../../utils/clientAmounts.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/ClientFormModal.vue",
+    "imports": [
+      "vue",
+      "../../stores/clients.js",
+      "../ui/BaseModal.vue",
+      "../ui/AlertMessage.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/ConstraintFieldModal.vue",
+    "imports": [
+      "vue",
+      "../../stores/clients.js",
+      "../ui/AlertMessage.vue",
+      "../ui/BaseModal.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/ConstraintsPanel.vue",
+    "imports": [
+      "vue",
+      "../../stores/clients.js",
+      "../../utils/format.js",
+      "../ui/AlertMessage.vue",
+      "../ui/EmptyState.vue",
+      "../ui/LoadingSpinner.vue",
+      "./ValuePicker.vue",
+      "./ConstraintFieldModal.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/CyclePanel.vue",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/DimensionGrid.vue",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/ImportPanel.vue",
+    "imports": [
+      "vue",
+      "../../utils/api.js",
+      "../../stores/clients.js",
+      "../../composables/useConfirm.js",
+      "../ui/AlertMessage.vue",
+      "../ui/EmptyState.vue",
+      "../../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/client-import/${route}",
+      "/api/client-import/batches",
+      "/api/client-import/batches/${lot.id}/revert",
+      "/api/client-import/schema",
+      "/api/client-import/template.${format}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/InteractionFormModal.vue",
+    "imports": [
+      "vue",
+      "../../stores/clients.js",
+      "../ui/BaseModal.vue",
+      "../ui/AlertMessage.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/LostReasonModal.vue",
+    "imports": [
+      "vue",
+      "../../stores/clients.js",
+      "../ui/BaseModal.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/OpportunityFormModal.vue",
+    "imports": [
+      "vue",
+      "../../stores/clients.js",
+      "../../utils/api.js",
+      "../../utils/payoffFamilies.js",
+      "../ui/BaseModal.vue",
+      "../ui/AlertMessage.vue"
+    ],
+    "api_literals": [
+      "/api/clients/${clientId}/contacts",
+      "/api/clients/${clientId}/mandates"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/PersonFormModal.vue",
+    "imports": [
+      "vue",
+      "../../stores/clients.js",
+      "../ui/BaseModal.vue",
+      "../ui/AlertMessage.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/RangeRail.vue",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/TechnicalPanel.vue",
+    "imports": [
+      "vue",
+      "../ui/EmptyState.vue",
+      "../../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/clients/ValuePicker.vue",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ui/ActionMenu.vue",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ui/AlertMessage.vue",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ui/BackLink.vue",
+    "imports": [
+      "vue-router"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ui/BaseModal.vue",
+    "imports": [
+      "vue",
+      "../../composables/useDocumentScrollLock.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ui/ConfirmDialog.vue",
+    "imports": [
+      "vue",
+      "./BaseModal.vue",
+      "../../composables/useConfirm.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ui/DataFilterBar.vue",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ui/EmptyState.vue",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/components/ui/LoadingSpinner.vue",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useAiSettings.js",
+    "imports": [
+      "vue",
+      "../utils/api",
+      "../utils/session.js"
+    ],
+    "api_literals": [
+      "/api/ai/providers?ollama_url=${encodeURIComponent(url)}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useAiWorkbench.js",
+    "imports": [
+      "vue",
+      "./useAiSettings"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useAiWorkbench.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "./useAiWorkbench",
+      "./useAiSettings"
+    ],
+    "api_literals": [
+      "/api/ai/providers",
+      "/api/test/generate"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "shared AI workflow",
+      "sends the edited prompt verbatim, emits a proposal and reports real phases",
+      "keeps custom edits visible but blocks generation after a context change",
+      "waits for draft saving before constructing a valuation prompt",
+      "rejects an obsolete preview arriving after the context changed",
+      "discards late results and prevents duplicate submissions",
+      "exposes provider errors and releases the busy state",
+      "does not apply a result to another screen after unmount",
+      "shared settings",
+      "shares model choices, persists no secrets and clears credentials on account change",
+      "preserves an unavailable chosen model and disables generation instead of switching it",
+      "ignores discovery for a previous Ollama address"
+    ]
+  },
+  {
+    "path": "frontend/src/composables/useBookingMtm.js",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      ", start.toISOString())\r\n      query.set("
+    ],
+    "api_literals": [
+      "/api/deals/${id}/mtm?stream=true",
+      "/api/deals/valuation-runs/latest-mtm?${query}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useBookingMtm.test.js",
+    "imports": [
+      "vitest",
+      "./useBookingMtm.js",
+      ")).getHours()).toBe(0)\r\n    expect(url.searchParams.get(",
+      ")).toBe(false)\r\n    expect(query.has("
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "MtM quotidien du Booking",
+      "écarte un MtM en vol invalidé par un changement de faits lifecycle",
+      "ouvre sur les paramètres du booking et aujourd’hui, même si le dernier run est ancien",
+      "restaure uniquement le résultat du jour et filtre les limites locales en UTC",
+      "interprète les timestamps SQLite sans fuseau comme UTC",
+      "expire les résultats et remet les valeurs par défaut au changement de jour",
+      "une restauration tardive ne remplace ni une sélection ni un nouveau calcul",
+      "consulte la date figée et conserve son MtM archivé malgré la date réelle du PC",
+      "affiche le chargement immédiatement, bloque le double clic et transmet la sélection",
+      "ne passe en GBM réalisé que sur sélection explicite",
+      "ne réaffiche pas le calcul de la veille qui termine après minuit",
+      "progression réelle du calcul",
+      "décode les messages fragmentés, puis le résultat",
+      "remonte l’échec de chargement sans inventer un résultat",
+      "signale un flux interrompu"
+    ]
+  },
+  {
+    "path": "frontend/src/composables/useConfirm.js",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useContextChanges.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useDataFilter.js",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useDividendCurve.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useDocumentScrollLock.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useDocumentScrollLock.test.js",
+    "imports": [
+      "vitest",
+      "./useDocumentScrollLock.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "défilement du document sous les modales",
+      "garde le document verrouillé jusqu’à fermeture du dernier masque",
+      "restaure aussi un document déjà borné par l’application",
+      "n’exige pas de document lors du rendu serveur"
+    ]
+  },
+  {
+    "path": "frontend/src/composables/useMarketAssumptions.js",
+    "imports": [
+      "vue",
+      "./useDividendCurve.js",
+      "../utils/underlyingDefaults.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useMarketAssumptions.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "./useMarketAssumptions.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "les hypothèses partent au moteur",
+      "ne transmet rien tant que rien n’est coché",
+      "transmet la courbe de taux en décimal une fois cochée",
+      "sépare le spread plat de la courbe par pilier",
+      "fait décroître le dividende depuis q, sur l’horizon demandé",
+      "pose toujours q en premier bucket — le serveur refuse le contraire",
+      "rouvrir un AO retrouve ses hypothèses",
+      "fait l’aller-retour sans rien perdre",
+      "réapparie les nœuds par maturité, pas par position",
+      "rouvre décoché un AO pricé sans hypothèse",
+      "supporte un AO enregistré avant que les cartes existent",
+      "deux écrans ne se marchent pas dessus",
+      "garde chaque jeu indépendant",
+      "la carte de dividende écrit dans une fiche qui dure",
+      "ne perd pas le réglage quand le sous-jacent change de nom ou de q",
+      "l’écran se monte quel que soit l’ordre des déclarations",
+      "ne lit pas les fiches avant la fin du setup",
+      "a son panier prêt avant le premier rendu"
+    ]
+  },
+  {
+    "path": "frontend/src/composables/useObservationPreview.js",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "../utils/payscriptEconomics.js"
+    ],
+    "api_literals": [
+      "/api/calendar/resolve",
+      "/api/finance/hist_prices?${q}",
+      "/api/schedule/generate"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useProductSummary.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useSensitiveChart.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useValuationNoteDraft.js",
+    "imports": [
+      "vue",
+      "../utils/api.js"
+    ],
+    "api_literals": [
+      "/api/valuation-notes",
+      "/api/valuation-notes/${id}",
+      "/api/valuation-notes/sources/"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useValuationNoteDraft.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "./useValuationNoteDraft"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Valo Explain editorial draft",
+      "does not save on load and autosaves the edited narrative only",
+      "serializes edits made during a save without losing the newer text",
+      "shares the save queue between autosave and an export waiting on newer edits",
+      "keeps unsaved text after a conflict and never silently overwrites it"
+    ]
+  },
+  {
+    "path": "frontend/src/composables/useValuationRunSelection.js",
+    "imports": [
+      "vue",
+      "../utils/valuationComparison"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useValuationRunSelection.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "./useValuationRunSelection"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Selection of archived MtM for Valo Explain",
+      "limits selection to two and orders by valuation date regardless of click order",
+      "restores the saved direction and rejects runs from another deal",
+      "flags differences in model, basis and recorded market parameters before generation"
+    ]
+  },
+  {
+    "path": "frontend/src/composables/useVariantDelta.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useVariantDelta.test.js",
+    "imports": [
+      "vitest",
+      "./useVariantDelta.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "aucun écart là où rien n’a été saisi",
+      "une déclinaison qu’on vient d’ouvrir n’a rien de modifié",
+      "ignore les entrées dormantes que le script ne déclare plus",
+      "chaque modification réelle est capturée",
+      "le texte du payoff",
+      "le panier",
+      "un titre retiré se dit comme un retrait",
+      "un titre ajouté emporte sa définition ET ses corrélations",
+      "la calibration d’un titre hérité n’est jamais un écart",
+      "la forme stockée",
+      "se relit depuis le corps de sauvegarde"
+    ]
+  },
+  {
+    "path": "frontend/src/composables/useVariantMark.js",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useYieldCurveAnchor.js",
+    "imports": [
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/composables/useYieldCurveAnchor.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "./useYieldCurveAnchor.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "la forme de la pente",
+      "part du taux court et tend vers r + écart",
+      "ne diverge pas au long, contrairement à une pente en bps par an",
+      "donne une courbe inversée avec un écart négatif",
+      "reste monotone et finie quand τ tend vers zéro",
+      "suit le taux court par translation",
+      "le lien vivant avec le champ de l’écran",
+      "remplit les piliers dès l’activation",
+      "déplace la courbe quand le taux sans risque change",
+      "suit aussi la prime de terme et la vitesse",
+      "ne touche à rien tant que l’ancrage est éteint"
+    ]
+  },
+  {
+    "path": "frontend/src/data/commonUnderlyings.js",
+    "imports": [
+      "vue",
+      "../utils/api.js",
+      "../utils/session.js"
+    ],
+    "api_literals": [
+      "/api/finance/underlyings"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/data/commonUnderlyings.test.js",
+    "imports": [
+      "vitest",
+      "./commonUnderlyings.js",
+      "../utils/session.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "sélection cohérente du référentiel",
+      "reprend ensemble ticker, nom et devise dans le Pricer et la RFQ",
+      "conserve un alias réellement utilisé par le payoff",
+      "refuse une devise absente ou divergente sans mutation partielle",
+      "rafraîchissement et isolation du catalogue",
+      "rafraîchit en place après une modification administrateur",
+      "ne réutilise ni n’applique une réponse provenant de la session précédente",
+      "retire un catalogue périmé lorsque le rafraîchissement échoue"
+    ]
+  },
+  {
+    "path": "frontend/src/data/payscriptTemplates.js",
+    "imports": [
+      "./productCatalogue.json"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/main.js",
+    "imports": [
+      "vue",
+      "pinia",
+      "./router/index.js",
+      "./App.vue",
+      "./style.css",
+      "./composables/useContextChanges.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/router/index.js",
+    "imports": [
+      "vue-router",
+      "../stores/auth"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/stores/asyncContext.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "vue",
+      "./pricing.js",
+      "./rfq.js",
+      "../composables/useObservationPreview.js",
+      "../utils/smileCalibration.js",
+      "../utils/volSurface.js"
+    ],
+    "api_literals": [
+      "/api/parse",
+      "/api/price",
+      "/api/volatility/calibrate"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "un override pendant la seconde requête dividendes reste conservé",
+      "le Pricer explique un refus de qualification et ne transmet aucun prix",
+      "une calibration lancée à 3 % ne s’applique pas après passage à 4 %",
+      "le Pricer refuse de transmettre un pricing préparé avec une calibration périmée",
+      "une ancienne préparation ne bloque pas le pricing de la nouvelle calibration",
+      "un rafraîchissement de cotations conserve une décomposition toujours liée au même prix",
+      "une ancienne ouverture RFQ ne remplace pas la dernière",
+      "une ancienne erreur réseau d’ouverture ne remonte pas après ouverture de B",
+      "une ancienne modification de cotation ne remplace pas une nouvelle lecture du même dossier",
+      "un ancien polling réseau ne remplace pas une cotation modifiée pendant son attente",
+      "un calendrier refusé n’est pas remplacé par les flux de l’ancien prix",
+      "les clôtures tardives du ticker A ne remplacent pas celles de B"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/auth.js",
+    "imports": [
+      "pinia",
+      "vue",
+      "./pricing.js",
+      "./products.js",
+      "./rfq.js",
+      "../data/commonUnderlyings.js",
+      "../utils/session.js",
+      "../utils/accessErrors.js"
+    ],
+    "api_literals": [
+      "/api/auth/development-admin-session",
+      "/api/auth/development-session",
+      "/api/auth/identity",
+      "/api/auth/login",
+      "/api/auth/logout",
+      "/api/auth/me",
+      "/api/platform/development/session"
+    ],
+    "store_ids": [
+      "auth"
+    ],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/stores/auth.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./auth.js",
+      "./pricing.js",
+      "./products.js",
+      "./rfq.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "les permissions métier reflètent le profil actif",
+      "retire immédiatement les commandes lorsque les capacités changent",
+      "la déconnexion ne laisse rien derrière",
+      "efface le jeton du stockage, pas seulement de la mémoire",
+      "oublie le jeton et le profil en mémoire",
+      "confidentialité des sessions RFQ bancaires",
+      "ne conserve pas le produit bancaire, ses marchés ou son prix après déconnexion",
+      "administration locale distincte de la simulation",
+      "permet au super utilisateur de gérer son organisation sans droits techniques",
+      "autorise la simulation au seul admin central habilité en développement"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/authSecurity.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./auth.js"
+    ],
+    "api_literals": [
+      "/api/auth/identity",
+      "/api/auth/login",
+      "/api/auth/logout",
+      "/api/auth/me"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "identité vérifiée avant transmission des identifiants",
+      "refuse une installation indisponible sans transmettre les identifiants",
+      "authentifie dans la base choisie et vérifie aussi le retour de session",
+      "déconnexion serveur et effacement immédiat",
+      "efface immédiatement la session locale puis révoque le jeton sur son installation",
+      "signale une révocation non confirmée en cas de serveur indisponible",
+      "révoque aussi la session centrale conservée par un changement de contexte développeur",
+      "ouverture explicite d’une installation arrêtée",
+      "demande le démarrage avant échange du ticket sans remplacer la session active",
+      "traduit une panne et conserve le compte courant",
+      "explique le redémarrage nécessaire si un ancien portail tourne encore"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/clients.js",
+    "imports": [
+      "pinia",
+      "vue",
+      "../utils/api.js",
+      "../utils/payoffFamilies.js"
+    ],
+    "api_literals": [
+      "/api/client-intelligence/analytics${suffixe}",
+      "/api/client-intelligence/clients/${clientId}${suffixe}",
+      "/api/client-intelligence/persons/${personId}${suffixe}",
+      "/api/client-intelligence/signals?${params}",
+      "/api/clients",
+      "/api/clients${suffixe}",
+      "/api/clients/${clientId}/constraints/schema",
+      "/api/clients/${clientId}/mandates",
+      "/api/clients/${clientId}/mandates/${mandatId}",
+      "/api/clients/${clientId}/preference-history${suffixe}",
+      "/api/clients/${clientId}/scoped-preferences",
+      "/api/clients/${clientId}/scoped-preferences/schema?${params}",
+      "/api/clients/${id}",
+      "/api/clients/${id}/archive",
+      "/api/clients/${id}/constraints",
+      "/api/clients/${id}/contacts?include_former=true",
+      "/api/clients/${id}/coverage",
+      "/api/clients/${id}/reactivate",
+      "/api/clients/${id}/scalar-constraints",
+      "/api/constraint-definitions",
+      "/api/constraint-definitions${suffixe}",
+      "/api/constraint-definitions/${id}",
+      "/api/constraint-definitions/${id}${forcer",
+      "/api/constraint-definitions/${id}/restore",
+      "/api/constraint-definitions/meta",
+      "/api/interactions",
+      "/api/interactions${suffixe}",
+      "/api/interactions/${id}",
+      "/api/interactions/follow-ups/${id}/close",
+      "/api/opportunities",
+      "/api/opportunities${suffixe}",
+      "/api/opportunities/${id}",
+      "/api/opportunities/${id}/status",
+      "/api/persons",
+      "/api/persons${suffixe}",
+      "/api/persons/${id}",
+      "/api/persons/${id}/deactivate",
+      "/api/persons/${id}/reactivate",
+      "/api/persons/${personId}/affiliations",
+      "/api/persons/${personId}/affiliations/${affiliationId}/close",
+      "/api/persons/${personId}/change-company",
+      "/api/persons/duplicates?${params}"
+    ],
+    "store_ids": [
+      "clients"
+    ],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/stores/clients.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./clients.js"
+    ],
+    "api_literals": [
+      "/api/client-intelligence/clients/4?mandate_id=21",
+      "/api/clients/1/constraints",
+      "/api/clients/4/scoped-preferences/schema?mandate_id=21"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "lireErreur rend toujours quelque chose d’affichable",
+      "déplie un refus métier structuré",
+      "accepte aussi un detail en simple chaîne",
+      "remonte la liste des doublons pour que l’écran puisse la montrer",
+      "ne rend jamais un objet brut, même sans corps exploitable",
+      "le verrou optimiste remonte jusqu’à l’appelant",
+      "propage le code CONSTRAINTS_VERSION_STALE et son message",
+      "envoie bien la version que l’écran avait sous les yeux",
+      "transmet la date et la source sans les confondre avec la préférence",
+      "un refus ne laisse pas la fiche dans un état à moitié modifié",
+      "les profils multi-périmètres gardent leur adresse explicite",
+      "porte le mandat sur les lectures et l’écriture, jamais dans un état implicite",
+      "les vocabulaires s’affichent en français sans perdre leur code",
+      "traduit un statut connu",
+      "rend la valeur brute plutôt que de masquer un code inconnu",
+      "la liste des statuts clos est celle du serveur"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/deals.js",
+    "imports": [
+      "pinia",
+      "../utils/commands.js",
+      "vue",
+      "../utils/api.js"
+    ],
+    "api_literals": [
+      "/api/deals",
+      "/api/deals/${dealId}",
+      "/api/deals/${dealId}/amendment-requests",
+      "/api/deals/${dealId}/amendment-requests/${requestId}/${action}",
+      "/api/deals/${dealId}/audit?${params}",
+      "/api/deals/${dealId}/events/${eventId}",
+      "/api/deals/${dealId}/events/${eventId}/reject",
+      "/api/deals/${dealId}/events/${eventId}/resolve-auto-exception",
+      "/api/deals/${dealId}/events/${eventId}/validate",
+      "/api/deals/${dealId}/events/refresh",
+      "/api/deals/${dealId}/lifecycle-proposals/${proposalId}/${action}",
+      "/api/deals/${dealId}/reprice",
+      "/api/deals/${id}",
+      "/api/deals/amendment-requests/pending",
+      "/api/deals/next-ref",
+      "/api/deals/watchlist${suffix}"
+    ],
+    "store_ids": [
+      "deals"
+    ],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/stores/deals.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./deals.js"
+    ],
+    "api_literals": [
+      "/api/deals/watchlist",
+      "/api/deals/watchlist?client_id=4&mandate_id=21"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "la watchlist reste le point d’entrée unique du Life Cycle",
+      "garde l’appel produit autonome quand aucun client n’est demandé",
+      "porte client et mandat dans la projection sans construire une autre API",
+      "le contexte affiché appartient au deal courant",
+      "efface immédiatement le statut de refresh et l’audit du deal précédent"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/demoMode.js",
+    "imports": [
+      "pinia",
+      "vue"
+    ],
+    "api_literals": [],
+    "store_ids": [
+      "demoMode"
+    ],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/stores/inputRetention.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./pricing.js",
+      "./products.js",
+      "../utils/optimizerResume.js",
+      "../composables/useBookingMtm.js",
+      "../utils/productCalculations.js",
+      "../utils/volSurface.js"
+    ],
+    "api_literals": [
+      "/api/parse"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "conservation et reprise C07",
+      "conserve chaque cellule partielle et refuse son utilisation dans un calcul complet",
+      "exige le choix explicite de la ligne scalaire et restitue la série au retour",
+      "construit une forme de calendrier valide sans inventer de dates et restaure la date unique",
+      "un parsing refusé ne touche ni les termes, ni le marché, ni le résultat",
+      "une date unique enregistrée pour un échéancier est refusée avant remplacement",
+      "applique seulement les termes en préservant panier, taux, funding et modèle",
+      "applique toutes les hypothèses seulement dans la portée choisie",
+      "applique un panier et ses corrélations quand leur inclusion a été choisie",
+      "refuse de remplacer des termes Product conservés par une configuration",
+      "ne remplace pas une saisie survenue pendant la validation de configuration",
+      "ouvre la version courante sans importer le calcul historique",
+      "ouvre un Product partiel et permet une modification explicite sans débloquer un dossier booké",
+      "recharge la précision et tous les buckets du marché conservé sans les regénérer",
+      "les changements de calendriers de la copie de travail ne modifient pas le Product reçu",
+      "compare eta et les paramètres de taux, avec unités et paramètres inactifs explicites",
+      "reprend q=2,001 % et son premier bucket sans arrondi ni divergence"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/portfolios.js",
+    "imports": [
+      "pinia",
+      "vue",
+      "../utils/api.js",
+      "./deals.js",
+      "../utils/riskDates.js"
+    ],
+    "api_literals": [
+      "/api/deals/${dealId}/portfolios",
+      "/api/deals/${id}/shock",
+      "/api/portfolios",
+      "/api/portfolios/${id}/shock",
+      "/api/portfolios/${p.id}",
+      "/api/portfolios/${view.value}/barriers",
+      "/api/portfolios/${view.value}/exposure-by-counterparty",
+      "/api/portfolios/${view.value}/pnl-explain",
+      "/api/portfolios/${view.value}/risk?valuation_date=${encodeURIComponent(valuationDate.value)}",
+      "/api/portfolios/${view.value}/smile-risk",
+      "/api/portfolios/${view.value}/var",
+      "/api/portfolios/barriers-global",
+      "/api/portfolios/exposure-by-counterparty",
+      "/api/portfolios/pnl-explain-global",
+      "/api/portfolios/risk-global?valuation_date=${encodeURIComponent(valuationDate.value)}",
+      "/api/portfolios/shock-global",
+      "/api/portfolios/smile-risk-global",
+      "/api/portfolios/var-global",
+      "/api/portfolios/var-history?${params}",
+      "/api/portfolios/var/${batchId}",
+      "/api/shocks?${params}"
+    ],
+    "store_ids": [
+      "portfolios"
+    ],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/stores/portfolios.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./portfolios.js"
+    ],
+    "api_literals": [
+      "/api/deals",
+      "/api/deals/12/portfolios",
+      "/api/portfolios",
+      "/api/portfolios?data_scope=PRODUCTION"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "gestion des portefeuilles",
+      "remonte explicitement une assignation refusée par l’API",
+      "permet à l’admin de créer un portefeuille pour le compte sélectionné",
+      "conserve plusieurs appartenances puis recharge les deals et les compteurs"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/portfoliosScope.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./portfolios.js",
+      "./deals.js"
+    ],
+    "api_literals": [
+      "/api/portfolios",
+      "/api/portfolios/var-history?data_scope=UAT&scope=portfolio&portfolio_id=9",
+      "/api/portfolios/var/10",
+      "/api/shocks"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "périmètres des calculs et historiques de risque",
+      "part de Production et sépare membres, risque et compteurs UAT",
+      "ignore une réponse Production tardive, même après un aller-retour UAT/Production",
+      "transmet le même périmètre aux chocs, smile et P&L",
+      "cloisonne les historiques de chocs et conserve une consultation legacy explicite",
+      "filtre les historiques VaR côté serveur par origine et portefeuille",
+      "arrête le polling et ignore son retour après un changement de périmètre",
+      "n’écrase pas le smile du nouveau périmètre avec une réponse ancienne",
+      "préserve et étiquette les anciennes études du deal UAT sélectionné",
+      "remonte un refus HTTP sans le publier comme total de risque",
+      "consulte les archives des portefeuilles supprimés sans changer le périmètre de calcul"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/pricing.js",
+    "imports": [
+      "../utils/payscriptEconomics.js",
+      "pinia",
+      "vue",
+      "../utils/api.js",
+      "../composables/useVariantDelta.js",
+      "../composables/useDividendCurve.js",
+      "../utils/calculationBudget.js",
+      "../utils/productModels.js",
+      "../utils/rfqBasket.js",
+      "../utils/underlyingDefaults.js",
+      "../data/commonUnderlyings.js",
+      "../utils/volSurface.js",
+      "../utils/smileCalibration.js",
+      "../utils/marketProvenance.js",
+      "../utils/pricingConfiguration.js",
+      "../data/payscriptTemplates.js"
+    ],
+    "api_literals": [
+      "/api/backtest",
+      "/api/backtest/compare",
+      "/api/calendar/resolve",
+      "/api/db/scripts",
+      "/api/db/scripts/${currentScriptId.value}",
+      "/api/db/scripts/variants/${v.id}",
+      "/api/finance/dividends?${params}",
+      "/api/finance/hist_prices?${q}",
+      "/api/finance/hist_vol?${params}",
+      "/api/grid",
+      "/api/indicatives",
+      "/api/mtf",
+      "/api/mtf/drilldown",
+      "/api/parse",
+      "/api/paths",
+      "/api/price",
+      "/api/price/implied-funding",
+      "/api/price/in-life",
+      "/api/proba",
+      "/api/products/${ind.product_id}",
+      "/api/products/${product.product_id}/pricing-input",
+      "/api/profile",
+      "/api/rfq/${rfqId}/pricing-input",
+      "/api/scenarios",
+      "/api/script/transcribe",
+      "/api/script/transcribe/engines",
+      "/api/script/transcribe/prepare",
+      "/api/solve"
+    ],
+    "store_ids": [
+      "pricing"
+    ],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/stores/pricing.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./pricing.js",
+      "../utils/productModels.js",
+      "../utils/payscriptPresets.js",
+      "../utils/__fixtures__/payscriptPresetServer.js"
+    ],
+    "api_literals": [
+      "/api/backtest",
+      "/api/calendar/resolve",
+      "/api/finance/dividends",
+      "/api/finance/hist_vol",
+      "/api/parse",
+      "/api/paths",
+      "/api/price",
+      "/api/price/in-life",
+      "/api/proba",
+      "/api/profile",
+      "/api/rfq/17/pricing-input",
+      "/api/schedule/generate"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "charger un exemple prérempli dans le Pricer",
+      "remplace les termes sans perdre le panier, le smile, les corrélations et les courbes",
+      "transmet le coupon trimestriel en fraction et la première observation à trois mois",
+      "conserve les cinq lignes du rappel dégressif",
+      "valider une option préremplie conserve sa convention et son règlement J+3",
+      "ne change aucun terme si la validation manque, la devise a changé ou un contrat est figé",
+      "un échec de préparation laisse les saisies en place",
+      "les Economics manquants sont signalés avant le pricing",
+      "une erreur de parse ne détruit aucune saisie",
+      "garde le calendrier pendant que le script est incomplet",
+      "le rend intact une fois la ligne terminée",
+      "garde aussi les PARAM, que le vidage réinitialisait en silence",
+      "ne recrée pas un calendrier qui a l",
+      "un nom qui disparaît du script dort, il ne meurt pas",
+      "conserve la valeur quand le CONSTAT cesse d’être déclaré",
+      "la restitue quand le nom revient",
+      "crée bien une entrée vierge pour un nom vraiment nouveau",
+      "ce qui part au moteur ne contient que le déclaré",
+      "ignore les entrées dormantes",
+      "la déclinaison ne survit pas au produit qu’elle décrit",
+      "est modifiée tant qu’on la regarde",
+      "cesse de l’être dès qu’on la relâche",
+      "le préremplissage depuis un AO garde ses dates",
+      "reprend les trois dates, pas seulement deux",
+      "ne laisse pas traîner la date de l’affaire précédente",
+      "envoie bien cette date au serveur",
+      "garde le tenor cote quand la maturite effective de la RFQ est ajustee",
+      "reprend tout le panier et sa corrélation jusque dans le prochain pricing",
+      "reprend la date et toutes les hypothèses de marché du prix RFQ au booking",
+      "les economics d’un deal rouvert restent autoritatifs",
+      "restaure nominal, devise et dates dans le store partagé",
+      "remet à zéro courbes, funding et réglages absents du deal suivant",
+      "un deal rouvert se valorise aujourd’hui, avant ou après son strike",
+      "fige le panier et la maturité tant que le deal booké reste ouvert",
+      "actualise le marché sans réécrire l’identité contractuelle",
+      "construit toujours le pricing avec le contrat figé",
+      "refuse un panier dont la taille diverge malgré le verrou",
+      "un résultat de pricing reste lié à ses entrées",
+      "devient périmé dès qu’un PARAM change",
+      "ignore une réponse arrivée après une modification",
+      "la maturité est une date contractuelle éditable",
+      "fait de AT MATURITY une date et en déduit T",
+      "restaure la date objet d’un CONSTAT MATURITE unique",
+      "les calculs transmettent la session au serveur",
+      "conserve les saisies après un refus puis reprend la validation",
+      "la validation est un geste, pas un effet de la frappe",
+      "ne relit rien pendant la frappe et signale le script non validé",
+      "une valeur initiale changée remplace la saisie, et le dit",
+      "une déclaration inchangée ne touche pas la saisie",
+      "une valeur jamais saisie suit le script sans être signalée",
+      "D6 : 8, Ctrl+S, ajout du %, Ctrl+S donne 8 %",
+      "refuse un PARAM scalaire vide au lieu de le convertir en zéro",
+      "refuse une ligne vide sans décaler les PARAM par observation",
+      "PARAM() : seules les lignes restées à l’ancienne valeur suivent le script (M11)",
+      "un chargement devient la référence et ne reporte rien",
+      "ignore une réponse de validation arrivée après une plus récente",
+      "un calcul valide d’abord et s’arrête sur une erreur de script",
+      "un calcul price le script validé, avec ses nouvelles valeurs",
+      "revenir au texte validé après un essai raté efface l’erreur",
+      "la maturité est la dernière constatation du produit",
+      "deux ans de coupons et une maturité à trois ans : trois ans",
+      "déplace les constatations terminales et laisse les coupons en place",
+      "refuse une maturité avancée avant la fin d’un échéancier non terminal (M12)",
+      "échéancier et date unique le même jour bougent ensemble, roll aligné compris",
+      "un calendrier trimestriel garde son ancrage quand sa fin bouge",
+      "reconnaît la constatation terminale par sa date, plus par son nom",
+      "affiche la date ajustée d’une constatation tombant un jour fermé",
+      "mode Normal : refuse une maturité antérieure à la dernière année AT",
+      "un modèle de produit ouvre le Pricer complété",
+      "génère panier, calendrier et maturité depuis la date de strike du Pricer",
+      "le calendrier ne suit pas un changement de strike (M13)",
+      "pose les fenêtres de la fiche et borne le panier à son minimum",
+      "sans ténor : le script générique et aucune date inventée",
+      "remplacer une session à échéancier ne laisse aucune déclaration sans valeur",
+      "signale une session modifiée avant qu’un modèle la remplace",
+      "la date de valorisation pilote le marché et le moteur",
+      "route une date avant strike vers le pricer forward-start",
+      "recharge σ, q et corrélation à la date choisie sans renommer le deal",
+      "le Pricer reprend le contrat de la RFQ liée",
+      "demande les termes épinglés au serveur RFQ et conserve les hypothèses privées"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/products.js",
+    "imports": [
+      "pinia",
+      "vue",
+      "../utils/api.js",
+      "../utils/commands.js"
+    ],
+    "api_literals": [
+      "/api/products",
+      "/api/products/${id}${termsVersion",
+      "/api/products/${id}/history?limit=20&offset=${offset}",
+      "/api/products/${id}?calculations_limit=${limit}&calculations_offset=${offset}",
+      "/api/products/${product.id}/archive",
+      "/api/products/${product.product_id}",
+      "/api/products/${product.product_id}/booking-forks",
+      "/api/products/${product.product_id}/calculations",
+      "/api/products/${product.product_id}/terms",
+      "/api/products/${productId}/calculations/${calculationId}",
+      "/api/products?archived=${archived}&paged=true&limit=${pageSize}&offset=${pageOffset}"
+    ],
+    "store_ids": [
+      "products"
+    ],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/stores/products.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./products.js"
+    ],
+    "api_literals": [
+      "/api/products/12",
+      "/api/products/12/calculations/31",
+      "/api/products/12?terms_version=2"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "chargement des calculs conservés",
+      "charge exactement le calcul demandé pour le reprendre",
+      "refuse de mélanger un ancien calcul avec les termes courants",
+      "déplie la fiche sans télécharger le détail de chaque résultat",
+      "reprend les termes de la RFQ sans importer les hypothèses du dernier calcul Product",
+      "reprend la même commande après une réponse de conservation perdue et un nouveau store"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/rfq.js",
+    "imports": [
+      "pinia",
+      "vue",
+      "../utils/api.js",
+      "../utils/rfqBasket.js",
+      "../utils/commands.js"
+    ],
+    "api_literals": [
+      "/api/price",
+      "/api/price/in-life",
+      "/api/rfq",
+      "/api/rfq/${id}",
+      "/api/rfq/${id}/exchange",
+      "/api/rfq/${id}/recipients",
+      "/api/rfq/${id}/send",
+      "/api/rfq/${rfq.id}/exchange-preview",
+      "/api/rfq/${rfq.id}/pricing-input",
+      "/api/rfq/${rfqId}",
+      "/api/rfq/${rfqId}/electronic-execution",
+      "/api/rfq/${rfqId}/quotes",
+      "/api/rfq/${rfqId}/quotes/${quoteId}",
+      "/api/rfq/${rfqId}/treatment${suffix}",
+      "/api/rfq/history",
+      "/api/rfq/providers"
+    ],
+    "store_ids": [
+      "rfq"
+    ],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/stores/rfq.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./rfq.js"
+    ],
+    "api_literals": [
+      "/api/price",
+      "/api/price/in-life",
+      "/api/rfq/7",
+      "/api/rfq/7/exchange-preview",
+      "/api/rfq/7/pricing-input"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "commande électronique durable",
+      "reprend la même clé après perte de réponse sans conserver le contenu sensible en session",
+      "les mutations concurrentes d’une quote",
+      "C23 applique la révocation serveur et la révision du last look dans le même dossier",
+      "C23 sérialise les modifications avec la révision renvoyée par la précédente",
+      "C23 transmet la révision effectivement affichée lors de la sélection",
+      "C23 une réponse tardive avec révocation ne touche pas un autre dossier",
+      "reçoit un prix réseau en préservant les hypothèses locales et le dossier actif",
+      "envoie le statut après le prix et conserve les deux",
+      "le pricing daté d’une RFQ",
+      "passe par le pricing in-life pour un strike historique",
+      "n’enregistre aucun faux prix quand le produit a déjà été rappelé",
+      "price séparément chaque sous-jacent et conserve la matrice du panier",
+      "RFQ et Product canonique",
+      "compose depuis Product puis appelle le moteur daté existant avec ses hypothèses effectives",
+      "ne lance pas le moteur ni un repli local si la version est refusée",
+      "ne présente pas un calcul comme enregistré si les hypothèses ont changé pendant le calcul",
+      "prépare une projection sans ajouter de cotation ni changer le dossier",
+      "utilise les relations autorisées et distingue leurs identifiants des fournisseurs manuels"
+    ]
+  },
+  {
+    "path": "frontend/src/stores/valuationContext.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "./pricing.js"
+    ],
+    "api_literals": [
+      "/api/paths",
+      "/api/proba"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/test/setup.js",
+    "imports": [
+      "vitest"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/__fixtures__/payscriptPresetServer.js",
+    "imports": [
+      "vitest",
+      "../productModels.js"
+    ],
+    "api_literals": [
+      "/api/calendar/resolve",
+      "/api/parse",
+      "/api/schedule/generate"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/accessErrors.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/api.js",
+    "imports": [
+      "./session.js"
+    ],
+    "api_literals": [
+      "/api/db/scripts"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/api.test.js",
+    "imports": [
+      "vitest",
+      "node:fs",
+      "node:url",
+      "node:path",
+      "./api.js"
+    ],
+    "api_literals": [
+      "/api/parse",
+      "/api/script/transcribe"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "messages de validation API lisibles",
+      "traduit les dates et nombres absents sans afficher le JSON ni doubler StartDate",
+      "identifie le sous-jacent et la contrainte de cours initial",
+      "préserve le message métier du serveur et traite les formes inconnues",
+      "authentification des appels API",
+      "relit le jeton à chaque appel et conserve les options JSON et multipart",
+      "ne laisse aucun écran métier contourner le transport authentifié"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/barriers.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/barriers.test.js",
+    "imports": [
+      "vitest",
+      "./barriers.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "la règle des barrières relit les écarts de la watchlist",
+      "place le curseur au niveau que donnent les écarts, sans rien recalculer",
+      "ombre sous la protection et au-dessus du rappel, jusqu’au repère exact",
+      "ne place pas un paramètre neutre : une participation à 90 % n’est pas une barrière",
+      "n’invente pas de position avant le strike",
+      "trace une règle par observable : un KI continu ne se lit pas sur le worst-of courant",
+      "garde lisibles deux repères proches : le second perd son étiquette, pas sa place",
+      "garde une règle de largeur non nulle quand tout est au même niveau",
+      "qualification des observations de surveillance",
+      "distingue le strike futur d’un observable indisponible",
+      "qualifie un minimum de clôtures sans inventer de distance quand il manque"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/calculationBudget.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/calculationBudget.test.js",
+    "imports": [
+      "vitest",
+      "./calculationBudget.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "estimation du coût de pricing",
+      "ajoute le coût des Greeks sans empiler leur mémoire",
+      "bloque les dimensions au-delà des limites serveur",
+      "intègre les dates littérales développées au coût"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/ccr.js",
+    "imports": [
+      "./api.js",
+      "../composables/useBookingMtm.js"
+    ],
+    "api_literals": [
+      "/api/ccr${path}",
+      "/api/ccr/calculate?stream=true"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/ccrHelp.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/clientAmounts.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/clientAmounts.test.js",
+    "imports": [
+      "vitest",
+      "./clientAmounts.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "C24 monetary observations retain their units",
+      "renders EUR and JPY separately, never as a 101 M pipeline",
+      "includes currency even with a single amount or an explicit zero",
+      "does not replace missing or non-finite amounts with zero",
+      "renders two ticket ranges without a mixed-currency median",
+      "keeps multiple observations in their own currency",
+      "does not assign a guessed currency to a legacy scalar",
+      "keeps declared-only ranges without inventing an observed ticket"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/commands.js",
+    "imports": [
+      "./session.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/commands.test.js",
+    "imports": [
+      "vitest",
+      "./commands.js",
+      "../stores/deals.js",
+      "pinia"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "reprise des commandes métier",
+      "partage les doubles clics simultanés, même si la réponse est immédiate",
+      "reconnaît un contenu identique indépendamment de l’ordre des propriétés",
+      "ne conserve dans le navigateur ni script, ni prix, ni jeton",
+      "conserve la reprise après renouvellement du jeton du même utilisateur",
+      "ignore un résultat tardif après un changement de session",
+      "arrête l’envoi si la clé ne peut pas être conservée",
+      "reprend le booking après réponse perdue, puis permet une autre intention explicite",
+      "ne confirme pas une réponse JSON tronquée et réutilise sa clé"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/concurrentPool.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/concurrentPool.test.js",
+    "imports": [
+      "vitest",
+      "./concurrentPool.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "pool de calculs portefeuille",
+      "borne la concurrence et poursuit après l’échec d’un deal"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/contextSwitch.js",
+    "imports": [
+      "./session.js"
+    ],
+    "api_literals": [
+      "/api/clients/${match[1]}",
+      "/api/db/scripts/${match[1]}",
+      "/api/deals/${match[1]}",
+      "/api/products/${match[1]}",
+      "/api/rfq/${match[1]}",
+      "/api/rfq/${match[1]}/booking-review"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/dealEvents.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/dealEvents.test.js",
+    "imports": [
+      "vitest",
+      "./dealEvents.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "les relevés d’un deal booké ne se lisent pas comme des constatations",
+      "annonce les constatations du contrat, pas ses lignes de fixing",
+      "place chaque relevé sous sa constatation, dans l’ordre des dates",
+      "numérote les constatations sans compter les relevés",
+      "laisse un produit ponctuel exactement tel qu’il s’affichait",
+      "lit un événement antérieur au champ comme une constatation",
+      "garde visible un relevé dont la constatation est introuvable",
+      "dit la règle d’agrégation en français, pas en mot-clé du langage"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/format.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/greekDisplay.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/greekDisplay.test.js",
+    "imports": [
+      "vitest",
+      "./greekDisplay.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "delta rapporté au niveau initial",
+      "convertit le choc de 1 % du spot actuel en choc de 1 % du fixing initial",
+      "coïncide avec le delta courant au fixing initial",
+      "ne présente aucun chiffre sans niveau initial et spot valides",
+      "ajoute chaque delta indicatif après le delta Risk sans modifier les valeurs du moteur",
+      "ne crée pas de delta rapporté au strike avant le fixing initial"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/marketProvenance.js",
+    "imports": [
+      "./underlyingDefaults.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/optimizerAutomaticMarket.test.js",
+    "imports": [
+      "vitest",
+      "./optimizerMarket.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Automatic dated market assumptions",
+      "rounds loaded pricing inputs to cents of percent while keeping the provider reference intact",
+      "starts with missing fields and classifies the selected title from its reference",
+      "preserves deliberate overrides on a dated refresh, including zero dividend",
+      "cannot apply an obsolete response to a different ticker",
+      "keeps absent provider fields missing while retaining explicit hypotheses",
+      "preserves the source value and date in an overridden frozen request",
+      "never introduces a generic correlation for a new or missing pair"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/optimizerDiagnostics.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/optimizerDiagnostics.test.js",
+    "imports": [
+      "vitest",
+      "./optimizerDiagnostics.js",
+      "./productOptimizer.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Optimizer pricing diagnostics",
+      "shows the best calculated coupons even with zero admissible structures and keeps recommendations strict",
+      "does not hide a more favourable rejected coupon behind an admissible one",
+      "never colours missing or failed validation green",
+      "uses the requested participation, cap and protection objectives",
+      "does not invent prices for failed or skipped structures",
+      "explains a central price inside tolerance with a confidence interval outside it",
+      "shows a hard risk breach with the direction and magnitude of the required bound",
+      "distinguishes endpoint prices from a solved quote and calculation errors from economic rejections",
+      "computes the net payoff target from the frozen economics"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/optimizerMarket.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/optimizerMarket.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "../stores/pricing.js",
+      "./optimizerMarket.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Optimizer market snapshot",
+      "copies exact engine values and every reference, without changing the Pricer",
+      "keeps references while editing and prunes removed identities",
+      "refuses stochastic rates, cross-currency, quanto and invalid identities",
+      "converts curve percentages exactly once and rejects missing numeric nodes",
+      "keeps correlations attached to identities when removing or reordering assets",
+      "exports the actual Pricer market without requiring script parameters or network"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/optimizerOutcome.js",
+    "imports": [
+      "./optimizerDiagnostics.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/optimizerOutcome.test.js",
+    "imports": [
+      "vitest",
+      "./optimizerOutcome.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Provisional versus final research outcomes",
+      "does not call an ongoing exploration a failed search, counts provisional solutions and does not request another job",
+      "explains all five failed holdouts and thirty untested provisional solutions, preserving statistical limits",
+      "does not treat hard economic rejection or a technical failure as a lack of precision",
+      "reports validation progress separately and confirms only genuinely passed controls",
+      "keeps the simulation suggestion within supported bounds and never launches from the diagnostic",
+      "shows the measured overrun even when every candidate was evaluated and confirmed",
+      "keeps historical partial results readable without inventing an elapsed time"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/optimizerPayoff.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/optimizerPayoff.test.js",
+    "imports": [
+      "vitest",
+      "./__fixtures__/optimizerFamilies.json",
+      "./optimizerPayoff.js",
+      "./productOptimizer.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Script-owned optimizer fields",
+      "preserves decimal endpoints after display-percent conversion",
+      "every default fixed value belongs to its native input step grid",
+      "switches booster objective between solving PART and solving CAP without stale axes",
+      "keeps gearing in multiples and gear coupon as a unique contractual amount",
+      "adds coupon barrier only for Phoenix and removes recall axes for reverse convertible",
+      "converts only percentage settings and keeps observation rank as an integer unit",
+      "missing required values block rather than becoming zero or silently disappearing"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/optimizerRadar.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/optimizerRadar.test.js",
+    "imports": [
+      "vitest",
+      "./optimizerRadar.js",
+      "./optimizerPayoff.js",
+      "./__fixtures__/optimizerFamilies.json"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Radar scales and financial directions",
+      "keeps identical scales for different selections and clips display without changing raw inputs",
+      "puts lower loss and protection barriers farther out, and shows explicit Q scales",
+      "adapts solved axes to participation and redemption cap, omits unavailable metrics and recall on non-autocalls"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/optimizerResearch.js",
+    "imports": [
+      "./api.js",
+      "./productOptimizer.js"
+    ],
+    "api_literals": [
+      "/api/product-optimizer/researches${path}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/optimizerResume.js",
+    "imports": [
+      "./optimizerMarket.js",
+      "./underlyingDefaults.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/payoffFamilies.js",
+    "imports": [
+      "../../../shared/payoffFamilies.json"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/payoffFamilies.test.js",
+    "imports": [
+      "vitest",
+      "../data/payscriptTemplates.js",
+      "./productModels.js",
+      "./payoffFamilies.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "classement des payoffs",
+      "regroupe les libellés historiques sans les modifier",
+      "propose une famille pour chaque modèle et template métier"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/payscriptEconomics.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/payscriptPresets.js",
+    "imports": [
+      "../data/payscriptPresets.json",
+      "./productModels.js",
+      "./payscriptEconomics.js",
+      "./api.js"
+    ],
+    "api_literals": [
+      "/api/calendar/resolve",
+      "/api/parse",
+      "/api/schedule/generate"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/payscriptPresets.test.js",
+    "imports": [
+      "vitest",
+      "./payscriptPresets.js",
+      "./productModels.js",
+      "./payscriptEconomics.js",
+      "./__fixtures__/payscriptPresetServer.js"
+    ],
+    "api_literals": [
+      "/api/calendar/resolve"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "exemples préremplis",
+      "ajuste un départ samedi avant de construire la première observation et garde les barrières dégressives",
+      "ne charge pas un exemple dont les dates ou le contrat ne peuvent pas être validés",
+      "cours absolus affichés selon le script",
+      "ne demande aucun cours en devise pour les dix-neuf modèles génériques",
+      "reconnaît le ratio normalisé et ignore le fixing initial ainsi que les commentaires"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/pricingConfiguration.js",
+    "imports": [
+      "./volSurface.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/pricingSession.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/pricingSession.test.js",
+    "imports": [
+      "vitest",
+      "pinia",
+      "../stores/pricing.js",
+      "./pricingSession.js",
+      "./payscriptPresets.js",
+      "./__fixtures__/payscriptPresetServer.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "navigation et session de pricing",
+      "reprend un exemple modifié, son marché et son prix au retour au Pricer",
+      "ne recharge ni un deal ni une RFQ au retour sur leur lien"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/productCalculations.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/productCalculations.test.js",
+    "imports": [
+      "vitest",
+      "./productCalculations.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "comparaison des marchés conservés",
+      "isole les mouvements contre le calcul précédent",
+      "conserve une ligne disparue pour rendre le changement visible",
+      "compare une série de plus de deux calculs dans leur ordre"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/productModels.js",
+    "imports": [
+      "../data/productCatalogue.json"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/productModels.test.js",
+    "imports": [
+      "vitest",
+      "./productModels.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "addMonthsIso suit relativedelta(months=n)",
+      "le catalogue",
+      "propose les ténors M9, dans l’ordre",
+      "donne à chaque fiche un script sans date et des rôles connus",
+      "borne le nombre de sous-jacents par fiche",
+      "buildModelCalendars",
+      "génère un échéancier du strike à la maturité, ancré sur le strike",
+      "pose la fenêtre de départ au strike et la date unique à maturité",
+      "porte la fréquence de relevé d’une fenêtre de période",
+      "ne génère rien sans strike ou sans ténor connu"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/productOptimizer.js",
+    "imports": [
+      "./api.js"
+    ],
+    "api_literals": [
+      "/api/product-optimizer/${path}",
+      "/api/product-optimizer/run"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/productOptimizer.test.js",
+    "imports": [
+      "vitest",
+      "./productOptimizer.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Product Optimizer",
+      "counts decimal endpoints and rejects reversed or zero-step ranges",
+      "never recommends a rejected candidate",
+      "excludes exploration-only and unfinished holdout candidates from recommendations",
+      "handles fragmented UTF-8 streams and requires a final result"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/rfqAnalysis.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/rfqAnalysis.test.js",
+    "imports": [
+      "vitest",
+      "./rfqAnalysis.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "C23 historical quote analysis",
+      "explicitly averages all same-day quotes without depending on input order"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/rfqBasket.js",
+    "imports": [
+      "./underlyingDefaults.js",
+      "./marketProvenance.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/rfqBasket.test.js",
+    "imports": [
+      "vitest",
+      "./rfqBasket.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "panier RFQ multi-sous-jacents",
+      "ne reconvertit pas les pourcentages d’un panier neuf",
+      "conserve la précision des hypothèses, y compris les modèles de vol",
+      "conserve chaque identité et chaque hypothèse propre au titre",
+      "agrandit une corrélation existante sans modifier ses paires"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/rfqNetworkPrototype.js",
+    "imports": [
+      "./productModels.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/rfqNetworkPrototype.test.js",
+    "imports": [
+      "node:crypto",
+      "vitest",
+      "./rfqNetworkPrototype.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "demandes et publications du prototype RFQ",
+      "ne sollicite aucune banque avant l’envoi explicite",
+      "communique les mêmes termes, une empreinte SHA-256 et aucune concurrence ou hypothèse privée",
+      "ne remet pas une demande à une banque non sollicitée",
+      "sépare calcul privé, contrôle, publication et réception",
+      "ne duplique pas une publication répétée de la même préparation",
+      "invalide le contrôle quand le prix préparé change",
+      "applique la seconde validation sans auto-validation",
+      "conserve l’ancien choix lorsqu’une révision remplace la réponse",
+      "refuse un contrôle périmé et une publication hors délai",
+      "garde le déclin sans inventer de prix",
+      "fermeté, retrait, confirmation et manuel",
+      "permet le retrait avant acceptation même si la réponse était sélectionnée",
+      "exige le motif et refuse le retrait d’une réponse d’une autre banque",
+      "refuse retrait et révision après une acceptation valide",
+      "refuse l’acceptation à l’expiration, sans réserver un prix",
+      "préserve une acceptation à temps puis permet le booking confirmé après expiration",
+      "conserve le téléphone déclaré et exige interlocuteur et référence",
+      "refuse l’acceptation d’une autre version de termes",
+      "distingue une réponse saisie manuellement d’une publication bancaire",
+      "ne révèle pas les événements privés ou ceux d’une autre banque"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/rfqQuoteStates.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/rfqReconciliationLabels.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/riskDates.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/riskDates.test.js",
+    "imports": [
+      "vitest",
+      "./riskDates.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "périmètre de risque daté",
+      "grise un deal avant son booking et dès son événement terminal",
+      "formate la date locale sans conversion UTC"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/riskScope.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/rollEconomics.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/rollEconomics.test.js",
+    "imports": [
+      "vitest",
+      "./rollEconomics.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "hypothèses économiques du roll",
+      "transmet les coûts en points et sépare les champs de bid inactifs",
+      "convertit une heure locale en instant explicite avec fuseau",
+      "préserve l’instant du bid à la réouverture d’une archive",
+      "normalise les champs inactifs de l’archive sans inventer une saisie",
+      "ne remplace pas les champs effacés par des coûts ou un bid nuls",
+      "explique un horodatage invalide avant l’envoi",
+      "retire l’ancien faux plafond à l’affichage sans modifier l’archive",
+      "conserve séparément quantité, récupération et plafond des résultats qualifiés"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/session.js",
+    "imports": [],
+    "api_literals": [
+      "/api/",
+      "/api/platform/"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/session.test.js",
+    "imports": [
+      "vitest",
+      "./api.js",
+      "./session.js",
+      "./contextSwitch.js"
+    ],
+    "api_literals": [
+      "/api/deals",
+      "/api/products",
+      "/api/rfq/12/booking-review"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "sessions par onglet et installation",
+      "ignore les anciens jetons partagés et route le métier directement au service privé",
+      "ne remplace pas la session d’un autre onglet",
+      "annule et rejette une réponse tardive après une bascule",
+      "reprise du dossier au changement de profil",
+      "ne transporte jamais un identifiant local entre deux installations",
+      "reprend le dossier seulement après une autorisation serveur fraîche",
+      "revient à l’accueil si le profil ne peut pas utiliser le Pricer",
+      "ouvre la revue de booking après contrôle serveur du profil Opérations"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/smileCalibration.js",
+    "imports": [
+      "./api.js",
+      "./volSurface.js"
+    ],
+    "api_literals": [
+      "/api/volatility/calibrate"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/smileCalibration.test.js",
+    "imports": [
+      "vitest",
+      "./smileCalibration.js",
+      "./volSurface.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "surface-driven model parameter synchronization",
+      "maps fractions to display values, caches the applied parameters and deduplicates requests",
+      "rejects a stale fit rather than pricing new assumptions with old parameters",
+      "preserves explicit manual model overrides",
+      "does not replace parameters when manual mode is selected during a fit",
+      "keeps the existing parameters on API failure and exposes its reason",
+      "sends the actual long horizon so its exclusions cannot be hidden"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/studySetup.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/studySetup.test.js",
+    "imports": [
+      "vitest",
+      "./studySetup",
+      "./studySnapshot"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Complete study setup",
+      "preserves a local benchmark and momentum after scanning",
+      "keeps known benchmarks and derives factors when omitted",
+      "restores the automatically computed Brinson result",
+      "keeps ISIN suggestions only when no benchmark is declared"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/studySnapshot.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/studySnapshot.test.js",
+    "imports": [
+      "vitest",
+      "./studySnapshot"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Studies snapshots",
+      "rejects responses from a previous study after run or load",
+      "preserves complete outputs without later mutation of the saved snapshot",
+      "opens legacy snapshots with empty derived outputs"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/studySynthesis.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/studySynthesis.test.js",
+    "imports": [
+      "vitest",
+      "./studySynthesis"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Study synthesis acceptance",
+      "keeps a generated synthesis as a draft for review",
+      "preserves an existing edited synthesis",
+      "reports mismatched versions and empty responses rather than silently discarding them",
+      "rejects technical output or an explicit token cutoff without replacing prose"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/underlyingDefaults.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/valuationComparison.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/valuationComparison.test.js",
+    "imports": [
+      "vitest",
+      "./valuationComparison.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "comparaison des valorisations",
+      "ordonne par date de valorisation puis par heure de calcul",
+      "calcule chaque mouvement contre la date sélectionnée précédente",
+      "retrouve la date de valorisation conservée dans le résultat"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/valuationSource.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/valuationSource.test.js",
+    "imports": [
+      "vitest",
+      "./valuationSource.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "keeps old archives without effective source unknown instead of inventing current market",
+      "reads nested and frozen effective evidence"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/volSurface.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/volSurface.test.js",
+    "imports": [
+      "vitest",
+      "./volSurface.js",
+      "./rfqBasket.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "editable coherent equity smiles",
+      "uses catalogue class and excludes volatility indices and unknown instruments",
+      "matches class/level anchors and maturity attenuation",
+      "moves one maturity or all, preserves the original and rejects calendar inversion",
+      "fits a wing target and propagates the coherent shape to other maturities",
+      "preserves engine fractions across RFQ editing and saving",
+      "rescales a manually edited term structure and restores invalid reference levels"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/workshopDate.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/workshopDate.test.js",
+    "imports": [
+      "vitest",
+      "./workshopDate"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "workshop calendar",
+      "uses the local day just after midnight",
+      "clamps leap day to the previous February"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/workshopHelp.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/workshopIssues.js",
+    "imports": [
+      "./workshopProgress"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/workshopIssues.test.js",
+    "imports": [
+      "vitest",
+      "./workshopIssues"
+    ],
+    "api_literals": [
+      "/api/missing",
+      "/api/retry"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "workshop problem register",
+      "links repeated errors to their exact occurrence and preserves their original message",
+      "does not attach a pilot incident to the next unrelated action at its recorded index",
+      "separates an unknown simulated-mail recipient from native Structura errors",
+      "shows a native pricing-receipt refusal without claiming a confirmed Structura defect",
+      "links an AI report by its result id and leaves its assertion unconfirmed",
+      "exports the original response and action context, including failures without a separate incident",
+      "keeps the initial IA report intact while exposing a saved human diagnosis"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/workshopPilot.js",
+    "imports": [
+      "./workshopProgress"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/workshopPilot.test.js",
+    "imports": [
+      "vitest",
+      "./workshopPilot"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "uses the diagnostic follow-up horizon instead of the former twelve-month scenario",
+      "campaign pilot",
+      "keeps periods, refusals and reconciliation errors distinct",
+      "does not propose restarting an exhausted campaign or silently change its budget",
+      "explains an error pause separately from a user pause",
+      "finds old actions beyond the former 160-entry cutoff and preserves original numbering",
+      "counts bank market shares only for complete client operations",
+      "formats cumulative real time without interpreting it as simulated months"
+    ]
+  },
+  {
+    "path": "frontend/src/utils/workshopProgress.js",
+    "imports": [],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/utils/workshopProgress.test.js",
+    "imports": [
+      "vitest",
+      "./workshopProgress"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "workshop observability",
+      "tracks each dossier recipients and waits for explicit bank confirmation",
+      "does not let the selected campaign keep an obsolete RUNNING status in the list",
+      "never presents a completed campaign as current IA activity, even with stale actor metadata",
+      "shows a disconnected controller instead of trusting a stale RUNNING record",
+      "distinguishes screenshots, real API activity, mail and wait without inventing browser usage",
+      "does not mark all responses received just because one bank quoted",
+      "shows the all-refusal outcome without pretending a trade or lifecycle was booked",
+      "requires the current native book review and settlement before showing lifecycle done",
+      "uses a chosen historical case rather than the latest case for the displayed booking",
+      "retains a native refusal and the exact issuer/deal identity in plain-language results"
+    ]
+  },
+  {
+    "path": "frontend/src/views/AccountSecurityView.vue",
+    "imports": [
+      "vue",
+      "../stores/auth.js",
+      "../utils/api.js",
+      "../components/ui/AlertMessage.vue",
+      "../composables/useConfirm.js"
+    ],
+    "api_literals": [
+      "/api/auth/logout-all",
+      "/api/auth/password"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminBrowseView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/EmptyState.vue",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/BaseModal.vue",
+      "../components/ui/DataFilterBar.vue",
+      "../composables/useDataFilter.js",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/admin/browse",
+      "/api/admin/browse/${activeTable.value}",
+      "/api/admin/browse/${activeTable.value}/${editRow.value.id}",
+      "/api/admin/browse/${activeTable.value}/${row.id}",
+      "/api/admin/browse/${activeTable.value}/delete"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminComputeView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/AlertMessage.vue",
+      "../utils/format.js",
+      "../composables/useConfirm.js"
+    ],
+    "api_literals": [
+      "/api/compute/admin/batches",
+      "/api/compute/admin/batches/${b.id}",
+      "/api/compute/admin/batches/${b.id}/relaunch",
+      "/api/compute/admin/batches/${b.id}/stop"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminCounterpartiesView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/AlertMessage.vue"
+    ],
+    "api_literals": [
+      "/api/admin/counterparties",
+      "/api/admin/counterparties/${c.id}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminEntitiesView.vue",
+    "imports": [
+      "vue",
+      "../stores/auth.js",
+      "vue-router",
+      "../utils/api.js",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/AlertMessage.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/admin/entities",
+      "/api/admin/entities/${e.id}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminMarketDataView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/AlertMessage.vue"
+    ],
+    "api_literals": [
+      "/api/admin/market-data",
+      "/api/admin/market-data/fetch"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminRfqProvidersView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/AlertMessage.vue",
+      "../components/HelpTip.vue",
+      "../composables/useConfirm.js"
+    ],
+    "api_literals": [
+      "/api/admin/counterparties",
+      "/api/admin/rfq-providers",
+      "/api/admin/rfq-providers/${p.id}",
+      "/api/admin/rfq-providers/${provider.id}/contacts",
+      "/api/admin/rfq-providers/${selectedProvider.value.id}/contacts",
+      "/api/admin/rfq-providers/${selectedProvider.value.id}/contacts/${contact.id}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminRfqRelationsView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../utils/format.js",
+      "../utils/payoffFamilies.js",
+      "../components/ui/BaseModal.vue",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/RfqNetworkSettings.vue"
+    ],
+    "api_literals": [
+      "/api/rfq-relations${path}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminUatGeneratorView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../composables/useConfirm.js",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/LoadingSpinner.vue",
+      "../utils/format.js",
+      "../composables/useBookingMtm.js"
+    ],
+    "api_literals": [
+      "/api/admin/uat-generator/batches",
+      "/api/admin/uat-generator/batches/${batch.id}",
+      "/api/admin/uat-generator/config",
+      "/api/admin/uat-generator/preview"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminUnderlyingsView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../data/commonUnderlyings.js",
+      "../composables/useConfirm.js",
+      "../utils/api.js",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/LoadingSpinner.vue"
+    ],
+    "api_literals": [
+      "/api/admin/underlyings",
+      "/api/admin/underlyings/${u.id}",
+      "/api/admin/underlyings/${u.id}/revalidate",
+      "/api/admin/underlyings/search?q=${encodeURIComponent(q)}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminUsersView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/AlertMessage.vue",
+      "../stores/auth.js",
+      "../components/ui/BaseModal.vue",
+      "../composables/useConfirm.js"
+    ],
+    "api_literals": [
+      "/api/admin/entities",
+      "/api/admin/users",
+      "/api/admin/users/${u.id}",
+      "/api/admin/users/${user.id}/${action}",
+      "/api/rfq-desks/admin",
+      "/api/rfq-desks/admin/${selectedDeskId.value}/members/${memberDraft.user_id}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AdminView.vue",
+    "imports": [
+      "../components/ui/BackLink.vue",
+      "vue-router",
+      "../stores/auth.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AgentWorkshopView.vue",
+    "imports": [
+      "vue",
+      "../utils/api",
+      "../stores/auth.js",
+      "../components/ui/BackLink.vue",
+      "../components/WorkshopMonitor.vue",
+      "../components/WorkshopHelp.vue",
+      "../components/WorkshopIssues.vue",
+      "../components/WorkshopBooks.vue",
+      "../components/WorkshopConfiguration.vue",
+      "../utils/workshopIssues",
+      "../utils/workshopProgress",
+      "../utils/workshopDate",
+      "../utils/workshopPilot",
+      "../composables/useConfirm"
+    ],
+    "api_literals": [
+      "/api/agent-workshop",
+      "/api/platform/simulation/start"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/AmcView.vue",
+    "imports": [
+      "../utils/studySnapshot",
+      "../utils/studySetup",
+      "../utils/studySynthesis",
+      "../components/AiWorkbench.vue",
+      "../components/ui/BackLink.vue",
+      "vue",
+      "vue-router",
+      "chart.js",
+      "../utils/api.js",
+      "../stores/demoMode.js",
+      "../charts/theme.js",
+      "../components/SensitiveValue.vue",
+      "../components/PriceSeriesImport.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/amc/analyze",
+      "/api/amc/benchmarks",
+      "/api/amc/export-pdf",
+      "/api/amc/ff-refresh?series_key=${encodeURIComponent(seriesKey)}",
+      "/api/amc/ff-series",
+      "/api/amc/ff-status",
+      "/api/amc/marketshocks",
+      "/api/amc/prices/attribution",
+      "/api/amc/prices/brinson",
+      "/api/amc/prices/fetch",
+      "/api/amc/prices/resolve-tickers",
+      "/api/amc/prices/status-for-study",
+      "/api/amc/prices/upload",
+      "/api/amc/studies",
+      "/api/amc/studies/${id}",
+      "/api/amc/study/detect",
+      "/api/amc/study/doc",
+      "/api/amc/study/export-pdf",
+      "/api/amc/study/run",
+      "/api/amc/synthesize",
+      "/api/amc/synthesize/payload",
+      "/api/amc/upload"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/BookingView.vue",
+    "imports": [
+      "../components/ui/ActionMenu.vue",
+      "../components/ui/BackLink.vue",
+      "vue",
+      "vue-router",
+      "../stores/deals.js",
+      "../stores/portfolios.js",
+      "../stores/auth.js",
+      "../utils/api.js",
+      "../components/ui/AlertMessage.vue",
+      "../utils/payoffFamilies.js",
+      "../components/HelpTip.vue",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/EmptyState.vue",
+      "../components/ui/DataFilterBar.vue",
+      "../components/AutoFixingExceptionModal.vue",
+      "../composables/useBookingMtm.js",
+      "../composables/useDataFilter.js",
+      "../utils/format.js",
+      "../utils/barriers.js",
+      "../components/LifecycleRefreshSummary.vue",
+      "../utils/riskScope.js",
+      "../data/payscriptTemplates.js",
+      "../utils/dealEvents.js"
+    ],
+    "api_literals": [
+      "/api/alerts/${a.id}/read",
+      "/api/alerts/read-all",
+      "/api/alerts/refresh-book",
+      "/api/alerts?unread_only=true",
+      "/api/deals/${d.id}/mtm/explain",
+      "/api/deals/${d.id}/mtm/explain/report",
+      "/api/deals/${d.id}/reinvest/roll",
+      "/api/deals/${id}",
+      "/api/deals/${id}/greeks"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/CcrView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/auth.js",
+      "../components/HelpTip.vue",
+      "../utils/ccrHelp.js",
+      "../components/CcrResult.vue",
+      "../components/CcrProgress.vue",
+      "../components/ui/BaseModal.vue",
+      "../components/SensitiveValue.vue",
+      "../components/ui/AlertMessage.vue",
+      "../utils/ccr.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/ClientDetailView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/clients.js",
+      "../composables/useConfirm.js",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/BackLink.vue",
+      "../components/ui/EmptyState.vue",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/clients/ClientFormModal.vue",
+      "../components/clients/PersonFormModal.vue",
+      "../components/clients/InteractionFormModal.vue",
+      "../components/clients/OpportunityFormModal.vue",
+      "../components/clients/ClientCard.vue",
+      "../components/clients/TechnicalPanel.vue",
+      "../components/clients/ConstraintsPanel.vue",
+      "../utils/format.js",
+      "../utils/payoffFamilies.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/ClientsView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/clients.js",
+      "../composables/useDataFilter.js",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/BackLink.vue",
+      "../components/ui/EmptyState.vue",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/DataFilterBar.vue",
+      "../components/clients/ClientFormModal.vue",
+      "../components/clients/PersonFormModal.vue",
+      "../components/clients/OpportunityFormModal.vue",
+      "../components/clients/ImportPanel.vue",
+      "../utils/format.js",
+      "../utils/clientAmounts.js",
+      ", libelle: "
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/ConsultationView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/auth"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/DealValuationsView.vue",
+    "imports": [
+      "../composables/useBookingMtm.js",
+      "../utils/valuationSource.js",
+      "vue",
+      "vue-router",
+      "../components/ui/BackLink.vue",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/SensitiveValue.vue",
+      "../components/PriceComparisonPanel.vue",
+      "../components/DealReferenceLink.vue",
+      "../utils/api.js",
+      "../utils/format.js",
+      "../utils/valuationComparison.js"
+    ],
+    "api_literals": [
+      "/api/deals/${dealId}",
+      "/api/deals/${dealId}/valuation-runs?run_type=MTM&include_payload=true",
+      "/api/deals/valuation-runs/${run.id}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/DocumentationView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../components/ui/BackLink.vue",
+      "../stores/deals.js",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/documents",
+      "/api/documents/${doc.id}/download",
+      "/api/documents/${id}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/FifoView.vue",
+    "imports": [
+      "../components/ui/BackLink.vue",
+      "vue",
+      "../utils/api.js",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/fifo/detect",
+      "/api/fifo/run"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/HomeView.vue",
+    "imports": [
+      "\r\n              class=",
+      "vue",
+      "vue-router",
+      "../stores/auth.js",
+      "../stores/pricing.js",
+      "../components/ui/BackLink.vue",
+      "../utils/api.js"
+    ],
+    "api_literals": [
+      "/api/alerts?unread_only=true&limit=1",
+      "/api/amc/studies"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/LoginView.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "./LoginView.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "choix de compte et sortie du portail",
+      "garde la session initiale et un retour utilisable après une panne",
+      "permet de revenir en arrière sans appel réseau, même après une erreur",
+      "traduit aussi une panne pendant la connexion par mot de passe",
+      "revient vers Admin sans dépendre du portail pour une ouverture directe",
+      "connexion normale par le portail",
+      "charge le choix des installations hors mode développeur et interdit le repli central implicite",
+      "bloque la connexion du portail quand son annuaire est indisponible",
+      "préserve la connexion directe au workspace autonome"
+    ]
+  },
+  {
+    "path": "frontend/src/views/LoginView.vue",
+    "imports": [
+      "vue",
+      "../stores/auth.js",
+      "vue-router",
+      "../components/ui/AlertMessage.vue",
+      "../utils/session.js",
+      "../utils/accessErrors.js"
+    ],
+    "api_literals": [
+      "/api/auth/options",
+      "/api/auth/register",
+      "/api/platform/development/access",
+      "/api/platform/development/admin-workbench",
+      "/api/platform/login-options"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/OpportunityDetailView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/clients.js",
+      "../utils/api.js",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/BackLink.vue",
+      "../components/ui/EmptyState.vue",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/DealReferenceLink.vue",
+      "../components/clients/OpportunityFormModal.vue",
+      "../components/clients/InteractionFormModal.vue",
+      "../components/clients/LostReasonModal.vue",
+      "../utils/format.js",
+      "../utils/payoffFamilies.js"
+    ],
+    "api_literals": [
+      "/api/clients/${fiche.client_id}/contacts"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/OptimizerResearchListView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../components/HelpTip.vue",
+      "../stores/demoMode.js",
+      "../utils/optimizerResearch.js",
+      "../utils/productOptimizer.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/OptimizerResultsView.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "./OptimizerResultsView.vue"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Saved research page lifecycle",
+      "prepares a higher-precision linked request without starting another pricing job",
+      "polls saved results then stops at completion; navigation never cancels the server job",
+      "ignores stale responses and hides metadata as soon as demo mode is enabled",
+      "requests an explicit stop through the owned job endpoint"
+    ]
+  },
+  {
+    "path": "frontend/src/views/OptimizerResultsView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/demoMode.js",
+      "../components/OptimizerResearchResults.vue",
+      "../utils/optimizerResearch.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/PersonDetailView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/clients.js",
+      "../composables/useConfirm.js",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/BackLink.vue",
+      "../components/ui/EmptyState.vue",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/clients/ChangeCompanyModal.vue",
+      "../components/clients/CyclePanel.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/PlatformView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../stores/auth.js",
+      "../utils/api.js",
+      "../composables/useContextChanges.js",
+      "../components/ui/AlertMessage.vue"
+    ],
+    "api_literals": [
+      "/api/platform/installations",
+      "/api/platform/installations/${item.key}/start",
+      "/api/platform/simulation/start",
+      "/api/platform/status"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/Pricer.vue",
+    "imports": [
+      "../components/ui/BackLink.vue",
+      "../components/PayScriptEditor.vue",
+      "../components/EconomicsTab.vue",
+      "../components/VariantBar.vue",
+      "../components/MarketParams.vue",
+      "../components/DealTab.vue",
+      "../components/EventsTab.vue",
+      "../components/ResultsPanel.vue",
+      "../components/KidPanel.vue",
+      "../components/EmtPanel.vue",
+      "../components/SensitiveValue.vue",
+      "../components/ProductContextBar.vue",
+      "../components/ui/AlertMessage.vue",
+      "../components/DealReferenceLink.vue",
+      "vue",
+      "vue-router",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "../composables/useConfirm.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/PricerView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "./Pricer.vue",
+      "../stores/pricing.js",
+      "../stores/auth.js",
+      "../stores/products.js",
+      "../stores/deals.js",
+      "../stores/rfq.js",
+      "../utils/productModels.js",
+      "../utils/pricingSession.js",
+      "../utils/api.js",
+      "../components/ui/AlertMessage.vue"
+    ],
+    "api_literals": [
+      "/api/db/scripts/${id}",
+      "/api/db/scripts/variants/${id}/resolved",
+      "/api/rfq-inbox/${Number(route.query.receivedRfq)}",
+      "/api/rfq/${rfq.id}/terms"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/ProductModelsView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../components/ui/BackLink.vue",
+      "../composables/useConfirm.js",
+      "../stores/pricing.js",
+      "../utils/calculationBudget.js",
+      "../utils/productModels.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/ProductOptimizerView.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "../utils/__fixtures__/optimizerFamilies.json",
+      "./ProductOptimizerView.vue",
+      "../components/OptimizerPayoffFields.vue",
+      "../utils/optimizerPayoff.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "Optimizer view lifecycle and request workflow",
+      "loads a higher-precision draft with the original market, economics and contractual constraints",
+      "saves intention and inputs then opens the dedicated result page without streaming",
+      "sends the displayed rounded inputs and restores them without rounding the source snapshot",
+      "loads from its own title selection, classifies STMicro and sends pricing date",
+      "preserves a manual vol on date change but clears it when replacing the title",
+      "ignores a response that arrives after a different title was selected",
+      "blocks missing values after an outage and preserves an explicit zero override",
+      "an explicit fixed parameter becomes a singleton and the explorer keeps every selected value",
+      "retries an unknown launch outcome with the identical command and creates a new key after editing",
+      "resumes a frozen request with curves and overrides into a new linked version"
+    ]
+  },
+  {
+    "path": "frontend/src/views/ProductOptimizerView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../components/HelpTip.vue",
+      "../components/OptimizerPanel.vue",
+      "../components/OptimizerNumberInput.vue",
+      "../components/OptimizerCurveInput.vue",
+      "../components/OptimizerPayoffFields.vue",
+      "../utils/optimizerPayoff.js",
+      "../utils/optimizerMarket.js",
+      "../utils/optimizerResearch.js",
+      "../utils/optimizerResume.js",
+      "../stores/demoMode.js",
+      "../data/commonUnderlyings.js",
+      "../utils/productOptimizer.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/ProductsView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../components/ui/BackLink.vue",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/BaseModal.vue",
+      "../components/ui/EmptyState.vue",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/SensitiveValue.vue",
+      "../components/PriceComparisonPanel.vue",
+      "../stores/products.js",
+      "../utils/format.js",
+      "../utils/productCalculations.js",
+      "../utils/api.js"
+    ],
+    "api_literals": [
+      "/api/documents/${doc.record_id}/download"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/ReinvestView.vue",
+    "imports": [
+      "../data/payscriptTemplates.js",
+      "../components/ui/BackLink.vue",
+      "vue",
+      "../stores/deals.js",
+      "../utils/api.js",
+      "../data/commonUnderlyings.js",
+      "../components/HelpTip.vue",
+      "../utils/format.js",
+      "../charts/theme.js",
+      "chart.js"
+    ],
+    "api_literals": [
+      "/api/deals/${deal.value.id}/reinvest/proposal",
+      "/api/deals/${deal.value.id}/reinvest/proposal/freeze",
+      "/api/deals/${deal.value.id}/reinvest/proposal/pdf",
+      "/api/deals/${deal.value.id}/reinvest/scan",
+      "/api/deals/${dealId}/archives"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/RfqAnalysisView.vue",
+    "imports": [
+      " type=",
+      "vue",
+      "chart.js",
+      "../stores/rfq.js",
+      "../components/ui/BackLink.vue",
+      "../stores/demoMode.js",
+      "../composables/useSensitiveChart.js",
+      "../charts/theme.js",
+      "../data/payscriptTemplates.js",
+      "../utils/format.js",
+      "../utils/rfqAnalysis.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/RfqBookingView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api",
+      "../utils/format.js",
+      "../components/ui/BackLink.vue",
+      "../components/SensitiveValue.vue"
+    ],
+    "api_literals": [
+      "/api/rfq/${route.params.rfqId}/book",
+      "/api/rfq/${route.params.rfqId}/booking-review"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/RfqInboxView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../utils/api.js",
+      "../stores/auth.js",
+      "../components/ui/BaseModal.vue",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/BackLink.vue",
+      "../utils/format.js",
+      "../components/RfqBankQuotePanel.vue",
+      "../components/RfqElectronicExecutionPanel.vue",
+      "../utils/rfqReconciliationLabels.js"
+    ],
+    "api_literals": [
+      "/api/rfq-inbox${before}",
+      "/api/rfq-inbox/${id}/assignment",
+      "/api/rfq-inbox/${id}/claim",
+      "/api/rfq-inbox/${id}/members",
+      "/api/rfq-inbox/${item.id}",
+      "/api/rfq-inbox/${item.id}/read"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/RfqNetworkPrototypeView.test.js",
+    "imports": [
+      "vue",
+      "@vue/server-renderer",
+      "vue-router",
+      "vitest",
+      "./RfqNetworkPrototypeView.vue",
+      "../utils/rfqNetworkPrototype.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "écrans du prototype RFQ",
+      "affiche un brouillon fictif et le maintien du parcours manuel",
+      "ne présente pas les termes ni le pricing à une banque non sollicitée",
+      "affiche la préparation bancaire sans exposer le calcul à la perspective demandeur"
+    ]
+  },
+  {
+    "path": "frontend/src/views/RfqNetworkPrototypeView.vue",
+    "imports": [
+      "vue",
+      "vue-router",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/BaseModal.vue",
+      "../utils/rfqNetworkPrototype.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/RfqProductTransition.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue-router",
+      "pinia",
+      "./RfqView.vue"
+    ],
+    "api_literals": [
+      "/api/clients",
+      "/api/parse",
+      "/api/rfq-desks"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "Product vers RFQ",
+      "remplace l’intention de création Product par le lien du dossier RFQ sélectionné",
+      "préremplit vente, deux millions, Client, mandat et documentation OTC",
+      "préserve aussi le sens achat et un dossier sans contexte Client",
+      "le bouton de pricing envoie les hypothèses sans identité du sous-jacent"
+    ]
+  },
+  {
+    "path": "frontend/src/views/RfqView.vue",
+    "imports": [
+      "../components/ui/BackLink.vue",
+      "../components/SensitiveValue.vue",
+      "../components/RfqExecutionPanel.vue",
+      "../utils/rfqQuoteStates.js",
+      "../components/DealReferenceLink.vue",
+      "vue",
+      "vue-router",
+      "../stores/rfq.js",
+      "../stores/demoMode.js",
+      "../stores/products.js",
+      "../composables/useMarketAssumptions.js",
+      "../utils/underlyingDefaults.js",
+      "../utils/marketProvenance.js",
+      "../utils/payoffFamilies.js",
+      "../components/YieldCurveCard.vue",
+      "../components/FundingCurveCard.vue",
+      "../components/DividendCurveCard.vue",
+      "../components/UnderlyingVolFields.vue",
+      "../utils/smileCalibration.js",
+      "../utils/volSurface.js",
+      "../utils/api.js",
+      "../utils/payscriptEconomics.js",
+      "../data/payscriptTemplates.js",
+      "../data/commonUnderlyings.js",
+      "../utils/rfqBasket.js",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/BaseModal.vue",
+      "../components/ui/EmptyState.vue",
+      "../components/ui/AlertMessage.vue",
+      "../components/ui/DataFilterBar.vue",
+      "../composables/useDataFilter.js",
+      "../components/RfqParamsEditor.vue",
+      "../components/PayScriptPresetPicker.vue",
+      "../components/RfqPricingPanel.vue",
+      "../components/RfqExchangePanel.vue",
+      "../components/CcrCreditCheck.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/calendar/resolve",
+      "/api/clients",
+      "/api/clients/${clientId}/contacts",
+      "/api/clients/${clientId}/mandates",
+      "/api/db/scripts",
+      "/api/deals",
+      "/api/deals/counterparties",
+      "/api/finance/hist_vol?tickers=${encodeURIComponent(tk)}&period=1y&asof=${encodeURIComponent(asof)}",
+      "/api/opportunities/${id}",
+      "/api/opportunities?client_id=${clientId}&open_only=true",
+      "/api/parse",
+      "/api/rfq-desks",
+      "/api/rfq-desks/${assignmentDraft.pilot_desk_id}/members",
+      "/api/rfq-desks/organization",
+      "/api/rfq/${rfq.current.id}/shares",
+      "/api/rfq/${rfq.current.id}/shares/${share.desk_id}",
+      "/api/rfq/${rfq.current.id}/shares/${shareDraft.desk_id}",
+      "/api/rfq/${snapshot.id}/assignment",
+      "/api/rfq/${source.id}/shares"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/RiskManagementView.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "./RiskManagementView.vue",
+      "../stores/portfolios.js"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": [
+      "concentration et qualification juridique",
+      "rend la sélection UAT et la consultation des anciennes études distinctes",
+      "affiche une exception non qualifiée sans présenter sa limite comme contrôlée",
+      "signale gamma et rho absents du calcul courant avec leur couverture et la source du delta"
+    ]
+  },
+  {
+    "path": "frontend/src/views/RiskManagementView.vue",
+    "imports": [
+      "../composables/useBookingMtm.js",
+      "../components/ui/ActionMenu.vue",
+      "../components/ui/BackLink.vue",
+      "vue",
+      "../utils/riskScope.js",
+      "vue-router",
+      "../stores/deals.js",
+      "../stores/portfolios.js",
+      "../stores/auth.js",
+      "../utils/api.js",
+      "../utils/format.js",
+      "../utils/barriers.js",
+      "../utils/riskDates.js",
+      "../utils/concurrentPool.js",
+      "../components/HelpTip.vue",
+      "../components/ui/AlertMessage.vue",
+      "../components/DealReferenceLink.vue",
+      "../composables/useConfirm.js"
+    ],
+    "api_literals": [
+      "/api/deals/${id}/greeks"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/ScriptsView.vue",
+    "imports": [
+      "../components/ui/BackLink.vue",
+      "vue",
+      "vue-router",
+      "../stores/auth.js",
+      "../utils/api.js",
+      "../composables/useConfirm.js",
+      "../components/ui/LoadingSpinner.vue",
+      "../components/ui/EmptyState.vue",
+      "../components/ui/DataFilterBar.vue",
+      "../composables/useDataFilter.js",
+      "../components/ui/BaseModal.vue",
+      "../components/ui/AlertMessage.vue",
+      "../utils/format.js"
+    ],
+    "api_literals": [
+      "/api/db/scripts",
+      "/api/db/scripts/${id}${cascade",
+      "/api/db/scripts/${s.id}",
+      "/api/db/scripts/${s.id}/variants",
+      "/api/db/scripts/${v.id}",
+      "/api/folders",
+      "/api/folders/${id}"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/StructuringView.vue",
+    "imports": [
+      "vue-router"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/TradingView.vue",
+    "imports": [
+      "vue",
+      "../utils/api",
+      "../utils/format.js",
+      "../components/ui/BackLink.vue",
+      "../stores/auth"
+    ],
+    "api_literals": [],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/ValoExplainView.vue",
+    "imports": [
+      "../utils/valuationSource.js",
+      "../components/AiWorkbench.vue",
+      "vue",
+      "vue-router",
+      "../components/SensitiveValue.vue",
+      "../components/DealReferenceLink.vue",
+      "../stores/demoMode",
+      "../utils/api",
+      "../composables/useBookingMtm",
+      "../composables/useValuationNoteDraft",
+      "../composables/useValuationRunSelection"
+    ],
+    "api_literals": [
+      "/api/deals",
+      "/api/deals/${dealId.value}/mtm?stream=true",
+      "/api/deals/valuation-runs/${r.id}",
+      "/api/valuation-notes",
+      "/api/valuation-notes/${id}",
+      "/api/valuation-notes/${note.id}/assist",
+      "/api/valuation-notes/${note.value.id}/pdf?${version",
+      "/api/valuation-notes/${note.value.id}/versions",
+      "/api/valuation-notes/${route.query.note}",
+      "/api/valuation-notes/${value.id}/versions",
+      "/api/valuation-notes/sources/${dealId.value}",
+      "/api/valuation-notes?stream=true"
+    ],
+    "store_ids": [],
+    "test_labels": []
+  },
+  {
+    "path": "frontend/src/views/archiveDocuments.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue-router",
+      "pinia",
+      "./BookingView.vue",
+      "./ReinvestView.vue",
+      "../components/VariantCompareTab.vue"
+    ],
+    "api_literals": [
+      "/api/alerts?",
+      "/api/deals/1/mtm/explain/report"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "Booking exporte le résultat sélectionné malgré une modification des dates et du mode",
+      "une proposition est gelée avec sa preuve affichée puis exportée par identifiant",
+      "un gel tardif ne remplace pas une autre proposition affichée",
+      "réouvrir une archive restitue ses chiffres sans demander de pricing",
+      "le comparateur fige la preuve affichée et restitue une étude conservée"
+    ]
+  },
+  {
+    "path": "frontend/src/views/asyncInterfaces.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue-router",
+      "pinia",
+      "./RfqView.vue",
+      "./RfqInboxView.vue",
+      "./BookingView.vue",
+      "../components/RfqExecutionPanel.vue",
+      "../components/RfqBankQuotePanel.vue",
+      "../stores/rfq.js",
+      "../utils/volSurface.js"
+    ],
+    "api_literals": [
+      "/api/alerts/refresh-book",
+      "/api/alerts?",
+      "/api/deals/1",
+      "/api/deals/2",
+      "/api/parse",
+      "/api/rfq-inbox/"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "la préparation bancaire actualise le dossier ouvert avec son contexte de réponse",
+      "une publication tardive ne remplace pas une réouverture du même dossier",
+      "le panneau bancaire émet le contexte capturé au départ du contrôle",
+      "une erreur de publication arrivée après fermeture ne pollue pas le panneau suivant",
+      "le refresh collectif recharge les événements ouverts et invalide le MtM affiché",
+      "un détail refusé est signalé et sa reprise réussie efface l’erreur",
+      "fermer une RFQ pendant la réaffectation ne réouvre pas son détail",
+      "la réponse de réaffectation courante reste applicable",
+      "une ancienne liste de collaborateurs ne s’ouvre pas sur B",
+      "les termes tardifs d’exécution ne remplissent pas une autre RFQ",
+      "un rafraîchissement du même accord conserve les preuves en cours de saisie",
+      "un acquittement global ne masque pas une nouvelle alerte reçue pendant son attente",
+      "un ancien chargement ne ressuscite pas une alerte acquittée",
+      "un ancien refus de prix ne restaure pas une saisie plus récente",
+      "un refus reçu après navigation ne devient pas une erreur sur B",
+      "un prix refusé recharge la valeur désormais enregistrée sur le serveur",
+      "le sens refusé revient au sens enregistré et conserve la saisie refusée",
+      "le last look refusé restaure le choix enregistré sans ajouter de ligne",
+      "un refus de A ne relance pas une lecture de A pendant l’ouverture de B",
+      "la RFQ refuse de calculer avec une calibration correspondant à l’ancien taux"
+    ]
+  },
+  {
+    "path": "frontend/src/views/marketDataGovernance.test.js",
+    "imports": [
+      "vitest",
+      "vue",
+      "vue/server-renderer",
+      "pinia",
+      "vue-router",
+      "../utils/marketProvenance.js",
+      "../utils/rfqBasket.js",
+      "../stores/pricing.js",
+      "../stores/demoMode.js",
+      "./RfqView.vue",
+      "./AdminMarketDataView.vue",
+      "../components/ComparatorTab.vue",
+      "../components/MarketDataProvenance.vue"
+    ],
+    "api_literals": [
+      "/api/parse",
+      "/api/price"
+    ],
+    "store_ids": [],
+    "test_labels": [
+      "référence, surcharge et valeur exacte survivent au panier RFQ",
+      "les métadonnées sont copiées et les anciennes références ne deviennent pas celles du nouveau ticker",
+      "un profil en erreur interdit un zéro de repli, et conserve l’hypothèse explicite",
+      "un fetch administratif réussi mais non qualifié ne devient pas OK"
+    ]
+  }
+]

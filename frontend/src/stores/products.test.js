@@ -72,7 +72,7 @@ describe('chargement des calculs conservés', () => {
 
     expect(product.calculations).toHaveLength(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith('/api/products/12', { headers: {} })
+    expect(fetchMock).toHaveBeenCalledWith('/api/products/12', { headers: {}, signal: expect.any(AbortSignal) })
   })
 
   it('reprend les termes de la RFQ sans importer les hypothèses du dernier calcul Product', async () => {
@@ -88,5 +88,36 @@ describe('chargement des calculs conservés', () => {
     expect(loaded.calculationInput).toBeNull()
     expect(loaded.calculationId).toBeNull()
     expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/products/12?terms_version=2'])
+  })
+
+  it('reprend la même commande après une réponse de conservation perdue et un nouveau store', async () => {
+    const posted = []
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      posted.push(JSON.parse(options.body))
+      if (posted.length === 1) throw new TypeError('Réponse perdue après succès serveur')
+      return response({ product_id: 12, revision: 1 })
+    }))
+    const payload = { name: 'Intention conservée', pricingInput: { script: 'AT MATURITY\n  PAY 1' } }
+    await expect(useProductsStore().retainPricing(payload)).rejects.toThrow('Réponse perdue')
+    setActivePinia(createPinia())
+    await useProductsStore().retainPricing(payload)
+    expect(posted[1].command_key).toBe(posted[0].command_key)
+    await useProductsStore().retainPricing(payload)
+    expect(posted[2].command_key).not.toBe(posted[1].command_key)
+  })
+
+  it.each(['calculation', 'terms'])('reprend aussi la commande %s sans changer de clé', async kind => {
+    const posted = []
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      posted.push(JSON.parse(options.body))
+      if (posted.length === 1) throw new Error('Réponse perdue')
+      return response({ product_id: 12, revision: 3 })
+    }))
+    const store = useProductsStore(), product = { product_id: 12, revision: 2 }
+    const send = () => kind === 'calculation' ? store.retainCalculation(product, { calculated_at: '2026-10-22' })
+      : store.reviseTerms(product, { script: 'AT MATURITY\n  PAY 1' }, 'Modification explicite')
+    await expect(send()).rejects.toThrow('Réponse perdue')
+    await send()
+    expect(posted[1].command_key).toBe(posted[0].command_key)
   })
 })

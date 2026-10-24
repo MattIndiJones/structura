@@ -1,3 +1,5 @@
+from datetime import date
+import pytest
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.api import deals as deals_api
@@ -77,3 +79,19 @@ def test_le_ki_garde_une_cle_terminale_independante_des_observations(monkeypatch
     alerts = session.exec(select(Alert).where(Alert.deal_id == deal.id)).all()
     assert len(alerts) == 1
     assert alerts[0].dedup_key == f"deal:{deal.id}:barrier:M_KI_BAR"
+
+
+def test_rappel_se_regle_a_sa_date_effective_sans_attendre_la_maturite(monkeypatch):
+    session,user,deal=_session_with_deal()
+    deal.status='en_reglement';deal.resolution_outcome='callé'
+    deal.settlement_date='2022-12-19';deal.settlement_amount=1.08
+    deal.payment_date='2026-12-17'
+    session.add(deal);session.commit()
+    refresh=lambda *_args,**_kwargs: pytest.fail('Un cash certain ne requiert pas un nouveau pricing')
+    lifecycle_alerts.configure_lifecycle_handlers(refresh,lambda *_args,**_kwargs:{})
+    monkeypatch.setattr(lifecycle_alerts,'business_today',lambda:date(2022,12,14))
+    assert lifecycle_alerts.refresh_book(session,user.id)['settled']==0
+    assert deal.status=='en_reglement'
+    monkeypatch.setattr(lifecycle_alerts,'business_today',lambda:date(2022,12,19))
+    assert lifecycle_alerts.refresh_book(session,user.id)['settled']==1
+    assert deal.status=='callé' and deal.payment_date=='2026-12-17'

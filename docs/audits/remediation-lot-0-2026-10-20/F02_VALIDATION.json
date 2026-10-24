@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "corrective": "F02",
+  "date": "2026-10-23",
+  "status": "locally_resolved_fixture",
+  "production_qualified": false,
+  "report": "../REMEDIATION_F02_2026-10-23.md",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "diagnosis": {
+    "classification": "fixture_initialization_prerequisite_missing",
+    "internal_migration_called_before_missing_tables_created": true,
+    "normal_startup_creates_tables_before_migration": true,
+    "normal_startup_incompatibility_reproduced": false,
+    "scope": "Tested isolated historical schemas only; no blanket compatibility claim."
+  },
+  "changes": {
+    "application_sources_changed": false,
+    "migration_sources_changed": false,
+    "test_file": "backend/tests/test_workflow_controls.py",
+    "existing_case_strengthened": "backend/tests/test_workflow_controls.py::test_legacy_migration_marks_ambiguous_rows_for_manual_review",
+    "new_case": "backend/tests/test_workflow_controls.py::test_startup_creates_product_tables_before_upgrading_legacy_rows",
+    "no_sql_guard_weakened": true
+  },
+  "backend": {
+    "passed": 7,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "distinct": true,
+    "new_cases": 1,
+    "strengthened_cases": 1,
+    "files": 4,
+    "test_ids": [
+      "backend/tests/test_workflow_controls.py::test_legacy_migration_marks_ambiguous_rows_for_manual_review",
+      "backend/tests/test_workflow_controls.py::test_startup_creates_product_tables_before_upgrading_legacy_rows",
+      "backend/tests/test_workflow_controls.py::test_startup_migration_retires_four_eyes_and_stales_pending_proposal",
+      "backend/tests/test_product_transition_integrity.py::test_migration_preserves_unqualified_historical_rows_without_inventing_a_version",
+      "backend/tests/test_product_transition_integrity.py::test_repository_and_sql_refuse_retrograde_current_pointer",
+      "backend/tests/test_c19_archives.py::test_archive_upgrade_adds_reference_column_and_reinstalls_same_guards",
+      "backend/tests/test_ccr.py::test_additive_migration_preserves_old_unknown_data"
+    ],
+    "duration_seconds_reported": 16.71,
+    "baseline_failure_count": 1,
+    "baseline_xml": "baseline.xml",
+    "final_xml": "final-backend.xml"
+  },
+  "acceptance": {
+    "legacy_quote_remains_unknown": true,
+    "legacy_fixing_requires_manual_review": true,
+    "original_spots_preserved": true,
+    "rfq_reference_preserved": true,
+    "product_links_and_versions_not_invented": true,
+    "official_fixings_not_invented": true,
+    "two_actual_startups": true,
+    "fk_enforced_and_checked_in_startup_case": true,
+    "invalid_product_inserts_and_updates_blocked_after_each_startup": true,
+    "adjacent_c06_c19_c21_migrations_revalidated": true
+  },
+  "network": {
+    "external_http_disabled": true,
+    "blocked_attempts": []
+  },
+  "failure_followup": {
+    "initial_cases": 121,
+    "remaining_cases": 120,
+    "initial_groups": 7,
+    "remaining_groups": 6,
+    "ledger": "FAILURE_REGISTER.json",
+    "other_cases_rerun": false
+  },
+  "isolation": {
+    "structura_environment_sanitized": true,
+    "temporary_data_dir": true,
+    "temporary_test_databases": true,
+    "real_db_used": false,
+    "server_started": false
+  },
+  "limits": [
+    "Only the seven selected backend cases.",
+    "No broad historical-schema compatibility qualification.",
+    "No real installation migration or backup/restore exercise.",
+    "Existing two SQLModel deprecation warnings unchanged.",
+    "Frozen step-1 evidence remains historical."
+  ],
+  "artifact_root": ".runtime/diagnostic-acceptance/f02-2026-10-23",
+  "commit": false,
+  "push": false,
+  "source_sha256": {
+    "backend/tests/test_workflow_controls.py": "b9d7c5c845ccbafa0be5efb9779bf31ff2363924c3f641c0822d2670a41a5def"
+  },
+  "runtime_artifacts_sha256": {
+    "baseline-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    "baseline.log": "968d61ccf155af1e3f51878957a22a920bf02b738c15dc92883cd2b0a8158440",
+    "baseline.xml": "f8ab249ff4bddac95cfcfa3dcb43ce1078857e2c999d1d491ac7d88e7a8771cc",
+    "f02_network_guard.py": "0005eb218a962eb2659bb486b882f6b506b41d5ad7bde6a772c1b765abfef8d7",
+    "final-backend-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    "final-backend.log": "27701a4f4d6d8bf1946f586dd1afa2cb1ddab5a0b0c8a5081192e53167d35b30",
+    "final-backend.xml": "9a6c5f68d66bbe4e3fca6967a8d6244a9174fc3c30ae051b399aaa2150374b64",
+    "fixture-recheck-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    "fixture-recheck.log": "b1e20e4bb67c67d619a167605a5d1c209549d10fc20db03a6ad2b048b02469bb",
+    "fixture-recheck.xml": "812c8b8de4118081e445d6ebefaff25a8216424261d72197ab68992843b9b78a",
+    "incremental.patch": "98bb5514a67f0c58f737aedd901aabe2ee9e0117d2fe5969f3f68cb37c0f86bf",
+    "migration-startup-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    "migration-startup.log": "c69fbd8c00bf4387c78b7eaeca1cacfaee5705684a01a536bba9a77df93b0780",
+    "migration-startup.xml": "a10ab9f3cf07bc575bdecceacdd6d9962e2888acd1650a85be3cb073957cb536",
+    "run_targeted.py": "e98307b138004683f44915ab7c8ed007021548cf87830253a5fad9ce75cb50d1",
+    "test_workflow_controls.before.py": "89bb9b4f4604c073789f4f39a167d1e927fc9e65e58df9193ba76fa2084a992e",
+    "preservation.json": "b1223163e088c5714a4f55aa0f1bacbe1ec80a7e4eb0d4e94efa034247137e08"
+  },
+  "preservation": {
+    "date": "2026-10-23",
+    "initial_files": 1290,
+    "unchanged_preexisting_files": 1285,
+    "expected_changed": [
+      "backend/tests/test_workflow_controls.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json"
+    ],
+    "new": [
+      "docs/audits/REMEDIATION_F02_2026-10-23.md",
+      "docs/audits/remediation-lot-0-2026-10-20/F02_VALIDATION.json",
+      "docs/audits/remediation-lot-0-2026-10-20/FAILURE_REGISTER.json"
+    ],
+    "unexpected_changes": [],
+    "application_and_migration_sources_unchanged": true,
+    "previous_runtime_artifacts_unchanged": 788,
+    "frozen_consolidation_and_c01_c27_proofs_unchanged": 36,
+    "unrelated_registry_fields_preserved": true,
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "real_db_absent": true,
+    "real_db_used": false,
+    "server_started": false,
+    "commit": false,
+    "push": false,
+    "frontend_modified": false,
+    "full_backend_suite_run": false,
+    "backend_passed_final": 7,
+    "other_failure_cases_rerun": false,
+    "current_open_failure_cases": 120,
+    "current_open_failure_groups": 6,
+    "json_counts_statuses_links_and_source_hashes_checked": true,
+    "incremental_whitespace_errors": 0
+  },
+  "report_sha256": "6bc9faac090467daeb4c6c6f1dab082e3eb9af7a56d1d7407e0ae09c76c5c94e",
+  "current_failure_register_sha256": "185a94f6e63481ab5632e57c6dc7c50d0885a9633e5cb79af5d22fe01bf02cb2"
+}

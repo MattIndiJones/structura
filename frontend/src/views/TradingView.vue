@@ -3,6 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { apiFetch, apiErrorMessage } from '../utils/api'
 import { formatDate, formatNumber } from '../utils/format.js'
 import BackLink from '../components/ui/BackLink.vue'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
 
 const relations = ref([])
 const executions = ref([])
@@ -210,7 +213,7 @@ onMounted(load)
               <h2 id="relationships-title">1 · Relations avec les contreparties</h2>
               <p>Ces conditions sont enregistrées pour votre entité. Une relation active et dans son périmètre est requise pour inscrire une note au journal.</p>
             </div>
-            <button class="btn-primary btn-sm" @click="startCreate">Nouvelle relation</button>
+            <button v-if="auth.canManageTrading" class="btn-primary btn-sm" @click="startCreate">Nouvelle relation</button>
           </div>
           <div class="table-scroll">
             <table>
@@ -221,7 +224,7 @@ onMounted(load)
                   <td><span class="state" :class="'state-' + row.status.toLowerCase()">{{ relationshipStates[row.status] || row.status }}</span><small>Effet {{ formatDate(row.effective_date) }}<template v-if="row.expiry_date"> · fin {{ formatDate(row.expiry_date) }}</template></small></td>
                   <td>{{ row.note_distribution_allowed ? 'Notes' : 'Notes non autorisées' }}<template v-if="row.otc_allowed"> · OTC</template><small v-if="row.csa_required">CSA requis</small></td>
                   <td class="numeric">{{ amount(row.gross_notional_limit) }} {{ row.currency }}</td>
-                  <td><button class="btn-secondary btn-sm" @click="edit(row)">Modifier</button></td>
+                  <td><button v-if="auth.canManageTrading" class="btn-secondary btn-sm" @click="edit(row)">Modifier</button></td>
                 </tr>
                 <tr v-if="!relations.length"><td colspan="5" class="empty-row">Aucune relation. Créez-en une avant de booker une note dans ce journal.</td></tr>
               </tbody>
@@ -323,11 +326,11 @@ onMounted(load)
                   <td>
                     <span class="state" :class="row.settlement_status === 'SETTLED' ? 'state-active' : 'state-pending'">{{ row.settlement_status === 'SETTLED' ? 'Réglé' : 'À rapprocher' }}</span>
                     <small>Valeur {{ formatDate(row.value_date) }}</small>
-                    <form v-if="row.settlement_status === 'PENDING'" class="proof-form" @submit.prevent="settle(row)">
+                    <form v-if="auth.canSettleTrading && row.settlement_status === 'PENDING'" class="proof-form" @submit.prevent="settle(row)">
                       <input v-model.trim="proofs[row.id]" class="input" placeholder="Référence de preuve" aria-label="Référence de preuve de règlement" minlength="5" maxlength="200" required />
                       <button class="btn-secondary btn-sm" :disabled="busy">Enregistrer la preuve</button>
                     </form>
-                    <small v-else>Preuve : {{ row.settlement_reference }}</small>
+                    <small v-else-if="row.settlement_status === 'SETTLED'">Preuve : {{ row.settlement_reference }}</small>
                   </td>
                 </tr>
                 <tr v-if="!executions.length"><td colspan="5" class="empty-row">Aucune note inscrite. Le booking se lance depuis le Pricer après choix d’une relation active.</td></tr>

@@ -39,7 +39,7 @@ def setup(tmp_path, monkeypatch):
     state['actors']['hector']['registered'] = True
     store.save(state)
     app = FastAPI(); app.include_router(agent_workshop.router)
-    identity = SimpleNamespace(id=3, role='user')
+    identity = SimpleNamespace(id=3, role='admin')
     app.dependency_overrides[get_current_user] = lambda: identity
     with TestClient(app) as client:
         yield store, viewer, manager, state, client, identity
@@ -49,6 +49,9 @@ def setup(tmp_path, monkeypatch):
 def test_permissions_actor_boundary_and_missing_book(setup, monkeypatch):
     store, _, _, state, client, identity = setup
     path = f"/api/agent-workshop/{state['id']}/consultations/hector"
+    identity.role = 'user'
+    assert client.post(path).status_code == client.delete(path).status_code == 403
+    identity.role = 'admin'
     identity.id = 4
     assert client.post(path).status_code == 404
     assert client.delete(path).status_code == 404
@@ -123,6 +126,8 @@ def test_consultation_lease_blocks_restart_even_without_http_health(setup, monke
 
 def test_native_viewer_preserves_books_campaign_and_reuses_its_process(setup):
     store, viewer, _, state, client, _ = setup
+    state['actors']['hector']['entity'] = 'Maison Hector'
+    store.save(state)
     directory = store.path(state['id']) / 'instances/hector'; directory.mkdir(parents=True)
     database = directory/'structura.db'
     native = create_engine(f'sqlite:///{database}')
@@ -155,6 +160,8 @@ def test_native_viewer_preserves_books_campaign_and_reuses_its_process(setup):
                                   ('POST','/api/deals/1/mtm'),('POST','/api/alerts/refresh-book'),('POST','/api/auth/register')]:
                 assert api.request(method,route,json={}).status_code==403
             assert api.post('/_instance/consultation-session').status_code==404
+            assert api.post('/api/auth/logout-all').status_code==204
+            assert api.get('/api/auth/me').status_code==401
         first_pid=viewer.children[(state['id'],'hector')][0].pid
         assert client.post(path).json()['url']==data['url']
         assert viewer.children[(state['id'],'hector')][0].pid==first_pid

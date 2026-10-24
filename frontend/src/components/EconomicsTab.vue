@@ -24,6 +24,7 @@
           <label class="label">Nominal <span class="text-red-400">*</span></label>
           <SensitiveValue mode="input">
             <input v-model="nominalRaw" @blur="formatNominal" @focus="unformatNominal"
+              :disabled="!!store.currentProduct"
               type="text" inputmode="numeric" class="input font-mono text-right"
               placeholder="1 000 000" />
           </SensitiveValue>
@@ -85,7 +86,8 @@
             <HelpTip text="Date d'échange du cash final. Elle porte l'actualisation du remboursement et peut donc modifier le prix. Proposée à maturité + 3 jours ouvrés, mais reste éditable selon le term sheet." />
           </label>
           <input v-model="store.globalParams.payment_date" type="date" class="input"
-            @input="paymentDateDirty = true" />
+            @input="paymentDateDirty = true; paymentDateError = ''" />
+          <p v-if="paymentDateError" role="alert" class="text-[10px] text-amber-400 mt-1">{{ paymentDateError }}</p>
         </div>
       </div>
     </fieldset>
@@ -128,13 +130,18 @@
             </span>
           </div>
 
-          <template v-if="p.kind === 'array'">
+          <div v-if="store.parameterConversions[p.name]" class="text-xs space-y-2" role="alert">
+            <p>Conversion en scalaire à confirmer. La série reste conservée dans cette session : {{ store.parameterConversions[p.name].join(' · ') }}.</p>
+            <button v-for="(value, index) in store.parameterConversions[p.name]" :key="index" class="btn-secondary text-xs mr-1"
+              @click="store.confirmParameterConversion(p.name, index)">Retenir la ligne {{ index + 1 }} : {{ value ?? 'À renseigner' }}{{ p.is_pct ? ' %' : '' }}</button>
+          </div>
+          <template v-else-if="p.kind === 'array'">
             <div class="flex flex-col gap-1.5">
               <div v-for="(value, rowIndex) in store.paramOverrides[p.name]" :key="rowIndex"
                    class="grid grid-cols-[8.5rem_minmax(0,1fr)_1rem] items-center gap-1.5">
                 <span class="text-[10px] text-slate-500 font-mono whitespace-nowrap">
                   Obs {{ rowIndex + 1 }}
-                  <template v-if="observationDates[rowIndex]">· {{ formatDate(observationDates[rowIndex]) }}</template>
+                  <template v-if="parameterDates(p)[rowIndex]">· {{ formatDate(parameterDates(p)[rowIndex]) }}</template>
                 </span>
                 <SensitiveValue mode="input">
                   <div class="relative">
@@ -223,6 +230,7 @@
 
         <div class="mb-1">
           <label class="label">Ticker Yahoo Finance</label>
+          <p v-if="catalogError" class="text-xs text-red-600">{{ catalogError }}</p>
           <SensitiveValue mode="input">
             <div class="flex gap-2 items-center">
               <select class="select text-xs flex-1" :value="activeU.ticker"
@@ -258,16 +266,20 @@
         <div class="w-32">
           <label class="label">Devise du sous-jacent</label>
           <select v-model="activeU.ccy" class="select">
+            <option v-if="activeU.ccy && !['EUR','USD','GBP','JPY','CHF','SGD'].includes(activeU.ccy)">{{ activeU.ccy }}</option>
             <option>EUR</option><option>USD</option><option>GBP</option>
             <option>JPY</option><option>CHF</option><option>SGD</option>
           </select>
+          <p v-if="catalogInstrument(activeU.ticker)?.ccy && activeU.ccy !== catalogInstrument(activeU.ticker).ccy" class="text-xs text-amber-700">Surcharge de devise ; référence {{ catalogInstrument(activeU.ticker).ccy }}.</p>
         </div>
+        <p v-if="catalogInstrument(activeU.ticker)?.label && activeU.name !== catalogInstrument(activeU.ticker).label" class="text-xs text-slate-500">Alias du payoff conservé : {{ activeU.name }}. Titre : {{ catalogInstrument(activeU.ticker).label }}.</p>
       </fieldset>
     </div>
 
     <fieldset class="card" :disabled="contractTermsLocked">
       <h2 class="label">Calendriers du script</h2>
       <PayScriptCalendars :declarations="calendarControls" :values="store.constatOverrides"
+        :frozen="contractTermsLocked" :frozen-schedule="store.currentProduct?.terms?.schedule || store.openedDeal?.schedule"
         :currency="store.globalParams.deal_ccy"
         :initial-date="store.startDate" :explicit-fixing="!!store.initialFixingName" />
     </fieldset>
@@ -279,6 +291,7 @@
         <HelpTip width="w-72" text="Aperçu consolidé de l'échéancier économique. Les niveaux S₀ officiels sont saisis dans Events après booking ; les clôtures affichées ici restent indicatives." />
       </h2>
 
+      <p v-if="calendarError" class="text-xs text-red-600 py-2" role="alert">{{ calendarError }}</p>
       <div v-if="!previewEvents.length" class="text-xs text-slate-600 italic py-2">
         Définissez un calendrier ou lancez un pricing pour visualiser les constatations.
       </div>
@@ -336,15 +349,16 @@ import { apiFetch } from '../utils/api.js'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { useVariantMark, cheminConstat, cheminGlobal, cheminParam, valeurLisible } from '../composables/useVariantMark.js'
-import { underlyingGroups, ensureUnderlyings } from '../data/commonUnderlyings.js'
+import { underlyingGroups, ensureUnderlyings, catalogInstrument, selectCatalogUnderlying } from '../data/commonUnderlyings.js'
 import { formatDate, formatInt, formatNumber } from '../utils/format.js'
 import PayScriptCalendars from './PayScriptCalendars.vue'
-import { usesAbsoluteSpots } from '../utils/payscriptEconomics.js'
+import { usesAbsoluteSpots, calendarPolicy } from '../utils/payscriptEconomics.js'
 import HelpTip from './HelpTip.vue'
 import { useObservationPreview } from '../composables/useObservationPreview.js'
 import SensitiveValue from './SensitiveValue.vue'
 
 const store = usePricingStore()
+const catalogError = ref('')
 const absoluteSpots = computed(() => usesAbsoluteSpots(store.script))
 const demo = useDemoModeStore()
 const marque = useVariantMark(store)
@@ -378,22 +392,13 @@ function unformatNominal(event) {
   if (event?.target) nextTick(() => event.target.select())
 }
 
-function addBizDays(isoDate, days) {
-  const date = new Date(isoDate)
-  let added = 0
-  while (added < days) {
-    date.setDate(date.getDate() + 1)
-    if (date.getDay() !== 0 && date.getDay() !== 6) added += 1
-  }
-  return date.toISOString().split('T')[0]
-}
-
 function usableDate(iso) {
   if (!iso) return false
   const year = Number(String(iso).slice(0, 4))
   return Number.isFinite(year) && year >= 1990 && year <= 2200
 }
 
+const paymentDateError = ref('')
 const paymentDateDirty = ref(!!store.globalParams.payment_date)
 let proposingPaymentDate = false
 
@@ -406,23 +411,43 @@ watch(() => store.globalParams.payment_date, (value) => {
 // would propose a payment date for a maturity that no longer exists.
 let proposalRevision = 0
 
+function finalSettlementPolicy() {
+  const dated = (store.scriptConstats || []).filter(c => c.role !== 'initial_fixing')
+    .map(c => store.constatOverrides[c.name]).filter(Boolean)
+    .map(value => ({ value, end: typeof value === 'string' ? value : value.end_date || value.date }))
+    .filter(item => item.end)
+  const terminal = dated.reduce((last, item) => item.end > last ? item.end : last, '')
+  const policies = dated.filter(item => item.end === terminal).map(({ value }) => {
+    const policy = calendarPolicy(value)
+    return { settlement_calendars: policy.settlement_calendars || [store.globalParams.deal_ccy || 'EUR'],
+      settlement_join: policy.settlement_join ?? (policy.settlement_calendars?.length > 1 ? '' : 'all_open') }
+  })
+  if (new Set(policies.map(policy => JSON.stringify(policy))).size > 1) {
+    throw new Error('Centres de règlement terminaux différents : date manuelle requise.')
+  }
+  return policies[0] || {}
+}
+
 async function proposePaymentDate(maturity) {
   const revision = ++proposalRevision
   if (contractTermsLocked.value || !usableDate(maturity) || paymentDateDirty.value) return
+  paymentDateError.value = ''
+  setProposedPaymentDate('')
   try {
     const response = await apiFetch('/api/calendar/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: maturity, currency: store.globalParams.deal_ccy || 'EUR', business_days: 3 }),
+      body: JSON.stringify({ date: maturity, currency: store.globalParams.deal_ccy || 'EUR', business_days: 3, ...finalSettlementPolicy() }),
     })
     if (response.ok) {
       const proposed = (await response.json()).date
-      if (revision === proposalRevision && !paymentDateDirty.value) setProposedPaymentDate(proposed)
+      if (!usableDate(proposed) || proposed < maturity) throw new Error('Date de règlement invalide')
+      if (revision === proposalRevision && !paymentDateDirty.value && !contractTermsLocked.value) setProposedPaymentDate(proposed)
       return
     }
-  } catch { /* repli week-end uniquement ci-dessous */ }
-  if (revision === proposalRevision && !paymentDateDirty.value) {
-    setProposedPaymentDate(addBizDays(maturity, 3))
+  } catch { /* The server calendar must qualify an automatic proposal. */ }
+  if (revision === proposalRevision && !paymentDateDirty.value && !contractTermsLocked.value) {
+    paymentDateError.value = 'Calendrier indisponible : règlement non proposé. Saisissez une date vérifiée au term sheet ou réessayez.'
   }
 }
 
@@ -432,7 +457,8 @@ function setProposedPaymentDate(date) {
   nextTick(() => { proposingPaymentDate = false })
 }
 
-watch(() => store.maturityDate, proposePaymentDate, { immediate: true })
+watch(() => [store.maturityDate, store.globalParams.deal_ccy, JSON.stringify(store.constatOverrides)],
+  ([maturity]) => proposePaymentDate(maturity), { immediate: true })
 watch(() => [store.maturityDate, store.globalParams.strike_date],
   () => store.syncTenorFromMaturity(), { immediate: true })
 
@@ -468,7 +494,9 @@ function onRemoveUnderlying() {
 }
 function onTickerSelect(ticker) {
   if (contractTermsLocked.value) return
-  activeU.value.ticker = ticker
+  catalogError.value = ''
+  try { selectCatalogUnderlying(activeU.value, ticker, store.script) }
+  catch (e) { catalogError.value = e.message }
 }
 
 function onTickerBlur() {
@@ -476,6 +504,7 @@ function onTickerBlur() {
   activeU.value.ticker = activeU.value.ticker.trim().toUpperCase()
 }
 
-const { previewEvents, datesObservations: observationDates, closesPassees: pastCloses } = useObservationPreview(
+const { previewEvents, datesByCalendar, closesPassees: pastCloses, calendarError } = useObservationPreview(
   store, () => store.startDate, () => store.globalParams.deal_ccy)
+function parameterDates(param) { return datesByCalendar.value[param.observation_calendar] || [] }
 </script>

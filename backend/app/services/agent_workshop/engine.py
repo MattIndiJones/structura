@@ -12,7 +12,8 @@ from ...core.calendars import adjust, BusinessDayConvention
 from .store import store, contract_mandate, source_manifest
 from .instances import Instances, clock_file
 from .tools import Tools
-from .brain import decide, action_schema, prepare_model
+from .brain import Decision, DecisionCancelled, decide, action_schema, prepare_model
+from .openai_model import BudgetReached, ModelUnavailable
 from .lease import CampaignLease
 from .reconciliation import check_books
 
@@ -41,6 +42,46 @@ def failure_message(exc, decision, timeout):
 
 
 PASSIVE_TOOLS = {'mail', 'wait', 'report', 'help', 'browser', 'api'}
+
+
+def routine_decision(actor, current):
+    """Execute mandatory setup without paying a model to choose a fixed step."""
+    if not current['connected']:
+        return Decision(tool='register', args={}, reason='Initialiser le compte privé prévu pour cet acteur.')
+    if 'relationship' in current['available_tools'] and current['relation_tasks']:
+        party = current['relation_tasks'][0]
+        mandate = current['contract_mandate'][party]
+        args = {'party': party, 'status': 'ACTIVE' if mandate['note_ready'] else 'PENDING',
+                'otc': bool(mandate['note_ready'] and mandate['otc_ready'])}
+        return Decision(tool='relationship', args=args,
+                        reason='Appliquer le mandat contractuel déjà approuvé pour cette relation.')
+    if actor['id'] == 'hector' and 'crm' in current['available_tools']:
+        return Decision(tool='crm', args={}, reason='Initialiser le dossier client fictif prévu pour la campagne.')
+    return None
+
+
+def needs_agent_decision(current):
+    return bool(set(current['available_tools']) - PASSIVE_TOOLS or current.get('solicitations'))
+
+
+def account_model_usage(state, metadata):
+    if metadata.get('provider') != 'openai':
+        return
+    usage = state['usage']
+    if metadata.get('cost_unknown'):
+        usage['unknown_cost_calls'] = usage.get('unknown_cost_calls',0)+1
+    usage['model_input_tokens'] = usage.get('model_input_tokens', 0) + int(metadata.get('input_tokens') or 0)
+    usage['model_output_tokens'] = usage.get('model_output_tokens', 0) + int(metadata.get('output_tokens') or 0)
+    usage['model_cost_usd'] = round(usage.get('model_cost_usd', 0) + float(metadata.get('cost_usd') or 0), 8)
+
+
+def model_limit_reason(state):
+    config, usage = state['config'], state['usage']
+    if usage.get('model_calls', 0) >= config.get('max_model_calls', 20000):
+        return 'Nombre maximal d’appels au modèle atteint.'
+    if config.get('provider', 'ollama') == 'openai' and usage.get('model_cost_usd', 0) >= config.get('max_ai_cost_usd', 5):
+        return 'Plafond de dépense IA de la campagne atteint.'
+    return None
 
 
 def workflow_facts(state):
@@ -124,7 +165,7 @@ def observation(state, key, tools):
             for party in otc_parties if party in actor['relations'] and not actor['relations'][party]['otc_allowed']]
         if key == "hector" and not actor["crm"]:
             candidates.append("Créer mon dossier client avec crm.")
-        if key=='hector' and actor['crm'] and state['month']<state['config']['months'] and not any(p['month']==state['month'] for p in actor.get('proposals',[])):
+        if state['config'].get('exploratory_actions', True) and key=='hector' and actor['crm'] and state['month']<state['config']['months'] and not any(p['month']==state['month'] for p in actor.get('proposals',[])):
             candidates.append('Proposer une structure adaptée au client avec propose, en expliquant le besoin et les risques ; idée non cotée et non contraignante.')
         if key == "client" and state["month"] < state["config"]["months"] and not any(c["month"] == state["month"] for c in cases):
             candidates.append("Exprimer un nouveau besoin ce mois avec request.")
@@ -145,6 +186,11 @@ def observation(state, key, tools):
                     candidates.append(f"Attendre ou clarifier l'accord client sur {cid}.")
                 elif cid not in state["accepted"]:
                     candidates.append(f"Accepter la quote retenue pour {cid} avec accept_quote, en utilisant son vrai quote_id.")
+                elif state['config'].get('native_rfq', True) and not c.get('trade_confirmed'):
+                    if c.get('bank_confirmation'):
+                        candidates.append(f"Confirmer le traitement de {cid} avec confirm_trade après lecture de l'accord bancaire.")
+                    else:
+                        candidates.append(f"Attendre la confirmation explicite de la banque retenue pour {cid}.")
                 else:
                     for leg in ("HECTOR_BUY", "HECTOR_SELL"):
                         if not any(d["case_id"] == cid and d["leg"] == leg for d in actor["deals"]):
@@ -156,11 +202,15 @@ def observation(state, key, tools):
                     relation_status=actor['relations'].get('hector',{}).get('status','MISSING')
                     candidates.append(f"Coter {cid} avec quote ou refuser explicitement avec decline. MA relation NOTE avec Hector est {relation_status} ; la situation d'une autre banque ne bloque pas mon prix.")
                 elif cid in state["accepted"] and any(q["id"] == state["accepted"][cid] for q in quotes) and not any(d["case_id"] == cid for d in actor["deals"]):
-                    candidates.append(f"Accord reçu : enregistrer BANK_SELL pour {cid} avec book.")
-                    book_tasks[cid]=['BANK_SELL']
+                    if state['config'].get('native_rfq', True) and not c.get('trade_confirmed'):
+                        if not c.get('bank_confirmation'):
+                            candidates.append(f"Confirmer le prix, le nominal et les termes de {cid} avec confirm_trade.")
+                    else:
+                        candidates.append(f"Accord reçu : enregistrer BANK_SELL pour {cid} avec book.")
+                        book_tasks[cid]=['BANK_SELL']
             elif key == "client" and cid in state["client_offers"] and cid not in state["client_acceptances"]:
                 candidates.append(f"Décider sur l'offre reçue pour {cid} avec client_accept.")
-            elif key == "client" and cid in state["accepted"] and not any(d["case_id"] == cid for d in actor["deals"]):
+            elif key == "client" and cid in state["accepted"] and (not state['config'].get('native_rfq', True) or c.get('trade_confirmed')) and not any(d["case_id"] == cid for d in actor["deals"]):
                 candidates.append(f"Accord reçu : enregistrer CLIENT_BUY pour {cid} avec book.")
                 book_tasks[cid]=['CLIENT_BUY']
         if any(d["settlement_status"] == "PENDING" and d["value_date"] <= state["business_date"] for d in actor["deals"]):
@@ -168,7 +218,7 @@ def observation(state, key, tools):
         if actor["deals"] and (actor.get("last_review", {}).get("date") != state["business_date"] or actor.get("last_review", {}).get("deals") != len(actor["deals"])):
             candidates.append("Consulter mon book et effectuer le suivi de vie avec review, puis settle.")
         current_cases = [c for c in cases if c["month"]==state["month"]]
-        if current_cases and actor.get("otc_sets"):
+        if state['config'].get('exploratory_actions', True) and current_cases and actor.get("otc_sets"):
             for party in actor["otc_sets"]:
                 if not any(r["date"]==state["business_date"] and r["party"]==party for r in actor.get("risk_runs",[])):
                     risk_parties.append(party)
@@ -182,7 +232,7 @@ def observation(state, key, tools):
     labels = {"Préparer ma relation":"relationship", "Finaliser la documentation":"relationship", "Créer mon dossier":"crm",
         "Relancer mon pricing":"reprice", "Proposer une structure":"propose",
         "Exprimer un nouveau":"request", "Adresser le besoin":"rfq", "Comparer les réponses":"offer",
-        "Accepter la quote":"accept_quote", "Enregistrer HECTOR":"book", "Accord reçu":"book",
+        "Accepter la quote":"accept_quote", "Confirmer le":"confirm_trade", "Enregistrer HECTOR":"book", "Accord reçu":"book",
         "Coter ":"quote", "Décider sur l’offre":"client_accept", "Décider sur l'offre":"client_accept",
         "Enregistrer mes preuves":"settle", "Consulter mon book":"review", "Tester le risque OTC":"risk"}
     for candidate in candidates:
@@ -229,11 +279,18 @@ def observation(state, key, tools):
         or actor['history'] and actor['history'][-1]['status']=='FAILED' and n['tool']==actor['history'][-1]['tool']]
     if not notes and actor['history'] and actor['history'][-1]['status']=='FAILED':
         memory = [m[:1000] for m in actor['memory'][-2:]]
+    scheduled = state['config'].get('payoff_templates') or []
+    scheduled_template = scheduled[state['month'] % len(scheduled)] if scheduled and key == 'client' and state['month'] < state['config']['months'] else None
     return {"actor": profile,
         "connected": key in tools.tokens, "contract_mandate":my_mandate, "relation_tasks":relation_tasks, "book_tasks":book_tasks, "correspondents":[k for k in state['actors'] if k!=key], "date": state["business_date"], "month": state["month"]+1,
+        "scheduled_template": scheduled_template,
         "api_capabilities": actor.get('api_capabilities', []),
-        "possible_actions": candidates, "available_tools":sorted(available), "risk_parties":risk_parties, "messages": [context_message(m) for m in unread[-8:]], "quotes": [q for q in quotes if q['case_id'] in context_ids],
-        "cases": [{**{k:v for k,v in c.items() if k != "pricing" and (key in {'hector', 'client'} or k not in {'declines', 'opportunity_id', 'rfq_id'})},
+        "possible_actions": candidates, "available_tools":sorted(available), "risk_parties":risk_parties,
+        "messages": [context_message(m) for m in unread[-8:]],
+        "solicitations": [m['id'] for m in unread if m.get('kind', 'MESSAGE') == 'MESSAGE'],
+        "quotes": [q for q in quotes if q['case_id'] in context_ids],
+        "cases": [{**{k:v for k,v in c.items() if k not in {'pricing','native_products','inbox_ids','execution_agreement','exchange_terms'}
+                     and (key in {'hector', 'client'} or k not in {'declines', 'opportunity_id', 'rfq_id','bank_confirmation'})},
             "terms": context_terms(c),
             "my_declined": key in c.get('declines', []) if actor['role']=='bank' else None,
             "client_accepted":c['id'] in state['client_acceptances'] if key in {'hector','client'} else None,
@@ -284,6 +341,18 @@ class Manager:
                     return
                 raise ValueError("Une campagne tourne déjà ; l'arrêter avant d'en lancer une autre.")
             state = store.load(key)
+            if state['config'].get('schema_version') == 2:
+                if model and model != state['config']['model']:
+                    raise ValueError('Modifier le modèle dans les paramètres avant le premier démarrage ; il reste ensuite figé.')
+                if state['usage']['duration_seconds'] >= state['config']['max_wall_minutes']*60:
+                    raise ValueError('Durée réelle maximale atteinte ; rejouer dans une campagne avec une durée supérieure.')
+                unresolved = [i for i in state['incidents'] if i.get('severity')=='BLOCKING'
+                              and store.issue_reviews(key).get(i['id'],{}).get('status')!='CLOSED']
+                if unresolved:
+                    raise ValueError('Qualifier et clôturer le blocage après correction et vérification sur une copie avant de reprendre.')
+                from .configuration import preview
+                state.setdefault('forecast_at_start', preview(state['config']))
+                state.setdefault('config_frozen_at', datetime.now(timezone.utc).isoformat())
             from .consultation import consultations
             if consultations.active(key):
                 raise ValueError("Fermer les consultations avant de redémarrer les IA.")
@@ -291,6 +360,10 @@ class Manager:
                 raise ValueError("Cette campagne est terminée. Créer une nouvelle campagne pour un nouvel essai.")
             if state["turns"] >= state["config"]["max_turns"]:
                 raise ValueError("Budget atteint. Créer une nouvelle campagne avec un budget supérieur.")
+            if model_limit_reason(state):
+                raise ValueError(model_limit_reason(state) + ' Créer une nouvelle campagne pour reprendre.')
+            if state.get('budget_blocked'):
+                raise ValueError('Plafond IA de cette campagne atteint. Créer une nouvelle campagne pour reprendre.')
             self.lease = CampaignLease(store.path(key))
             if model:
                 state["config"]["model"] = model
@@ -299,10 +372,11 @@ class Manager:
             previous_command=store.read_command(key)
             state['last_control_id']=previous_command['id'] if previous_command else None
             self.pause.clear(); self.cancel.clear()
+            state.pop('provider_stop', None)
             state["status"] = "RUNNING"
             state['run_started_at'] = datetime.now(timezone.utc).isoformat()
             state.pop('pause_reason', None)
-            state.setdefault('run_manifests',[]).append(source_manifest())
+            state.setdefault('run_manifests',[]).append(source_manifest(include_git=True))
             state['clock_reason']='Préparation des installations privées'
             store.save(state)
             self.published = deepcopy(state)
@@ -397,6 +471,8 @@ class Manager:
         self.persist()
 
     def request_activity(self, actor, request, calls):
+        if self.live['config'].get('schema_version')==2 and request.get('status')=='PENDING' and self.consume_command():
+            raise RuntimeError('Arrêt demandé avant la prochaine requête métier.')
         activity = self.live.get('activity')
         if activity and activity['actor'] == actor and activity['phase'] == 'EXECUTING':
             activity['request'] = request
@@ -405,7 +481,7 @@ class Manager:
 
     def coach(self, key, error, tools, commercial=None):
         actor = self.live["actors"].get("achille")
-        if not self.live["config"]["coaching"] or not actor:
+        if not self.live["config"]["coaching"] or not actor or model_limit_reason(self.live):
             return
         context = {"connected": True, "mission": "Tu es superviseur, sans compte commercial. Réponds avec mail pour expliquer l'erreur au destinataire indiqué. Ne propose ni faux prix ni contournement d'un contrôle.",
             "to": key, "correspondents":[key], "error": error, "last_action": {
@@ -428,7 +504,10 @@ class Manager:
                     context['native_capabilities']['operations']=context['native_capabilities']['operations'][:3]
             self.live["usage"]["model_calls"] += 1
             self.begin_activity('achille', 'THINKING', tasks=[f"Conseiller {key} à partir du résultat observé."])
-            decision, metadata = decide(actor, context, self.live["config"])
+            decision, metadata = decide(actor, context, self.live["config"], self.consume_command, self.live['usage'])
+            account_model_usage(self.live, metadata)
+            if self.consume_command():
+                return
             self.begin_activity('achille', 'EXECUTING', decision)
             if decision.tool=='report' and commercial:
                 result=tools.execute('achille','report',decision.args)
@@ -450,7 +529,16 @@ class Manager:
                     'text': decision.args.get('body', decision.args.get('description', decision.reason)),
                 })
             actor['status']='Conseil adressé'
+        except DecisionCancelled:
+            return
+        except BudgetReached:
+            self.live['budget_blocked'] = True
+        except ModelUnavailable as exc:
+            account_model_usage(self.live, exc.metadata)
+            self.live['provider_stop'] = True
+            self.incident('achille', 'HARNESS', 'Coaching interrompu : ' + str(exc)[:500])
         except Exception as exc:
+            account_model_usage(self.live, getattr(exc, 'metadata', {}))
             self.incident("achille", "HARNESS", "Coaching indisponible : " + str(exc)[:500])
         finally:
             self.live['activity'] = None
@@ -470,6 +558,9 @@ class Manager:
         actor['seen_message_ids']=list(seen)
 
     def run(self):
+        if self.live['config'].get('schema_version') == 2:
+            from .diagnostic import run
+            return run(self)
         state = self.live
         directory = store.path(state["id"])
         instances = Instances(directory, state, self.consume_command)
@@ -480,7 +571,7 @@ class Manager:
             state['activity'] = {'phase': 'PREPARING', 'actor': None, 'started_at': datetime.now(timezone.utc).isoformat()}
             state['clock_reason'] = 'Chargement du modèle local avant les décisions'
             self.persist()
-            state['model_preparation'] = prepare_model(state['config'])
+            state['model_preparation'] = prepare_model(state['config'], self.consume_command)
             state['clock_reason'] = 'Préparation des installations privées'
             self.persist()
             instances.start(); self.persist()
@@ -492,6 +583,11 @@ class Manager:
                 idle_rounds=0
                 while not self.cancel.is_set() and state["turns"] < state["config"]["max_turns"]:
                     if self.consume_command(): break
+                    if state.get('budget_blocked') or model_limit_reason(state):
+                        state['status'] = 'ATTENTION'
+                        self.incident('achille', 'HARNESS', model_limit_reason(state) or 'Plafond IA de la campagne atteint.')
+                        self.persist()
+                        break
                     if self.pause.is_set():
                         state["status"] = "PAUSED"; state["clock_reason"] = "Pause demandée"
                         state['activity'] = None; state['active_actor'] = None
@@ -504,6 +600,11 @@ class Manager:
                         actor = state["actors"][key]
                         obs = observation(state, key, tools)
                         message_cursor = obs["messages"][-1]["id"] if obs["messages"] else ""
+                        if not needs_agent_decision(obs):
+                            actor['seen_message_ids'] = list(set(actor.get('seen_message_ids', [])) |
+                                {message['id'] for message in obs['messages']})
+                            actor['status'] = 'En attente'
+                            continue
                         if not (set(obs.get('available_tools', []))-PASSIVE_TOOLS) and actor.get("idle_messages") == message_cursor:
                             continue
                         state["active_actor"] = key; state["clock_reason"] = "Décision IA / action Structura"
@@ -512,10 +613,20 @@ class Manager:
                         call_start = time.monotonic()
                         tools.calls = []
                         decision = None
+                        metadata = {"model": state["config"]["model"], "decision_received": False}
                         before = workflow_facts(state)
                         try:
-                            state["usage"]["model_calls"] += 1
-                            decision, metadata = decide(actor, obs, state["config"])
+                            decision = routine_decision(actor, obs)
+                            if decision is None:
+                                state["usage"]["model_calls"] += 1
+                                decision, received_metadata = decide(actor, obs, state["config"], self.consume_command, state['usage'])
+                            else:
+                                received_metadata = {'provider': 'controller', 'model': None, 'seconds': 0}
+                            metadata.update(received_metadata)
+                            account_model_usage(state, received_metadata)
+                            metadata["decision_received"] = True
+                            if self.consume_command():
+                                raise DecisionCancelled()
                             actor['status'] = 'Utilise Structura' if decision.tool not in {'mail','wait','report','request','client_accept'} else 'Exécute sa décision'
                             self.begin_activity(key, 'EXECUTING', decision)
                             result = tools.execute(key, decision.tool, decision.args)
@@ -524,8 +635,20 @@ class Manager:
                             actor["status"] = "En attente" if decision.tool == "wait" else "Action réalisée"
                             if decision.tool == "wait":
                                 actor["idle_messages"] = message_cursor
+                        except DecisionCancelled:
+                            result = {"cancelled": True, "explanation": "Arrêt demandé ; décision non exécutée."}
+                            status = "CANCELLED"
+                            actor["status"] = "Arrêt demandé"
                         except Exception as exc:
-                            result = {"error": failure_message(exc, decision, state['config']['timeout_seconds'])[:2600], "error_detail": str(exc)[:2600]}; metadata = {"seconds": round(time.monotonic()-call_start, 2)}
+                            result = {"error": failure_message(exc, decision, state['config']['timeout_seconds'])[:2600], "error_detail": str(exc)[:2600]}
+                            metadata.update(getattr(exc, "metadata", {}))
+                            account_model_usage(state, getattr(exc, 'metadata', {}))
+                            if isinstance(exc, BudgetReached):
+                                state['budget_blocked'] = True
+                            elif isinstance(exc, ModelUnavailable):
+                                state['provider_stop'] = True
+                            metadata.setdefault("seconds", round(time.monotonic()-call_start, 2))
+                            metadata["error_stage"] = "decision" if decision is None else "tool"
                             expected = "EXPECTED_REFUSAL" in str(exc)
                             status = "EXPECTED_REFUSAL" if expected else "FAILED"
                             actor["status"] = "Refus attendu" if expected else "Erreur à diagnostiquer"
@@ -549,14 +672,26 @@ class Manager:
                         state['activity'] = None
                         actor["history"].append({"tool": action["tool"], "status": status, "result": safe_record(result), 'business_progress': business_progress})
                         actor["seen_message_ids"] = list(set(actor.get("seen_message_ids", [])) | {m["id"] for m in obs["messages"]})
-                        if status == "FAILED" and decision is not None and errors[key] <= 2:
+                        if status == "FAILED" and decision is not None and errors[key] <= 2 and not self.cancel.is_set():
                             self.coach(key, result["error"], tools)
                         self.persist()
+                        if state.get('budget_blocked') or model_limit_reason(state):
+                            state['status'] = 'ATTENTION'
+                            self.incident('achille', 'HARNESS', model_limit_reason(state) or 'Plafond IA de la campagne atteint.')
+                            self.persist()
+                            break
+                        if state.get('provider_stop'):
+                            state['status'] = 'ATTENTION'
+                            self.incident('achille', 'HARNESS', 'Fournisseur IA indisponible ; aucun nouvel appel automatique.')
+                            self.persist()
+                            break
                         if errors[key] >= 4:
                             self.pause.set(); state["status"] = "PAUSED"
                             state['pause_reason']='ERROR'
                             self.incident(key, "HARNESS", "Quatre échecs consécutifs : campagne en pause pour conserver les preuves et permettre une reprise.")
                             self.persist(); break
+                    if state['status'] == 'ATTENTION' and (state.get('budget_blocked') or state.get('provider_stop') or model_limit_reason(state)):
+                        break
                     if self.consume_command() or self.pause.is_set():
                         continue
                     self.supervise_messages(tools)
@@ -571,8 +706,17 @@ class Manager:
                     commercial_closed = current_case and current_case.get("outcome") in {"CLIENT_DECLINED", "NO_QUOTE"}
                     reviewed = all(not a["deals"] or (a.get("last_review", {}).get("date") == state["business_date"] and a.get("last_review", {}).get("deals") == len(a["deals"])
                         and all(d["settlement_status"] == "SETTLED" for d in a["deals"])) for a in state["actors"].values())
-                    if state["month"] >= state["config"]["months"] and reviewed:
+                    active_books = any(a.get('last_review', {}).get('active_deals', 0) for a in state['actors'].values())
+                    if state["month"] >= state["config"]["months"] and reviewed and not active_books:
                         state["status"] = "COMPLETED"; break
+                    if state['month'] >= state['config']['months'] and reviewed and active_books:
+                        state['month'] += 1
+                        state['business_date'] = adjust(date.fromisoformat(state['config']['start_date'])+relativedelta(months=state['month']), 'EUR', BusinessDayConvention.FOLLOWING).isoformat()
+                        clock_file(directory, state['business_date'])
+                        for actor in state['actors'].values():
+                            actor.pop('idle_messages', None)
+                        state['clock_reason'] = 'Suivi des derniers coupons et remboursements après la période commerciale'
+                        self.persist(); continue
                     if (current and current["status"] == "COMPLETE" and any(d["case_id"] == current["case_id"] for d in state["actors"]["client"]["deals"]) or commercial_closed) and reviewed:
                         state["milestones"].append({"date": state["business_date"], "case_id": current_case["id"], "status": "NO_TRADE" if commercial_closed else "BOOKS_MATCHED"})
                         state["month"] += 1

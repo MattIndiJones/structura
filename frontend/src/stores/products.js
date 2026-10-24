@@ -1,12 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch } from '../utils/api.js'
-
-function commandKey(prefix) {
-  const id = globalThis.crypto?.randomUUID?.()
-    || `${Date.now()}-${Math.random().toString(16).slice(2)}`
-  return `${prefix}-${id}`
-}
+import { durableCommand } from '../utils/commands.js'
 
 function message(data, fallback) {
   if (typeof data?.detail === 'string') return data.detail
@@ -20,6 +15,20 @@ export const useProductsStore = defineStore('products', () => {
   const loading = ref(false)
   const saving = ref(false)
   const error = ref('')
+  const offset = ref(0), hasMore = ref(false)
+  const pageSize = 50
+
+  async function postCommand(path, operation, payload, fallback) {
+    return durableCommand(operation, payload, async key => {
+      const res = await apiFetch(path, { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, command_key: key }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(message(data, fallback))
+      if (!data?.product_id) throw new Error('Réponse incomplète ; reprenez la même commande pour vérifier son résultat.')
+      return data
+    })
+  }
 
   async function getProduct(id, { termsVersion = null } = {}) {
     const res = await apiFetch(`/api/products/${id}${termsVersion == null ? '' : `?terms_version=${termsVersion}`}`)
@@ -38,18 +47,32 @@ export const useProductsStore = defineStore('products', () => {
   // Used by the library's expandable rows. It deliberately does not toggle
   // the store-wide loader, otherwise opening one row would replace the whole
   // product table with the page spinner.
-  async function fetchDetails(id) {
+  async function fetchDetails(id, { offset = null, limit = 20 } = {}) {
+    if (offset != null) {
+      const response = await apiFetch(`/api/products/${id}?calculations_limit=${limit}&calculations_offset=${offset}`)
+      const data = await response.json()
+      if (!response.ok) throw new Error(message(data, 'Dossier inaccessible.'))
+      return data
+    }
     return getProduct(id)
   }
 
-  async function fetchAll({ archived = false } = {}) {
+  async function fetchHistory(id, offset = 0) {
+    const response = await apiFetch(`/api/products/${id}/history?limit=20&offset=${offset}`)
+    const data = await response.json()
+    if (!response.ok) throw new Error(message(data, 'Historique inaccessible.'))
+    return data
+  }
+
+  async function fetchAll({ archived = false, pageOffset = 0 } = {}) {
     loading.value = true
     error.value = ''
     try {
-      const res = await apiFetch(`/api/products?archived=${archived}`)
+      const res = await apiFetch(`/api/products?archived=${archived}&paged=true&limit=${pageSize}&offset=${pageOffset}`)
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(message(data, 'Impossible de charger les produits.'))
-      items.value = data
+      items.value = Array.isArray(data) ? data : data.items
+      offset.value = pageOffset; hasMore.value = data.has_more === true
       return data
     } catch (e) {
       error.value = e.message
@@ -66,7 +89,8 @@ export const useProductsStore = defineStore('products', () => {
       const data = await getProduct(id, { termsVersion })
       let calculationInput = null
       const calculation = !withCalculation ? null : calculationId == null
-        ? data.calculations?.at(-1) : data.calculations?.find(item => item.id === Number(calculationId))
+        ? data.calculations?.filter(item => item.terms_version === data.terms_version).at(-1)
+        : data.calculations?.find(item => item.id === Number(calculationId))
       if (calculationId != null && !calculation) {
         throw new Error('Ce calcul n’appartient pas au produit ou n’existe plus.')
       }
@@ -78,7 +102,8 @@ export const useProductsStore = defineStore('products', () => {
         calculationInput = (await fetchCalculation(id, calculation.id)).input
       }
       current.value = data
-      return { product: data, calculationInput, calculationId: calculation?.id ?? null }
+      return { product: data, calculationInput, calculationId: calculation?.id ?? null,
+        notice: withCalculation && !calculation ? 'Aucun calcul conservé pour cette version. Les termes sont chargés ; vérifiez les hypothèses de marché avant de calculer.' : '' }
     } catch (e) {
       error.value = e.message
       return null
@@ -93,20 +118,13 @@ export const useProductsStore = defineStore('products', () => {
     saving.value = true
     error.value = ''
     try {
-      const res = await apiFetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          command_key: commandKey('retain-product'),
-          name,
-          pricing_input: pricingInput,
-          pricing_receipt: pricingReceipt || null,
-          intent,
-          listed,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(message(data, 'Le produit n’a pas pu être conservé.'))
+      const data = await postCommand('/api/products', 'retain-product', {
+        name,
+        pricing_input: pricingInput,
+        pricing_receipt: pricingReceipt || null,
+        intent,
+        listed,
+      }, 'Le produit n’a pas pu être conservé.')
       current.value = data
       return data
     } catch (e) {
@@ -136,17 +154,11 @@ export const useProductsStore = defineStore('products', () => {
     saving.value = true
     error.value = ''
     try {
-      const res = await apiFetch(`/api/products/${product.product_id}/calculations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          command_key: commandKey('retain-calculation'),
+      const data = await postCommand(`/api/products/${product.product_id}/calculations`,
+        `retain-calculation-${product.product_id}`, {
           expected_revision: product.revision,
           pricing_receipt: pricingReceipt,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(message(data, 'Le calcul n’a pas pu être conservé.'))
+        }, 'Le calcul n’a pas pu être conservé.')
       current.value = data
       return data
     } catch (e) {
@@ -185,11 +197,35 @@ export const useProductsStore = defineStore('products', () => {
     }
   }
 
+  async function reviseTerms(product, pricingInput, reason) {
+    saving.value = true; error.value = ''
+    try {
+      const data = await postCommand(`/api/products/${product.product_id}/terms`,
+        `revise-terms-${product.product_id}`, { expected_revision: product.revision,
+          pricing_input: pricingInput, reason }, 'La nouvelle version n’a pas pu être conservée.')
+      current.value = data
+      return data
+    } catch (e) { error.value = e.message; throw e }
+    finally { saving.value = false }
+  }
+
+  async function forkForBooking(product) {
+    saving.value = true; error.value = ''
+    try {
+      return await postCommand(`/api/products/${product.product_id}/booking-forks`,
+        `booking-fork-${product.product_id}`, { expected_revision: product.revision,
+          expected_terms_version: product.terms_version,
+          reason: 'Autre opération explicitement demandée depuis ce pricing.' },
+        'La nouvelle opération n’a pas pu être préparée.')
+    } catch (e) { error.value = e.message; throw e }
+    finally { saving.value = false }
+  }
+
   function release() { current.value = null }
 
   return {
-    items, current, loading, saving, error,
-    fetchAll, fetchOne, fetchDetails, fetchCalculation,
-    retainPricing, retainCalculation, setListed, setArchived, release,
+    items, current, loading, saving, error, offset, hasMore, pageSize,
+    fetchAll, fetchOne, fetchDetails, fetchCalculation, fetchHistory,
+    retainPricing, retainCalculation, reviseTerms, forkForBooking, setListed, setArchived, release,
   }
 })

@@ -26,7 +26,7 @@
           <tbody>
             <tr v-for="e in entities" :key="e.id" class="border-b border-slate-800/60">
               <td class="py-1.5 pr-3">
-                <input class="input py-1 px-2" :value="e.name"
+                <input class="input py-1 px-2" :value="e.name" :readonly="managed"
                        @change="updateEntity(e, $event.target.value)" />
               </td>
               <td class="py-1.5 pr-3 text-slate-500">{{ formatDate(e.created_at) }}</td>
@@ -35,7 +35,8 @@
         </table>
       </div>
 
-      <div class="card flex items-end gap-2">
+      <p v-if="managed" class="text-sm text-slate-500">Organisation liée au manifeste. Le nom canonique est verrouillé ; le renommage passe par le provisionnement.</p>
+      <div v-else class="card flex items-end gap-2">
         <div class="flex flex-col gap-1 flex-1">
           <label class="label">Nouvelle entité</label>
           <input v-model="newName" type="text" class="input" placeholder="Ex: UTI" @keyup.enter="createEntity" />
@@ -47,7 +48,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useAuthStore } from '../stores/auth.js'
 import { RouterLink } from 'vue-router'
 import { apiFetch } from '../utils/api.js'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
@@ -55,6 +57,8 @@ import AlertMessage from '../components/ui/AlertMessage.vue'
 import { formatDate } from '../utils/format.js'
 
 const entities = ref([])
+const auth = useAuthStore()
+const managed = computed(() => auth.user?.installation?.kind === 'organization')
 const loading  = ref(true)
 const error    = ref('')
 const notice   = ref('')

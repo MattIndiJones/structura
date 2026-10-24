@@ -20,7 +20,7 @@ TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=400)
 MATURITY = VALUE_D + timedelta(days=1096)
 
-USER = SimpleNamespace(id=1)
+USER = SimpleNamespace(id=1, role='user', entity_id=None)
 
 
 def _add_deal(s: Session, script: str, reference: str, n_underlyings: int = 1,

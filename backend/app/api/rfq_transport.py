@@ -33,9 +33,11 @@ def retry(message_id: str, current: Annotated[User, Depends(get_current_user)], 
     item = session.get(RfqSolicitation, row.solicitation_id)
     link = session.get(RfqRemoteLink, item.id)
     if link.inbound:
-        require_action(session, item.id, current, "read" if row.kind == "READ" else "publish_quote", lock=True)
+        require_action(session, item.id, current, 'book' if row.kind in {'EXECUTION_CONFIRMATION','EXECUTION_STATUS'}
+                       else "read" if row.kind == "READ" else "publish_quote", lock=True)
     else:
-        require_rfq_access(session, session.get(RfqExchangeRound, item.round_id).rfq_id, current, "solicit")
+        require_rfq_access(session, session.get(RfqExchangeRound, item.round_id).rfq_id, current,
+                           'book' if row.kind in {'EXECUTION_REQUEST','EXECUTION_STATUS'} else "solicit")
     if row.state not in {"DELIVERED", "CANCELLED"}:
         row.next_attempt_at = datetime.utcnow()
         session.add(row)

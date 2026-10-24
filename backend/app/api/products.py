@@ -6,9 +6,10 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import func, or_, update
 from sqlmodel import Session, select
 
-from .auth import get_current_user, receipt_signing_secret
+from .auth import get_current_pricer, receipt_signing_secret
 from ..core.product.inputs import describe_product, pricing_input, terms_from_input
 from ..core.product.models import CommercialContext, Product, TradeIntent
 from ..core.schemas import PricingRequest
@@ -17,7 +18,7 @@ from ..core.valuation_context import (
     pricing_input_payload, verify_pricing_receipt,
 )
 from ..db.database import get_session
-from ..db.models import ProductCalculationRun, ProductRecord, User
+from ..db.models import ProductCalculationRun, ProductRecord, ProductRevision, User
 from ..services.product_receipts import verify_server_receipt
 from ..services.product_repository import (
     ProductError, load_product, owned_record, previous_command,
@@ -78,11 +79,28 @@ class ProductCalculationCreate(BaseModel):
     pricing_receipt: dict
 
 
+class ProductBookingFork(BaseModel):
+    command_key: str = Field(min_length=8, max_length=100)
+    expected_revision: int = Field(ge=1)
+    expected_terms_version: int = Field(ge=1)
+    reason: str = Field(min_length=10, max_length=1000)
+
+
+class RetainedDraftInput(PricingRequest):
+    # Retaining work is allowed before its contractual horizon is known.
+    T: float | None = Field(default=None, gt=0, le=30)
+
+
 def _fail(exc: ProductError):
     raise HTTPException(status_code=exc.status, detail={"code": exc.code, "message": str(exc)})
 
 
-def _validated_pricing_input(payload: dict) -> dict:
+def _validated_pricing_input(payload: dict, *, draft: bool = False) -> dict:
+    if draft:
+        payload = {k: (None if v == '' and k in {
+            'strike_date', 'value_date', 'maturity_date', 'payment_date', 'anchor'} else v)
+            for k, v in payload.items()}
+        return pricing_input_payload(RetainedDraftInput.model_validate(payload))
     if "valuation_date" in payload or "strike_levels" in payload:
         from .inlife import InLifePricingRequest
         return pricing_input_payload(InLifePricingRequest.model_validate(payload))
@@ -117,7 +135,7 @@ def _row_summary(row: ProductRecord, product: Product) -> dict:
         "underlyings": [u.model_dump(mode="json") for u in product.terms.underlyings],
         "maturity_date": (product.terms.maturity_date.isoformat()
                           if product.terms.maturity_date else None),
-        "latest_price": (product.calculations[-1].price if product.calculations else None),
+        "latest_price": next((c.price for c in reversed(product.calculations) if c.terms_version == product.terms_version), None),
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }
@@ -126,7 +144,7 @@ def _row_summary(row: ProductRecord, product: Product) -> dict:
 @router.post("", status_code=201)
 def create_product(
     body: ProductCreate,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
 ):
     return _create_product(body, current, session)
@@ -145,9 +163,10 @@ def _create_product(
     try:
         prior = previous_command(session, current, body.command_key, command_payload)
         if prior is not None:
+            session.rollback()
             return prior.to_dict()
 
-        validated = _validated_pricing_input(body.pricing_input)
+        validated = _validated_pricing_input(body.pricing_input, draft=body.pricing_receipt is None)
         product = Product(
             name=(body.name.strip() or _default_name(validated)),
             terms=terms_from_input(validated, allow_unresolved=True),
@@ -188,62 +207,169 @@ def _create_product(
     except ValueError as exc:
         session.rollback()
         raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        session.rollback()
+        raise
+
+
+@router.post("/{product_id}/booking-forks", status_code=201)
+def fork_product_for_booking(
+    product_id: int, body: ProductBookingFork,
+    current: Annotated[User, Depends(get_current_pricer)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    """A new trade gets its own dossier, with explicit restricted lineage."""
+    payload = {'operation': 'booking_fork', 'source_product_id': product_id,
+               **body.model_dump(mode='json', exclude={'command_key'})}
+    try:
+        prior = previous_command(session, current, body.command_key, payload)
+        if prior is not None:
+            owned_record(session, product_id, current, right='prepare')
+            session.rollback()
+            return prior.to_dict()
+        row = owned_record(session, product_id, current, right='prepare')
+        from ..services.rfq_bank import case_for_product
+        if case_for_product(session, product_id):
+            raise ProductError('PRODUCT_PRIVATE_FORK_FORBIDDEN',
+                'Un calcul privé bancaire doit rester dans son parcours RFQ.')
+        session.execute(update(ProductRecord).where(ProductRecord.id == product_id)
+                        .values(id=product_id).execution_options(synchronize_session=False))
+        session.refresh(row)
+        if row.revision != body.expected_revision:
+            raise ProductError('PRODUCT_REVISION_STALE',
+                'Le dossier source a changé ; rechargez-le avant de créer une autre opération.')
+        source = load_product(session, product_id, terms_version=body.expected_terms_version)
+        child = Product(name=source.name, terms=source.terms,
+            origin_product_id=product_id, data_origin=source.data_origin, listed=False,
+            intent=source.intent.model_copy(update={'counterparty_id': None}))
+        child = stage_new_product(session, child, user=current, uat_batch_id=row.uat_batch_id,
+            action='PRODUCT_FORKED_FOR_BOOKING', reason=body.reason)
+        from ..core.audit import record_audit_event
+        record_audit_event(session, action='PRODUCT_BOOKING_LINEAGE_RECORDED',
+            object_type='PRODUCT', object_id=child.product_id, actor_user_id=current.id,
+            result='SUCCESS', reason=body.reason,
+            after={'origin_product_id': product_id, 'origin_revision': source.revision,
+                   'origin_terms_version': source.terms_version,
+                   'origin_terms_fingerprint': source.terms_fingerprint,
+                   'detached_rfq_ids': [item.to_dict().get('id') for item in source.rfqs],
+                   'detached_indicative_ids': [item.to_dict().get('id') for item in source.indicatives],
+                   'detached_deal_id': source.execution.to_dict().get('deal_id') if source.execution else None})
+        stage_command(session, current, body.command_key, payload, child)
+        session.commit()
+        return child.to_dict()
+    except ProductError as exc:
+        session.rollback()
+        _fail(exc)
+    except Exception:
+        session.rollback()
+        raise
 
 
 @router.get("")
 def list_products(
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
-    archived: bool = Query(default=False),
+    archived: bool = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    paged: bool = False,
 ):
     query = select(ProductRecord).where(
         ProductRecord.archived == archived,
         ProductRecord.listed == True,  # noqa: E712
     )
-    if current.role != "admin":
-        query = query.where(ProductRecord.user_id == current.id)
-    rows = session.exec(query.order_by(ProductRecord.updated_at.desc())).all()
+    if current.role != 'admin':
+        query = query.where(or_(ProductRecord.entity_id == current.entity_id if current.entity_id is not None else False,
+            (ProductRecord.entity_id.is_(None)) & (ProductRecord.user_id == current.id)))
+    rows = session.exec(query.order_by(ProductRecord.updated_at.desc(), ProductRecord.id.desc())).yield_per(100)
     visible = []
+    skipped = 0
     for row in rows:
         try:
             owned_record(session, row.id, current)
         except ProductError:
             continue
-        visible.append(_row_summary(row, load_product(session, row.id)))
-    return visible
+        if skipped < offset:
+            skipped += 1
+            continue
+        if len(visible) == limit:
+            return {'items': visible, 'offset': offset, 'limit': limit, 'has_more': True} if paged else visible
+        product = load_product(session, row.id, calculation_page=(0, 0))
+        summary = _row_summary(row, product)
+        latest = session.exec(select(ProductCalculationRun.terms_version,
+            (func.json_extract(ProductCalculationRun.result_json, '$.price') * 100).label('price'))
+            .where(ProductCalculationRun.product_id == row.id, ProductCalculationRun.terms_version == row.terms_version)
+            .order_by(ProductCalculationRun.id.desc()).limit(1)).first()
+        historical = session.exec(select(ProductCalculationRun.terms_version,
+            (func.json_extract(ProductCalculationRun.result_json, '$.price') * 100).label('price'))
+            .where(ProductCalculationRun.product_id == row.id).order_by(ProductCalculationRun.id.desc()).limit(1)).first()
+        summary.update(latest_price=latest.price if latest else None,
+            latest_price_terms_version=latest.terms_version if latest else None,
+            historical_price=historical.price if historical and not latest else None,
+            historical_price_terms_version=historical.terms_version if historical and not latest else None)
+        visible.append(summary)
+    return {'items': visible, 'offset': offset, 'limit': limit, 'has_more': False} if paged else visible
 
 
 @router.get("/{product_id}")
 def get_product(
     product_id: int,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
     revision: int | None = None,
     terms_version: int | None = None,
+    calculations_limit: Annotated[int | None, Query(ge=1, le=100)] = None,
+    calculations_offset: Annotated[int, Query(ge=0)] = 0,
 ):
     try:
         owned_record(session, product_id, current)
-        product = load_product(session, product_id, revision=revision, terms_version=terms_version)
-        return {**product.to_dict(), "description": describe_product(product)}
+        product = load_product(session, product_id, revision=revision, terms_version=terms_version,
+            calculation_page=None if calculations_limit is None else (calculations_offset, calculations_limit + 1))
+        data = product.to_dict()
+        if calculations_limit is not None:
+            calculations = data['calculations']
+            data['calculations'] = calculations[-calculations_limit:]
+            data['calculation_page'] = {'offset': calculations_offset, 'limit': calculations_limit,
+                'has_more': len(calculations) > calculations_limit}
+        return {**data, "description": describe_product(product)}
     except ProductError as exc:
         _fail(exc)
+
+
+@router.get('/{product_id}/history')
+def product_history(product_id: int, current: Annotated[User, Depends(get_current_pricer)],
+                    session: Annotated[Session, Depends(get_session)],
+                    limit: Annotated[int, Query(ge=1, le=100)] = 20, offset: Annotated[int, Query(ge=0)] = 0):
+    try:
+        owned_record(session, product_id, current)
+    except ProductError as exc:
+        _fail(exc)
+    rows = session.exec(select(ProductRevision.revision, ProductRevision.terms_version,
+        ProductRevision.action, ProductRevision.reason, ProductRevision.created_at)
+        .where(ProductRevision.product_id == product_id).order_by(ProductRevision.revision.desc())
+        .offset(offset).limit(limit + 1)).all()
+    return {'items': [dict(row._mapping) for row in rows[:limit]], 'offset': offset,
+            'limit': limit, 'has_more': len(rows) > limit}
 
 
 @router.patch("/{product_id}")
 def update_product(
     product_id: int,
     body: ProductUpdate,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
 ):
     try:
-        owned_record(session, product_id, current)
+        owned_record(session, product_id, current, right="prepare")
         from ..services.rfq_bank import case_for_product
         if case_for_product(session, product_id) and (body.intent is not None or body.commercial is not None):
             raise ProductError("RFQ_BANK_INTENT_LOCKED", "Le nominal, le sens et la demande reçue sont figés.")
         product = load_product(session, product_id)
         if product.revision != body.expected_revision:
             raise ProductError("PRODUCT_REVISION_STALE", "Le produit a changé. Rechargez le dossier.")
+        if product.execution and (body.intent is not None or body.commercial is not None):
+            raise ProductError('PRODUCT_BOOKED_CONTEXT_LOCKED',
+                               'Le nominal, le sens et le contexte commercial sont bookés. Utilisez une rectification gouvernée.')
         changes = {}
         if body.name is not None:
             changes["name"] = body.name.strip() or product.name
@@ -271,7 +397,7 @@ def update_product(
 def revise_product_terms(
     product_id: int,
     body: ProductTermsUpdate,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
 ):
     command_payload = body.model_dump(mode="json", exclude={"command_key"})
@@ -280,12 +406,13 @@ def revise_product_terms(
         if prior is not None:
             if prior.product_id != product_id:
                 raise ProductError("PRODUCT_COMMAND_CONFLICT", "La commande désigne un autre produit.")
+            session.rollback()
             return prior.to_dict()
-        owned_record(session, product_id, current)
+        owned_record(session, product_id, current, right="prepare")
         product = load_product(session, product_id)
         if product.revision != body.expected_revision:
             raise ProductError("PRODUCT_REVISION_STALE", "Le produit a changé. Rechargez le dossier.")
-        validated = _validated_pricing_input(body.pricing_input)
+        validated = _validated_pricing_input(body.pricing_input, draft=True)
         changed = stage_terms(
             session, product, terms_from_input(validated, allow_unresolved=True),
             actor_id=current.id, reason=body.reason)
@@ -305,17 +432,20 @@ def revise_product_terms(
     except ValueError as exc:
         session.rollback()
         raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        session.rollback()
+        raise
 
 
 @router.post("/{product_id}/archive")
 def archive_product(
     product_id: int,
     body: ProductArchive,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
 ):
     try:
-        owned_record(session, product_id, current)
+        owned_record(session, product_id, current, right="prepare")
         product = load_product(session, product_id)
         product = stage_revision(
             session, product.model_copy(update={"archived": body.archived}),
@@ -333,7 +463,7 @@ def archive_product(
 def compose_product_pricing_input(
     product_id: int,
     body: ProductPricingInput,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
 ):
     try:
@@ -358,7 +488,7 @@ def compose_product_pricing_input(
 def retain_product_calculation(
     product_id: int,
     body: ProductCalculationCreate,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
 ):
     """Append one server-produced calculation without changing product terms."""
@@ -375,6 +505,7 @@ def retain_product_calculation(
                 raise ProductError(
                     "PRODUCT_COMMAND_CONFLICT",
                     "La commande désigne un autre produit.")
+            session.rollback()
             return prior.to_dict()
 
         owned_record(session, product_id, current)
@@ -415,13 +546,16 @@ def retain_product_calculation(
     except ValueError as exc:
         session.rollback()
         raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        session.rollback()
+        raise
 
 
 @router.get("/{product_id}/calculations/{calculation_id}")
 def get_product_calculation(
     product_id: int,
     calculation_id: int,
-    current: Annotated[User, Depends(get_current_user)],
+    current: Annotated[User, Depends(get_current_pricer)],
     session: Annotated[Session, Depends(get_session)],
 ):
     try:
@@ -432,6 +566,9 @@ def get_product_calculation(
     if row is None or row.product_id != product_id:
         raise HTTPException(status_code=404, detail="Calcul produit introuvable.")
     pricing_input = json.loads(row.input_json)
+    previous = session.exec(select(ProductCalculationRun.id).where(
+        ProductCalculationRun.product_id == product_id, ProductCalculationRun.terms_version == row.terms_version,
+        ProductCalculationRun.id < row.id).order_by(ProductCalculationRun.id.desc()).limit(1)).first()
     return {
         "id": row.id,
         "product_id": row.product_id,
@@ -443,10 +580,14 @@ def get_product_calculation(
         "source": row.source,
         "input_hash": row.input_hash,
         "input": pricing_input,
+        "previous_calculation_id": previous,
         # The Product keeps contractual terms only. Market assumptions belong
         # to each dated calculation and are reconstructed from its immutable,
         # fingerprinted engine input, including for calculations retained
         # before this field was exposed by the API.
         "market_snapshot": market_snapshot_from_pricing_input(pricing_input),
         "result": json.loads(row.result_json),
+        "calculation_identity": json.loads(row.result_json).get("calculation_identity"),
+        "archive_warnings": ([] if json.loads(row.result_json).get("calculation_identity") else
+                             ["Ancien calcul sans identité de moteur : résultat conservé, rejeu non qualifié."]),
     }

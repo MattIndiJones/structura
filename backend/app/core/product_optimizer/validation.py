@@ -10,15 +10,27 @@ from .contracts import VALIDATION_SEEDS
 from .statistics import apply_summary, summarize_paths, normal_interval
 from .market import market_engine_kwargs
 from .families import family_schema, coupon_labels, solution_definition, solution_scale, solved_value
+from ..payscript.parser import script_source_hash
 
 logger = logging.getLogger(__name__)
 
 
 def parameter_diagnostic(result, script, inputs, candidate, pairs, alpha, definition):
     """Local delta-method uncertainty; never change the proposed parameter."""
+    try:
+        proof = family_schema(candidate.product_family)["payoff_qualification"]
+    except ValueError as exc:
+        return {"status": "UNAVAILABLE_PAYOFF_QUALIFICATION", "reason": str(exc)}
+    if (script.source_hash != proof["source_hash"]
+            or script_source_hash(inputs.get("script", "")) != proof["source_hash"]
+            or definition["key"] not in proof["parameter_affinity"]):
+        return {"status": "UNAVAILABLE_PAYOFF_QUALIFICATION", "payoff_qualification": proof,
+                "reason": "Le diagnostic exige le script exact du payoff qualifié et son paramètre approuvé."}
+    def diagnostic(status, **values):
+        return {"status": status, "payoff_qualification": proof, **values}
     quantity = getattr(candidate,definition["key"])
     if quantity <= 1e-10:
-        return {"status": "UNAVAILABLE_ZERO_COUPON" if definition["key"] == "coupon" else "UNAVAILABLE_ZERO_PARAMETER"}
+        return diagnostic("UNAVAILABLE_ZERO_COUPON" if definition["key"] == "coupon" else "UNAVAILABLE_ZERO_PARAMETER")
     dt = inputs["T"]/max(1, round(inputs["T"]*52))
     steps = max(1, round(inputs["T"]*52))
     df = _build_rate_term(inputs.get("yield_curve") or [], steps, dt, inputs["r"]).df
@@ -52,22 +64,22 @@ def parameter_diagnostic(result, script, inputs, candidate, pairs, alpha, defini
             raw = sum(amount for _, amount in path)
             pv.append(raw*discount); slopes.append(max(0.,raw-1.)/quantity*discount)
         else:
-            return {"status":"UNAVAILABLE_FLOW_LABELS"}
+            return diagnostic("UNAVAILABLE_FLOW_LABELS")
     paired_pv = (np.asarray(pv[:pairs])+np.asarray(pv[pairs:]))/2
     paired_slope = (np.asarray(slopes[:pairs])+np.asarray(slopes[pairs:]))/2
     mean_pv, slope = float(paired_pv.mean()), float(paired_slope.mean())
     if abs(mean_pv-result["price"]) > 1e-6:
-        return {"status":"UNAVAILABLE_FLOW_PV_MISMATCH"}
+        return diagnostic("UNAVAILABLE_FLOW_PV_MISMATCH")
     if slope <= 1e-12:
-        return {"status":"UNAVAILABLE_NO_COUPON_EXPOSURE" if definition["key"] == "coupon" else "UNAVAILABLE_NO_PARAMETER_EXPOSURE"}
+        return diagnostic("UNAVAILABLE_NO_COUPON_EXPOSURE" if definition["key"] == "coupon" else "UNAVAILABLE_NO_PARAMETER_EXPOSURE")
     target = candidate.pricing_target if candidate.pricing_target is not None else candidate.issue_price
     fair_coupon = quantity+(target-mean_pv)/slope
     residual = (paired_pv+(fair_coupon-quantity)*paired_slope-target)/slope
     error = float(residual.std(ddof=1)/math.sqrt(pairs))
-    return {"status":"AVAILABLE", "fair_parameter_estimate":fair_coupon, "parameter":definition["key"],
+    return diagnostic("AVAILABLE", fair_parameter_estimate=fair_coupon, parameter=definition["key"],
             **({"fair_coupon_estimate":fair_coupon} if definition["key"] == "coupon" else {}),
-            "local_only":candidate.product_family == "booster", "standard_error":error,
-            "interval":normal_interval(fair_coupon, error, alpha), "method":"normal delta method; diagnostic only"}
+            local_only=proof["parameter_affinity"][definition["key"]] != "AFFINE", standard_error=error,
+            interval=normal_interval(fair_coupon, error, alpha), method="normal delta method; diagnostic only")
 
 
 def coupon_diagnostic(result, script, inputs, candidate, pairs, alpha):
@@ -106,6 +118,7 @@ def validate_candidate(req, candidate, shortlist_size):
         comparisons[name] = {"absolute_difference": difference, "threshold": z*error+allowance,
                              "compatible": difference <= z*error+allowance}
     candidate.validation = {"exploration": exploration, "shortlist_size": shortlist_size,
+                            "payoff_qualification": family["payoff_qualification"],
                             "family_confidence": .95, "per_check_alpha": alpha,
                             "interval_method": "Bonferroni; normal price, empirical Bernstein bounded analytics",
                             "runs": runs, "compatibility": comparisons,

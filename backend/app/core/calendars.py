@@ -1,9 +1,8 @@
-"""Business-day calendars and date-roll conventions, by settlement currency.
+"""Named observation calendars, payment centres and business-day conventions.
 
-Which calendar applies is decided by the currency the cash moves in, not by
-where the underlying trades: an Athena on the S&P 500 settled in EUR pays its
-coupons on TARGET business days, not on NYSE ones. A product whose underlying
-market is closed but whose settlement currency is open still pays.
+Observation venues and payment centres are separate contractual choices.
+Multiple calendars require a product-specific all-open or any-open rule.
+Historical currency-only configurations retain their original bank mapping.
 
 The euro has no country calendar — EUR settlement follows TARGET, the payment
 system, which is why it is mapped to the ECB financial calendar rather than to
@@ -17,6 +16,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from enum import Enum
 from functools import lru_cache
+from dataclasses import dataclass
 
 import holidays
 
@@ -32,6 +32,69 @@ _SPECS: dict[str, tuple[str, str, str | None]] = {
 }
 
 SUPPORTED_CURRENCIES = tuple(sorted(_SPECS))
+
+# Named observation venues and payment centres. Currency aliases retain the
+# historical bank-calendar mapping for existing Economics configurations.
+_NAMED = {
+    'TARGET': ('financial', 'ECB', None),
+    'NYSE': ('financial', 'NYSE', None),
+    'NASDAQ': ('financial', 'XNAS', None),
+    'XETR': ('financial', 'XETR', None),
+    'JPX': ('financial', 'JPX', None),
+    'HKEX': ('financial', 'HKEX', None),
+    'SGX': ('financial', 'SGX', None),
+    'SIX': ('financial', 'SIX', None),
+}
+CALENDAR_CODES = tuple(sorted({*_SPECS, *_NAMED}))
+OBSERVATION_CODES = CALENDAR_CODES
+SETTLEMENT_CODES = tuple(sorted({*_SPECS, 'TARGET'}))
+
+
+@dataclass(frozen=True)
+class CalendarSelection:
+    codes: tuple[str, ...]
+    join: str
+
+
+CalendarInput = str | CalendarSelection
+
+
+def validate_settlement_lag(value) -> int:
+    """Contractual settlement lags are integers, never coerced or truncated."""
+    if type(value) is not int or not 0 <= value <= 30:
+        raise ValueError('Le délai de règlement doit être un entier entre 0 et 30 jours ouvrés.')
+    return value
+
+
+def calendar_selection(config: dict, purpose: str, currency=None):
+    """Resolve an explicit policy, or retain the historical currency mapping.
+
+    Multiple calendars require an explicit product-level combination choice.
+    An empty explicit selection is an error, not a fallback to the currency.
+    """
+    field = f'{purpose}_calendars'
+    if field not in config:
+        if config.get(f'{purpose}_join'):
+            raise ValueError(f'{field} : sélection de calendriers manquante.')
+        return currency
+    codes = config[field]
+    allowed = SETTLEMENT_CODES if purpose == 'settlement' else OBSERVATION_CODES
+    if not isinstance(codes, (list, tuple)) or not codes or any(
+            not isinstance(code, str) or code not in allowed for code in codes):
+        raise ValueError(f'{field} : choisir au moins un calendrier reconnu ({", ".join(allowed)}).')
+    codes = tuple(dict.fromkeys(codes))
+    join = config.get(f'{purpose}_join')
+    if join is None and len(codes) == 1:
+        join = 'all_open'
+    if join not in ('all_open', 'any_open'):
+        raise ValueError(f'{field} : choisir explicitement « toutes ouvertes » ou « au moins une ouverte ».')
+    return CalendarSelection(codes, join)
+
+
+def calendar_context(config, currency=None):
+    config = config if isinstance(config, dict) else {}
+    return (calendar_selection(config, 'observation', currency),
+            calendar_selection(config, 'settlement', currency))
 
 
 class BusinessDayConvention(str, Enum):
@@ -56,7 +119,7 @@ class UnsupportedCurrency(ValueError):
 
 @lru_cache(maxsize=None)
 def _calendar(currency: str):
-    spec = _SPECS.get((currency or "").upper())
+    spec = {**_SPECS, **_NAMED}.get((currency or "").upper())
     if spec is None:
         raise UnsupportedCurrency(
             f"Devise « {currency} » sans calendrier de jours ouvrés. "
@@ -69,14 +132,17 @@ def _calendar(currency: str):
     return holidays.country_holidays(code, subdiv=subdiv)
 
 
-def is_business_day(day: date, currency: str) -> bool:
-    """Weekend or public holiday in the settlement currency's calendar."""
+def is_business_day(day: date, currency: CalendarInput) -> bool:
+    """Whether a named calendar or explicit calendar combination is open."""
+    if isinstance(currency, CalendarSelection):
+        opened = [is_business_day(day, code) for code in currency.codes]
+        return all(opened) if currency.join == 'all_open' else any(opened)
     if day.weekday() >= 5:
         return False
     return day not in _calendar(currency)
 
 
-def adjust(day: date, currency: str,
+def adjust(day: date, currency: CalendarInput,
            convention: BusinessDayConvention = DEFAULT_CONVENTION) -> date:
     """Move `day` onto a business day according to `convention`.
 
@@ -99,7 +165,7 @@ def adjust(day: date, currency: str,
     return rolled
 
 
-def add_business_days(day: date, n: int, currency: str) -> date:
+def add_business_days(day: date, n: int, currency: CalendarInput) -> date:
     """Settlement lag: `n` business days after `day` (T+n).
 
     n = 0 means "same day if it is a business day, else the next one" — the
@@ -113,7 +179,7 @@ def add_business_days(day: date, n: int, currency: str) -> date:
     return current
 
 
-def business_days_between(start: date, end: date, currency: str) -> int:
+def business_days_between(start: date, end: date, currency: CalendarInput) -> int:
     """Business days strictly after `start` up to and including `end`.
 
     Negative when `end` precedes `start`, so it inverts add_business_days."""
@@ -129,7 +195,7 @@ def business_days_between(start: date, end: date, currency: str) -> int:
     return count
 
 
-def _roll(day: date, step: int, currency: str) -> date:
+def _roll(day: date, step: int, currency: CalendarInput) -> date:
     current = day + timedelta(days=step)
     while not is_business_day(current, currency):
         current += timedelta(days=step)

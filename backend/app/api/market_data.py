@@ -18,7 +18,7 @@ async def hist_vol_endpoint(
     tickers: str,
     period: str = "1y",
     asof: Optional[str] = None,
-    window_days: int = 252,
+    window_days: int | None = None,
 ):
     """Load realized vol/correlation for a current or historical as-of date."""
     tks = [t.strip().upper() for t in tickers.split(",") if t.strip()]
@@ -35,7 +35,7 @@ async def hist_prices_endpoint(
     tks = [t.strip().upper() for t in tickers.split(",") if t.strip()]
     if not tks:
         return {"error": "Aucun ticker fourni"}
-    return load_hist_prices(tks, start, end)
+    return load_hist_prices(tks, start, end, allow_partial=True)
 
 
 @router.get("/underlyings")

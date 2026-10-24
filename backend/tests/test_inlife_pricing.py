@@ -96,6 +96,15 @@ def test_sans_date_de_valorisation_on_price_a_l_emission(marche):
     assert res["valuation_date"] == STRIKE.isoformat()
 
 
+def test_inlife_preserves_continuous_monitoring_policy_and_warning(marche):
+    result = api.price_in_life(_requete(
+        valuation_date=date(2026, 6, 14), barrier_monitoring="continuous"), USER)
+    assert result["barrier_monitoring"] == "continuous"
+    assert result["barrier_monitoring_details"]["method"] == "analytic_marginals"
+    assert result["barrier_monitoring_details"]["joint_extrema_exact"] is False
+    assert "minimum/maximum" in result["barrier_monitoring_note"]
+
+
 def test_avec_une_date_passee_le_produit_a_une_histoire(marche):
     res = api.price_in_life(_requete(valuation_date=date(2026, 6, 14)), USER)
     assert res["in_life"] is True

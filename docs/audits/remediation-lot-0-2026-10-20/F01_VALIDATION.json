@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "corrective": "F01",
+  "date": "2026-10-23",
+  "status": "locally_resolved_fixture",
+  "production_qualified": false,
+  "report": "../REMEDIATION_F01_2026-10-23.md",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "initial_failure_cases": 1,
+  "initial_case_ids": [
+    "backend/tests/test_amc_studies.py::test_public_registration_requires_explicit_enable"
+  ],
+  "diagnosis": {
+    "root_cause": "The test supplied the eleven-character password123; C02 rejected RegisterRequest before register could raise the intended disabled-registration HTTP 403.",
+    "fixture_changes": "Conforming password, explicit autonomous context, model construction before the expected HTTP exception and exact disabled-registration reason.",
+    "application_changed": false,
+    "permissions_expanded": false,
+    "password_policy_changed": false,
+    "business_arbitration_required": false
+  },
+  "baseline": {
+    "artifact": ".runtime/diagnostic-acceptance/f01-2026-10-23/baseline.xml",
+    "sha256": "b26be98b2b16e23c8d1d0758866b9f32811edbb228b3a53268951f8f31bec086",
+    "failed": 1,
+    "root_error": "RegisterRequest ValidationError: password shorter than 12 characters"
+  },
+  "backend": {
+    "distinct_passed": 21,
+    "registration_passed": 15,
+    "adjacent_passed": 6,
+    "new_cases": 14,
+    "initial_failure_cases_covered": 1,
+    "same_nodeid": 1,
+    "renamed": 0,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "runs": [
+      {
+        "artifact": ".runtime/diagnostic-acceptance/f01-2026-10-23/registration-final.xml",
+        "passed": 15,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "d84d2766eee008d3100f29a7e1cb35b407a5154154779dcd77aa17ee2ddaa33c",
+        "external_http_blocked_attempts": 0
+      },
+      {
+        "artifact": ".runtime/diagnostic-acceptance/f01-2026-10-23/dependencies-final.xml",
+        "passed": 6,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "sha256": "fd4a0480733eed50b949060b5fe26d4bbd0d67e2c7fc90e800175d22643ffa0f",
+        "external_http_blocked_attempts": 0
+      }
+    ],
+    "test_ids": [
+      "backend/tests/test_amc_studies.py::test_public_registration_requires_explicit_enable",
+      "backend/tests/test_hybrid_bootstrap.py::test_local_admin_cannot_grant_technical_role_or_reassign_organization",
+      "backend/tests/test_hybrid_bootstrap.py::test_managed_login_never_offers_simulation_registration",
+      "backend/tests/test_public_registration.py::test_disabled_registration_rejects_valid_payload_without_writes[absent]",
+      "backend/tests/test_public_registration.py::test_disabled_registration_rejects_valid_payload_without_writes[false]",
+      "backend/tests/test_public_registration.py::test_disabled_registration_rejects_valid_payload_without_writes[unrecognized]",
+      "backend/tests/test_public_registration.py::test_disabled_registration_rejects_valid_payload_without_writes[zero]",
+      "backend/tests/test_public_registration.py::test_enabled_registration_persists_regular_user_and_issues_usable_session[1]",
+      "backend/tests/test_public_registration.py::test_enabled_registration_persists_regular_user_and_issues_usable_session[true]",
+      "backend/tests/test_public_registration.py::test_enabled_registration_persists_regular_user_and_issues_usable_session[yes]",
+      "backend/tests/test_public_registration.py::test_managed_registration_ignores_public_opt_in",
+      "backend/tests/test_public_registration.py::test_registration_enforces_password_bounds_before_persistence[ascii-limit]",
+      "backend/tests/test_public_registration.py::test_registration_enforces_password_bounds_before_persistence[ascii-over-limit]",
+      "backend/tests/test_public_registration.py::test_registration_enforces_password_bounds_before_persistence[minimum-minus-one]",
+      "backend/tests/test_public_registration.py::test_registration_enforces_password_bounds_before_persistence[minimum]",
+      "backend/tests/test_public_registration.py::test_registration_enforces_password_bounds_before_persistence[utf8-limit]",
+      "backend/tests/test_public_registration.py::test_registration_enforces_password_bounds_before_persistence[utf8-over-limit]",
+      "backend/tests/test_session_security.py::test_logout_is_persistent_and_only_revokes_current_session",
+      "backend/tests/test_session_security.py::test_password_audit_correlates_success_failure_and_contains_no_secrets",
+      "backend/tests/test_session_security.py::test_pre_c02_token_requires_reauthentication",
+      "backend/tests/test_session_security.py::test_temporary_password_activation_personal_change_and_admin_reset"
+    ],
+    "derived_manifest": ".runtime/diagnostic-acceptance/f01-2026-10-23/qualified-distinct.xml",
+    "external_http_blocked_attempts": 0
+  },
+  "validation_criteria": {
+    "public_disabled": "Valid body returns the exact disabled-registration 403; absent, 0, false and unrecognized opt-in create neither User nor Entity, with login options disabled.",
+    "public_enabled": "Existing 1/true/yes opt-in in the simulation context returns 201 and a usable JWT; regular user and organization are persisted under active FK constraints, password is hashed, username/email duplicates do not create extra rows.",
+    "C01": "New account remains role user; managed local administrator scope and technical-role/organization boundaries are re-exercised by adjacent acceptance.",
+    "C02_password": "HTTP rejects 11 characters, 73 ASCII bytes and 74 UTF-8 bytes without writes; accepts 12 characters, 72 ASCII bytes and 72 UTF-8 bytes with real password login.",
+    "C02_sessions": "Registration JWT carries jti/session_version; real me and password login succeed; logout invalidates only the current session. Adjacent tests cover temporary password activation/reset, pre-C02 JWT rejection and secret-free login audit.",
+    "managed": "Installation-bound registration remains 403 even with all opt-in/simulation flags enabled; identity options remain closed and persisted users/organization are unchanged."
+  },
+  "source_sha256": {
+    "backend/tests/test_amc_studies.py": "bf32fe7f045220a38e85a6cc1039516f5a785bb2bcb826fbc6321c6e8eda8d11",
+    "backend/tests/test_public_registration.py": "2e6a7160aaad938d75411b2e1860d7534df09a1651522829c529e475bae04fcd"
+  },
+  "failure_inventory": {
+    "initial_cases_all_groups": 121,
+    "before_f01": 1,
+    "resolved_by_f01": 1,
+    "current_open_cases": 0,
+    "current_open_groups": 0,
+    "locally_resolved_cases": 121,
+    "locally_resolved_groups": 7,
+    "remaining_groups": [],
+    "other_cases_rerun": false
+  },
+  "artifacts_directory": ".runtime/diagnostic-acceptance/f01-2026-10-23",
+  "limits": [
+    "Only the original registration test, the new registration file and six adjacent cases were run; no global backend suite or frontend build.",
+    "All 121 historical cases now have local resolution evidence across F01-F07; this is not a new combined execution of the current whole suite.",
+    "No graphical acceptance, deployed login, existing installation adoption or production qualification.",
+    "Historical C01-C27/F02/F03/F04/F05/F06/F07 proofs and frozen step-1 reference remain unchanged.",
+    "No real business database opened, no service started, no commit or push."
+  ],
+  "preservation": {
+    "artifact": ".runtime/diagnostic-acceptance/f01-2026-10-23/preservation.json",
+    "sha256": "d3b2943b1a6901b40b390b5ce0b11eeeba2f1b87fe8602e106d4d761fe264efd",
+    "status": "PASS"
+  },
+  "historical_resolution_check": {
+    "artifact": ".runtime/diagnostic-acceptance/f01-2026-10-23/historical-resolution-check.json",
+    "sha256": "e2a2abd58ceaae906febcaf62877f3b34a98d42d7a2b52ab18ab2f52ce585124",
+    "status": "PASS",
+    "cases_matched": 121,
+    "new_test_execution": false
+  },
+  "runtime_evidence_sha256": {
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/ANOMALY_REGISTER.md.before": "c640f8a0bb24c24f330aadf31a9432c6f0e0ca6deba6655223fcfc4748667962",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/baseline-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/baseline.log": "ffdb7817650306373778184df399b219b1932665ece80ea2694dba76469271fa",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/baseline.xml": "b26be98b2b16e23c8d1d0758866b9f32811edbb228b3a53268951f8f31bec086",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/commands.json": "f079bc7ed8a033e4535f1abea74626a8e451e705168a726f3f38e9d32dab1ddd",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/dependencies-final-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/dependencies-final.log": "e9259e411811910f85a650272eee87aff8090c2b05d03660cceff904dba94add",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/dependencies-final.xml": "fd4a0480733eed50b949060b5fe26d4bbd0d67e2c7fc90e800175d22643ffa0f",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/dependencies-selection.json": "3815c052bf5cddb48a99ba4c5844cb85385d14f8f4040b3a50fd5071cb84a5ab",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/DEPENDENCIES_AND_VALIDATION.md.before": "0bea4408a921562b16798392925ee2501e96bcdf9211fc5e46a05e569c98b6fd",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/f01_network_guard.py": "e3b2b6f5d2140c8d6bcc31ec79d28b3ccc91fef313c233ef485b5611545edeed",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/FAILURE_REGISTER.json.before": "3c634b6f676b5fbd11f35afdfce3b85c99f7dd7765eb2a9d2d998bfa9ee2b38b",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/finalize.py": "ded4ad5cbccd1e3a3b55e455915896fa1eff1a7e817aef3b882cc194129cbc67",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/historical-resolution-check.json": "e2a2abd58ceaae906febcaf62877f3b34a98d42d7a2b52ab18ab2f52ce585124",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/initial-selection.json": "61250547108b130cbb9b46e7e29ccf6f271de9e7e259743956cfd8b29caf1cb8",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/initial-snapshot.json": "a0cf6c45b2b81b773802f61231d89e9b3ee21bd847bc9907911507181eda2ca0",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/preservation.json": "d3b2943b1a6901b40b390b5ce0b11eeeba2f1b87fe8602e106d4d761fe264efd",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/process-inventory.json": "bc3d479a2608df41557a7008073d00bb3b212da7bf65a06d308a0b757c83fa39",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/qualified-distinct.xml": "732a6fe9fab0ae90915e78cc9a638f81152a170c9b1c7a2a91da18909c65a8cd",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/README.md.before": "c5321de098de4e7866fddd46f2b3212c62632c1ad052d2626a12ffeb1c38ebf5",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/REGISTER.json.before": "86d6457d0b635f19a4a2023f60508d1f31bd216496c0534fbcee27c6bb9998aa",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/registration-final-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/registration-final.log": "cfd61c59695e038c6a3cf15ea1289b58344e47b31c4f31e25ea11d2d19f8c28e",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/registration-final.xml": "d84d2766eee008d3100f29a7e1cb35b407a5154154779dcd77aa17ee2ddaa33c",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/run_targeted.py": "61616d3c955a287dc4bbfbd952b4187d30a16aa9d17fc761090f7409951e87ce",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/test_amc_studies-incremental.patch": "fad8251cbff355c32f70234927731bdfcf0351938dcd20b0ce448b8ad8e2635b",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/test_amc_studies.py.before": "7e8f73c0ed7322354affbe42c9c9c05dc6e376fa41fe1a91b6ff93e96a8ab0c8",
+    ".runtime/diagnostic-acceptance/f01-2026-10-23/verify_delivery.py": "e3c9787b6ba2ed4f5833526fb67a36ca855f40dbd5921ec06443af72c7487283"
+  }
+}

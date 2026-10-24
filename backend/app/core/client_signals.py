@@ -97,7 +97,8 @@ def _nom_personne(session: Session, person_id: Optional[int]) -> Optional[str]:
 
 def build_signals(session: Session, *, entity_id: Optional[int],
                   user_id: Optional[int] = None,
-                  asof: Optional[date] = None) -> list[Signal]:
+                  asof: Optional[date] = None, viewer=None,
+                  include_demo: bool = False) -> list[Signal]:
     """Les signaux d'un utilisateur, du plus urgent au plus lointain."""
     asof = asof or date.today()
     signaux: list[Signal] = []
@@ -193,7 +194,9 @@ def build_signals(session: Session, *, entity_id: Optional[int],
     # Tout chargé d'un coup, puis regroupé : une requête par client faisait
     # grandir le coût de cet écran avec le portefeuille, et un N+1 ne se voit
     # jamais tant qu'on développe sur trois clients.
-    par_client = transactions_by_client(session, entity_id)
+    par_client = transactions_by_client(session, entity_id, viewer=viewer, asof=asof,
+                                        include_demo=include_demo)
+    observed_ids={(row.source_type,row.source_id) for rows in par_client.values() for row in rows}
     for client in clients:
         deals = par_client.get(client.id, [])
         cycle = compute_cycle(_dates_de_trade(deals), asof=asof)
@@ -257,7 +260,10 @@ def build_signals(session: Session, *, entity_id: Optional[int],
     if user_id is not None:
         requete = requete.where(Deal.user_id == user_id)
     deals_lifecycle = [deal for deal in session.exec(requete).all()
-                       if deal.client_id is not None]
+                       if deal.client_id is not None and ('deal',deal.id) in observed_ids]
+    if viewer is not None:
+        from ..services.business_access import visible_deals
+        deals_lifecycle = visible_deals(session, deals_lifecycle, viewer)
     deal_ids = [deal.id for deal in deals_lifecycle if deal.id is not None]
     fin_horizon = asof + timedelta(days=horizon)
     prochains: dict[int, DealEvent] = {}
@@ -337,6 +343,8 @@ def build_signals(session: Session, *, entity_id: Optional[int],
     for ligne in session.exec(
             select(ClientTradeHistory).where(
                 ClientTradeHistory.entity_id == entity_id)).all():
+        if ('imported_trade',ligne.id) not in observed_ids:
+            continue
         maturite = _date_iso(ligne.maturity_date)
         if maturite is None or not (asof <= maturite <= asof + timedelta(days=horizon)):
             continue

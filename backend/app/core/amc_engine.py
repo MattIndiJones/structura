@@ -21,7 +21,8 @@ import yfinance as yf
 from scipy import stats as _scipy_stats
 
 # ── Persistent FF factor store (never auto-deleted, updated via /ff-refresh) ──
-_FF_STORE = Path(__file__).parent.parent.parent / "data" / "ff_factors"
+from ..runtime import data_path
+_FF_STORE = data_path("ff_factors")
 _FF_STORE.mkdir(parents=True, exist_ok=True)
 
 # ── Fama-French series catalog ─────────────────────────────────────────

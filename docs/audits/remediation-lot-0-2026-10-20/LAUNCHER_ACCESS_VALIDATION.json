@@ -1,0 +1,1032 @@
+{
+  "date": "2026-10-24",
+  "status": "PASS_LOCAL_PENDING_USER_PORTAL_RESTART",
+  "report": "../ADMIN_ACCOUNT_SWITCH_2026-10-24.md",
+  "warm_report": "../LAUNCHER_ACCESS_ACCEPTANCE_2026-10-24.md",
+  "findings": {
+    "LA01": "Obsolete acceptance cleanup/schema fixed; all six organizations and roles covered",
+    "LA02": "Admin account selector enabled with guarded navigation to portal",
+    "LA03": "Explicit cold organization start before development ticket, with ownership and directory checks",
+    "LA04": "Profile selection, two exits, actionable French errors and original session preserved"
+  },
+  "backend": {
+    "distinct_passed": 53,
+    "current_change_followup_passed": 34,
+    "batches": [
+      {
+        "file": "targeted.xml",
+        "passed": 45,
+        "sha256": "90385cd583e1312c51a117553759a209d03f5787fb3da138271a00d9a8940da8"
+      },
+      {
+        "file": "launcher-final.xml",
+        "passed": 14,
+        "sha256": "6208cd60a7d5d751f04f67cd3677391f30b70d130ba7adb2925ed71bc97650d8"
+      },
+      {
+        "file": "cold-access.xml",
+        "passed": 26,
+        "sha256": "4cb20d2e46a179ba792e3d62f2fbdb8a8ba9c2ab8b8e085b8cdb02b8d081d72a"
+      },
+      {
+        "file": "identity-final.xml",
+        "passed": 8,
+        "sha256": "1d5f19e2a98121e71894103f897df5881cdadadf2c767748f345a2d0ac3b63a9"
+      }
+    ],
+    "latest_result_by_identity": {
+      "backend.tests.test_structura_launcher::test_menu_choices_start_only_needed_services_and_reuse_them": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_failed_partial_launch_only_stops_newly_created_services": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_occupied_admin_port_does_not_replace_its_occupant_or_block_portal": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_backend_without_explicit_environment_opens_launcher": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_full_admin_has_its_own_manifest_and_separate_data_directory": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_each_organization_shortcut_opens_its_own_superuser_route[bnp-paribas]": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_each_organization_shortcut_opens_its_own_superuser_route[societe-generale]": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_each_organization_shortcut_opens_its_own_superuser_route[citi]": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_each_organization_shortcut_opens_its_own_superuser_route[ubs]": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_each_organization_shortcut_opens_its_own_superuser_route[leonteq]": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_each_organization_shortcut_opens_its_own_superuser_route[kepler-cheuvreux-solutions]": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_console_shortcut_remains_separate_from_full_admin": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_simulation_shortcut_opens_admin_screen_without_campaign_or_controller": "cold-access.xml",
+      "backend.tests.test_structura_launcher::test_acceptance_failure_cleans_admin_and_controller_but_preserves_existing_portal": "cold-access.xml",
+      "backend.tests.test_hybrid_development::test_development_access_is_disabled_by_default": "cold-access.xml",
+      "backend.tests.test_hybrid_development::test_central_catalog_and_grants_have_no_private_data": "cold-access.xml",
+      "backend.tests.test_hybrid_development::test_redemption_is_local_audited_and_replay_safe": "cold-access.xml",
+      "backend.tests.test_hybrid_development::test_grants_reject_wrong_scope_expiry_and_disabled_account": "cold-access.xml",
+      "backend.tests.test_hybrid_bootstrap::test_bootstrap_is_idempotent_and_only_seeds_configuration": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_managed_login_never_offers_simulation_registration": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_reinitialization_observes_revocation_without_restoring_it": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_initialization_refuses_preexisting_data_and_wrong_identity": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_profiles_and_local_admin_are_explicit[superuser-superuser-200]": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_profiles_and_local_admin_are_explicit[front-front-403]": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_profiles_and_local_admin_are_explicit[operations-operations-403]": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_profiles_and_local_admin_are_explicit[controller-controller-403]": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_tokens_reject_foreign_audience_issuer_and_organization": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_local_admin_cannot_grant_technical_role_or_reassign_organization": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_desk_grants_do_not_allow_self_elevation": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_secondary_profiles_cannot_price_or_book_by_calling_functions": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_distributor_seed_has_sales_desk_and_no_banking_policy": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_interrupted_transaction_can_be_initialized_without_duplicate_accounts": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_managed_studies_cannot_read_another_installation": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_foreign_installation_is_refused_before_migration": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_preflight_allows_empty_interrupted_schema_but_not_private_rows": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_managed_preflight_rejects_admin_identity_with_valid_business_bootstrap": "targeted.xml",
+      "backend.tests.test_hybrid_bootstrap::test_managed_installation_reinitializes_in_a_fresh_process": "targeted.xml",
+      "backend.tests.test_installation_identity_security::test_password_portal_directory_and_central_session_revocation_without_developer_mode": "identity-final.xml",
+      "backend.tests.test_installation_identity_security::test_admin_preflight_rejects_foreign_or_unmarked_db_before_any_migration[business]": "identity-final.xml",
+      "backend.tests.test_installation_identity_security::test_admin_preflight_rejects_foreign_or_unmarked_db_before_any_migration[unmarked-admin]": "identity-final.xml",
+      "backend.tests.test_installation_identity_security::test_admin_preflight_rejects_foreign_or_unmarked_db_before_any_migration[foreign-marker]": "identity-final.xml",
+      "backend.tests.test_installation_identity_security::test_marked_admin_workspace_starts_idempotently_and_retains_revocations": "identity-final.xml",
+      "backend.tests.test_installation_identity_security::test_central_foreign_identity_is_refused_without_schema_changes": "identity-final.xml",
+      "backend.tests.test_installation_identity_security::test_additive_session_migration_preserves_accounts_and_is_repeatable": "identity-final.xml",
+      "backend.tests.test_installation_identity_security::test_legacy_read_only_book_uses_separate_revocation_and_audit_store": "identity-final.xml",
+      "backend.tests.test_portal_account_start::test_explicit_open_starts_only_the_selected_installation_before_grant": "cold-access.xml",
+      "backend.tests.test_portal_account_start::test_grant_without_explicit_start_keeps_existing_non_starting_contract": "cold-access.xml",
+      "backend.tests.test_portal_account_start::test_no_service_start_before_access_and_profile_checks[headers0-front-403]": "cold-access.xml",
+      "backend.tests.test_portal_account_start::test_no_service_start_before_access_and_profile_checks[headers1-front-403]": "cold-access.xml",
+      "backend.tests.test_portal_account_start::test_no_service_start_before_access_and_profile_checks[headers2-admin-403]": "cold-access.xml",
+      "backend.tests.test_portal_account_start::test_unavailable_service_returns_french_error_without_grant": "cold-access.xml",
+      "backend.tests.test_portal_account_start::test_directory_divergence_cannot_start_a_different_local_manifest": "cold-access.xml",
+      "backend.tests.test_portal_account_start::test_return_url_is_public_and_only_advertised_in_development": "cold-access.xml"
+    },
+    "new_cases": 17,
+    "full_suite_rerun": false
+  },
+  "frontend": {
+    "passed": 779,
+    "files_passed": 86,
+    "build_exit_code": 0,
+    "log": "frontend-build-verified.log",
+    "log_sha256": "29c50778b575eee321855b66eb21e7288d066d886e75d066093eebdc62e05510",
+    "earlier_helper_reporting_error": "cp1252 output of checkmark after successful initial build; final build command and exit code verified",
+    "previous_dist_preserved": true
+  },
+  "native": {
+    "warm_isolated": [
+      "all_six_organizations",
+      "individual_organization_shortcuts_reuse_services",
+      "24_development_identities",
+      "business_products",
+      "cross_installation_tokens_denied",
+      "central_console",
+      "launcher_simulation_opens_full_admin",
+      "admin_campaign_screen_read_apis",
+      "signed_central_simulation_read_apis",
+      "business_simulation_denied",
+      "no_business_schema_central",
+      "no_campaign_created_or_started"
+    ],
+    "warm_operational": [
+      "all_six_organizations",
+      "individual_organization_shortcuts_reuse_services",
+      "24_development_identities",
+      "business_products",
+      "cross_installation_tokens_denied",
+      "central_console",
+      "launcher_simulation_opens_full_admin",
+      "admin_campaign_screen_read_apis",
+      "signed_central_simulation_read_apis",
+      "business_simulation_denied",
+      "no_business_schema_central",
+      "no_campaign_created_or_started"
+    ],
+    "business_identities_per_environment": 24,
+    "cold": [
+      "Admin and portal only at start",
+      "foreign SG port preserved on failure",
+      "French 503 without ticket",
+      "both returns to Admin",
+      "BNP Front cold start",
+      "SG Operations cold retry after fixture release",
+      "return to Admin from Operations",
+      "keyboard profile choice without false unsaved prompt"
+    ]
+  },
+  "graphical": {
+    "checkpoints": [
+      {
+        "id": "A01-bnp",
+        "note": "BNP Paribas, super utilisateur affiché après connexion depuis le portail",
+        "url": "http://127.0.0.1:18600/#/"
+      },
+      {
+        "id": "A02-societe-generale",
+        "note": "Société Générale, super utilisateur après remplacement complet du contexte",
+        "url": "http://127.0.0.1:18600/#/"
+      },
+      {
+        "id": "A03-citi",
+        "note": "Citi, super utilisateur connecté dans son installation",
+        "url": "http://127.0.0.1:18600/#/"
+      },
+      {
+        "id": "A04-ubs",
+        "note": "UBS, super utilisateur connecté",
+        "url": "http://127.0.0.1:18600/#/"
+      },
+      {
+        "id": "A05-leonteq",
+        "note": "Leonteq, super utilisateur connecté",
+        "url": "http://127.0.0.1:18600/#/"
+      },
+      {
+        "id": "A06-kepler",
+        "note": "Kepler Cheuvreux Solutions, super utilisateur connecté",
+        "url": "http://127.0.0.1:18600/#/"
+      },
+      {
+        "id": "A07-console",
+        "note": "Console SaaS, administrateur central et six services actifs affichés",
+        "url": "http://127.0.0.1:18600/#/platform"
+      },
+      {
+        "id": "A08-central-simulation",
+        "note": "Écran de préparation de simulation via la console, sans création ni démarrage",
+        "url": "http://127.0.0.1:18600/#/agent-workshop"
+      },
+      {
+        "id": "A09-admin-simulation",
+        "note": "Raccourci simulation du launcher : Admin complet, formulaire et estimation chargés, aucune campagne lancée",
+        "url": "http://127.0.0.1:18609/#/agent-workshop"
+      },
+      {
+        "id": "A10-operational-bnp",
+        "note": "Raccourci individuel BNP du launcher sur le runtime permanent : connexion automatique au super utilisateur",
+        "url": "http://127.0.0.1:8100/#/"
+      },
+      {
+        "id": "A11-operational-sg",
+        "note": "Raccourci individuel du launcher, runtime permanent : Société Générale / superuser",
+        "url": "http://127.0.0.1:8100/#/"
+      },
+      {
+        "id": "A12-operational-citi",
+        "note": "Raccourci individuel du launcher, runtime permanent : Citi / superuser",
+        "url": "http://127.0.0.1:8100/#/"
+      },
+      {
+        "id": "A13-operational-ubs",
+        "note": "Raccourci individuel du launcher, runtime permanent : UBS / superuser",
+        "url": "http://127.0.0.1:8100/#/"
+      },
+      {
+        "id": "A14-operational-leonteq",
+        "note": "Raccourci individuel du launcher, runtime permanent : Leonteq / superuser",
+        "url": "http://127.0.0.1:8100/#/"
+      },
+      {
+        "id": "A15-operational-kepler",
+        "note": "Raccourci individuel du launcher, runtime permanent : Kepler Cheuvreux Solutions / superuser",
+        "url": "http://127.0.0.1:8100/#/"
+      },
+      {
+        "id": "A16-operational-console",
+        "note": "Raccourci Console SaaS du runtime permanent, six organisations actives",
+        "url": "http://127.0.0.1:8100/#/platform"
+      },
+      {
+        "id": "A17-operational-central-simulation",
+        "note": "Simulation centrale du runtime permanent ouverte sans démarrer de campagne",
+        "url": "http://127.0.0.1:8100/#/agent-workshop"
+      },
+      {
+        "id": "A18-operational-admin-simulation",
+        "note": "Raccourci simulation du launcher sur le workspace Admin permanent, aucune campagne démarrée",
+        "url": "http://127.0.0.1:8000/#/agent-workshop"
+      },
+      {
+        "id": "A19-operational-central-loaded",
+        "note": "Simulation centrale chargée, lecture seule des campagnes et paramètres",
+        "url": "http://127.0.0.1:8100/#/agent-workshop"
+      },
+      {
+        "id": "B01-admin-account-menu",
+        "note": "Sélecteur Admin désormais actif, annulation et choix d’un autre compte disponibles",
+        "url": "http://127.0.0.1:18609/#/"
+      },
+      {
+        "id": "B02-unavailable-account",
+        "note": "Échec réel sur port occupé : erreur française et deux retours disponibles, aucune activation de compte",
+        "url": "http://127.0.0.1:18600/#/login"
+      },
+      {
+        "id": "B03-return-admin",
+        "note": "Retour effectif au compte Admin après un échec d’ouverture",
+        "url": "http://127.0.0.1:18609/#/"
+      },
+      {
+        "id": "B04-browser-return",
+        "note": "Le bouton Retour revient aussi à Admin depuis le portail",
+        "url": "http://127.0.0.1:18609/#/"
+      },
+      {
+        "id": "B05-cold-bnp-front",
+        "note": "Depuis Admin seul : BNP initialement arrêtée démarrée à la demande, compte Front affiché",
+        "url": "http://127.0.0.1:18600/#/"
+      },
+      {
+        "id": "B06-cold-sg-operations",
+        "note": "Après libération du port, nouvel essai réussi : Société Générale démarrée à la demande et profil Opérations distinct",
+        "url": "http://127.0.0.1:18600/#/"
+      },
+      {
+        "id": "B07-account-back-to-admin",
+        "note": "Retour au workspace Admin depuis le compte Opérations, sans perte de l’accès au sélecteur",
+        "url": "http://127.0.0.1:18609/#/"
+      },
+      {
+        "id": "B08-final-account-choice",
+        "note": "Version finale : choix de profil au clavier et retours accessibles sans fausse alerte de saisies",
+        "url": "http://127.0.0.1:18600/#/login"
+      },
+      {
+        "id": "B09-final-return",
+        "note": "Retour Admin confirmé après changement du profil au clavier, sans dialogue de perte de saisies",
+        "url": "http://127.0.0.1:18609/#/"
+      }
+    ],
+    "count": 28,
+    "warm": 19,
+    "cold": 9
+  },
+  "preservation": {
+    "verified_at": "2026-10-24T13:49:34.006348+00:00",
+    "databases": {
+      "platform": {
+        "integrity": "ok",
+        "protected_tables_preserved": [
+          "platform_users",
+          "platform_identity"
+        ],
+        "accounts_and_private_files_preserved": true,
+        "count_changes": {
+          "platform_audit": [
+            85,
+            138
+          ]
+        }
+      },
+      "bnp-paribas": {
+        "integrity": "ok",
+        "protected_tables_preserved": [
+          "users",
+          "entities",
+          "deals",
+          "products",
+          "rfq_requests",
+          "hybrid_bootstrap",
+          "rfq_desks",
+          "rfq_desk_memberships"
+        ],
+        "accounts_and_private_files_preserved": true,
+        "count_changes": {
+          "scheduler_runs": [
+            2,
+            3
+          ],
+          "audit_events": [
+            13,
+            21
+          ],
+          "hybrid_development_redemptions": [
+            12,
+            17
+          ],
+          "rfq_electronic_executions": [
+            null,
+            0
+          ],
+          "rfq_electronic_evidence": [
+            null,
+            0
+          ],
+          "booking_commands": [
+            null,
+            0
+          ],
+          "archived_documents": [
+            null,
+            0
+          ],
+          "variant_study_archives": [
+            null,
+            0
+          ],
+          "revoked_sessions": [
+            null,
+            0
+          ],
+          "rfq_booking_evidence": [
+            null,
+            0
+          ],
+          "reference_catalog_states": [
+            null,
+            3
+          ],
+          "alert_reads": [
+            null,
+            0
+          ],
+          "admin_workbench_identity": [
+            null,
+            0
+          ],
+          "rfq_electronic_bookings": [
+            null,
+            0
+          ],
+          "rfq_reconciliation_statements": [
+            null,
+            0
+          ]
+        }
+      },
+      "societe-generale": {
+        "integrity": "ok",
+        "protected_tables_preserved": [
+          "users",
+          "entities",
+          "deals",
+          "products",
+          "rfq_requests",
+          "hybrid_bootstrap",
+          "rfq_desks",
+          "rfq_desk_memberships"
+        ],
+        "accounts_and_private_files_preserved": true,
+        "count_changes": {
+          "scheduler_runs": [
+            1,
+            2
+          ],
+          "audit_events": [
+            11,
+            19
+          ],
+          "hybrid_development_redemptions": [
+            10,
+            15
+          ],
+          "rfq_electronic_executions": [
+            null,
+            0
+          ],
+          "rfq_electronic_evidence": [
+            null,
+            0
+          ],
+          "booking_commands": [
+            null,
+            0
+          ],
+          "archived_documents": [
+            null,
+            0
+          ],
+          "variant_study_archives": [
+            null,
+            0
+          ],
+          "revoked_sessions": [
+            null,
+            0
+          ],
+          "rfq_booking_evidence": [
+            null,
+            0
+          ],
+          "reference_catalog_states": [
+            null,
+            3
+          ],
+          "alert_reads": [
+            null,
+            0
+          ],
+          "admin_workbench_identity": [
+            null,
+            0
+          ],
+          "rfq_electronic_bookings": [
+            null,
+            0
+          ],
+          "rfq_reconciliation_statements": [
+            null,
+            0
+          ]
+        }
+      },
+      "citi": {
+        "integrity": "ok",
+        "protected_tables_preserved": [
+          "users",
+          "entities",
+          "deals",
+          "products",
+          "rfq_requests",
+          "hybrid_bootstrap",
+          "rfq_desks",
+          "rfq_desk_memberships"
+        ],
+        "accounts_and_private_files_preserved": true,
+        "count_changes": {
+          "scheduler_runs": [
+            1,
+            2
+          ],
+          "audit_events": [
+            11,
+            19
+          ],
+          "hybrid_development_redemptions": [
+            10,
+            15
+          ],
+          "rfq_electronic_executions": [
+            null,
+            0
+          ],
+          "rfq_electronic_evidence": [
+            null,
+            0
+          ],
+          "booking_commands": [
+            null,
+            0
+          ],
+          "archived_documents": [
+            null,
+            0
+          ],
+          "variant_study_archives": [
+            null,
+            0
+          ],
+          "revoked_sessions": [
+            null,
+            0
+          ],
+          "rfq_booking_evidence": [
+            null,
+            0
+          ],
+          "reference_catalog_states": [
+            null,
+            3
+          ],
+          "alert_reads": [
+            null,
+            0
+          ],
+          "admin_workbench_identity": [
+            null,
+            0
+          ],
+          "rfq_electronic_bookings": [
+            null,
+            0
+          ],
+          "rfq_reconciliation_statements": [
+            null,
+            0
+          ]
+        }
+      },
+      "ubs": {
+        "integrity": "ok",
+        "protected_tables_preserved": [
+          "users",
+          "entities",
+          "deals",
+          "products",
+          "rfq_requests",
+          "hybrid_bootstrap",
+          "rfq_desks",
+          "rfq_desk_memberships"
+        ],
+        "accounts_and_private_files_preserved": true,
+        "count_changes": {
+          "scheduler_runs": [
+            1,
+            2
+          ],
+          "audit_events": [
+            9,
+            17
+          ],
+          "hybrid_development_redemptions": [
+            8,
+            13
+          ],
+          "rfq_electronic_executions": [
+            null,
+            0
+          ],
+          "rfq_electronic_evidence": [
+            null,
+            0
+          ],
+          "booking_commands": [
+            null,
+            0
+          ],
+          "archived_documents": [
+            null,
+            0
+          ],
+          "variant_study_archives": [
+            null,
+            0
+          ],
+          "revoked_sessions": [
+            null,
+            0
+          ],
+          "rfq_booking_evidence": [
+            null,
+            0
+          ],
+          "reference_catalog_states": [
+            null,
+            3
+          ],
+          "alert_reads": [
+            null,
+            0
+          ],
+          "admin_workbench_identity": [
+            null,
+            0
+          ],
+          "rfq_electronic_bookings": [
+            null,
+            0
+          ],
+          "rfq_reconciliation_statements": [
+            null,
+            0
+          ]
+        }
+      },
+      "leonteq": {
+        "integrity": "ok",
+        "protected_tables_preserved": [
+          "users",
+          "entities",
+          "deals",
+          "products",
+          "rfq_requests",
+          "hybrid_bootstrap",
+          "rfq_desks",
+          "rfq_desk_memberships"
+        ],
+        "accounts_and_private_files_preserved": true,
+        "count_changes": {
+          "scheduler_runs": [
+            1,
+            2
+          ],
+          "audit_events": [
+            14,
+            22
+          ],
+          "hybrid_development_redemptions": [
+            13,
+            18
+          ],
+          "rfq_electronic_executions": [
+            null,
+            0
+          ],
+          "rfq_electronic_evidence": [
+            null,
+            0
+          ],
+          "booking_commands": [
+            null,
+            0
+          ],
+          "archived_documents": [
+            null,
+            0
+          ],
+          "variant_study_archives": [
+            null,
+            0
+          ],
+          "revoked_sessions": [
+            null,
+            0
+          ],
+          "rfq_booking_evidence": [
+            null,
+            0
+          ],
+          "reference_catalog_states": [
+            null,
+            3
+          ],
+          "alert_reads": [
+            null,
+            0
+          ],
+          "admin_workbench_identity": [
+            null,
+            0
+          ],
+          "rfq_electronic_bookings": [
+            null,
+            0
+          ],
+          "rfq_reconciliation_statements": [
+            null,
+            0
+          ]
+        }
+      },
+      "kepler-cheuvreux-solutions": {
+        "integrity": "ok",
+        "protected_tables_preserved": [
+          "users",
+          "entities",
+          "deals",
+          "products",
+          "rfq_requests",
+          "hybrid_bootstrap",
+          "rfq_desks",
+          "rfq_desk_memberships"
+        ],
+        "accounts_and_private_files_preserved": true,
+        "count_changes": {
+          "scheduler_runs": [
+            1,
+            2
+          ],
+          "audit_events": [
+            9,
+            17
+          ],
+          "hybrid_development_redemptions": [
+            8,
+            13
+          ],
+          "rfq_electronic_executions": [
+            null,
+            0
+          ],
+          "rfq_electronic_evidence": [
+            null,
+            0
+          ],
+          "booking_commands": [
+            null,
+            0
+          ],
+          "archived_documents": [
+            null,
+            0
+          ],
+          "variant_study_archives": [
+            null,
+            0
+          ],
+          "revoked_sessions": [
+            null,
+            0
+          ],
+          "rfq_booking_evidence": [
+            null,
+            0
+          ],
+          "reference_catalog_states": [
+            null,
+            3
+          ],
+          "alert_reads": [
+            null,
+            0
+          ],
+          "admin_workbench_identity": [
+            null,
+            0
+          ],
+          "rfq_electronic_bookings": [
+            null,
+            0
+          ],
+          "rfq_reconciliation_statements": [
+            null,
+            0
+          ]
+        }
+      },
+      "admin-workbench": {
+        "integrity": "ok",
+        "protected_tables_preserved": [
+          "users",
+          "entities",
+          "deals",
+          "products",
+          "rfq_requests",
+          "admin_workbench_identity"
+        ],
+        "accounts_and_private_files_preserved": true,
+        "count_changes": {
+          "audit_events": [
+            33,
+            35
+          ]
+        }
+      }
+    },
+    "campaigns": {
+      "admin-workbench": {
+        "file_count": 994,
+        "all_files_byte_unchanged": true
+      },
+      "simulation": {
+        "file_count": 0,
+        "all_files_byte_unchanged": true
+      }
+    },
+    "isolated_campaign_directories_empty": true,
+    "status": "PASS"
+  },
+  "cleanup": {
+    "verified_at": "2026-10-24T14:08:22.758041+00:00",
+    "completed_owned_service_stops": 22,
+    "receipts": [
+      [
+        {
+          "key": "platform",
+          "stopped": true,
+          "pid": 3876,
+          "launcher_pid": 27788,
+          "launch_id": "47fd2a86-233d-474b-b386-85d66a205a1e",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "simulation",
+          "stopped": true,
+          "pid": 24828,
+          "launcher_pid": 17204,
+          "launch_id": "8e18094c-5487-4118-94cd-c100b2c59a48",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "leonteq",
+          "stopped": true,
+          "pid": 9904,
+          "launcher_pid": 29044,
+          "launch_id": "3de097c0-00fd-43a3-9c1f-0f9188a28534",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "societe-generale",
+          "stopped": true,
+          "pid": 17712,
+          "launcher_pid": 23956,
+          "launch_id": "522758e6-2826-41dd-8c66-5b08a3fbf139",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "ubs",
+          "stopped": true,
+          "pid": 27224,
+          "launcher_pid": 26120,
+          "launch_id": "d7d40f98-76d9-4b2c-b147-a2223f4ef9c0",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "kepler-cheuvreux-solutions",
+          "stopped": true,
+          "pid": 27792,
+          "launcher_pid": 12672,
+          "launch_id": "9b6df52c-c166-4c07-a132-52b740470555",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "bnp-paribas",
+          "stopped": true,
+          "pid": 9976,
+          "launcher_pid": 4860,
+          "launch_id": "d0574e44-6263-42a0-81b2-89564b7e03e9",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "citi",
+          "stopped": true,
+          "pid": 27864,
+          "launcher_pid": 15128,
+          "launch_id": "ea235574-ef96-4d40-9111-45ec6bd53d9c",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "admin-workbench",
+          "stopped": true,
+          "pid": 25596,
+          "launcher_pid": 23184,
+          "launch_id": "24fcdb9e-9beb-4b7a-9039-ba3a69411576",
+          "process_exited": true,
+          "port_released": true
+        }
+      ],
+      [
+        {
+          "key": "platform",
+          "stopped": true,
+          "pid": 3660,
+          "launcher_pid": 26860,
+          "launch_id": "ce4f952d-bbb5-4497-91b0-3088a09cdff1",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "simulation",
+          "stopped": true,
+          "pid": 30100,
+          "launcher_pid": 29924,
+          "launch_id": "b24f9f5d-490e-4e34-b8f8-5d988d28a45c",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "leonteq",
+          "stopped": true,
+          "pid": 21000,
+          "launcher_pid": 29072,
+          "launch_id": "a4250043-7290-4937-8370-0240f5655b5a",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "bnp-paribas",
+          "stopped": true,
+          "pid": 29328,
+          "launcher_pid": 22008,
+          "launch_id": "0dbd58c7-9da3-4add-9db7-3d22612538cc",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "citi",
+          "stopped": true,
+          "pid": 25564,
+          "launcher_pid": 27996,
+          "launch_id": "b4a19e5c-e8d6-41a7-94de-467b19885e55",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "societe-generale",
+          "stopped": true,
+          "pid": 24048,
+          "launcher_pid": 25656,
+          "launch_id": "269f2ad7-6c5e-4a46-b286-cc301ffe3824",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "ubs",
+          "stopped": true,
+          "pid": 21068,
+          "launcher_pid": 25244,
+          "launch_id": "f87f8b4f-c787-47f7-9dcb-7cccbe5e7520",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "kepler-cheuvreux-solutions",
+          "stopped": true,
+          "pid": 26968,
+          "launcher_pid": 552,
+          "launch_id": "ffb8e3f1-ff08-475f-9ea3-11eeb82e6d2e",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "admin-workbench",
+          "stopped": true,
+          "pid": 13040,
+          "launcher_pid": 6636,
+          "launch_id": "b4177700-47b0-4fe5-8065-17e644071237",
+          "process_exited": true,
+          "port_released": true
+        }
+      ],
+      [
+        {
+          "key": "platform",
+          "stopped": true,
+          "pid": 25952,
+          "launcher_pid": 27800,
+          "launch_id": "2db5e2ce-3168-46f4-adb3-8f24a48c64c9",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "admin-workbench",
+          "stopped": true,
+          "pid": 23020,
+          "launcher_pid": 28620,
+          "launch_id": "c835e720-8d77-42ff-bfe0-031d8333ab33",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "societe-generale",
+          "stopped": true,
+          "pid": 23548,
+          "launcher_pid": 19836,
+          "launch_id": "8545fd8f-0836-4938-b41f-6e8ef19ddd53",
+          "process_exited": true,
+          "port_released": true
+        },
+        {
+          "key": "bnp-paribas",
+          "stopped": true,
+          "pid": 1584,
+          "launcher_pid": 17996,
+          "launch_id": "32fabfe2-fd98-492f-b64e-4a65ee284f65",
+          "process_exited": true,
+          "port_released": true
+        }
+      ]
+    ],
+    "isolated_ports_free": true,
+    "foreign_fixture_and_helper_exited": true,
+    "new_user_services_preserved": []
+  },
+  "activation": {
+    "user_processes_restarted_by_agent": false,
+    "remaining": "Stop Structura through the user's launcher, reopen Admin and reload the tab to load the changed platform contract"
+  },
+  "no_ai_campaign_created_or_started": true,
+  "production_qualified": false,
+  "commit_push": false,
+  "source_sha256": {
+    "scripts/check_structura_launcher.py": "40d35362507f5862fa9c8e8b4beea24ce231e1b37f9c031240276506a5c9fdef",
+    "backend/tests/test_structura_launcher.py": "42ae07653e7a27a7191c30ccbfb31239584294b4648cc904facda67a2a9572e3",
+    "backend/app/hybrid/development.py": "2f84b80852e77a008d30588aebebed64ba3d9d8addf1faa207b21ab142b376e6",
+    "backend/app/hybrid/platform.py": "c7cba9ac87e8f04040272b932d0f88c1611665106cdc17f84b1b0231e19c5260",
+    "backend/tests/test_portal_account_start.py": "0efca41cbc030a89644a6cb407e3e142a472ade4542a51d40b8acc87aee1275a",
+    "frontend/src/components/ContextSelector.vue": "2f55ce00aa9a60df693fd6ce4ff23721bf07705ed95a6b19d4129f7f7221fd7f",
+    "frontend/src/components/ContextSelector.test.js": "1fb20a71746208fc442db67138a260836d8fbff51b19c417490330c5711943c0",
+    "frontend/src/components/AppHeader.vue": "cdc4595f18e6195450ad902ea70eec988562676bcfbfb95ea84ec220a8544128",
+    "frontend/src/views/LoginView.vue": "04b43f1baf1c7711ae8ff6aa58df524b4f9ac268bebe7f09853da834d208731f",
+    "frontend/src/views/LoginView.test.js": "d807261d547b29833f1155aca7dda16c556a75fc970b98e577d8b65c42950c49",
+    "frontend/src/stores/auth.js": "338390daa4279796a8d27e95fd18e029d239ed4e0ee522b3781d02e5160783ad",
+    "frontend/src/stores/authSecurity.test.js": "20214dfa3316d4edff9b5d866539bb77796c9d54bf5b93c017c4cfbbc4314e32",
+    "frontend/src/utils/accessErrors.js": "b585dc5fddbc545dc88ed7d30e94ac48fe86f9b40dd346730649e7f6b87344b5"
+  }
+}

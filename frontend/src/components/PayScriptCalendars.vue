@@ -35,12 +35,14 @@
           <div class="flex gap-1"><input type="number" min="1" class="input w-16" v-model.number="values[c.name].sub_frequency.value" /><select class="select" v-model="values[c.name].sub_frequency.unit"><option>D</option><option>W</option><option>M</option><option>Y</option></select></div>
         </label>
       </div>
+      <CalendarPolicyFields v-if="values[c.name] && typeof values[c.name] === 'object'" :values="values[c.name]" :currency="currency" />
       <details v-if="c.kind !== 'single'" :open="advancedCalendar(values[c.name])" class="mt-3 text-xs">
         <summary class="cursor-pointer text-slate-500">Réglages avancés du calendrier</summary>
         <div class="flex flex-wrap gap-3 mt-2">
           <label class="label">Roll (première observation si vide)<input type="date" class="input" v-model="values[c.name].roll_date" /></label>
           <label class="label">Stub<select class="select" v-model="values[c.name].stub"><option value="short_last">Court en fin</option><option value="long_last">Long en fin</option><option value="short_first">Court au début</option><option value="long_first">Long au début</option></select></label>
         </div>
+        <p class="text-slate-500 mt-1">Nouveaux calendriers : le stub long fusionne systématiquement la période irrégulière avec la période régulière voisine. Une frontière régulière reste inchangée ; les calendriers figés conservent leurs dates.</p>
       </details>
       <div v-if="c.reduction" class="flex flex-wrap items-end gap-3 mt-3 text-xs">
         <span>{{ c.reduction }} par sous-jacent sur la fenêtre</span>
@@ -49,7 +51,7 @@
         </label>
         <ConstatWindowFields :scope="c.window_scope" :valeurs="values[c.name]" :apercu="previews[c.name]" />
       </div>
-      <ObservationSchedule v-if="c.kind !== 'single'" class="mt-3" :request="request(c)" :window-frequency="c.window_scope === 'period' ? tenorString(values[c.name].window_frequency) : null" />
+      <ObservationSchedule v-if="c.kind !== 'single'" class="mt-3" :request="request(c)" :frozen="frozen" :frozen-data="frozenCalendar(c)" :window-frequency="c.window_scope === 'period' ? tenorString(values[c.name].window_frequency) : null" />
     </div>
   </div>
 </template>
@@ -58,8 +60,9 @@ import { computed, ref, watch } from 'vue'
 import { apiFetch } from '../utils/api.js'
 import ConstatWindowFields from './ConstatWindowFields.vue'
 import ObservationSchedule from './ObservationSchedule.vue'
+import CalendarPolicyFields from './CalendarPolicyFields.vue'
 import { serializeCalendars, fixingDate, tenorString } from '../utils/payscriptEconomics.js'
-const props = defineProps({ declarations: Array, values: Object, currency: String, initialDate: String, explicitFixing: Boolean })
+const props = defineProps({ declarations: Array, values: Object, currency: String, initialDate: String, explicitFixing: Boolean, frozen: Boolean, frozenSchedule: Object })
 function advancedCalendar(value) {
   return (value?.stub && value.stub !== 'short_last') || !!(value?.roll_date && value.roll_date !== value.first_observation_date && value.roll_date !== value.period_start_date)
 }
@@ -71,6 +74,7 @@ watch(() => [props.declarations, props.values, props.currency], async (_, __, on
   let cancelled = false
   onCleanup(() => { cancelled = true })
   const result = {}
+  if (props.frozen) { previews.value = {}; return }
   for (const c of props.declarations) {
     const v = props.values[c.name]
     if (!c.reduction || c.window_scope === 'period' || !v?.window_length?.value || !v?.window_frequency?.value) continue
@@ -79,7 +83,7 @@ watch(() => [props.declarations, props.values, props.currency], async (_, __, on
     try {
       const response = await apiFetch('/api/schedule/window', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, window_length: tenorString(v.window_length), window_frequency: tenorString(v.window_frequency), forward: c.role === 'initial_fixing', currency: props.currency, convention: v.convention || 'none' }),
+        body: JSON.stringify({ date, window_length: tenorString(v.window_length), window_frequency: tenorString(v.window_frequency), forward: c.role === 'initial_fixing', currency: props.currency, convention: v.convention || 'none', observation_calendars: v.observation_calendars, observation_join: v.observation_join, settlement_calendars: v.settlement_calendars, settlement_join: v.settlement_join }),
       })
       const data = await response.json()
       result[c.name] = response.ok ? data : { erreur: typeof data.detail === 'string' ? data.detail : 'Fenêtre incomplète.' }
@@ -87,6 +91,17 @@ watch(() => [props.declarations, props.values, props.currency], async (_, __, on
   }
   if (!cancelled) previews.value = result
 }, { deep: true, immediate: true })
+function frozenCalendar(c) {
+  if (!props.frozenSchedule) return null
+  const rows = (props.frozenSchedule.constatations || []).filter(row => row.calendrier === c.name).sort((a, b) => a.rang - b.rang)
+  const dates = rows.map(row => row.date)
+  if (!dates.length || dates.some(date => !date)) return null
+  return { first_is_observation: true, dates, main_dates: dates, raw_dates: dates,
+    payment_dates: rows.map(row => row.date_paiement || row.date),
+    windows: Object.fromEntries(rows.filter(row => row.reduction).map(row => [row.date, {
+      dates: (row.releves || []).map(point => point.date), n: (row.releves || []).length,
+    }])) }
+}
 function request(c) {
   const value = serializeCalendars(props.declarations, props.values, props.initialDate || fixingDate(props.declarations, props.values))[c.name]
   if (explicit.value) {

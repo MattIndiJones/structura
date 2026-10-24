@@ -279,7 +279,8 @@ def _autocall(final, n_assets=2, N=8000, full=False):
     compiled = resolve_constats(cs, CAL_PERIODE, anchor=TODAY, currency="EUR")
     uls = [_ul(f"S{i}") for i in range(n_assets)]
     corr = [[1.0 if i == j else 0.5 for j in range(n_assets)] for i in range(n_assets)]
-    res = run_mc(compiled, uls, corr, r=0.03, T_max=3.0, N=N, model="constant",
+    tenor = (date(2029, 9, 10) - TODAY).days / 365.25
+    res = run_mc(compiled, uls, corr, r=0.03, T_max=tenor, N=N, model="constant",
                  seed=7, antithetic=True, user_params={})
     return res if full else res["price"]
 
@@ -395,7 +396,7 @@ def test_la_sous_frequence_se_recale_sur_chaque_date_principale():
 
 # ── 9. L'aperçu ne doit jamais déverser ────────────────────────────────
 
-def test_l_apercu_refuse_un_calendrier_absurde():
+def test_l_apercu_refuse_un_calendrier_absurde(authenticated_client):
     """Une année tapée « 0026 » au lieu de « 2026 » produit deux mille
     constatations. L'aperçu les refuse au lieu de les rendre : un panneau qui
     déverse des milliers de lignes est illisible, et la cause est presque
@@ -403,7 +404,9 @@ def test_l_apercu_refuse_un_calendrier_absurde():
     from fastapi.testclient import TestClient
     from backend.app.main import app
 
-    c = TestClient(app)
+    from backend.app.api import schedule
+    c = authenticated_client
+    c.app.include_router(schedule.router)
     base = {"end_date": "2029-09-10", "roll_date": "2029-09-10", "frequency": "1Y",
             "window_frequency": "3M", "currency": "EUR"}
 
@@ -428,17 +431,21 @@ def test_l_apercu_refuse_un_calendrier_absurde():
 
     absurde = c.post("/api/schedule/period-window", json={**base, "start_date": "0026-09-10"})
     assert absurde.status_code == 422
-    assert "dates de début" in absurde.json()["detail"]
+    assert "1900 et 2200" in absurde.json()["detail"]
 
 
-def test_l_apercu_d_une_fenetre_de_longueur_dit_les_vraies_dates():
+def test_l_apercu_d_une_fenetre_de_longueur_dit_les_vraies_dates(authenticated_client):
     """« 10 jours ouvrés à partir du 10/09 » ne va pas au 20 mais au 23 : deux
     week-ends sautés. C'est exactement ce que l'aperçu existe pour montrer."""
     from fastapi.testclient import TestClient
     from backend.app.main import app
 
-    d = TestClient(app).post("/api/schedule/window", json={
+    from backend.app.api import schedule
+    authenticated_client.app.include_router(schedule.router)
+    response = authenticated_client.post("/api/schedule/window", json={
         "date": "2026-09-10", "window_length": "10D", "window_frequency": "1D",
-        "forward": True, "currency": "EUR"}).json()
+        "forward": True, "currency": "EUR"})
+    assert response.status_code == 200, response.text
+    d = response.json()
     assert d["first"] == "2026-09-10" and d["last"] == "2026-09-23"
     assert d["count"] == 10

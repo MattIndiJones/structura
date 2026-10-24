@@ -11,83 +11,30 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlmodel import Session, select
+from sqlalchemy import update
 from ..db.database import get_session
-from ..db.models import Entity, User
+from ..db.models import Entity, User, RevokedSession
+from ..core.session_security import session_claims, session_digest, validate_password
+from ..core.audit import record_audit_event
+from pydantic import field_validator
 from ..core.workflow import amendment_four_eyes_enabled
+from ..core.access import capabilities, is_local_admin, profile, require_managed_capability, require_capability
+from ..hybrid.config import current_config, signing_secret
+from ..hybrid.development import DevelopmentTicket
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# Value that used to be compiled into this file — and therefore into every
-# clone, backup and fork of the repository. Anyone holding a copy could mint a
-# token for any user id, admin included, without a password. Kept here only to
-# be REFUSED: an installation still carrying it must not start.
-_LEAKED_SECRET = "structura-jwt-secret-change-in-prod"
+from ..runtime import consultation_mode
+from ..core import consultation_sessions
+from ..core.instance_signing import (
+    _LEAKED_SECRET, _SECRET_FILE, _load_secret, process_secret, receipt_signing_secret,
+)
 
-# backend/app/api/auth.py -> parents[2] == backend/
-from ..runtime import data_path
-
-_SECRET_FILE = data_path(".jwt_secret")
-
-
-def _load_secret() -> str:
-    """Signing key, in order of preference: environment, then a per-machine
-    file, then a freshly generated one.
-
-    The key must not live in the repository, but hard-failing without one
-    would make a fresh clone unusable and push people towards putting it back.
-    So an absent key is generated once and stored in `backend/data/` — the
-    directory that already holds the un-versioned database — which keeps
-    sessions alive across the backend restarts this project does constantly,
-    while giving every machine a distinct key. Deployments override it through
-    STRUCTURA_JWT_SECRET and never touch the file.
-
-    Tokens signed with the previously hard-coded value stop verifying here.
-    That is the point, not a side effect."""
-    from_env = os.environ.get("STRUCTURA_JWT_SECRET", "").strip()
-    if from_env:
-        if from_env == _LEAKED_SECRET:
-            raise RuntimeError(
-                "STRUCTURA_JWT_SECRET porte la valeur d'exemple publiée dans le "
-                "dépôt : elle ne signe plus rien. Générez une clé propre "
-                "(python -c \"import secrets; print(secrets.token_urlsafe(64))\").")
-        if len(from_env) < 32:
-            raise RuntimeError(
-                f"STRUCTURA_JWT_SECRET fait {len(from_env)} caractères — 32 au "
-                f"minimum sont exigés pour une signature HS256 sérieuse.")
-        return from_env
-
-    try:
-        if _SECRET_FILE.exists():
-            stored = _SECRET_FILE.read_text(encoding="utf-8").strip()
-            if stored and stored != _LEAKED_SECRET and len(stored) >= 32:
-                return stored
-        generated = secrets.token_urlsafe(64)
-        _SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SECRET_FILE.write_text(generated, encoding="utf-8")
-        logger.warning(
-            "Cle de signature JWT generee dans %s (fichier non versionne). "
-            "Les jetons anterieurs sont invalides : reconnectez-vous.",
-            _SECRET_FILE)
-        return generated
-    except OSError as exc:
-        # Read-only filesystem, permissions, container without volume: an
-        # ephemeral key still beats a published one. Sessions die on restart.
-        logger.warning(
-            "Cle JWT non persistable (%s) — cle ephemere pour ce processus. "
-            "Definissez STRUCTURA_JWT_SECRET pour des sessions durables.", exc)
-        return secrets.token_urlsafe(64)
-
-
-_SECRET = _load_secret()
+_SECRET = process_secret()
 _ALGO = "HS256"
 _EXPIRE_DAYS = 7
-
-
-def receipt_signing_secret() -> str:
-    """Key shared by API endpoints that issue and verify server receipts."""
-    return _SECRET
 
 _oauth2 = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
@@ -144,22 +91,38 @@ def _hash_pw(password: str) -> str:
 
 
 def _verify_pw(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+    try:
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    except ValueError:
+        return False
 
 
-def _make_token(user_id: int, role: str, entity_id: int | None) -> str:
+def _identity_config():
+    from ..hybrid.admin_workbench import config as workbench_config
+    return current_config() or workbench_config()
+
+
+def _make_token(user_id: int, role: str, entity_id: int | None, developer_origin=None, *, auth_version=0) -> str:
     payload = {
         "sub": str(user_id),
         "role": role,
         "entity_id": entity_id,
         "exp": datetime.utcnow() + timedelta(days=_EXPIRE_DAYS),
+        **session_claims(auth_version),
     }
+    config = _identity_config()
+    if config:
+        payload.update(iss=str(config.installation_id), aud=str(config.installation_id),
+                       organization_id=str(config.organization_id))
+    if developer_origin:
+        payload["developer_origin"] = developer_origin
     return jwt.encode(payload, _SECRET, algorithm=_ALGO)
 
 
 def get_current_user(
     token: Annotated[str, Depends(_oauth2)],
     session: Annotated[Session, Depends(get_session)],
+    request: Request = None,
 ) -> User:
     exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -167,20 +130,144 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, _SECRET, algorithms=[_ALGO])
+        config = _identity_config()
+        options = {"require_exp": True, **({"require_iss": True, "require_aud": True} if config else {})}
+        payload = jwt.decode(token, _SECRET, algorithms=[_ALGO], options=options,
+            **({"issuer": str(config.installation_id), "audience": str(config.installation_id)} if config else {}))
         user_id = int(payload["sub"])
-    except (JWTError, KeyError, ValueError):
+        digest = session_digest(payload)
+    except (JWTError, KeyError, ValueError, TypeError):
         raise exc
-    user = session.get(User, user_id)
-    if not user or not user.is_active:
+    user = consultation_sessions.load_user(session, user_id=user_id) if consultation_mode() else session.get(User, user_id)
+    revoked = consultation_sessions.revoked(digest) if consultation_mode() else session.get(RevokedSession, digest)
+    if not user or not user.is_active or payload["session_version"] != user.auth_version or revoked:
         raise exc
+    if current_config():
+        from ..hybrid.business import HybridBootstrap
+        marker = session.get(HybridBootstrap, 1)
+        if not marker or marker.installation_id != str(config.installation_id) or user.entity_id != marker.entity_id \
+                or payload.get("organization_id") != str(config.organization_id) or user.role not in {"organization_admin", "user", "ops_maker", "checker"}:
+            raise exc
+    elif config:
+        from ..hybrid.admin_workbench import AdminWorkbenchIdentity
+        marker = session.get(AdminWorkbenchIdentity, 1)
+        if not marker or marker.installation_id != str(config.installation_id):
+            raise exc
+    if user.password_change_required and request and request.url.path not in {
+            "/api/auth/me", "/api/auth/password", "/api/auth/logout", "/api/auth/logout-all"}:
+        raise HTTPException(403, "Changez le mot de passe provisoire avant de poursuivre.")
     return user
 
 
-def get_current_admin(current: Annotated[User, Depends(get_current_user)]) -> User:
-    if current.role != "admin":
+def revoke_user_sessions(session: Session, user: User):
+    """Atomic epoch increment: concurrent revocations must never restore a session."""
+    session.add(user)
+    session.flush()
+    session.execute(update(User).where(User.id == user.id).values(auth_version=User.auth_version + 1))
+    session.refresh(user)
+
+
+def _session_audit(session, action, user, request, *, result="SUCCESS", username=None):
+    import uuid
+    config = _identity_config()
+    if consultation_mode():
+        consultation_sessions.audit({"action": action, "result": result, "user_id": user.id if user else None,
+                                    "username": user.username if user else (username or "")[:128],
+                                    "correlation_id": str(uuid.uuid4()), "installation_id": os.environ.get("STRUCTURA_INSTANCE_ID"),
+                                    "client_ip": request.client.host if request.client else None})
+        return
+    record_audit_event(session, action=action, object_type="SESSION", object_id=user.id if user else None,
+        actor_user_id=user.id if user else None, result=result, correlation_id=str(uuid.uuid4()),
+        metadata={"installation_id": str(config.installation_id) if config else "standalone",
+                  "username": user.username if user else (username or "")[:128],
+                  "client_ip": request.client.host if request.client else None})
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+    _validate = field_validator("new_password")(validate_password)
+
+
+@router.post("/password", status_code=204)
+def change_password(body: PasswordChange, request: Request,
+                    current: Annotated[User, Depends(get_current_user)],
+                    session: Annotated[Session, Depends(get_session)]):
+    if consultation_mode():
+        raise HTTPException(403, "Le book consulté reste en lecture seule.")
+    if not _verify_pw(body.current_password, current.password_hash) or body.current_password == body.new_password:
+        _session_audit(session, "PASSWORD_CHANGE", current, request, result="REJECTED")
+        session.commit()
+        raise HTTPException(400, "Mot de passe actuel incorrect ou nouveau mot de passe inchangé.")
+    current.password_hash = _hash_pw(body.new_password)
+    current.password_change_required = False
+    revoke_user_sessions(session, current)
+    _session_audit(session, "PASSWORD_CHANGE", current, request)
+    session.commit()
+
+
+@router.post("/logout", status_code=204)
+def logout(request: Request, current: Annotated[User, Depends(get_current_user)],
+           token: Annotated[str, Depends(_oauth2)], session: Annotated[Session, Depends(get_session)]):
+    payload = jwt.get_unverified_claims(token)  # Already verified by get_current_user.
+    if consultation_mode():
+        consultation_sessions.audit({"action": "LOGOUT", "user_id": current.id},
+                                    digest=session_digest(payload), expires_at=payload["exp"])
+        return
+    session.merge(RevokedSession(token_digest=session_digest(payload), user_id=current.id,
+                                expires_at=datetime.utcfromtimestamp(payload["exp"])))
+    _session_audit(session, "LOGOUT", current, request)
+    session.commit()
+
+
+@router.post("/logout-all", status_code=204)
+def logout_all(request: Request, current: Annotated[User, Depends(get_current_user)],
+               session: Annotated[Session, Depends(get_session)]):
+    if consultation_mode():
+        consultation_sessions.audit({"action": "LOGOUT_ALL", "user_id": current.id}, revoke_user_id=current.id)
+        return
+    revoke_user_sessions(session, current)
+    _session_audit(session, "LOGOUT_ALL", current, request)
+    session.commit()
+
+
+def get_current_admin(current: Annotated[User, Depends(get_current_user)], request: Request = None) -> User:
+    if not is_local_admin(current):
         raise HTTPException(status_code=403, detail="Réservé aux administrateurs")
+    if current_config() and request and request.url.path.startswith("/api/admin/browse"):
+        raise HTTPException(403, "Le navigateur SQL technique n'est pas accessible au super utilisateur métier.")
     return current
+
+
+def get_current_pricer(current: Annotated[User, Depends(get_current_user)]) -> User:
+    require_capability(current, "business.price")
+    return current
+
+
+def get_current_simulation_admin(current: Annotated[User, Depends(get_current_user)]) -> User:
+    if current.role != "admin" or current_config():
+        raise HTTPException(403, "Simulation réservée à l'administration technique, hors installation métier.")
+    return current
+
+
+@router.get("/options")
+def login_options():
+    from ..hybrid.admin_workbench import options
+    return {"registration_enabled": not current_config() and os.environ.get("STRUCTURA_BOOTSTRAP_PROFILE") == "simulation"
+            and os.environ.get("STRUCTURA_WORKSHOP_CHILD") == "1"
+            and os.environ.get("STRUCTURA_ALLOW_REGISTRATION", "").lower() in {"1", "true", "yes"}, **options()}
+
+
+@router.get("/identity")
+def login_identity():
+    config = _identity_config()
+    return {"installation": config.public_descriptor() if config else None}
+
+
+@router.post("/development-admin-session", include_in_schema=False)
+def development_admin_session(request: Request):
+    from ..hybrid.admin_workbench import login
+    return login(request)
 
 
 @router.post("/login")
@@ -200,29 +287,77 @@ def login(
     The 429 deliberately says nothing about whether the identifiant exists —
     same reason the failure below returns one generic message."""
     key = _throttle_key(form.username, request)
-    _check_not_locked(key)
-
-    user = session.exec(select(User).where(User.username == form.username)).first()
-    if not user or not _verify_pw(form.password, user.password_hash):
+    user = consultation_sessions.load_user(session, username=form.username) if consultation_mode() else session.exec(select(User).where(User.username == form.username)).first()
+    try:
+        _check_not_locked(key)
+    except HTTPException:
+        _session_audit(session, "LOGIN_THROTTLED", user, request, result="REJECTED", username=form.username)
+        session.commit()
+        raise
+    if not user or not user.is_active or not _verify_pw(form.password, user.password_hash):
         _record_failure(key)
+        _session_audit(session, "LOGIN", user, request, result="REJECTED", username=form.username)
+        session.commit()
         raise HTTPException(status_code=400, detail="Identifiants incorrects")
 
     _record_success(key)
+    identity = (user.id, user.role, user.entity_id, user.auth_version)
+    _session_audit(session, "LOGIN", user, request)
+    session.commit()
     return {
-        "access_token": _make_token(user.id, user.role, user.entity_id),
+        "access_token": _make_token(*identity[:3], auth_version=identity[3]),
         "token_type": "bearer",
     }
 
 
+@router.post("/development-session")
+def development_session(body: DevelopmentTicket,
+                        request: Request, session: Annotated[Session, Depends(get_session)]):
+    from ..hybrid.development import require_access, verify
+    from ..hybrid.business import HybridBootstrap, ROLES, DevelopmentRedemption
+    from ..core.audit import record_audit_event
+    from sqlalchemy.exc import IntegrityError
+    import json
+    config = current_config()
+    require_access(request, config)
+    payload = verify(config, body.ticket)
+    marker = session.get(HybridBootstrap, 1)
+    user = session.exec(select(User).where(User.username == payload["sub"])).first()
+    if not marker or not user or not user.is_active or user.entity_id != marker.entity_id or user.role != ROLES[payload["sub"]]:
+        raise HTTPException(403, "Ce compte ou son profil de développement est indisponible.")
+    origin = payload["developer_origin"]
+    session.add(DevelopmentRedemption(ticket_id=payload["jti"], user_id=user.id, origin_json=json.dumps(origin)))
+    record_audit_event(session, action="DEVELOPMENT_LOGIN", object_type="SESSION", object_id=None,
+        actor_user_id=user.id, result="SUCCESS", correlation_id=payload["jti"],
+        metadata={"effective_username": user.username, "effective_role": user.role, "developer_origin": origin})
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(409, "Cet accès développeur a déjà été utilisé.")
+    return {"access_token": _make_token(user.id, user.role, user.entity_id, origin, auth_version=user.auth_version), "token_type": "bearer"}
+
+
 @router.get("/me")
-def me(current: Annotated[User, Depends(get_current_user)]):
+def me(current: Annotated[User, Depends(get_current_user)], token: Annotated[str, Depends(_oauth2)]):
     from ..runtime import consultation_mode, business_today
+    from ..hybrid.development import enabled
+    config = current_config()
+    origin = jwt.get_unverified_claims(token).get("developer_origin") if config else None
+    from ..hybrid.admin_workbench import options
     return {
+        **options(),
         "id": current.id,
         "username": current.username,
         "email": current.email,
+        "password_change_required": current.password_change_required,
         "role": current.role,
         "entity_id": current.entity_id,
+        "profile": profile(current),
+        "capabilities": capabilities(current),
+        "installation": _identity_config().public_descriptor() if _identity_config() else None,
+        "developer_access": enabled(config),
+        "developer_origin": origin,
         # Deployment-wide governance, not a per-user right: the UI needs it to
         # decide whether an amendment must be handed to somebody else or can be
         # carried through by whoever opened it (see core/workflow.py).
@@ -238,10 +373,13 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     entity_name: Optional[str] = None   # créer une nouvelle entité, ou rejoindre "Demo"
+    _validate = field_validator("password")(validate_password)
 
 
 @router.post("/register", status_code=201)
 def register(body: RegisterRequest, session: Annotated[Session, Depends(get_session)]):
+    if current_config():
+        raise HTTPException(403, "Admission locale par un administrateur de l'organisation requise.")
     if os.environ.get("STRUCTURA_ALLOW_REGISTRATION", "").lower() not in ("1", "true", "yes"):
         raise HTTPException(403, "Inscription publique désactivée. Contactez un administrateur.")
     if len(body.username) < 3:
@@ -272,6 +410,6 @@ def register(body: RegisterRequest, session: Annotated[Session, Depends(get_sess
     session.commit()
     session.refresh(user)
     return {
-        "access_token": _make_token(user.id, user.role, user.entity_id),
+        "access_token": _make_token(user.id, user.role, user.entity_id, auth_version=user.auth_version),
         "token_type": "bearer",
     }

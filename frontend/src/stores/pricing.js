@@ -1,3 +1,4 @@
+import { calendarPolicy } from '../utils/payscriptEconomics.js'
 import { defineStore } from 'pinia'
 import { ref, reactive, computed, watch } from 'vue'
 import { apiFetch, apiErrorMessage } from '../utils/api.js'
@@ -6,10 +7,12 @@ import { courbeDividende } from '../composables/useDividendCurve.js'
 import { CALCULATION_LIMITS, estimatePricingCalculation } from '../utils/calculationBudget.js'
 import { buildModelCalendars } from '../utils/productModels.js'
 import { normaliseCorrelation } from '../utils/rfqBasket.js'
-import { defaultUnderlying, fractionToPercent, PERCENT_MARKET_FIELDS } from '../utils/underlyingDefaults.js'
+import { defaultUnderlying, fractionToPercent, fractionToPercentExact, PERCENT_MARKET_FIELDS } from '../utils/underlyingDefaults.js'
 import { underlyingGroups } from '../data/commonUnderlyings.js'
-import { classifyUnderlying, makeSurface, resizeSurfaceLevel } from '../utils/volSurface.js'
+import { classifyUnderlying, makeSurface, resizeSurfaceLevel, surfaceCalibrationKey } from '../utils/volSurface.js'
 import { calibrateUnderlying } from '../utils/smileCalibration.js'
+import { recordMarketReference, marketProvenanceFields } from '../utils/marketProvenance.js'
+import { readPricingConfiguration } from '../utils/pricingConfiguration.js'
 
 import { examples } from '../data/payscriptTemplates.js'
 
@@ -46,6 +49,8 @@ export const usePricingStore = defineStore('pricing', () => {
   // over — see _applyDeclarationChanges; an unchanged declaration never
   // touches what was typed, and neither does a load.
   const paramOverrides = reactive({})
+  const parameterConversions = reactive({})
+  const parameterShapes = {}
 
   /**
    * Aligne les surcharges sur ce que le script DÉCLARE, sans rien détruire.
@@ -72,11 +77,20 @@ export const usePricingStore = defineStore('pricing', () => {
       } else if (p.kind === 'array' && !Array.isArray(paramOverrides[p.name])) {
         // Declaration changed PARAM → PARAM() under a sticky override:
         // promote the scalar to a single-row table instead of crashing the UI.
-        paramOverrides[p.name] = [paramOverrides[p.name]]
+        paramOverrides[p.name] = parameterShapes[p.name]?.array?.slice() || [paramOverrides[p.name]]
       } else if (p.kind !== 'array' && Array.isArray(paramOverrides[p.name])) {
-        paramOverrides[p.name] = paramOverrides[p.name][0] ?? p.display_default
+        parameterShapes[p.name] = { array: [...paramOverrides[p.name]] }
+        parameterConversions[p.name] = [...paramOverrides[p.name]]
       }
+      if (p.kind === 'array') delete parameterConversions[p.name]
     }
+  }
+
+  function confirmParameterConversion(name, index) {
+    const values = parameterConversions[name]
+    if (!values || !Number.isInteger(index) || index < 0 || index >= values.length) return
+    paramOverrides[name] = values[index]
+    delete parameterConversions[name]
   }
 
   function _sameNumber(a, b) {
@@ -103,6 +117,8 @@ export const usePricingStore = defineStore('pricing', () => {
     for (const p of after || []) {
       const old = previous.get(p.name)
       if (!old || !(p.name in paramOverrides)) continue
+      if (parameterConversions[p.name]) continue
+      if (old.kind !== p.kind) continue
       const unitChanged = !!old.is_pct !== !!p.is_pct
       if (old.required && p.required && !unitChanged) continue
       if (p.required && !unitChanged) continue
@@ -141,6 +157,8 @@ export const usePricingStore = defineStore('pricing', () => {
   const scriptHasStop  = ref(false)
   const scriptHasMaturityEvent = ref(false)
   const constatOverrides = reactive({})
+  const calendarShapes = {}
+  const calendarKinds = {}
 
   // frequency/sub_frequency are {value, unit} pairs in the UI (a number input +
   // a D/M/Y select) rather than a single "3M"-style text field — _tenorStr()
@@ -186,6 +204,22 @@ export const usePricingStore = defineStore('pricing', () => {
   /** Même règle que `_syncParamOverrides` : on complète, on ne supprime pas. */
   function _syncConstatOverrides() {
     for (const c of scriptConstats.value) {
+      const previousKind = calendarKinds[c.name]
+      if (previousKind && previousKind !== c.kind && c.name in constatOverrides) {
+        const old = constatOverrides[c.name]
+        calendarShapes[c.name] ||= {}
+        calendarShapes[c.name][previousKind] = JSON.parse(JSON.stringify(old))
+        const common = typeof old === 'object' && old ? Object.fromEntries(
+          ['convention', 'settlement_lag', 'window_length', 'window_frequency',
+            'observation_calendars', 'observation_join', 'settlement_calendars', 'settlement_join',
+            ...(previousKind !== 'single' && c.kind !== 'single'
+              ? ['start_date','first_observation_date','period_start_date','end_date','roll_date','frequency','stub'] : [])]
+            .filter(k => k in old).map(k => [k, JSON.parse(JSON.stringify(old[k]))])) : {}
+        constatOverrides[c.name] = calendarShapes[c.name][c.kind]
+          ? JSON.parse(JSON.stringify(calendarShapes[c.name][c.kind]))
+          : Object.assign(c.kind === 'single' ? { date: '' } : _defaultConstatValue(c.kind, c.reduction, c.window_scope), common)
+      }
+      calendarKinds[c.name] = c.kind
       if (!(c.name in constatOverrides)) {
         constatOverrides[c.name] = _defaultConstatValue(c.kind, c.reduction, c.window_scope)
         continue
@@ -413,6 +447,9 @@ export const usePricingStore = defineStore('pricing', () => {
   // Dossier Product conservé actuellement ouvert. Null signifie que la
   // session reste un brouillon de pricing entièrement éphémère.
   const currentProduct = ref(null)
+  const variantComparisonInputs = ref(null)
+  const editingProductTerms = ref(false)
+  const productLoadNotice = ref('')
   // Last explicitly opened pricing entry. Navigation does not replace it.
   const sessionRouteKey = ref(null)
 
@@ -436,7 +473,17 @@ export const usePricingStore = defineStore('pricing', () => {
   // A deal loaded through loadFromDeal is a persisted contract. The Pricer may
   // change its valuation assumptions, but it must not turn that contract into
   // another payoff while continuing to display the booked reference.
-  const contractTermsLocked = computed(() => !!openedDeal.value || !!currentProduct.value)
+  const contractTermsLocked = computed(() => !!openedDeal.value || !!currentProduct.value?.execution
+    || (!!currentProduct.value && !editingProductTerms.value))
+
+  function beginProductTermsEdit() {
+    if (!currentProduct.value || currentProduct.value.execution || openedDeal.value || currentRfqId.value) {
+      throw new Error('Ce dossier ne permet pas la modification directe des termes.')
+    }
+    editingProductTerms.value = true
+    _invalidatePricingOutputs()
+    leftTab.value = 'economics'
+  }
 
   function _activeBookedContract() {
     return contractTermsLocked.value ? bookedContractTerms.value : null
@@ -472,6 +519,7 @@ export const usePricingStore = defineStore('pricing', () => {
         product_name: productTitle.value,
         pricing_input: pricingInput,
         contrepartie: '',
+        counterparty_id: null,
         devise: globalParams.deal_ccy || 'EUR',
         nominal: 0,
         underlyings: underlyings.value.map(u => ({
@@ -554,8 +602,9 @@ export const usePricingStore = defineStore('pricing', () => {
     const up = {}
     for (const p of scriptParams.value) {
       if (omit.includes(p.name)) continue
-      const v = paramOverrides[p.name] ?? p.raw_default
-      if (allowMissing && (v == null || v === '' || (Array.isArray(v) && v.some(x => x == null || x === '')))) {
+      if (parameterConversions[p.name]) throw new Error(`Confirmez la conversion de ${p.name} en scalaire dans Economics.`)
+      const v = p.name in paramOverrides ? paramOverrides[p.name] : p.display_default
+      if (allowMissing && (v == null || (typeof v === 'string' && !v.trim()))) {
         up[p.name] = null
         continue
       }
@@ -563,10 +612,11 @@ export const usePricingStore = defineStore('pricing', () => {
         if (!v.length) throw new Error(`Le paramètre ${p.name} doit contenir au moins une valeur.`)
         up[p.name] = v.map((x, index) => {
           if (x == null || (typeof x === 'string' && x.trim() === '')) {
+            if (allowMissing) return null
             throw new Error(`Le paramètre ${p.name}, ligne ${index + 1}, est requis.`)
           }
           const number = Number(x)
-          if (!Number.isFinite(number)) {
+          if (typeof x === 'boolean' || !Number.isFinite(number)) {
             throw new Error(`Le paramètre ${p.name}, ligne ${index + 1}, doit être numérique.`)
           }
           return p.is_pct ? number / 100 : number
@@ -576,7 +626,7 @@ export const usePricingStore = defineStore('pricing', () => {
           throw new Error(`Le paramètre ${p.name} est requis.`)
         }
         const number = Number(v)
-        if (!Number.isFinite(number)) {
+        if (typeof v === 'boolean' || !Number.isFinite(number)) {
           throw new Error(`Le paramètre ${p.name} doit être numérique.`)
         }
         up[p.name] = p.is_pct ? number / 100 : number
@@ -611,14 +661,18 @@ export const usePricingStore = defineStore('pricing', () => {
       curvature: u.curvature / 100,
       asset_class: u.asset_class || 'unknown',
       smile_parameter_mode: u.smile_parameter_mode || 'automatic',
+      ...(u.calibration_evidence ? {calibration_evidence: JSON.parse(JSON.stringify(u.calibration_evidence))} : {}),
       vol_surface: u.vol_surface ? JSON.parse(JSON.stringify(u.vol_surface)) : null,
+      ...marketProvenanceFields(u),
     }))
   }
 
   // La dérivation vit dans useDividendCurve : l'écran d'appel d'offres en a
   // besoin avec SON horizon, et deux implémentations d'une convention de
   // bucket finiraient par décaler la courbe d'un an sans rien signaler.
-  const _buildDividendCurve = (u) => courbeDividende(u, globalParams.T)
+  const _buildDividendCurve = (u) => u.dividendCurveEnabled && u._savedDividendCurve
+    && u.q === u._savedDividendBase?.q && u.dividendDecay === u._savedDividendBase?.decay
+    ? u._savedDividendCurve.map(p => ({ ...p })) : courbeDividende(u, globalParams.T)
 
   function _buildCorr() {
     const n = underlyings.value.length
@@ -664,6 +718,7 @@ export const usePricingStore = defineStore('pricing', () => {
       } else if (c.kind === 'single') {
         // Date unique portant une fenêtre de constatation.
         out[c.name] = {
+          ...calendarPolicy(v),
           date: v.date,
           window_length: _tenorStr(v.window_length),
           window_frequency: _tenorStr(v.window_frequency),
@@ -672,6 +727,7 @@ export const usePricingStore = defineStore('pricing', () => {
         }
       } else {
         out[c.name] = {
+          ...calendarPolicy(v),
           ...(initialFixingName.value ? { first_observation_date: v.first_observation_date, period_start_date: v.period_start_date || startDate.value } : { start_date: v.start_date }),
           end_date: v.end_date, roll_date: v.roll_date || v.first_observation_date,
           frequency: _tenorStr(v.frequency), stub: v.stub,
@@ -723,6 +779,7 @@ export const usePricingStore = defineStore('pricing', () => {
           continue
         }
         if (ov && typeof ov === 'object') {
+          Object.assign(ov, JSON.parse(JSON.stringify(calendarPolicy(v))))
           // Une date unique portant une fenêtre est stockée comme objet : sa
           // date vit dans `date`, pas dans start_date.
           if (v.date !== undefined) ov.date = v.date || ''
@@ -770,6 +827,13 @@ export const usePricingStore = defineStore('pricing', () => {
    * des rappels qui n'ont jamais eu lieu. Le prix affichait une chose, la
    * distribution en décrivait une autre — et rien ne le signalait.
    */
+  function _contractCalendar(frozen) {
+    if (frozen?.calendar_status && (frozen.calendar_status !== 'FROZEN' || !frozen.frozen_schedule) && scriptConstats.value.length) {
+      throw new Error('Calendrier contractuel figé indisponible ou incohérent : requalifiez le dossier avant repricing.')
+    }
+    return frozen?.frozen_schedule || (contractTermsLocked.value ? currentProduct.value?.terms?.resolved_events : null) || null
+  }
+
   function _baseBody(parameterOptions = {}) {
     const frozen = _activeBookedContract()
     return _avecTermesDOrigine({
@@ -780,6 +844,8 @@ export const usePricingStore = defineStore('pricing', () => {
       T: frozen?.T ?? globalParams.T,
       seed: globalParams.seed,
       model: globalParams.model,
+      antithetic: globalParams.antithetic,
+      ..._rateParams(),
       user_params: frozen?.user_params ?? _buildUserParams(parameterOptions),
       yield_curve: yieldCurve.enabled
         ? yieldCurve.pillars.map(p => [p.T, p.rate / 100])
@@ -800,7 +866,7 @@ export const usePricingStore = defineStore('pricing', () => {
       // elle décrit le produit à l'émission — comportement historique.
       valuation_date: globalParams.valuation_date || null,
       maturity_date: frozen?.maturity_date ?? _maturityDate(),
-      frozen_schedule: currentProduct.value?.terms?.resolved_events || null,
+      frozen_schedule: _contractCalendar(frozen),
       // Le calendrier CONSTAT porte des dates absolues ; le moteur veut des
       // fractions d'année depuis l'origine de son axe, qui est la date de
       // STRIKE — là où le niveau initial se constate. Repli sur la value date
@@ -810,7 +876,7 @@ export const usePricingStore = defineStore('pricing', () => {
     })
   }
 
-  // sigma_r/a_r only apply to /price (and Greeks) — see runPricing/runGreeks.
+  // All pricing and Monte Carlo analyses share the active short-rate settings.
   // Derives the two backend params from the single rateModel selector so
   // switching back to "Déterministe" always sends 0 regardless of leftover
   // field values, and "ABM" always sends a_r=0 (no mean reversion).
@@ -851,6 +917,7 @@ export const usePricingStore = defineStore('pricing', () => {
   ])
 
   async function _authoritativeProductRequest(request) {
+    if (editingProductTerms.value) throw new Error('Conservez la nouvelle version des termes avant de calculer ou de transmettre ce produit.')
     const product = currentProduct.value
     if (!product) return request
     const context = Object.fromEntries(
@@ -948,17 +1015,7 @@ export const usePricingStore = defineStore('pricing', () => {
         parseError.value = data.errors || 'Le serveur signale une erreur de syntaxe sans précision.'
         return false
       }
-      const previousParams = scriptParams.value
-      scriptParams.value = data.params; scriptConstats.value = data.constats || []
-      scriptHasStop.value = data.has_stop ?? false
-      scriptHasMaturityEvent.value = data.has_maturity_event ?? false
-      scriptAtDates.value = Array.isArray(data.at_dates) ? data.at_dates : []
-      parseError.value = null
-      validatedScript.value = parsedScript
-      const report = explicit
-        ? _applyDeclarationChanges(previousParams, scriptParams.value) : null
-      _syncParamOverrides(); _syncConstatOverrides()
-      validationReport.value = report
+      _installScriptValidation(parsedScript, data, explicit)
       return true
     } catch (e) {
       if (revision === _parseRevision && script.value === parsedScript) {
@@ -968,6 +1025,19 @@ export const usePricingStore = defineStore('pricing', () => {
       }
       return false
     }
+  }
+
+  function _installScriptValidation(text, data, explicit = false) {
+    const previousParams = scriptParams.value
+    scriptParams.value = data.params; scriptConstats.value = data.constats || []
+    scriptHasStop.value = data.has_stop ?? false
+    scriptHasMaturityEvent.value = data.has_maturity_event ?? false
+    scriptAtDates.value = Array.isArray(data.at_dates) ? data.at_dates : []
+    parseError.value = null; parseRequestFailed = false
+    validatedScript.value = text; checkedScript.value = text
+    const report = explicit ? _applyDeclarationChanges(previousParams, data.params) : null
+    _syncParamOverrides(); _syncConstatOverrides()
+    validationReport.value = report
   }
 
   /** Ctrl+S and the « Valider » button: the explicit validation. */
@@ -1000,16 +1070,44 @@ export const usePricingStore = defineStore('pricing', () => {
     })
   }
 
+  let _preparationRevision=0
   function _prepareCalculation(report = message => { error.value = message }) {
-    const scriptReady=_prepareScriptCalculation(report)
+    const revision=++_preparationRevision
+    const activeReport=message=>{if(revision===_preparationRevision) report(message)}
+    if (editingProductTerms.value) {
+      report('Conservez la nouvelle version des termes avant de calculer ou de transmettre ce produit.')
+      return Promise.resolve(false)
+    }
+    const scriptReady=_prepareScriptCalculation(activeReport)
     const items=underlyings.value.filter(u=>u.vol_surface && ['heston','sabr','lsv'].includes(globalParams.model))
     if(!items.length) return scriptReady
+    const context=()=>({model:globalParams.model,horizon:globalParams.T,rate:globalParams.r})
+    const signature=()=>JSON.stringify([globalParams,script.value,paramOverrides,constatOverrides,
+      corrMatrix.value,currentProduct.value,openedDeal.value?.id,
+      underlyings.value.map(u=>[u.ticker,u.ccy,u.sigma])])
+    const startingModelContext=JSON.stringify(context())
     return (async()=>{
       if(scriptReady && !(await scriptReady)) return false
       try {
-        for(const u of items) await calibrateUnderlying(u,globalParams.model,globalParams.T,globalParams.r)
+        if(revision!==_preparationRevision) return false
+        if(JSON.stringify(context())!==startingModelContext) throw Error('Le contexte a changé pendant la préparation. Relancez le calcul.')
+        const initial=signature()
+        for(const u of items) {
+          if(revision!==_preparationRevision) return false
+          if(signature()!==initial || !underlyings.value.includes(u)) throw Error('Le contexte a changé pendant la préparation. Relancez le calcul.')
+          const live=context()
+          await calibrateUnderlying(u,live.model,live.horizon,live.rate,context)
+          if(u.smile_parameter_mode!=='manual' && u.smile_calibration?.status==='unqualified')
+            throw Error('Calibration exploratoire non qualifiée : paramètres non appliqués. '
+              +(u.smile_calibration.qualification?.reasons || []).join(' '))
+        }
+        if(revision!==_preparationRevision) return false
+        if(signature()!==initial || items.some(u=>!underlyings.value.includes(u)
+          || (u.smile_parameter_mode!=='manual' && (u.smile_calibration?.status!=='ready'
+            || u.smile_calibration.key!==surfaceCalibrationKey(u,globalParams.model,globalParams.T,globalParams.r)))))
+          throw Error('La calibration ne correspond plus au contexte courant. Relancez le calcul.')
         return true
-      } catch(e) { report(e.message); return false }
+      } catch(e) { activeReport(e.message); return false }
     })()
   }
 
@@ -1123,24 +1221,24 @@ export const usePricingStore = defineStore('pricing', () => {
   const _effectiveFailures = new Set()
   const _effectiveInFlight = new Set()
 
-  function _effectiveKey(date, convention) {
-    return `${globalParams.deal_ccy || 'EUR'}|${convention}|${date}`
+  function _effectiveKey(date, convention, policy = {}) {
+    return JSON.stringify({ currency: globalParams.deal_ccy || 'EUR', convention, date, ...policy })
   }
 
-  function _effectiveDate(date, convention) {
+  function _effectiveDate(date, convention, policy) {
     if (!date || !convention || convention === 'none') return date
-    return _effectiveDates[_effectiveKey(date, convention)] || date
+    return _effectiveDates[_effectiveKey(date, convention, policy)] || date
   }
 
   async function _resolveEffectiveDate(key) {
     if (key in _effectiveDates || _effectiveFailures.has(key) || _effectiveInFlight.has(key)) return
-    const [currency, convention, date] = key.split('|')
+    const request = JSON.parse(key)
     _effectiveInFlight.add(key)
     try {
       const res = await apiFetch('/api/calendar/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, currency, convention }),
+        body: JSON.stringify(request),
       })
       const data = res?.ok ? await res.json() : null
       if (data && _plausibleIsoDate(data.date)) _effectiveDates[key] = data.date
@@ -1175,7 +1273,7 @@ export const usePricingStore = defineStore('pricing', () => {
         convention = value.convention || 'none'
       }
       if (raw) out.push({ name: c.name, kind: c.kind, raw, convention,
-                          date: _effectiveDate(raw, convention) })
+                          policy: calendarPolicy(value), date: _effectiveDate(raw, convention, calendarPolicy(value)) })
     }
     return out
   }
@@ -1190,6 +1288,8 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   function _maturityDate() {
+    const retained = _activeBookedContract()?.maturity_date || (contractTermsLocked.value ? currentProduct.value?.terms?.maturity_date : null)
+    if (retained) return retained
     const constatDates = _datedConstats().map(entry => entry.date)
     const dates = [...constatDates, ..._atEventDates().map(entry => entry.date)]
     // `AT MATURITY` has no date of its own: it carries the Maturity field's.
@@ -1218,11 +1318,10 @@ export const usePricingStore = defineStore('pricing', () => {
   // while nothing has been refused.
   const maturityError = ref('')
 
-  watch(() => _datedConstats()
+  watch(() => JSON.stringify(_datedConstats()
     .filter(entry => entry.convention !== 'none' && _plausibleIsoDate(entry.raw))
-    .map(entry => _effectiveKey(entry.raw, entry.convention))
-    .join(','),
-  keys => { for (const key of keys ? keys.split(',') : []) _resolveEffectiveDate(key) })
+    .map(entry => _effectiveKey(entry.raw, entry.convention, entry.policy))),
+  keys => { if (!contractTermsLocked.value) for (const key of JSON.parse(keys)) _resolveEffectiveDate(key) })
 
   function syncTenorFromMaturity() {
     // Une RFQ porte le tenor effectivement cote. Son echeancier peut finir un
@@ -1348,6 +1447,7 @@ export const usePricingStore = defineStore('pricing', () => {
       payment_date: frozen ? frozen.payment_date : (globalParams.payment_date || null),
       valuation_date: globalParams.valuation_date,
       settlement_ccy: frozen?.settlement_ccy ?? globalParams.deal_ccy ?? 'EUR',
+      frozen_schedule: _contractCalendar(frozen),
       yield_curve: yieldCurve.enabled
         ? yieldCurve.pillars.map(p => [p.T, p.rate / 100])
         : [],
@@ -1810,6 +1910,8 @@ export const usePricingStore = defineStore('pricing', () => {
       script_sha256: scriptGen.value.script_sha256,
       checks_status: scriptGen.value.checks_status,
       pricing_check: scriptGen.value.pricing_check,
+      payoff_qualification: scriptGen.value.payoff_qualification
+        ? JSON.parse(JSON.stringify(scriptGen.value.payoff_qualification)) : { status: 'STRUCTURAL_ONLY' },
       warnings_acknowledged: !!warningsAcknowledged,
       adopted_script_text: scriptGen.value.script,
       modified_after_adoption: false,
@@ -1831,7 +1933,7 @@ export const usePricingStore = defineStore('pricing', () => {
       ..._baseBody(),
       main_price: result.value.price * 100,
       n_outer, n_inner, n_dates,
-      seed: params.seed || globalParams.seed,
+      seed: 42,
     }
     loading.value = true; error.value = null
     // Rough cost calibration: ~4.7s for the 200×500×5 default on a GBM/local-vol model.
@@ -1993,6 +2095,17 @@ export const usePricingStore = defineStore('pricing', () => {
   const marketDataAsOf = ref('')
   const marketDataEffectiveDate = ref('')
   let _marketDataRevision = 0
+  let _marketContextRevision = 0
+  watch(()=>JSON.stringify([underlyings.value,corrMatrix.value,globalParams,currentProduct.value,openedDeal.value?.id]),
+    ()=>{ _marketContextRevision++ },{flush:'sync'})
+  function _marketResponseCurrent(revision, contextRevision) {
+    if(revision!==_marketDataRevision) return false
+    if(contextRevision!==_marketContextRevision) {
+      yfStatus.value='Réponse ignorée : le panier ou les hypothèses ont changé. Relancez le chargement.'
+      return false
+    }
+    return true
+  }
 
   /** Profil de dividende d'un titre à une date donnée : rendement déclaré,
    *  rendement implicite lu dans l'écart des séries, et les détachements qui
@@ -2044,34 +2157,37 @@ export const usePricingStore = defineStore('pricing', () => {
     // ticker is contractual identity: refreshing market data must not rewrite
     // it, even cosmetically.
     if (!contractTermsLocked.value) underlyings.value[idx].ticker = tk
+    const contextRevision = _marketContextRevision
     marketDataLoading.value = true
     yfStatus.value = `Chargement ${tk}${requestedAsOf ? ` au ${requestedAsOf}` : ''}…`
     try {
       const res = await apiFetch(_histVolUrl([tk], requestedAsOf))
       const data = await res.json()
-      if (revision !== _marketDataRevision) return
+      if (!_marketResponseCurrent(revision,contextRevision)) return
+      if (!res.ok) throw Error(apiErrorMessage(data,'Chargement du marché refusé.'))
       if (data.error) { yfStatus.value = `⚠ ${tk}: ${data.error}`; return }
       // backend renvoie la clé uppercase identique à tk
       const vol = data.vols?.[tk] ?? null
       // Le dividende ne vient plus du champ instantané de Yahoo : il est
       // reconstruit à la DATE DE VALORISATION, avec le détail des
       // détachements qui le fondent (voir services/market_data.dividend_profile).
-      const div = await loadDividendProfile(tk, requestedAsOf || null)
-      if (revision !== _marketDataRevision) return
+      const div = data.dividend_profiles?.[tk] ?? await loadDividendProfile(tk, requestedAsOf || null)
+      if (!_marketResponseCurrent(revision,contextRevision)) return
       const q = div?.ok ? div.yield_declared : null
       if (vol != null) {
         // Keep enough precision for the Pricer to reproduce the deal MtM with
         // the same seed. Formatting belongs to the input, not to the value sent
         // to the engine.
         underlyings.value[idx].vol_level_source = 'realized'
-        underlyings.value[idx].sigma = Math.round(vol * 1e8) / 1e6
-        underlyings.value[idx].alpha = Math.round(vol * 1e8) / 1e6
-        if (q != null) underlyings.value[idx].q = Math.round(q * 1e8) / 1e6
+        underlyings.value[idx].sigma = fractionToPercentExact(vol)
+        underlyings.value[idx].alpha = fractionToPercentExact(vol)
+        if (q != null) underlyings.value[idx].q = fractionToPercentExact(q)
         if (!contractTermsLocked.value
             && /^Sous-jacent \d+$/.test(underlyings.value[idx].name || '')) {
           underlyings.value[idx].name = tk
         }
         underlyings.value[idx].dividendProfile = div?.ok ? div : null
+        recordMarketReference(underlyings.value[idx],data,tk,div)
         const suffixe = div?.ok
           ? (div.pays_dividends
               ? ` · ${div.dividends.length} détachement(s)` + (div.suspect ? ' ⚠ écart de sources' : '')
@@ -2083,7 +2199,7 @@ export const usePricingStore = defineStore('pricing', () => {
         yfStatus.value = `⚠ ${tk}: introuvable sur Yahoo Finance`
         if (data.missing?.includes(tk)) yfStatus.value += ' — vérifiez le ticker'
       }
-    } catch (e) { if (revision === _marketDataRevision) yfStatus.value = '⚠ Erreur réseau: ' + e.message }
+    } catch (e) { if (_marketResponseCurrent(revision,contextRevision)) yfStatus.value = '⚠ ' + e.message }
     finally { if (revision === _marketDataRevision) marketDataLoading.value = false }
   }
 
@@ -2098,18 +2214,20 @@ export const usePricingStore = defineStore('pricing', () => {
     if (!pairs.length) { yfStatus.value = '⚠ Aucun ticker renseigné'; return }
     const requestedAsOf = options.asof ?? globalParams.valuation_date ?? ''
     const revision = ++_marketDataRevision
+    const contextRevision = _marketContextRevision
     marketDataLoading.value = true
     yfStatus.value = `Téléchargement${requestedAsOf ? ` au ${requestedAsOf}` : ''} en cours…`
     const tickers = pairs.map(p => p.tick)
     try {
       const res = await apiFetch(_histVolUrl(tickers, requestedAsOf))
       const data = await res.json()
-      if (revision !== _marketDataRevision) return
+      if (!_marketResponseCurrent(revision,contextRevision)) return
+      if (!res.ok) throw Error(apiErrorMessage(data,'Chargement du marché refusé.'))
       if (data.error) { yfStatus.value = '⚠ ' + data.error; return }
 
       const dividendProfiles = await Promise.all(
-        pairs.map(({ tick }) => loadDividendProfile(tick, requestedAsOf || null)))
-      if (revision !== _marketDataRevision) return
+        pairs.map(({ tick }) => data.dividend_profiles?.[tick] ?? loadDividendProfile(tick, requestedAsOf || null)))
+      if (!_marketResponseCurrent(revision,contextRevision)) return
 
       pairs.forEach(({ u, idx, tick }, pairIndex) => {
         const vol = data.vols?.[tick] ?? null
@@ -2117,14 +2235,15 @@ export const usePricingStore = defineStore('pricing', () => {
         const div = dividendProfiles[pairIndex]
         const q = div?.ok ? div.yield_declared : null
         underlyings.value[idx].vol_level_source = 'realized'
-        underlyings.value[idx].sigma = Math.round(vol * 1e8) / 1e6
-        underlyings.value[idx].alpha = Math.round(vol * 1e8) / 1e6
-        if (q != null) underlyings.value[idx].q = Math.round(q * 1e8) / 1e6
+        underlyings.value[idx].sigma = fractionToPercentExact(vol)
+        underlyings.value[idx].alpha = fractionToPercentExact(vol)
+        if (q != null) underlyings.value[idx].q = fractionToPercentExact(q)
         if (!contractTermsLocked.value
             && /^Sous-jacent \d+$/.test(underlyings.value[idx].name || '')) {
           underlyings.value[idx].name = tick
         }
         underlyings.value[idx].dividendProfile = div?.ok ? div : null
+        recordMarketReference(underlyings.value[idx],data,tick,div)
       })
 
       // Apply correlation matrix
@@ -2143,7 +2262,7 @@ export const usePricingStore = defineStore('pricing', () => {
       const divWarning = missingDividends.length
         ? ` · q conservé pour ${missingDividends.join(', ')}` : ''
       yfStatus.value = `✓ ${fnd} — σ, q, corr mis à jour · ${data.n_obs} rendements${_marketDateLabel(data, requestedAsOf)}${divWarning}${miss}`
-    } catch (e) { if (revision === _marketDataRevision) yfStatus.value = '⚠ Erreur: ' + e.message }
+    } catch (e) { if (_marketResponseCurrent(revision,contextRevision)) yfStatus.value = '⚠ ' + e.message }
     finally { if (revision === _marketDataRevision) marketDataLoading.value = false }
   }
 
@@ -2212,6 +2331,9 @@ export const usePricingStore = defineStore('pricing', () => {
     comparator.value = null
     currentIndicativeId.value = null
     currentProduct.value = null
+    variantComparisonInputs.value = null
+    editingProductTerms.value = false
+    productLoadNotice.value = ''
     currentRfqId.value = null
     currentRfqExecution.value = null
     openedDeal.value = null
@@ -2252,6 +2374,9 @@ export const usePricingStore = defineStore('pricing', () => {
     corrMatrix.value = [[1.0]]
     activeUnderlyingIdx.value = 0
     for (const key of Object.keys(paramOverrides)) delete paramOverrides[key]
+    for (const table of [parameterConversions, parameterShapes, calendarShapes, calendarKinds]) {
+      for (const key of Object.keys(table)) delete table[key]
+    }
     for (const key of Object.keys(constatOverrides)) delete constatOverrides[key]
     const today = _localTodayIso()
     Object.assign(globalParams, {
@@ -2314,6 +2439,7 @@ export const usePricingStore = defineStore('pricing', () => {
       dates: [globalParams.strike_date, globalParams.value_date, globalParams.maturity_date],
       nominal: globalParams.nominal,
       ccy: globalParams.deal_ccy,
+      variantComparisonInputs: variantComparisonInputs.value,
     })
   }
 
@@ -2323,7 +2449,7 @@ export const usePricingStore = defineStore('pricing', () => {
 
   /** True when replacing the session would lose a modified product. */
   function hasUnsavedSession() {
-    if (_sessionBaseline === null || contractTermsLocked.value) return false
+    if (_sessionBaseline === null || (contractTermsLocked.value && !variantComparisonInputs.value)) return false
     return _sessionSnapshot() !== _sessionBaseline
   }
 
@@ -2431,24 +2557,28 @@ export const usePricingStore = defineStore('pricing', () => {
 
   function _productUnderlying(identity, market, index) {
     const out = { ..._defaultUnderlying(index + 1), ...identity }
+    if(market?.market_data)out.market_data=JSON.parse(JSON.stringify(market.market_data))
     out.vol_surface=market?.vol_surface ? JSON.parse(JSON.stringify(market.vol_surface)) : null
     out.asset_class=market?.asset_class || 'unknown'
     out.smile_parameter_mode=market?.smile_parameter_mode || 'automatic'
+    if(market?.calibration_evidence) out.calibration_evidence=JSON.parse(JSON.stringify(market.calibration_evidence))
     out._smileDefaults=false
     out.vol_level_source='saved'
     for (const field of PERCENT_MARKET_FIELDS) {
-      if (market?.[field] != null) out[field] = fractionToPercent(market[field])
+      if (market?.[field] != null) out[field] = fractionToPercentExact(market[field])
     }
     if (market?.ccyh != null) out.ccyh = Number(market.ccyh) * 10000
     if (market?.kappa != null) out.kappa = Number(market.kappa)
     const curve = market?.dividend_curve || []
     if (curve.length) {
       out.dividendCurveEnabled = true
-      out.q = fractionToPercent(curve[0][1])
+      out.q = fractionToPercentExact(market.q ?? curve[0][1])
       out.dividendDecay = curve.length > 1 && Number(curve[0][1]) > 0
         ? Math.max(0, Math.min(100,
           (1 - Number(curve[1][1]) / Number(curve[0][1])) * 100))
         : fractionToPercent(market?.dividend_decay || 0)
+      out._savedDividendCurve = curve.map(([T, rate]) => ({ T, rate: fractionToPercentExact(rate) }))
+      out._savedDividendBase = { q: out.q, decay: out.dividendDecay }
     }
     return out
   }
@@ -2456,6 +2586,12 @@ export const usePricingStore = defineStore('pricing', () => {
   /** Ouvre le Product comme source contractuelle et remet, si elle existe,
    *  la dernière hypothèse de marché dans les champs du pricer. */
   async function loadFromProduct(product, calculationInput = null) {
+    const response = await apiFetch('/api/parse', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ script: product.terms.script }) })
+    const validation = await response.json()
+    if (!response.ok || !validation.ok || !Array.isArray(validation.params)) {
+      throw new Error('Les termes du Product ne peuvent pas être validés. La session précédente est conservée.')
+    }
     _resetInputState()
     _clearResults()
     const terms = product.terms
@@ -2473,7 +2609,7 @@ export const usePricingStore = defineStore('pricing', () => {
     activeUnderlyingIdx.value = 0
 
     Object.assign(globalParams, {
-      r: market.r != null ? fractionToPercent(market.r) : globalParams.r,
+      r: market.r != null ? fractionToPercentExact(market.r) : globalParams.r,
       T: terms.T,
       N: market.N ?? globalParams.N,
       model: market.model || globalParams.model,
@@ -2488,36 +2624,70 @@ export const usePricingStore = defineStore('pricing', () => {
       barrierMonitoring: market.barrier_monitoring || 'weekly',
       rateModel: Number(market.sigma_r || 0) === 0
         ? 'deterministic' : (Number(market.a_r || 0) === 0 ? 'abm' : 'hull_white'),
-      sigma_r: fractionToPercent(market.sigma_r || 0),
+      sigma_r: fractionToPercentExact(market.sigma_r || 0),
       a_r: Number(market.a_r || 0),
     })
     if (Array.isArray(market.yield_curve) && market.yield_curve.length) {
       yieldCurve.enabled = true
       yieldCurve.pillars = market.yield_curve.map(([T, rate]) => ({
-        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, rate: fractionToPercent(rate),
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, rate: fractionToPercentExact(rate),
       }))
     }
     if (Array.isArray(market.funding_curve) && market.funding_curve.length) {
       fundingCurve.enabled = true
       fundingCurve.mode = 'pillars'
       fundingCurve.pillars = market.funding_curve.map(([T, spread]) => ({
-        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: fractionToPercent(spread),
+        label: T < 1 ? `${Math.round(T * 12)}M` : `${T}Y`, T, spread: fractionToPercentExact(spread),
       }))
     } else if (market.funding_spread != null) {
       fundingCurve.enabled = Number(market.funding_spread) !== 0
       fundingCurve.mode = 'flat'
-      fundingCurve.level = fractionToPercent(market.funding_spread)
+      fundingCurve.level = fractionToPercentExact(market.funding_spread)
     }
 
-    await parseScript()
+    _parseRevision += 1
+    _installScriptValidation(script.value, validation)
     for (const parameter of terms.parameters || []) {
       if (!(parameter.name in paramOverrides)) continue
       paramOverrides[parameter.name] = Array.isArray(parameter.value)
-        ? parameter.value.map(value => fromStoredUnits(parameter.name, value))
-        : fromStoredUnits(parameter.name, parameter.value)
+        ? parameter.value.map(value => value == null ? null : fromStoredUnits(parameter.name, value))
+        : parameter.value == null ? null : fromStoredUnits(parameter.name, parameter.value)
     }
     _restoreConstats(terms.constats || {})
     currentProduct.value = product
+    const intent = product.intent || {}
+    const execution = product.execution || {}
+    pendingDealPrefill.value = {
+      sens: intent.side === 'SELL' ? 'achat' : 'vente',
+      counterparty_id: intent.counterparty_id ?? null,
+      contrepartie: intent.counterparty_name || '',
+      product_type: intent.product_type || '',
+      transaction_format: intent.transaction_format || '',
+      instrument_family: intent.instrument_family || '',
+      payoff_family: intent.payoff_family || '',
+      payoff_description: intent.payoff_description || '',
+      documentation_reference: intent.documentation_reference || '',
+      client_id: product.commercial?.client_id ?? null,
+      mandate_id: product.commercial?.mandate_id ?? null,
+      opportunity_id: product.commercial?.opportunity_id ?? null,
+      primary_affiliation_id: product.commercial?.primary_affiliation_id ?? null,
+      commercial_context: null, commercial_reason: '',
+      fair_value: execution.fair_value ?? 0,
+      price_traded: execution.price_traded ?? 0,
+      trade_date: execution.trade_date || globalParams.trade_date,
+    }
+    _markSessionBaseline()
+  }
+
+  function prepareBookingFork(product) {
+    const origin = currentProduct.value?.product_id || openedDeal.value?.product_id
+    if (!origin || product.origin_product_id !== origin || product.execution
+        || product.rfqs?.length || product.indicatives?.length) {
+      throw new Error('La nouvelle opération ne correspond pas au dossier source.')
+    }
+    _clearResults()
+    currentProduct.value = product
+    productLoadNotice.value = 'Nouvelle opération reliée au dossier d’origine. RFQ et indicatif détachés ; relancez le prix et confirmez le contexte commercial.'
     _markSessionBaseline()
   }
 
@@ -2662,15 +2832,21 @@ export const usePricingStore = defineStore('pricing', () => {
       maturity_date: deal.maturity_date || _maturityDate() || null,
       payment_date: deal.payment_date || null,
       settlement_ccy: market.deal_ccy ?? deal.devise ?? globalParams.deal_ccy,
+      frozen_schedule: deal.frozen_schedule || null,
+      calendar_status: deal.calendar_status,
     }
+    const retainedSchedule = deal.schedule || deal.frozen_schedule?.schedule
     openedDeal.value = {
       id: deal.id, reference: deal.reference, contract_version: deal.contract_version,
+      product_id: deal.product_id, product_terms_version: deal.product_terms_version,
       counterparty_id: deal.counterparty_id, ccr_netting_set_id: deal.ccr_netting_set_id,
       uat_batch_id: deal.uat_batch_id, devise: deal.devise,
+      ...(retainedSchedule ? { schedule: JSON.parse(JSON.stringify(retainedSchedule)) } : {}),
     }
     pendingDealPrefill.value = {
       sens: deal.sens,
       contrepartie: deal.contrepartie || '',
+      counterparty_id: deal.counterparty_id || null,
       product_type: deal.product_type || '',
       fixing_policy: deal.fixing_policy || 'AUTO_YAHOO',
       fair_value: deal.fair_value,
@@ -2793,6 +2969,7 @@ export const usePricingStore = defineStore('pricing', () => {
       // DealTab leaves the field empty and says why rather than guessing.
       ...(selected ? {
         contrepartie: selected.counterparty ?? '',
+        counterparty_id: selected.counterparty_id ?? null,
         rfq_provider_label: selected.provider,
         price_traded: selected.price ?? 0,
       } : {}),
@@ -2868,13 +3045,45 @@ export const usePricingStore = defineStore('pricing', () => {
     }
   }
 
-  async function loadFromDb(data) {
+  async function loadFromDb(data, { scope = 'all' } = {}) {
+    if (currentProduct.value || openedDeal.value || currentRfqId.value) throw new Error('Les termes de ce dossier sont figés ; ouvrez une nouvelle session pour appliquer une configuration.')
+    if (!['terms', 'all'].includes(scope)) throw new Error('Portée de configuration inconnue.')
+    const { params, calendars, global: saved } = readPricingConfiguration(data)
+    const before = JSON.stringify([_sessionSnapshot(), underlyings.value, globalParams, yieldCurve, fundingCurve])
+    const response = await apiFetch('/api/parse', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ script: data.script_text }),
+    })
+    const validation = await response.json()
+    if (!response.ok || !validation.ok || !Array.isArray(validation.params) || !Array.isArray(validation.constats || [])) {
+      throw new Error('Configuration refusée : ' + (validation.errors || 'le script ne peut pas être validé.'))
+    }
+    for (const p of validation.params) {
+      if (p.name in params && Array.isArray(params[p.name]) && p.kind !== 'array') throw new Error(`Configuration incompatible avec PARAM ${p.name}.`)
+    }
+    for (const c of validation.constats || []) {
+      if (c.kind !== 'single' && typeof calendars[c.name] === 'string') throw new Error(`Calendrier ${c.name} incompatible avec la déclaration enregistrée.`)
+    }
+    if (saved.corr_matrix && !saved.underlyings && saved.corr_matrix.length !== underlyings.value.length) {
+      throw new Error('Les corrélations enregistrées ne correspondent pas au panier conservé.')
+    }
+    if (before !== JSON.stringify([_sessionSnapshot(), underlyings.value, globalParams, yieldCurve, fundingCurve])
+        || currentProduct.value || openedDeal.value || currentRfqId.value) {
+      throw new Error('La session a changé pendant la préparation. Réappliquez la configuration.')
+    }
+    const preserved = {
+      basket: JSON.parse(JSON.stringify(underlyings.value)), corr: JSON.parse(JSON.stringify(corrMatrix.value)),
+      global: { ...globalParams }, yield: JSON.parse(JSON.stringify(yieldCurve)), funding: JSON.parse(JSON.stringify(fundingCurve)),
+    }
     _resetInputState()
+    const termKeys = new Set(['T', 'strike_date', 'value_date', 'maturity_date', 'payment_date', 'deal_ccy'])
+    for (const [k, v] of Object.entries(preserved.global)) if (!termKeys.has(k)) globalParams[k] = v
+    Object.assign(yieldCurve, preserved.yield); Object.assign(fundingCurve, preserved.funding)
     // Charger une ORIGINE efface toute variante affichée : sans ça, la barre
     // de déclinaison survivrait à la navigation et colorerait des champs par
     // rapport à un parent qui n'est plus à l'écran.
     relacherVariante()
-    const configuration = JSON.parse(data.global_params_json || '{}').configuration
+    const configuration = saved.configuration
     currentScriptId.value   = configuration ? null : data.id
     currentScriptName.value = configuration ? '' : data.name
     script.value = data.script_text
@@ -2886,19 +3095,18 @@ export const usePricingStore = defineStore('pricing', () => {
     } catch { scriptGenerationProvenance.value = null }
     adoptedGeneratedScriptText.value = (
       scriptGenerationProvenance.value?.adopted_script_text || '')
-    await parseScript()
+    _parseRevision += 1
+    _installScriptValidation(data.script_text, validation)
 
     if (data.params_json) {
-      const saved = JSON.parse(data.params_json)
-      for (const [k, v] of Object.entries(saved)) {
+      for (const [k, v] of Object.entries(params)) {
         if (k in paramOverrides) paramOverrides[k] = v
       }
     }
 
-    if (data.constats_json) _restoreConstats(JSON.parse(data.constats_json))
+    _restoreConstats(calendars)
 
     if (data.global_params_json) {
-      const saved = JSON.parse(data.global_params_json)
       for (const [k, v] of Object.entries(saved)) {
         if (k in globalParams) globalParams[k] = v
       }
@@ -2914,9 +3122,9 @@ export const usePricingStore = defineStore('pricing', () => {
         corrMatrix.value = saved.corr_matrix.map(row => [...row])
       }
       if (saved.funding) {
-        fundingCurve.enabled = !!saved.funding.enabled
-        fundingCurve.mode = saved.funding.mode || 'flat'
-        fundingCurve.level = saved.funding.level ?? 1.5
+        fundingCurve.enabled = saved.funding.enabled ?? preserved.funding.enabled
+        fundingCurve.mode = saved.funding.mode || preserved.funding.mode
+        fundingCurve.level = saved.funding.level ?? preserved.funding.level
         if (Array.isArray(saved.funding.pillars) && saved.funding.pillars.length) {
           fundingCurve.pillars = saved.funding.pillars.map(x => ({ ...x }))
         }
@@ -2927,6 +3135,14 @@ export const usePricingStore = defineStore('pricing', () => {
           yieldCurve.pillars = saved.yield_curve_pillars.map(x => ({ ...x }))
         }
       }
+    }
+
+    if (!saved.underlyings || scope === 'terms') {
+      underlyings.value = preserved.basket; corrMatrix.value = preserved.corr
+    }
+    if (scope === 'terms') {
+      for (const [k, v] of Object.entries(preserved.global)) if (!termKeys.has(k)) globalParams[k] = v
+      Object.assign(yieldCurve, preserved.yield); Object.assign(fundingCurve, preserved.funding)
     }
 
     _clearResults()
@@ -3183,8 +3399,9 @@ export const usePricingStore = defineStore('pricing', () => {
     // deux voies de construction finiraient par classer des produits
     // que l'écran ne price pas.
     inLifeBody: _inLifeBody,
-    currentIndicativeId, currentProduct, productTitle, ensureIndicative,
+    currentIndicativeId, currentProduct, variantComparisonInputs, productTitle, ensureIndicative,
     currentRfqId, currentRfqExecution, pendingDealPrefill, openedDeal, contractTermsLocked,
+    editingProductTerms, beginProductTermsEdit, productLoadNotice, parameterConversions, confirmParameterConversion,
     initialFixingName, startDate, saveConfiguration,
     draftProductBody: () => _baseBody({ allowMissing: true }),
     parseScript, runPricing, runGreeks,
@@ -3205,7 +3422,7 @@ export const usePricingStore = defineStore('pricing', () => {
     resetToDefaults, releaseSession, sessionRouteKey, loadFromDb, loadVariant, saveVariant, variantInfo,
     relacherVariante,
     variantDirty,
-    loadFromDeal, loadFromRfq, loadFromProduct, saveScript, updateScript,
+    loadFromDeal, loadFromRfq, loadFromProduct, prepareBookingFork, saveScript, updateScript,
     loadFromProductModel, loadFromPreset, hasUnsavedSession,
     pricingBody: _pricingBody,
     optimizerMarketInputs: () => ({

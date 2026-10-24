@@ -20,3 +20,9 @@ export const PERCENT_MARKET_FIELDS = [
 export function fractionToPercent(value) {
   return Math.round(Number(value) * 1e6) / 1e4
 }
+
+// Shift the persisted decimal without rounding meaningful saved digits.
+export function fractionToPercentExact(value) {
+  const [coefficient, exponent = '0'] = String(Number(value)).split('e')
+  return Number(`${coefficient}e${Number(exponent) + 2}`)
+}

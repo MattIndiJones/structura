@@ -36,6 +36,7 @@ from .client_cycle import (
     recommend_contact_window,
 )
 from .payoff_families import canonical_payoff_family
+from .client_analysis import amount_summary, currency_code, temporal_basis
 
 
 def _payoff_family_for_reporting(row) -> str | None:
@@ -237,7 +238,7 @@ def _depuis_deal(
 
 
 def _depuis_historique(
-    ligne: ClientTradeHistory, *, client_origin: str = "imported",
+    ligne: ClientTradeHistory, *, client_origin: str = "imported", mandate_origin: Optional[str] = None,
 ) -> Transaction:
     from .client_technical import decouper_sous_jacents
     return Transaction(
@@ -255,7 +256,7 @@ def _depuis_historique(
         price_pct=ligne.price_pct, traded_with_us=ligne.traded_with_us,
         reference=ligne.external_ref, source_type="imported_trade",
         source_id=ligne.id,
-        data_origin="demo" if client_origin == "demo" else "imported",
+        data_origin="demo" if client_origin == "demo" or mandate_origin == 'demo' else "imported",
         transaction_format=ligne.transaction_format,
         instrument_family=ligne.instrument_family,
         payoff_family=ligne.payoff_family,
@@ -280,8 +281,13 @@ def _origin_maps(
 
 
 def _normalise_transactions(
-    session: Session, deals: Sequence[Deal], histories: Sequence[ClientTradeHistory],
+    session: Session, deals: Sequence[Deal], histories: Sequence[ClientTradeHistory], *, viewer=None,
 ) -> list[Transaction]:
+    if viewer is not None:
+        from ..services.business_access import visible_deals
+        deals = visible_deals(session, deals, viewer)
+        histories = [row for row in histories if viewer.entity_id is not None
+                     and row.entity_id == viewer.entity_id]
     client_origins, mandate_origins = _origin_maps(
         session,
         [row.client_id for row in deals] + [row.client_id for row in histories],
@@ -296,20 +302,28 @@ def _normalise_transactions(
         for row in deals
     ] + [
         _depuis_historique(
-            row, client_origin=client_origins.get(row.client_id, "imported"))
+            row, client_origin=client_origins.get(row.client_id, "imported"),
+            mandate_origin=mandate_origins.get(row.mandate_id))
         for row in histories
     ]
 
 
 def eligible_transactions(
-    transactions: Sequence[Transaction], *, include_demo: bool = False,
+    transactions: Sequence[Transaction], *, include_demo: bool = False, asof: Optional[date] = None,
 ) -> list[Transaction]:
     return [row for row in transactions
-            if include_demo or row.analytically_eligible]
+            if (include_demo or row.analytically_eligible)
+            and (asof is None or (_date_iso(row.trade_date) is not None and _date_iso(row.trade_date) <= asof))]
+
+
+def eligible_opportunities(session, rows, *, include_demo=False):
+    clients,mandates=_origin_maps(session,[row.client_id for row in rows],[row.mandate_id for row in rows])
+    return [row for row in rows if include_demo or (row.data_origin!='demo'
+        and clients.get(row.client_id)!='demo' and mandates.get(row.mandate_id)!='demo')]
 
 
 def deals_of_affiliations(session: Session,
-                          affiliation_ids: Sequence[int]) -> list[Transaction]:
+                          affiliation_ids: Sequence[int], *, viewer=None) -> list[Transaction]:
     """Les transactions rattachées à ces affiliations — bookées ET importées."""
     if not affiliation_ids:
         return []
@@ -319,20 +333,20 @@ def deals_of_affiliations(session: Session,
     importes = session.exec(
         select(ClientTradeHistory).where(
             ClientTradeHistory.affiliation_id.in_(ids))).all()
-    return _normalise_transactions(session, bookes, importes)
+    return _normalise_transactions(session, bookes, importes, viewer=viewer)
 
 
-def deals_of_client(session: Session, client_id: int) -> list[Transaction]:
+def deals_of_client(session: Session, client_id: int, *, viewer=None) -> list[Transaction]:
     bookes = session.exec(
         select(Deal).where(Deal.client_id == client_id)).all()
     importes = session.exec(
         select(ClientTradeHistory).where(
             ClientTradeHistory.client_id == client_id)).all()
-    return _normalise_transactions(session, bookes, importes)
+    return _normalise_transactions(session, bookes, importes, viewer=viewer)
 
 
 def transactions_of_entity(session: Session, entity_id: Optional[int], *,
-                           include_demo: Optional[bool] = None) -> list[Transaction]:
+                           include_demo: Optional[bool] = None, viewer=None, asof: Optional[date] = None) -> list[Transaction]:
     """Toutes les transactions rattachées d'une entité, en DEUX requêtes.
 
     L'écran d'analytiques bouclait sur les clients en appelant
@@ -346,18 +360,12 @@ def transactions_of_entity(session: Session, entity_id: Optional[int], *,
     importes = session.exec(
         select(ClientTradeHistory).where(
             ClientTradeHistory.entity_id == entity_id)).all()
-    normalized = _normalise_transactions(session, bookes, importes)
-    if include_demo is None:
-        # A database made solely of demonstration Clients is an explicit demo
-        # workspace.  As soon as one real/imported fact exists, demo/UAT rows
-        # are excluded from portfolio analytics.
-        include_demo = bool(normalized) and all(
-            row.data_origin == "demo" for row in normalized)
-    return eligible_transactions(normalized, include_demo=include_demo)
+    normalized = _normalise_transactions(session, bookes, importes, viewer=viewer)
+    return eligible_transactions(normalized, include_demo=bool(include_demo), asof=asof or date.today())
 
 
 def transactions_by_client(session: Session, entity_id: Optional[int], *,
-                           include_demo: Optional[bool] = None) -> dict[int, list[Transaction]]:
+                           include_demo: Optional[bool] = None, viewer=None, asof: Optional[date] = None) -> dict[int, list[Transaction]]:
     """Tout l'entité chargé d'un coup, puis regroupé en mémoire.
 
     Les signaux parcourent chaque client pour comparer sa cadence à son propre
@@ -366,7 +374,7 @@ def transactions_by_client(session: Session, entity_id: Optional[int], *,
     """
     groupes: dict[int, list[Transaction]] = {}
     for transaction in transactions_of_entity(
-            session, entity_id, include_demo=include_demo):
+            session, entity_id, include_demo=include_demo, viewer=viewer, asof=asof):
         if transaction.client_id is not None:
             groupes.setdefault(transaction.client_id, []).append(transaction)
     return groupes
@@ -448,7 +456,7 @@ def observed_behaviour(deals: Sequence[Transaction]) -> dict:
     devises = Counter(d.currency for d in deals if d.currency)
     emetteurs = Counter(d.issuer for d in deals if d.issuer)
 
-    nominaux = sorted(d.notional for d in deals if d.notional)
+    tickets=amount_summary((d.currency,d.notional) for d in deals)
     maturites = []
     for transaction in deals:
         debut = _date_iso(transaction.reference_date)
@@ -469,7 +477,7 @@ def observed_behaviour(deals: Sequence[Transaction]) -> dict:
         return (float(triees[n // 2]) if n % 2
                 else (triees[n // 2 - 1] + triees[n // 2]) / 2.0)
 
-    ticket_median = _mediane(nominaux)
+    ticket_median = tickets['median']
     maturite_mediane = _mediane(maturites)
 
     importees = sum(1 for d in deals if d.imported)
@@ -485,7 +493,9 @@ def observed_behaviour(deals: Sequence[Transaction]) -> dict:
         explication.append(
             f"Structure la plus fréquente : {premier} ({compte} sur {len(deals)}).")
     if ticket_median:
-        explication.append(f"Ticket médian {round(ticket_median):,}".replace(",", " "))
+        explication.append(f"Ticket médian {round(ticket_median):,} {tickets['currency']}".replace(",", " "))
+    elif tickets['by_currency']:
+        explication.append('Tickets présentés par devise ; aucune médiane entre unités différentes.')
     if maturite_mediane:
         explication.append(f"Maturité médiane {round(maturite_mediane)} mois.")
 
@@ -502,6 +512,10 @@ def observed_behaviour(deals: Sequence[Transaction]) -> dict:
         "issuers": emetteurs.most_common(),
         "underlyings": sous_jacents.most_common(10),
         "median_ticket": ticket_median,
+        'median_ticket_currency':tickets['currency'],
+        'median_ticket_by_currency':{code:stats['median'] for code,stats in tickets['by_currency'].items()},
+        'ticket_counts_by_currency':{code:stats['count'] for code,stats in tickets['by_currency'].items()},
+        'unqualified_ticket_count':tickets['unqualified_count'],
         "median_maturity_months": maturite_mediane,
         "origins": dict(origines),
         "coverage": {
@@ -1187,10 +1201,31 @@ def observed_ranges(transactions: Sequence[Transaction], client: Client, *,
         if debut and fin and fin > debut:
             maturites.append(round((fin - debut).days / 30.44))
     preferences = scoped_preferences or {}
+    declared_currency=currency_code(preferences.get('ticket_currency',client.ticket_currency))
+    ticket_groups={}
+    for transaction in transactions:
+        code=currency_code(transaction.currency)
+        if code and amount_summary([(code,transaction.notional)])['unqualified_count']==0:
+            ticket_groups.setdefault(code,[]).append(transaction.notional)
+    tickets={code:{**_borne(values,
+        preferences.get('ticket_min',client.ticket_min) if code==declared_currency else None,
+        preferences.get('ticket_max',client.ticket_max) if code==declared_currency else None),'currency':code}
+        for code,values in sorted(ticket_groups.items())}
+    if declared_currency and (preferences.get('ticket_min',client.ticket_min) is not None
+                              or preferences.get('ticket_max',client.ticket_max) is not None):
+        tickets.setdefault(declared_currency,{**_borne([],preferences.get('ticket_min',client.ticket_min),
+            preferences.get('ticket_max',client.ticket_max)),'currency':declared_currency})
+    summary=amount_summary((row.currency,row.notional) for row in transactions)
+    common=tickets.get(summary['currency']) if summary['currency'] else None
+    if common is None:
+        common={**_borne([],None,None),'currency':None,'suppressed_reason':
+            'MULTIPLE_OR_UNQUALIFIED_CURRENCIES' if transactions else 'NO_OBSERVATIONS'}
+    if not transactions and declared_currency in tickets:
+        common=tickets[declared_currency]
     return {
-        "ticket": _borne([t.notional for t in transactions],
-                         preferences.get("ticket_min", client.ticket_min),
-                         preferences.get("ticket_max", client.ticket_max)),
+        'ticket':common,'ticket_by_currency':tickets,
+        'ticket_declared_currency':declared_currency,
+        'unqualified_ticket_count':summary['unqualified_count'],
         "maturity_months": _borne(
                                   maturites,
                                   preferences.get(
@@ -1290,7 +1325,7 @@ def lead_time_pairs(session: Session,
 # ── Vues assemblées ───────────────────────────────────────────────────
 
 def person_intelligence(session: Session, person_id: int, *,
-                        asof: Optional[date] = None) -> dict:
+                        asof: Optional[date] = None, viewer=None) -> dict:
     """La lecture complète d'une personne : elle, son poste actuel, sa maison.
 
     C'est le §85 — pouvoir mettre côte à côte ce qu'elle faisait avant, ce
@@ -1304,7 +1339,9 @@ def person_intelligence(session: Session, person_id: int, *,
     affiliations = session.exec(
         select(Affiliation).where(Affiliation.person_id == person_id)).all()
     ids = [a.id for a in affiliations]
-    courante = next((a for a in affiliations if a.end_date is None), None)
+    courante = next((a for a in sorted(affiliations,key=lambda row:row.start_date or '',reverse=True)
+                     if (not a.start_date or a.start_date<=asof.isoformat())
+                     and (a.end_date is None or a.end_date>=asof.isoformat())),None)
     client_ids = sorted({row.client_id for row in affiliations})
     client_origins = {
         row.id: row.data_origin for row in session.exec(
@@ -1314,14 +1351,14 @@ def person_intelligence(session: Session, person_id: int, *,
         client_origins.get(row.client_id) == "demo" for row in affiliations)
 
     deals_personnels = eligible_transactions(
-        deals_of_affiliations(session, ids), include_demo=personal_demo)
+        deals_of_affiliations(session, ids, viewer=viewer), include_demo=personal_demo, asof=asof)
     cycle_personnel = compute_cycle(_dates_de_trade(deals_personnels), asof=asof)
 
     if courante is not None:
         current_demo = client_origins.get(courante.client_id) == "demo"
         deals_courants = eligible_transactions(
-            deals_of_affiliations(session, [courante.id]),
-            include_demo=current_demo)
+            deals_of_affiliations(session, [courante.id], viewer=viewer),
+            include_demo=current_demo, asof=asof)
         cycle_courant = compute_cycle(_dates_de_trade(deals_courants), asof=asof)
 
         # La maison SANS cette personne : se comparer à un agrégat qui vous
@@ -1331,7 +1368,7 @@ def person_intelligence(session: Session, person_id: int, *,
                 Affiliation.client_id == courante.client_id)).all()
             if a.person_id != person_id]
         deals_maison = eligible_transactions(
-            deals_of_affiliations(session, autres), include_demo=current_demo)
+            deals_of_affiliations(session, autres, viewer=viewer), include_demo=current_demo, asof=asof)
         cycle_maison = compute_cycle(_dates_de_trade(deals_maison), asof=asof)
     else:
         deals_courants, deals_maison = [], []
@@ -1345,6 +1382,7 @@ def person_intelligence(session: Session, person_id: int, *,
 
     return {
         "person_id": person_id,
+        'asof':asof.isoformat(),'temporal_basis':temporal_basis(asof),
         "name": f"{personne.first_name} {personne.last_name}".strip(),
         "current_affiliation_id": courante.id if courante else None,
         "cycles": {
@@ -1360,7 +1398,7 @@ def person_intelligence(session: Session, person_id: int, *,
         },
         "declared": declared_preferences(
             session, client_id=courante.client_id if courante else None,
-            affiliation_id=courante.id if courante else None),
+            affiliation_id=courante.id if courante else None, asof=asof),
         "lost_reasons": lost_reasons(session, affiliation_ids=ids),
         "contact_window": fenetre_contact.as_dict(),
     }
@@ -1444,7 +1482,7 @@ def _rfqs_du_client(
     client_id: int,
     opportunity_ids: Sequence[int],
     *, mandate_id: Optional[int] = None,
-    affiliation_id: Optional[int] = None,
+    affiliation_id: Optional[int] = None, viewer=None,
 ) -> list[dict]:
     """RFQs explicitly attributed to the Client, directly or via Opportunity."""
     from ..db.models import RfqRequest
@@ -1457,6 +1495,9 @@ def _rfqs_du_client(
                 RfqRequest.opportunity_id.in_(list(opportunity_ids)))).all()
         by_id.update({row.id: row for row in inherited})
     rows = list(by_id.values())
+    if viewer is not None:
+        from ..services.rfq_access import effective_rights
+        rows = [row for row in rows if "read" in effective_rights(session, row, viewer)]
     if mandate_id is not None:
         rows = [row for row in rows if row.mandate_id == mandate_id]
     if affiliation_id is not None:
@@ -1465,7 +1506,7 @@ def _rfqs_du_client(
     return sorted(
         ({"id": r.id, "reference": r.reference, "name": r.name,
           "status": r.status, "kind": r.kind, "ao_date": r.ao_date,
-          "opportunity_id": r.opportunity_id, "model_price": r.model_price,
+          "opportunity_id": r.opportunity_id, "model_price": (r.model_price if viewer is None or "price" in effective_rights(session, r, viewer) else None),
           "mandate_id": r.mandate_id,
           "primary_affiliation_id": r.primary_affiliation_id,
           "transaction_format": r.transaction_format,
@@ -1478,7 +1519,7 @@ def _rfqs_du_client(
 def client_intelligence(
     session: Session, client_id: int, *, asof: Optional[date] = None,
     mandate_id: Optional[int] = None, affiliation_id: Optional[int] = None,
-    include_demo: Optional[bool] = None,
+    include_demo: Optional[bool] = None, viewer=None,
 ) -> dict:
     """A scoped, auditable profile; Client aggregation never hides mandates."""
     asof = asof or date.today()
@@ -1490,10 +1531,13 @@ def client_intelligence(
     # Client excludes UAT facts unless a diagnostic caller explicitly asks to
     # inspect them.
     include_demo = client.data_origin == "demo" if include_demo is None else include_demo
-    all_transactions = deals_of_client(session, client_id)
-    transactions = eligible_transactions(
-        all_transactions, include_demo=include_demo)
-    excluded_demo_count = len(all_transactions) - len(transactions)
+    all_transactions = deals_of_client(session, client_id, viewer=viewer)
+    origin_eligible=eligible_transactions(all_transactions,include_demo=include_demo)
+    transactions = eligible_transactions(origin_eligible,include_demo=True,asof=asof)
+    excluded_demo_count = len(all_transactions) - len(origin_eligible)
+    excluded_future_count=sum(_date_iso(row.trade_date) is not None and _date_iso(row.trade_date)>asof
+                              for row in origin_eligible)
+    excluded_undated_count=sum(_date_iso(row.trade_date) is None for row in origin_eligible)
 
     mandates = list(session.exec(
         select(ClientMandate).where(ClientMandate.client_id == client_id)).all())
@@ -1572,8 +1616,7 @@ def client_intelligence(
 
     dossiers = list(session.exec(
         select(Opportunity).where(Opportunity.client_id == client_id)).all())
-    if not include_demo:
-        dossiers = [row for row in dossiers if row.data_origin != "demo"]
+    dossiers=eligible_opportunities(session,dossiers,include_demo=include_demo)
     scoped_dossiers = dossiers
     if mandate_id is not None:
         scoped_dossiers = [row for row in scoped_dossiers
@@ -1591,8 +1634,11 @@ def client_intelligence(
         "client_id": client_id,
         "name": client.name,
         "asof": asof.isoformat(),
+        'temporal_basis':temporal_basis(asof),
         "analysis_mode": "demo" if include_demo else "real",
         "excluded_demo_count": excluded_demo_count,
+        'excluded_future_count':excluded_future_count,
+        'excluded_undated_count':excluded_undated_count,
         "scope": {
             "kind": scope_kind, "name": scope_name,
             "client_id": client_id, "mandate_id": mandate_id,
@@ -1627,6 +1673,7 @@ def client_intelligence(
             scoped, client, scoped_preferences=current_preferences),
         "thresholds": next_thresholds(cycle),
         "conversion": {
+            'state_basis':'CURRENT_STATE','state_asof':date.today().isoformat(),
             "won": len(won), "lost": len(lost), "decided": decided,
             "rate": (len(won) / decided) if decided else None,
         },
@@ -1635,7 +1682,7 @@ def client_intelligence(
         "technical": technical_view(session, scoped),
         "rfqs": _rfqs_du_client(
             session, client_id, [row.id for row in dossiers],
-            mandate_id=mandate_id, affiliation_id=affiliation_id),
+            mandate_id=mandate_id, affiliation_id=affiliation_id, viewer=viewer),
         "transactions": sorted(({
             "source_type": row.source_type,
             "source_id": row.source_id,

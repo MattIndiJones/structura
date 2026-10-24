@@ -54,6 +54,8 @@ def restore_calendar(compiled, payload: dict):
             raise ValueError("Le type d’événement diffère du calendrier figé.")
         for key in EVENT_FIELDS:
             setattr(event, key, deepcopy(row[key]))
+    from ..payscript.parser import validate_observation_dates
+    validate_observation_dates(compiled.events)
     compiled.strike_fix_dates = deepcopy(payload["strike_fix_dates"])
     compiled.strike_fix_reduction = payload["strike_fix_reduction"]
     schedule = payload["schedule"]

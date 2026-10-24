@@ -55,7 +55,7 @@ def app_client(monkeypatch):
 
 
 def _monde(session, *, gagnees=0, perdues=0, ouvertes=0):
-    client = Client(name="ABC AM", entity_id=1, status="active")
+    client = Client(name="ABC AM", entity_id=1, status="active", data_origin='native')
     session.add(client); session.commit(); session.refresh(client)
     personne = Person(first_name="Jean", last_name="Dupont", entity_id=1)
     session.add(personne); session.commit(); session.refresh(personne)
@@ -68,20 +68,20 @@ def _monde(session, *, gagnees=0, perdues=0, ouvertes=0):
         n += 1
         session.add(Opportunity(reference=f"OPP-W{n}", entity_id=1,
                                 owner_user_id=1, client_id=client.id,
-                                title="G", status="won", amount=1_000_000))
+                                title="G", status="won", amount=1_000_000,data_origin='native'))
     for i in range(perdues):
         n += 1
         session.add(Opportunity(reference=f"OPP-L{n}", entity_id=1,
                                 owner_user_id=1, client_id=client.id,
                                 title="P", status="lost",
                                 lost_reason="coupon_too_low" if i % 2 else "timing",
-                                amount=1_000_000))
+                                amount=1_000_000,data_origin='native'))
     for _ in range(ouvertes):
         n += 1
         session.add(Opportunity(reference=f"OPP-O{n}", entity_id=1,
                                 owner_user_id=1, client_id=client.id,
                                 title="O", status="client_interest",
-                                amount=2_000_000,
+                                amount=2_000_000,data_origin='native',
                                 last_activity_at=datetime(2026, 8, 30)))
     session.commit()
     return client, personne, affiliation

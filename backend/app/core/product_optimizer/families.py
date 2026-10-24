@@ -4,6 +4,7 @@ from copy import deepcopy
 
 from ..payscript.catalogue import PRODUCTS
 from ..payscript.parser import parse_script
+from ..payscript.qualification import qualify_payoff
 
 
 RANGE_POLICIES = {
@@ -85,8 +86,10 @@ def family_schema(key, objective=None):
     objective=objective or objectives[0]
     if objective not in objectives: raise ValueError("Objectif non applicable au script sélectionné.")
     modes={name:_mode_schema(key,policy,parsed,name) for name in objectives}
+    qualification = qualify_payoff(key, product["script"])
     return dict(product_family=key, status="SUPPORTED", label=product["label"], description=product["description"],
                 script=product["script"], script_hash=hashlib.sha256(product["script"].encode()).hexdigest(),
+                payoff_qualification=qualification,
                 **modes[objective], modes=modes,objective=objective,
                 objectives=[dict(value=name,label="Coupon cible et perte en capital minimale" if key == "autocall_gear_put" and name == "target_coupon" else OBJECTIVE_LABELS[name]) for name in objectives],
                 has_autocall=policy["has_autocall"], coupon_rule=policy["coupon_rule"],
@@ -98,9 +101,13 @@ def family_schema(key, objective=None):
 
 
 def solution_scale(candidate):
-    if candidate.product_family == "autocall_gear_put" or ADAPTERS[candidate.product_family].get("solved") == "PART":
+    return solution_scale_for_period(candidate.product_family, candidate.observation_months)
+
+
+def solution_scale_for_period(product_family, observation_months):
+    if product_family == "autocall_gear_put" or ADAPTERS[product_family].get("solved") == "PART":
         return 1.
-    return candidate.observation_months/12
+    return observation_months/12
 
 
 def solution_definition(req):

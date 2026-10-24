@@ -160,7 +160,10 @@ def test_la_trajectoire_expliquee_est_celle_de_l_eventail():
     ids = _quantile_ids(row)
     dd = run_mtf_drilldown(cs, uls, C1, r=r, T_max=T, main_price=p0, t0=row["t"],
                            scenario_ids=ids, script_source=AUTOCALL, **CFG)
-    S_fan = _simulate_mtf_outer(uls, C1, r, fan_grid(fan), CFG["n_outer"], CFG["seed"])
+    from backend.app.core.payscript.time_grid import contract_axis, durations
+    ts, dt = contract_axis(T, cs, fan_grid(fan))
+    S_fan = _simulate_mtf_outer(uls, C1, r, fan_grid(fan), CFG["n_outer"], CFG["seed"],
+                               time_steps=durations(dt, ts))
     for scn in dd["scenarios"]:
         wof_fan = S_fan[1:, :, scn["id"]].min(axis=1)
         wof_panel = scn["path"]["wof"][1:1 + len(wof_fan)]

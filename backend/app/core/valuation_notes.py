@@ -3,10 +3,11 @@ from copy import deepcopy
 import json
 import math
 
-from .valuation_runs import engine_identity
+from .valuation_runs import engine_identity, calculation_identity
 from .compute.pricers.var_scenario import price_var_scenario_job, residual_script_from_payload
 from .deal_valuation import _get_events
 from .valuation_note_support import events_for_note, monitor_levels, residual_greeks
+from .valuation_attribution import ATTRIBUTION_VERSION, with_dividend_inputs
 
 SECTIONS = ("synthese", "analyse", "contexte", "conclusion")
 LABELS = dict(zip(SECTIONS, ("Synthèse", "Analyse", "Contexte et limites", "Conclusion")))
@@ -47,6 +48,8 @@ def saved_evidence(run, deal):
     diagnostics = json.loads(run.diagnostics_json or "{}")
     data = deepcopy(diagnostics.get("note_snapshot"))
     warnings = []
+    if not diagnostics.get("calculation_identity"):
+        warnings.append("Ancien calcul sans identité complète du moteur et des conventions ; rejeu non qualifié.")
     if not data:
         # Never reconstruct old historical observations from today's market data.
         market = json.loads(run.market_data_json or "{}")
@@ -74,11 +77,18 @@ def frozen_greeks(run, evidence, progress):
         return
     p = json.loads(run.context_json)
     c = p.get("valuation_context")
-    if not c or run.engine_fingerprint != engine_identity()[1] or p.get("settlement_claim"):
+    if (not c or run.engine_fingerprint != engine_identity()[1] or p.get("settlement_claim")
+            or json.loads(run.diagnostics_json or "{}").get("calculation_identity") != calculation_identity()):
         evidence["warnings"].append("Sensibilités non disponibles avec le moteur archivé ; aucune sensibilité actuelle n'est substituée.")
         return
     progress("Calcul des sensibilités sur les paramètres archivés")
-    if abs(price_var_scenario_job(p)["price"] - evidence["data"]["mtm"]["mtm"]) > 1e-10:
+    residual_script_from_payload(p)  # Contract/calendar failures must still block.
+    try:
+        reproduced = price_var_scenario_job(p)["price"]
+    except (ValueError, ArithmeticError, RuntimeError) as exc:
+        evidence["warnings"].append(f"Sensibilités omises : échec du rejeu ({type(exc).__name__}: {exc}).")
+        return
+    if abs(reproduced - evidence["data"]["mtm"]["mtm"]) > 1e-10:
         evidence["warnings"].append("Sensibilités omises : le calcul de référence ne se reproduit pas à la précision attendue.")
         return
     ctx = dict(residual_script=residual_script_from_payload(p), engine_uls=c["underlyings"],
@@ -89,10 +99,27 @@ def frozen_greeks(run, evidence, progress):
                barrier_monitoring=c["barrier_monitoring"], antithetic=c["antithetic"],
                state=p["state"], norm_spots=p["norm_spots"], strike_set_t=c["strike_set_t"],
                residual_payment_t=c["maturity_payment_t"], underlyings_json=c["underlyings"])
-    evidence["data"]["greeks"] = residual_greeks(ctx, c["N"])
+    try:
+        evidence["data"]["greeks"] = residual_greeks(ctx, c["N"])
+    except (ValueError, ArithmeticError, RuntimeError) as exc:
+        evidence["warnings"].append(f"Sensibilités omises : calcul indisponible ({type(exc).__name__}: {exc}).")
 
 
 def compare_runs(first, second, progress=lambda phase: None):
+    """Numerical replay failures retain the observed difference without attribution."""
+    for run in (first, second):
+        payload = json.loads(run.context_json)
+        if payload.get("valuation_context") and not payload.get("settlement_claim"):
+            residual_script_from_payload(payload)
+    try:
+        return _compare_runs(first, second, progress)
+    except (ValueError, ArithmeticError, RuntimeError) as exc:
+        result = _compare_runs(first, second, progress, replay=False)
+        result["warnings"] = [f"Échec du rejeu ({type(exc).__name__}: {exc}). Écart observé uniquement, sans attribution causale."]
+        return result
+
+
+def _compare_runs(first, second, progress=lambda phase: None, replay=True):
     """Sequential frozen revaluations, no provider calls or inferred market inputs.
 
     Time and realized path state move together: decoupling a crossed coupon or
@@ -107,12 +134,17 @@ def compare_runs(first, second, progress=lambda phase: None):
     delta = (m2["mtm"] - m1["mtm"]) * 100
     res = dict(date1=m1.get("valuation_date"), date2=m2.get("valuation_date"),
                mtm1=m1["mtm"], mtm2=m2["mtm"], delta_pts=delta, steps=[],
-               residual_pts=delta, available=False, warnings=[],
-               methodology="Réévaluations successives sur les entrées archivées, à graine et nombre de trajectoires identiques. Ordre : temps et état réalisé, spots, dividendes, diffusion et change, corrélations, taux, financement, flux à recevoir. L'attribution dépend de cet ordre ; le résidu reste non attribué. La variation du MtM exclut les flux déjà payés et ne constitue pas un P&L total.")
+               residual_pts=delta, available=False, warnings=[], attribution_version=ATTRIBUTION_VERSION,
+               methodology="Réévaluations successives sur les entrées archivées, à graine et nombre de trajectoires identiques. Ordre : temps, état réalisé et créances ensemble, spots, dividendes, diffusion et change, corrélations, taux, financement. L'attribution dépend de cet ordre ; le résidu reste non attribué. La variation du MtM exclut les flux déjà payés et ne constitue pas un P&L total.")
     ca, cb = a.get("valuation_context", {}), b.get("valuation_context", {})
+    if not replay:
+        return res
     reason = None
     if first.contract_version != second.contract_version:
         reason = "Versions contractuelles différentes."
+    elif any(json.loads(run.diagnostics_json or "{}").get("calculation_identity") != calculation_identity()
+             for run in (first, second)):
+        reason = "Identité complète de moteur/conventions absente ou différente."
     elif first.engine_fingerprint != second.engine_fingerprint or first.engine_fingerprint != engine_identity()[1]:
         reason = "Moteur différent entre les calculs ou depuis leur enregistrement."
     elif not ca or not cb or a.get("settlement_claim") or b.get("settlement_claim"):
@@ -142,23 +174,16 @@ def compare_runs(first, second, progress=lambda phase: None):
         for k in nested:
             current["valuation_context"][k] = deepcopy(cb.get(k))
         if underlying:
-            for old, new in zip(current["valuation_context"]["underlyings"], cb["underlyings"]):
-                if underlying == "dividend":
-                    for k in ("q", "dividend_curve", "dividend_decay"):
-                        if k in new:
-                            old[k] = deepcopy(new[k])
-                        else:
-                            old.pop(k, None)
-                else:
-                    old.clear()
-                    old.update(deepcopy(new))
+            current["valuation_context"]["underlyings"] = (
+                with_dividend_inputs(current["valuation_context"]["underlyings"], cb["underlyings"])
+                if underlying == "dividend" else deepcopy(cb["underlyings"]))
         progress("Attribution : " + label)
         value = previous if current == before else float(price_var_scenario_job(current)["price"])
         if not math.isfinite(value):
             raise ValueError("Une réévaluation intermédiaire n'est pas finie.")
         res["steps"].append({"label": label, "delta_pts": (value - previous) * 100})
         previous = value
-    step("Temps et état réalisé", ("T_elapsed", "passe_jusqu_a", "state"),
+    step("Temps et état réalisé", ("T_elapsed", "passe_jusqu_a", "state", "unsettled_pv", "unsettled_cash_flows"),
          ("T", "maturity_payment_t", "value_date_t", "strike_set_t", "state"))
     step("Spots", ("norm_spots",))
     step("Dividendes", underlying="dividend")
@@ -166,7 +191,6 @@ def compare_runs(first, second, progress=lambda phase: None):
     step("Corrélations", ("corr",), ("corr_matrix",))
     step("Taux", nested=("r", "yield_curve", "sigma_r", "a_r"))
     step("Financement", nested=("funding_curve", "funding_spread"))
-    step("Flux à recevoir (PV)", ("unsettled_pv",))
     res.update(available=True, residual_pts=(m2["mtm"] - previous) * 100)
     return res
 

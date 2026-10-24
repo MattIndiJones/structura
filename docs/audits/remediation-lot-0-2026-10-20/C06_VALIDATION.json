@@ -1,0 +1,161 @@
+{
+  "date": "2026-10-20",
+  "timezone": "Europe/Berlin",
+  "workstream": "C06",
+  "status": "Validated locally; full transverse, historical, graphical and production qualification open",
+  "baseline": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c06-baseline-2qu361hm",
+  "baseline_status_entries": 367,
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "authorization": {
+    "code_and_targeted_tests": true,
+    "commit": false,
+    "push": false,
+    "business_data_mutation": false
+  },
+  "scope": {
+    "findings": [
+      "M04-01",
+      "M04-02",
+      "M04-03",
+      "M04-07",
+      "M09-01"
+    ],
+    "depends_on": [
+      "C01"
+    ],
+    "preserved_dependencies": [
+      "C01",
+      "C02",
+      "C03",
+      "C04",
+      "C05"
+    ],
+    "decisions_changed": [],
+    "cross_cases_not_closed": [
+      "T02",
+      "T12",
+      "T13"
+    ]
+  },
+  "backend": {
+    "distinct_passed_cases": 307,
+    "current_failures": 0,
+    "files": 14,
+    "new_c06_cases": 72,
+    "full_backend_suite_run": false,
+    "aggregation": "Latest result by test ID across targeted runs; not a single 307-case green run.",
+    "attempts": [
+      {
+        "run": "backend-targeted",
+        "passed": 300,
+        "failed": 3,
+        "xml": ".runtime/diagnostic-acceptance/c06-2026-10-20/backend-targeted.xml",
+        "xml_sha256": "a2cb043f3d7805dd777a671cd99c824fc875d153e5a7822761f311bab2a918dc"
+      },
+      {
+        "run": "backend-followup",
+        "passed": 6,
+        "failed": 0,
+        "xml": ".runtime/diagnostic-acceptance/c06-2026-10-20/backend-followup.xml",
+        "xml_sha256": "767a9e395f4b2ac86fac988002e1a0d824970954ae0755abb90ade6e1c89eb3f"
+      },
+      {
+        "run": "backend-payment-amendment",
+        "passed": 1,
+        "failed": 0,
+        "xml": ".runtime/diagnostic-acceptance/c06-2026-10-20/backend-payment-amendment.xml",
+        "xml_sha256": "5c24575df8eac56e8dcd0a3311d9c29cb98ef39306bac0ae3496e492cbf7394d"
+      }
+    ],
+    "summary": ".runtime/diagnostic-acceptance/c06-2026-10-20/backend-validation-summary.json",
+    "summary_sha256": "a01da7b6657a3f02a09d011f6a281533132d7fcf02588e129a5fa26600d36431",
+    "fixture_alignment": "Three legacy RFQ market tests now create coherent canonical terms with a C01-capable role; no permission guard disabled.",
+    "primary_http_acceptance": "Real desks and JWT/session verification in standalone and managed access_case fixtures; SQLite foreign keys and Product guards active.",
+    "c04_interactions": [
+      "Nominal 1m to 1.4m amendment, then RFQ annotation preserves credit proof and Deal snapshots",
+      "Payment-date amendment appends Product terms v2 under SQL guards; RFQ stays v1; annotation preserves both versions"
+    ],
+    "legacy_unit_limits": "Existing legacy RFQ and Product-only tests retain their explicit desk-less fixture scope; not claimed as full bilateral acceptance."
+  },
+  "frontend": {
+    "passed": 494,
+    "failed": 0,
+    "files": 65,
+    "new_c06_cases": 3,
+    "build_succeeded": true,
+    "build_seconds": 11.81,
+    "command": "npm.cmd run build -- --outDir <temporary directory>",
+    "output_directory": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c06-build-c70343599f47453bb56f8234dddb19fb",
+    "log": ".runtime/diagnostic-acceptance/c06-2026-10-20/frontend-build.log",
+    "log_sha256": "9488fff8096e5953dddf142ac8cce6bcad7d6ca50d789f850878ed4ab7b4c0c0"
+  },
+  "operational_changes": [
+    "RFQ facts project onto the current Product; historical terms never replace the current pointer",
+    "Explicit stale-context or stale-terms promotion returns conflict without durable mutation",
+    "Product to RFQ inherits omitted side, nominal, commercial and legal context; inherited IDs still validated",
+    "Booked Product intent/commercial blocks cannot be edited generically; cosmetic name/listed changes allowed",
+    "Explicit top-level model allowlist; underlying identity excluded; unknown keys refused; mixed params/pricing_params refused",
+    "SQLite Product/version guards on six durable tables, current pointer, revision insertion and calculation insertion",
+    "Additive migration preserves unqualified historical rows; no version invented or business-data migration performed"
+  ],
+  "coverage_limits": [
+    "No manual graphical acceptance, real installation restart, historical portfolio audit or production qualification",
+    "T02 C06 version scope only; retries/concurrency/filiation C08 not closed",
+    "T12 full bilateral close/reopen/quote revision and reconciliation remain C08/C23",
+    "T13 archive replay and screen/PDF qualification remain C18/C19; reference guards alone are not proof",
+    "SQL constraints validate identity/version references, not all frozen economic values",
+    "Legacy unqualified rows require explicit requalification before canonical transitions",
+    "API clients must send only model assumptions to pricing_params; former silent ignoring is replaced by explicit errors"
+  ],
+  "integrity": {
+    "prior_changes_preserved": true,
+    "no_preexisting_files_removed": true,
+    "head_unchanged": true,
+    "dist_unchanged": true,
+    "prior_c01_to_c05_reports_and_evidence_unchanged": true,
+    "prior_non_c06_registry_findings_and_workstreams_unchanged": true,
+    "decisions_unchanged": true,
+    "incremental_whitespace_checks_passed": true,
+    "isolated_backend_data": true,
+    "backend_data_structura_db_exists": false,
+    "business_database_hash_note": "No business-db-sha256.txt in baseline because backend/data/structura.db is absent; no hash comparison claimed.",
+    "manually_started_services": false,
+    "cleanup": ".runtime/diagnostic-acceptance/c06-2026-10-20/process-cleanup.json",
+    "cleanup_sha256": "7b5bf10333edf56ea346e9988531cc5ac538b6339d3519bc4ac9a35d188e4fa5"
+  },
+  "changed_files": [
+    "backend/app/api/products.py",
+    "backend/app/api/rfq.py",
+    "backend/app/db/product_migrations.py",
+    "backend/app/services/product_repository.py",
+    "backend/tests/test_product_transition_integrity.py",
+    "backend/tests/test_rfq.py",
+    "docs/README.md",
+    "docs/audits/REMEDIATION_C06_2026-10-20.md",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+    "docs/audits/remediation-lot-0-2026-10-20/C06_VALIDATION.json",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+    "frontend/src/views/RfqProductTransition.test.js",
+    "frontend/src/views/RfqView.vue"
+  ],
+  "source_sha256": {
+    "backend/app/api/products.py": "2552d9ae2862ed6d70a15d9cb3bd399cd822621236c5ff6b994ef1af1ad37959",
+    "backend/app/api/rfq.py": "dcedd3530d94a3a79b39b53b3c69ceb09c9d9bc5dfe53a10a8ed37e485b9de4c",
+    "backend/app/db/product_migrations.py": "c2d467ba1f3e1dc5014aaef383bd0d7000f92b06a815c5ac463903112ea434b2",
+    "backend/app/services/product_repository.py": "07e8ec0cb9cee58860d963c811c7cd3ee4169a16ee3cffe6c223a3e499d29b31",
+    "backend/tests/test_product_transition_integrity.py": "778223cfe7a53059d7fb431fdf061f4291451fb863e6bb0b1bb0ba548dcdb337",
+    "backend/tests/test_rfq.py": "bc38fac92468744cab277658df27fc4ba3fcf6eefde172eb75acfa112c3bd14f",
+    "docs/README.md": "08689284dd68b7942f7963396527af771c7ea4d0ba66d2f57c67cfa53af70300",
+    "docs/audits/REMEDIATION_C06_2026-10-20.md": "250c0da7c768b9e93da932c5859f0ba5a26a15251b96e9c933db75e0296901b0",
+    "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md": "3da7cc399b3e5d207b7bd8cdbec43306fc1324db6564a9274d1e062d64e3d61d",
+    "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md": "0cef8766ad326ea9f37ee6d8a466dbf791146a7f44d20733befa16c95805d646",
+    "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json": "e6815c579307e5433fca89674c8b704156c42eed00eb5342077d69726edd0845",
+    "frontend/src/views/RfqProductTransition.test.js": "2244dda26f6884a52032dc34fc838ede171117e4c1be30f12e5edea3ffd2a068",
+    "frontend/src/views/RfqView.vue": "947dea7afbe514959ac2b2e1ff05a79d9b98a1bbe407ac013be837676c112565"
+  },
+  "incremental_diff": {
+    "path": ".runtime/diagnostic-acceptance/c06-2026-10-20/incremental.diff",
+    "sha256": "6019555abf9867c1f2e9580653360a18ad84626a36fbd7c6961a55f47c0a2f97"
+  }
+}

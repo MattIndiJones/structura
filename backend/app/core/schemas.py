@@ -121,6 +121,56 @@ class UnderlyingParams(BaseModel):
     vol_surface: VolatilitySurfaceParams | None = None
     asset_class: str = Field(default='unknown', pattern='^(equity|index|unknown)$')
     smile_parameter_mode: str = Field(default='automatic', pattern='^(automatic|manual)$')
+    calibration_evidence: dict | None = Field(default=None, exclude_if=lambda value: value is None)
+    market_data: dict | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator('calibration_evidence')
+    @classmethod
+    def finite_calibration_evidence(cls, evidence):
+        import json
+        if evidence is not None:
+            try:
+                json.dumps(evidence, allow_nan=False)
+            except (ValueError, TypeError) as exc:
+                raise ValueError('Preuve de calibration non finie ou non sérialisable.') from exc
+        return evidence
+
+    @model_validator(mode='after')
+    def validate_market_provenance(self):
+        if not self.market_data:
+            self.market_data = None
+            return self
+        import json
+        from copy import deepcopy
+        data = deepcopy(self.market_data)
+        try:
+            json.dumps(data, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Provenance de marché non finie ou non sérialisable.') from exc
+        references = data.get('references', {})
+        if not isinstance(references, dict):
+            raise ValueError('Les références de marché doivent être un objet.')
+        overrides = {}
+        for field in ('sigma', 'q'):
+            reference = references.get(field)
+            if reference is None:
+                continue
+            if not isinstance(reference, dict) or reference.get('unit') != 'fraction':
+                raise ValueError('Les références sigma/q sont exprimées en fraction.')
+            source = reference.get('value')
+            applied = reference.get('applied_value', source)
+            if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in (source, applied)):
+                raise ValueError('Valeur de référence de marché invalide.')
+            if not isinstance(reference.get('ticker', self.ticker), str):
+                raise ValueError('Ticker de référence de marché invalide.')
+            used = getattr(self, field)
+            if used != applied or reference.get('ticker', self.ticker).upper() != self.ticker.upper():
+                overrides[field] = used
+        data.update(version=1, references=references, overrides=overrides,
+                    effective={'sigma': self.sigma, 'q': self.q, 'dividend_curve': self.dividend_curve},
+                    source_attestation='CLIENT_DECLARED_REFERENCE')
+        self.market_data = data
+        return self
 
     @field_validator("dividend_curve")
     @classmethod
@@ -266,6 +316,7 @@ class PricingResponse(BaseModel):
     corr_repair: Optional[Dict[str, Any]] = None
     barrier_monitoring: str = "weekly"
     barrier_monitoring_note: Optional[str] = None
+    barrier_monitoring_details: Optional[Dict[str, Any]] = None
 
 
 class ParseRequest(BaseModel):
@@ -316,6 +367,12 @@ class AnalysisBase(BaseModel):
     r: float = Field(default=0.03, ge=MIN_RATE, le=MAX_RATE)
     T: float = Field(default=3.0, gt=0.0, le=MAX_MATURITY_YEARS)
     seed: int = 42
+    antithetic: bool = True
+
+    @field_validator('seed', mode='before')
+    @classmethod
+    def fixed_monte_carlo_seed(cls, _value):
+        return 42
     model: str = Field(default="constant", pattern=f"^({'|'.join(MODELS)})$")
     user_params: Dict[str, Any] = {}
     yield_curve: List[List[float]] = []
@@ -474,6 +531,7 @@ class SolverRequest(AnalysisBase):
     hi: float
     N: int = Field(default=8000, ge=1000, le=50000)
     tol: float = Field(default=1e-4, gt=0, le=0.01)
+    param_tol: float = Field(default=5e-7, gt=0, description="Tolérance en unités du PARAM, distincte de la tolérance de prix.")
     max_iter: int = Field(default=40, ge=5, le=100)
 
 
@@ -507,7 +565,7 @@ class ReinvestScanRequest(BaseModel):
     hi: float
     filters: List[ReinvestMetricFilter] = []
     N: int = Field(default=6000, ge=1000, le=20000)
-    model: str = Field(default="constant", pattern=f"^({'|'.join(MODELS)})$")
+    model: Optional[str] = Field(default=None, pattern=f"^({'|'.join(MODELS)})$")
     vol_period: str = "1y"
     # Maturité du scan — None = tenor d'origine du deal (deal.T). Bissection
     # tenue sur param_name uniquement ; param_overrides (mode avancé) fixe
@@ -531,11 +589,13 @@ class ReinvestProposalRequest(BaseModel):
     T: Optional[float] = Field(default=None, gt=0.0, le=MAX_MATURITY_YEARS)
     param_overrides: Dict[str, Any] = {}
     N: int = Field(default=8000, ge=1000, le=20000)
-    model: str = Field(default="constant", pattern=f"^({'|'.join(MODELS)})$")
+    model: Optional[str] = Field(default=None, pattern=f"^({'|'.join(MODELS)})$")
     vol_period: str = "1y"
     backtest_start: str = "2015-01-01"
     backtest_freq: int = Field(default=21, ge=1, le=252)
     backtest_invest_pct: float = Field(default=100.0, gt=0, le=200)
+    study_preview: Optional[dict] = None
+    parent_archive_id: Optional[str] = Field(default=None, max_length=40)
 
 
 class GridRequest(AnalysisBase):
@@ -564,7 +624,14 @@ class ScenarioRequest(AnalysisBase):
     N: int = Field(default=2000, ge=300, le=20000)
 
 
-class BusinessDayRequest(BaseModel):
+class CalendarPolicyRequest(BaseModel):
+    observation_calendars: Optional[List[str]] = None
+    observation_join: Optional[str] = None
+    settlement_calendars: Optional[List[str]] = None
+    settlement_join: Optional[str] = None
+
+
+class BusinessDayRequest(CalendarPolicyRequest):
     """Resolve one date against a settlement calendar.
 
     Serves the two things a UI needs and cannot compute itself: moving a typed
@@ -577,10 +644,11 @@ class BusinessDayRequest(BaseModel):
         pattern="^(following|modified_following|preceding|modified_preceding|none)$")
     # Applied BEFORE the convention: the lag lands on a business day by
     # construction, the convention then has nothing left to move.
-    business_days: int = Field(default=0, ge=0, le=60)
+    business_days: int = Field(default=0, ge=0, le=30, strict=True)
+    settlement_lag: int = Field(default=0, ge=0, le=30, strict=True)
 
 
-class ScheduleRequest(BaseModel):
+class ScheduleRequest(CalendarPolicyRequest):
     """CONSTAT()/CONSTAT()() calendar generation — "expert mode", independent
     of any script. Dates are ISO strings (YYYY-MM-DD); frequency/sub_frequency
     are tenor strings (e.g. "3M", "1W", "1Y", "1D")."""
@@ -597,13 +665,13 @@ class ScheduleRequest(BaseModel):
     # tenor produces, not of what the product observes.
     currency: Optional[str] = None
     # Business days between an observation and the movement of its cash.
-    settlement_lag: int = Field(default=0, ge=0, le=30)
+    settlement_lag: int = Field(default=0, ge=0, le=30, strict=True)
     convention: str = Field(
-        default="modified_following",
+        default="none",
         pattern="^(following|modified_following|preceding|modified_preceding|none)$")
 
 
-class PeriodWindowPreviewRequest(BaseModel):
+class PeriodWindowPreviewRequest(CalendarPolicyRequest):
     """Aperçu d'une fenêtre de PÉRIODE : combien de constatations le calendrier
     produit, et combien de relevés chacune moyenne.
 
@@ -623,7 +691,7 @@ class PeriodWindowPreviewRequest(BaseModel):
         pattern="^(following|modified_following|preceding|modified_preceding|none)$")
 
 
-class WindowPreviewRequest(BaseModel):
+class WindowPreviewRequest(CalendarPolicyRequest):
     """Aperçu d'une fenêtre de constatation : les dates qu'elle retient
     vraiment, avant tout pricing.
 

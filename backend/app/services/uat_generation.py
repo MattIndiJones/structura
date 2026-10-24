@@ -28,7 +28,7 @@ from sqlmodel import Session, select
 from ..core.audit import record_audit_event
 from ..core.compute.executor import run_batch
 from ..core.valuation_context import build_pricing_receipt
-from ..core.workflow import DataCategory
+from ..core.workflow import DataCategory, FixingStatus
 from ..db.models import (
     Alert, Counterparty, Deal, DealContractVersion, DealEvent,
     Document, EmtRecord, Indicative, KidRecord, LifecycleProposal,
@@ -36,7 +36,7 @@ from ..db.models import (
     ProductCalculationRun, ProductCommand, ProductRecord, ProductRevision,
     ProductTermsVersion, RfqProvider, RfqQuote, RfqRequest, ShockRun,
     TradeAmendmentRequest, UatGenerationBatch, User, ValuationRun,
-    ValuationNote, ValuationNoteVersion,
+    ValuationNote, ValuationNoteVersion, ArchivedDocument,
 )
 from .product_receipts import signed_receipt
 
@@ -232,7 +232,7 @@ def generator_config(session: Session) -> dict:
     provider_rows = []
     for provider in providers:
         cpty = counterparties.get(provider.counterparty_id)
-        if not cpty:
+        if not cpty and provider.counterparty_id is None:
             cpty = next((c for c in counterparties.values()
                          if c.name.casefold() == provider.label.casefold()), None)
         if cpty:
@@ -956,37 +956,6 @@ def _create_rfq(spec: dict, body: UatGenerationRequest, target: User,
     return session.get(RfqRequest, rfq.id), selected
 
 
-def _align_events_to_business_days(deal: Deal, session: Session) -> int:
-    """Move every booked observation off Saturday and Sunday.
-
-    _book_deal resolves the contract calendar by rolling year fractions, and
-    that resolver carries no business-day convention, so 22% of the events
-    this generator produced landed on a weekend — a date on which no index
-    has a close, hence a fixing no operator can ever resolve. Snapping the
-    anchors in _profile_dates is not enough: the intermediate observations
-    come from the resolver, not from the anchors.
-
-    Only event_date moves. t_years is left exactly as booked because it drives
-    the Monte-Carlo schedule and the official replay, and a shift of at most
-    two days on a multi-year schedule is immaterial there — which is precisely
-    how a real observation calendar behaves once its dates are adjusted.
-    Consecutive observations are a quarter apart at the tightest, so rolling
-    backwards can never make two of them collide."""
-    moved = 0
-    for event in session.exec(
-        select(DealEvent).where(DealEvent.deal_id == deal.id)
-    ).all():
-        current = date.fromisoformat(event.event_date)
-        aligned = _to_business_day(current)
-        if aligned != current:
-            event.event_date = aligned.isoformat()
-            session.add(event)
-            moved += 1
-    if moved:
-        session.flush()
-    return moved
-
-
 def _book(spec: dict, target: User, product: dict | None, batch: UatGenerationBatch,
           session: Session, *, rfq: RfqRequest | None = None,
           selected: RfqQuote | None = None, counterparty: str) -> Deal:
@@ -994,6 +963,7 @@ def _book(spec: dict, target: User, product: dict | None, batch: UatGenerationBa
     receipt = spec["pricing_receipt"]
     deal_data = deals_api._book_deal(
         deals_api.DealCreate(
+            counterparty_id=(selected.counterparty_id if selected else session.exec(select(Counterparty.id).where(Counterparty.name == counterparty, Counterparty.active == True)).one()),
             product_id=product["product_id"] if product else None,
             product_terms_version=product["terms_version"] if product else None,
             sens="vente",
@@ -1023,9 +993,9 @@ def _book(spec: dict, target: User, product: dict | None, batch: UatGenerationBa
             f"UAT-DEAL-{batch.batch_key}-{spec['lifecycle_profile']}-"),
         uat_batch_id=batch.id,
     )
-    deal = session.get(Deal, deal_data["id"])
-    _align_events_to_business_days(deal, session)
-    return deal
+    # Booking already resolves and freezes C05 calendars, including currency
+    # and payment dates. Never realign the resulting observations afterwards.
+    return session.get(Deal, deal_data["id"])
 
 
 def _assert_product_continuity(
@@ -1078,33 +1048,21 @@ def _assert_product_continuity(
 
 def _load_yahoo_fixings(deal: Deal, target: User, session: Session,
                         result: dict) -> dict:
-    """Officialise, at generation time, everything Yahoo can already answer.
+    """Use the public transactional refresh; missing closes never become S0.
 
-    Generated deals used to arrive with every constatation empty, and the only
-    way to fill them was a Refresh the operator had to know to press — so the
-    whole fixture was useless for anything downstream of a fixing: residual
-    MtM, lifecycle resolution, P&L explain, valuation notes.
-
-    This calls the production path, the very one the Refresh button calls, so
-    a batch lands with its reachable closes already applied and its lifecycle
-    already resolved where it should be.
-
-    Only for profiles the generator leaves unresolved. The terminal and
-    officialised ones attach their own synthetic fixings to force a specific
-    outcome (a call at 1.15, a knock-in at 0.35); replaying them against real
-    Yahoo closes would contradict the very scenario they exist to produce.
-
-    A failure is recorded, not raised: Yahoo unreachable, or a close not yet
-    published, must not sink a whole batch — the deal is still valid, it just
-    has nothing to load yet."""
+    A provider failure leaves the generated objects available and is reported
+    separately from creation. The caller measures actual official coverage.
+    """
     try:
-        outcome = deals_api._refresh_deal_core(
+        outcome = deals_api.refresh_deal_core(
             deal, session, actor_user_id=target.id)
     except Exception as exc:  # provider outage, ticker gap, closed market
         result["fixings_error"] = f"{type(exc).__name__}: {exc}"[:200]
         return result
     result["official_fixings"] = int(outcome.get("officialized") or 0)
     result["pending_exceptions"] = len(outcome.get("exceptions") or [])
+    if outcome.get("monitoring_error"):
+        result["fixings_error"] = str(outcome["monitoring_error"])[:200]
     evaluation = outcome.get("evaluation") or {}
     result["outcome"] = evaluation.get("outcome")
     return result
@@ -1117,22 +1075,11 @@ def _materialize_lifecycle_profile(
     batch: UatGenerationBatch,
     session: Session,
 ) -> dict:
-    """Give the deal its real observations and let the script say what happened.
+    """Load qualified provider observations and report their actual coverage.
 
-    Every profile used to attach a constant synthetic ratio to each reached
-    observation — 1.0 at the strike, then a flat 0.80, or 1.15 to force a call,
-    or 0.35 to force a knock-in — and then assert the very outcome it had just
-    engineered. Two things were wrong with that. The values were not a
-    trajectory: a deal showed 344 at three different dates because 344 is
-    0.80 x 430, which is not something a stock does. And every profile that
-    skipped the machinery got no strike fixing at all, so the barrier watchlist
-    had no S0 to measure against and computed nothing on four deals out of five.
-
-    There is one rule now: at each observation date, the underlying's actual
-    close, fetched through the production path. Whether a barrier is breached
-    follows from the script evaluating those values — it is not decided here.
-    A profile no longer forces an outcome; it decides how far back the deal was
-    traded, which is the part that was ever worth having."""
+    Profiles set chronology; only official replay decides the outcome. Missing
+    data stays missing, and cancelled post-resolution events are no longer due.
+    """
     profile = spec["lifecycle_profile"]
     events = list(session.exec(
         select(DealEvent).where(DealEvent.deal_id == deal.id)
@@ -1145,7 +1092,10 @@ def _materialize_lifecycle_profile(
         "profile_label": spec["lifecycle_profile_label"],
         "reached_events": len(reached),
         "official_fixings": 0,
+        "available_fixings": 0,
         "missing_fixings": 0,
+        "pending_exceptions": 0,
+        "fixings_status": "NOT_DUE",
         "outcome": None,
     }
 
@@ -1154,6 +1104,24 @@ def _materialize_lifecycle_profile(
         return result
     _load_yahoo_fixings(deal, target, session, result)
     session.flush()
+    required = list(session.exec(select(DealEvent).where(
+        DealEvent.deal_id == deal.id, DealEvent.event_date <= today_iso,
+        DealEvent.status != "annulé")).all())
+    available = sum(
+        bool(event.current_fixing_version_id)
+        and event.fixing_status in {FixingStatus.VALIDATED.value, FixingStatus.APPLIED.value}
+        and event.data_category == DataCategory.FIXING_OFFICIAL.value
+        for event in required
+    )
+    result["reached_events"] = len(required)
+    result["available_fixings"] = available
+    result["missing_fixings"] = len(required) - available
+    if result.get("fixings_error") and not available:
+        result["fixings_status"] = "FAILED"
+    elif result["missing_fixings"] or result["pending_exceptions"] or result.get("fixings_error"):
+        result["fixings_status"] = "PARTIAL"
+    else:
+        result["fixings_status"] = "SUCCESS"
     record_audit_event(
         session,
         action="UAT_LIFECYCLE_SCENARIO_MATERIALIZED",
@@ -1161,15 +1129,20 @@ def _materialize_lifecycle_profile(
         object_id=deal.id,
         actor_user_id=None,
         actor_type="SYSTEM",
-        result="SUCCESS",
+        result={"FAILED": "ERROR", "PARTIAL": "PARTIAL", "SUCCESS": "SUCCESS"}[
+            result["fixings_status"]],
         after={
             "deal_reference": deal.reference,
             "profile": profile,
             "official_fixings": result["official_fixings"],
+            "available_fixings": available,
+            "missing_fixings": result["missing_fixings"],
+            "fixings_status": result["fixings_status"],
+            "fixings_error": result.get("fixings_error"),
             "outcome": result["outcome"],
         },
-        reason="Constatations UAT chargées depuis les clôtures Yahoo réelles.",
-        data_source=DataCategory.FIXING_OFFICIAL,
+        reason="Chargement des clôtures UAT ; couverture officielle et lacunes explicites.",
+        data_source=(DataCategory.FIXING_OFFICIAL if available else DataCategory.UNKNOWN),
         correlation_id=f"uat:{batch.batch_key}",
     )
     return result
@@ -1577,6 +1550,10 @@ def delete_batch(batch_id: int, admin: User, session: Session) -> dict:
             session.exec(delete(model).where(model.product_id.in_(product_ids)))
 
     if deal_ids:
+        from ..db.models import BookingCommand
+        session.exec(update(BookingCommand).where(BookingCommand.deal_id.in_(deal_ids))
+                     .values(deal_id=None))
+        session.exec(delete(ArchivedDocument).where(ArchivedDocument.deal_id.in_(deal_ids)))
         note_ids = select(ValuationNote.id).where(ValuationNote.deal_id.in_(deal_ids))
         session.exec(delete(ValuationNoteVersion).where(ValuationNoteVersion.note_id.in_(note_ids)))
         session.exec(delete(ValuationNote).where(ValuationNote.deal_id.in_(deal_ids)))
@@ -1601,6 +1578,8 @@ def delete_batch(batch_id: int, admin: User, session: Session) -> dict:
             session.exec(update(RfqQuote).where(RfqQuote.id.in_(quote_ids)).values(
                 parent_quote_id=None))
             session.exec(delete(RfqQuote).where(RfqQuote.id.in_(quote_ids)))
+        from ..db.models import RfqBookingEvidence
+        session.exec(delete(RfqBookingEvidence).where(RfqBookingEvidence.rfq_id.in_(rfq_ids)))
         session.exec(delete(RfqRequest).where(RfqRequest.id.in_(rfq_ids)))
 
     if product_ids:

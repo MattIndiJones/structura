@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { barrierGauges } from './barriers.js'
+import { barrierGauges, barrierGapLabel, barrierChipClass } from './barriers.js'
 
 // Ce que la watchlist renvoie pour l'autocall Athena sur MC.PA au 13/09/2026 :
 // worst-of à 67,9 % du strike, rappel à 100 %, protection à 55 %.
@@ -82,5 +82,20 @@ describe('la règle des barrières relit les écarts de la watchlist', () => {
     ])
     expect(g.hi - g.lo).toBeGreaterThanOrEqual(10)
     expect(g.currentPct).toBeCloseTo(g.marks[0].pct, 9)
+  })
+})
+
+describe('qualification des observations de surveillance', () => {
+  it('distingue le strike futur d’un observable indisponible', () => {
+    expect(barrierGapLabel({ gap_pts: null, value_status: 'STRIKE_PENDING' })).toBe('en attente du strike')
+    expect(barrierGapLabel({ gap_pts: null, value_status: 'UNAVAILABLE' })).toBe('observable indisponible')
+    expect(barrierGapLabel({ gap_pts: null })).toBe('observable indisponible')
+  })
+  it('qualifie un minimum de clôtures sans inventer de distance quand il manque', () => {
+    const b = { kind: 'ki', level: .6, gap_pts: -10, observable: 'S_MIN[1]', monitoring_basis: 'SAMPLED_CLOSES_SINCE_STRIKE' }
+    expect(barrierGapLabel(b)).toContain('franchie (-10.0 pts) · clôtures indicatives depuis le strike')
+    expect(barrierGapLabel({ ...b, gap_pts: null })).not.toContain('franchie')
+    expect(barrierGauges([{ ...b, gap_pts: null }])).toEqual([])
+    expect(barrierChipClass({ ...b, gap_pts: null })).not.toContain('bg-red')
   })
 })

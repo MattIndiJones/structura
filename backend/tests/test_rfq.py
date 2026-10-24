@@ -13,11 +13,10 @@ features from the 2026-07-29 session:
 import json
 from datetime import date, datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import SQLModel, Session, create_engine, select
 
@@ -29,26 +28,51 @@ from backend.app.core.schemas import PricingRequest
 from backend.app.core.valuation_context import build_pricing_receipt
 from backend.app.db.models import (
     AuditEvent, Client, ClientMandate, Counterparty, Deal, Opportunity,
-    ProductRecord, RfqProvider, RfqProviderContact, RfqQuote, RfqRequest,
+    Entity, ProductRecord, RfqDesk, RfqDeskMembership, RfqProvider, RfqProviderContact, RfqQuote, RfqRequest, User,
 )
 from backend.app.core.references import next_reference
 from backend.app.core.rfq_controls import booking_terms_differences, pricing_input_hash
 from backend.app.services.product_receipts import signed_receipt
 from backend.app.services.product_repository import load_product
 
-USER = SimpleNamespace(id=1, entity_id=1)
-
-
-@pytest.fixture(autouse=True)
-def historical_rfq_cases(monkeypatch):
-    """Existing RFQ tests exercise rows without the new desk-ownership record."""
-    monkeypatch.setattr(rfq_api, "require_create_desk", lambda *_: None)
+USER = User(id=1, entity_id=1, username="rfq-front", email="front@example.test",
+            password_hash="test-only", role="user", is_active=True)
+ADMIN = User(id=2, entity_id=1, username="rfq-admin", email="admin@example.test",
+             password_hash="test-only", role="organization_admin", is_active=True)
+OTHER = User(id=99, entity_id=1, username="rfq-other", email="other@example.test",
+             password_hash="test-only", role="user", is_active=True)
 
 
 def _make_session() -> Session:
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    @event.listens_for(eng, "connect")
+    def foreign_keys(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
     SQLModel.metadata.create_all(eng)
-    return Session(eng)
+    session = Session(eng)
+    session.add(Entity(id=1, name="RFQ test organization"))
+    session.flush()
+    session.add_all([User(**actor.model_dump()) for actor in (USER, ADMIN, OTHER)])
+    session.flush()
+    session.add_all([RfqDesk(id=11, entity_id=1, name="Front"),
+                     RfqDesk(id=99, entity_id=1, name="Other desk")])
+    session.flush()
+    rights = '["read","prepare","price","select","solicit","book","organize"]'
+    session.add_all([RfqDeskMembership(desk_id=11, user_id=1, rights_json=rights),
+                     RfqDeskMembership(desk_id=99, user_id=99, rights_json=rights)])
+    session.commit()
+    return session
+
+
+def _legal_counterparty(session, name):
+    """Provision explicit test reference data, never an application fallback."""
+    legal = session.exec(select(Counterparty).where(Counterparty.name == name)).first()
+    if legal is None:
+        legal = Counterparty(name=name, active=True)
+        session.add(legal)
+        session.commit()
+        session.refresh(legal)
+    return legal
 
 
 def _rfq_params(**over):
@@ -69,30 +93,35 @@ def _rfq_params(**over):
 
 
 def _new_rfq(s: Session):
-    body = rfq_api.RfqCreate(
+    body = rfq_api.RfqCreate(pilot_desk_id=11,
         name="Autocall test", script_snapshot="AT MATURITY\n  PAY 1",
         params=_rfq_params())
     return rfq_api.create_rfq(body, USER, s)
 
 
-def _add_quote(s: Session, rfq_id: int, provider: str = "BNP Paribas"):
-    return rfq_api.add_quote(rfq_id, rfq_api.QuoteCreate(provider=provider), USER, s)
+def _add_quote(s: Session, rfq_id: int, provider: str = "BNP Paribas", *, firmness="FIRM"):
+    legal = _legal_counterparty(s, provider) if provider in {"BNP Paribas", "UBS"} else None
+    quote = rfq_api.add_quote(rfq_id, rfq_api.QuoteCreate(
+        provider=provider, counterparty_id=legal.id if legal else None), USER, s)
+    # Prepare execution evidence before any selection; material edits revoke it.
+    return rfq_api.update_quote(rfq_id, quote["id"], rfq_api.QuoteUpdate(
+        firmness=firmness, valid_until=(datetime.utcnow() + timedelta(minutes=30)).isoformat()), USER, s)
 
 
 def test_rfq_provider_contacts_are_admin_managed_and_offered_on_rfq():
     s = _make_session()
     provider = admin_api.create_rfq_provider(
-        admin_api.RfqProviderCreate(label="BNP Paribas"), USER, s)
+        admin_api.RfqProviderCreate(label="BNP Paribas", reason="Référencement fournisseur pour les RFQ"), ADMIN, s)
     first = admin_api.create_rfq_provider_contact(
         provider["id"], admin_api.RfqContactCreate(
-            name="Virginie", email="virginie@example.com"), USER, s)
+            name="Virginie", email="virginie@example.com"), ADMIN, s)
     assert [c["name"] for c in rfq_api.list_providers(USER, s)[0]["contacts"]] == ["Virginie"]
     with pytest.raises(HTTPException) as duplicate:
         admin_api.create_rfq_provider_contact(
-            provider["id"], admin_api.RfqContactCreate(name="virginie"), USER, s)
+            provider["id"], admin_api.RfqContactCreate(name="virginie"), ADMIN, s)
     assert duplicate.value.status_code == 409
     admin_api.update_rfq_provider_contact(
-        provider["id"], first["id"], admin_api.RfqContactUpdate(active=False), USER, s)
+        provider["id"], first["id"], admin_api.RfqContactUpdate(active=False), ADMIN, s)
     assert rfq_api.list_providers(USER, s)[0]["contacts"] == []
     assert s.get(RfqProviderContact, first["id"]).name == "Virginie"
 
@@ -136,15 +165,15 @@ def test_rfq_contract_change_creates_a_product_terms_version():
 
 def test_deleted_rfq_and_quote_ids_are_never_reused_by_sqlite():
     s = _make_session()
+    draft = _new_rfq(s)
+    rfq_api.delete_rfq(draft["id"], USER, s)
     first = _new_rfq(s)
+    assert first["id"] > draft["id"]
     first_quote = _add_quote(s, first["id"])
-    rfq_api.delete_rfq(first["id"], USER, s)
-
-    second = _new_rfq(s)
-    second_quote = _add_quote(s, second["id"])
-
-    assert second["id"] > first["id"]
+    rfq_api.delete_quote(first["id"], first_quote["id"], USER, s)
+    second_quote = _add_quote(s, first["id"], "UBS")
     assert second_quote["id"] > first_quote["id"]
+    assert s.exec(text("PRAGMA foreign_key_check")).all() == []
 
 
 def test_to_trade_calendar_is_rejected_before_the_rfq_is_created():
@@ -152,7 +181,7 @@ def test_to_trade_calendar_is_rejected_before_the_rfq_is_created():
     strike = date.today() + timedelta(days=14)
     end = strike + timedelta(days=365)
     with pytest.raises(HTTPException) as exc:
-        rfq_api.create_rfq(rfq_api.RfqCreate(
+        rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11,
             name="Calendrier incomplet",
             kind="to_trade",
             script_snapshot="CONSTAT() OBS\nAT OBS:\n  PAY 1",
@@ -182,7 +211,7 @@ def test_to_trade_calendar_is_rejected_before_the_rfq_is_created():
 def test_to_trade_schedule_shape_is_rejected_before_persistence(malformed):
     s = _make_session()
     with pytest.raises(HTTPException) as exc:
-        rfq_api.create_rfq(rfq_api.RfqCreate(
+        rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11,
             name="Calendrier mal formé", kind="to_trade",
             script_snapshot="CONSTAT() OBS\nAT OBS:\n  PAY 1",
             params=_rfq_params(constats={"OBS": malformed}),
@@ -214,7 +243,7 @@ def test_multi_underlying_rfq_requires_a_complete_correlation_matrix():
         }},
     }
     with pytest.raises(HTTPException) as exc:
-        rfq_api.create_rfq(rfq_api.RfqCreate(
+        rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11,
             name="Worst-of incomplet", kind="to_trade",
             script_snapshot="CONSTAT() OBS\nAT OBS:\n  PAY WOF",
             params=params,
@@ -236,7 +265,7 @@ def test_multi_underlying_repricing_cannot_replace_the_matrix_with_an_incomplete
         **{key: value for key, value in _rfq_params().items()
            if key != "underlyings"},
     }
-    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11,
         name="Worst-of", script_snapshot="AT MATURITY\n  PAY WOF", params=params,
     ), USER, s)
 
@@ -449,7 +478,7 @@ def test_to_trade_rfq_requires_an_expert_calendar_script():
     # with a script_id, since script_id alone doesn't guarantee Expert mode.
     try:
         rfq_api.create_rfq(
-            rfq_api.RfqCreate(name="Autocall précis", kind="to_trade", script_id=7,
+            rfq_api.RfqCreate(pilot_desk_id=11, name="Autocall précis", kind="to_trade", script_id=7,
                                script_snapshot="AT 1, 2, 3\n  PAY 1"),
             USER, s)
         assert False, "expected HTTPException"
@@ -462,7 +491,7 @@ def test_to_trade_rfq_requires_an_expert_calendar_script():
     start = date.today() + timedelta(days=7)
     end = start + timedelta(days=365)
     rfq = rfq_api.create_rfq(
-        rfq_api.RfqCreate(name="Autocall précis", kind="to_trade",
+        rfq_api.RfqCreate(pilot_desk_id=11, name="Autocall précis", kind="to_trade",
                            script_snapshot="CONSTAT() Cal\nAT Cal:\n  PAY 0\nAT MATURITY\n  PAY 1",
                            params={**_rfq_params(T=1.0), "constats": {"CAL": {
                                "start_date": start.isoformat(),
@@ -525,7 +554,7 @@ def test_multi_underlying_rfq_reaches_the_deal_without_losing_market_inputs():
         "maturity_date": maturity.isoformat(), "payment_date": payment.isoformat(),
         "constats": constats, "user_params": {}, "r": 0.03, "model": "constant",
     }
-    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11,
         name="Worst-of LVMH DAX", kind="to_trade",
         script_snapshot=script, params=params,
     ), USER, s)
@@ -604,7 +633,7 @@ def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority(
     )
     s.add(opportunity); s.commit(); s.refresh(opportunity)
 
-    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11,
         name="AO Client", opportunity_id=opportunity.id,
         script_snapshot="AT MATURITY\n  PAY 1",
         params=_rfq_params(),
@@ -638,6 +667,7 @@ def test_booking_uses_the_rfq_commercial_and_legal_context_as_authority(
 
 def _booking_body(**over):
     base = dict(
+        transaction_format="EMTN", instrument_family="Note",
         contrepartie="BNP Paribas", nominal=1_000_000.0, fair_value=97.9,
         price_traded=98.0, trade_date=date.today().isoformat(),
         strike_date=date.today().isoformat(), value_date=date.today().isoformat(),
@@ -703,7 +733,7 @@ def _pricing_receipt_for_booking(body):
     )
 
 
-def _book_deal(body, current, s, fermete="FIRM"):
+def _book_deal(body, current, s):
     """Upgrade legacy success fixtures to the now-explicit execution contract.
 
     Tests that exercise missing/foreign/unselected RFQs remain untouched: only
@@ -717,38 +747,13 @@ def _book_deal(body, current, s, fermete="FIRM"):
             if rfq and rfq.user_id == current.id and rfq.selected_quote_id else None
         if rfq and selected and rfq.status == "retenue":
             params = json.loads(rfq.params_json or "{}")
-            if not params.get("underlyings"):
-                params = {
-                    "underlyings": body.underlyings,
-                    "user_params": (body.market_snapshot or {}).get("user_params", {}),
-                    "constats": (body.market_snapshot or {}).get("constats", {}),
-                    "notional": body.nominal, "currency": body.devise,
-                    "strike_date": body.strike_date, "value_date": body.value_date,
-                    "payment_date": body.payment_date,
-                    "T": body.T, "model": "constant", "r": 0.03,
-                }
-                rfq.params_json = json.dumps(params)
             rfq.kind = "to_trade"
             rfq.model_price = rfq.model_price or body.fair_value
             rfq.model_price_at = datetime.utcnow()
             rfq.model_input_hash = pricing_input_hash(rfq.script_snapshot, params)
-            selected.firmness = fermete
-            selected.valid_until = datetime.utcnow() + timedelta(minutes=30)
-            selected.status = "recu"
-            cpty = s.exec(select(Counterparty).where(
-                Counterparty.name == body.contrepartie)).first()
-            if not cpty:
-                cpty = Counterparty(name=body.contrepartie, active=True)
-                s.add(cpty); s.flush()
-            provider = s.exec(select(RfqProvider).where(
-                RfqProvider.label == selected.provider)).first()
-            if not provider:
-                provider = RfqProvider(
-                    label=selected.provider, active=True, counterparty_id=cpty.id)
-            else:
-                provider.counterparty_id = cpty.id
-                provider.active = True
-            s.add(provider); s.add(selected); s.add(rfq); s.commit()
+            s.add(rfq); s.commit()
+    if body.counterparty_id is None and body.contrepartie in {"BNP Paribas", "UBS"}:
+        body.counterparty_id = _legal_counterparty(s, body.contrepartie).id
     return deals_api.book_deal(body, current, s)
 
 
@@ -807,10 +812,10 @@ def test_booking_rejects_an_unknown_rfq_id():
 def test_booking_rejects_another_users_rfq():
     s = _make_session()
     other_rfq = rfq_api.create_rfq(
-        rfq_api.RfqCreate(
+        rfq_api.RfqCreate(pilot_desk_id=99,
             name="RFQ d'un autre desk", script_snapshot="AT MATURITY\n  PAY 1",
             params=_rfq_params()),
-        SimpleNamespace(id=99, entity_id=1), s)
+        OTHER, s)
 
     with pytest.raises(HTTPException) as exc:
         _book_deal(_booking_body(rfq_id=other_rfq["id"]), USER, s)
@@ -862,8 +867,8 @@ def test_deleting_the_selected_quote_takes_the_rfq_back_too():
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=q["id"]), USER, s)
 
     rfq_api.delete_quote(rfq["id"], q["id"], USER, s)
-    # Plus aucune cotation : retour au tout début, pas « Retenue » ni « Cotée ».
-    assert rfq_api.get_rfq(rfq["id"], USER, s)["status"] == "draft"
+    # The frozen solicitation survives deletion of its response.
+    assert rfq_api.get_rfq(rfq["id"], USER, s)["status"] == "envoye"
 
 
 def test_clearing_a_price_takes_the_rfq_back_to_envoyee():
@@ -875,23 +880,29 @@ def test_clearing_a_price_takes_the_rfq_back_to_envoyee():
     assert rfq_api.get_rfq(rfq["id"], USER, s)["status"] == "envoye"
 
 
-def test_sans_suite_is_terminal_until_reopened():
-    """La majorité des AO n'aboutit pas : « sans suite » est le seul statut
-    posé à la main, et il ne doit pas être effacé par une cotation qui
-    arrive après coup."""
+def test_closed_round_requires_an_explicit_successor():
+    from backend.app.services.rfq_exchange import round_for
     s = _make_session()
     rfq = _new_rfq(s)
-    _add_quote(s, rfq["id"])
-
-    marked = rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(status="sans_suite"), USER, s)
-    assert marked["status"] == "sans_suite"
-
-    q2 = _add_quote(s, rfq["id"], "UBS")
-    rfq_api.update_quote(rfq["id"], q2["id"], rfq_api.QuoteUpdate(price=99.0), USER, s)
+    quote = _add_quote(s, rfq["id"])
+    rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(status="sans_suite"), USER, s)
+    old_round = round_for(s, rfq["id"])
+    for mutate in (
+        lambda: _add_quote(s, rfq["id"], "UBS"),
+        lambda: rfq_api.update_quote(rfq["id"], quote["id"], rfq_api.QuoteUpdate(price=99), USER, s),
+        lambda: rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(status="auto"), USER, s),
+    ):
+        with pytest.raises(HTTPException) as failure:
+            mutate()
+        assert failure.value.status_code == 409
+        s.rollback()
+    successor = rfq_api.create_rfq(rfq_api.RfqCreate(
+        pilot_desk_id=11, previous_round_id=old_round.id, name="Nouveau tour explicite",
+        script_snapshot=rfq["script_snapshot"], params=rfq["params"]), USER, s)
+    assert successor["id"] != rfq["id"]
+    assert successor["previous_round_id"] == old_round.id
     assert rfq_api.get_rfq(rfq["id"], USER, s)["status"] == "sans_suite"
-
-    reopened = rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(status="auto"), USER, s)
-    assert reopened["status"] == "quote"   # rendu à la déduction, pas à « Brouillon »
+    assert s.get(RfqQuote, quote["id"]) is not None
 
 
 def test_a_booked_rfq_never_falls_back():
@@ -967,12 +978,18 @@ def test_deleting_an_rfq_a_deal_was_booked_from_is_refused():
     assert s.get(RfqRequest, rfq["id"]) is not None
 
 
-def test_an_rfq_without_a_booked_deal_stays_deletable():
+def test_only_an_unsolicited_unbooked_rfq_stays_deletable():
     s = _make_session()
+    draft = _new_rfq(s)
+    rfq_api.delete_rfq(draft["id"], USER, s)
+    assert s.get(RfqRequest, draft["id"]) is None
     rfq = _new_rfq(s)
-    _add_quote(s, rfq["id"])
-    rfq_api.delete_rfq(rfq["id"], USER, s)
-    assert s.get(RfqRequest, rfq["id"]) is None
+    quote = _add_quote(s, rfq["id"])
+    with pytest.raises(HTTPException) as failure:
+        rfq_api.delete_rfq(rfq["id"], USER, s)
+    assert failure.value.status_code == 409
+    assert s.get(RfqRequest, rfq["id"]) is not None
+    assert s.get(RfqQuote, quote["id"]) is not None
 
 
 # ── 10. Contrepartie du booking résolue hors du catalogue fournisseurs ──
@@ -1087,7 +1104,7 @@ def test_history_flags_the_winner_only_once_the_deal_is_booked():
 
     assert all(not r["won"] for r in rfq_api.rfq_history(USER, s))
 
-    _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    _book_deal(_booking_body(contrepartie="UBS", rfq_id=rfq["id"]), USER, s)
     rows = {r["quote_id"]: r for r in rfq_api.rfq_history(USER, s)}
     assert rows[winner["id"]]["won"] is True
     assert rows[loser["id"]]["won"] is False
@@ -1119,7 +1136,7 @@ def test_booking_freezes_the_competitive_picture_on_the_deal():
     rfq_api.update_quote(rfq["id"], loser["id"], rfq_api.QuoteUpdate(price=98.7), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=winner["id"]), USER, s)
 
-    deal = _book_deal(_booking_body(rfq_id=rfq["id"], price_traded=98.2), USER, s)
+    deal = _book_deal(_booking_body(contrepartie="UBS", rfq_id=rfq["id"], price_traded=98.2), USER, s)
     prov = deal["rfq_provenance"]
     assert prov["reference"] == rfq["reference"]
     assert prov["model_price"] == 97.9
@@ -1190,7 +1207,7 @@ def test_provenance_keeps_only_final_quotes_as_competition():
     _answered_last_look(s, rfq["id"], rival["id"], 98.4)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=winner["id"]), USER, s)
 
-    deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    deal = _book_deal(_booking_body(contrepartie="UBS", price_traded=98.2, rfq_id=rfq["id"]), USER, s)
     assert deal["rfq_provenance"]["competition"] == [{"provider": "BNP Paribas", "price": 98.4}]
     responses = deal["rfq_provenance"]["responses"]
     assert next(row for row in responses if row["quote_id"] == rival["id"])["is_final"] is False
@@ -1203,25 +1220,26 @@ def test_a_deal_booked_outside_any_tender_has_no_provenance():
 
 # ── 13. Un AO ne s'exécute qu'une fois ──────────────────────────────────
 
-def _booked_rfq(s):
+def _booked_rfq(s, body=None):
     rfq = _new_rfq(s)
     q = _add_quote(s, rfq["id"], "UBS")
     rfq_api.update_quote(rfq["id"], q["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=q["id"]), USER, s)
-    return rfq, _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    return rfq, _book_deal(body or _booking_body(contrepartie="UBS", rfq_id=rfq["id"]), USER, s)
 
 
 def test_an_rfq_cannot_be_booked_twice():
-    """Deux deals se réclamant de la même mise en concurrence : le hit ratio
-    de la banque gagnante compterait double et aucun des deux ne serait LE
-    trade issu de cet AO."""
+    """An identical retry returns the same trade; a new intent cannot book it twice."""
     s = _make_session()
-    rfq, first = _booked_rfq(s)
-
+    body = _booking_body(contrepartie="UBS", rfq_id=1, command_key="rfq-execution-once")
+    rfq, first = _booked_rfq(s, body)
+    retry = _book_deal(body, USER, s)
+    assert retry["id"] == first["id"]
+    assert len(s.exec(select(Deal)).all()) == 1
     with pytest.raises(HTTPException) as exc:
-        _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+        _book_deal(body.model_copy(update={"command_key": "another-execution"}), USER, s)
     assert exc.value.status_code == 409
-    assert first["reference"] in exc.value.detail   # l'erreur nomme le deal existant
+    assert first["reference"] in exc.value.detail
 
 
 def test_a_booked_rfq_points_at_its_deal():
@@ -1412,7 +1430,7 @@ def _booked_for_freeze(s):
     rfq_api.update_quote(rfq["id"], win["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(model_price=97.9), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=win["id"]), USER, s)
-    deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
+    deal = _book_deal(_booking_body(contrepartie="UBS", rfq_id=rfq["id"]), USER, s)
     return rfq, win, deal
 
 
@@ -1438,10 +1456,16 @@ def test_the_competitive_record_is_frozen_once_the_tender_traded(label, mutate):
     mettre en concurrence demain était réécrivable après coup."""
     s = _make_session()
     rfq, win, deal = _booked_for_freeze(s)
+    before_product = load_product(s, rfq["product_id"]).to_dict()
+    before_quote = s.get(RfqQuote, win["id"]).model_dump(mode="json")
     with pytest.raises(HTTPException) as exc:
         mutate(rfq_api, s, rfq, win)
     assert exc.value.status_code == 409
-    assert deal["reference"] in exc.value.detail
+    s.rollback()
+    assert load_product(s, rfq["product_id"]).to_dict() == before_product
+    assert s.get(RfqQuote, win["id"]).model_dump(mode="json") == before_quote
+    assert s.get(RfqRequest, rfq["id"]).status == "clos"
+    assert s.get(Deal, deal["id"]).reference == deal["reference"]
 
 
 def test_the_winner_survives_every_refused_mutation():
@@ -1494,12 +1518,26 @@ def test_booking_accepts_a_forward_start_paid_before_its_strike():
     assert deal["value_date"] == "2026-08-30"
 
 
-def test_a_counterparty_outside_the_catalog_stays_accepted():
-    """Volontaire : Deal.contrepartie est une chaîne libre pour que l'historique
-    reste lisible après un renommage du catalogue."""
+def test_unknown_counterparty_requires_explicit_audited_admin_exception():
     s = _make_session()
-    assert _book_deal(
-        _booking_body(contrepartie="Banque Inconnue"), USER, s)["contrepartie"] == "Banque Inconnue"
+    body = _booking_body(contrepartie="Banque Inconnue")
+    with pytest.raises(HTTPException) as failure:
+        _book_deal(body, USER, s)
+    assert failure.value.status_code == 422
+    assert "Identifiant de contrepartie" in failure.value.detail
+    assert not s.exec(select(Deal)).all()
+    body.legal_identity_exception = deals_api.LegalIdentityExceptionRequest(
+        reason="Contrepartie juridique vérifiée hors référentiel pour ce trade")
+    with pytest.raises(HTTPException) as forbidden:
+        _book_deal(body, USER, s)
+    assert forbidden.value.status_code == 403
+    booked = _book_deal(body, ADMIN, s)
+    assert booked["contrepartie"] == "Banque Inconnue"
+    assert booked["counterparty_id"] is None
+    audit = s.exec(select(AuditEvent).where(
+        AuditEvent.action == "BOOKING_LEGAL_IDENTITY_EXCEPTION_APPROVED")).one()
+    assert audit.actor_user_id == ADMIN.id
+    assert audit.reason == body.legal_identity_exception.reason
 
 
 @pytest.mark.parametrize("price, expect", [
@@ -1558,7 +1596,7 @@ def test_a_last_look_that_degrades_the_price_is_refused():
 
 def test_a_last_look_that_degrades_is_read_the_other_way_on_a_sell():
     s = _make_session()
-    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11,
         name="AO vente", sens="vente", script_snapshot="AT MATURITY\n  PAY 1",
         params=_rfq_params()), USER, s)
     q = _add_quote(s, rfq["id"], "UBS")
@@ -1577,7 +1615,7 @@ def test_sens_and_kind_are_constrained(field, value):
     branche vente : un sens mal orthographié inversait la lecture de tous les
     écarts."""
     with pytest.raises(Exception) as exc:
-        rfq_api.RfqCreate(name="X", script_snapshot="AT MATURITY\n  PAY 1", **{field: value})
+        rfq_api.RfqCreate(pilot_desk_id=11, name="X", script_snapshot="AT MATURITY\n  PAY 1", **{field: value})
     assert "pattern" in str(exc.value)
 
 
@@ -1612,7 +1650,7 @@ def _rfq_with_contractual_terms(s):
     }
     script = "PARAM COUPON = 8%\nAT MATURITY\n  PAY 1 + COUPON"
     rfq = rfq_api.create_rfq(
-        rfq_api.RfqCreate(name="Termes figés", script_snapshot=script, params=params), USER, s)
+        rfq_api.RfqCreate(pilot_desk_id=11, name="Termes figés", script_snapshot=script, params=params), USER, s)
     q = _add_quote(s, rfq["id"], "BNP Paribas")
     rfq_api.update_quote(rfq["id"], q["id"], rfq_api.QuoteUpdate(price=98.0), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=q["id"]), USER, s)
@@ -1790,7 +1828,7 @@ def _rfq_a_echeancier(s):
         "T": round(jours / 365.25, 4),            # RfqView.vue : yearsBetween
         "model": "constant", "r": 0.03,
     }
-    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(
+    rfq = rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11,
         name="Autocall à échéancier", script_snapshot=_AUTOCALL_A_ECHEANCIER,
         params=params), USER, s)
     q = _add_quote(s, rfq["id"], "BNP Paribas")
@@ -1945,8 +1983,8 @@ def test_renaming_a_counterparty_keeps_its_providers_attached():
     s.commit()
     assert rfq_api._counterparty_by_provider(s) == {"BNP Paribas": "BNP Paribas"}
 
-    admin_api.update_counterparty(c.id, admin_api.CounterpartyUpdate(name="BNP Paribas SA"),
-                                   USER, s)
+    admin_api.update_counterparty(c.id, admin_api.CounterpartyUpdate(name="BNP Paribas SA", reason="Renommage juridique confirmé"),
+                                   ADMIN, s)
     # Le fournisseur suit le renommage au lieu de tomber dans le vide.
     assert rfq_api._counterparty_by_provider(s) == {"BNP Paribas": "BNP Paribas SA"}
 
@@ -1976,19 +2014,18 @@ _CONTRACTUEL = {
 
 
 def _rfq_avec_params(s: Session):
-    # `create_rfq` rend la vue sérialisée ; on veut la ligne.
-    cree = _new_rfq(s)
-    rfq = s.get(RfqRequest, cree["id"])
-    rfq.params_json = json.dumps(_CONTRACTUEL)
-    s.add(rfq)
-    s.commit()
-    s.refresh(rfq)
-    return rfq
+    # C06: prepare coherent terms through the canonical path, with a C01 role.
+    actor = USER
+    cree = rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11, name='Hypothèses de marché',
+        script_snapshot='PARAM M_KI = 60%\nAT MATURITY\n  PAY 1',
+        params=json.loads(json.dumps(_CONTRACTUEL))), actor, s)
+    return s.get(RfqRequest, cree['id'])
 
 
 def _pricer(s: Session, rfq_id: int, hypotheses: dict):
     """Le vrai chemin de l'écran : PATCH pricing_params, puis lecture."""
-    rfq_api.update_rfq(rfq_id, rfq_api.RfqUpdate(pricing_params=hypotheses), USER, s)
+    actor = USER
+    rfq_api.update_rfq(rfq_id, rfq_api.RfqUpdate(pricing_params=hypotheses), actor, s)
     return json.loads(s.get(RfqRequest, rfq_id).params_json)
 
 
@@ -2009,18 +2046,19 @@ def test_les_hypotheses_de_marche_atteignent_les_params_stockes():
 
 
 def test_les_hypotheses_ne_deplacent_aucun_terme_contractuel():
-    # Le contrôle négatif du test précédent : ce qui passe est cantonné aux
-    # hypothèses de modèle. Sans lui, un AO cotations en main deviendrait
-    # impossible à re-pricer — le gel se déclencherait sur des termes intacts.
+    # C06: contract keys are refused explicitly, never silently ignored.
     with _make_session() as s:
         rfq = _rfq_avec_params(s)
-        params = _pricer(s, rfq.id, {
-            "yield_curve": [[1, 0.05]],
-            "strike_date": "2099-12-31",       # contractuel : doit être ignoré
-            "user_params": {"M_KI": 0.99},     # idem
-            "underlyings": [{"ticker": "AAAA.PA", "dividend_decay": 0.10}],
-        })
-
+        before = rfq.params_json
+        with pytest.raises(HTTPException):
+            _pricer(s, rfq.id, {
+                "yield_curve": [[1, 0.05]], "strike_date": "2099-12-31",
+                "user_params": {"M_KI": 0.99},
+                "underlyings": [{"ticker": "AAAA.PA", "dividend_decay": 0.10}],
+            })
+        s.expire_all()
+        assert s.get(RfqRequest, rfq.id).params_json == before
+        params = _pricer(s, rfq.id, {"underlyings": [{"dividend_decay": 0.10}]})
         assert params["strike_date"] == "2026-01-15"
         assert params["user_params"] == {"M_KI": 0.60}
         assert params["underlyings"][0]["ticker"] == "STM.PA"
@@ -2057,11 +2095,11 @@ def test_les_hypotheses_survivent_a_un_second_calcul():
 
 def _rfq_bookee(s, fermete):
     rfq = _new_rfq(s)
-    quote = _add_quote(s, rfq["id"])
+    quote = _add_quote(s, rfq["id"], firmness=fermete)
     rfq_api.update_quote(rfq["id"], quote["id"], rfq_api.QuoteUpdate(
         price=99.1, quoted_at=datetime.utcnow().isoformat()), USER, s)
     rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=quote["id"]), USER, s)
-    deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s, fermete=fermete)
+    deal = _book_deal(_booking_body(rfq_id=rfq["id"]), USER, s)
     return (s.get(RfqQuote, quote["id"]),
             json.loads(s.get(Deal, deal["id"]).rfq_provenance_json))
 
@@ -2128,7 +2166,7 @@ _DATES = {
 
 
 def _creer(s, payment_date):
-    return rfq_api.create_rfq(rfq_api.RfqCreate(
+    return rfq_api.create_rfq(rfq_api.RfqCreate(pilot_desk_id=11,
         name="Autocall SX5E", script_snapshot=_SCRIPT_EXPERT,
         params={**_DATES, "payment_date": payment_date}), USER, s)
 
@@ -2159,3 +2197,69 @@ def test_le_refus_vaut_aussi_a_la_modification():
 
         assert exc.value.status_code == 422
         assert "précède la maturité" in exc.value.detail
+
+
+@pytest.mark.parametrize("selected", ["parent", "child"])
+def test_deleting_last_look_family_clears_selection_and_preserves_other_quotes(selected):
+    with _make_session() as session:
+        rfq = _new_rfq(session)
+        parent = _add_quote(session, rfq["id"])
+        survivor = _add_quote(session, rfq["id"], "UBS")
+        rfq_api.update_quote(rfq["id"], parent["id"], rfq_api.QuoteUpdate(price=100), USER, session)
+        child = _answered_last_look(session, rfq["id"], parent["id"], 99)
+        if selected == "parent":
+            # An unanswered child allows the original response to remain eligible.
+            rfq_api.update_quote(rfq["id"], child.id, rfq_api.QuoteUpdate(price=None), USER, session)
+        chosen = parent["id"] if selected == "parent" else child.id
+        rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(selected_quote_id=chosen), USER, session)
+        before = load_product(session, rfq["product_id"]).revision
+        rfq_api.delete_quote(rfq["id"], parent["id"], USER, session)
+        result = rfq_api.get_rfq(rfq["id"], USER, session)
+        assert [q["id"] for q in result["quotes"]] == [survivor["id"]]
+        assert result["selected_quote_id"] is None
+        assert result["selected_quote_revision"] is None
+        assert result["status"] == "envoye"
+        assert load_product(session, rfq["product_id"]).revision == before + 1
+        assert session.exec(text("PRAGMA foreign_key_check")).all() == []
+
+
+def test_closed_round_refuses_quote_deletion_and_preserves_its_product():
+    with _make_session() as session:
+        rfq = _new_rfq(session)
+        quote = _add_quote(session, rfq["id"])
+        rfq_api.update_quote(rfq["id"], quote["id"], rfq_api.QuoteUpdate(price=99), USER, session)
+        rfq_api.update_rfq(rfq["id"], rfq_api.RfqUpdate(status="sans_suite"), USER, session)
+        before = load_product(session, rfq["product_id"]).revision
+        with pytest.raises(HTTPException) as failure:
+            rfq_api.delete_quote(rfq["id"], quote["id"], USER, session)
+        assert failure.value.status_code == 409
+        session.rollback()
+        assert session.get(RfqQuote, quote["id"]).price == 99
+        assert load_product(session, rfq["product_id"]).revision == before
+
+
+@pytest.mark.parametrize("access, expected", [("read_only", 403), ("revoked", 404), ("other_desk", 404)])
+def test_quote_deletion_respects_current_desk_rights_without_changing_product(access, expected):
+    with _make_session() as session:
+        rfq = _new_rfq(session)
+        quote = _add_quote(session, rfq["id"])
+        before = load_product(session, rfq["product_id"]).to_dict()
+        actor = USER
+        if access == "other_desk":
+            actor = OTHER
+        else:
+            membership = session.exec(select(RfqDeskMembership).where(
+                RfqDeskMembership.desk_id == 11, RfqDeskMembership.user_id == USER.id)).one()
+            if access == "read_only":
+                membership.rights_json = '["read"]'
+            else:
+                membership.active = False
+            session.add(membership)
+            session.commit()
+        with pytest.raises(HTTPException) as failure:
+            rfq_api.delete_quote(rfq["id"], quote["id"], actor, session)
+        assert failure.value.status_code == expected
+        session.rollback()
+        assert session.get(RfqQuote, quote["id"]) is not None
+        assert load_product(session, rfq["product_id"]).to_dict() == before
+        assert session.exec(text("PRAGMA foreign_key_check")).all() == []

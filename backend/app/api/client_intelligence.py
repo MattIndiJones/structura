@@ -1,12 +1,8 @@
-"""Client Intelligence — les lectures analytiques.
+"""Read-only CRM analytics with entity isolation and explicit temporal scope.
 
-Endpoints en lecture seule : ce module ne modifie rien, il agrège. Le
-cloisonnement par entité est vérifié ici comme ailleurs — une lecture est aussi
-une fuite si elle traverse la frontière.
-
-`asof` est exposé sur chaque route. Ce n'est pas un confort de test : rejouer
-une analyse à une date passée est la seule façon de vérifier qu'un signal levé
-la semaine dernière l'était à raison.
+``asof`` bounds observed trade dates. Commercial reference records, opportunity
+statuses and operational follow-ups remain current and are identified as such.
+This is not a reconstruction of historical knowledge or missing status history.
 """
 from __future__ import annotations
 
@@ -61,7 +57,7 @@ def lecture_client(
             raise HTTPException(404, "Affiliation introuvable")
     return client_intelligence(
         session, client_id, asof=_asof(asof), mandate_id=mandate_id,
-        affiliation_id=affiliation_id, include_demo=include_demo)
+        affiliation_id=affiliation_id, include_demo=include_demo, viewer=current)
 
 
 @router.get("/persons/{person_id}")
@@ -74,7 +70,7 @@ def lecture_personne(
     personne = session.get(Person, person_id)
     if personne is None or personne.entity_id != current.entity_id:
         raise HTTPException(404, "Personne introuvable")
-    return person_intelligence(session, person_id, asof=_asof(asof))
+    return person_intelligence(session, person_id, asof=_asof(asof), viewer=current)
 
 
 @router.get("/affiliations/{affiliation_id}")
@@ -96,9 +92,15 @@ def lecture_affiliation(
     if client is None or client.entity_id != current.entity_id:
         raise HTTPException(404, "Affiliation introuvable")
 
-    deals = deals_of_affiliations(session, [affiliation_id])
+    from ..core.client_intelligence import eligible_transactions
+    from ..core.client_analysis import temporal_basis
+    day=_asof(asof)
+    include_demo=client.data_origin=='demo'
+    deals = eligible_transactions(deals_of_affiliations(session,[affiliation_id],viewer=current),
+                                  include_demo=include_demo,asof=day)
     return {
         "affiliation_id": affiliation_id,
+        'asof':day.isoformat(),'temporal_basis':temporal_basis(day),'analysis_mode':'demo' if include_demo else 'real',
         "person_id": affiliation.person_id,
         "client_id": affiliation.client_id,
         "cycle": compute_cycle(_dates_de_trade(deals), asof=_asof(asof)).as_dict(),
@@ -112,11 +114,16 @@ def signaux(
     session: Annotated[Session, Depends(get_session)],
     asof: Optional[str] = Query(None),
     mine_only: bool = Query(True, description="Mes dossiers seulement"),
+    include_demo: bool = False,
 ):
+    from ..core.client_analysis import temporal_basis
+    day=_asof(asof)
     liste = build_signals(session, entity_id=current.entity_id,
                           user_id=current.id if mine_only else None,
-                          asof=_asof(asof))
+                          asof=day, viewer=current, include_demo=include_demo)
     return {
+        'asof':day.isoformat(),'temporal_basis':temporal_basis(day),
+        'analysis_mode': 'demo_included' if include_demo else 'real',
         "signals": [s.as_dict() for s in liste],
         # Les seuils sont rendus avec les signaux : un utilisateur qui voit
         # « en sommeil » doit pouvoir savoir depuis quand on considère qu'un
@@ -136,6 +143,7 @@ def analytiques(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
     asof: Optional[str] = Query(None),
+    include_demo: bool = False,
 ):
     """Les chiffres du portefeuille commercial.
 
@@ -161,8 +169,11 @@ def analytiques(
     en_poste = {a.person_id for a in session.exec(
         select(Affiliation).where(Affiliation.end_date.is_(None))).all()}
 
-    opportunites = list(session.exec(
+    from ..core.client_intelligence import eligible_opportunities
+    from ..core.client_analysis import amount_summary, temporal_basis
+    opportunites = eligible_opportunities(session,list(session.exec(
         select(Opportunity).where(Opportunity.entity_id == current.entity_id)).all())
+        ,include_demo=include_demo)
     TERMINAUX = {"won", "lost", "cancelled", "archived"}
     ouvertes = [o for o in opportunites if o.status not in TERMINAUX]
     gagnees = [o for o in opportunites if o.status == "won"]
@@ -188,7 +199,7 @@ def analytiques(
     # pour 31 clients, et le coût grandit avec le portefeuille — donc il ne se
     # voit jamais avant la mise en service.
     from ..core.client_intelligence import transactions_of_entity
-    deals = transactions_of_entity(session, current.entity_id)
+    deals = transactions_of_entity(session, current.entity_id, viewer=current,asof=jour,include_demo=include_demo)
 
     # Délai entre ouverture du dossier et transaction — médiane, comme partout.
     delais = []
@@ -215,16 +226,21 @@ def analytiques(
         cle = deal.product_type or "(non renseigné)"
         par_produit[cle] = par_produit.get(cle, 0) + 1
     importees = sum(1 for d in deals if d.imported)
+    pipeline=amount_summary((row.currency,row.amount) for row in ouvertes)
 
     return {
         "asof": jour.isoformat(),
+        'temporal_basis':temporal_basis(jour),'analysis_mode':'demo_included' if include_demo else 'real',
         "clients": {"total": len(clients), "active": len(actifs),
                     "dormant": len(dormants)},
         "contacts": {"total": len(personnes),
                      "affiliated": len([p for p in personnes if p.id in en_poste])},
         "opportunities": {
             "open": len(ouvertes), "won": len(gagnees), "lost": len(perdues),
-            "pipeline_amount": sum(o.amount or 0 for o in ouvertes),
+            'pipeline_amount':pipeline['amount'],'pipeline_currency':pipeline['currency'],
+            'pipeline_by_currency':{code:stats['amount'] for code,stats in pipeline['by_currency'].items()},
+            'pipeline_unqualified_count':pipeline['unqualified_count'],
+            'state_basis':'CURRENT_STATE','state_asof':date.today().isoformat(),
             # None et non 0 : sans dossier tranché, le taux n'existe pas.
             "conversion_rate": conversion,
             "decided": tranchees,
@@ -250,20 +266,24 @@ def apercu(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
     asof: Optional[str] = Query(None),
+    include_demo: bool = False,
 ):
     """Ce qu'il y a à faire ce matin, groupé par nature.
 
     L'écran d'accueil du module ne cherche pas à tout montrer : il répond à
     « par quoi je commence », ce qui suppose de trier, pas d'énumérer.
     """
+    from ..core.client_analysis import temporal_basis
     jour = _asof(asof)
     liste = build_signals(session, entity_id=current.entity_id,
-                          user_id=current.id, asof=jour)
+                          user_id=current.id, asof=jour, viewer=current, include_demo=include_demo)
     groupes: dict[str, list] = {}
     for signal in liste:
         groupes.setdefault(signal.kind, []).append(signal.as_dict())
     return {
         "asof": jour.isoformat(),
+        "analysis_mode": "demo_included" if include_demo else "real",
+        'temporal_basis':temporal_basis(jour),
         "by_kind": groupes,
         "counts": {kind: len(items) for kind, items in groupes.items()},
         "total": len(liste),

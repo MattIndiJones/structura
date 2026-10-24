@@ -111,6 +111,10 @@ async def upload_underlying(
     key:    Annotated[str, Form()],
     file:   Annotated[UploadFile, File()],
     ticker: Annotated[str, Form()] = "",
+    currency: Annotated[str, Form()] = "",
+    price_type: Annotated[str, Form()] = "",
+    unit: Annotated[str, Form()] = "",
+    adjustment_date: Annotated[str, Form()] = "",
     current: Annotated[User, Depends(get_current_admin)] = None,
 ):
     """Upload a price time series from Excel (.xlsx) or JSON."""
@@ -118,7 +122,9 @@ async def upload_underlying(
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(413, "Fichier trop volumineux (20 Mo maximum).")
     try:
-        return upload_prices(key, content, file.filename or "upload", ticker)
+        return upload_prices(key, content, file.filename or "upload", ticker,
+                             currency=currency, price_type=price_type, unit=unit,
+                             adjustment_date=adjustment_date or None)
     except ValueError as e:
         raise HTTPException(422, str(e))
     except Exception as e:

@@ -203,7 +203,11 @@ def test_fx_rate_to_respects_historical_asof(monkeypatch):
         return series
 
     monkeypatch.setattr(amc_prices, "get_fx_series", fake_series)
-    assert amc_prices.fx_rate_to("USD", "EUR", asof=dt.date(2024, 12, 31)) == 0.80
+    # Filtering out future quotes must not qualify a year-old past quote.
+    assert amc_prices.fx_rate_to("USD", "EUR", asof=dt.date(2024, 12, 31)) is None
+    quote = amc_prices.fx_quote_to("USD", "EUR", asof=dt.date(2024, 12, 31))
+    assert quote['effective_date'] == '2024-01-02' and quote['age_days'] == 364
+    assert not quote['qualified'] and quote['raw_rate'] == .80
     assert calls[0]["end"] == "2025-01-01"
 
 
@@ -275,7 +279,7 @@ def test_study_files_scope_and_concurrency(tmp_path, monkeypatch):
     mine = root / "42"
     mine.mkdir(parents=True)
     monkeypatch.setenv("STRUCTURA_STUDIES_ROOT", str(root))
-    user = SimpleNamespace(id=42, role="user")
+    user = SimpleNamespace(id=42, role="user", entity_id=None)
     assert study_folder(str(mine), user) == str(mine)
     with pytest.raises(HTTPException) as error: study_folder(str(tmp_path), user)
     assert error.value.status_code == 403
@@ -328,8 +332,8 @@ def test_saved_snapshot_archive_and_ownership(tmp_path):
     from fastapi import HTTPException
     engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(engine)
-    user = SimpleNamespace(id=41, role="user")
-    other = SimpleNamespace(id=42, role="user")
+    user = SimpleNamespace(id=41, role="user", entity_id=None)
+    other = SimpleNamespace(id=42, role="user", entity_id=None)
     result = {"meta": {"isin": "GENERIC"}, "_artifacts": {"brinson": {"check_pct": 1.25}, "ai": {"generation_id": "test"}}}
     with Session(engine) as session:
         saved = create_study(AmcStudyCreate(isin="GENERIC", result=result, synthese="Conclusion"), user, session)
@@ -346,10 +350,13 @@ def test_saved_snapshot_archive_and_ownership(tmp_path):
 def test_public_registration_requires_explicit_enable(monkeypatch):
     from backend.app.api.auth import register, RegisterRequest
     from fastapi import HTTPException
+    monkeypatch.delenv("STRUCTURA_INSTALLATION_CONFIG", raising=False)
     monkeypatch.delenv("STRUCTURA_ALLOW_REGISTRATION", raising=False)
+    body = RegisterRequest(username="testuser", password="Registration-2026", email="test@example.test")
     with pytest.raises(HTTPException) as error:
-        register(RegisterRequest(username="testuser", password="password123", email="test@example.test"), None)
+        register(body, None)
     assert error.value.status_code == 403
+    assert error.value.detail == "Inscription publique désactivée. Contactez un administrateur."
 
 
 def test_timing_incomplete_future_window_excluded(monkeypatch):

@@ -109,9 +109,9 @@ def test_common_correlation_stress_also_changes_cross_product_pairs(monkeypatch)
     book,market=common_market.harmonize_market(trades,deals,None,request,lambda *a,**kw:data)
     seen=[]
     original=service.joint_scenarios
-    def capture(runtimes,req,times):
+    def capture(runtimes,req,times,outer_times=None):
         seen.append(req.correlations['AAPL|MSFT'])
-        return original(runtimes,req,times)
+        return original(runtimes,req,times,outer_times)
     monkeypatch.setattr(service,'joint_scenarios',capture)
     result=evaluate_inputs({'request':request.model_dump(mode='json'),'configuration':{},'trades':book,'common_market':market})
     assert result['errors']==[] and result['stress']['errors']==[]

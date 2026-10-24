@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 from datetime import datetime
-from sqlalchemy import Index, UniqueConstraint, text
+from sqlalchemy import Index, UniqueConstraint, text, ForeignKey, Integer
 from sqlmodel import SQLModel, Field, Column, Text
 from .ccr_models import (  # register additive CCR tables with the shared metadata
     CCRCreditProfile, CCRMasterAgreement, CCRCSAAgreement, CCRNettingSet,
@@ -9,6 +9,8 @@ from .ccr_models import (  # register additive CCR tables with the shared metada
 )
 from .rfq_transport_models import (RfqInstallation, RfqChannel, RfqRemoteLink,
     RfqTransportOutbox, RfqTransportInbox, RfqTransportAttempt)
+from .rfq_electronic_models import RfqElectronicExecution, RfqElectronicBooking, RfqElectronicEvidence
+from .rfq_reconciliation_models import RfqReconciliationStatement
 
 
 class ProductRecord(SQLModel, table=True):
@@ -90,6 +92,47 @@ class ProductCommand(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class BookingCommand(SQLModel, table=True):
+    """Successful booking intent, committed atomically with its local position."""
+    __tablename__ = "booking_commands"
+    __table_args__ = (UniqueConstraint("user_id", "command_key"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id")
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
+    command_key: str
+    input_hash: str
+    # Explicit UAT cleanup leaves a tombstone, never a reusable successful key.
+    deal_id: Optional[int] = Field(default=None, foreign_key="deals.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ArchivedDocument(SQLModel, table=True):
+    """Server-owned immutable proposal or explain, including the rendered PDF."""
+    __tablename__ = "archived_documents"
+    id: str = Field(primary_key=True)
+    kind: str = Field(index=True)
+    deal_id: int = Field(foreign_key="deals.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    parent_id: Optional[str] = Field(default=None, foreign_key="archived_documents.id")
+    contract_version: int
+    request_json: str = Field(sa_column=Column(Text, nullable=False))
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+    content_hash: str
+    pdf_base64: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class VariantStudyArchive(SQLModel, table=True):
+    """A frozen exploratory comparison; it is never an execution or a Product."""
+    __tablename__ = "variant_study_archives"
+    id: str = Field(primary_key=True)
+    script_id: int = Field(foreign_key="scripts.id", index=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    parent_id: Optional[str] = Field(default=None, foreign_key="variant_study_archives.id")
+    evidence_json: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class OptimizerResearch(SQLModel, table=True):
     """A dated exploration and its server-owned calculation; never a booked product."""
     __tablename__ = "optimizer_researches"
@@ -128,10 +171,19 @@ class User(SQLModel, table=True):
     username: str = Field(unique=True, index=True)
     email: str = Field(unique=True, index=True)
     password_hash: str
-    role: str = Field(default="user")          # "admin" | "user"
+    role: str = Field(default="user")  # user | ops_maker | checker | organization_admin | legacy admin
     entity_id: Optional[int] = Field(default=None, foreign_key="entities.id")
     is_active: bool = Field(default=True)
+    auth_version: int = Field(default=0)
+    password_change_required: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RevokedSession(SQLModel, table=True):
+    __tablename__ = "revoked_sessions"
+    token_digest: str = Field(primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    expires_at: datetime
 
 
 class RfqDesk(SQLModel, table=True):
@@ -462,6 +514,7 @@ class Portfolio(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     user_id: int = Field(foreign_key="users.id")
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
     is_default: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -529,6 +582,8 @@ class Deal(SQLModel, table=True):
     product_id: Optional[int] = Field(default=None, foreign_key="products.id", unique=True)
     product_terms_version: Optional[int] = Field(default=None)
     counterparty_id: Optional[int] = Field(default=None, foreign_key="counterparties.id")
+    # Immutable administrator attestation at booking, retained after legal qualification.
+    legal_identity_exception_json: Optional[str] = Field(default=None, sa_column=Column(Text))
     ccr_netting_set_id: Optional[int] = Field(default=None, foreign_key="ccr_netting_sets.id")
     # Unique: the reference is the trade's business identity (valuation notes,
     # KID, client correspondence). Handed out by core/references.py, which
@@ -658,6 +713,8 @@ class Deal(SQLModel, table=True):
     # resolved — lets the Booking view compute a hit-ratio straight from the
     # deal list, no per-deal events fetch needed. None while still actif.
     resolution_outcome: Optional[str] = Field(default=None)
+    # Actual terminal cash date after early recall, separate from frozen contractual maturity payment.
+    settlement_date: Optional[str] = Field(default=None)
 
     # JSON blobs
     underlyings_json: str = Field(default="[]", sa_column=Column(Text))   # [{name, ticker, s0_abs}]
@@ -720,6 +777,7 @@ class TradeAmendmentRequest(SQLModel, table=True):
     applied_by: Optional[int] = Field(default=None, foreign_key="users.id")
     applied_at: Optional[datetime] = Field(default=None)
     applied_contract_version: Optional[int] = Field(default=None)
+    credit_check_json: Optional[str] = Field(default=None, sa_column=Column(Text))
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
@@ -756,6 +814,7 @@ class AmcStudy(SQLModel, table=True):
     __tablename__ = "amc_studies"
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
+    entity_id: Optional[int] = Field(default=None, foreign_key="entities.id", index=True)
     isin: str = Field(default="", index=True)
     product_name: str = Field(default="")
     label: str = Field(default="")
@@ -831,6 +890,7 @@ class KidRecord(SQLModel, table=True):
     t_rhp: float = Field(default=0.0)
     horizons_json: str = Field(default="[]", sa_column=Column(Text))
     costs_json: str = Field(default="{}", sa_column=Column(Text))
+    calculation_evidence_json: str = Field(default="{}", sa_column=Column(Text))
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -867,6 +927,17 @@ class EmtRecord(SQLModel, table=True):
     description: str = Field(default="", sa_column=Column(Text))
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RfqBookingEvidence(SQLModel, table=True):
+    """Server-verified RFQ calculation retained for an operational handoff."""
+    __tablename__ = "rfq_booking_evidence"
+    rfq_id: int = Field(primary_key=True, foreign_key="rfq_requests.id")
+    terms_version: int
+    input_hash: str
+    receipt_json: str = Field(sa_column=Column(Text))
+    retained_by: int = Field(foreign_key="users.id")
+    retained_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class RfqRequest(SQLModel, table=True):
@@ -947,6 +1018,7 @@ class RfqRequest(SQLModel, table=True):
     # status "retenue". Points at either a top-level quote or a last-look child
     # (RfqQuote.parent_quote_id) — whichever price/time actually got traded.
     selected_quote_id: Optional[int] = Field(default=None, foreign_key="rfq_quotes.id")
+    selected_quote_revision: Optional[int] = Field(default=None)
     # Optional factual explanation recorded by the desk when the retained
     # response is not the best executable price.  It never changes the quote
     # ranking and never blocks selection: an absent explanation must stay
@@ -962,9 +1034,15 @@ class RfqQuote(SQLModel, table=True):
     __tablename__ = "rfq_quotes"
     id: Optional[int] = Field(default=None, primary_key=True)
     rfq_id: int = Field(foreign_key="rfq_requests.id", index=True)
+    revision: int = Field(default=1)
     provider: str = Field(default="manuel")
+    provider_id: Optional[int] = Field(default=None, foreign_key="rfq_providers.id")
+    counterparty_id: Optional[int] = Field(default=None, foreign_key="counterparties.id")
+    counterparty_name: Optional[str] = None
+    identity_frozen: bool = Field(default=False)
     contact: Optional[str] = Field(default=None)
     price: Optional[float] = Field(default=None)
+    model_reference_json: Optional[str] = Field(default=None, sa_column=Column(Text))
     currency: Optional[str] = Field(default=None)
     status: str = Field(default="en_attente")  # en_attente | recu | decline | expire
     note: Optional[str] = Field(default=None)
@@ -987,10 +1065,9 @@ class RfqQuote(SQLModel, table=True):
 
 
 class Counterparty(SQLModel, table=True):
-    """Admin-managed catalog of counterparties eligible to face a booked
-    deal. Deal.contrepartie stores the name directly (free string, not a FK)
-    — same rationale as RfqProvider: booked history stays readable if a
-    counterparty is later renamed or removed from the eligible list.
+    """Legal identity catalog. New bookings require an active stable ID;
+    Deal.contrepartie retains the contractual label snapshot. Deactivation
+    preserves historical links and never substitutes another legal entity.
 
     limit_eur is an optional soft concentration limit (nominal EUR-converted
     across every active deal facing this counterparty) — set by an admin,
@@ -1005,6 +1082,13 @@ class Counterparty(SQLModel, table=True):
     limit_eur: Optional[float] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ReferenceCatalogState(SQLModel, table=True):
+    __tablename__ = "reference_catalog_states"
+    key: str = Field(primary_key=True)
+    initialized_at: datetime = Field(default_factory=datetime.utcnow)
+    adopted_existing: bool = Field(default=False)
 
 
 class Underlying(SQLModel, table=True):
@@ -1044,21 +1128,16 @@ class Underlying(SQLModel, table=True):
 
 
 class RfqProvider(SQLModel, table=True):
-    """Admin-managed catalog of RFQ counterparties. RfqQuote.provider stores
-    the label directly (free string, not a FK) so historical quotes stay
-    readable even if a provider is later renamed or deleted."""
+    """RFQ channel catalog. Quotes freeze channel and local legal identity;
+    legacy quotes remain readable and require explicit identity qualification."""
     __tablename__ = "rfq_providers"
     id: Optional[int] = Field(default=None, primary_key=True)
     label: str
     mode: str = Field(default="manual")  # manual | api
     active: bool = Field(default=True)
-    # Which eligible counterparty a deal booked out of this provider's quote
-    # actually faces. Optional and NOT a hard identity: a quoting channel is
-    # not always the legal entity the trade ends up with (a platform such as
-    # deritrade quotes, the issuing bank faces the trade). Left unset, the
-    # booking prefill can only fall back to matching labels between the two
-    # admin catalogs, and refuses to prefill a counterparty it can't find —
-    # see api/rfq.py _counterparty_by_provider and DealTab.vue.
+    # Optional legal mapping for future manual quotes. Each resolved quote
+    # freezes its own legal ID; an invalid explicit mapping never falls back
+    # to another bank with the channel's label.
     counterparty_id: Optional[int] = Field(default=None, foreign_key="counterparties.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -1096,6 +1175,14 @@ class Alert(SQLModel, table=True):
     dedup_key: str = Field(default="", index=True)
     read: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AlertRead(SQLModel, table=True):
+    """Reading a shared alert must not acknowledge it for another actor."""
+    __tablename__ = "alert_reads"
+    alert_id: int = Field(sa_column=Column(Integer, ForeignKey("alerts.id", ondelete="CASCADE"), primary_key=True))
+    user_id: int = Field(primary_key=True, foreign_key="users.id")
+    read_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 def position_sign(deal: "Deal") -> float:
@@ -1954,3 +2041,7 @@ class ConstraintDefinition(SQLModel, table=True):
     created_by_user_id: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+from .archive_integrity import register as _register_archive_integrity
+_register_archive_integrity(OptimizerResearch.__table__, ArchivedDocument.__table__, VariantStudyArchive.__table__)

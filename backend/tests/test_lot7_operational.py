@@ -1,6 +1,6 @@
 import json
 import ast
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from threading import Barrier, Thread
 import time
 
@@ -112,6 +112,7 @@ def test_estimation_var_agrege_les_deals_et_scenarios():
 
 
 def test_runs_de_valorisation_sont_append_only_et_rejouables(monkeypatch):
+    from backend.app.core.payscript.parser import parse_script, resolve_constats
     engine = _engine()
     with Session(engine) as session:
         user = _user(session)
@@ -129,15 +130,18 @@ def test_runs_de_valorisation_sont_append_only_et_rejouables(monkeypatch):
                 "settlement_ccy": "EUR",
             },
             "valuation_context": {"constats": {}, "underlyings": [{}]},
-            "T_elapsed": 0.5, "passe_jusqu_a": 0.5, "state": {},
+            "T_elapsed": 0.5, "passe_jusqu_a": 0.5, "state": {"index": 0},
+            "compiled": resolve_constats(parse_script(deal.script_snapshot), {},
+                                         anchor=date(2026, 1, 1), currency="EUR"),
+            "user_params": {},
             "norm_spots": [1.0], "corr": [[1.0]], "N_used": 2000,
             "underlyings_json": [{"name": "S1", "ticker": "ABC"}],
             "s0_map": {"S1": 100.0},
         }
         first, _ = stage_valuation_run(
-            session, deal, user.id, "MTM", ctx, {"mtm": 0.98})
+            session, deal, user.id, "MTM", ctx, {"mtm": 0.98, "valuation_date": "2026-07-02"})
         second, _ = stage_valuation_run(
-            session, deal, user.id, "MTM", ctx, {"mtm": 1.01})
+            session, deal, user.id, "MTM", ctx, {"mtm": 1.01, "valuation_date": "2026-07-02"})
         session.commit()
         assert first.id != second.id
         assert deal.latest_valuation_run_id == second.id
@@ -194,10 +198,8 @@ def test_les_couches_metier_n_importent_aucune_route_api():
         for path in (root / layer).rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom) and node.module == "api":
-                    violations.append(str(path.relative_to(root)))
-                if isinstance(node, ast.ImportFrom) and node.level and node.module:
-                    if node.module.startswith("api"):
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    if node.module == "api" or node.module.startswith(("api.", "backend.app.api")):
                         violations.append(str(path.relative_to(root)))
                 if isinstance(node, ast.Import):
                     for alias in node.names:

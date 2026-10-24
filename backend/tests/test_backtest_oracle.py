@@ -25,6 +25,7 @@ from backend.app.core.payscript.parser import parse_script, resolve_constats
 from backend.app.core.payscript.engine import eval_script_on_history, run_mc
 
 DEBUT = date(2026, 9, 10)
+CONTRACT_TENOR = (date(2029, 9, 10) - DEBUT).days / 365.25
 
 
 def _serie(n_jours=1200, niveau=100.0):
@@ -40,7 +41,7 @@ def _resolu(src, constats, currency="EUR"):
     return resolve_constats(parse_script(src), constats, anchor=DEBUT, currency=currency)
 
 
-def _rejeu(src, constats, user_params=None, T=3.0, tickers=("TK1",), n_jours=1200):
+def _rejeu(src, constats, user_params=None, T=CONTRACT_TENOR, tickers=("TK1",), n_jours=1200):
     jours, px = _serie(n_jours)
     compiled = _resolu(src, constats)
     return eval_script_on_history(
@@ -56,7 +57,7 @@ def _ul():
                 sigma_fx=0.0, rho_sfx=0.0, ccyh=0.0)
 
 
-def _pricing(src, constats, user_params=None, T=3.0, n_actifs=1):
+def _pricing(src, constats, user_params=None, T=CONTRACT_TENOR, n_actifs=1):
     compiled = _resolu(src, constats)
     uls = [dict(_ul(), name=f"TK{i + 1}") for i in range(n_actifs)]
     corr = [[1.0 if i == j else 0.5 for j in range(n_actifs)] for i in range(n_actifs)]

@@ -83,17 +83,11 @@ def protect_mutation(session, rfq_id, fields, quote_id=None):
 
 
 def _counterparty(session, rfq, quote):
+    from .legal_identity import network_counterparty, quote_counterparty
     published = publication.publication_for_quote(session, quote.id)
     if published:
-        name = json.loads(published.payload_json)['counterparty_name']
-    else:
-        from ..api.rfq import _counterparty_by_provider
-        name = _counterparty_by_provider(session).get(quote.provider)
-    counterparty = session.exec(select(Counterparty).where(Counterparty.name == name,
-        Counterparty.active == True)).first() if name else None
-    if not counterparty:
-        raise HTTPException(422, 'Rapprochez la contrepartie juridique avec une contrepartie active avant traitement')
-    return counterparty
+        return network_counterparty(session, rfq, published)
+    return quote_counterparty(session, quote)
 
 
 def _check_relation(session, rfq, published, snapshot):
@@ -120,7 +114,11 @@ def _snapshot(session, rfq, quote):
     published = publication.publication_for_quote(session, quote.id)
     response = json.loads(published.payload_json) if published else None
     params = json.loads(rfq.params_json)
+    from .rfq_quote_integrity import same_currency, selection_matches
+    if not same_currency(session, rfq, quote) or not selection_matches(rfq, quote):
+        raise HTTPException(409, 'La sélection doit viser cette révision dans la devise Product.')
     snapshot = {'rfq_id': rfq.id, 'rfq_reference': rfq.reference, 'quote_id': quote.id,
+        'quote_revision': quote.revision,
         'product_id': product.product_id, 'terms_version': product.terms_version,
         'terms_fingerprint': product.terms_fingerprint,
         'terms': product.terms.model_dump(mode='json', exclude={'schedule_error'}),
@@ -148,7 +146,7 @@ def _snapshot(session, rfq, quote):
     return snapshot
 
 
-def request_treatment(session, rfq_id, user, body):
+def request_treatment(session, rfq_id, user, body, *, electronic=False):
     rfq = lock_rfq_organization(session, rfq_id, user, 'book')
     # Also serialize legacy creator-owned RFQs, which have no ownership row.
     session.execute(update(RfqRequest).where(RfqRequest.id == rfq.id).values(id=rfq.id))
@@ -164,7 +162,7 @@ def request_treatment(session, rfq_id, user, body):
     quote = session.get(RfqQuote, body.quote_id)
     if not quote or quote.rfq_id != rfq_id or rfq.selected_quote_id != quote.id:
         raise HTTPException(409, 'Retenez cette réponse exacte avant de déclarer le traitement demandé')
-    from ..api.rfq import _get_quotes, _quote_row, superseded_quote_ids
+    from .rfq_state import _get_quotes, _quote_row, superseded_quote_ids
     superseded = quote.id in superseded_quote_ids(_get_quotes(rfq_id, session))
     if rfq.status != 'retenue' or quote.status != 'recu' or not _quote_row(quote, superseded=superseded, session=session)['comparable']:
         raise HTTPException(409, 'La réponse retenue doit être active et non remplacée')
@@ -176,16 +174,20 @@ def request_treatment(session, rfq_id, user, body):
     agreement = RfqExecutionAgreement(rfq_id=rfq_id, entity_id=rfq.entity_id, quote_id=quote.id,
         command_key=body.command_key, request_hash=request_hash, snapshot_json=json.dumps(snapshot, ensure_ascii=False),
         snapshot_hash=exchange.digest(snapshot), requested_by=user.id, requested_at=business_now(),
-        request_source=body.source, request_reference=body.reference.strip(), bank_contact=body.bank_contact.strip())
+        request_source='ELECTRONIC_REQUEST' if electronic else body.source,
+        request_reference=body.reference.strip(), bank_contact=body.bank_contact.strip())
     session.add(agreement); session.flush()
     _record(session, rfq, user, agreement, 'RFQ_TREATMENT_REQUEST_DECLARED')
-    session.commit()
+    if not electronic:
+        session.commit()
     return row(session, agreement)
 
 
 def confirm_treatment(session, rfq_id, agreement_id, user, body):
     rfq = lock_rfq_organization(session, rfq_id, user, 'book')
     agreement = _require(session, rfq_id, agreement_id)
+    if agreement.request_source == 'ELECTRONIC_REQUEST':
+        raise HTTPException(409, 'La confirmation électronique doit provenir du canal bancaire, pas d’une saisie locale.')
     session.execute(update(RfqExecutionAgreement).where(RfqExecutionAgreement.id == agreement_id).values(state=agreement.state))
     session.refresh(agreement)
     payload = body.model_dump(mode='json')
@@ -200,6 +202,8 @@ def confirm_treatment(session, rfq_id, agreement_id, user, body):
     snapshot = json.loads(agreement.snapshot_json)
     quote = session.get(RfqQuote, agreement.quote_id)
     current_snapshot = _snapshot(session, rfq, quote)
+    if current_snapshot['counterparty_id'] == snapshot['counterparty_id']:
+        current_snapshot['counterparty_name'] = snapshot['counterparty_name']
     if exchange.digest(current_snapshot) != agreement.snapshot_hash or rfq.selected_quote_id != quote.id:
         raise HTTPException(409, 'La réponse ou les termes ont changé depuis la demande de traitement')
     published = publication.publication_for_quote(session, quote.id)
@@ -253,6 +257,8 @@ def _require(session, rfq_id, agreement_id):
 def cancel_request(session, rfq_id, agreement_id, user, reason):
     rfq = lock_rfq_organization(session, rfq_id, user, 'book')
     agreement = _require(session, rfq_id, agreement_id)
+    if agreement.request_source == 'ELECTRONIC_REQUEST':
+        raise HTTPException(409, 'La demande électronique doit recevoir une décision bancaire ; aucune annulation locale implicite.')
     session.execute(update(RfqExecutionAgreement).where(RfqExecutionAgreement.id == agreement_id).values(state=agreement.state))
     session.refresh(agreement)
     if agreement.state != 'REQUESTED' or len(reason.strip()) < 3:
@@ -268,12 +274,12 @@ def _record(session, rfq, user, agreement, action):
     session.flush()
     record_audit_event(session, action=action, object_type='RFQ', object_id=rfq.id,
         actor_user_id=user.id, result='SUCCESS', after=row(session, agreement))
-    from ..api.rfq import _sync_product_rfq
+    from .rfq_state import _sync_product_rfq
     _sync_product_rfq(session, rfq, user, action='PRODUCT_' + action)
 
 
 def booking_request_hash(body):
-    return exchange.digest(body.model_dump(mode='json', exclude={'execution_agreement_id'}))
+    return exchange.digest(body.model_dump(mode='json', exclude={'execution_agreement_id', 'command_key'}))
 
 
 def booking_context(session, body, user):
@@ -285,6 +291,10 @@ def booking_context(session, body, user):
                 owned_record(session, body.product_id, user)
             except ProductError as exc:
                 raise HTTPException(exc.status, str(exc)) from exc
+            from .rfq_electronic import bank_booking_context
+            electronic, replay = bank_booking_context(session, body, user)
+            if electronic:
+                return None, replay
             bound = session.exec(select(RfqRequest).where(RfqRequest.product_id == body.product_id)).all()
             for rfq in bound:
                 if active_agreement(session, rfq.id) or session.exec(select(RfqQuotePublication.id).join(
@@ -311,7 +321,7 @@ def booking_context(session, body, user):
         if exchange.digest(snapshot) != agreement.snapshot_hash or product.terms_fingerprint != snapshot['terms_fingerprint']:
             raise HTTPException(409, 'Les termes de l’accord confirmé diffèrent du Product')
         expected = {'price_traded': snapshot['price'], 'nominal': snapshot['nominal'], 'devise': snapshot['currency'],
-            'contrepartie': snapshot['counterparty_name'], 'sens': 'vente' if snapshot['side'] == 'BUY' else 'achat'}
+            'counterparty_id': snapshot['counterparty_id'], 'sens': 'vente' if snapshot['side'] == 'BUY' else 'achat'}
         if any(getattr(body, key) != value for key, value in expected.items()) or rfq.selected_quote_id != agreement.quote_id:
             raise HTTPException(409, 'Le prix, le nominal, les parties ou le sens diffèrent de l’accord confirmé')
         published = publication.publication_for_quote(session, agreement.quote_id)
@@ -359,7 +369,7 @@ def record_booking_block(session, body, user, reason):
         agreement.booking_block_reason = reason
         agreement.booking_blocked_at = business_now()
         session.add(agreement)
-        from ..api.rfq import _sync_product_rfq
+        from .rfq_state import _sync_product_rfq
         rfq = session.get(RfqRequest, body.rfq_id)
         _sync_product_rfq(session, rfq, user, action='PRODUCT_RFQ_CONFIRMED_BOOKING_BLOCKED')
         session.commit()

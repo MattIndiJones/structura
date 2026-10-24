@@ -1,0 +1,1088 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-23",
+  "head": "7dce3021a88feb4f0021ca3de8f3596277bc72a5",
+  "branch": "codex/hybrid-saas-foundation",
+  "report": "../GRAPHICAL_ACCEPTANCE_2026-10-23.md",
+  "status": "completed_with_explicit_coverage_limits",
+  "production_qualified": false,
+  "scope": "Native graphical acceptance on isolated loopback installations; application APIs and numerical engine unchanged by the runtime adapter.",
+  "runtime": ".runtime/diagnostic-acceptance/graphical-2026-10-23",
+  "installations": {
+    "platform": 18100,
+    "bnp-paribas": 18101,
+    "leonteq": 18105
+  },
+  "market": {
+    "provider": "SYNTHETIC_SCENARIO",
+    "seed": 42,
+    "real_market_qualified": false
+  },
+  "checkpoints": [
+    {
+      "id": "G01-portal",
+      "at": "2026-10-23T14:51:21.638Z",
+      "url": "http://127.0.0.1:18100/#/login",
+      "notes": "Portail isolé : six organisations, connexion normale et développement explicitement activé.",
+      "dom": "G01-portal.dom.txt",
+      "screenshot": "screenshots/G01-portal.jpg"
+    },
+    {
+      "id": "G02-organization-home",
+      "at": "2026-10-23T14:53:21.405Z",
+      "url": "http://127.0.0.1:18100/#/",
+      "notes": "Connexion à Leonteq et navigation métier sans accès technique central.",
+      "dom": "G02-organization-home.dom.txt",
+      "screenshot": "screenshots/G02-organization-home.jpg"
+    },
+    {
+      "id": "G03-model-economics",
+      "at": "2026-10-23T14:53:56.819Z",
+      "url": "http://127.0.0.1:18100/#/pricer?modele=phoenix_memoire&sousJacents=1&tenor=1Y",
+      "notes": "Modèle Phoenix mémoire, un sous-jacent, un an : paramètres vierges à compléter et calendriers explicites.",
+      "dom": "G03-model-economics.dom.txt",
+      "screenshot": "screenshots/G03-model-economics.jpg"
+    },
+    {
+      "id": "G03-incomplete-refusal",
+      "at": "2026-10-23T14:54:10.228Z",
+      "url": "http://127.0.0.1:18100/#/pricer?modele=phoenix_memoire&sousJacents=1&tenor=1Y",
+      "notes": "Refus attendu d’un pricing incomplet sans paramètres effectifs.",
+      "dom": "G03-incomplete-refusal.dom.txt",
+      "screenshot": "screenshots/G03-incomplete-refusal.jpg"
+    },
+    {
+      "id": "G04-priced-phoenix",
+      "at": "2026-10-23T14:55:33.535Z",
+      "url": "http://127.0.0.1:18100/#/pricer?modele=phoenix_memoire&sousJacents=1&tenor=1Y",
+      "notes": "Prix 101,05 %, IC95 [100,81;101,28], 5000 tirages, seed42, coupon8%, barrières100/70/60; calendrier explicite et paiement27/10/2027.",
+      "dom": "G04-priced-phoenix.dom.txt",
+      "screenshot": "screenshots/G04-priced-phoenix.jpg"
+    },
+    {
+      "id": "G05-product-saved",
+      "at": "2026-10-23T14:55:49.357Z",
+      "url": "http://127.0.0.1:18100/#/pricer?modele=phoenix_memoire&sousJacents=1&tenor=1Y",
+      "notes": "Product PRD-20261023-001 v1 révision2 conservé, prix daté attaché, termes verrouillés.",
+      "dom": "G05-product-saved.dom.txt",
+      "screenshot": "screenshots/G05-product-saved.jpg"
+    },
+    {
+      "id": "G06-rfq-model",
+      "at": "2026-10-23T14:56:08.660Z",
+      "url": "http://127.0.0.1:18100/#/rfq?product=1",
+      "notes": "Anomalie G02 : preuve de prix initial rejetée sur valuation_date ; refus reproduit avant correction.",
+      "dom": "G06-rfq-model.dom.txt",
+      "screenshot": "screenshots/G06-rfq-model.jpg"
+    },
+    {
+      "id": "G06-rfq-price-corrected",
+      "at": "2026-10-23T14:59:34.164Z",
+      "url": "http://127.0.0.1:18100/#/rfq?product=1",
+      "notes": "G02 corrigé : prix RFQ 101,05 % identique au Pricer, preuve conservée et décomposition des flux.",
+      "dom": "G06-rfq-price-corrected.dom.txt",
+      "screenshot": "screenshots/G06-rfq-price-corrected.jpg"
+    },
+    {
+      "id": "G07-quote-selected",
+      "at": "2026-10-23T15:00:32.547Z",
+      "url": "http://127.0.0.1:18100/#/rfq?product=1",
+      "notes": "Cotation manuelle BNP Paribas reçue, ferme, datée et valable deux heures ; révision retenue et termes RFQ gelés.",
+      "dom": "G07-quote-selected.dom.txt",
+      "screenshot": "screenshots/G07-quote-selected.jpg"
+    },
+    {
+      "id": "G08-booking-review",
+      "at": "2026-10-23T15:00:45.432Z",
+      "url": "http://127.0.0.1:18100/#/rfq/1/booking",
+      "notes": "Revue opérationnelle : contrepartie active BNP, 1MEUR, prix100, Productv1 et preuve serveur ; confirmation désactivée avant attestation.",
+      "dom": "G08-booking-review.dom.txt",
+      "screenshot": "screenshots/G08-booking-review.jpg"
+    },
+    {
+      "id": "G09-book-created",
+      "at": "2026-10-23T15:02:33.776Z",
+      "url": "http://127.0.0.1:18100/#/booking?deal=1",
+      "notes": "Deal LEON-20261023-001 créé une fois, Productv1, nominal1MEUR prix100 et fairvalue101,05 ; fixings manquants visibles.",
+      "dom": "G09-book-created.dom.txt",
+      "screenshot": "screenshots/G09-book-created.jpg"
+    },
+    {
+      "id": "G10-refresh-source-refusal",
+      "at": "2026-10-23T15:02:56.946Z",
+      "url": "http://127.0.0.1:18100/#/booking?deal=1",
+      "notes": "Marché SYNTHETIC_SCENARIO explicite ; fixing automatique Yahoo refusé, compte rendu FAILED couverture0/1 et alerte sans succès trompeur.",
+      "dom": "G10-refresh-source-refusal.dom.txt",
+      "screenshot": "screenshots/G10-refresh-source-refusal.jpg"
+    },
+    {
+      "id": "G10-refresh-details-corrected",
+      "at": "2026-10-23T15:05:16.362Z",
+      "url": "http://127.0.0.1:18100/#/booking?deal=1",
+      "notes": "G04 corrigé : fiche ouverte et événements relus après refresh collectif ; exception atteinte visible et traitable.",
+      "dom": "G10-refresh-details-corrected.dom.txt",
+      "screenshot": "screenshots/G10-refresh-details-corrected.jpg"
+    },
+    {
+      "id": "G11-manual-fixing-review",
+      "at": "2026-10-23T15:05:27.058Z",
+      "url": "http://127.0.0.1:18100/#/booking?deal=1",
+      "notes": "Fixing synthétique saisi par exception explicite avec source et motif ; ancienne version conservée.",
+      "dom": "G11-manual-fixing-review.dom.txt",
+      "screenshot": "screenshots/G11-manual-fixing-review.jpg"
+    },
+    {
+      "id": "G12-mtm",
+      "at": "2026-10-23T15:05:39.144Z",
+      "url": "http://127.0.0.1:18100/#/booking?deal=1",
+      "notes": "MtM101,10 %, IC95[100,98;101,21], date23/10/2026 et fixing officiel159,13026754 issu de l’exception sourcée ; source synthétique explicite.",
+      "dom": "G12-mtm.dom.txt",
+      "screenshot": "screenshots/G12-mtm.jpg"
+    },
+    {
+      "id": "G13-valuation-history",
+      "at": "2026-10-23T15:06:08.807Z",
+      "url": "http://127.0.0.1:18100/#/booking/1/valuations",
+      "notes": "RunVR-1 immuable,101,10%,source synthétique ; anomalieG05 : heure15:05 affichée au lieu de17:05 dans le book.",
+      "dom": "G13-valuation-history.dom.txt",
+      "screenshot": "screenshots/G13-valuation-history.jpg"
+    },
+    {
+      "id": "G14-valuation-note-frozen",
+      "at": "2026-10-23T15:07:07.357Z",
+      "url": "http://127.0.0.1:18100/#/valo-explain?note=1&deal=1",
+      "notes": "Note issue du runVR-1, commentaire synthétique, version PDF figée sans recalcul ni écrasement du run.",
+      "dom": "G14-valuation-note-frozen.dom.txt",
+      "screenshot": "screenshots/G14-valuation-note-frozen.jpg"
+    },
+    {
+      "id": "G15-risk-greeks",
+      "at": "2026-10-23T15:08:38.559Z",
+      "url": "http://127.0.0.1:18100/#/risk?tab=portfolios",
+      "notes": "Portefeuille RECETTE UI EUR créé et affecté ; calcul réel des Greeks sous source synthétique, couverture à lire dans le résultat.",
+      "dom": "G15-risk-greeks.dom.txt",
+      "screenshot": "screenshots/G15-risk-greeks.jpg"
+    },
+    {
+      "id": "G16-ccr-link-before",
+      "at": "2026-10-23T15:08:38.746Z",
+      "url": "http://127.0.0.1:18100/risk/ccr",
+      "notes": "Anomalie G06 : lien absolu /risk/ccr au lieu du routage hash ; navigation en dehors de la SPA.",
+      "dom": "G16-ccr-link-before.dom.txt",
+      "screenshot": "screenshots/G16-ccr-link-before.jpg"
+    },
+    {
+      "id": "G17-risk-scope-uat",
+      "at": "2026-10-23T15:09:39.941Z",
+      "url": "http://127.0.0.1:18100/#/risk?tab=portfolios",
+      "notes": "Périmètre UAT explicite : zéro position, aucun calcul possible ; le Deal manuel du périmètre Production est exclu.",
+      "dom": "G17-risk-scope-uat.dom.txt",
+      "screenshot": "screenshots/G17-risk-scope-uat.jpg"
+    },
+    {
+      "id": "G18-risk-stress",
+      "at": "2026-10-23T15:09:53.541Z",
+      "url": "http://127.0.0.1:18100/#/risk?tab=portfolios",
+      "notes": "Stress Crash actions explicite : spot-20%, vol+10points ; résultat et historique Production conservés.",
+      "dom": "G18-risk-stress.dom.txt",
+      "screenshot": "screenshots/G18-risk-stress.jpg"
+    },
+    {
+      "id": "G19-client-mandate",
+      "at": "2026-10-23T15:10:43.681Z",
+      "url": "http://127.0.0.1:18100/#/clients/fiche/1",
+      "notes": "Client fictif RECETTE UI Gestion et mandat EUR créés ; historique vide explicite sans statistiques inventées.",
+      "dom": "G19-client-mandate.dom.txt",
+      "screenshot": "screenshots/G19-client-mandate.jpg"
+    },
+    {
+      "id": "G20-crm-opportunity",
+      "at": "2026-10-23T15:11:18.272Z",
+      "url": "http://127.0.0.1:18100/#/clients/opportunites/1",
+      "notes": "Opportunité fictive OPP-20261023-001 : client, mandat, contact principal, nominal et format conservés.",
+      "dom": "G20-crm-opportunity.dom.txt",
+      "screenshot": "screenshots/G20-crm-opportunity.jpg"
+    },
+    {
+      "id": "G21-crm-loss",
+      "at": "2026-10-23T15:11:27.958Z",
+      "url": "http://127.0.0.1:18100/#/clients/opportunites/1",
+      "notes": "Clôture perdue impossible sans motif ; scénario Timing motivé conservé sans transaction inventée.",
+      "dom": "G21-crm-loss.dom.txt",
+      "screenshot": "screenshots/G21-crm-loss.jpg"
+    },
+    {
+      "id": "G22-optimizer-budget",
+      "at": "2026-10-23T15:12:07.509Z",
+      "url": "http://127.0.0.1:18100/#/structuring/optimizer",
+      "notes": "Optimizer : Athena12mois monoAIR,σ30%,q2%,cible100%,tolérance0,5point,1candidat,N4000,1worker,budget60s admis20,1Mo.",
+      "dom": "G22-optimizer-budget.dom.txt",
+      "screenshot": "screenshots/G22-optimizer-budget.jpg"
+    },
+    {
+      "id": "G23-optimizer-confirmed",
+      "at": "2026-10-23T15:12:46.856Z",
+      "url": "http://127.0.0.1:18100/#/structuring/researches/8de7e882-6dce-4744-8190-08ab2223322b",
+      "notes": "Un candidat confirmé : coupon15,69% annuel nominal, prix100,03%,IC[99,78;100,28],probperteQ4,99%,contrôles indépendantsN/2N ; zéro échec.",
+      "dom": "G23-optimizer-confirmed.dom.txt",
+      "screenshot": "screenshots/G23-optimizer-confirmed.jpg"
+    },
+    {
+      "id": "G24-optimizer-resume",
+      "at": "2026-10-23T15:12:53.740Z",
+      "url": "http://127.0.0.1:18100/#/structuring/optimizer?from=8de7e882-6dce-4744-8190-08ab2223322b",
+      "notes": "Reprise de recherche depuis l’archive : nouvelle étude distincte, inputs de marché et bornes de recherche restaurés.",
+      "dom": "G24-optimizer-resume.dom.txt",
+      "screenshot": "screenshots/G24-optimizer-resume.jpg"
+    },
+    {
+      "id": "G25-reinvest-filtered",
+      "at": "2026-10-23T15:13:28.205Z",
+      "url": "http://127.0.0.1:18100/#/reinvest",
+      "notes": "Scan de réinvestissement borné à AIR : résultat non admissible détaillé, aucun candidat présenté comme recommandé.",
+      "dom": "G25-reinvest-filtered.dom.txt",
+      "screenshot": "screenshots/G25-reinvest-filtered.jpg"
+    },
+    {
+      "id": "G26-front-profile",
+      "at": "2026-10-23T15:14:45.169Z",
+      "url": "http://127.0.0.1:18100/#/reinvest",
+      "notes": "Profil Front activé : administration absente ; contexte de l’onglet remplacé et saisies du contexte précédent purgées.",
+      "dom": "G26-front-profile.dom.txt",
+      "screenshot": "screenshots/G26-front-profile.jpg"
+    },
+    {
+      "id": "G27-front-booking-refused",
+      "at": "2026-10-23T15:14:50.926Z",
+      "url": "http://127.0.0.1:18100/#/",
+      "notes": "Accès direct au booking Front testé ; route effective et absence de commande de booking relevées.",
+      "dom": "G27-front-booking-refused.dom.txt",
+      "screenshot": "screenshots/G27-front-booking-refused.jpg"
+    },
+    {
+      "id": "G28-operations-pricer-refused",
+      "at": "2026-10-23T15:15:16.983Z",
+      "url": "http://127.0.0.1:18100/#/",
+      "notes": "Profil Opérations : accès direct au Pricer refusé par la route ; reste sur l’accueil.",
+      "dom": "G28-operations-pricer-refused.dom.txt",
+      "screenshot": "screenshots/G28-operations-pricer-refused.jpg"
+    },
+    {
+      "id": "G29-operations-rfq-projection-before",
+      "at": "2026-10-23T15:16:07.440Z",
+      "url": "http://127.0.0.1:18100/#/rfq?rfq=1",
+      "notes": "Opérations : hypothèses et commandes de pricing absentes, cotation bookée non modifiable. AnomalieG07 : panneau invite à un calcul inaccessible et faux avertissement meilleur prix non retenu quand la comparaison est indisponible.",
+      "dom": "G29-operations-rfq-projection-before.dom.txt",
+      "screenshot": "screenshots/G29-operations-rfq-projection-before.jpg"
+    },
+    {
+      "id": "G29-operations-rfq-corrected",
+      "at": "2026-10-23T15:18:57.434Z",
+      "url": "http://127.0.0.1:18100/#/rfq?rfq=1",
+      "notes": "G07 corrigé : message de restriction de pricing ; aucune invitation inaccessible ni verdict de meilleur prix sans comparaison ; book conservé.",
+      "dom": "G29-operations-rfq-corrected.dom.txt",
+      "screenshot": "screenshots/G29-operations-rfq-corrected.jpg"
+    },
+    {
+      "id": "G30-rfq-reload-corrected",
+      "at": "2026-10-23T15:19:16.699Z",
+      "url": "http://127.0.0.1:18100/#/rfq?rfq=1",
+      "notes": "G03 : sélection depuis l’intention Product remplace l’URL par rfq=1 ; rechargement rouvre la RFQ bookée, sans nouvelle demande.",
+      "dom": "G30-rfq-reload-corrected.dom.txt",
+      "screenshot": "screenshots/G30-rfq-reload-corrected.jpg"
+    },
+    {
+      "id": "G31-history-time-corrected",
+      "at": "2026-10-23T15:19:17.009Z",
+      "url": "http://127.0.0.1:18100/#/booking/1/valuations",
+      "notes": "G05 : historique du runVR-1 affiché17:05 comme le book, lecture UTC explicite ; dates contractuelles inchangées.",
+      "dom": "G31-history-time-corrected.dom.txt",
+      "screenshot": "screenshots/G31-history-time-corrected.jpg"
+    },
+    {
+      "id": "G32-ccr-route-corrected",
+      "at": "2026-10-23T15:19:45.985Z",
+      "url": "http://127.0.0.1:18100/#/risk/ccr",
+      "notes": "G06 : lien CCR corrigé en #/risk/ccr ; catalogue juridique actif et diagnostic de périmètre accessibles, récupération externe désactivée.",
+      "dom": "G32-ccr-route-corrected.dom.txt",
+      "screenshot": "screenshots/G32-ccr-route-corrected.jpg"
+    },
+    {
+      "id": "G33-ccr-incomplete",
+      "at": "2026-10-23T15:20:56.973Z",
+      "url": "http://127.0.0.1:18100/#/risk/ccr",
+      "notes": "CCR borné64x64,2horizons,NMtM1000 : résultat explicite incomplet, historique ajusté local insuffisant, profil crédit incomplet ; PFE/CVA indisponibles et limites non qualifiées, jamais remplacées par zéro.",
+      "dom": "G33-ccr-incomplete.dom.txt",
+      "screenshot": "screenshots/G33-ccr-incomplete.jpg"
+    },
+    {
+      "id": "G34-uat-preview",
+      "at": "2026-10-23T15:25:05.377Z",
+      "url": "http://127.0.0.1:18100/#/admin/uat-generator",
+      "notes": "Lot isolé de 1 Product Capital Garanti, 1 pricing, 1 booking, sans MTM ni Greeks. Prévisualisation sans création.",
+      "dom": "G34-uat-preview.dom.txt",
+      "screenshot": "screenshots/G34-uat-preview.jpg"
+    },
+    {
+      "id": "G35-uat-complete",
+      "at": "2026-10-23T15:26:56.481Z",
+      "url": "http://127.0.0.1:18100/#/admin/uat-generator",
+      "notes": "Lot UAT 20261023-152615-CEA95B terminé : 1 Product, 1 deal, aucun RFQ/MTM/Greek. Premier échec du lanceur de recette écarté et corrigé (guard main Windows). Heure UTC encore visible avant extension G05.",
+      "dom": "G35-uat-complete.dom.txt",
+      "screenshot": "screenshots/G35-uat-complete.jpg"
+    },
+    {
+      "id": "G36-production-filter",
+      "at": "2026-10-23T15:27:01.808Z",
+      "url": "http://127.0.0.1:18100/#/risk",
+      "notes": "Production : seul le deal manuel LEON-20261023-001, nominal 1 M EUR, malgré un lot UAT désormais présent.",
+      "dom": "G36-production-filter.dom.txt",
+      "screenshot": "screenshots/G36-production-filter.jpg"
+    },
+    {
+      "id": "G37-uat-filter",
+      "at": "2026-10-23T15:27:10.509Z",
+      "url": "http://127.0.0.1:18100/#/risk",
+      "notes": "Recette UAT : seul le Capital Garanti nominal 100 kEUR, Greeks absents explicitement ; le deal manuel de Production est exclu.",
+      "dom": "G37-uat-filter.dom.txt",
+      "screenshot": "screenshots/G37-uat-filter.jpg"
+    },
+    {
+      "id": "G38-pdf-corrected-frozen",
+      "at": "2026-10-23T15:27:39.144Z",
+      "url": "http://127.0.0.1:18100/#/valo-explain?note=2&deal=1",
+      "notes": "Nouvelle note #2 figée en révision 2 sur VR-1 à 101,10 %. Archive #1 conservée ; nouveau PDF téléchargé pour contrôle de provenance et mise en page.",
+      "dom": "G38-pdf-corrected-frozen.dom.txt",
+      "screenshot": "screenshots/G38-pdf-corrected-frozen.jpg"
+    },
+    {
+      "id": "G39-uat-time-corrected",
+      "at": "2026-10-23T15:28:37.202Z",
+      "url": "http://127.0.0.1:18100/#/admin/uat-generator",
+      "notes": "Lot créé à 15:26 UTC affiché 17:26 local, conforme au fuseau du navigateur.",
+      "dom": "G39-uat-time-corrected.dom.txt",
+      "screenshot": "screenshots/G39-uat-time-corrected.jpg"
+    },
+    {
+      "id": "G40-demo-masked",
+      "at": "2026-10-23T15:33:55.104Z",
+      "url": "http://127.0.0.1:18100/?graphical=delivery#/rfq?rfq=1",
+      "notes": "Mode Démo actif : panier, nominal, prix modèle, cotations, paramètres, PayScript et panneaux de calcul masqués ; build final index-MfkNU1UR.js vérifié.",
+      "dom": "G40-demo-masked.dom.txt",
+      "screenshot": "screenshots/G40-demo-masked.jpg"
+    },
+    {
+      "id": "G41-demo-restored",
+      "at": "2026-10-23T15:33:55.569Z",
+      "url": "http://127.0.0.1:18100/?graphical=delivery#/rfq?rfq=1",
+      "notes": "Mode Démo désactivé : valeurs 101,05 %, AIR.PA et quote 100 restaurées, RFQ/Deal identiques.",
+      "dom": "G41-demo-restored.dom.txt",
+      "screenshot": "screenshots/G41-demo-restored.jpg"
+    },
+    {
+      "id": "G42-bnp-isolation",
+      "at": "2026-10-23T15:34:16.001Z",
+      "url": "http://127.0.0.1:18100/?graphical=delivery#/rfq",
+      "notes": "BNP Paribas Super utilisateur : liste RFQ vide ; aucun dossier ni prix du book Leonteq après changement explicite de contexte.",
+      "dom": "G42-bnp-isolation.dom.txt",
+      "screenshot": "screenshots/G42-bnp-isolation.jpg"
+    },
+    {
+      "id": "G43-bank-inbox-empty",
+      "at": "2026-10-23T15:34:21.941Z",
+      "url": "http://127.0.0.1:18100/?graphical=delivery#/rfq/recues",
+      "notes": "File RFQ reçues BNP accessible, vide sans relation réseau établie. Aucun échange bilatéral publié dans cette recette ; ce cas reste à qualifier séparément.",
+      "dom": "G43-bank-inbox-empty.dom.txt",
+      "screenshot": "screenshots/G43-bank-inbox-empty.jpg"
+    },
+    {
+      "id": "G44-final-mask-preserves-ccr",
+      "at": "2026-10-23T15:43:09.469Z",
+      "url": "http://127.0.0.1:18100/?graphical=final-proof#/rfq?rfq=1",
+      "notes": "Build final index-B-gcOkXN.js ; panier/prix/quote masqués. Panneau CCR conservé dans le DOM mais invisible, sans démontage ni perte de ses saisies/résultats.",
+      "dom": "G44-final-mask-preserves-ccr.dom.txt",
+      "screenshot": "screenshots/G44-final-mask-preserves-ccr.jpg"
+    }
+  ],
+  "checkpoint_count": 48,
+  "graphical_anomalies": [
+    {
+      "id": "G01",
+      "priority": "P1",
+      "title": "Redémarrage géré refusant sa propre table d’identité vide",
+      "workstreams": [
+        "C02"
+      ],
+      "checkpoints": [
+        "G01-portal",
+        "G02-organization-home"
+      ],
+      "files": [
+        "backend/app/hybrid/business.py"
+      ],
+      "status": "corrected_locally_revalidated"
+    },
+    {
+      "id": "G02",
+      "priority": "P1",
+      "title": "Reçu de pricing à l’émission refusé sur valuation_date",
+      "workstreams": [
+        "C06",
+        "C18"
+      ],
+      "checkpoints": [
+        "G06-rfq-price-corrected",
+        "G09-book-created"
+      ],
+      "files": [
+        "backend/app/services/rfq_booking.py"
+      ],
+      "status": "corrected_locally_revalidated"
+    },
+    {
+      "id": "G03",
+      "priority": "P2",
+      "title": "Lien de dossier RFQ perdu après transition depuis Product",
+      "workstreams": [
+        "C06",
+        "C07",
+        "C08"
+      ],
+      "checkpoints": [
+        "G30-rfq-reload-corrected"
+      ],
+      "files": [
+        "frontend/src/views/RfqView.vue"
+      ],
+      "status": "corrected_locally_revalidated"
+    },
+    {
+      "id": "G04",
+      "priority": "P1",
+      "title": "Détails et MtM périmés après refresh collectif du book",
+      "workstreams": [
+        "C10",
+        "C13",
+        "C18",
+        "C26"
+      ],
+      "checkpoints": [
+        "G10-refresh-details-corrected",
+        "G11-manual-fixing-review",
+        "G12-mtm"
+      ],
+      "files": [
+        "frontend/src/views/BookingView.vue",
+        "frontend/src/composables/useBookingMtm.js"
+      ],
+      "status": "corrected_locally_revalidated"
+    },
+    {
+      "id": "G05",
+      "priority": "P2",
+      "title": "Historiques UTC affichés comme des heures locales",
+      "workstreams": [
+        "C19",
+        "C21",
+        "C27"
+      ],
+      "checkpoints": [
+        "G31-history-time-corrected",
+        "G39-uat-time-corrected"
+      ],
+      "files": [
+        "frontend/src/views/DealValuationsView.vue",
+        "frontend/src/views/RiskManagementView.vue",
+        "frontend/src/views/AdminUatGeneratorView.vue"
+      ],
+      "status": "corrected_locally_revalidated"
+    },
+    {
+      "id": "G06",
+      "priority": "P2",
+      "title": "Lien CCR sortant du routeur à hash",
+      "workstreams": [
+        "C21"
+      ],
+      "checkpoints": [
+        "G32-ccr-route-corrected",
+        "G33-ccr-incomplete"
+      ],
+      "files": [
+        "frontend/src/views/RiskManagementView.vue"
+      ],
+      "status": "corrected_locally_revalidated"
+    },
+    {
+      "id": "G07",
+      "priority": "P2",
+      "title": "Invitation privée inaccessible et fausse alerte de meilleure quote",
+      "workstreams": [
+        "C01",
+        "C23"
+      ],
+      "checkpoints": [
+        "G29-operations-rfq-corrected"
+      ],
+      "files": [
+        "frontend/src/components/RfqPricingPanel.vue",
+        "frontend/src/views/RfqView.vue"
+      ],
+      "status": "corrected_locally_revalidated"
+    },
+    {
+      "id": "G08",
+      "priority": "P2",
+      "title": "Source Yahoo affirmée à tort dans le PDF",
+      "workstreams": [
+        "C11",
+        "C19"
+      ],
+      "checkpoints": [
+        "G38-pdf-corrected-frozen"
+      ],
+      "files": [
+        "backend/app/core/deal_valuation_pdf.py"
+      ],
+      "status": "corrected_locally_revalidated"
+    },
+    {
+      "id": "G09",
+      "priority": "P2",
+      "title": "Valeurs RFQ visibles en mode Démo",
+      "workstreams": [
+        "C01",
+        "C27"
+      ],
+      "checkpoints": [
+        "G40-demo-masked",
+        "G41-demo-restored",
+        "G44-final-mask-preserves-ccr"
+      ],
+      "files": [
+        "frontend/src/views/RfqView.vue"
+      ],
+      "status": "corrected_locally_revalidated"
+    }
+  ],
+  "open_graphical_anomalies": 0,
+  "historical_finding_counts_unchanged": true,
+  "historical_failure_cases_unchanged": 180,
+  "targeted_backend": {
+    "passed_distinct": 151,
+    "failed": 0,
+    "skipped": 0,
+    "test_files": 8,
+    "new_cases": 6,
+    "runs": [
+      {
+        "name": "G01-tests",
+        "passed": 36,
+        "xml": "G01-tests.xml",
+        "sha256": "508891fe1326604e1d55313b600c93d2ed185d1bed332ab8e26cc8940f6dca12",
+        "network_guard": {
+          "external_http_disabled": true,
+          "blocked_attempts": []
+        }
+      },
+      {
+        "name": "G02-after",
+        "passed": 61,
+        "xml": "G02-after.xml",
+        "sha256": "0506472b910f51f57fb1d0c30139caa674970c287de84fc4574bd3c85f8d295b",
+        "network_guard": {
+          "external_http_disabled": true,
+          "blocked_attempts": []
+        }
+      },
+      {
+        "name": "G08-after",
+        "passed": 54,
+        "xml": "G08-after.xml",
+        "sha256": "bef6431c32ff62e2f0e166fd196ad58d99f3892236ca05aff91eec145d5dac7f",
+        "network_guard": {
+          "external_http_disabled": true,
+          "blocked_attempts": []
+        }
+      }
+    ],
+    "identities": [
+      "backend.tests.test_business_permissions::test_agreement_permission_matrix_and_audited_denials[organization]",
+      "backend.tests.test_business_permissions::test_agreement_permission_matrix_and_audited_denials[standalone]",
+      "backend.tests.test_business_permissions::test_booking_review_refuses_stale_or_missing_evidence[organization]",
+      "backend.tests.test_business_permissions::test_booking_review_refuses_stale_or_missing_evidence[standalone]",
+      "backend.tests.test_business_permissions::test_crm_details_aggregates_signals_and_alerts_follow_deal_scope[organization]",
+      "backend.tests.test_business_permissions::test_crm_details_aggregates_signals_and_alerts_follow_deal_scope[standalone]",
+      "backend.tests.test_business_permissions::test_front_colleague_operations_controller_handoff_and_revocation[organization]",
+      "backend.tests.test_business_permissions::test_front_colleague_operations_controller_handoff_and_revocation[standalone]",
+      "backend.tests.test_business_permissions::test_historical_rfq_without_desk_keeps_personal_access[organization]",
+      "backend.tests.test_business_permissions::test_historical_rfq_without_desk_keeps_personal_access[standalone]",
+      "backend.tests.test_business_permissions::test_manual_refresh_only_processes_the_shared_visible_book[organization]",
+      "backend.tests.test_business_permissions::test_manual_refresh_only_processes_the_shared_visible_book[standalone]",
+      "backend.tests.test_business_permissions::test_operational_valuation_keeps_contract_scope[organization]",
+      "backend.tests.test_business_permissions::test_operational_valuation_keeps_contract_scope[standalone]",
+      "backend.tests.test_business_permissions::test_scope_migration_freezes_owner_and_keeps_unknown_settlement_dates",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/compute/batches]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/grid]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price/implied-funding]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price/in-life]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/price]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/product-optimizer/run]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/scenarios]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[organization-/api/solve]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/compute/batches]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/grid]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price/implied-funding]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price/in-life]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/price]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/product-optimizer/run]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/scenarios]",
+      "backend.tests.test_business_permissions::test_secondary_profiles_cannot_compute_through_alternate_endpoints[standalone-/api/solve]",
+      "backend.tests.test_business_permissions::test_settlement_is_operations_only_idempotent_and_dates_are_distinct[organization]",
+      "backend.tests.test_business_permissions::test_settlement_is_operations_only_idempotent_and_dates_are_distinct[standalone]",
+      "backend.tests.test_business_permissions::test_shared_collections_and_documents_keep_contract_authorization[organization]",
+      "backend.tests.test_business_permissions::test_shared_collections_and_documents_keep_contract_authorization[standalone]",
+      "backend.tests.test_c19_archives::test_archive_owner_immutability_and_identical_pdf",
+      "backend.tests.test_c19_archives::test_archive_upgrade_adds_reference_column_and_reinstalls_same_guards",
+      "backend.tests.test_c19_archives::test_calculation_receipt_binds_engine_identity_to_signature",
+      "backend.tests.test_c19_archives::test_fixing_correction_invalidates_current_projection_without_changing_archive",
+      "backend.tests.test_c19_archives::test_freeze_refuses_modified_or_wrong_proof[author]",
+      "backend.tests.test_c19_archives::test_freeze_refuses_modified_or_wrong_proof[contract]",
+      "backend.tests.test_c19_archives::test_freeze_refuses_modified_or_wrong_proof[price]",
+      "backend.tests.test_c19_archives::test_freeze_refuses_modified_or_wrong_proof[purpose]",
+      "backend.tests.test_c19_archives::test_historical_claim_remains_priceable_after_current_settlement",
+      "backend.tests.test_c19_archives::test_invalid_contract_calendar_still_blocks_note",
+      "backend.tests.test_c19_archives::test_known_claim_var_scenario_carries_rate_shock_without_asset_correlation",
+      "backend.tests.test_c19_archives::test_legacy_fixed_price_is_not_a_replay",
+      "backend.tests.test_c19_archives::test_numerical_replay_failure_keeps_observed_difference",
+      "backend.tests.test_c19_archives::test_old_identity_is_not_invented_and_probe_does_not_overwrite",
+      "backend.tests.test_c19_archives::test_optimizer_terminal_evidence_is_null_safe_and_undeletable[DELETE-False]",
+      "backend.tests.test_c19_archives::test_optimizer_terminal_evidence_is_null_safe_and_undeletable[DELETE-True]",
+      "backend.tests.test_c19_archives::test_optimizer_terminal_evidence_is_null_safe_and_undeletable[request_hash=NULL-False]",
+      "backend.tests.test_c19_archives::test_optimizer_terminal_evidence_is_null_safe_and_undeletable[request_hash=NULL-True]",
+      "backend.tests.test_c19_archives::test_optimizer_terminal_evidence_is_null_safe_and_undeletable[result_json=NULL-False]",
+      "backend.tests.test_c19_archives::test_optimizer_terminal_evidence_is_null_safe_and_undeletable[result_json=NULL-True]",
+      "backend.tests.test_c19_archives::test_optimizer_terminal_evidence_is_null_safe_and_undeletable[status=NULL-False]",
+      "backend.tests.test_c19_archives::test_optimizer_terminal_evidence_is_null_safe_and_undeletable[status=NULL-True]",
+      "backend.tests.test_c19_archives::test_proposal_pdf_keeps_displayed_coupon_after_vol_changes_and_separate_successor",
+      "backend.tests.test_c19_archives::test_receivable_replay_really_uses_its_inputs[amount-1.2]",
+      "backend.tests.test_c19_archives::test_receivable_replay_really_uses_its_inputs[dr-0.01]",
+      "backend.tests.test_c19_archives::test_receivable_replay_really_uses_its_inputs[funding_curve-value5]",
+      "backend.tests.test_c19_archives::test_receivable_replay_really_uses_its_inputs[funding_spread-0.03]",
+      "backend.tests.test_c19_archives::test_receivable_replay_really_uses_its_inputs[payment_date-2026-11-30]",
+      "backend.tests.test_c19_archives::test_receivable_replay_really_uses_its_inputs[valuation_date-2026-10-02]",
+      "backend.tests.test_c19_archives::test_receivable_replay_really_uses_its_inputs[yield_curve-value3]",
+      "backend.tests.test_c19_archives::test_replay_uses_frozen_calendar_and_never_current_resolver",
+      "backend.tests.test_c19_archives::test_rfq_history_uses_dated_benchmark_and_keeps_it_private",
+      "backend.tests.test_c19_archives::test_unverified_scalar_model_benchmark_is_dated_and_detached",
+      "backend.tests.test_hybrid_bootstrap::test_bootstrap_is_idempotent_and_only_seeds_configuration",
+      "backend.tests.test_hybrid_bootstrap::test_desk_grants_do_not_allow_self_elevation",
+      "backend.tests.test_hybrid_bootstrap::test_distributor_seed_has_sales_desk_and_no_banking_policy",
+      "backend.tests.test_hybrid_bootstrap::test_foreign_installation_is_refused_before_migration",
+      "backend.tests.test_hybrid_bootstrap::test_initialization_refuses_preexisting_data_and_wrong_identity",
+      "backend.tests.test_hybrid_bootstrap::test_interrupted_transaction_can_be_initialized_without_duplicate_accounts",
+      "backend.tests.test_hybrid_bootstrap::test_local_admin_cannot_grant_technical_role_or_reassign_organization",
+      "backend.tests.test_hybrid_bootstrap::test_managed_installation_reinitializes_in_a_fresh_process",
+      "backend.tests.test_hybrid_bootstrap::test_managed_login_never_offers_simulation_registration",
+      "backend.tests.test_hybrid_bootstrap::test_managed_preflight_rejects_admin_identity_with_valid_business_bootstrap",
+      "backend.tests.test_hybrid_bootstrap::test_managed_studies_cannot_read_another_installation",
+      "backend.tests.test_hybrid_bootstrap::test_preflight_allows_empty_interrupted_schema_but_not_private_rows",
+      "backend.tests.test_hybrid_bootstrap::test_profiles_and_local_admin_are_explicit[controller-controller-403]",
+      "backend.tests.test_hybrid_bootstrap::test_profiles_and_local_admin_are_explicit[front-front-403]",
+      "backend.tests.test_hybrid_bootstrap::test_profiles_and_local_admin_are_explicit[operations-operations-403]",
+      "backend.tests.test_hybrid_bootstrap::test_profiles_and_local_admin_are_explicit[superuser-superuser-200]",
+      "backend.tests.test_hybrid_bootstrap::test_reinitialization_observes_revocation_without_restoring_it",
+      "backend.tests.test_hybrid_bootstrap::test_secondary_profiles_cannot_price_or_book_by_calling_functions",
+      "backend.tests.test_hybrid_bootstrap::test_tokens_reject_foreign_audience_issuer_and_organization",
+      "backend.tests.test_hybrid_installations::test_central_bootstrap_refuses_an_unidentified_business_database",
+      "backend.tests.test_hybrid_installations::test_central_service_has_no_business_schema_or_routes",
+      "backend.tests.test_hybrid_installations::test_directory_rejects_private_business_contents",
+      "backend.tests.test_hybrid_installations::test_layout_cannot_redirect_to_other_private_directory",
+      "backend.tests.test_hybrid_installations::test_managed_environment_does_not_inherit_other_installation",
+      "backend.tests.test_hybrid_installations::test_openai_key_is_only_forwarded_to_central_campaign_controller",
+      "backend.tests.test_hybrid_installations::test_partial_layout_resumes_and_lost_secret_is_not_replaced",
+      "backend.tests.test_hybrid_installations::test_preparation_is_repeatable_and_private",
+      "backend.tests.test_hybrid_installations::test_prepare_refuses_unidentified_or_protected_data",
+      "backend.tests.test_installation_identity_security::test_additive_session_migration_preserves_accounts_and_is_repeatable",
+      "backend.tests.test_installation_identity_security::test_admin_preflight_rejects_foreign_or_unmarked_db_before_any_migration[business]",
+      "backend.tests.test_installation_identity_security::test_admin_preflight_rejects_foreign_or_unmarked_db_before_any_migration[foreign-marker]",
+      "backend.tests.test_installation_identity_security::test_admin_preflight_rejects_foreign_or_unmarked_db_before_any_migration[unmarked-admin]",
+      "backend.tests.test_installation_identity_security::test_central_foreign_identity_is_refused_without_schema_changes",
+      "backend.tests.test_installation_identity_security::test_legacy_read_only_book_uses_separate_revocation_and_audit_store",
+      "backend.tests.test_installation_identity_security::test_marked_admin_workspace_starts_idempotently_and_retains_revocations",
+      "backend.tests.test_installation_identity_security::test_password_portal_directory_and_central_session_revocation_without_developer_mode",
+      "backend.tests.test_rfq_execution::test_acceptance_after_expiry_or_future_confirmation_is_rejected",
+      "backend.tests.test_rfq_execution::test_booking_refusal_preserves_confirmation_and_block_reason",
+      "backend.tests.test_rfq_execution::test_concurrent_booking_of_same_execution_returns_one_deal",
+      "backend.tests.test_rfq_execution::test_confirmed_trade_books_after_quote_expiry_and_replays_once",
+      "backend.tests.test_rfq_execution::test_duplicate_execution_reference_across_rfqs_has_conflict",
+      "backend.tests.test_rfq_execution::test_expired_offer_cannot_be_backdated_into_a_new_treatment",
+      "backend.tests.test_rfq_execution::test_external_confirmation_freezes_terms_and_preserves_manual_route",
+      "backend.tests.test_rfq_execution::test_external_conflict_keeps_confirmed_trade_and_blocks_booking",
+      "backend.tests.test_rfq_execution::test_immutable_evidence_and_duplicate_execution_reference",
+      "backend.tests.test_rfq_execution::test_manual_booking_without_new_confirmation_keeps_existing_workflow",
+      "backend.tests.test_rfq_execution::test_network_booking_requires_exact_confirmation_without_rewriting_publication",
+      "backend.tests.test_rfq_execution::test_no_book_right_and_foreign_organization_cannot_confirm",
+      "backend.tests.test_rfq_execution::test_relationship_suspension_blocks_new_confirmation",
+      "backend.tests.test_rfq_execution::test_requested_is_not_confirmation_and_cancel_preserves_history",
+      "backend.tests.test_rfq_product_exchange::test_another_user_cannot_read_either_projection",
+      "backend.tests.test_rfq_product_exchange::test_inactive_recipient_and_past_or_unzoned_deadlines_are_refused",
+      "backend.tests.test_rfq_product_exchange::test_inception_receipt_cannot_attest_a_later_rfq_valuation",
+      "backend.tests.test_rfq_product_exchange::test_invalid_or_duplicate_recipient_is_refused[ids0]",
+      "backend.tests.test_rfq_product_exchange::test_invalid_or_duplicate_recipient_is_refused[ids1]",
+      "backend.tests.test_rfq_product_exchange::test_native_pricing_uses_the_current_engine_and_persisted_private_inputs",
+      "backend.tests.test_rfq_product_exchange::test_price_is_not_recorded_after_inputs_change",
+      "backend.tests.test_rfq_product_exchange::test_pricer_can_change_private_context_but_not_contractual_terms",
+      "backend.tests.test_rfq_product_exchange::test_request_projection_uses_product_and_keeps_private_data_out",
+      "backend.tests.test_rfq_product_exchange::test_rfqs_keep_their_own_terms_version_after_a_product_revision",
+      "backend.tests.test_rfq_product_exchange::test_stale_version_never_prepares_a_different_request[2]",
+      "backend.tests.test_rfq_product_exchange::test_stale_version_never_prepares_a_different_request[99]",
+      "backend.tests.test_valuation_notes::test_ai_is_explicit_grounded_and_does_not_change_draft",
+      "backend.tests.test_valuation_notes::test_drafts_are_revision_checked_and_versions_keep_identical_pdf",
+      "backend.tests.test_valuation_notes::test_frozen_spot_move_and_funding_are_separate_and_telescope",
+      "backend.tests.test_valuation_notes::test_legacy_note_warns_without_inventing_history",
+      "backend.tests.test_valuation_notes::test_noncomparable_runs_show_only_observed_difference[N]",
+      "backend.tests.test_valuation_notes::test_noncomparable_runs_show_only_observed_difference[contract_version]",
+      "backend.tests.test_valuation_notes::test_noncomparable_runs_show_only_observed_difference[engine_fingerprint]",
+      "backend.tests.test_valuation_notes::test_noncomparable_runs_show_only_observed_difference[model]",
+      "backend.tests.test_valuation_notes::test_noncomparable_runs_show_only_observed_difference[seed]",
+      "backend.tests.test_valuation_notes::test_note_reuses_exact_price_archives_history_and_computes_frozen_greeks",
+      "backend.tests.test_valuation_notes::test_ownership_and_http_validation",
+      "backend.tests.test_valuation_notes::test_pdf_labels_the_archived_observation_source[None-non renseign\\xe9e]",
+      "backend.tests.test_valuation_notes::test_pdf_labels_the_archived_observation_source[SYNTHETIC_SCENARIO-SYNTHETIC_SCENARIO \\u2014 donn\\xe9es de sc\\xe9nario, sans cours de march\\xe9 r\\xe9el]",
+      "backend.tests.test_valuation_notes::test_pdf_labels_the_archived_observation_source[YAHOO_FINANCE-Yahoo Finance]",
+      "backend.tests.test_valuation_notes::test_replay_mismatch_blocks_attribution",
+      "backend.tests.test_valuation_notes::test_reversed_comparison_and_calendar_roll_reconcile",
+      "backend.tests.test_valuation_notes::test_saved_notes_block_normal_deal_deletion_but_uat_purge_cleans_children",
+      "backend.tests.test_valuation_notes::test_sources_are_compact_authorized_and_preserve_dates",
+      "backend.tests.test_valuation_notes::test_stream_has_progress_and_persists_one_note",
+      "backend.tests.test_valuation_notes::test_two_identical_frozen_contexts_have_zero_attribution",
+      "backend.tests.test_valuation_notes::test_two_underlying_correlation_change_uses_archived_matrix"
+    ],
+    "failed_reproduction_separate": "G02-before.xml"
+  },
+  "frontend": {
+    "passed": 737,
+    "test_files": 83,
+    "new_cases": 6,
+    "build": "build-final-proof",
+    "build_log": "build-final-proof.log",
+    "build_succeeded": true,
+    "final_script": "assets/index-B-gcOkXN.js"
+  },
+  "reconciliation": {
+    "query_only": true,
+    "counts": {
+      "products": 2,
+      "rfq_requests": 1,
+      "deals": 2,
+      "official_fixing_versions": 1,
+      "valuation_runs": 2,
+      "valuation_notes": 2,
+      "valuation_note_versions": 2,
+      "optimizer_researches": 1,
+      "uat_generation_batches": 1
+    },
+    "foreign_key_violations": 0,
+    "bnp_products_rfq_deals": [
+      0,
+      0,
+      0
+    ],
+    "rfq": {
+      "id": 1,
+      "product_id": 1,
+      "product_terms_version": 1,
+      "selected_quote_id": 1,
+      "selected_quote_revision": 3,
+      "model_price": 101.04679999999999
+    },
+    "deal": {
+      "id": 1,
+      "product_id": 1,
+      "product_terms_version": 1,
+      "rfq_id": 1,
+      "nominal": 1000000.0,
+      "price_traded": 100.0,
+      "sens": "vente",
+      "uat_batch_id": null
+    },
+    "quote": {
+      "id": 1,
+      "revision": 3,
+      "price": 100.0,
+      "counterparty_id": 10,
+      "identity_frozen": 1
+    },
+    "receipt_signed_and_price_matched": true,
+    "official_fixing": {
+      "id": 1,
+      "deal_id": 1,
+      "version": 1,
+      "status": "VALIDATED",
+      "spots_json": "{\"Airbus\": 159.13026754}",
+      "provider": "USER_DECLARED_SOURCE",
+      "source_type": "USER_DECISION",
+      "external_reference": "RECETTE SYNTHETIQUE — synthetic_market.json seed42 / AIR.PA / 2026-10-23",
+      "validation_reason": "Recette graphique isolée : cours synthétique contrôlé, sans donnée réelle ni certification Yahoo.",
+      "record_sha256": "9843c27ad7bcdab9847b3c25e4c92842a6b3cd87bc4bef71380c1c672f0ec5d1",
+      "validated_by": 1
+    },
+    "mtm": 1.010952,
+    "run_id": 1,
+    "context_hash": "bdc0d78bfb9c15447054fc11f45518ead6a2986603748a5b71ff06bd46fff6c3",
+    "notes": [
+      {
+        "note_id": 1,
+        "filename": "valuation-note.pdf",
+        "pdf_sha256": "f2ce0ce732aa12a90b6b964f717f50bb5cc081b7240c07350f722213751269a7",
+        "run_id": 1,
+        "context_hash": "bdc0d78bfb9c15447054fc11f45518ead6a2986603748a5b71ff06bd46fff6c3",
+        "frozen_bytes_identical": true
+      },
+      {
+        "note_id": 2,
+        "filename": "valuation-note-corrected.pdf",
+        "pdf_sha256": "a9183f0b26d21af5ae72ec1209e7a87af743fb1af9335b545c4ae0e8cebf4df0",
+        "run_id": 1,
+        "context_hash": "bdc0d78bfb9c15447054fc11f45518ead6a2986603748a5b71ff06bd46fff6c3",
+        "frozen_bytes_identical": true
+      }
+    ],
+    "optimizer_export_identical": true,
+    "production_deals": 1,
+    "uat_deals": 1
+  },
+  "workstream_scopes": {
+    "C01": "Profils Front/Opérations/Super utilisateur, restriction des calculs privés et Démo du dossier RFQ ; matrice D05 exhaustive non couverte.",
+    "C02": "Portail, changement de contexte, deux installations et redémarrages réels isolés ; anciens workspaces Admin et TLS non couverts.",
+    "C03": "Quote manuelle avec contrepartie juridique reconnue ; exception administrateur et régularisation historique non couvertes.",
+    "C05": "Dates du Phoenix et jointures observation/règlement explicitement choisies ; panier/stubs longs non rejoués en UI.",
+    "C06": "Product 1/v1 conservé jusqu’à RFQ et Deal 1, reçu réel, rechargement stable ; changement v2 et synchronisation ancienne non rejoués en UI.",
+    "C07": "Rechargement RFQ et reprise Optimizer ; tous brouillons et budgets de volumétrie non couverts.",
+    "C08": "Filiation native et absence de création supplémentaire au rechargement ; perte réseau et retry concurrent non provoqués en UI.",
+    "C09": "Compilation/pricing des templates Phoenix mémoire et Athena ; grammaire invalide et matrice mémoire/STOP non rejouées en UI.",
+    "C10": "Refresh/détail/erreur/retry et invalidation de MtM couverts par tests ; réponse tardive d’une calibration non provoquée dans le navigateur.",
+    "C11": "Source synthétique effective, refus de fixing automatique et de dividende inconnu ; aucun flux réel ni FX qualifié dans cette recette.",
+    "C13": "Exception de strike motivée, source conservée et fixing officiel v1 consommé au MtM ; correction après paiement non couverte.",
+    "C14": "Calendrier et première transition de strike cohérents ; coupons, rappel, maturité et paiement futurs non appliqués.",
+    "C18": "Calculs réels et contextes conservés Pricer/RFQ/MtM/Greeks/stress ; domaine numérique avancé non élargi.",
+    "C19": "VR-1 conservé dans deux notes distinctes, PDF figés et provenance corrigée ; vraie adoption historique et attribution entre deux dates non couvertes.",
+    "C20": "Recherche Athena bornée, candidat confirmé, export identique à l’archive, reprise ; dépassement/interruption non provoqués.",
+    "C21": "Greeks et choc explicite ; CCR accessible mais incomplet faute de données qualifiées ; VaR et CVA positives non qualifiées.",
+    "C23": "Quote manuelle sélectionnée r3 et booking, file bancaire vide ; publication/exécution réseau bilatérale non effectuée.",
+    "C24": "Client fictif, mandat, contact et opportunité perdue motivée ; gagné/booké, attribution déplacée et multi-devises non rejoués en UI.",
+    "C25": "Scan et exclusion explicite pour dividende inconnu ; roll positif, proposition figée et PDF non couverts.",
+    "C26": "Alertes de fixing et refresh collectif vers registre/MtM ; rapport de paiement et correction consommée non couverts.",
+    "C27": "Lot UAT réel isolé de Production dans le risque ; Démo RFQ ; suppression du lot et tous historiques non rejoués en UI."
+  },
+  "cross_validation_scopes": {
+    "T01": "Partiel graphique : trois profils et deux organisations ; pas de révocation en vol ni partage collectif complet.",
+    "T02": "Partiel graphique : filiation et rechargement stables ; pas de concurrence ou de réponse perdue provoquée.",
+    "T04": "Partiel graphique : calendrier explicite et manque de marché visible ; pas du scénario combiné import/FX/suspension.",
+    "T08": "Partiel graphique : strike officiel manuel puis MtM/Greeks/CCR incomplet ; pas de coupon corrigé après consommation.",
+    "T10": "Partiel graphique : Production/UAT séparés et hypothèses/exclusions explicites ; pas de VaR complète ni multi-devises.",
+    "T12": "Non qualifié graphiquement en bilatéral : quote manuelle locale et file de réception vide seulement.",
+    "T13": "Partiel graphique : archive VR-1 et deux PDF figés concordants ; pas de rejeu après évolution du moteur.",
+    "T14": "Partiel graphique : objets CRM Demo et clôture perdue motivée ; pas du scénario daté/devises/réattribution complet.",
+    "T15": "Partiel graphique : une recherche terminée, exportée puis reprise ; pas de limite d’itérations ni dépassement forcé.",
+    "T16": "Refus graphique contrôlé pour dividende inconnu ; aucune proposition positive figée/exportée."
+  },
+  "coverage_limits": [
+    "Qualification locale sur marché synthétique et format bureau ; aucune certification de production.",
+    "Pas de publication RFQ ni exécution bilatérale signée entre les deux services dans le navigateur.",
+    "Pas de coupon/rappel/maturité/paiement appliqué, de correction après consommation ni de rapprochement P&L cash complet.",
+    "CCR incomplet explicite ; pas de PFE/CVA positive qualifiée ni de VaR avec historique long.",
+    "Réinvestissement refusé pour dividende inconnu ; roll positif, gel et PDF restent à exercer.",
+    "Surfaces, calibrations, Heston/LSV/taux stochastiques et domaine élargi C16 non qualifiés graphiquement ici.",
+    "Imports historiques, reprise des anciens workspaces, TLS, navigateurs multiples et formats étroits non qualifiés.",
+    "La campagne backend complète antérieure reste datée ; seuls 151 tests backend ciblés ont été exécutés ici."
+  ],
+  "business_decisions_changed": false,
+  "historical_full_backend": {
+    "proof": "BACKEND_FULL_VALIDATION.json",
+    "passed": 3943,
+    "skipped": 3,
+    "rerun_this_delivery": false
+  },
+  "services_stopped": true,
+  "owned_listeners_remaining": 0,
+  "real_database_absent": true,
+  "commit_or_push": false,
+  "outillage_incidents_excluded": [
+    "PowerShell npm argument forwarding corrected for isolated builds.",
+    "Windows spawn main guard added to the runtime adapter; native generator then completed.",
+    "Stale browser assets excluded; fresh page final script identity checked."
+  ],
+  "preservation": {
+    "initial_existing_files": 1311,
+    "existing_files_changed_in_scope": 21,
+    "new_files_in_scope": 3,
+    "unrelated_files_changed": 0,
+    "historical_runtime_artifacts_preserved": 155,
+    "historical_full_backend_proof_preserved": true,
+    "frozen_step_1_reference_preserved": true,
+    "findings_decisions_dependencies_and_counts_preserved": true,
+    "historical_failure_ledger_preserved": true,
+    "frontend_dist_preserved": true,
+    "scoped_diff_check": "pass",
+    "head_and_branch_unchanged": true
+  },
+  "runtime_evidence_sha256": {
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-complete.log": "7109081dd4f2970c28666b735c0618a83ca42c01aa4c2e96e85a06a38b72722b",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-delivery.log": "04b38d9d99b9fdfb852a9c6bb9cf674250b07c83bb4706cacd68dcc9127f55fb",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-final-proof.log": "a134f0c273d17a43a6596aa21873c0a041f30c545fd7d65b743f0327afd32d42",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-final.log": "db255ef32a30f39dc776d785edaca8d181afca7d9117fc5e0863e64a327dd474",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-G03.log": "bd3c03daef75cd91edfcf3d6ce188fa60a9e04a4ca328dda515e18bfb7f44ab6",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-G04.log": "b8c761d8cc0d56c6737aff745dc810857a0c45ebde768461f6301b4827b33238",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-G06.log": "6d04aa786706d63041ae967f7f7d58ff549904b7e989be62614caec13d17bf08",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-initial-corrected.log": "5559764af16988b9a1157e82e6a6729c6c5f9bb8185250ba9857133caad784a1",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-initial.log": "ef4096bfce2eea76eeeaf8b413defeab88b64a804234e805ee830c8504ef5cf1",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/build-verified.log": "ad6dfa7306b3122a4da7c441b0e55a6407e958764df4b58ca3aa9914703d6f2c",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/database-reconciliation.json": "4e9cdc3bea23f59024defb6c8b6d9fcb07259333b3ae24bd6323dbe935828240",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/diagnose_boot.py": "19de53f891f837c4437158d069aa3561ba5a69677d9edf84d08d72ff51dfd6d4",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/finalize.py": "4b108c91d79a76debb975334f253ce500f26b06a178b9458dad7bef2446b3040",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/full_network_guard.py": "e82c903a53df06804e649010073207e50d098dbb94426b1f02424120b7116084",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G01-portal.dom.txt": "e2e1407e54dc81418a6d938bf6fd906d285057c87bba77640741989de4aa3bf9",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G01-tests-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G01-tests.log": "7af1d559cad5b39cfec7c0a6298eab7322138622a7ab9ada8c6c1cc7aead61d6",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G01-tests.xml": "508891fe1326604e1d55313b600c93d2ed185d1bed332ab8e26cc8940f6dca12",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G02-after-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G02-after.log": "8694a800928c0daf479d3a5d6b98b9b825f4e0d8b5b868feb0582fee79b7ce56",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G02-after.xml": "0506472b910f51f57fb1d0c30139caa674970c287de84fc4574bd3c85f8d295b",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G02-before-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G02-before.log": "6add2682062298f1fd9c3c79e9f5d745ad86ec26c9b4b25cda0e3822870238aa",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G02-before.xml": "f3608e2be4a70e64b81443e552ac897f2969fb9c46aeb6b2bc6a80ac9dfd08e0",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G02-organization-home.dom.txt": "b580be880b364d50c3236d21c9cbbe713950130ab85007f155ac193bf302a2c7",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G03-incomplete-refusal.dom.txt": "79c3314c6d96b2dd70f3f290cc4093a0323df957575b12f91691dca418c761ea",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G03-model-economics.dom.txt": "cc93907e82a831e85a56916a67aa8b247fae17fd43108630fe28f8d1eccfade8",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G04-priced-phoenix.dom.txt": "e2f51cb0d04cc7d514435bfcb613dde9e4864dd7bbd280e7dc7d23b488ac485e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G05-product-saved.dom.txt": "1236bfbecacf3ce34ba5dba15ff0715013df742e8e5357e478dc2a6c14677b7a",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G06-rfq-model.dom.txt": "cc4b532af7a55a31d6e42e916ed83d64ca4209350222b1bf24131ac221a8f44f",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G06-rfq-price-corrected.dom.txt": "ceade33baa3903175253c04a5240ca505dae07d6e3a49ed10fbefeaacea1b023",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G07-quote-selected.dom.txt": "4129599cd8e4e5c708c57830202423d073358edd4c65d70d0f752ceb29e846a7",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G08-after-network.json": "22d375ba3cb64c27f41088dafc09a16e9971da87c9880d080063db8a2371610e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G08-after.log": "d18b1c510d6362a258dcc99fdf281fa5d375bcfede8b336ced3e235192c5cb24",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G08-after.xml": "bef6431c32ff62e2f0e166fd196ad58d99f3892236ca05aff91eec145d5dac7f",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G08-booking-review.dom.txt": "9a6b15c527cbda964f6d2a10285a72b6475e147cc9ce081293becd7d76c5bb7a",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G09-book-created.dom.txt": "d22fac4afd637abbfa0bc870da7a46c8a057d83cbe420154e59d581b3c1e6074",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G10-refresh-details-corrected.dom.txt": "abc13d1306af29d7e0834e0c0003f6d46d8a0c32085edc52ab17533bd9473dbc",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G10-refresh-source-refusal.dom.txt": "a7623eca6eb95177c5f810959d3e3c6476fd0242db871f68eeeef0840b949d4b",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G11-manual-fixing-review.dom.txt": "2ae7b7c42703d97ded3cd00644d6dd603d2fe3d901c9a1438e70c9942fa27e70",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G12-mtm.dom.txt": "5332f71615dc2fa5c1b281e38c141bc242e20f57ebdf474306dfd7e680faa6a0",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G13-valuation-history.dom.txt": "c1dfb6406cb49971b9971c1345e56efaef7e6d4697a22d706117f2f1d7bac748",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G14-valuation-note-frozen.dom.txt": "8e842a4fbc4797a066569a1cd88a9a7f98a079f244ab8b6d958d3ecc27b89421",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G15-risk-greeks.dom.txt": "ce61bf6adbab8d4563a16aba92f816aafb69d89ed975a95353dd564109b38162",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G16-ccr-link-before.dom.txt": "cb2ca668e6ab47e3e9de9840d5e9b54088dee31c79fd3dac74d1b2d9fc7e8500",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G17-risk-scope-uat.dom.txt": "add1ad19476dd72c9081d2f04026962d3955bdc6768981860706a168b2cf5707",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G18-risk-stress.dom.txt": "eba83d33316a7733bebea72cf174c83b52a6da224a3314ded7a679964e18e857",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G19-client-mandate.dom.txt": "96732d52b3fece82ae02fc02eb48f3a1e70b05f9b71f98d579bc970870846d1b",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G20-crm-opportunity.dom.txt": "6c0d848149809b63557f6a2bde9995637fdd48d21eb08d4b9994c1af9e81f9d2",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G21-crm-loss.dom.txt": "87851d53140f67890e7cfc756600b16c5455307be3b7f6fc3b9a1da90281d56d",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G22-optimizer-budget.dom.txt": "efe4d409c217295201bd449ce1e5b2b00e81016f677809a3a35a7441f28f369b",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G23-optimizer-confirmed.dom.txt": "2c4cd7d1565b79be86c0613ae0bc80a0378713f01f540f48d09a1833f82eaa3f",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G24-optimizer-resume.dom.txt": "fd821f57865a2b449dccd0062d95f57a437379a3b0245c111cc8843fe5651d10",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G25-reinvest-filtered.dom.txt": "47311bcc15f0507305da3346a2b89db95e40d31b9e7f5808552e6bbc5e7ceaa3",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G26-front-profile.dom.txt": "0b3343b2e23c5a2f976099f1d780d7748743df84e77e463d856f95d70b587dfd",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G27-front-booking-refused.dom.txt": "416ccdd79f31f9d9b3664675daf6eb7ff4d17f7a970b3991e54fa104dc8a8684",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G28-operations-pricer-refused.dom.txt": "d6b4b9e64abbfe9e1a707eb13a938df0b5388d51d1cdef44ce6a0d1e2411adc9",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G29-operations-rfq-corrected.dom.txt": "0853a2c33bee82c22339d0eb7bc163bf031415a43f97b6c6959ce519e0c6f382",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G29-operations-rfq-projection-before.dom.txt": "5da2d45708b2d28d620190429ea39776116a9dbde11e74b4ee7b0759245227b0",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G30-rfq-reload-corrected.dom.txt": "cc133e61df7365a7418654f4869848bf29f442240a27c0363a75abad7818855c",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G31-history-time-corrected.dom.txt": "41801dd08d1f74bf9835d7bd9da01250b322d651bf5b7ff13115ae0b6b6ff787",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G32-ccr-route-corrected.dom.txt": "ab261f615c615373362aef20351d717ac6dd8d99df22365f15c5e8319c9ef001",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G33-ccr-incomplete.dom.txt": "40066b221937f840a3be298da85b14968f9f4bc771571ddb21ccebf098dd8981",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G34-uat-preview.dom.txt": "63f5ca7769c8279bcb8cc3fd56f6a6a3c596e349a7d7a52ff24c04550d7eb685",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G35-uat-complete.dom.txt": "9d6e36842fdc24220bb9ca894a59eddb69551fd531066c12be0e52fc4d774725",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G36-production-filter.dom.txt": "a008d4d45947b982b9a5cfc5316d6a045e3ea7d5eb8e179d16947ba267480365",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G37-uat-filter.dom.txt": "419cf6f58ccae1434e4c2838d71f1c5484b6bacc128a72d5b75792fe3677a228",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G38-pdf-corrected-frozen.dom.txt": "ef0458cc0177219bdd6367455fb452337106b1829f0b322ab5596d11f09ada9a",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G39-uat-time-corrected.dom.txt": "e829cb4e58f3ba8dbbc605b485ba0cd2148562ef87119016b8ea8810bb749d3f",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G40-demo-masked.dom.txt": "b2223a77bcce62cb94da45912d8cb712c586dc454a41c5ecaa072c54149a8059",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G41-demo-restored.dom.txt": "138c89fb1a6807e3f84f172023cadf672bd641d4ada4035437300ea9060523d3",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G42-bnp-isolation.dom.txt": "572e34061ec49cc72454a98a0932403eddc6f94ffe66ba052a0374e829d5bdbf",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G43-bank-inbox-empty.dom.txt": "2ad726e46cc25d697d6adc1047c3092fc84a8e6802cd507440864206b7a45282",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/G44-final-mask-preserves-ccr.dom.txt": "ce699ca8bfd984cb410be62b11c0cbab9ca996770fca6749836b422e6610502c",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/initial-snapshot.json": "817959989ba61115acb24c4de4e278fead5cdbd45205c0065f400d7b4693f300",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/manage.py": "3eb82aaa40ba81378d0e290c10c0339bb31dc4c4f17328c7a6179dfafc3426c3",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/optimizer-export.json": "b340f2ed9cafa9ad5710c78b3e69e27c1819328d637b092242075c4bb6387f22",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/port-inventory-final.json": "700d805be4ef179ebb7c464670895cd28645229401d1330385abe7fa5d12f543",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/prepare.py": "a515760a33100d00d950ee268a321b86c49d569281a019870c1721d1ce2c2fa6",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/process-inventory-final.json": "536dadcc94a1c1947ddbb81b914a78b585bbd80e77ab59a45729e51d6698eff0",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/run_tests.py": "6c5792ae73c5cae88ad651905ee51364c9b3830c7f3f2b0b477e48c3baea397e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/serve.py": "3238cfc89ef63606832d9f78ef8646103793487969f9b08713aaabfe2630dce4",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-after-G01.log": "a81b26af2e50fce00ffca2298f0197bf3ba76b16d87839ac0048ce34b5bdc5a7",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-after-G02.log": "166cb5e222ad4f48596bea7164a540cfea2063461a5c8ebb05a89d6ea180076c",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-build-G03.log": "cfffb38dc274159b77430191c0cc2b0f0f3468e9a1b6a9a9fe2c2b10cb4caf10",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-build-G04.log": "c7234ba6597c8b5aee6c0e075f9f1398e975c71af460f985614cbccca13859ad",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-complete.log": "fbe701be2d10e692bd3dfe42f72bccdb7d07f94712f0ca679bb6a2cbf4c0f8cc",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-final-proof.log": "8e75906f77256950a619ee063a44ddeb51d449fd7f09f0a5b93e019441ab717d",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-final.log": "361202f06601537fc123c6793123dd06922fa85ef7d8c257015e9a1718949677",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-initial.log": "454a4f7db1a830772829491043a306bdf2b86a9538d2a91c5c0ed1399097c3d5",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-network-isolated.log": "0a3c3996923707036912146155fbf0bf0fbbe38fd59caedbc1d1fa553921a48b",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-synthetic-market.log": "f984d5eb247f41b0f4806442eafaa7e4a9fec7e6a17dd72ae31cac19977a37ca",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-uat.log": "5b3322b794839627909f961980db512e7e0a65330d3c821f8825232148e41baa",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/start-verified.log": "88d90272029010628738a5ba7a4c2b0cf078674c7c49e8de53cee0ec49f61ef4",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/stop-before-final.log": "0eb2bd6104334179af247cde88932b8168b4681d901f0e0ce21b392604439fe2",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/stop-final.log": "59c21768cd45744c7bc0d176835aa9fdcb95c17e029443cddd064d3261618dc4",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/synthetic_market.json": "678efa83ea361140ba31fc1c713cad68c61c2642a28ebed1a70a8a4590a93c92",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/ui-checks.json": "8b03dee4782ea94f7872744a0c341ebdb392b7cf7ad496f991ac2f7d0e9ae5c4",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/valuation-note-corrected-page-1.png": "7857dc0a8deb27830d855e5cdef245dac438bff80b67cae0249d6894727b8d98",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/valuation-note-corrected-page-2.png": "e3fd6d6acdff51f2ded883b0c6b3bc39c96a686806a6b267a2f6d180495f0101",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/valuation-note-corrected.pdf": "a9183f0b26d21af5ae72ec1209e7a87af743fb1af9335b545c4ae0e8cebf4df0",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/valuation-note-corrected.txt": "c178193a8916491df275d993359f572f461c16393d115762378474dc56fe4cd0",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/valuation-note-page1.png": "239bae5c0d0482c6ec3f66f075d57584beedb3eb0d55c558ea5d44e94505a42f",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/valuation-note-page2.png": "144e4d0bb93f61d4405261c3ac8462b72a2344a3c2dfee18a7d7321fecfc19aa",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/valuation-note.pdf": "f2ce0ce732aa12a90b6b964f717f50bb5cc081b7240c07350f722213751269a7",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/valuation-note.txt": "4fb035f41fbb0c3c363d6ff0f8ef651e12f3ed8d4e6f06308b6cb5321d6c9943",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/verify_delivery.py": "7f77bf58bba1f1e347eb7bd27cdd693fb97bc975ca460aebbd6775cf04457120",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G01-portal.jpg": "daff278ec7f41c784cbcf3407343d2e09c21c01381aecf42391d69af5180802e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G02-organization-home.jpg": "5eb368b4b1d86414c7fa41e4e83b0a4bcd6d6d822d022bdfa2925ad70463128b",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G03-incomplete-refusal.jpg": "e82536f87188fc7bad9039d4a694a1f4163cdb7781562ae5b23d81438523b66e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G03-model-economics.jpg": "efb8eec16092f8a27c6d6bee3a18138eb61a17e93ae3314cb789e682e867acde",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G04-priced-phoenix.jpg": "82b2ae03990ebd2d18b876138a6b152ad6eaef663c81de3a00d20f0abb6f4c10",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G05-product-saved.jpg": "27ce8c7f2fa2a81ab43a6e559282b7297d9f4552885afb5083d6657f87afcb0a",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G06-rfq-model.jpg": "c820f18914fa9f97b065610a37eef44bd440203eeff49f22ef59cd2099597bcb",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G06-rfq-price-corrected.jpg": "8767e3db470848dc371a62c6983cb904dd70140904882e5587817738dc9f8610",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G07-quote-selected.jpg": "4853778474a2f73b202bbfbfe687cdb4006262d4a6bd078c3fc4d9b2182abd84",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G08-booking-review.jpg": "2b520df02ebbe1935bf09d9ddd9911a062abcbbcc694bac75e391ec57040f506",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G09-book-created.jpg": "6eaeb7a688de0609b425d973b4da7b610ac8b4c7bd104d341eda3acac396e687",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G10-refresh-details-corrected.jpg": "c8343a8896147fffff143b798f4acaaca82b5b0e002be7e18171dce9477921cd",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G10-refresh-source-refusal.jpg": "05ef6ace0ef88f532e19e33eeadb79aad9c5d2d3b15e5b918c32ba6d267e12c1",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G11-manual-fixing-review.jpg": "18f7f3207a736f8f29c64562a9bd9ae5f8a2d57c53cdac0d4c123f6ce06bf554",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G12-mtm.jpg": "d9df5071544ee604f26ac505cf6b0b769b08392c0a50633b720d5c6ff8266088",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G13-valuation-history.jpg": "b345a587886616445c2608dc3c7d9ecd8d95aaa09e3375b599523c593d93a1a9",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G14-valuation-note-frozen.jpg": "c48ce21fd790f41ca48dd41fd76ee76f30a78ad78ae9c2fe0e21f5ea0e4e8205",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G15-risk-greeks.jpg": "5d3340114d4414312c1848240a9f21384f362f523103472e6d3e4381cfa07f7e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G16-ccr-link-before.jpg": "eb18642246efb4c85e4587270d7899d7f10c39cf0c136bc774f8ee117fcf7084",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G17-risk-scope-uat.jpg": "30ee9527810bb3af5f8537427ed911f0ffb833468e6d5a589b4de52009441c78",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G18-risk-stress.jpg": "f3461207ad17529254c07f92a9ef25330d032a711c66bcf16776a9e54ee63552",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G19-client-mandate.jpg": "6ccb5758c1b38a8f8f6424c143b1c8b33c3d3fa27fa33e6de7308ebf53babe65",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G20-crm-opportunity.jpg": "748a48831a5db28aff819dc97d61e8ab3eabc0c82b72275f45d62a326f7088d9",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G21-crm-loss.jpg": "5de1eb7dda3a5a2e06c365c4cf119121168f241e470bc788ec171c4978921e7e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G22-optimizer-budget.jpg": "fe0e584515bd0508015b10554cc6a4556a0a6fe5d7ade263323b4cc520271b3b",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G23-optimizer-confirmed.jpg": "2070ab7d06d0a527d118c8bcc6b217045fe26564dec80ff98a2d1cb7578065a8",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G24-optimizer-resume.jpg": "00fc0d09a27a3c8412d15b59f1ae7de776e68aaa23b69dc94e21a7efe9fee839",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G25-reinvest-filtered.jpg": "751d4d5b59a22291465089b44e279e61b396f6e7b70230bd8a8f39c86c29c10c",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G26-front-profile.jpg": "ed880b7b9aa5caaadbf1af90dccfa64cd9965a37bc400e568fc49849e6180c36",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G27-front-booking-refused.jpg": "ae78afde38b85e8a2bf437fdf5c1feafa42c9d9eb0b9dcc6bc9e8ed2583a69d5",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G28-operations-pricer-refused.jpg": "4084f0eee69678f35c8bb8b5f2f570493314f61a83847803f3a095cacb7f7bb9",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G29-operations-rfq-corrected.jpg": "5d148e01b6ccad46a0a8b483576350d640d1388b60c8f23accf028bfd2467a88",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G29-operations-rfq-projection-before.jpg": "e15bf43d2d0b56d366ecdb80736f9bda8c6be5e3edda6e2b6310512afc5d7115",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G30-rfq-reload-corrected.jpg": "60f72505e24e06d55169ae70f44c75576fa8974cb1bfd4dd9e690437ff17cfef",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G31-history-time-corrected.jpg": "68fce16b2e3d09b95787ff49c75e18477d2815f253930efd7fde1185309851d3",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G32-ccr-route-corrected.jpg": "9f8d71d7a46aa62986f951a65003365e4089e8e34a87782c26fe1ebbc9f076cf",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G33-ccr-incomplete.jpg": "7b5723e5b526025e3ae11495e819941721fdfcb42c0aa104f0dac5c80e73593a",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G34-uat-preview.jpg": "508c759eab44982665b96bc68b95025eb65de604a4b9c9b46a30230aa4a7af5e",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G35-uat-complete.jpg": "1e2cf8afec34b9759240ff0dd9e69c2acd99a2e97b12803068eacf5d3ca6f2eb",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G36-production-filter.jpg": "845b06b99c8aa1e3e8846de4b6254e384255e3c2196e81a57b1bd0589633be25",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G37-uat-filter.jpg": "2f8f41c5d08f7296aaf9d516fe324e70cf70684bff33d36b06ba14d3db217681",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G38-pdf-corrected-frozen.jpg": "7e2e9257834ae744ef85ead28cc6d0f5f9ab6c0452fc9f96ef9cbcddc7fae265",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G39-uat-time-corrected.jpg": "531638db136efd6dad4b34f15ec7e702a03752d51c8c5f2e286cefb902865d2d",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G40-demo-masked.jpg": "c593c90c9ce642b6be203082ddcb634c3c0867d76a7c6dc61446e4a4c55eda91",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G41-demo-restored.jpg": "60f72505e24e06d55169ae70f44c75576fa8974cb1bfd4dd9e690437ff17cfef",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G42-bnp-isolation.jpg": "0952f9f446a7e976182aa97eea2b5f6fccda23638a2d2541de0b27a185687a8b",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G43-bank-inbox-empty.jpg": "620c10e97ee3ed90b07426f1bdac168c558b4eb074825371d0e7d50bf8df192a",
+    ".runtime/diagnostic-acceptance/graphical-2026-10-23/screenshots/G44-final-mask-preserves-ccr.jpg": "85ad8f32af62cf0a1dac70c0550a447b7ea68be6c091a0c4eacf6a46bbccd0a4"
+  }
+}

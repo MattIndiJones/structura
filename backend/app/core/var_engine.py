@@ -29,6 +29,7 @@ EVERY requested ticker's list is exactly as long as the shared `dates` list
 so no per-ticker ragged-length handling is needed, only "this ticker
 couldn't be fetched at all" needs a guard."""
 from __future__ import annotations
+from .product.calendar import freeze_calendar
 import json
 import math
 from dataclasses import dataclass, field
@@ -84,7 +85,7 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
             "data_provider": (mtm_payload.get("market_used", {})
                               .get("data", {}).get("provider")),
             "base": {
-                "fixed_price": mtm_payload["mtm"],
+                **ctx["claim_inputs"],
                 "settlement_claim": True,
                 "n_paths": 0,
             },
@@ -104,6 +105,7 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
                           .get("data", {}).get("provider")),
         "base": {
             "script_text": terms.script,
+            "frozen_calendar": freeze_calendar(ctx["compiled"]),
             "constat_values": terms.constats.to_dict(),
             "value_date": terms.value_date.isoformat(),
             # Sans ces deux-la le worker ne peut pas resoudre un calendrier
@@ -131,6 +133,7 @@ def build_deal_scenario_base(deal, session: Session, n_paths: int = 3000) -> dic
             "n_paths": n_paths,
             "valuation_context": ctx["valuation_context"],
             "unsettled_pv": ctx.get("unsettled_pv", 0.0),
+            "unsettled_cash_flows": ctx.get("unsettled_cash_flows", []),
         },
     }
 
@@ -159,14 +162,17 @@ class MarketScenario:
 
 
 def apply_scenario_to_deal_base(deal_base: dict, scenario: MarketScenario) -> dict:
-    """Resolves a ticker-keyed market scenario onto one deal's own
-    underlying order — a ticker the scenario doesn't mention (deal holds
-    something the book-wide scenario grid didn't cover) gets a neutral
-    (no-op) shock rather than erroring, same 'best effort, not all-or-
-    nothing' spirit as the rest of this feature."""
+    """Resolve an explicitly complete scenario; missing is never neutral."""
+    if deal_base["base"].get("settlement_claim"):
+        return {**deal_base["base"], "dr": scenario.dr_frac}
     tickers = deal_base["tickers"]
-    spot_mult = [1.0 + scenario.spot_pct.get(tk, 0.0) / 100.0 for tk in tickers]
-    vol_add = [scenario.vol_pts.get(tk, 0.0) / 100.0 for tk in tickers]
+    missing = [tk for tk in tickers if any(
+        tk not in shocks or not math.isfinite(shocks[tk])
+        for shocks in (scenario.spot_pct, scenario.vol_pts))]
+    if missing:
+        raise ValueError(f"Scénario {scenario.key} incomplet : facteurs absents ou invalides {', '.join(missing)}")
+    spot_mult = [1.0 + scenario.spot_pct[tk] / 100.0 for tk in tickers]
+    vol_add = [scenario.vol_pts[tk] / 100.0 for tk in tickers]
     context = deal_base["base"].get("valuation_context") or {}
     corr_shocked = _shock_corr_scalar(
         context.get("corr_matrix", deal_base["base"]["corr"]), scenario.corr_delta)
@@ -187,7 +193,8 @@ def _usable_tickers(prices: dict, dates: list[str], tickers: list[str]) -> list[
     iff it's present at all and has that exact length; anything else means
     the fetch failed for it entirely, not a partial-history case to patch
     around."""
-    return [tk for tk in tickers if len(prices.get(tk, [])) == len(dates)]
+    return [tk for tk in tickers if dates and len(prices.get(tk, [])) == len(dates)
+            and all(math.isfinite(v) and v > 0 for v in prices[tk])]
 
 
 def _horizon_returns(prices: list[float], horizon_days: int) -> np.ndarray:

@@ -1,0 +1,220 @@
+{
+  "workstream": "C17",
+  "validated_on": "2026-10-21",
+  "scope": [
+    "M07-01",
+    "M07-03",
+    "M07-04",
+    "M07-05",
+    "M07-06"
+  ],
+  "global_closure": false,
+  "production_qualified": false,
+  "decision": {
+    "date": "2026-10-21",
+    "confirmed_by": "Philippe",
+    "answer": "5 pb vanilles et 10 pb digitales",
+    "max_vanilla_error_bp": 5.0,
+    "max_digital_error_bp": 10.0,
+    "error_unit": "basis points of nominal",
+    "scope": "Maximum absolute price errors on published calibration control points; distinct from C16 barrier panel tolerance",
+    "report": "../REMEDIATION_C17_2026-10-21.md",
+    "evidence": "C17_VALIDATION.json",
+    "production_approved": false,
+    "nonconverged_or_out_of_threshold": "Exploration only; no automatic application"
+  },
+  "backend": {
+    "unique_passed": 323,
+    "files": 12,
+    "new_c17_cases": 41,
+    "batches": [
+      {
+        "junit": "targeted.xml",
+        "tests": 107,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "junit": "integrity-final.xml",
+        "tests": 39,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "junit": "api-final.xml",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "junit": "dependencies.xml",
+        "tests": 183,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "junit": "persistence.xml",
+        "tests": 26,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "junit": "dossier-final.xml",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "initial_failure_resolution": "New invalid-density assertion used an admissible strike; corrected to K=0.2 where density is invalid, final test passed. No historic expected price changed."
+  },
+  "frontend": {
+    "passed": 643,
+    "files": 72,
+    "log": "frontend-final.log",
+    "build_passed": true,
+    "build_log": "frontend-final.log",
+    "build_output": "C:/Users/phili/AppData/Local/Temp/structura-c17-vite-build",
+    "initial_build_issue": "PowerShell/npm lost --outDir; vitest passed; direct Vite build with --outDir=... then passed."
+  },
+  "measurements": {
+    "summary": {
+      "flat": {
+        "success": true,
+        "qualified": true,
+        "max_vanilla_error_bp": 0.05967163948593368,
+        "max_digital_error_bp": 0.3052986499185728,
+        "parameters": {
+          "v0": 0.08998593090188783,
+          "theta": 0.09000092618582592,
+          "kappa": 9.940443241676457,
+          "xi": 0.05347908863560758,
+          "rho_h": -0.0005665737569767887
+        }
+      },
+      "standard_4y": {
+        "success": true,
+        "qualified": false,
+        "max_vanilla_error_bp": 47.00638819360614,
+        "max_digital_error_bp": 131.44673836322008,
+        "parameters": {
+          "v0": 0.09947961397181733,
+          "theta": 0.17495058049961082,
+          "kappa": 0.549271438254117,
+          "xi": 0.6325495746369802,
+          "rho_h": -0.7845544553563698
+        }
+      },
+      "base_10y": {
+        "success": true,
+        "qualified": false,
+        "max_vanilla_error_bp": 163.7598922176542,
+        "max_digital_error_bp": 214.8770624020935,
+        "parameters": {
+          "v0": 0.10213511556302043,
+          "theta": 0.1830813751579043,
+          "kappa": 0.4128132666292115,
+          "xi": 0.5874557369224611,
+          "rho_h": -0.7883086043460883
+        }
+      },
+      "edited_7y": {
+        "success": true,
+        "qualified": false,
+        "max_vanilla_error_bp": 307.2508723060613,
+        "max_digital_error_bp": 299.30507489825675,
+        "parameters": {
+          "v0": 0.09804086280369709,
+          "theta": 0.2091517910691106,
+          "kappa": 0.39976637874819915,
+          "xi": 0.6120307566981029,
+          "rho_h": -0.7851665685276299
+        }
+      }
+    },
+    "edited_7y_atm_target_change_bp": 401.2405065389474,
+    "low_variance_wing_calls_bp": [
+      4.692029874886977e-10,
+      9.844839578697169e-08
+    ],
+    "numerical": {
+      "method": "adaptive-infinite-Fourier-BS-control-variate",
+      "absolute_tolerance": 1e-08,
+      "integration_error_estimate": 1.2344827872395398e-09,
+      "evaluations": 2535,
+      "roundoff_correction_max_bp": 2.0777934928162267e-07
+    }
+  },
+  "coverage": {
+    "heston_independent_riccati_reference_max_tolerance_nominal": 2e-08,
+    "low_variance_precision_and_arbitrage_strikes": 31,
+    "independent_black_scholes_limit_cases": 6,
+    "full_dossier_reloaded_from_isolated_sqlite": true,
+    "automatic_fresh_price_signature_and_context_enforced": true,
+    "legacy_invalid_localvol_and_lsv_refused": true,
+    "late_frontend_responses_and_manual_parameters_preserved": true
+  },
+  "limits": [
+    "Qualification only at published finite points, not blanket production approval",
+    "Automatic fit application limited to flat scalar deterministic carry without quanto",
+    "SABR exploratory; LSV Heston component does not qualify complete LSV",
+    "No MC time-convergence or new barrier qualification",
+    "Historic dossier is evidence, not qualification of later MtM/scenarios; C18 pending",
+    "Calibration attempts are transient until voluntary Product calculation retention",
+    "Legacy inputs remain readable; invalid repricing refused, no automatic migration",
+    "No browser UAT, actual portfolio impact inventory or business backfill"
+  ],
+  "preservation": {
+    "baseline_files": 1425,
+    "unchanged_files": 1407,
+    "expected_changed_files": [
+      "backend/app/api/inlife.py",
+      "backend/app/api/pricing.py",
+      "backend/app/api/volatility.py",
+      "backend/app/core/inlife_valuation.py",
+      "backend/app/core/payscript/engine.py",
+      "backend/app/core/schemas.py",
+      "backend/app/core/smile_calibration.py",
+      "backend/app/core/valuation_runs.py",
+      "docs/README.md",
+      "docs/audits/remediation-lot-0-2026-10-20/ANOMALY_REGISTER.md",
+      "docs/audits/remediation-lot-0-2026-10-20/DEPENDENCIES_AND_VALIDATION.md",
+      "docs/audits/remediation-lot-0-2026-10-20/REGISTER.json",
+      "docs/reference/PAYSCRIPT_REFERENCE.md",
+      "frontend/src/components/VolSurfaceEditor.vue",
+      "frontend/src/stores/asyncContext.test.js",
+      "frontend/src/stores/pricing.js",
+      "frontend/src/utils/smileCalibration.js",
+      "frontend/src/utils/smileCalibration.test.js"
+    ],
+    "deleted_files": [],
+    "head_unchanged": true,
+    "branch_unchanged": true,
+    "business_db_absent": true,
+    "previous_register_entries_and_c16_decision_unchanged": true,
+    "baseline_path": "C:\\Users\\phili\\AppData\\Local\\Temp\\structura-c17-baseline-9x0vqkbh",
+    "new_files": [
+      "backend/app/services/calibration_evidence.py",
+      "backend/tests/test_surface_calibration_integrity.py",
+      "docs/audits/REMEDIATION_C17_2026-10-21.md",
+      "docs/audits/remediation-lot-0-2026-10-20/C17_VALIDATION.json"
+    ]
+  },
+  "safety": {
+    "commit": false,
+    "push": false,
+    "server_started": false,
+    "business_data_mutated": false,
+    "external_http_guard": {
+      "external_http_disabled": true,
+      "blocked_attempts": []
+    }
+  },
+  "local_artifacts": "C:\\Users\\admin\\GitHub\\structura\\.runtime\\diagnostic-acceptance\\c17-2026-10-21",
+  "report": "../REMEDIATION_C17_2026-10-21.md"
+}

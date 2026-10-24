@@ -19,9 +19,10 @@ import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
 from backend.app.api import portfolios as portfolios_api
-from backend.app.db.models import Deal, Portfolio, position_sign
+from backend.app.db.models import Deal, Portfolio, User, position_sign
 
-USER = SimpleNamespace(id=1)
+USER = User(id=1, username="risk-front", email="risk@example.test",
+            password_hash="test-only", role="user")
 
 GREEKS = {
     "valuation_date": date.today().isoformat(),
@@ -34,7 +35,10 @@ GREEKS = {
 def _make_session():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    return Session(eng)
+    session = Session(eng)
+    session.add(User(**USER.model_dump()))
+    session.commit()
+    return session
 
 
 def _add_deal(s: Session, reference: str, sens: str, portfolio_id=None,

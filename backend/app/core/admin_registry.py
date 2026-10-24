@@ -25,7 +25,7 @@ from ..db.models import (
     KidRecord, EmtRecord, RfqRequest, RfqQuote, User, Entity, AdminAuditLog,
     Alert, ShockRun, LifecycleProposal, TradeAmendmentRequest,
     DealContractVersion, OfficialFixingVersion,
-    ValuationRun, ValuationNote,
+    ValuationRun, ValuationNote, ArchivedDocument, VariantStudyArchive,
 )
 from .audit import commit_rejection
 
@@ -83,6 +83,7 @@ REGISTRY: dict[str, dict] = {
     "scripts": {
         "model": Script, "label": "Scripts",
         "columns": ["id", "name", "category", "user_id", "is_shared", "created_at", "updated_at"],
+        "blockers": [(VariantStudyArchive, "script_id")],
     },
     "folders": {
         "model": Folder, "label": "Dossiers",
@@ -117,7 +118,7 @@ REGISTRY: dict[str, dict] = {
         ],
         # Issued documents and valuation notes protect their supporting deal
         # from ordinary deletion. Explicit UAT cleanup is scoped separately.
-        "blockers": [(KidRecord, "deal_id"), (EmtRecord, "deal_id"), (ValuationNote, "deal_id")],
+        "blockers": [(KidRecord, "deal_id"), (EmtRecord, "deal_id"), (ValuationNote, "deal_id"), (ArchivedDocument, "deal_id")],
         "editable_fields": {},
     },
     "documents": {

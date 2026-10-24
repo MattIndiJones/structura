@@ -35,7 +35,7 @@ def _session() -> Session:
 
 
 def _client(session, nom):
-    c = Client(name=nom, entity_id=1, status="active")
+    c = Client(name=nom, entity_id=1, status="active", data_origin='native')
     session.add(c); session.commit(); session.refresh(c)
     return c
 

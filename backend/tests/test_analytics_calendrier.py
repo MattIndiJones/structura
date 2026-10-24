@@ -300,6 +300,24 @@ def test_chaque_analytique_bascule_sur_la_vie_restante(nom, appel):
     """
     commun = dict(_champs_communs(), T=3.0, value_date=dt.date(2024, 6, 18),
                    maturity_date=dt.date(2027, 6, 14))
+    if nom == "mark_to_future":
+        from fastapi import HTTPException
+        # The nested replay now refuses unsupported settlement assumptions.
+        # Test both refusals before checking the residual switch in its domain.
+        for value_date, message in [(commun["value_date"], "value date"),
+                                    (commun["strike_date"], "paiements différés")]:
+            for variant in ({}, {"valuation_date": dt.date(2026, 6, 14)}):
+                with pytest.raises(HTTPException) as error:
+                    appel({**commun, "value_date": value_date}, variant)
+                assert error.value.status_code == 422
+                # Once in life, the initial value date is in the past; the
+                # remaining settlement lag is still unsupported.
+                assert ("paiements différés" if variant else message) in error.value.detail
+        commun["value_date"] = commun["strike_date"]
+        commun["constats"] = {
+            name: {**config, "settlement_lag": 0}
+            for name, config in commun["constats"].items()
+        }
     em = appel(commun, {})
     assert em["in_life"] is False, nom
 

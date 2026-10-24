@@ -9,6 +9,17 @@ function fixture() {
     cases:{}, quotes:[], accepted:{}, client_offers:{},client_acceptances:[],book_checks:[]}
 }
 describe('workshop observability',()=>{
+  it('tracks each dossier recipients and waits for explicit bank confirmation',()=>{
+    const s=fixture();s.config.schema_version=2
+    s.actors.leonteq={name:'Leonteq',role:'issuer',registered:true,relations:{},deals:[]}
+    s.cases={'CASE-0001':{id:'CASE-0001',month:0,nominal:1e7,requester:'hector',recipients:['leonteq'],rfq_sent:true,declines:[]}}
+    s.quotes=[{id:'q',case_id:'CASE-0001',bank:'leonteq'}];s.accepted={'CASE-0001':'q'}
+    const result=workflowSteps(s)
+    expect(result.steps.find(r=>r.title==='Appel d’offres').done).toBe(true)
+    expect(result.steps.find(r=>r.title==='Accords').done).toBe(false)
+    s.cases['CASE-0001'].trade_confirmed=true
+    expect(workflowSteps(s).steps.find(r=>r.title==='Accords').done).toBe(true)
+  })
   it('does not let the selected campaign keep an obsolete RUNNING status in the list',()=>{
     const state={id:'a',status:'COMPLETED',turns:47,business_date:'2025-11-10'}
     const rows=[{id:'a',status:'RUNNING',turns:0},{id:'b',status:'DRAFT',turns:0}]

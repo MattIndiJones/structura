@@ -185,6 +185,7 @@ def _engine_underlyings(market: dict, underlyings_json: list) -> list[dict]:
             "vol_surface": copy.deepcopy(u.get('vol_surface')),
             "asset_class": u.get('asset_class','unknown'),
             "smile_parameter_mode": u.get('smile_parameter_mode','automatic'),
+            "calibration_evidence": copy.deepcopy(u.get('calibration_evidence')),
         })
     return out
 

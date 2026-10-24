@@ -12,6 +12,7 @@ from ..db.database import get_session
 from ..db.models import RfqSolicitation, RfqExchangeRound, User
 from ..runtime import business_now
 from ..services import rfq_exchange as exchange, rfq_bank as bank, rfq_publication as publication
+from ..services import rfq_electronic
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api/rfq-inbox", tags=["rfq"])
@@ -28,8 +29,11 @@ def list_received(current: Annotated[User, Depends(get_current_user)],
         if (before_id is None or item.id < before_id) and exchange.can_receive(session, item, current):
             row = session.get(RfqExchangeRound, item.round_id)
             request = json.loads(item.request_json)
+            electronic = rfq_electronic.workspace(session,item.id)
+            reconciliation = electronic.get('reconciliation') if electronic else None
             output.append({**exchange.delivery_row(item, row, session), "title": request["title"],
                 "requester": request["requester"], "nominal": request["nominal"], "currency": request["currency"],
+                "reconciliation_state": reconciliation['state'] if reconciliation else None,
                 "response_deadline": request["response_deadline"], **bank.work_row(session, item, current)})
             if len(output) == 100:
                 break
@@ -42,7 +46,16 @@ def received_request(item_id: int, current: Annotated[User, Depends(get_current_
     item = exchange.require_received(session, item_id, current)
     row = session.get(RfqExchangeRound, item.round_id)
     return {**exchange.delivery_row(item, row, session), "request": json.loads(item.request_json),
-            **bank.work_row(session, item, current), **publication.workspace(session, item, current)}
+            **bank.work_row(session, item, current), **publication.workspace(session, item, current),
+            'electronic_execution': rfq_electronic.workspace(session, item.id)}
+
+
+@router.post('/{item_id}/electronic-execution/{execution_id}/decision')
+def decide_electronic_execution(item_id: int, execution_id: str, body: rfq_electronic.BankDecision,
+                               current: Annotated[User, Depends(get_current_user)],
+                               session: Annotated[Session, Depends(get_session)]):
+    rfq_electronic.decide(session, item_id, execution_id, current, body)
+    return received_request(item_id, current, session)
 
 
 @router.put("/{item_id}/publication-policy")

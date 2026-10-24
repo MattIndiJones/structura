@@ -14,6 +14,32 @@ import { usePricingStore } from './pricing.js'
 import { useProductsStore } from './products.js'
 import { useRfqStore } from './rfq.js'
 
+describe('les permissions métier reflètent le profil actif', () => {
+  beforeEach(() => { setActivePinia(createPinia()); sessionStorage.clear() })
+
+  it.each([
+    ['user', ['business.price'], true, false, false, false],
+    ['ops_maker', ['book', 'trading.settle'], false, true, false, true],
+    ['checker', ['business.read'], false, false, false, false],
+    ['organization_admin', ['business.price', 'book', 'trading.relationships.manage', 'trading.settle'], true, true, true, true],
+    ['admin', [], false, false, false, false],
+  ])('%s utilise les capacités de son installation', (role, capabilities, price, book, manage, settle) => {
+    const auth = useAuthStore()
+    auth.user = { role, capabilities, installation: { kind: 'organization' } }
+    expect([auth.canPrice, auth.canBook, auth.canManageTrading, auth.canSettleTrading]).toEqual([price, book, manage, settle])
+    auth.user = { ...auth.user, is_active: false }
+    expect([auth.canPrice, auth.canBook, auth.canManageTrading, auth.canSettleTrading]).toEqual([false, false, false, false])
+  })
+
+  it('retire immédiatement les commandes lorsque les capacités changent', () => {
+    const auth = useAuthStore()
+    auth.user = { role: 'ops_maker', capabilities: ['book'], installation: { kind: 'organization' } }
+    expect(auth.canBook).toBe(true)
+    auth.user = { ...auth.user, capabilities: [] }
+    expect(auth.canBook).toBe(false)
+  })
+})
+
 describe('la déconnexion ne laisse rien derrière', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -21,13 +47,13 @@ describe('la déconnexion ne laisse rien derrière', () => {
   })
 
   it('efface le jeton du stockage, pas seulement de la mémoire', () => {
-    localStorage.setItem('auth_token', 'jeton-du-compte-A')
+    sessionStorage.setItem('auth_token', 'jeton-du-compte-A')
     const auth = useAuthStore()
     auth.logout()
 
     // Un jeton laissé en stockage reconnecterait le compte A au prochain
     // chargement, y compris après que quelqu'un d'autre se soit assis devant.
-    expect(localStorage.getItem('auth_token')).toBeNull()
+    expect(sessionStorage.getItem('auth_token')).toBeNull()
   })
 
   it('oublie le jeton et le profil en mémoire', () => {
@@ -70,5 +96,31 @@ describe('confidentialité des sessions RFQ bancaires', () => {
     expect(products.items).toEqual([])
     expect(rfqs.current).toBeNull()
     expect(rfqs.history).toEqual([])
+  })
+})
+
+describe('administration locale distincte de la simulation', () => {
+  beforeEach(() => { setActivePinia(createPinia()); localStorage.clear() })
+  it('permet au super utilisateur de gérer son organisation sans droits techniques', () => {
+    const auth = useAuthStore()
+    auth.user = { role: 'organization_admin' }
+    expect(auth.isOrganizationAdmin).toBe(true)
+    expect(auth.canAdministerOrganization).toBe(true)
+    expect(auth.isAdmin).toBe(false)
+    expect(auth.canManageSimulation).toBe(false)
+    for (const role of ['user', 'ops_maker', 'checker']) {
+      auth.user = { role }
+      expect(auth.canAdministerOrganization).toBe(false)
+      expect(auth.isAdmin).toBe(false)
+    }
+  })
+  it('autorise la simulation au seul admin central habilité en développement', () => {
+    const auth = useAuthStore()
+    auth.user = {role:'platform_admin', capabilities:['directory.read','simulation.manage']}
+    expect(auth.canManageSimulation).toBe(true)
+    expect(auth.isAdmin).toBe(false)
+    expect(auth.canAdministerOrganization).toBe(false)
+    auth.user = {role:'platform_admin', capabilities:['directory.read']}
+    expect(auth.canManageSimulation).toBe(false)
   })
 })

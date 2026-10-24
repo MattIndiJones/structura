@@ -8,8 +8,10 @@ on every screen load. What can be expensive is producing those per-deal
 Greeks, which stays an explicit action in the frontend."""
 from __future__ import annotations
 import json
+import math
+from itertools import combinations
 from datetime import date, datetime, timedelta
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -19,14 +21,17 @@ from ..db.models import (
     Counterparty, ValuationRun, position_sign,
 )
 from .auth import get_current_user
+from ..services.business_access import can_read_organization_record, visible_deals
 from .admin import _CATALOG
 from .deals import MtmExplainRequest
-from ..core.amc_prices import fx_rate_to
+from ..core.amc_prices import fx_quote_to
 from ..core.risk_lifecycle import deal_risk_state, terminal_dates_by_deal
+from ..core.valuation_runs import current_fixings_match
+from ..core.risk_scope import DataScope, select_risk_deals, risk_scope_metadata
 
 router = APIRouter(prefix="/api/portfolios", tags=["portfolios"])
 
-_STALE_DAYS = 7   # same convention as Admin market-data's price staleness
+_STALE_DAYS = 7   # Valuation-run age; market observation quality has its own policy.
 
 _TICKER_TO_KEY = {c["ticker"]: c["key"] for c in _CATALOG}
 _TICKER_TO_LABEL = {c["ticker"]: c["label"] for c in _CATALOG}
@@ -35,10 +40,16 @@ _REPORTING_CCY = "EUR"
 
 
 def _fx_to_reporting(devise: str | None,
-                     asof: date | str | None = None) -> float | None:
+                     asof: date | str | None = None, *, coverage: dict | None = None) -> float | None:
     """Rate towards the reporting currency — None when genuinely unknown.
     See core/amc_prices.fx_rate_to for why 1.0 and None must stay distinct."""
-    return fx_rate_to(devise, _REPORTING_CCY, asof=asof)
+    key = devise or _REPORTING_CCY
+    quote = coverage.get(key) if coverage is not None else None
+    if quote is None:
+        quote = fx_quote_to(devise, _REPORTING_CCY, asof=asof)
+    if coverage is not None:
+        coverage[key] = quote
+    return quote['rate']
 
 
 def _fx_missing_row(d: Deal) -> dict:
@@ -79,26 +90,23 @@ def _is_admin(user: User) -> bool:
 
 def _active_deals_statement(current: User):
     statement = select(Deal).where(Deal.status == "actif")
-    if not _is_admin(current):
-        statement = statement.where(Deal.user_id == current.id)
     return statement
 
 
 def _all_deals_statement(current: User):
     statement = select(Deal)
-    if not _is_admin(current):
-        statement = statement.where(Deal.user_id == current.id)
     return statement
 
 
 def _portfolio_accessible(p: Portfolio | None, current: User) -> bool:
-    return bool(p and (_is_admin(current) or p.user_id == current.id))
+    return can_read_organization_record(p, current)
 
 
 def _portfolio_deals(
     session: Session,
     portfolio_id: int,
     statuses: tuple[str, ...] | None = None,
+    *, current: User | None = None,
 ) -> list[Deal]:
     """Load members once, deduplicated by economic deal identity.
 
@@ -122,31 +130,35 @@ def _portfolio_deals(
         legacy_statement = legacy_statement.where(Deal.status.in_(statuses))
     for deal in session.exec(legacy_statement).all():
         by_id.setdefault(deal.id, deal)
-    return list(by_id.values())
+    rows = list(by_id.values())
+    return visible_deals(session, rows, current) if current is not None else rows
 
 
 @router.get("")
 def list_portfolios(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    data_scope: DataScope = "PRODUCTION",
 ):
     statement = select(Portfolio)
-    if not _is_admin(current):
-        statement = statement.where(Portfolio.user_id == current.id)
     portfolios = session.exec(statement).all()
     rows = []
     for p in portfolios:
+        if not _portfolio_accessible(p, current):
+            continue
         owner = session.get(User, p.user_id)
         entity = session.get(Entity, owner.entity_id) if owner and owner.entity_id else None
         # The same deal may appear in several portfolios. Each badge counts
         # the distinct live positions in that view.
-        n = len(_portfolio_deals(session, p.id, ("actif",)))
+        n = len(select_risk_deals(_portfolio_deals(session, p.id, ("actif",), current=current), data_scope))
         rows.append(_portfolio_row(
             p,
             n,
             owner.username if owner else f"Compte #{p.user_id}",
             entity.name if entity else None,
         ))
+    for row in rows:
+        row["data_scope"] = data_scope
     return sorted(rows, key=lambda r: (
         r["owner_username"] if _is_admin(current) else "",
         r["name"],
@@ -168,7 +180,7 @@ def create_portfolio(
     owner = session.get(User, target_user_id)
     if not owner:
         raise HTTPException(404, "Compte propriétaire introuvable")
-    p = Portfolio(name=name, user_id=target_user_id)
+    p = Portfolio(name=name, user_id=target_user_id, entity_id=owner.entity_id)
     session.add(p)
     session.commit()
     session.refresh(p)
@@ -280,6 +292,10 @@ def _greeks_snapshots(
                 or (payload_version is not None
                     and payload_version != deal.contract_version)):
             continue
+        source = session.get(ValuationRun, payload.get("valuation_run_id")) if payload.get("valuation_run_id") else None
+        if not current_fixings_match(session, source or ValuationRun(
+                deal_id=deal.id, result_json=deal.greeks_json)):
+            continue
         computed_at = _parsed_computed_at(payload, deal.greeks_computed_at)
         snapshots[deal.id] = (payload, computed_at)
         timestamps[deal.id] = computed_at or datetime.min
@@ -292,12 +308,12 @@ def _greeks_snapshots(
         select(ValuationRun).where(
             ValuationRun.deal_id.in_(deal_ids),
             ValuationRun.run_type == "GREEKS",
-        ).order_by(ValuationRun.created_at.desc())
+        ).order_by(ValuationRun.created_at.desc(), ValuationRun.id.desc())
     ).all()
     for run in runs:
         if run.contract_version != deal_versions.get(run.deal_id):
             continue
-        if run.deal_id in snapshots and timestamps[run.deal_id] >= run.created_at:
+        if run.deal_id in snapshots and timestamps[run.deal_id] > run.created_at:
             continue
         try:
             payload = json.loads(run.result_json)
@@ -305,6 +321,9 @@ def _greeks_snapshots(
             continue
         if _greeks_valuation_date(payload) != target:
             continue
+        if not current_fixings_match(session, run):
+            continue
+        payload["valuation_run_id"] = run.id
         computed_at = _parsed_computed_at(payload, run.created_at)
         snapshots[run.deal_id] = (payload, computed_at)
         timestamps[run.deal_id] = computed_at or run.created_at
@@ -313,6 +332,7 @@ def _greeks_snapshots(
 
 def _aggregate_risk(
     deals: list[Deal], session: Session, valuation_date: date | None = None,
+    data_scope: Literal["PRODUCTION", "UAT"] = "PRODUCTION",
 ) -> dict:
     valuation_date = valuation_date or date.today()
     if valuation_date > date.today():
@@ -322,6 +342,10 @@ def _aggregate_risk(
     scoped_deals: list[Deal] = []
     deals_outside_scope: list[dict] = []
     for deal in deals:
+        if (deal.uat_batch_id is not None) != (data_scope == "UAT"):
+            deals_outside_scope.append({"id": deal.id, "reference": deal.reference,
+                                        "reason": f"Hors périmètre {data_scope}"})
+            continue
         active, reason = deal_risk_state(
             deal, valuation_date, terminal_dates.get(deal.id))
         if active:
@@ -339,6 +363,7 @@ def _aggregate_risk(
     deals_included, deals_missing_greeks, deals_stale = [], [], []
     deals_missing_theta: list[dict] = []
     deals_missing_fx: list[dict] = []
+    fx_coverage = {}
     oldest_computed_at = None
     nominal_total_eur = 0.0
     now = datetime.utcnow()
@@ -346,7 +371,7 @@ def _aggregate_risk(
     for d in scoped_deals:
         # Nominal is known regardless of whether Greeks were ever computed —
         # unlike the sensitivities below, it must not wait on deals_missing_greeks.
-        fx_rate = _fx_to_reporting(d.devise, valuation_date)
+        fx_rate = _fx_to_reporting(d.devise, valuation_date, coverage=fx_coverage)
         if fx_rate is None:
             # Excluded from every total, not converted at parity: this deal's
             # size in EUR is unknown, and an unknown size must not be added.
@@ -372,7 +397,7 @@ def _aggregate_risk(
 
         greeks, computed_at = snapshot
         vega_scope = (greeks.get("vega_scope") or {}).get("type") or "non_documente"
-        if vega_scope not in {"total", "leg_independante"}:
+        if vega_scope not in {"total", "leg_independante", "effective_local_vol"}:
             vega_scope = "non_documente"
         name_to_ticker = {u.get("name"): u.get("ticker", "")
                           for u in json.loads(d.underlyings_json)}
@@ -386,6 +411,7 @@ def _aggregate_risk(
                                                        "vega_by_scope_eur": {
                                                            "total": 0.0,
                                                            "leg_independante": 0.0,
+                                                           "effective_local_vol": 0.0,
                                                            "non_documente": 0.0,
                                                        },
                                                        "_vega_scopes": [],
@@ -395,12 +421,12 @@ def _aggregate_risk(
                        "vega_scope": None}
             for greek_name, out_key in (("delta", "delta_eur"), ("gamma", "gamma_eur")):
                 v = g.get(greek_name)
-                if v is not None:
+                if v is not None and math.isfinite(v):
                     amt = v * w
                     bucket[out_key] += amt
                     contrib[out_key] = amt
             vega = g.get("vega")
-            if vega is not None:
+            if vega is not None and math.isfinite(vega):
                 amt = vega * w
                 bucket["vega_by_scope_eur"][vega_scope] += amt
                 if vega_scope not in bucket["_vega_scopes"]:
@@ -421,7 +447,7 @@ def _aggregate_risk(
         # corr_shock_pts convention, so the two numbers are comparable.
         for pair_key, v in (greeks.get("corr_pairs") or {}).items():
             parts = pair_key.split(" / ")
-            if len(parts) != 2 or v is None:
+            if len(parts) != 2 or v is None or not math.isfinite(v):
                 continue
             key, label = _canonical_pair(name_to_ticker, parts[0], parts[1])
             bucket = corr_pairs.setdefault(key, {"label": label, "corr_eur": 0.0, "contributions": []})
@@ -441,7 +467,7 @@ def _aggregate_risk(
         _SCALE = {"theta": 1.0, "rho": 0.01}
         for greek_name in ("theta", "rho"):
             v = (greeks.get("scalar") or {}).get(greek_name)
-            if v is not None:
+            if v is not None and math.isfinite(v):
                 scalar[greek_name] += v * w * _SCALE[greek_name]
 
         # A deal whose theta could not be rolled forward exactly (fixing window
@@ -476,6 +502,80 @@ def _aggregate_risk(
             bucket["vega_by_scope_eur"][scopes[0]] if len(scopes) == 1 else None
         )
 
+    # Keep the latest run as one coherent snapshot. Never fill a missing
+    # metric from an older market state. Partial sums are separate evidence.
+    metric_coverage = {name: {"required": 0, "available": 0, "missing": [], "sources": []}
+                       for name in ("delta", "gamma", "vega", "theta", "rho", "corr")}
+    bucket_counts = {}
+    for deal in scoped_deals:
+        snapshot = snapshots.get(deal.id)
+        payload, stamp = snapshot if snapshot else ({}, None)
+        source = {"deal_id": deal.id, "reference": deal.reference,
+                  "run_id": payload.get("valuation_run_id"),
+                  "source": "VALUATION_RUN" if payload.get("valuation_run_id") else "LEGACY_CACHE",
+                  "computed_at": stamp.isoformat() if stamp else None,
+                  "valuation_date": valuation_date.isoformat()}
+        fx_ok = not any(row["id"] == deal.id for row in deals_missing_fx)
+        underlyings = json.loads(deal.underlyings_json or "[]")
+        names = {u.get("name"): u.get("ticker", "") for u in underlyings}
+
+        def register(metric, value, factor=None):
+            entry = metric_coverage[metric]
+            entry["required"] += 1
+            present = fx_ok and value is not None and math.isfinite(value)
+            if present:
+                entry["available"] += 1
+                entry["sources"].append({**source, "factor": factor})
+            else:
+                entry["missing"].append({**source, "factor": factor,
+                    "reason": "FX indisponible" if not fx_ok else "Métrique absente du dernier calcul valable"})
+            return present
+
+        for u in underlyings:
+            name, ticker = u.get("name"), u.get("ticker", "")
+            key = _TICKER_TO_KEY.get(ticker, ticker or name)
+            bucket = per_underlying.setdefault(key, {"label": _TICKER_TO_LABEL.get(ticker, name),
+                "delta_eur": 0., "gamma_eur": 0., "vega_eur": None,
+                "vega_by_scope_eur": {}, "vega_scopes": [], "vega_scope_mixed": False, "contributions": []})
+            counts = bucket_counts.setdefault(key, {m: [0, 0] for m in ("delta", "gamma", "vega")})
+            for metric in counts:
+                counts[metric][0] += 1
+                counts[metric][1] += register(metric, (payload.get("per_underlying", {}).get(name) or {}).get(metric), key)
+        for metric in ("theta", "rho"):
+            register(metric, (payload.get("scalar") or {}).get(metric))
+        for a, b in combinations(names, 2):
+            key, label = _canonical_pair(names, a, b)
+            values = payload.get("corr_pairs") or {}
+            present = register("corr", values.get(f"{a} / {b}", values.get(f"{b} / {a}")), key)
+            bucket = corr_pairs.setdefault(key, {"label": label, "corr_eur": 0., "contributions": []})
+            bucket.setdefault("coverage", {"required": 0, "available": 0})
+            bucket["coverage"]["required"] += 1
+            bucket["coverage"]["available"] += present
+    for metric, coverage in metric_coverage.items():
+        required, available = coverage["required"], coverage["available"]
+        coverage.update(status="NOT_APPLICABLE" if not required else "COMPLETE" if available == required else "PARTIAL" if available else "UNAVAILABLE",
+                        coverage_pct=100 * available / required if required else None,
+                        basis="required factor/metric components in requested scope")
+        if metric in scalar:
+            coverage["available_sum_eur"] = scalar[metric] if available else None
+            if available != required or not required:
+                scalar[metric] = None
+    for key, counts in bucket_counts.items():
+        bucket = per_underlying[key]
+        bucket["coverage"] = {}
+        for metric, (required, available) in counts.items():
+            field = f"{metric}_eur"
+            bucket[f"available_{field}"] = bucket.get(field) if available else None
+            bucket["coverage"][metric] = {"required": required, "available": available,
+                                           "coverage_pct": 100 * available / required}
+            if available != required:
+                bucket[field] = None
+    for bucket in corr_pairs.values():
+        coverage = bucket.get("coverage", {})
+        bucket["available_corr_eur"] = bucket["corr_eur"] if coverage.get("available") else None
+        if coverage.get("required") != coverage.get("available"):
+            bucket["corr_eur"] = None
+
     return {
         "deals_included": deals_included,
         "deals_missing_greeks": deals_missing_greeks,
@@ -485,10 +585,14 @@ def _aggregate_risk(
         # Positions left out because their currency could not be converted.
         # Non-empty means every total below is partial — say so on screen.
         "deals_missing_fx": deals_missing_fx,
+        "fx_coverage": list(fx_coverage.values()),
         "nominal_total_eur": nominal_total_eur,
         "per_underlying": per_underlying,
         "corr_pairs": corr_pairs,
         "scalar": scalar,
+        "metric_coverage": metric_coverage,
+        "data_scope": data_scope,
+        "is_test": data_scope == "UAT",
         "oldest_computed_at": oldest_computed_at.isoformat() if oldest_computed_at else None,
         "reporting_ccy": "EUR",
         "valuation_date": valuation_date.isoformat(),
@@ -500,10 +604,11 @@ def risk_global(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
     valuation_date: date | None = None,
+    data_scope: Literal["PRODUCTION", "UAT"] = "PRODUCTION",
 ):
     """Risk aggregated over deals whose optional exposure existed as of date."""
-    deals = session.exec(_all_deals_statement(current)).all()
-    payload = _aggregate_risk(list(deals), session, valuation_date)
+    deals = visible_deals(session, session.exec(_all_deals_statement(current)).all(), current)
+    payload = _aggregate_risk(list(deals), session, valuation_date, data_scope)
     payload["scope"] = "global"
     return payload
 
@@ -520,21 +625,22 @@ def risk_global(
 # per construction since each deal's chain does.
 
 _STEP_KEYS = {"Effet temps": "temps", "Effet spot": "spot",
-              "Effet volatilité": "vol", "Effet corrélation": "corr"}
+              "Effet dividendes": "dividendes", "Effet volatilité": "vol", "Effet corrélation": "corr"}
 
 
 def _run_explain_on_book(deals: list[Deal], session: Session, n_paths: int,
                          body: MtmExplainRequest) -> dict:
     from .deals import _explain_core
 
-    steps = {"temps": 0.0, "spot": 0.0, "vol": 0.0, "corr": 0.0}
+    steps = {"temps": 0.0, "spot": 0.0, "dividendes": 0.0, "vol": 0.0, "corr": 0.0}
     has_corr = False
     contributions, skipped, errors = [], [], []
+    fx_coverage = {}
     delta_mtm_eur = flows_eur = residual_eur = 0.0
     nominal_total_eur = 0.0
 
     for d in deals:
-        fx_rate = _fx_to_reporting(d.devise)
+        fx_rate = _fx_to_reporting(d.devise, body.date2, coverage=fx_coverage)
         if fx_rate is None:
             # Same treatment as a deal that cannot be repriced: named in
             # `skipped`, absent from the EUR totals. Converting at parity here
@@ -560,8 +666,11 @@ def _run_explain_on_book(deals: list[Deal], session: Session, n_paths: int,
                            "error": str(e)})
             continue
 
+        # Display precision in points must not become an EUR accounting input.
+        # Archived legacy payloads remain readable at their original precision.
+        measured = payload.get("unrounded") or payload
         contrib_steps = {}
-        for s in payload["steps"]:
+        for s in measured["steps"]:
             key = _STEP_KEYS.get(s["label"])
             if key is None:
                 continue
@@ -570,18 +679,18 @@ def _run_explain_on_book(deals: list[Deal], session: Session, n_paths: int,
             contrib_steps[key] = round(eur, 2)
             if key == "corr":
                 has_corr = True
-        residual_eur += payload["residual_pts"] * to_eur
-        flows_eur += payload["flows_total_pts"] * to_eur
-        delta_mtm_eur += payload["delta_pts"] * to_eur
+        residual_eur += measured["residual_pts"] * to_eur
+        flows_eur += measured["flows_total_pts"] * to_eur
+        delta_mtm_eur += measured["delta_pts"] * to_eur
 
         contributions.append({
             "deal_id": d.id, "reference": d.reference,
             "date1": payload["date1"], "date2": payload["date2"],
             "mtm1": payload["mtm1"], "mtm2": payload["mtm2"],
-            "delta_mtm_eur": round(payload["delta_pts"] * to_eur, 2),
-            "flows_eur": round(payload["flows_total_pts"] * to_eur, 2),
-            "pnl_eur": round(payload["pnl_total_pts"] * to_eur, 2),
-            "residual_eur": round(payload["residual_pts"] * to_eur, 2),
+            "delta_mtm_eur": round(measured["delta_pts"] * to_eur, 2),
+            "flows_eur": round(measured["flows_total_pts"] * to_eur, 2),
+            "pnl_eur": round(measured["pnl_total_pts"] * to_eur, 2),
+            "residual_eur": round(measured["residual_pts"] * to_eur, 2),
             "steps_eur": contrib_steps,
         })
 
@@ -590,12 +699,15 @@ def _run_explain_on_book(deals: list[Deal], session: Session, n_paths: int,
     waterfall = [
         {"key": "temps", "label": "Effet temps", "delta_eur": round(steps["temps"], 2)},
         {"key": "spot", "label": "Effet spot", "delta_eur": round(steps["spot"], 2)},
+        {"key": "dividendes", "label": "Effet dividendes", "delta_eur": round(steps["dividendes"], 2)},
         {"key": "vol", "label": "Effet volatilité", "delta_eur": round(steps["vol"], 2)},
     ]
     if has_corr:
         waterfall.append({"key": "corr", "label": "Effet corrélation",
                           "delta_eur": round(steps["corr"], 2)})
     return {
+        "cash_basis": "CONTRACTUAL_PAYMENT_DATE",
+        "attribution_version": "pnl-payment-v2",
         "nominal_total_eur": round(nominal_total_eur, 2),
         "steps": waterfall,
         "residual_eur": round(residual_eur, 2),
@@ -604,6 +716,7 @@ def _run_explain_on_book(deals: list[Deal], session: Session, n_paths: int,
         "pnl_total_eur": round(pnl_total_eur, 2),
         "pct_impact": round(pct, 3) if pct is not None else None,
         "contributions": contributions,
+        "fx_coverage": list(fx_coverage.values()),
         "skipped": skipped,
         "errors": errors,
         "reporting_ccy": "EUR",
@@ -616,14 +729,17 @@ def pnl_explain_global(
     session: Annotated[Session, Depends(get_session)],
     n_paths: int = 20000,
     body: Optional[MtmExplainRequest] = None,
+    data_scope: DataScope = "PRODUCTION",
 ):
     """P&L explain aggregated across every active deal of the user. date1
     omitted means each deal explains from its own value date (P&L depuis
     l'origine) ; date2 omitted means today."""
-    deals = session.exec(_active_deals_statement(current)).all()
+    deals = visible_deals(session, session.exec(_active_deals_statement(current)).all(), current)
+    deals = select_risk_deals(deals, data_scope)
     result = _run_explain_on_book(list(deals), session, n_paths,
                                   body or MtmExplainRequest())
     result["scope"] = "global"
+    result.update(risk_scope_metadata(deals, data_scope))
     return result
 
 
@@ -634,16 +750,19 @@ def pnl_explain_portfolio(
     session: Annotated[Session, Depends(get_session)],
     n_paths: int = 20000,
     body: Optional[MtmExplainRequest] = None,
+    data_scope: DataScope = "PRODUCTION",
 ):
     p = session.get(Portfolio, portfolio_id)
     if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = _portfolio_deals(session, portfolio_id, ("actif",))
+    deals = _portfolio_deals(session, portfolio_id, ("actif",), current=current)
+    deals = select_risk_deals(deals, data_scope)
     result = _run_explain_on_book(list(deals), session, n_paths,
                                   body or MtmExplainRequest())
     result["scope"] = "portfolio"
     result["portfolio_id"] = portfolio_id
     result["name"] = p.name
+    result.update(risk_scope_metadata(deals, data_scope))
     return result
 
 
@@ -653,12 +772,13 @@ def portfolio_risk(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
     valuation_date: date | None = None,
+    data_scope: Literal["PRODUCTION", "UAT"] = "PRODUCTION",
 ):
     p = session.get(Portfolio, portfolio_id)
     if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = _portfolio_deals(session, portfolio_id)
-    payload = _aggregate_risk(list(deals), session, valuation_date)
+    deals = _portfolio_deals(session, portfolio_id, current=current)
+    payload = _aggregate_risk(list(deals), session, valuation_date, data_scope)
     payload["scope"] = "portfolio"
     payload["portfolio_id"] = portfolio_id
     payload["name"] = p.name
@@ -667,28 +787,41 @@ def portfolio_risk(
 
 # ── Counterparty exposure & concentration ────────────────────────────
 #
-# Nominal-EUR concentration by contrepartie — same cheap "sum over already-
-# known deal fields" philosophy as _aggregate_risk (no Monte Carlo, no
-# dependency on Greeks ever having been computed): Deal.contrepartie is a
-# free string, not a FK (see models.py:Counterparty), so grouping is a direct
-# string group-by. Nominal, not live MtM, is the exposure basis on purpose —
-# for a family office or a small desk with no dedicated risk function, "what
-# nominal am I facing this bank for" is the number that actually gets acted
-# on (a structured note is an unsecured claim on the issuer for the promised
-# redemption, not today's secondary MtM), and unlike a live reprice it's
-# always available with zero compute cost.
+# Nominal-EUR monitoring is separate from blocking CCR limits. Legal IDs own
+# aggregation and limits; labels remain descriptive snapshots. Unqualified
+# legacy positions and D01 exceptions remain visible without inferred IDs.
 def _aggregate_exposure_by_counterparty(deals: list[Deal], session: Session) -> dict:
     by_cpty: dict[str, dict] = {}
+    catalog = {item.id: item for item in session.exec(select(Counterparty)).all()}
+    requiring_qualification = []
     deals_missing_fx: list[dict] = []
+    fx_coverage = {}
     nominal_total_eur = 0.0
 
     for d in deals:
-        fx_rate = _fx_to_reporting(d.devise)
+        legal = catalog.get(d.counterparty_id)
+        key = f"counterparty:{d.counterparty_id}" if d.counterparty_id is not None else f"unqualified:{d.contrepartie or '(non renseignée)'}"
+        identity_status = ("ACTIVE" if legal.active else "INACTIVE") if legal else (
+            "REFERENCE_MISSING" if d.counterparty_id is not None else "UNQUALIFIED")
+        bucket = by_cpty.setdefault(key, {"counterparty_id": d.counterparty_id,
+            "contrepartie": legal.name if legal else d.contrepartie or "(non renseignée)",
+            "identity_status": identity_status, "historical_names": set(),
+            "limit_eur": legal.limit_eur if legal else None,
+            "nominal_eur": 0.0, "deals": [], "missing_fx_count": 0})
+        bucket["historical_names"].add(d.contrepartie)
+        if legal is None:
+            requiring_qualification.append({"id": d.id, "reference": d.reference,
+                "counterparty_id": d.counterparty_id, "contrepartie": d.contrepartie,
+                "identity_status": identity_status,
+                "administrator_exception": bool(d.legal_identity_exception_json),
+                "credit_status": "NOT_ASSESSED"})
+        fx_rate = _fx_to_reporting(d.devise, coverage=fx_coverage)
         if fx_rate is None:
             # A counterparty limit is checked against a number. Understating
             # an exposure because a rate was missing is the one failure mode
             # this screen exists to prevent, so the position is named instead.
             deals_missing_fx.append(_fx_missing_row(d))
+            bucket["missing_fx_count"] += 1
             continue
         exposure_fraction = (
             float(d.settlement_amount or 0.0)
@@ -697,29 +830,36 @@ def _aggregate_exposure_by_counterparty(deals: list[Deal], session: Session) -> 
         nom_eur = d.nominal * exposure_fraction * fx_rate
         nominal_total_eur += nom_eur
 
-        key = d.contrepartie or "(non renseignée)"
-        bucket = by_cpty.setdefault(key, {"nominal_eur": 0.0, "deals": []})
         bucket["nominal_eur"] += nom_eur
         bucket["deals"].append({
             "id": d.id, "reference": d.reference,
+            "contrepartie": d.contrepartie,
             "nominal_eur": round(nom_eur, 2), "status": d.status,
             "exposure_basis": ("settlement_amount"
                                if d.status == "en_reglement" else "nominal"),
         })
 
-    limits = {c.name: c.limit_eur for c in session.exec(select(Counterparty)).all()}
-
     rows = []
-    for name, bucket in by_cpty.items():
-        limit = limits.get(name)
+    for key, bucket in by_cpty.items():
+        limit = bucket["limit_eur"]
+        breached = bool(limit is not None and bucket["nominal_eur"] > limit)
+        qualified = bucket["identity_status"] in {"ACTIVE", "INACTIVE"}
+        limit_status = ("UNQUALIFIED" if not qualified else "INCOMPLETE" if bucket["missing_fx_count"]
+                        else "NO_LIMIT" if limit is None else "BREACH" if breached else "OK")
         pct = (bucket["nominal_eur"] / nominal_total_eur) if nominal_total_eur else None
         rows.append({
-            "contrepartie": name,
+            "identity_key": key,
+            "counterparty_id": bucket["counterparty_id"],
+            "contrepartie": bucket["contrepartie"],
+            "identity_status": bucket["identity_status"],
+            "historical_names": sorted(bucket["historical_names"]),
             "nominal_eur": round(bucket["nominal_eur"], 2),
             "pct_of_book": round(pct, 4) if pct is not None else None,
-            "deal_count": len(bucket["deals"]),
+            "deal_count": len(bucket["deals"]) + bucket["missing_fx_count"],
             "limit_eur": limit,
-            "limit_breached": bool(limit is not None and bucket["nominal_eur"] > limit),
+            "limit_breached": breached if qualified and (not bucket["missing_fx_count"] or breached) else None,
+            "limit_status": limit_status,
+            "missing_fx_count": bucket["missing_fx_count"],
             "deals": sorted(bucket["deals"], key=lambda x: -x["nominal_eur"]),
         })
     rows.sort(key=lambda r: -r["nominal_eur"])
@@ -729,13 +869,18 @@ def _aggregate_exposure_by_counterparty(deals: list[Deal], session: Session) -> 
     # for a book facing a single one. effective_n = 1/HHI is the "equivalent
     # number of equally-sized counterparties" this book behaves like — more
     # intuitive to read than a raw HHI for someone without a risk background.
-    hhi = sum((r["pct_of_book"] or 0.0) ** 2 for r in rows) if nominal_total_eur else None
+    complete = not requiring_qualification and not deals_missing_fx
+    hhi = sum((r["pct_of_book"] or 0.0) ** 2 for r in rows) if nominal_total_eur and complete else None
     effective_n = round(1 / hhi, 2) if hhi else None
-    top3_pct = round(sum(r["pct_of_book"] or 0.0 for r in rows[:3]), 4) if nominal_total_eur else None
+    top3_pct = round(sum(r["pct_of_book"] or 0.0 for r in rows[:3]), 4) if nominal_total_eur and complete else None
 
     return {
         "nominal_total_eur": round(nominal_total_eur, 2),
         "by_counterparty": rows,
+        "coverage_complete": complete,
+        "fx_coverage": list(fx_coverage.values()),
+        "deals_requiring_qualification": requiring_qualification,
+        "limit_basis": "NOMINAL_EUR_MONITORING",
         "hhi": round(hhi, 4) if hhi else None,
         "effective_n": effective_n,
         "top3_pct": top3_pct,
@@ -831,13 +976,16 @@ def _aggregate_barriers(deals: list[Deal], session: Session) -> dict:
 def barriers_global(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    data_scope: DataScope = "PRODUCTION",
 ):
     """Barrier proximity ranked across every active deal of the user, across
     all of their portfolios — same 'always the true total' contract as
     /risk-global."""
-    deals = session.exec(_active_deals_statement(current)).all()
+    deals = visible_deals(session, session.exec(_active_deals_statement(current)).all(), current)
+    deals = select_risk_deals(deals, data_scope)
     payload = _aggregate_barriers(list(deals), session)
     payload["scope"] = "global"
+    payload.update(risk_scope_metadata(deals, data_scope))
     return payload
 
 
@@ -846,15 +994,18 @@ def portfolio_barriers(
     portfolio_id: int,
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    data_scope: DataScope = "PRODUCTION",
 ):
     p = session.get(Portfolio, portfolio_id)
     if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = _portfolio_deals(session, portfolio_id, ("actif",))
+    deals = _portfolio_deals(session, portfolio_id, ("actif",), current=current)
+    deals = select_risk_deals(deals, data_scope)
     payload = _aggregate_barriers(list(deals), session)
     payload["scope"] = "portfolio"
     payload["portfolio_id"] = portfolio_id
     payload["name"] = p.name
+    payload.update(risk_scope_metadata(deals, data_scope))
     return payload
 
 
@@ -862,16 +1013,17 @@ def portfolio_barriers(
 def exposure_by_counterparty_global(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    data_scope: DataScope = "PRODUCTION",
 ):
     """Concentration by counterparty across every active deal of the user,
     across all of their portfolios — same 'always the true total' contract
     as /risk-global."""
     statement = select(Deal).where(Deal.status.in_(["actif", "en_reglement"]))
-    if not _is_admin(current):
-        statement = statement.where(Deal.user_id == current.id)
-    deals = session.exec(statement).all()
+    deals = visible_deals(session, session.exec(statement).all(), current)
+    deals = select_risk_deals(deals, data_scope)
     payload = _aggregate_exposure_by_counterparty(list(deals), session)
     payload["scope"] = "global"
+    payload.update(risk_scope_metadata(deals, data_scope))
     return payload
 
 
@@ -880,13 +1032,16 @@ def exposure_by_counterparty_portfolio(
     portfolio_id: int,
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
+    data_scope: DataScope = "PRODUCTION",
 ):
     p = session.get(Portfolio, portfolio_id)
     if not _portfolio_accessible(p, current):
         raise HTTPException(404, "Portefeuille introuvable")
-    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"))
+    deals = _portfolio_deals(session, portfolio_id, ("actif", "en_reglement"), current=current)
+    deals = select_risk_deals(deals, data_scope)
     payload = _aggregate_exposure_by_counterparty(list(deals), session)
     payload["scope"] = "portfolio"
     payload["portfolio_id"] = portfolio_id
     payload["name"] = p.name
+    payload.update(risk_scope_metadata(deals, data_scope))
     return payload

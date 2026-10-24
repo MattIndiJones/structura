@@ -1,0 +1,160 @@
+{
+  "date": "2026-10-24",
+  "status": "PASS",
+  "cause": "Legacy Admin workspace predates C02 identity attestation",
+  "report": "../LAUNCHER_RECOVERY_2026-10-24.md",
+  "targeted_passed": 31,
+  "new_adoption_cases": 18,
+  "test_identities": [
+    "backend.tests.test_admin_workbench_adoption::test_active_workspace_and_foreign_port_are_refused",
+    "backend.tests.test_admin_workbench_adoption::test_audit_failure_rolls_back_identity_but_keeps_backup",
+    "backend.tests.test_admin_workbench_adoption::test_explicit_attestation_is_required[expected_installation_id-foreign]",
+    "backend.tests.test_admin_workbench_adoption::test_explicit_attestation_is_required[expected_sha256-outdated]",
+    "backend.tests.test_admin_workbench_adoption::test_explicit_attestation_is_required[reason-]",
+    "backend.tests.test_admin_workbench_adoption::test_inspection_is_read_only_and_adoption_backs_up_every_original_row",
+    "backend.tests.test_admin_workbench_adoption::test_normal_migration_and_restarts_preserve_existing_account",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[broken-fk]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[business-marker]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[disabled]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[foreign-admin-marker]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[journal]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[second-user]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[unknown-schema]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[wrong-entity]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[wrong-manifest]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[wrong-password]",
+    "backend.tests.test_admin_workbench_adoption::test_refused_adoption_never_changes_existing_database[wrong-role]",
+    "backend.tests.test_installation_identity_security::test_additive_session_migration_preserves_accounts_and_is_repeatable",
+    "backend.tests.test_installation_identity_security::test_admin_preflight_rejects_foreign_or_unmarked_db_before_any_migration[business]",
+    "backend.tests.test_installation_identity_security::test_admin_preflight_rejects_foreign_or_unmarked_db_before_any_migration[foreign-marker]",
+    "backend.tests.test_installation_identity_security::test_admin_preflight_rejects_foreign_or_unmarked_db_before_any_migration[unmarked-admin]",
+    "backend.tests.test_installation_identity_security::test_central_foreign_identity_is_refused_without_schema_changes",
+    "backend.tests.test_installation_identity_security::test_legacy_read_only_book_uses_separate_revocation_and_audit_store",
+    "backend.tests.test_installation_identity_security::test_marked_admin_workspace_starts_idempotently_and_retains_revocations",
+    "backend.tests.test_installation_identity_security::test_password_portal_directory_and_central_session_revocation_without_developer_mode",
+    "backend.tests.test_structura_launcher::test_backend_without_explicit_environment_opens_launcher",
+    "backend.tests.test_structura_launcher::test_failed_partial_launch_only_stops_newly_created_services",
+    "backend.tests.test_structura_launcher::test_full_admin_has_its_own_manifest_and_separate_data_directory",
+    "backend.tests.test_structura_launcher::test_menu_choices_start_only_needed_services_and_reuse_them",
+    "backend.tests.test_structura_launcher::test_occupied_admin_port_does_not_replace_its_occupant_or_block_portal"
+  ],
+  "junit_sha256": "8c185d570f96915edfb73729e2e1ee0b24a2b55d085bbd6ad54cda449c1a3700",
+  "first_run": {
+    "passed": 27,
+    "failed": 4,
+    "resolved": true,
+    "cause": "Provisioning manifest cache refreshed explicitly; identity-test _DB_PATH isolated from retired legacy marker",
+    "junit_sha256": "1037ad1ee90d8fd2c270e2a36c320f459b1d5d4001680ae3a3f98c3d5c5ab7a3"
+  },
+  "isolated_native": {
+    "passed": true,
+    "checks": [
+      "explicit_adoption",
+      "byte_identical_backup",
+      "real_launcher_admin_and_portal",
+      "repeated_launch_reuses_owned_services",
+      "frontend_served",
+      "health_identity",
+      "development_admin_session",
+      "authenticated_admin",
+      "products_deals_campaign_list",
+      "foreign_origin_refused",
+      "no_AI_started"
+    ],
+    "cleanup": [
+      {
+        "key": "platform",
+        "stopped": true,
+        "pid": 25516,
+        "launcher_pid": 7384,
+        "launch_id": "d5b4dbe3-8f9c-4bb5-8ae9-21416d59015c",
+        "process_exited": true,
+        "port_released": true
+      },
+      {
+        "key": "admin-workbench",
+        "stopped": true,
+        "pid": 27112,
+        "launcher_pid": 3304,
+        "launch_id": "f40ce204-3c5b-43dd-b8b2-b84a9effb801",
+        "process_exited": true,
+        "port_released": true
+      }
+    ]
+  },
+  "original_workspace": {
+    "passed": true,
+    "checks": [
+      "private_files_unchanged",
+      "byte_identical_database_backup",
+      "explicit_identity_audited",
+      "normal_migrations",
+      "original_admin_and_entity_unchanged",
+      "business_counts_unchanged",
+      "sqlite_integrity",
+      "launcher_admin_and_portal_start",
+      "repeated_launch_reuses_services",
+      "frontend_served",
+      "development_admin_login",
+      "authenticated_business_and_campaign_reads",
+      "no_AI_started"
+    ],
+    "cleanup": [
+      {
+        "key": "platform",
+        "stopped": true,
+        "pid": 29212,
+        "launcher_pid": 20984,
+        "launch_id": "575c09ca-c7fe-472a-a4e9-54767bc30011",
+        "process_exited": true,
+        "port_released": true
+      },
+      {
+        "key": "admin-workbench",
+        "stopped": true,
+        "pid": 23828,
+        "launcher_pid": 28800,
+        "launch_id": "950f7f99-3b25-490c-8d23-b18d0379ea68",
+        "process_exited": true,
+        "port_released": true
+      }
+    ],
+    "backup_sha256": "334f1b1a1c8a68c691c4c31da15e4000d9c35a0c99998d9bba6b7ea6446cb790",
+    "accounts_passwords_roles_and_entity_preserved": true,
+    "products_deals_rfqs_preserved": true,
+    "private_manifest_and_secrets_preserved": true
+  },
+  "cleanup": {
+    "verified_at": "2026-10-24T13:37:00.390562+00:00",
+    "ports_checked": [
+      8000,
+      8100,
+      18500,
+      18509
+    ],
+    "owned_pids_checked": [
+      3304,
+      7384,
+      20984,
+      23828,
+      25516,
+      27112,
+      28800,
+      29212
+    ],
+    "remaining_listeners": [],
+    "remaining_owned_processes": []
+  },
+  "limits": [
+    "Only corroborated historical single-admin development bootstrap is supported",
+    "Other installations and multi-user/changed-password workspaces require separate provisioning",
+    "No Tkinter visual recipe, full backend rerun, frontend change or production qualification"
+  ],
+  "commit_push": false,
+  "source_sha256": {
+    "backend/app/hybrid/admin_adoption.py": "a4af9f8015d0b4344aa99a5e342f0bef85b4edee0db1c849d1b07052a52d35f5",
+    "scripts/adopt_admin_workbench.py": "ca4259a3c172330856c553ab89504af6527ec4108180ed32501fb226aea75e37",
+    "backend/tests/test_admin_workbench_adoption.py": "a5537dd50f32dd4ae8a84f74b0f6cba428004080aa479248661672eef062b917",
+    "backend/tests/test_installation_identity_security.py": "fc9ec2e0766695c7f7a2d4a8e31337310d11ed4c7e30301dce1b98767ee68fdf"
+  }
+}

@@ -100,7 +100,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { apiFetch } from '../utils/api.js'
 import SensitiveValue from './SensitiveValue.vue'
 
@@ -113,6 +113,7 @@ const props = defineProps({
   // seule façon de vérifier qu'un calendrier annuel relevé trimestriellement
   // fait bien 3 constatations de 4 relevés, et non 12 observations.
   windowFrequency: { type: String, default: null },
+  frozen: Boolean, frozenData: Object,
 })
 
 const open    = ref(false)
@@ -137,6 +138,7 @@ const CONVENTION_LABELS = {
 // remontrait le calcul d'avant — des relevés qui ne correspondaient plus aux
 // constatations affichées juste au-dessus.
 let chargePour = null
+let loadRevision = 0
 
 function onToggle(event) {
   open.value = event.target.open
@@ -144,7 +146,16 @@ function onToggle(event) {
 }
 
 async function load() {
+  const revision = ++loadRevision
+  const requestedSignature = signature.value
   const r = props.request
+  if (props.frozen) {
+    data.value = props.frozenData || null
+    fenetres.value = props.frozenData?.windows || null
+    error.value = data.value ? '' : 'Calendrier figé indisponible : aucun recalcul automatique.'
+    chargePour = signature.value
+    return
+  }
   if (!(r?.first_observation_date || r?.start_date) || !r?.end_date || !r?.frequency) {
     error.value = 'Calendrier incomplet — dates et fréquence requises.'
     return
@@ -158,14 +169,18 @@ async function load() {
       body: JSON.stringify(r),
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Erreur serveur')
-    data.value = await res.json()
-    fenetres.value = props.windowFrequency ? await loadFenetres(r) : null
-    chargePour = signature.value
+    const resolved = await res.json()
+    const windows = props.windowFrequency ? await loadFenetres(r) : null
+    if (revision !== loadRevision || requestedSignature !== signature.value) return
+    data.value = resolved
+    fenetres.value = windows
+    chargePour = requestedSignature
   } catch (e) {
+    if (revision !== loadRevision || requestedSignature !== signature.value) return
     error.value = e.message
     data.value = null
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -180,6 +195,8 @@ async function loadFenetres(r) {
         start_date: r.period_start_date || r.start_date, first_observation_date: r.first_observation_date, end_date: r.end_date, roll_date: r.roll_date || r.first_observation_date,
         frequency: r.frequency, window_frequency: props.windowFrequency,
         stub: r.stub, currency: r.currency, convention: r.convention || 'none',
+        observation_calendars: r.observation_calendars, observation_join: r.observation_join,
+        settlement_calendars: r.settlement_calendars, settlement_join: r.settlement_join,
       }),
     })
     if (!res.ok) return null
@@ -192,16 +209,19 @@ async function loadFenetres(r) {
 
 /** Signature des paramètres — scalaire, donc comparable. */
 const signature = computed(() =>
-  JSON.stringify(props.request) + '|' + (props.windowFrequency || ''))
+  JSON.stringify(props.request) + '|' + (props.windowFrequency || '') + '|' + JSON.stringify([props.frozen, props.frozenData]))
 
 // Ouvert, l'échéancier suit les champs qu'on modifie — après une pause, pour
 // ne pas lancer un appel par frappe de clavier.
 let timer = null
 watch(signature, () => {
+  loadRevision++
+  loading.value = false
   if (!open.value) { data.value = null; fenetres.value = null; return }
   clearTimeout(timer)
   timer = setTimeout(load, 400)
 })
+onUnmounted(() => { loadRevision++; clearTimeout(timer) })
 
 const WEEKDAYS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.']
 const weekdayOf = iso => WEEKDAYS[new Date(iso + 'T12:00:00').getDay()]
@@ -241,6 +261,7 @@ const summary = computed(() => {
     `${d.dates.length - (d.first_is_observation ? 0 : 1)} constatation(s)`,
     `${d.dates[d.first_is_observation ? 0 : 1] || d.dates[0]} → ${d.dates[d.dates.length - 1]}`,
   ]
+  if (props.frozen) parts.push('Calendrier contractuel figé')
   if (r.frequency) parts.push(`tous les ${r.frequency}`)
   if (STUB_LABELS[r.stub]) parts.push(STUB_LABELS[r.stub])
   if (CONVENTION_LABELS[r.convention]) parts.push(CONVENTION_LABELS[r.convention])

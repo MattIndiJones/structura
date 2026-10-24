@@ -7,8 +7,9 @@ schemas (engine units) and that persisted display snapshot.
 
 ``ValuationContext`` itself is deliberately plain JSON data.  It contains no
 database row, closure or compiled PayScript and can therefore cross the worker
-process boundary used by VaR.  ``run_valuation`` is the only adapter to
-``run_mc``; scenario bumps override only the requested fields.
+process boundary used by VaR. ``run_valuation`` prices this context and
+``run_analysis`` derives bounded analytics through the same ``run_mc`` engine;
+scenario bumps override only the requested fields.
 """
 from __future__ import annotations
 
@@ -103,7 +104,77 @@ def valuation_context_from_dict(payload: dict) -> ValuationContext:
                                if key in known})
 
 
-def run_valuation(script, context: ValuationContext | dict, **overrides):
+def valuation_context_from_request(req, compiled, *, residual=None, paths=None):
+    """One dated input boundary for the price and its derived analyses."""
+    from .payscript.parser import analysis_origin, effective_T_max
+    origin = residual.valuation if residual is not None else analysis_origin(req)
+    year_fraction = lambda day: ((day-origin).days/365.25 if residual is not None else
+                                round((day-origin).days/365.25, 6)) if day is not None else None
+    curve = lambda values: (residual.sur_axe_residuel(values) if residual is not None else deepcopy(values or []))
+    return ValuationContext(
+        underlyings=deepcopy(residual.underlyings) if residual is not None else [u.model_dump() for u in req.underlyings],
+        corr_matrix=deepcopy(req.corr_matrix), r=residual.r if residual is not None else req.r,
+        T=residual.T_remaining if residual is not None else effective_T_max(compiled, req.T),
+        N=paths if paths is not None else req.N, model=req.model, seed=42,
+        antithetic=req.antithetic, user_params=deepcopy(residual.user_params if residual is not None else req.user_params),
+        yield_curve=curve(req.yield_curve), funding_curve=curve(req.funding_curve),
+        funding_spread=req.funding_spread, sigma_r=req.sigma_r, a_r=req.a_r,
+        barrier_monitoring=req.barrier_monitoring, maturity_payment_t=year_fraction(req.payment_date),
+        value_date_t=0. if residual is not None else (year_fraction(req.value_date) or 0.),
+        strike_set_t=residual.residuel.strike_set_t if residual is not None else None,
+        state=deepcopy(residual.mc_kwargs) if residual is not None else {},
+        script_text=residual.script_text if residual is not None else req.script,
+        constats=deepcopy(residual.constats if residual is not None else req.constats))
+
+
+def run_analysis(script, context: ValuationContext, kind: str, **options):
+    from .payscript.engine import run_mc_paths, run_mc_proba
+    if kind not in ('paths', 'proba'):
+        raise ValueError('Analytique inconnue.')
+    kwargs = {key: deepcopy(getattr(context, key)) for key in (
+        'underlyings', 'corr_matrix', 'r', 'model', 'seed', 'antithetic', 'user_params',
+        'yield_curve', 'funding_curve', 'funding_spread', 'sigma_r', 'a_r',
+        'barrier_monitoring', 'maturity_payment_t', 'value_date_t', 'strike_set_t')}
+    kwargs.update(T_max=context.T, state=deepcopy(context.state), **options)
+    kwargs['N_stat' if kind == 'paths' else 'N'] = context.N
+    result = (run_mc_paths if kind == 'paths' else run_mc_proba)(script, **kwargs)
+    result['valuation_context_fingerprint'] = json_transport_fingerprint(context.to_dict())
+    result['calibration_role'] = 'Frozen input evidence; no new calibration qualification'
+    return result
+
+
+def validate_mtf_context(script, context: ValuationContext, *, payment_aware=False):
+    """Refuse inputs the nested replay cannot preserve, before any MC work."""
+    from .payscript.engine import _mtf_reject_unsupported
+
+    _mtf_reject_unsupported(context.model, context.barrier_monitoring,
+                            context.yield_curve, context.sigma_r,
+                            context.underlyings)
+    if context.funding_curve or context.funding_spread:
+        raise ValueError(
+            "Le funding (spread ou courbe) n'est pas encore supporté en "
+            "Mark-to-Future et dans les horizons intermédiaires KID. "
+            "Cette analyse est indisponible avec ces hypothèses ; "
+            "le prix conserve son funding.")
+    if context.value_date_t or context.strike_set_t is not None:
+        raise ValueError(
+            "La value date décalée et le strike différé ne sont pas encore "
+            "supportés en Mark-to-Future et dans les horizons intermédiaires KID.")
+    if not payment_aware:
+        delayed = (context.maturity_payment_t is not None
+                   and abs(context.maturity_payment_t - context.T) > 1e-6)
+        delayed = delayed or any(
+            abs(p - d) > 1e-6 for ev in script.events
+            for d, p in zip(ev.dates, ev.payment_dates or []))
+        if delayed:
+            raise ValueError(
+                "Les paiements différés ne sont pas encore supportés dans "
+                "l'éventail Mark-to-Future et son drill-down. "
+                "Les horizons KID utilisent le rejeu distinct des créances.")
+
+
+def run_valuation(script, context: ValuationContext | dict, *,
+                  per_path_flows=False, flows_at_payment=False, **overrides):
     """Run one valuation; ``overrides`` contains scenario/Greek bumps only."""
     from .payscript.engine import run_mc
 
@@ -176,6 +247,8 @@ def run_valuation(script, context: ValuationContext | dict, **overrides):
         "strike_set_t": ctx.strike_set_t,
         **deepcopy(ctx.state),
     }
+    if per_path_flows:
+        kwargs.update(per_path_flows=True, flows_at_payment=flows_at_payment)
     kwargs.update(overrides)
     return run_mc(**kwargs)
 
@@ -394,3 +467,17 @@ def deterministic_cashflow_pv(
     risk_free = zero_at(yield_curve, float(r))
     credit = zero_at(funding_curve, float(funding_spread))
     return float(amount) * math.exp(-(risk_free + credit) * t)
+
+
+def unsettled_cashflows_pv(context: dict, *, dr=0., ds=0.):
+    """Reprice detached receivables at their actual payment times."""
+    flows = context.get('unsettled_cash_flows')
+    if flows is None:
+        if (dr or ds) and context.get('unsettled_pv'):
+            raise ValueError('Dates de paiement des créances absentes : réactualisation impossible.')
+        return float(context.get('unsettled_pv', 0.))
+    return sum(deterministic_cashflow_pv(
+        row['cf'], row['time_to_payment'], r=context['r_frac']+dr,
+        yield_curve=[[t, rate+dr] for t, rate in context.get('yc', [])],
+        funding_curve=[[t, spread+ds] for t, spread in context.get('funding_curve', [])],
+        funding_spread=context.get('funding_spread', 0.)+ds) for row in flows)

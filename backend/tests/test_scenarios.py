@@ -87,7 +87,7 @@ def test_grid_runs_on_every_model(model):
     """vol_add (and spot_mult) is wired into every model's simulate function —
     no crash, and the grid stays internally consistent (base price matches a
     direct run_mc call) for heston/sabr/localvol too, not just constant."""
-    params = [dict(CALL_PARAMS[0], skew=-0.1, curvature=0.05)]
+    params = [dict(CALL_PARAMS[0], skew=-0.01, curvature=0.01)]
     grid = compute_scenario_grid(CALL_SCRIPT, params, CORR,
                                   r=0.03, T=1.0, model=model, seed=42,
                                   user_params={'K': 1.0},

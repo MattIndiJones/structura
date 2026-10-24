@@ -1,6 +1,15 @@
 import { reactive, ref } from 'vue'
 import { apiFetch } from '../utils/api.js'
 
+export function standardMtmRequest(request) {
+  const known = ['recalibrate', 'r', 'overrides', 'window_days', 'valuation_date',
+    'funding_curve', 'funding_spread', 'funding_source_reference']
+  return (request.recalibrate ?? 'none') === 'none' && request.r == null
+    && !Object.keys(request.overrides || {}).length && (request.window_days ?? 252) === 252
+    && ['funding_curve', 'funding_spread', 'funding_source_reference'].every(k => request[k] == null)
+    && Object.keys(request).every(k => known.includes(k))
+}
+
 export function localDay(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
@@ -76,6 +85,7 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
   function invalidate(id) {
     revisions[id] = (revisions[id] || 0) + 1
     mtmResults[id] = null
+    restored.delete(id)
   }
   function setMtmMode(id, mode) {
     syncDay()
@@ -122,7 +132,7 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
         const valuationDate = result.valuation_date || request.valuation_date
         if (!(id in versions) || versions[id] !== (revisions[id] || 0) || mtmLoading[id] || mtmResults[id]) continue
         if (!timestamp || (!archived && localDay(timestamp) !== day) || valuationDate !== day) continue
-        if (request.recalibrate !== 'none' || request.r != null || Object.keys(request.overrides || {}).length || (request.window_days ?? 252) !== 252) continue
+        if (!standardMtmRequest(request)) continue
         if (mtmModeFor(id) !== 'booking' || mtmDateFor(id) !== day) continue
         if (result.mtm == null && !result.resolved_pending) continue
         mtmResults[id] = { ...result, _runCreatedAt: timestamp.toISOString(), _restored: true }
@@ -138,6 +148,7 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
     const epoch = generation
     runningGeneration[id] = epoch
     invalidate(id)
+    const version = revisions[id]
     mtmLoading[id] = true
     mtmProgress[id] = 'preparing'
     try {
@@ -150,10 +161,10 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
       })
       const data = await readMtmResponse(response, phase => { mtmProgress[id] = phase })
       syncDay()
-      if (generation === epoch) mtmResults[id] = { ...data, _runCreatedAt: new Date().toISOString() }
+      if (generation === epoch && revisions[id] === version) mtmResults[id] = { ...data, _runCreatedAt: new Date().toISOString() }
     } catch (e) {
       syncDay()
-      if (generation === epoch) mtmResults[id] = { error: e.message }
+      if (generation === epoch && revisions[id] === version) mtmResults[id] = { error: e.message }
     } finally {
       mtmLoading[id] = false
       delete mtmProgress[id]
@@ -176,6 +187,6 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
 
   return {
     todayIso, mtmLoading, mtmResults, mtmModeFor, mtmDateFor, setMtmMode, setMtmDate,
-    loadSavedMtms, loadSavedMtm: id => loadSavedMtms([id]), runMtm, mtmProgressLabel, syncDay,
+    loadSavedMtms, loadSavedMtm: id => loadSavedMtms([id]), runMtm, mtmProgressLabel, syncDay, invalidateMtm: invalidate,
   }
 }

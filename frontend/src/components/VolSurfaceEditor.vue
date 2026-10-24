@@ -21,9 +21,9 @@
         <div><label class="label">Déplacement de courbe</label><select class="select" v-model="scope" :disabled="busy">
           <option value="one">Cette maturité</option><option value="all">Toutes les maturités</option></select></div>
         <div><label class="label">Asymétrie (%)</label><SensitiveValue mode="input"><input class="input" type="number" step="1" min="-99" max="99"
-          :value="Number((surface.rho*100).toFixed(4))" @change="editShape('rho',Number($event.target.value)/100,$event)" :disabled="busy" /></SensitiveValue></div>
+          :value="Number((surface.rho*100).toFixed(4))" @change="editShape('rho',$event.target.value,$event)" :disabled="busy" /></SensitiveValue></div>
         <div><label class="label">Intensité du smile</label><SensitiveValue mode="input"><input class="input" type="number" step=".05" min="0" max="3"
-          :value="Number(surface.eta.toFixed(5))" @change="editShape('eta',Number($event.target.value),$event)" :disabled="busy" /></SensitiveValue></div>
+          :value="Number(surface.eta.toFixed(5))" @change="editShape('eta',$event.target.value,$event)" :disabled="busy" /></SensitiveValue></div>
       </div>
       <SensitiveChart>
         <svg ref="svg" class="smile-plot" viewBox="0 0 680 255" role="img" aria-label="Smiles éditables par maturité"
@@ -59,8 +59,19 @@
         <span v-if="u.smile_parameter_mode==='manual'">Paramètres de modèle saisis manuellement ; la surface reste une cible de référence.
           <button class="btn text-xs ml-2" @click="recalibrate">Recalibrer sur la surface</button></span>
         <span v-else-if="fit?.status==='loading'">Recalibration {{ model==='sabr'?'SABR':'Heston' }} en cours…</span>
-        <span v-else-if="fit?.status==='ready'">Ajustement indicatif {{ model==='sabr'?'SABR':model==='lsv'?'de la composante Heston du LSV':'Heston' }} : écart maximal vanille {{ demo.enabled ? '•••' : Number(fit.max_price_error_bp).toFixed(1) }} bps.
-          {{ fit.success===false ? 'Optimisation non convergée. ' : '' }}Taux/dividende plats de référence ; paramètres constants. {{ horizon>10 ? 'Ajustement limité aux dix premières années.' : '' }}</span>
+        <span v-else-if="['ready','unqualified'].includes(fit?.status)">
+          {{ fit.status==='ready' ? 'Ajustement qualifié aux points contrôlés.' : 'Ajustement exploratoire, paramètres non appliqués.' }}
+          {{ fit.success ? 'Optimisation convergée.' : 'Optimisation non convergée.' }}
+          Écarts maximaux : vanille {{ demo.enabled ? '•••' : Number(fit.max_price_error_bp).toFixed(1) }} pb / seuil 5 pb ;
+          digitale {{ demo.enabled ? '•••' : Number(fit.max_digital_error_bp).toFixed(1) }} pb / seuil 10 pb.
+          {{ fit.qualification?.reasons?.join(' ') }}
+          Taux/dividende plats, sans quanto. Ce contrôle ne qualifie pas le Monte Carlo de production ni les barrières.
+          <details v-if="fit.dossier"><summary>Périmètre de calibration</summary>
+            <span>Maturités : {{ fit.dossier.grid.expiries.join(', ') }} ans ; strikes : {{ fit.dossier.grid.strikes.join(', ') }} × spot.
+              Horizon couvert : {{ fit.dossier.context.fit_horizon }} ans sur {{ fit.dossier.context.requested_horizon }}.
+              Piliers exclus : {{ fit.dossier.grid.excluded_pillars.map(p=>p.expiry+' ans').join(', ') || 'aucun' }}.</span>
+          </details>
+        </span>
         <span v-else-if="fit?.status==='error'" class="text-amber-600">{{ fit.message }}</span>
         <span v-else>La nouvelle surface nécessite une recalibration.</span>
       </div>
@@ -107,7 +118,8 @@ const curve=t=>Array.from({length:81},(_,i)=>{const k=.6+i*.01;return`${i?'L':'M
 function scheduleCalibration() {
   clearTimeout(timer)
   if(drag||busy.value||!needsCalibration.value)return
-  timer=setTimeout(()=>calibrateUnderlying(props.u,props.model,props.horizon,props.rate).catch(()=>{}),600)
+  timer=setTimeout(()=>calibrateUnderlying(props.u,props.model,props.horizon,props.rate,
+    ()=>({underlying:props.u,model:props.model,horizon:props.horizon,rate:props.rate})).catch(()=>{}),600)
 }
 watch(()=>JSON.stringify([surface.value,props.model,props.horizon,props.rate,props.u.q]),scheduleCalibration,{immediate:true})
 watch(()=>props.u,()=>{undo.value=null;message.value='';revision++;busy.value=false;cancel()})
@@ -150,7 +162,14 @@ async function selectProfile(profile) {
 function resetProfile(){commit(makeSurface(surface.value.profile,props.u.sigma,props.horizon))}
 function recalibrate(){props.u.smile_parameter_mode='automatic';props.u.smile_calibration=null;scheduleCalibration()}
 function restore(){if(undo.value){const before=undo.value;undo.value=null;commit(before)}}
-async function editShape(field,value,event){const s=cloneSurface(surface.value);s[field]=value;s.mode='manual';await commit(s);event.target.value=field==='rho'?surface.value.rho*100:surface.value.eta}
+async function editShape(field,value,event){
+  if(String(value).trim()==='' || !Number.isFinite(Number(value))) {
+    message.value='Valeur requise : la dernière hypothèse est conservée.'
+  } else {
+    const s=cloneSurface(surface.value);s[field]=Number(value)/(field==='rho'?100:1);s.mode='manual';await commit(s)
+  }
+  event.target.value=field==='rho'?surface.value.rho*100:surface.value.eta
+}
 async function editNode(t,k,value,event){
   try{await commit(moveSurfaceNode(surface.value,t,k,value));event.target.value=vol(t,k).toFixed(4)}
   catch(e){message.value=e.message;event.target.value=vol(t,k).toFixed(4)}

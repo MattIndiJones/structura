@@ -17,7 +17,7 @@ from .lease import CampaignLease
 from .persistence import atomic_write
 from .store import store
 
-ACTOR_KEYS = {"hector", "bnp", "ca", "sg", "client"}
+ACTOR_KEYS = {"hector", "bnp", "ca", "sg", "ubs", "leonteq", "client"}
 INACTIVE = {"STOPPED", "COMPLETED", "ATTENTION"}
 
 
@@ -124,6 +124,11 @@ class Consultations:
                 "STRUCTURA_WORKSHOP_ROOT": str(directory / "agent_workshop"),
                 "STRUCTURA_INSTANCE_CONTROL_TOKEN": record["token"], "STRUCTURA_INSTANCE_ID": record["identity"],
                 "STRUCTURA_JWT_SECRET": secrets.token_urlsafe(64), "PYTHONPATH": str(ROOT / "backend")}
+            environment.pop("STRUCTURA_INSTALLATION_CONFIG", None)
+            environment.pop("STRUCTURA_ADMIN_WORKBENCH_CONFIG", None)
+            environment.pop("STRUCTURA_BOOTSTRAP_PROFILE", None)
+            environment.pop("STRUCTURA_DEVELOPER_ACCESS", None)
+            environment.pop("STRUCTURA_LAUNCH_ID", None)
             output = (directory / "server.log").open("a", encoding="utf-8")
             command = [sys.executable, str(ROOT / "backend" / "run.py")]
             try:

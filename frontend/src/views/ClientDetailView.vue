@@ -99,8 +99,8 @@
             données fictives
           </span>
           <span v-if="intelligence?.excluded_demo_count" class="badge badge-muted"
-                :title="`${intelligence.excluded_demo_count} transaction(s) UAT exclue(s) du profil réel`">
-            {{ intelligence.excluded_demo_count }} UAT exclue(s)
+                :title="`${intelligence.excluded_demo_count} transaction(s) Demo/UAT exclue(s) du profil réel`">
+            {{ intelligence.excluded_demo_count }} Demo/UAT exclue(s)
           </span>
         </div>
 

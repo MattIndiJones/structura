@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from .runtime import consultation_mode
+from .core.document_uploads import DocumentUploadLimitMiddleware
 from .api.pricing import router as pricing_router
 from .api.volatility import router as volatility_router
 from .api.ccr import router as ccr_router
@@ -49,6 +50,7 @@ from .api.rfq_desks import router as rfq_desks_router
 from .api.rfq_relations import router as rfq_relations_router
 from .api.rfq_inbox import router as rfq_inbox_router
 from .api.rfq_transport import router as rfq_transport_router
+from .api.rfq_reconciliation import router as rfq_reconciliation_router
 from .api.admin import router as admin_router
 from .api.alerts import router as alerts_router
 from .api.compute import router as compute_router
@@ -71,6 +73,8 @@ app = FastAPI(
     version="0.2.0",
 )
 
+app.add_middleware(DocumentUploadLimitMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[v.strip() for v in __import__("os").environ.get(
@@ -81,12 +85,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from .hybrid.config import current_config as installation_config
+from .hybrid.development import add_portal_cors
+add_portal_cors(app, installation_config())
+
 configure_lifecycle_handlers(refresh_deal_core, build_watchlist_row)
 
 @app.middleware("http")
 async def consultation_read_only(request: Request, call_next):
     if consultation_mode() and request.method not in {"GET", "HEAD", "OPTIONS"}:
-        allowed = {"/api/auth/login", "/_instance/stop", "/_instance/consultation-session"}
+        allowed = {"/api/auth/login", "/api/auth/logout", "/api/auth/logout-all", "/_instance/stop", "/_instance/consultation-session"}
         if request.url.path not in allowed:
             return JSONResponse(status_code=403, content={"detail":
                 "Consultation en lecture seule : modification et recalcul désactivés."})
@@ -177,6 +185,7 @@ app.include_router(rfq_desks_router)
 app.include_router(rfq_relations_router)
 app.include_router(rfq_inbox_router)
 app.include_router(rfq_transport_router)
+app.include_router(rfq_reconciliation_router)
 app.include_router(admin_router)
 app.include_router(alerts_router)
 app.include_router(compute_router)
@@ -229,6 +238,16 @@ async def health():
     result = {"status": "ok", "version": "0.1.0"}
     if os.environ.get("STRUCTURA_INSTANCE_ID"):
         result.update(instance_id=os.environ["STRUCTURA_INSTANCE_ID"], process_id=os.getpid())
+    if os.environ.get("STRUCTURA_BOOTSTRAP_PROFILE") == "admin_workbench":
+        result.update(kind="admin_workbench", launch_id=os.environ.get("STRUCTURA_LAUNCH_ID"),
+                      developer_access=os.environ.get("STRUCTURA_DEVELOPER_ACCESS") == "1")
+    from .hybrid.config import current_config
+    config = current_config()
+    if config:
+        from .hybrid.development import enabled
+        result.update(instance_id=str(config.installation_id), process_id=os.getpid(),
+                      launch_id=os.environ.get("STRUCTURA_LAUNCH_ID"), kind=config.kind,
+                      registry_state=config.registry_state, developer_access=enabled(config))
     if consultation_mode():
         result["read_only"] = True
     return result
@@ -260,10 +279,11 @@ async def consultation_session(request: Request):
             expected, request.headers.get("X-Instance-Control", "")):
         raise HTTPException(404, "Not found")
     with Session(engine) as session:
-        user = session.get(User, int(os.environ["STRUCTURA_CONSULTATION_USER_ID"]))
+        from .core.consultation_sessions import load_user
+        user = load_user(session, user_id=int(os.environ["STRUCTURA_CONSULTATION_USER_ID"]))
         if not user or not user.is_active:
             raise HTTPException(409, "Le compte sauvegardé de cet acteur est indisponible.")
-        return {"access_token": _make_token(user.id, user.role, user.entity_id), "token_type": "bearer"}
+        return {"access_token": _make_token(user.id, user.role, user.entity_id, auth_version=user.auth_version), "token_type": "bearer"}
 
 
 if DIST.exists():

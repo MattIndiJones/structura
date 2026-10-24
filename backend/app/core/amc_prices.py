@@ -1,8 +1,8 @@
 """AMC underlying price store.
 
-Persistent store for underlying price time series used in the VAG
-(Valeur Ajoutée de Gestion) module.  Each series is stored as a parquet file
-keyed by a sanitised slug derived from the underlying name or ISIN.
+Persistent store for underlying price time series used in the VAG module.
+Logical instrument keys resolve through an atomic market manifest to immutable
+Parquet generations; exact legacy addresses remain readable without migration.
 
 Two acquisition paths:
   1. Yahoo Finance auto-fetch  (yfinance)
@@ -15,6 +15,8 @@ import json
 import math
 import re
 import datetime
+from contextlib import nullcontext
+from hashlib import sha256
 from pathlib import Path
 from typing import Optional
 
@@ -23,7 +25,9 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from ..runtime import data_path
+from ..runtime import data_path, business_today
+from . import market_storage
+from .reference_data import REFERENCE_CURRENCIES
 
 _PRICE_STORE = data_path("underlying_prices")
 _PRICE_STORE.mkdir(parents=True, exist_ok=True)
@@ -47,232 +51,243 @@ def is_gbx_ticker(ticker: str, currency: str) -> bool:
 
 
 def _slug(key: str) -> str:
-    """Turn an ISIN or name into a safe filename slug."""
-    return re.sub(r"[^A-Za-z0-9_\-]", "_", key.strip())[:80]
+    """Keep uppercase identifiers; hash every lossy, long or case-ambiguous name."""
+    identity = key.strip()
+    if not identity or re.fullmatch(r"[A-Z0-9_\-]{1,80}", identity):
+        return identity
+    if re.fullmatch(r"[A-Za-z0-9_\-]{0,32}--[a-f0-9]{64}", identity):
+        return identity
+    prefix = re.sub(r"[^A-Za-z0-9_\-]", "_", identity)[:32]
+    return prefix+'--'+sha256(identity.encode('utf-8')).hexdigest()
 
 
-def _parquet_path(key: str) -> Path:
+def _logical_price_path(key):
     return _PRICE_STORE / f"{_slug(key)}.parquet"
 
 
-def _load_ticker_map() -> dict:
-    if _TICKER_MAP_FILE.exists():
-        try:
-            return json.loads(_TICKER_MAP_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    return {}
+def _parquet_path(key: str) -> Path:
+    logical = _logical_price_path(key)
+    path = market_storage.current_path(logical)
+    if path.exists() or path != logical:
+        return path
+    # Legacy names can be read only through an exact, lossless identity.
+    for legacy in _PRICE_STORE.glob('*.parquet'):
+        if _slug(legacy.stem) == _slug(key):
+            return market_storage.current_path(legacy)
+    return path
 
 
-def _save_ticker_map(m: dict) -> None:
-    _TICKER_MAP_FILE.write_text(
-        json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def _load_ticker_map(*, transaction=None) -> dict:
+    path = transaction.path(_TICKER_MAP_FILE) if transaction else market_storage.current_path(_TICKER_MAP_FILE)
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'),object_pairs_hook=_unique_json_object)
+        if not isinstance(value, dict) or any(not isinstance(k,str) or not isinstance(v,str) for k,v in value.items()):
+            raise ValueError('Invalid ticker mapping')
+        return {_slug(key):ticker for key,ticker in value.items()}
+    except (ValueError, TypeError) as exc:
+        raise ValueError('Association instrument/ticker illisible ; remplacement suspendu.') from exc
 
 
-# ── public API ────────────────────────────────────────────────────────
+def _save_ticker_map(mapping: dict, *, transaction=None) -> None:
+    with (nullcontext(transaction) if transaction else market_storage.transaction()) as pending:
+        pending.json(_TICKER_MAP_FILE, mapping)
 
+
+@market_storage.consistent_read
 def price_status(underlyings: list[dict] | None = None) -> list[dict]:
-    """Return status of every stored price series.
-
-    If *underlyings* is provided (list of {isin, name} dicts from block_b),
-    merge with stored series so missing ones show up as unavailable.
-    """
     ticker_map = _load_ticker_map()
-    stored: dict[str, dict] = {}
-
-    for p in _PRICE_STORE.glob("*.parquet"):
-        key = p.stem
+    stored = {}
+    for logical in market_storage.logical_paths(_PRICE_STORE):
+        key = _slug(logical.stem)
         try:
-            df = pd.read_parquet(p)
-            stored[key] = {
-                "key":      key,
-                "rows":     len(df),
-                "date_min": str(df.index.min().date()),
-                "date_max": str(df.index.max().date()),
-                "available": True,
-                "source":   df.attrs.get("source", "unknown"),
-                "currency": df.attrs.get("currency", ""),
-            }
-        except Exception:
-            stored[key] = {"key": key, "available": False}
-
-    result = []
-    seen_keys: set[str] = set()
-
-    if underlyings:
-        for u in underlyings:
-            isin = u.get("isin", "")
-            name = u.get("name", "")
-            key = _slug(isin or name)
-            seen_keys.add(key)
-            ticker = ticker_map.get(key, "")
-            entry = stored.get(key, {"key": key, "available": False})
-            result.append({**entry, "isin": isin, "name": name, "ticker": ticker})
-
-    # Also expose series stored that aren't in current underlyings list
-    for key, info in stored.items():
-        if key not in seen_keys:
-            ticker = ticker_map.get(key, "")
-            result.append({**info, "isin": "", "name": key, "ticker": ticker})
-
+            frame = pd.read_parquet(market_storage.current_path(logical))
+            stored[key] = dict(key=key, rows=len(frame), date_min=str(frame.index.min().date()),
+                date_max=str(frame.index.max().date()), available=True,
+                source=frame.attrs.get('source','unknown'), currency=frame.attrs.get('currency',''),
+                price_type=frame.attrs.get('price_type','UNKNOWN_LEGACY'),
+                unit=frame.attrs.get('unit','UNKNOWN_LEGACY'),
+                instrument_key=frame.attrs.get('instrument_key',logical.stem),
+                storage_revision=frame.attrs.get('storage_revision','legacy'))
+        except (OSError, ValueError, KeyError):
+            stored[key] = dict(key=key,available=False)
+    result, seen = [], set()
+    for underlying in underlyings or []:
+        isin, name = underlying.get('isin',''), underlying.get('name','')
+        key = _slug(isin or name); seen.add(key)
+        result.append({**stored.get(key,dict(key=key,available=False)), 'isin':isin,'name':name,
+                       'ticker':ticker_map.get(key,'')})
+    for key,item in stored.items():
+        if key not in seen:
+            result.append({**item,'isin':'','name':item.get('instrument_key',key),'ticker':ticker_map.get(key,'')})
     return result
 
 
-def fetch_prices(key: str, ticker: str,
-                 start: str | None = None,
-                 end: str | None = None) -> dict:
-    """Download adjusted close prices from Yahoo Finance and persist."""
-    if not ticker or ticker.strip() == "":
-        raise ValueError("Ticker Yahoo Finance requis")
-
-    # Persist ticker mapping
-    m = _load_ticker_map()
-    m[_slug(key)] = ticker.strip()
-    _save_ticker_map(m)
-
-    _start = start or "2000-01-01"
-    _end   = end   or datetime.date.today().isoformat()
-
-    tkr = yf.Ticker(ticker.strip())
-    df  = tkr.history(start=_start, end=_end, auto_adjust=True)
-
-    if df.empty:
-        raise ValueError(f"Aucune donnée Yahoo Finance pour '{ticker}' sur la période")
-
-    # Detect currency from ticker metadata
-    currency = ""
-    try:
-        info = tkr.fast_info
-        currency = getattr(info, "currency", None) or ""
-    except Exception:
-        pass
-
-    raw_prices = tkr.history(start=_start, end=_end, auto_adjust=False)
-    df = df[["Close"]].rename(columns={"Close": "close"})
-    if not raw_prices.empty:
-        df["price_close"] = raw_prices["Close"]
-    df.attrs["adjustment_date"] = datetime.date.today().isoformat()
-    df.index = pd.to_datetime(df.index).tz_localize(None)
-    df.index.name = "date"
-    if is_gbx_ticker(ticker.strip(), currency):
-        df["close"] = df["close"] / 100
-        if "price_close" in df:
-            df["price_close"] /= 100
-    df.attrs["source"]   = f"yahoo:{ticker.strip()}"
-    df.attrs["currency"] = currency.upper()
-    df.to_parquet(_parquet_path(key))
-
-    return {
-        "key":      _slug(key),
-        "ticker":   ticker.strip(),
-        "currency": currency.upper(),
-        "rows":     len(df),
-        "date_min": str(df.index.min().date()),
-        "date_max": str(df.index.max().date()),
-    }
+def _validate_key(key):
+    if not isinstance(key,str) or not key.strip():
+        raise ValueError('Identifiant instrument requis.')
+    return key.strip()
 
 
-def upload_prices(key: str, content: bytes, filename: str,
-                  ticker: str = "") -> dict:
-    """Parse an Excel or JSON file and persist as a price series.
-
-    Expected formats:
-    - Excel: first column = date, second column = price (any header)
-    - JSON:  list of {date: "YYYY-MM-DD", close: 123.45}
-             or dict {"YYYY-MM-DD": 123.45}
-    """
-    ext = Path(filename).suffix.lower()
-
-    if ext in (".xlsx", ".xls"):
-        raw = pd.read_excel(io.BytesIO(content), header=0)
-        raw.columns = [str(c).strip() for c in raw.columns]
-        date_col  = raw.columns[0]
-        price_col = raw.columns[1]
-        raw[date_col] = pd.to_datetime(raw[date_col], errors="coerce")
-        raw = raw.dropna(subset=[date_col, price_col])
-        df = raw.set_index(date_col)[[price_col]].rename(columns={price_col: "close"})
-
-    elif ext == ".json":
-        data = json.loads(content.decode("utf-8"))
-        if isinstance(data, list):
-            df = pd.DataFrame(data)
-            # accept {date, close} or {date, price} or {date, nav}
-            for col in ("close", "price", "nav", "value"):
-                if col in df.columns:
-                    df = df.rename(columns={col: "close"})
-                    break
-            df["date"] = pd.to_datetime(df["date"], errors="coerce")
-            df = df.dropna(subset=["date", "close"]).set_index("date")[["close"]]
-        elif isinstance(data, dict):
-            df = pd.DataFrame(
-                [{"date": k, "close": v} for k, v in data.items()]
-            )
-            df["date"] = pd.to_datetime(df["date"], errors="coerce")
-            df = df.dropna(subset=["date", "close"]).set_index("date")[["close"]]
+def _save_series(key, frame, ticker='', *, shared=False, expected=None):
+    """Publish the series, association and optional raw/adjusted copies together."""
+    from ..services.market_history import store_history
+    key = _validate_key(key)
+    frame = frame.copy(deep=True)
+    frame.attrs['instrument_key'] = key
+    with market_storage.transaction() as pending:
+        pending.require_unchanged(expected)
+        mapping = _load_ticker_map(transaction=pending)
+        pending.parquet(_logical_price_path(key), frame)
+        if ticker:
+            mapping[_slug(key)] = ticker
         else:
-            raise ValueError("Format JSON non reconnu")
-    else:
-        raise ValueError(f"Format non supporté : {ext}. Utiliser .xlsx ou .json")
+            mapping.pop(_slug(key),None)
+        _save_ticker_map(mapping,transaction=pending)
+        if shared:
+            scale = 100 if is_gbx_ticker(ticker,frame.attrs.get('currency','')) else 1
+            for field,adjusted in [('close',True),('price_close',False)]:
+                store_history(ticker,frame[field]*scale,adjusted,
+                    frame.attrs['requested_start'],frame.attrs['requested_end'],transaction=pending)
+    return dict(key=_slug(key),ticker=ticker,rows=len(frame),date_min=str(frame.index.min().date()),
+                date_max=str(frame.index.max().date()),currency=frame.attrs['currency'],
+                source=frame.attrs['source'],price_type=frame.attrs['price_type'],unit=frame.attrs['unit'])
 
-    df.index = pd.to_datetime(df.index).tz_localize(None)
-    df.index.name = "date"
-    df["close"] = pd.to_numeric(df["close"], errors="coerce")
-    df = df.dropna()
-    df = df.sort_index()
 
-    if df.empty:
-        raise ValueError("Aucune donnée valide trouvée dans le fichier")
+def fetch_prices(key: str, ticker: str, start: str | None = None, end: str | None = None) -> dict:
+    key = _validate_key(key)
+    if not ticker or not ticker.strip():
+        raise ValueError('Ticker Yahoo Finance requis')
+    ticker = ticker.strip().upper()
+    from ..services.market_history import _path as shared_path
+    expected = market_storage.versions([_logical_price_path(key),shared_path(ticker,True),shared_path(ticker,False)])
+    first = datetime.date.fromisoformat(start) if start else datetime.date(2000,1,1)
+    last = datetime.date.fromisoformat(end) if end else business_today()+datetime.timedelta(days=1)
+    if first >= last:
+        raise ValueError('Période de téléchargement invalide (fin exclusive).')
+    instrument = yf.Ticker(ticker)
+    adjusted = instrument.history(start=first.isoformat(),end=last.isoformat(),auto_adjust=True)
+    raw = instrument.history(start=first.isoformat(),end=last.isoformat(),auto_adjust=False)
+    if adjusted.empty or raw.empty or 'Close' not in adjusted or 'Close' not in raw:
+        raise ValueError('Cours bruts ou ajustés absents ; aucun remplacement.')
+    try:
+        info = instrument.fast_info
+        currency = str(info.get('currency','') if isinstance(info,dict) else getattr(info,'currency','')).upper()
+    except Exception as exc:
+        raise ValueError('Devise du fournisseur indisponible ; aucun remplacement.') from exc
+    if currency not in REFERENCE_CURRENCIES:
+        raise ValueError('Devise du fournisseur inconnue ; aucun remplacement.')
+    adjusted = market_storage.validate_frame(adjusted[['Close']].rename(columns={'Close':'close'}))
+    raw = market_storage.validate_frame(raw[['Close']].rename(columns={'Close':'price_close'}),('price_close',))
+    if not adjusted.index.equals(raw.index):
+        raise ValueError('Dates des cours bruts et ajustés différentes ; aucun remplacement.')
+    if adjusted.index.min().date() < first or adjusted.index.max().date() >= last:
+        raise ValueError('Cours reçus hors de la période demandée.')
+    adjusted['price_close'] = raw['price_close']
+    if is_gbx_ticker(ticker,currency):
+        adjusted[['close','price_close']] /= 100
+    adjusted.attrs.update(source=f'yahoo:{ticker}',currency=currency,price_type='ADJUSTED_CLOSE',
+        raw_price_type='UNADJUSTED_CLOSE',unit='CURRENCY',adjustment_date=business_today().isoformat(),
+        requested_start=first.isoformat(),requested_end=(last-datetime.timedelta(days=1)).isoformat(),
+        fetched_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+    return _save_series(key,adjusted,ticker,shared=True,expected=expected)
 
-    df.attrs["source"] = f"manual:{filename}"
 
-    slug = _slug(key)
-    df.to_parquet(_parquet_path(key))
+def _unique_json_object(pairs):
+    value = {}
+    for key,item in pairs:
+        if key in value:
+            raise ValueError('Clé JSON ou date dupliquée ; aucun remplacement.')
+        value[key] = item
+    return value
 
-    if ticker:
-        m = _load_ticker_map()
-        m[slug] = ticker
-        _save_ticker_map(m)
 
-    return {
-        "key": slug,
-        "rows": len(df),
-        "date_min": str(df.index.min().date()),
-        "date_max": str(df.index.max().date()),
-        "source": f"manual:{filename}",
-    }
+def upload_prices(key: str, content: bytes, filename: str, ticker: str = '', *,
+                  currency: str | None = None, price_type: str | None = None, unit: str | None = None,
+                  adjustment_date: str | None = None) -> dict:
+    """Import explicit total-return observations; optional price_close stays raw."""
+    _validate_key(key)
+    currency = (currency or '').strip().upper()
+    if currency not in REFERENCE_CURRENCIES or price_type not in {'ADJUSTED_CLOSE','TOTAL_RETURN_NAV'} or unit != 'CURRENCY':
+        raise ValueError('Conventions requises : devise reconnue, cours ajusté ou NAV de rendement total, unité de devise. Un cours brut seul ne remplace pas une série de rendement total.')
+    ext = Path(filename).suffix.lower()
+    try:
+        if ext in ('.xlsx','.xls'):
+            frame = pd.read_excel(io.BytesIO(content))
+            if len(frame.columns) < 2:
+                raise ValueError('Colonnes date et cours requises.')
+            frame = frame.rename(columns={frame.columns[0]:'date',frame.columns[1]:'close'})
+        elif ext == '.json':
+            data = json.loads(content.decode('utf-8'),object_pairs_hook=_unique_json_object)
+            if isinstance(data,dict):
+                frame = pd.DataFrame([{'date':day,'close':value} for day,value in data.items()])
+            elif isinstance(data,list):
+                frame = pd.DataFrame(data)
+                aliases = [field for field in ['close','price','nav','value'] if field in frame]
+                if len(aliases) != 1:
+                    raise ValueError('Une seule colonne de cours requise.')
+                frame = frame.rename(columns={aliases[0]:'close'})
+            else:
+                raise ValueError('Format JSON non reconnu.')
+        else:
+            raise ValueError('Format non supporté : utiliser .xlsx, .xls ou .json.')
+        if 'date' not in frame or frame.columns.has_duplicates:
+            raise ValueError('Dates absentes ou colonnes dupliquées.')
+        # Avoid ambiguous locale-dependent dates in JSON and text Excel cells.
+        if frame['date'].map(lambda v:isinstance(v,str) and not re.fullmatch(r'\d{4}-\d{2}-\d{2}',v)).any():
+            raise ValueError('Dates texte attendues au format AAAA-MM-JJ.')
+        columns = ['close']+(['price_close'] if 'price_close' in frame else [])
+        frame = market_storage.validate_frame(frame.set_index('date')[columns],columns)
+    except (KeyError, TypeError, UnicodeError) as exc:
+        raise ValueError('Fichier de cours invalide ; aucun remplacement.') from exc
+    frame.attrs.update(source=f'manual:{Path(filename).name}',currency=currency,
+        price_type=price_type,unit=unit,imported_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+    if 'price_close' in frame:
+        if not adjustment_date:
+            raise ValueError('Colonne price_close : date de référence des unités de titres requise.')
+        reference = datetime.date.fromisoformat(adjustment_date)
+        if reference < frame.index.max().date() or reference > business_today():
+            raise ValueError('Date des unités de titres attendue entre la dernière observation et aujourd’hui.')
+        frame.attrs.update(raw_price_type='UNADJUSTED_CLOSE',adjustment_date=reference.isoformat())
+    return _save_series(key,frame,(ticker or '').strip().upper())
 
 
 def delete_prices(key: str) -> None:
-    p = _parquet_path(key)
-    if p.exists():
-        p.unlink()
-    m = _load_ticker_map()
-    m.pop(_slug(key), None)
-    _save_ticker_map(m)
+    logical = _logical_price_path(key)
+    with market_storage.transaction() as pending:
+        pending.delete(logical)
+        # Keep an old legacy file on disk but hide its logical address.
+        for legacy in _PRICE_STORE.glob('*.parquet'):
+            if _slug(legacy.stem) == _slug(key):
+                pending.delete(legacy)
+        mapping = _load_ticker_map(transaction=pending)
+        mapping.pop(_slug(key),None)
+        _save_ticker_map(mapping,transaction=pending)
 
 
-def get_fx_series(from_ccy: str, to_ccy: str,
-                  start: str | None = None,
-                  end: str | None = None) -> pd.Series:
-    """Return a daily FX series (from_ccy → to_ccy), cached to parquet.
-
-    Uses Yahoo Finance pairs e.g. USDCHF=X, EURUSD=X.
-    Returns a Series indexed by date with the exchange rate.
-    If from_ccy == to_ccy, returns a constant Series of 1.0 (no conversion needed).
-    """
+def get_fx_series(from_ccy: str, to_ccy: str, start: str | None = None, end: str | None = None) -> pd.Series:
     from .amc_market_bundle import active_bundle
     bundle = active_bundle()
     if bundle is not None:
-        return bundle.fx(from_ccy.upper().strip(), to_ccy.upper().strip())
+        return bundle.fx(from_ccy.upper().strip(),to_ccy.upper().strip()).copy(deep=True)
+    return _stored_fx_series(from_ccy,to_ccy,start,end)
+
+
+@market_storage.consistent_read
+def _stored_fx_series(from_ccy, to_ccy, start, end):
     from_ccy = from_ccy.upper().strip()
     to_ccy   = to_ccy.upper().strip()
 
     if from_ccy == to_ccy or not from_ccy or not to_ccy:
         return pd.Series(dtype=float)   # caller interprets empty as no-op
+    if not re.fullmatch(r'[A-Z]{3}', from_ccy) or not re.fullmatch(r'[A-Z]{3}', to_ccy):
+        raise ValueError('Paire de devises invalide.')
 
     cache_key = f"{from_ccy}{to_ccy}"
-    cache_path = _FX_STORE / f"{cache_key}.parquet"
+    logical_path = _FX_STORE / f"{cache_key}.parquet"
+    expected = market_storage.versions([logical_path])
+    cache_path = market_storage.current_path(logical_path)
 
     _start = start or "2000-01-01"
     _end   = end   or datetime.date.today().isoformat()
@@ -282,13 +297,18 @@ def get_fx_series(from_ccy: str, to_ccy: str,
     # A historical request can use a cache that already covers its endpoint.
     if cache_path.exists():
         try:
-            cached = pd.read_parquet(cache_path)
+            cached = market_storage.validate_frame(pd.read_parquet(cache_path), ('rate',))
             if not cached.empty:
                 last_cached = cached.index.max().date()
                 today = datetime.date.today()
                 # Refresh only if more than 1 day old and market was open
                 cached_series = cached["rate"].dropna()
                 cached_series.index = pd.to_datetime(cached_series.index).tz_localize(None)
+                from .market_policy import freshness
+                requested = datetime.date.fromisoformat(end)-datetime.timedelta(days=1) if end else today
+                known = cached_series.loc[cached_series.index <= pd.Timestamp(requested)]
+                if not known.empty and freshness(known.index[-1].date(), requested, "reporting_fx")["qualified"]:
+                    return record_market(f"fx:{cache_key}", cached_series)
                 if (today - last_cached).days <= 1 or (end and last_cached >= datetime.date.fromisoformat(end)):
                     return record_market(f"fx:{cache_key}", cached_series)
         except Exception:
@@ -307,9 +327,11 @@ def get_fx_series(from_ccy: str, to_ccy: str,
                 s.index.name = "date"
                 if invert:
                     s = (1.0 / s).rename("rate")
-                out = s.to_frame()
+                out = market_storage.validate_frame(s.to_frame(), ('rate',))
                 out.attrs["pair"] = f"{from_ccy}/{to_ccy}"
-                out.to_parquet(cache_path)
+                with market_storage.transaction() as pending:
+                    pending.require_unchanged(expected)
+                    pending.parquet(logical_path, out)
                 return record_market(f"fx:{cache_key}", s)
         except Exception:
             continue
@@ -317,8 +339,8 @@ def get_fx_series(from_ccy: str, to_ccy: str,
     return record_market(f"fx:{cache_key}", cached_series) if cached_series is not None else pd.Series(dtype=float)
 
 
-def fx_rate_to(from_ccy: str | None, to_ccy: str = "EUR",
-               asof: datetime.date | str | None = None) -> float | None:
+def fx_quote_to(from_ccy: str | None, to_ccy: str = "EUR",
+                asof: datetime.date | str | None = None) -> dict:
     """Conversion rate at *asof* (latest by default), or None if unknown.
 
     `get_fx_series` answers with an empty Series in two unrelated situations:
@@ -336,44 +358,68 @@ def fx_rate_to(from_ccy: str | None, to_ccy: str = "EUR",
     Callers are expected to exclude and name it rather than guess."""
     src = (from_ccy or "").upper().strip()
     dst = (to_ccy or "EUR").upper().strip()
+    from ..runtime import business_today
+    from .market_policy import freshness
+    asof_date = datetime.date.fromisoformat(asof) if isinstance(asof, str) else asof or business_today()
+    quote = dict(from_ccy=src, to_ccy=dst, requested_asof=asof_date.isoformat(),
+                 provider="YAHOO_FINANCE", rate=None, raw_rate=None, qualified=False)
     if not src or src == dst:
-        return 1.0
-    asof_date = (datetime.date.fromisoformat(asof) if isinstance(asof, str)
-                 else asof)
+        return {**quote, "rate": 1., "qualified": True, "status": "NO_CONVERSION", "age_days": 0,
+                "effective_date": asof_date.isoformat(), "provider": None}
     # Yahoo's `end` is exclusive. Ask through the following calendar day, then
     # filter locally as caches may contain newer quotes than the requested
     # historical valuation date.
     provider_end = ((asof_date + datetime.timedelta(days=1)).isoformat()
                     if asof_date else None)
-    series = get_fx_series(src, dst, end=provider_end)
+    try:
+        series = get_fx_series(src, dst, end=provider_end).copy()
+    except Exception as exc:
+        return {**quote, **freshness(None, asof_date, "reporting_fx"), "reason": type(exc).__name__}
+    series.index = pd.to_datetime(series.index).tz_localize(None)
+    series = series.loc[~series.index.duplicated(keep="last")].sort_index()
     if asof_date is not None and not series.empty:
         index = pd.to_datetime(series.index).tz_localize(None)
         series = series[index <= pd.Timestamp(asof_date)]
     if series.empty:
-        return None
+        return {**quote, **freshness(None, asof_date, "reporting_fx")}
     try:
         rate = float(series.iloc[-1])
     except (TypeError, ValueError):
-        return None
+        return {**quote, "status": "INVALID_RATE"}
     if not math.isfinite(rate) or rate <= 0.0:
-        return None    # corrupt cache row, not a quote
-    return rate
+        return {**quote, "status": "INVALID_RATE"}
+    quality = freshness(pd.Timestamp(series.index[-1]).date(), asof_date, "reporting_fx")
+    return {**quote, **quality, "raw_rate": rate, "rate": rate if quality["qualified"] else None}
+
+
+def fx_rate_to(from_ccy: str | None, to_ccy: str = "EUR",
+               asof: datetime.date | str | None = None) -> float | None:
+    """Compatibility scalar: an unqualified quote never feeds a reporting total."""
+    return fx_quote_to(from_ccy, to_ccy, asof)["rate"]
+
+
+def _bundle_key(bundle, key):
+    if key in bundle.aliases:
+        return key
+    matches = [alias for alias in bundle.aliases if _slug(alias) == key]
+    if len(matches) != 1:
+        raise ValueError(f'Titre absent ou ambigu dans le dossier de marché : {key}')
+    return matches[0]
 
 
 def get_currency(key: str) -> str:
-    """Return the stored currency for a price series, or empty string."""
     from .amc_market_bundle import active_bundle
     bundle = active_bundle()
     if bundle is not None:
-        return bundle.load(key).attrs["currency"]
-    p = _parquet_path(key)
-    if not p.exists():
-        return ""
-    try:
-        df = pd.read_parquet(p)
-        return df.attrs.get("currency", "")
-    except Exception:
-        return ""
+        return bundle.load(_bundle_key(bundle,key)).attrs['currency']
+    with market_storage.read_view():
+        path = _parquet_path(key)
+        if not path.exists():
+            return ''
+        try:
+            return pd.read_parquet(path).attrs.get('currency','')
+        except (OSError,ValueError):
+            return ''
 
 
 def resolve_ticker(query: str) -> tuple[str, str]:
@@ -403,16 +449,17 @@ def resolve_ticker(query: str) -> tuple[str, str]:
 
 
 def load_prices(key: str) -> pd.DataFrame:
-    """Load a stored price series. Raises ValueError if not found."""
+    """Read an independent local-bundle or committed-store frame."""
     from .amc_market_bundle import active_bundle
     bundle = active_bundle()
     if bundle is not None:
-        return bundle.load(key)
-    p = _parquet_path(key)
-    if not p.exists():
-        raise ValueError(f"Prix non disponibles pour '{key}'. Importez d'abord la série.")
-    from .amc_controls import record_market
-    return record_market(f"prices:{key}", pd.read_parquet(p))
+        return bundle.load(_bundle_key(bundle,key)).copy(deep=True)
+    with market_storage.read_view():
+        path = _parquet_path(key)
+        if not path.exists():
+            raise ValueError(f"Prix non disponibles pour '{key}'. Importez d'abord la série.")
+        from .amc_controls import record_market
+        return record_market(f'prices:{key}',pd.read_parquet(path))
 
 
 def spot_on_date(key: str, date_str: str) -> dict | None:
@@ -614,65 +661,24 @@ def build_marks(components: list[dict], as_of_date: str, prod_ccy: str, *, price
     return marks
 
 
-def auto_populate_store(components: list[dict],
-                        since: str = "2010-01-01") -> dict[str, str]:
-    """Fetch and persist price history for components not yet in the price store.
-
-    Called automatically by load_study_data() on every study so that a
-    first-time run populates the store for Blocks H, I, and subsequent marks.
-    Components already present in the store are skipped (no re-download).
-
-    Returns {isin: "existing" | "fetched" | "failed"}.
-    """
+def auto_populate_store(components: list[dict], since: str = "2010-01-01") -> dict[str,str]:
+    """Use the same validated atomic ingestion path for automatic local caching."""
     from .amc_market_bundle import active_bundle
-    bundle = active_bundle()
-    if bundle is not None:
+    if active_bundle() is not None:
         return {}
-    _end = datetime.date.today().isoformat()
-    results: dict[str, str] = {}
-
-    for c in components:
-        isin = (c.get("isin") or "").strip()
-        name = (c.get("name") or "").strip()
+    results = {}
+    for component in components:
+        isin,name = (component.get('isin') or '').strip(),(component.get('name') or '').strip()
         if not isin:
             continue
-
-        # Skip if already in store (by ISIN or name)
-        if any(_parquet_path(k).exists() for k in [isin, name] if k):
-            results[isin] = "existing"
+        if any(_parquet_path(key).exists() for key in [isin,name] if key):
+            results[isin] = 'existing'
             continue
-
-        sym = yf_symbol(isin, name)
         try:
-            tkr = yf.Ticker(sym)
-            df  = tkr.history(start=since, end=_end, auto_adjust=True)
-            if df.empty:
-                results[isin] = "failed"
-                continue
-
-            currency = ""
-            try:
-                currency = (getattr(tkr.fast_info, "currency", None) or "").upper()
-            except Exception:
-                pass
-
-            df = df[["Close"]].rename(columns={"Close": "close"})
-            df.index = pd.to_datetime(df.index).tz_localize(None)
-            df.index.name = "date"
-            if is_gbx_ticker(sym, currency):
-                df["close"] = df["close"] / 100
-            df.attrs["source"]   = f"yahoo_auto:{sym}"
-            df.attrs["currency"] = currency
-            df.to_parquet(_parquet_path(isin))
-
-            m = _load_ticker_map()
-            m[_slug(isin)] = sym
-            _save_ticker_map(m)
-
-            results[isin] = "fetched"
+            fetch_prices(isin,yf_symbol(isin,name),start=since)
+            results[isin] = 'fetched'
         except Exception:
-            results[isin] = "failed"
-
+            results[isin] = 'failed'
     return results
 
 

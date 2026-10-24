@@ -122,6 +122,9 @@ def _colonnes(chemin, table):
 def _migrer(monkeypatch, chemin):
     moteur = create_engine(f"sqlite:///{chemin}")
     monkeypatch.setattr(db, "engine", moteur)
+    # Startup creates missing tables before upgrading existing columns/guards.
+    from sqlmodel import SQLModel
+    SQLModel.metadata.create_all(moteur)
     db._migrate()
     return moteur
 

@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass, field
 
 from ...core.payscript.parser import parse_script, CompiledScript
+from ...core.payscript.qualification import recognize_payoff
 from .prompt import SCRIPT_MARK, EXPLAIN_MARK
 
 # Sévérités : 'ok' (vert), 'attention' (orange, à regarder), 'info' (neutre).
@@ -46,6 +47,7 @@ class Validation:
     compiles: bool = False
     checks_status: str = "not_run"
     pricing_check: str = "not_run"
+    payoff_qualification: dict = field(default_factory=lambda: {"status": "STRUCTURAL_ONLY"})
 
     def as_dict(self) -> dict:
         return {
@@ -58,6 +60,7 @@ class Validation:
             "compiles": self.compiles,
             "checks_status": self.checks_status,
             "pricing_check": self.pricing_check,
+            "payoff_qualification": self.payoff_qualification,
             "has_warnings": self.checks_status == "warning",
             "adoption_requires_acknowledgement": self.checks_status == "warning",
             "parse_error": self.parse_error,
@@ -129,6 +132,7 @@ def structural_checks(compiled: CompiledScript, script: str,
     """La fiche de contrôle. Chaque ligne répond à « le script fait-il ce que
     la demande dit ? », jamais à « le script compile-t-il ? »."""
     from ...core.payscript.bindings import monitoring_source
+    qualification = recognize_payoff(script)
     script = monitoring_source(script)
     d = (description or "").lower()
     checks: list[Check] = []
@@ -137,8 +141,8 @@ def structural_checks(compiled: CompiledScript, script: str,
     has_mat = any(e.type == "AT_MATURITY" or (e.constat_ref and ((e.constat_qualifier and all(q == ("last",) for q in e.constat_qualifier)) or any(c.name == e.constat_ref and c.kind == "single" for c in compiled.constats))) for e in compiled.events)
     checks.append(Check(
         "Bloc de maturité", OK if has_mat else WARN,
-        "Présent." if has_mat else
-        "ABSENT — une trajectoire jamais rappelée ne paie rien."))
+        "Bloc repéré ; son remboursement reste à vérifier sur les trajectoires." if has_mat else
+        "Aucun bloc final repéré ; vérifier le règlement des trajectoires sans rappel."))
 
     # -- Rappel demandé vs rappel écrit
     veut_rappel = any(m in d for m in _RECALL_WORDS)
@@ -146,7 +150,7 @@ def structural_checks(compiled: CompiledScript, script: str,
         coherent = veut_rappel == compiled.has_stop
         checks.append(Check(
             "Rappel anticipé", OK if coherent else WARN,
-            "STOP présent, cohérent avec la demande." if coherent and veut_rappel
+            "STOP repéré ; sa présence ne prouve pas les conditions ni les flux du rappel." if coherent and veut_rappel
             else "STOP présent (non demandé explicitement)." if compiled.has_stop
             else "La demande décrit un rappel mais le script ne contient AUCUN "
                  "STOP : le produit continuera d'observer après le rappel."))
@@ -157,7 +161,7 @@ def structural_checks(compiled: CompiledScript, script: str,
         use_spot = bool(re.search(r"\bWOF\b(?!_MIN)", script, re.I))
         veut_americaine = any(m in d for m in _AMERICAN_WORDS)
         if use_min and not use_spot:
-            nature = "américaine (WOF_MIN) — franchissement à tout moment"
+            nature = "minimum de trajectoire (WOF_MIN) — surveillance selon le moteur et sa grille"
         elif use_min and use_spot:
             nature = "mixte : WOF pour certaines conditions, WOF_MIN pour d'autres"
         else:
@@ -165,18 +169,21 @@ def structural_checks(compiled: CompiledScript, script: str,
         niveau = WARN if (veut_americaine and not use_min) else INFO
         checks.append(Check(
             "Nature de la barrière", niveau,
-            f"Retenue : {nature}."
+            f"Indicateur structurel : {nature}."
             + (" La demande évoque un franchissement en continu : WOF_MIN était "
                "probablement attendu." if niveau == WARN else "")))
 
     # -- Coupon à mémoire
     if any(m in d for m in _MEMORY_WORDS):
         a_memo = bool(re.search(r"SET\s+\w*MEMO\w*\s*=", script, re.I))
+        memory_qualified = (qualification["status"] == "REFERENCE_PATHS_PASSED"
+                            and qualification["family"] == "phoenix_memoire")
         checks.append(Check(
-            "Coupon à mémoire", OK if a_memo else WARN,
-            "Mémoire mise à jour après versement." if a_memo else
-            "Aucune variable de mémoire mise à jour : les coupons manqués ne "
-            "seront jamais rattrapés."))
+            "Coupon à mémoire", OK if memory_qualified else WARN,
+            "Rattrapage, remise à zéro et mémoire impayée vérifiés sur le panel de référence du script exact."
+            if memory_qualified else
+            "Affectation MEMO repérée : indicateur structurel seul, sans preuve de rattrapage ni de remise à zéro."
+            if a_memo else "Aucune affectation MEMO repérée ; la mémoire demandée reste à qualifier sur des trajectoires."))
 
     # -- Sous-jacents référencés
     idx = {int(m) for m in re.findall(r"S(?:_MIN|_MAX|_PREV)?\[(\d+)\]", script)}
@@ -343,6 +350,7 @@ def validate(raw_response: str, *, description: str, underlyings, corr,
     v.compiles = True
     v.n_events = len(compiled.events)
     v.has_stop = compiled.has_stop
+    v.payoff_qualification = recognize_payoff(script)
     v.params = [{"name": p.name, "raw_default": p.raw_default,
                  "is_pct": p.is_pct, "desc": p.desc, "kind": p.kind}
                 for p in compiled.params]

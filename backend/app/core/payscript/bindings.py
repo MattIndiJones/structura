@@ -127,7 +127,8 @@ def effective_parameters(params, supplied: dict | None, *, allow_missing=False) 
         values = value if sequence else [value]
         if not values or (sequence and param.kind != 'array'):
             raise ValueError(f'PARAM {param.name} : série vide ou incompatible avec un scalaire.')
-        if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in values):
+        if any(not (allow_missing and x is None) and (
+                isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x)) for x in values):
             raise ValueError(f'PARAM {param.name} : valeur numérique finie requise.')
         result[param.name] = list(values) if sequence else value
     return result

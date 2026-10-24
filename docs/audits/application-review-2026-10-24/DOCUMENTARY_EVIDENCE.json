@@ -1,0 +1,150 @@
+{
+  "inspection_date": "2026-10-24",
+  "new_tests_executed": false,
+  "reports": [
+    {
+      "path": "docs/audits/BACKEND_FULL_VALIDATION_2026-10-23.md",
+      "sha256": "981191d9a8b44f5e0bcdbdd4a755d4880ba0f4379716362d73406bcee3a88520",
+      "scope": "Historical documentation, not a new execution of this review"
+    },
+    {
+      "path": "docs/audits/GRAPHICAL_ACCEPTANCE_2026-10-23.md",
+      "sha256": "65c795794353642458342115c36a7dea9f455c6f42dba6ea5df1669291511edb",
+      "scope": "Historical documentation, not a new execution of this review"
+    },
+    {
+      "path": "docs/audits/BILATERAL_RFQ_ACCEPTANCE_2026-10-24.md",
+      "sha256": "fdef670be791c54606d500c5e2cd4fe2ca82cc21aa1df4c67ea7bb1c3a7f7636",
+      "scope": "Historical documentation, not a new execution of this review"
+    },
+    {
+      "path": "docs/audits/ELECTRONIC_RFQ_EXECUTION_2026-10-24.md",
+      "sha256": "5dca98c94d1ab4cb1adba78f8d22df6345a7270fdadad186e797e971d4f0ea8a",
+      "scope": "Historical documentation, not a new execution of this review"
+    },
+    {
+      "path": "docs/audits/RFQ_RECONCILIATION_2026-10-24.md",
+      "sha256": "bb735040d7939e7364d5d45b5ecbfd5dcbcf7c94c240c335a2b6eac789940af6",
+      "scope": "Historical documentation, not a new execution of this review"
+    },
+    {
+      "path": "docs/audits/LAUNCHER_ACCESS_ACCEPTANCE_2026-10-24.md",
+      "sha256": "c0faf6bc454c40cf6417ac25e620d1cf2011d04a35d979b2c03dd4501e45a2aa",
+      "scope": "Historical documentation, not a new execution of this review"
+    },
+    {
+      "path": "docs/audits/ADMIN_ACCOUNT_SWITCH_2026-10-24.md",
+      "sha256": "b5dfbd9178e13062dbcc9350bf280398788d284059915c4b03115bee0eef5067",
+      "scope": "Historical documentation, not a new execution of this review"
+    },
+    {
+      "path": "docs/audits/REMEDIATION_C15_2026-10-21.md",
+      "sha256": "df7950744dcbd3f1d5a09f4baa527ea09a4c5cc316c25788f102afe92bc8bc24",
+      "scope": "Historical documentation, not a new execution of this review"
+    },
+    {
+      "path": "docs/audits/REMEDIATION_C16_2026-10-21.md",
+      "sha256": "f41760040e6e98ec582513026fa26502ed70e6b93a2702b3fdfcec70c5094eed",
+      "scope": "Historical documentation, not a new execution of this review"
+    },
+    {
+      "path": "docs/audits/REMEDIATION_C17_2026-10-21.md",
+      "sha256": "298236accca2d8cee4db9ad13502a2e3e2ebf15c864bf7037133a1e3edfaadbf",
+      "scope": "Historical documentation, not a new execution of this review"
+    }
+  ],
+  "latest_launcher_evidence": {
+    "path": "docs/audits/remediation-lot-0-2026-10-20/LAUNCHER_ACCESS_VALIDATION.json",
+    "sha256": "73b292f1ad632a38077c438f5fb2fc2562cb6f4cbe7339b65c2e538f64a4f12c",
+    "status": "PASS_LOCAL_PENDING_USER_PORTAL_RESTART",
+    "backend_distinct_passed": 53,
+    "backend_followup_passed": 34,
+    "frontend_passed": 779,
+    "frontend_files": 86,
+    "build_exit_code": 0,
+    "graphical_checkpoints": 28,
+    "production_qualified": false,
+    "activation_remaining": "Stop Structura through the user's launcher, reopen Admin and reload the tab to load the changed platform contract",
+    "source_comparisons": [
+      {
+        "path": "scripts/check_structura_launcher.py",
+        "recorded_sha256": "40d35362507f5862fa9c8e8b4beea24ce231e1b37f9c031240276506a5c9fdef",
+        "current_sha256": "40d35362507f5862fa9c8e8b4beea24ce231e1b37f9c031240276506a5c9fdef",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/test_structura_launcher.py",
+        "recorded_sha256": "42ae07653e7a27a7191c30ccbfb31239584294b4648cc904facda67a2a9572e3",
+        "current_sha256": "42ae07653e7a27a7191c30ccbfb31239584294b4648cc904facda67a2a9572e3",
+        "matches": true
+      },
+      {
+        "path": "backend/app/hybrid/development.py",
+        "recorded_sha256": "2f84b80852e77a008d30588aebebed64ba3d9d8addf1faa207b21ab142b376e6",
+        "current_sha256": "2f84b80852e77a008d30588aebebed64ba3d9d8addf1faa207b21ab142b376e6",
+        "matches": true
+      },
+      {
+        "path": "backend/app/hybrid/platform.py",
+        "recorded_sha256": "c7cba9ac87e8f04040272b932d0f88c1611665106cdc17f84b1b0231e19c5260",
+        "current_sha256": "c7cba9ac87e8f04040272b932d0f88c1611665106cdc17f84b1b0231e19c5260",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/test_portal_account_start.py",
+        "recorded_sha256": "0efca41cbc030a89644a6cb407e3e142a472ade4542a51d40b8acc87aee1275a",
+        "current_sha256": "0efca41cbc030a89644a6cb407e3e142a472ade4542a51d40b8acc87aee1275a",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/components/ContextSelector.vue",
+        "recorded_sha256": "2f55ce00aa9a60df693fd6ce4ff23721bf07705ed95a6b19d4129f7f7221fd7f",
+        "current_sha256": "2f55ce00aa9a60df693fd6ce4ff23721bf07705ed95a6b19d4129f7f7221fd7f",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/components/ContextSelector.test.js",
+        "recorded_sha256": "1fb20a71746208fc442db67138a260836d8fbff51b19c417490330c5711943c0",
+        "current_sha256": "1fb20a71746208fc442db67138a260836d8fbff51b19c417490330c5711943c0",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/components/AppHeader.vue",
+        "recorded_sha256": "cdc4595f18e6195450ad902ea70eec988562676bcfbfb95ea84ec220a8544128",
+        "current_sha256": "cdc4595f18e6195450ad902ea70eec988562676bcfbfb95ea84ec220a8544128",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/views/LoginView.vue",
+        "recorded_sha256": "04b43f1baf1c7711ae8ff6aa58df524b4f9ac268bebe7f09853da834d208731f",
+        "current_sha256": "04b43f1baf1c7711ae8ff6aa58df524b4f9ac268bebe7f09853da834d208731f",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/views/LoginView.test.js",
+        "recorded_sha256": "d807261d547b29833f1155aca7dda16c556a75fc970b98e577d8b65c42950c49",
+        "current_sha256": "d807261d547b29833f1155aca7dda16c556a75fc970b98e577d8b65c42950c49",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/stores/auth.js",
+        "recorded_sha256": "338390daa4279796a8d27e95fd18e029d239ed4e0ee522b3781d02e5160783ad",
+        "current_sha256": "338390daa4279796a8d27e95fd18e029d239ed4e0ee522b3781d02e5160783ad",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/stores/authSecurity.test.js",
+        "recorded_sha256": "20214dfa3316d4edff9b5d866539bb77796c9d54bf5b93c017c4cfbbc4314e32",
+        "current_sha256": "20214dfa3316d4edff9b5d866539bb77796c9d54bf5b93c017c4cfbbc4314e32",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/utils/accessErrors.js",
+        "recorded_sha256": "b585dc5fddbc545dc88ed7d30e94ac48fe86f9b40dd346730649e7f6b87344b5",
+        "current_sha256": "b585dc5fddbc545dc88ed7d30e94ac48fe86f9b40dd346730649e7f6b87344b5",
+        "matches": true
+      }
+    ],
+    "note": "Hash agreement is file identity only, not rerun validation or qualification of other modules."
+  }
+}

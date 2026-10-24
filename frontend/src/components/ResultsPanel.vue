@@ -104,23 +104,23 @@
     <!-- Tuiles stats -->
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
       <div class="stat-box">
-        <div class="text-xs text-slate-500 mb-1">Médiane</div>
+        <div class="text-xs text-slate-500 mb-1">Médiane actualisée</div>
         <div class="text-xl font-bold text-slate-200"><SensitiveValue>{{ f2(store.result.median) }} %</SensitiveValue></div>
       </div>
       <div class="stat-box">
-        <div class="text-xs text-slate-500 mb-1">VaR 5%
-          <HelpTip text="5ᵉ percentile du payoff simulé (non actualisé) — la valeur en dessous de laquelle tombent 5% des chemins. C'est une VaR sur le remboursement final, pas sur le P&amp;L d'une position déjà en portefeuille." />
+        <div class="text-xs text-slate-500 mb-1">Quantile 5 % actualisé
+          <HelpTip text="5ᵉ percentile de la somme des flux actualisés à la date de valeur. Ce quantile n'est pas une VaR de P&amp;L en portefeuille." />
         </div>
         <div class="text-xl font-bold text-amber-400"><SensitiveValue>{{ f2(store.result.var5) }} %</SensitiveValue></div>
       </div>
       <div class="stat-box">
         <div class="text-xs text-slate-500 mb-1">P(retour &gt; 100%)
-          <HelpTip text="Fraction des chemins simulés où le payoff (non actualisé) dépasse strictement le nominal — probabilité d'un scénario gagnant, pas la probabilité que le prix de marché dépasse le pair." />
+          <HelpTip text="Somme des flux nominaux strictement supérieure au pair. Ce n'est ni un gain net sur le prix payé ni une probabilité que le prix de marché dépasse le pair." />
         </div>
         <div class="text-xl font-bold text-green-400"><SensitiveValue>{{ f1(store.result.prob_gt100) }} %</SensitiveValue></div>
       </div>
       <div class="stat-box">
-        <div class="text-xs text-slate-500 mb-1">N chemins</div>
+        <div class="text-xs text-slate-500 mb-1">Tirages indépendants</div>
         <div class="text-lg font-semibold text-slate-300"><SensitiveValue>{{ formatInt(store.result.n_eff) }}</SensitiveValue></div>
       </div>
       <div class="stat-box">
@@ -491,7 +491,10 @@
              class="text-[11px] text-amber-600 mt-3">
           Delta sur base initiale indisponible avant la constatation du niveau initial.
         </div>
-        <div v-if="vegaScopeNote || thetaEventNote" class="flex flex-col gap-2 mt-3">
+        <div v-if="vegaScopeNote || thetaEventNote || store.result.greeks?.corr_bumps" class="flex flex-col gap-2 mt-3">
+          <div v-for="(bump, key) in store.result.greeks?.corr_bumps || {}" :key="key" class="text-[11px] text-slate-500">
+            {{ gLabel(key) }} : {{ bump.effective == null ? 'sensibilité indisponible, aucun choc isolé admissible' : 'choc effectif '+formatNumber(bump.effective*100,4)+' points de corrélation' }}.
+          </div>
           <div v-if="vegaScopeNote" class="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 text-[11px] text-slate-500">
             {{ vegaScopeNote }}
           </div>
@@ -930,6 +933,7 @@ const vegaScopeNote = computed(() => {
   const scope = vegaScope.value
   if (!scope) return ''
   if (scope.type === 'total') return 'Périmètre du Vega : bump appliqué à l’ensemble de la volatilité diffusée.'
+  if (scope.type === 'effective_local_vol') return 'Vega LSV : décalage additif de la volatilité locale effective ; processus de variance figé, sans recalibration.'
   const coverage = Object.entries(scope.coverage || {})
     .map(([name, value]) => {
       const idx = store.underlyings.findIndex(underlying => underlying.name === name)

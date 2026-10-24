@@ -1,0 +1,359 @@
+[
+  {
+    "path": "/account/security",
+    "line": 5,
+    "view": "AccountSecurityView",
+    "title": "Sécurité du compte",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/platform",
+    "line": 6,
+    "view": "PlatformView",
+    "title": "Administration centrale",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/consultation",
+    "line": 7,
+    "view": "ConsultationView",
+    "title": "Ouverture en consultation",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/agent-workshop",
+    "line": 8,
+    "view": "AgentWorkshopView",
+    "title": "Simulation entre agents",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/agent-workshop",
+    "line": 9,
+    "view": "AgentWorkshopView",
+    "title": "Simulation entre agents",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/trading",
+    "line": 10,
+    "view": "TradingView",
+    "title": "Relations et exécutions",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/structuring",
+    "line": 12,
+    "view": "StructuringView",
+    "title": "Structuring Intelligence",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/structuring/optimizer",
+    "line": 17,
+    "view": "ProductOptimizerView",
+    "title": "Product Optimizer",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/structuring/researches",
+    "line": 22,
+    "view": "OptimizerResearchListView",
+    "title": "Recherches & pricings",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/structuring/researches/:researchId",
+    "line": 27,
+    "view": "OptimizerResultsView",
+    "title": "Résultats de recherche",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/login",
+    "line": 32,
+    "view": "LoginView",
+    "title": "Accueil",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/",
+    "line": 37,
+    "view": "HomeView",
+    "title": "Accueil",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/scripts",
+    "line": 42,
+    "view": "ScriptsView",
+    "title": "Mes Scripts",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/pricer",
+    "line": 47,
+    "view": "PricerView",
+    "title": "Pricer",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/pricer/:id",
+    "line": 52,
+    "view": "PricerView",
+    "title": "Pricer",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/pricer/v/:variantId",
+    "line": 60,
+    "view": "PricerView",
+    "title": "Pricer",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/products/:productId/pricer",
+    "line": 65,
+    "view": "PricerView",
+    "title": "Produit — Pricer",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/products",
+    "line": 70,
+    "view": "ProductsView",
+    "title": "Mes Produits",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/product-models",
+    "line": 77,
+    "view": "ProductModelsView",
+    "title": "Modèles de produits",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/documentation",
+    "line": 82,
+    "view": "DocumentationView",
+    "title": "Documentation",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/rfq/:rfqId/booking",
+    "line": 87,
+    "view": "RfqBookingView",
+    "title": "Revue du booking RFQ",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/booking",
+    "line": 92,
+    "view": "BookingView",
+    "title": "Booking — produits bookés",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/valo-explain",
+    "line": 97,
+    "view": "ValoExplainView",
+    "title": "Valo Explain — notes de valorisation",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/booking/:dealId/valuations",
+    "line": 102,
+    "view": "DealValuationsView",
+    "title": "Historique des MtM",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/risk",
+    "line": 107,
+    "view": "RiskManagementView",
+    "title": "Risk Management",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/risk/ccr",
+    "line": 112,
+    "view": "CcrView",
+    "title": "Risque de contrepartie — CCR",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/reinvest",
+    "line": 117,
+    "view": "ReinvestView",
+    "title": "Réinvestissement",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/amc",
+    "line": 122,
+    "view": "AmcView",
+    "title": "Analyse AMC",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/fifo",
+    "line": 127,
+    "view": "FifoView",
+    "title": null,
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/clients",
+    "line": 145,
+    "view": "ClientDetailView",
+    "title": "Client",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/",
+    "line": 146,
+    "view": "ClientDetailView",
+    "title": "Client",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/clients/fiche/:id/:section?",
+    "line": 149,
+    "view": "ClientDetailView",
+    "title": "Client",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/clients/contacts/:id(\\\\d+)",
+    "line": 154,
+    "view": "PersonDetailView",
+    "title": "Contact",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/clients/opportunites/:id(\\\\d+)",
+    "line": 159,
+    "view": "OpportunityDetailView",
+    "title": "Opportunité",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/clients/:section(apercu|liste|contacts|opportunites|signaux|analytics|import)",
+    "line": 164,
+    "view": "ClientsView",
+    "title": "Clients",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/rfq",
+    "line": 169,
+    "view": "RfqView",
+    "title": "RFQ Fournisseurs",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/rfq/recues",
+    "line": 174,
+    "view": "RfqInboxView",
+    "title": "RFQ reçues",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/rfq/analyse",
+    "line": 179,
+    "view": "RfqAnalysisView",
+    "title": "Analyse Contreparties",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/rfq/prototype-reseau",
+    "line": 184,
+    "view": "RfqNetworkPrototypeView",
+    "title": "RFQ réseau — prototype du lot 0",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin",
+    "line": 189,
+    "view": "AdminView",
+    "title": "Administration",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/rfq-relations",
+    "line": 194,
+    "view": "AdminRfqRelationsView",
+    "title": "Relations RFQ",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/rfq-providers",
+    "line": 199,
+    "view": "AdminRfqProvidersView",
+    "title": "Fournisseurs RFQ",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/counterparties",
+    "line": 204,
+    "view": "AdminCounterpartiesView",
+    "title": "Contreparties deals",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/browse/:table?",
+    "line": 209,
+    "view": "AdminBrowseView",
+    "title": null,
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/users",
+    "line": 214,
+    "view": "AdminUsersView",
+    "title": "Utilisateurs",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/entities",
+    "line": 219,
+    "view": "AdminEntitiesView",
+    "title": "Entités",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/underlyings",
+    "line": 224,
+    "view": "AdminUnderlyingsView",
+    "title": "Sous-jacents",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/market-data",
+    "line": 229,
+    "view": "AdminMarketDataView",
+    "title": "Données de marché",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/compute",
+    "line": 234,
+    "view": "AdminComputeView",
+    "title": "Files de calcul",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/admin/uat-generator",
+    "line": 239,
+    "view": "AdminUatGeneratorView",
+    "title": "Générateur UAT",
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  },
+  {
+    "path": "/:pathMatch(.*)*",
+    "line": 244,
+    "view": null,
+    "title": null,
+    "note": "Lexical extraction; redirect target literals may also appear. See router source."
+  }
+]

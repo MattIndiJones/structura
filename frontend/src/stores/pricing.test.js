@@ -922,7 +922,7 @@ const appelsParse = () => globalThis.fetch.mock.calls
 describe('les calculs transmettent la session au serveur', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    localStorage.setItem('auth_token', 'pricing-test-session')
+    sessionStorage.setItem('auth_token', 'pricing-test-session')
     vi.useFakeTimers()
   })
   afterEach(() => {

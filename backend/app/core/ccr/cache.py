@@ -1,12 +1,24 @@
 """Reuse frozen CCR base valuations, never a client-supplied risk decision."""
 from copy import deepcopy
 import json
+import hashlib
+from pathlib import Path
 from sqlalchemy import func
 from sqlmodel import select
 
 from ...db.models import CCRExposureCalculation, DealEvent, ProductRecord, ProductTermsVersion
 from ...services.market_data import market_data_provider_for_deal
 from ..valuation_context import canonical_fingerprint
+from ..valuation_runs import engine_identity
+
+
+def implementation_identity():
+    """One identity for preparation, saved dependency keys and monitoring."""
+    version, engine = engine_identity()
+    digest = hashlib.sha256()
+    for filename in ("contracts.py", "exposure.py", "service.py", "preparation.py", "common_market.py", "cache.py"):
+        digest.update((Path(__file__).parent / filename).read_bytes())
+    return version, engine, digest.hexdigest()
 
 
 def preparation_key(session, entity_id, deals, request, fingerprint):

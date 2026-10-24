@@ -3,6 +3,11 @@ import { durationLabel, pilotSummary, timelinePage, matchedBankVolumes } from '.
 
 const state=()=>({status:'RUNNING',controller_active:true,config:{months:12,max_turns:800},month:0,turns:12,actors:{},cases:{},book_checks:[]})
 
+it('uses the diagnostic follow-up horizon instead of the former twelve-month scenario',()=>{
+  const s=state();s.config.horizon_months=60;s.month=12
+  expect(pilotSummary(s).percent).toBe(20)
+})
+
 describe('campaign pilot',()=>{
   it('keeps periods, refusals and reconciliation errors distinct',()=>{
     const s=state();s.month=2;s.book_checks=[{status:'COMPLETE'},{status:'NO_TRADE'},{status:'MISMATCH'},{status:'UNVERIFIED'}]

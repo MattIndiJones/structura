@@ -20,6 +20,21 @@ describe('MtM quotidien du Booking', () => {
   })
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
+  it('écarte un MtM en vol invalidé par un changement de faits lifecycle', async () => {
+    const wait = deferred()
+    vi.stubGlobal('fetch', vi.fn(() => wait.promise))
+    const state = useBookingMtm()
+    const pending = state.runMtm(1)
+    state.invalidateMtm(1)
+    wait.resolve(reply({ mtm: 1.02 }))
+    await pending
+    expect(state.mtmResults[1]).toBeNull()
+    expect(state.mtmLoading[1]).toBe(false)
+    fetch.mockResolvedValueOnce(reply({ mtm: 1.01 }))
+    await state.runMtm(1)
+    expect(state.mtmResults[1].mtm).toBe(1.01)
+  })
+
   it('ouvre sur les paramètres du booking et aujourd’hui, même si le dernier run est ancien', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => reply([saved({
       created_at: new Date(2026, 8, 16, 12).toISOString(),

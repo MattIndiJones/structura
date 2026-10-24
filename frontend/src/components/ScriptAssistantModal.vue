@@ -92,12 +92,18 @@
                 {{ gen.compiles ? 'Compilation réussie' : 'Compilation échouée' }}
               </span>
               <span class="badge" :class="statutClasse(gen.pricing_check)">
-                Contrôle financier · {{ statutLibelle(gen.pricing_check) }}
+                Exécution de contrôle · {{ statutLibelle(gen.pricing_check) }}
               </span>
               <span class="badge" :class="statutClasse(gen.checks_status)">
-                Revue · {{ statutLibelle(gen.checks_status) }}
+                Revue structurelle · {{ statutLibelle(gen.checks_status) }}
               </span>
             </div>
+            <p class="text-[11px] text-slate-500 mb-2" data-testid="payoff-qualification">
+              {{ gen.payoff_qualification?.status === 'REFERENCE_PATHS_PASSED'
+                ? 'Logique du script vérifiée sur un panel de trajectoires de référence.'
+                : 'Payoff non qualifié : les indicateurs structurels et le prix de contrôle ne prouvent pas sa conformité économique.' }}
+              Les termes du produit, les calendriers et le modèle de pricing restent à valider.
+            </p>
             <div class="flex flex-col gap-1">
               <div v-for="(c, i) in gen.checks" :key="i"
                    class="flex items-start gap-2 text-[11px] leading-snug">

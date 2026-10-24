@@ -19,7 +19,10 @@
 
     <!-- Rien à montrer : on distingue « jamais calculé » de « calculé mais
          plus en mémoire », parce que l'action à faire n'est pas la même. -->
-    <div v-if="!result" class="card flex flex-col items-center justify-center gap-2 py-10 text-center">
+    <div v-if="!canPrice" class="card text-xs text-slate-500">
+      Calcul privé réservé aux profils habilités au pricing.
+    </div>
+    <div v-else-if="!result" class="card flex flex-col items-center justify-center gap-2 py-10 text-center">
       <div class="text-3xl">🧮</div>
       <template v-if="rfq?.model_price != null">
         <div class="text-xs text-slate-400">Prix modèle en base : <span class="font-semibold text-slate-200">{{ fmtPts(rfq.model_price) }}</span></div>
@@ -117,7 +120,7 @@
         </div>
       </div>
 
-      <FluxDecomposition :result="result" :origin-date="pricing.strikeDate"
+      <FluxDecomposition :result="result" :origin-date="result.valuation_date || pricing.strikeDate"
                          :contract-origin-date="pricing.strikeDate"
                          :value-date="pricing.valueDate" />
     </template>
@@ -132,6 +135,7 @@ import SensitiveValue from './SensitiveValue.vue'
 import { formatDateTime, formatInt, formatNumber } from '../utils/format.js'
 
 const props = defineProps({
+  canPrice: { type: Boolean, default: true },
   // L'AO courant (pour son model_price déjà en base).
   rfq:     { type: Object, default: null },
   // Entrée lastPricing du store :

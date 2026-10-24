@@ -96,9 +96,12 @@ def test_no_conversion_needed_answers_one():
     assert fx_rate_to(None, "EUR") == 1.0
 
 
-def test_unknown_currency_answers_none_not_parity():
+def test_unknown_currency_answers_none_not_parity(monkeypatch):
     """The whole defect in one assertion: an unloadable pair used to become
     1.0, booking a JPY notional at 164x its size with nothing on screen."""
+    import pandas as pd
+    from backend.app.core import amc_prices
+    monkeypatch.setattr(amc_prices, "get_fx_series", lambda *_a, **_k: pd.Series(dtype=float))
     assert fx_rate_to("ZZZ", "EUR") is None
 
 
@@ -535,24 +538,30 @@ def test_model_price_can_be_recomputed_with_quotes_in_hand():
 
 def test_repricing_never_touches_the_contractual_identity():
     """Belt and braces: contractual keys sent through the pricing channel are
-    ignored rather than applied — the freeze cannot be walked around."""
+    rejected atomically — the freeze cannot be walked around."""
     import json as _json
     from backend.app.api import rfq as rfq_api
     s, rfq, before = _rfq_session()
 
-    rfq_api.update_rfq(rfq.id, rfq_api.RfqUpdate(pricing_params={
-        "user_params": {"CPN": 0.20}, "strike_date": "2030-01-01", "T": 1.0,
-        "constats": {"OBS": {"end_date": "2028-01-01"}},
-        "underlyings": [{"name": "PIRATE", "ticker": "XXX", "ccy": "USD", "sigma": 0.9}],
-    }), _me(), s)
+    from fastapi import HTTPException
+    original_json = rfq.params_json
+    with pytest.raises(HTTPException) as failure:
+        rfq_api.update_rfq(rfq.id, rfq_api.RfqUpdate(pricing_params={
+            "user_params": {"CPN": 0.20}, "strike_date": "2030-01-01", "T": 1.0,
+            "constats": {"OBS": {"end_date": "2028-01-01"}},
+            "underlyings": [{"name": "PIRATE", "ticker": "XXX", "ccy": "USD", "sigma": 0.9}],
+        }), _me(), s)
+    assert failure.value.status_code == 422
+    assert failure.value.detail["code"] == "RFQ_PRICING_FIELDS_FORBIDDEN"
 
     s.refresh(rfq)
     after = _json.loads(rfq.params_json)
+    assert rfq.params_json == original_json
     for key in ("user_params", "strike_date", "value_date", "T", "constats", "notional"):
         assert after[key] == before[key], key
     ul = after["underlyings"][0]
     assert (ul["name"], ul["ticker"], ul["ccy"]) == ("Microsoft", "MSFT", "EUR")
-    assert ul["sigma"] == 0.9                    # the model half does go through
+    assert ul["sigma"] == before["underlyings"][0]["sigma"]
 
 
 def test_repricing_keeps_every_underlying_of_the_basket():

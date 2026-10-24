@@ -7,7 +7,7 @@ import { aiSettings, aiCredentials, aiCatalog, refreshAiCatalog, syncAiIdentity 
 const renderer = createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
 const apps = []
 function mount(overrides = {}) {
-  const props = reactive({ endpoint: '/test/generate', payload: { value: 1 }, contextKey: '', disabled: false, ...overrides })
+  const props = reactive({ endpoint: '/api/test/generate', payload: { value: 1 }, contextKey: '', disabled: false, ...overrides })
   const emit = vi.fn()
   let state
   const app = renderer.createApp({ setup() { state = useAiWorkbench(props, emit); return () => null } })
@@ -115,7 +115,7 @@ describe('shared settings', () => {
     expect(b.state.selectedModel.value).toBe('other:14b')
     aiCredentials.openai = 'secret-test'; await nextTick()
     expect(localStorage.getItem('ai_settings_v1')).not.toContain('secret-test')
-    localStorage.setItem('auth_token', 'other-account'); syncAiIdentity()
+    sessionStorage.setItem('auth_token', 'other-account'); syncAiIdentity()
     expect(aiCredentials.openai).toBe('')
   })
 

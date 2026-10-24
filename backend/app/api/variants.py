@@ -1,33 +1,9 @@
-"""Comparaison des déclinaisons d'un deal, côte à côte.
+"""Compare variants using one market context and the original nominal basis.
 
-À iso-valeur, le prix ne départage plus rien : c'est tout l'intérêt de
-restructurer, et c'est aussi ce qui rend un tableau de prix inutile pour
-choisir. La colonne qui décide est **P(récupérer le pair d'origine)**, et elle
-demande d'être calculée avec soin, parce qu'elle ne veut pas dire la même chose
-selon le mode.
-
-Sur un AVENANT, le nominal ne bouge pas : récupérer le pair, c'est que la jambe
-résiduelle rende 100 %. La probabilité se lit directement.
-
-Sur un ROLL, le détenteur débouclé à P₀ achète k = P₀ / P_neuve unités d'une
-note neuve. Son remboursement par unité de nominal D'ORIGINE vaut donc
-k × payoff_neuf, et récupérer le pair exige payoff_neuf ≥ 1/k = P_neuve / P₀.
-Sur le dossier Marex : P₀ = 46 %, P_neuve = 87 %, donc il faudrait que la note
-neuve rende 189 % de SON pair. Autant dire jamais.
-
-Afficher la P(≥100 %) brute de la note neuve à côté de celle d'un avenant
-ferait exactement le contresens que ces chiffres révèlent : 54 % contre 28 %
-donnerait le roll gagnant, alors qu'il plafonne la récupération à 53 % du
-nominal d'origine.
-
-Le tableau porte donc les deux : la probabilité ramenée au nominal d'origine, et
-le plafond de récupération. Un chiffre sans son plafond n'est pas comparable.
-
-Note de méthode : le corps de requête du PARENT est fourni par l'écran, tel
-qu'il l'envoie pour afficher son prix. Rien n'est reconstruit ici. Une seconde
-voie de construction — même soignée — finirait par produire des unités ou des
-dates légèrement autres, et le tableau classerait des produits que l'écran ne
-price pas.
+A roll buys net exit proceeds / all-in entry price units of the new note.
+Quantity, future undiscounted recovery and a proven contractual cap are separate
+metrics. A simulated maximum never establishes a contractual bound. The sealed
+study retains the funding assumptions, inputs, prices and resulting distributions.
 """
 from __future__ import annotations
 
@@ -40,8 +16,11 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from ..core.variants import MODE_ROLL, VariantError, params_moteur, resoudre
+from ..core.roll_economics import RollFinancing, recovery_summary, roll_budget
 from ..db.database import get_session
-from ..db.models import Script, User
+from ..db.models import Script, User, VariantStudyArchive
+from ..services.archived_documents import seal, unseal, ProposalFreeze
+from ..core.valuation_runs import calculation_identity
 from .auth import get_current_user
 from .inlife import InLifePricingRequest, price_in_life
 from .scripts_db import _contexte, _lisible
@@ -68,6 +47,7 @@ class CompareRequest(BaseModel):
     # Moins de chemins que le prix de référence : ce tableau classe, il ne
     # publie pas. Le prix qui fait foi reste celui de l'onglet Résultats.
     N: int = Field(default=8000, ge=1000, le=50000)
+    roll_financing: RollFinancing = Field(default_factory=RollFinancing)
 
 
 def _prix(corps: dict, current: User) -> dict:
@@ -206,13 +186,20 @@ def compare_variants(
     if origine.get("early_recall"):
         raise HTTPException(422, origine.get("message", "Produit déjà rappelé."))
     p0 = origine["price"]
+    from ..runtime import business_now
+    from datetime import timezone
+    now = business_now()
+    calculated_at = (now.replace(tzinfo=timezone.utc) if now.tzinfo is None
+                     else now.astimezone(timezone.utc)).isoformat()
+    valuation_date = origine.get('valuation_date') or corps_base.get('valuation_date')
+    evidence = [{"id": None, "input": corps_base, "result": origine}]
 
     lignes = [{
         "id": None, "titre": "Origine", "mode": "",
         "prix": p0, "ecart": 0.0,
         # Nominal inchangé : récupérer le pair, c'est que la jambe rende 100 %.
         "proba_pair_origine": origine.get("prob_gt100"),
-        "plafond": 1.0,
+        **recovery_summary(origine, 1.0),
         "duree": origine.get("fugit"),
         "ecarts": 0,
     }]
@@ -230,10 +217,15 @@ def compare_variants(
             continue
         delta = json.loads(v.variant_delta_json or "{}")
         mode = v.variant_mode or "avenant"
+        item = {"id": v.id, "parent_id": parent.id, "parent_context": _contexte(parent),
+                "delta": delta, "mode": mode, "title": v.variant_title}
+        evidence.append(item)
         try:
             ctx = resoudre(_contexte(parent), delta, mode)
             corps = (_corps_roll if mode == MODE_ROLL else _corps_avenant)(corps_base, ctx)
+            item["input"] = corps
             res = _prix(corps, current)
+            item["result"] = res
         except VariantError as e:
             lignes.append(_refus(v, mode, delta, str(e)))
             continue
@@ -245,27 +237,76 @@ def compare_variants(
             continue
 
         prix = res["price"]
-        if mode == MODE_ROLL:
-            # k unités d'une note neuve pour P₀ de valeur débouclée.
-            k = (p0 / prix) if prix > 0 else 0.0
-            plafond = k
-            # Récupérer le pair D'ORIGINE exige payoff_neuf ≥ 1/k.
-            proba = _proba_pair(res, 1.0 / k) if k > 0 else 0.0
-        else:
-            plafond = 1.0
-            proba = res.get("prob_gt100")
+        financing = None
+        try:
+            if mode == MODE_ROLL:
+                k, financing = roll_budget(p0, prix, req.roll_financing,
+                    valuation_date=valuation_date, calculated_at=calculated_at)
+                proba = _proba_pair(res, 1.0 / k) if k > 0 else 0.0
+                recovery = recovery_summary(res, k, script=corps['script'])
+            else:
+                proba = res.get('prob_gt100')
+                recovery = recovery_summary(res, 1.0)
+        except ValueError as exc:
+            lignes.append(_refus(v, mode, delta, str(exc)))
+            continue
 
         lignes.append({
             "id": v.id, "titre": v.variant_title, "mode": mode,
             "prix": prix, "ecart": round(prix - p0, 6),
-            "proba_pair_origine": proba, "plafond": round(plafond, 6),
+            "proba_pair_origine": proba, **recovery,
+            "roll_financing": financing,
             "duree": res.get("fugit"),
             "ecarts": len(delta.get("set") or {}) + len(delta.get("removed") or []),
         })
 
-    return {"lignes": lignes, "N": req.N,
+    result = {"lignes": lignes, "N": req.N, 'comparison_schema_version': 2,
+            'roll_financing': req.roll_financing.model_dump(mode='json'),
+            'calculated_at': calculated_at,
             "valuation_date": origine.get("valuation_date"),
             "in_life": origine.get("in_life", False)}
+    if req.parent_id is not None:
+        parent = _lisible(session.get(Script, req.parent_id), current, session)
+        import hashlib
+        from pathlib import Path
+        result["preview"] = seal({"purpose": "VARIANT_STUDY", "user_id": current.id,
+            "script_id": parent.id, "created_at": business_now().isoformat(),
+            "parent_context": _contexte(parent), "request": req.model_dump(mode="json"),
+            "calculation_identity": calculation_identity(), "evidence": evidence,
+            "comparison_method_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            "result": dict(result)})
+    return result
+
+
+@router.post("/archives")
+def freeze_variant_study(body: ProposalFreeze, current: Annotated[User, Depends(get_current_user)],
+                         session: Annotated[Session, Depends(get_session)]):
+    from uuid import uuid5, NAMESPACE_URL
+    from ..core.valuation_context import canonical_json
+    claims = unseal(body.preview, current.id, "VARIANT_STUDY")
+    _lisible(session.get(Script, claims["script_id"]), current, session)
+    archive_id = str(uuid5(NAMESPACE_URL, "structura-variant-study:" + body.preview["signature"]))
+    row = session.get(VariantStudyArchive, archive_id)
+    if row is None:
+        row = VariantStudyArchive(id=archive_id, script_id=claims["script_id"], user_id=current.id,
+                                  evidence_json=canonical_json(claims))
+        session.add(row)
+        from ..core.audit import record_audit_event
+        record_audit_event(session, action="VARIANT_STUDY_FROZEN", object_type="SCRIPT",
+                           object_id=row.script_id, actor_user_id=current.id, result="SUCCESS",
+                           after={"archive_id": row.id})
+        session.commit()
+    return {"archive_id": row.id}
+
+
+@router.get("/archives/{script_id}")
+def list_variant_studies(script_id: int, current: Annotated[User, Depends(get_current_user)],
+                         session: Annotated[Session, Depends(get_session)]):
+    _lisible(session.get(Script, script_id), current, session)
+    return [{"archive_id": row.id, "created_at": row.created_at.isoformat(),
+             "evidence": json.loads(row.evidence_json)} for row in session.exec(select(VariantStudyArchive).where(
+                 VariantStudyArchive.script_id == script_id, VariantStudyArchive.user_id == current.id)
+                 .order_by(VariantStudyArchive.created_at.desc())).all()]
 
 
 def _refus(v: Script, mode: str, delta: dict, motif: str) -> dict:
@@ -277,6 +318,8 @@ def _refus(v: Script, mode: str, delta: dict, motif: str) -> dict:
         "id": v.id, "titre": v.variant_title, "mode": mode,
         "prix": None, "ecart": None, "proba_pair_origine": None,
         "plafond": None, "duree": None,
+        'reinvested_notional': None, 'recovery_mean': None, 'recovery_median': None,
+        'recovery_sample_max': None, 'recovery_cap_method': 'UNAVAILABLE', 'roll_financing': None,
         "ecarts": len(delta.get("set") or {}) + len(delta.get("removed") or []),
         "refus": motif,
     }

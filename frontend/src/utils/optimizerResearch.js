@@ -54,7 +54,7 @@ export const optimizerHelp={
   expected_maturity:'Durée moyenne sous Q jusqu’à la terminaison, en années ; elle peut être inférieure à la maturité contractuelle.',
   expected_capital_loss:'Perte moyenne Q de la jambe de capital, en % du nominal, avant coupons. La borne haute est comparée au plafond.',
   simulations:'Nombre de paires antithétiques indépendantes. Le calcul simule deux trajectoires par paire ; la validation utilise de nouveaux tirages à N et 2N.',
-  budget:'Nombre de candidats, calculs simultanés et durée maximale. L’arrêt conserve les résultats disponibles avec une couverture partielle explicite.',
+  budget:'Nombre de candidats, calculs simultanés et budget temps. Un calcul déjà engagé peut se terminer au-delà du budget, notamment en séquentiel ; le dépassement est signalé et le résultat reste partiel. Les résultats reçus sont conservés.',
   fair_value:'Valeur actualisée du payoff, en % du nominal, sous le modèle et le marché figés dans cette recherche.',
   interval:'Intervalle de confiance utilisé pour le contrôle. L’exploration et la validation indépendante n’utilisent pas le même ajustement statistique.',
   status:'Vert : contraintes respectées et validation indépendante réussie. Rouge : hors conditions ou contrôle non concluant. Ambre : validation manquante.',

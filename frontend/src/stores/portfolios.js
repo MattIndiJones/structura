@@ -52,6 +52,17 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   const dealsStore = useDealsStore()
 
   const portfolios = ref([])
+  const dataScope = ref('PRODUCTION')
+  const historyMode = ref('CURRENT')
+  const scopeError = ref('')
+  let contextVersion = 0
+  const historyScope = computed(() => historyMode.value === 'LEGACY_UNQUALIFIED' ? historyMode.value : dataScope.value)
+  const scopeLabel = computed(() => dataScope.value === 'UAT' ? 'Recette UAT' : 'Production')
+  const historyLabel = computed(() => historyScope.value === 'LEGACY_UNQUALIFIED' ? 'Historique non qualifié' : scopeLabel.value + (historyMode.value === 'ALL_VIEWS' ? ' · toutes vues' : ''))
+  const matchesScope = d => (d.uat_batch_id != null) === (dataScope.value === 'UAT')
+  const withScope = url => `${url}${url.includes('?') ? '&' : '?'}data_scope=${dataScope.value}`
+  const historyToken = () => `${contextVersion}:${historyMode.value}:${historyScope.value}`
+
   const view = ref('global')            // 'global' | portfolio id
   const valuationDate = ref(localTodayIso())
   const risk = ref(null)
@@ -71,26 +82,30 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   })
 
   const allMembers = computed(() => {
-    if (view.value === 'global') return dealsStore.deals
-    return dealsStore.deals.filter(d => (d.portfolio_ids || []).includes(view.value))
+    const scoped = dealsStore.deals.filter(matchesScope)
+    if (view.value === 'global') return scoped
+    return scoped.filter(d => (d.portfolio_ids || []).includes(view.value))
   })
 
   const riskMembers = computed(() => allMembers.value.filter(
     deal => dealRiskState(deal, valuationDate.value).active))
 
   const activeDealsCount = computed(() => dealsStore.deals.filter(
-    deal => dealRiskState(deal, valuationDate.value).active).length)
+    deal => matchesScope(deal) && dealRiskState(deal, valuationDate.value).active).length)
 
-  const members = computed(() => {
-    if (view.value === 'global') return dealsStore.deals.filter(d => d.status === 'actif')
-    return dealsStore.deals.filter(d =>
-      d.status === 'actif' && (d.portfolio_ids || []).includes(view.value))
-  })
+  const members = computed(() => allMembers.value.filter(d => d.status === 'actif'))
+
+  async function scopedRead(url, ticket = contextVersion) {
+    const res = await apiFetch(url)
+    if (!res.ok) throw await apiError(res, 'Chargement du périmètre impossible')
+    const data = await res.json()
+    return ticket === contextVersion ? data : null
+  }
+
 
   async function load() {
-    const res = await apiFetch('/api/portfolios')
-    if (!res.ok) throw await apiError(res, 'Erreur de chargement des portefeuilles')
-    portfolios.value = await res.json()
+    const data = await scopedRead(withScope('/api/portfolios'))
+    if (data !== null) portfolios.value = data
   }
 
   async function create(name, userId = null) {
@@ -120,7 +135,7 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   async function remove(p) {
     const res = await apiFetch(`/api/portfolios/${p.id}`, { method: 'DELETE' })
     if (!res.ok) throw await apiError(res, 'Suppression du portefeuille impossible')
-    if (view.value === p.id) view.value = 'global'
+    if (view.value === p.id) { view.value = 'global'; clearSelectionResults() }
     await dealsStore.loadDeals()
     await load()
     await loadRisk()
@@ -155,34 +170,36 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   }
 
   async function loadRisk() {
+    const ticket = contextVersion
     riskLoading.value = true
     try {
       const url = view.value === 'global'
         ? `/api/portfolios/risk-global?valuation_date=${encodeURIComponent(valuationDate.value)}`
         : `/api/portfolios/${view.value}/risk?valuation_date=${encodeURIComponent(valuationDate.value)}`
-      const res = await apiFetch(url)
-      risk.value = await res.json()
+      const data = await scopedRead(withScope(url), ticket)
+      if (data !== null) risk.value = data
     } finally {
-      riskLoading.value = false
+      if (ticket === contextVersion) riskLoading.value = false
     }
   }
 
   async function loadExposure() {
+    const ticket = contextVersion
     exposureLoading.value = true
     try {
       const url = view.value === 'global'
         ? '/api/portfolios/exposure-by-counterparty'
         : `/api/portfolios/${view.value}/exposure-by-counterparty`
-      const res = await apiFetch(url)
-      exposure.value = await res.json()
+      const data = await scopedRead(withScope(url), ticket)
+      if (data !== null) exposure.value = data
     } finally {
-      exposureLoading.value = false
+      if (ticket === contextVersion) exposureLoading.value = false
     }
   }
 
-  // Barrier proximity — unlike loadRisk/loadExposure (cheap reads over
-  // already-persisted data), this calls out to live market data per deal
-  // (backend's build_watchlist_row, no caching) so it is NOT auto-loaded on
+  // Barrier proximity uses the existing dated market-data/cache service per
+  // deal. It can be more expensive than reading persisted Greeks, so it is
+  // not auto-loaded on
   // every portfolio switch — only when the Barrières tab is actually opened
   // (see RiskManagementView.vue), same "expensive, explicit" treatment as
   // the VaR study and P&L explain below.
@@ -190,71 +207,121 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   const barriersLoading = ref(false)
 
   async function loadBarriers() {
+    const ticket = contextVersion
     barriersLoading.value = true
     try {
       const url = view.value === 'global'
         ? '/api/portfolios/barriers-global'
         : `/api/portfolios/${view.value}/barriers`
-      const res = await apiFetch(url)
-      barriers.value = await res.json()
+      const data = await scopedRead(withScope(url), ticket)
+      if (data !== null) barriers.value = data
     } finally {
-      barriersLoading.value = false
+      if (ticket === contextVersion) barriersLoading.value = false
     }
+  }
+
+  function clearSelectionResults() {
+    contextVersion += 1
+    stopVarPolling()
+    risk.value = exposure.value = barriers.value = smileResult.value = varStudy.value = null
+    riskLoading.value = exposureLoading.value = barriersLoading.value = smileLoading.value = false
+    varLaunching.value = false
+    varHistory.value = []
+    scopeError.value = ''
+  }
+
+  async function reloadSelection() {
+    const ticket = contextVersion
+    try {
+      await Promise.all([load(), loadRisk(), loadExposure(), loadVarHistory(),
+        loadShockHistory(view.value === 'global' ? 'global' : 'portfolio', view.value === 'global' ? null : view.value),
+        loadShockHistory(view.value === 'global' ? 'smile_global' : 'smile_portfolio', view.value === 'global' ? null : view.value)])
+    } catch (e) { if (ticket === contextVersion) scopeError.value = e.message }
   }
 
   function selectView(v) {
     view.value = v
-    loadRisk()
-    loadExposure()
-    loadShockHistory(v === 'global' ? 'global' : 'portfolio', v === 'global' ? null : v)
-    loadShockHistory(v === 'global' ? 'smile_global' : 'smile_portfolio',
-      v === 'global' ? null : v)
-    // Barrières is lazy (see loadBarriers) — just drop the stale scope's
-    // result so the tab shows a fresh "à charger" state, not another
-    // portfolio's rows, if it's already been opened once.
-    barriers.value = null
+    clearSelectionResults()
+    return reloadSelection()
   }
 
-  // History keys: a bare deal id for deal scope, '<scope>:<id or empty>'
-  // otherwise ('global:' for the whole book) — same convention as the
-  // /api/shocks query parameters.
+  function setDataScope(value) {
+    if (!['PRODUCTION', 'UAT'].includes(value)) throw new Error('Périmètre invalide')
+    if (dataScope.value === value) return Promise.resolve()
+    dataScope.value = value
+    historyMode.value = 'CURRENT'
+    clearSelectionResults()
+    return reloadSelection()
+  }
+
+  async function setHistoryMode(value) {
+    if (!['CURRENT', 'ALL_VIEWS', 'LEGACY_UNQUALIFIED'].includes(value)) throw new Error('Historique invalide')
+    historyMode.value = value
+    stopVarPolling()
+    varStudy.value = null
+    varHistory.value = []
+    try {
+      await Promise.all([loadVarHistory(),
+        loadShockHistory(view.value === 'global' ? 'global' : 'portfolio', view.value === 'global' ? null : view.value),
+        loadShockHistory(view.value === 'global' ? 'smile_global' : 'smile_portfolio', view.value === 'global' ? null : view.value)])
+    } catch (e) { scopeError.value = e.message }
+  }
+
+  // Individual contracts retain their own history key. Aggregate keys also
+  // include the archived origin so a scope switch never reuses another book.
   function historyKey(scope, id) {
-    return scope === 'deal' ? id : `${scope}:${id ?? ''}`
+    return scope === 'deal' ? id : `${historyMode.value}:${historyScope.value}:${scope}:${id ?? ''}`
   }
 
   async function loadShockHistory(scope, id) {
-    const params = scope === 'deal'
-      ? `scope=deal&deal_id=${id}`
-      : id
-        ? `scope=${encodeURIComponent(scope)}&portfolio_id=${id}`
-        : `scope=${encodeURIComponent(scope)}`
-    const res = await apiFetch(`/api/shocks?${params}&limit=5`)
-    shockHistory[historyKey(scope, id)] = await res.json()
+    const ticket = historyToken()
+    const key = historyKey(scope, id)
+    const params = new URLSearchParams({ scope, data_scope: historyScope.value, limit: '5' })
+    if (scope !== 'deal' && historyMode.value !== 'CURRENT') params.set('all_views', 'true')
+    if (scope === 'deal') {
+      params.set('deal_id', id)
+      const deal = dealsStore.deals.find(d => d.id === id)
+      params.set('data_scope', deal?.uat_batch_id != null ? 'UAT' : 'PRODUCTION')
+    } else if (id != null) params.set('portfolio_id', id)
+    const res = await apiFetch(`/api/shocks?${params}`)
+    if (!res.ok) throw await apiError(res, 'Historique des chocs indisponible')
+    let data = await res.json()
+    // An explicitly selected Deal can retain unqualified legacy studies;
+    // they are labelled individually and never enter an aggregate total.
+    if (scope === 'deal') {
+      params.set('data_scope', 'LEGACY_UNQUALIFIED')
+      const legacy = await apiFetch(`/api/shocks?${params}`)
+      if (!legacy.ok) throw await apiError(legacy, 'Ancien historique des chocs indisponible')
+      data = [...data, ...await legacy.json()].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 5)
+    }
+    if (ticket === historyToken()) shockHistory[key] = data
   }
 
   const currentShockHistory = computed(() => {
-    const key = view.value === 'global' ? 'global:' : `portfolio:${view.value}`
+    const key = historyKey(view.value === 'global' ? 'global' : 'portfolio', view.value === 'global' ? null : view.value)
     return shockHistory[key] || []
   })
 
   const currentSmileHistory = computed(() => {
-    const key = view.value === 'global'
-      ? 'smile_global:'
-      : `smile_portfolio:${view.value}`
+    const key = historyKey(view.value === 'global' ? 'smile_global' : 'smile_portfolio', view.value === 'global' ? null : view.value)
     return shockHistory[key] || []
   })
 
   async function runShock(scope, id, form) {
+    const ticket = contextVersion
+    const deal = scope === 'deal' ? dealsStore.deals.find(d => d.id === id) : null
+    const origin = scope === 'deal' ? (deal?.uat_batch_id != null ? 'UAT' : 'PRODUCTION') : dataScope.value
     const url = scope === 'deal' ? `/api/deals/${id}/shock`
       : scope === 'portfolio' ? `/api/portfolios/${id}/shock`
       : '/api/portfolios/shock-global'
     const res = await apiFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, data_scope: origin }),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || 'Erreur choc')
+    if (ticket !== contextVersion) return null
     await loadShockHistory(scope, id)
     return data
   }
@@ -263,6 +330,7 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   const smileLoading = ref(false)
 
   async function runSmileRisk(form) {
+    const ticket = contextVersion
     smileLoading.value = true
     smileResult.value = null
     try {
@@ -272,10 +340,11 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
       const res = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, data_scope: dataScope.value }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Erreur du scénario de smile')
+      if (ticket !== contextVersion) return null
       smileResult.value = data
       await loadShockHistory(
         view.value === 'global' ? 'smile_global' : 'smile_portfolio',
@@ -283,24 +352,25 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
       )
       return data
     } finally {
-      smileLoading.value = false
+      if (ticket === contextVersion) smileLoading.value = false
     }
   }
 
   // P&L explain waterfall aggregated over the current selection (full
   // reprice chain per deal — slow on a large book, caller shows a spinner).
   async function runPnlExplain(body) {
+    const ticket = contextVersion
     const url = view.value === 'global'
       ? '/api/portfolios/pnl-explain-global'
       : `/api/portfolios/${view.value}/pnl-explain`
-    const res = await apiFetch(url, {
+    const res = await apiFetch(withScope(url), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || 'Erreur P&L explain')
-    return data
+    return ticket === contextVersion ? data : null
   }
 
   // ── VaR/ES study (async — see core/compute/ and api/var.py) ──────────
@@ -315,27 +385,40 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   const varPolling = ref(false)
   const varHistory = ref([])
   let varPollTimer = null
+  let varGeneration = 0
 
   function stopVarPolling() {
+    varGeneration += 1
     if (varPollTimer) clearTimeout(varPollTimer)
     varPollTimer = null
     varPolling.value = false
   }
 
-  async function pollVarBatch(batchId) {
-    const res = await apiFetch(`/api/portfolios/var/${batchId}`)
-    const data = await res.json()
-    varStudy.value = data
-    if (data.status === 'queued' || data.status === 'running') {
-      varPollTimer = setTimeout(() => pollVarBatch(batchId), 3000)
-    } else {
-      varPolling.value = false
-      loadVarHistory()
+  async function pollVarBatch(batchId, ticket = historyToken(), generation = varGeneration) {
+    try {
+      const res = await apiFetch(`/api/portfolios/var/${batchId}`)
+      if (!res.ok) throw await apiError(res, 'Étude VaR indisponible')
+      const data = await res.json()
+      if (ticket !== historyToken() || generation !== varGeneration) return
+      varStudy.value = data
+      if (data.status === 'queued' || data.status === 'running') {
+        varPollTimer = setTimeout(() => pollVarBatch(batchId, ticket, generation), 3000)
+      } else {
+        varPolling.value = false
+        await loadVarHistory()
+      }
+    } catch (e) {
+      if (ticket === historyToken() && generation === varGeneration) {
+        varPolling.value = false
+        scopeError.value = e.message
+      }
     }
   }
 
   async function launchVar(form) {
     stopVarPolling()
+    const ticket = historyToken()
+    const generation = varGeneration
     varLaunching.value = true
     varStudy.value = null
     try {
@@ -345,7 +428,7 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
       const res = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, data_scope: dataScope.value }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -356,21 +439,26 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
         if (typeof detail === 'object') err.computeDetail = detail
         throw err
       }
+      if (ticket !== historyToken() || generation !== varGeneration) return null
       varPolling.value = true
-      pollVarBatch(data.batch_id)
+      pollVarBatch(data.batch_id, ticket, generation)
       return data
     } finally {
-      varLaunching.value = false
+      if (ticket === historyToken() && generation === varGeneration) varLaunching.value = false
     }
   }
 
-  // Past studies (any status) — reuses the generic compute batches list,
-  // filtered client-side to this one kind, so reopening a finished study
-  // never needs re-running it.
+  // History is filtered on frozen origin and portfolio view by the server.
+  // Reopening a finished study never needs another calculation.
   async function loadVarHistory() {
-    const res = await apiFetch('/api/compute/batches')
-    const all = await res.json()
-    varHistory.value = all.filter(b => b.kind === 'var_scenario').slice(0, 10)
+    const ticket = historyToken()
+    const params = new URLSearchParams({ data_scope: historyScope.value, scope: view.value === 'global' ? 'global' : 'portfolio' })
+    if (view.value !== 'global') params.set('portfolio_id', view.value)
+    if (historyMode.value === 'ALL_VIEWS') params.set('all_views', 'true')
+    const res = await apiFetch(`/api/portfolios/var-history?${params}`)
+    if (!res.ok) throw await apiError(res, 'Historique VaR indisponible')
+    const rows = await res.json()
+    if (ticket === historyToken()) varHistory.value = rows
   }
 
   function openVarBatch(batchId) {
@@ -381,7 +469,8 @@ export const usePortfoliosStore = defineStore('portfolios', () => {
   }
 
   return {
-    portfolios, view, valuationDate, risk, riskLoading, exposure, exposureLoading, shockHistory,
+    portfolios, view, dataScope, historyMode, scopeLabel, historyLabel, scopeError, setDataScope, setHistoryMode,
+    valuationDate, risk, riskLoading, exposure, exposureLoading, shockHistory,
     barriers, barriersLoading,
     varStudy, varLaunching, varPolling, varHistory,
     label, isDefaultView, activeDealsCount, members, allMembers, riskMembers,

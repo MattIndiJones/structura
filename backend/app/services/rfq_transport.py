@@ -31,7 +31,7 @@ from ..runtime import business_now
 from . import rfq_exchange as exchange, rfq_relationships as relationships
 
 PROTOCOL = "STRUCTURA_RFQ_1"
-KINDS = {"REQUEST", "QUOTE", "WITHDRAW", "READ", "CLOSE"}
+KINDS = {"REQUEST", "QUOTE", "WITHDRAW", "READ", "CLOSE", "EXECUTION_REQUEST", "EXECUTION_CONFIRMATION", "EXECUTION_STATUS"}
 
 
 def canonical(value):
@@ -260,7 +260,12 @@ def receive_request(session, channel, message):
             RfqExchangeRound.exchange_reference == round_row.exchange_reference)).all():
         if previous.number >= round_row.number:
             raise HTTPException(409, "Tour ancien ou déjà reçu sous une autre identité de message")
-        previous.state = "SUPERSEDED"; session.add(previous)
+        if previous.state == 'OPEN':
+            previous.state = "SUPERSEDED"
+            session.add(previous)
+        if round_row.previous_round_id is None or previous.number > session.get(
+                RfqExchangeRound, round_row.previous_round_id).number:
+            round_row.previous_round_id = previous.id
     session.add(round_row); session.flush()
     from .rfq_publication import utc
     if utc(request["response_deadline"]) <= business_now():
@@ -284,6 +289,19 @@ def receive_event(session, channel, message):
     row = session.get(RfqExchangeRound, item.round_id)
     rfq = session.get(RfqRequest, row.rfq_id)
     payload, kind = message["payload"], message["kind"]
+    if kind == 'EXECUTION_STATUS':
+        from .rfq_reconciliation import receive as receive_statement
+        receive_statement(session, item, message)
+        return item
+    if kind in {'EXECUTION_REQUEST', 'EXECUTION_CONFIRMATION'}:
+        from . import rfq_electronic
+        if kind == 'EXECUTION_REQUEST' and link.inbound:
+            rfq_electronic.receive_request(session, item, message)
+        elif kind == 'EXECUTION_CONFIRMATION' and not link.inbound:
+            rfq_electronic.receive_decision(session, item, message)
+        else:
+            raise HTTPException(422, 'Direction du message d’exécution invalide')
+        return item
     if kind == "CLOSE" and link.inbound:
         if payload.get("state") not in {"CLOSED", "SUPERSEDED"}:
             raise HTTPException(422, "Clôture invalide")
@@ -318,8 +336,8 @@ def receive_event(session, channel, message):
                 quote.status = "expire"
                 session.add(quote)
             if rfq.selected_quote_id == quote.id and not quote_row.acceptance_received_at:
-                rfq.selected_quote_id = None
-                rfq.selection_reason_code = rfq.selection_reason_note = None
+                from .rfq_quote_integrity import clear_selection
+                clear_selection(rfq)
     else:
         request = json.loads(item.request_json)
         allowed = {"format_version", "nature", "exchange_reference", "round_number", "terms_version", "terms_fingerprint",
@@ -346,10 +364,16 @@ def receive_event(session, channel, message):
             raise HTTPException(409, "Révision de cotation incohérente ou déjà réservée")
         if publication.utc(payload["published_at"]) > publication.utc(request["response_deadline"]):
             raise HTTPException(422, "Publication après le délai de réponse")
+        from .legal_identity import relation_counterparty
+        legal = relation_counterparty(session, rfq, item)
         quote = RfqQuote(id=next_audited_id(session, RfqQuote, "RFQ_QUOTE"), rfq_id=rfq.id,
+            revision=payload['revision'],
+            counterparty_id=legal.id, counterparty_name=legal.name, identity_frozen=True,
             provider=request["recipient"]["organization"], contact=payload["publisher"]["email"], price=payload["price"],
             currency=payload["currency"], status="recu", firmness=payload["firmness"],
             valid_until=publication.utc(payload["valid_until"]), quoted_at=publication.utc(payload["published_at"]))
+        from .rfq_model_reference import snapshot
+        quote.model_reference_json = snapshot(session, rfq)
         session.add(quote); session.flush()
         session.add(RfqQuotePublication(solicitation_id=item.id, revision=payload["revision"], quote_id=quote.id,
             message_id=message["id"], payload_json=canonical(payload), published_by=remote_source(session).id,
@@ -366,10 +390,10 @@ def receive_event(session, channel, message):
                 old.status = "expire"
                 session.add(old)
             if rfq.selected_quote_id == old.id and not older.acceptance_received_at:
-                rfq.selected_quote_id = None
-                rfq.selection_reason_code = rfq.selection_reason_note = None
+                from .rfq_quote_integrity import clear_selection
+                clear_selection(rfq)
     session.flush()
-    from ..api.rfq import _sync_status, _sync_product_rfq
+    from .rfq_state import _sync_status, _sync_product_rfq
     _sync_status(rfq, session)
     _sync_product_rfq(session, rfq, remote_source(session), action="PRODUCT_RFQ_REMOTE_RESPONSE_RECEIVED")
     return item
@@ -395,7 +419,7 @@ def receive(session, packet):
                 or message["kind"] not in KINDS or (operation != "CANCEL" and message["payload_hash"] != exchange.digest(message["payload"])) \
                 or (operation == "CANCEL" and message["payload"] is not None):
             raise HTTPException(422, "Message RFQ invalide")
-        allowed = {"REQUEST", "CLOSE"} if channel.role == "BANK" else {"READ", "QUOTE", "WITHDRAW"}
+        allowed = {"REQUEST", "CLOSE", "EXECUTION_REQUEST", "EXECUTION_STATUS"} if channel.role == "BANK" else {"READ", "QUOTE", "WITHDRAW", "EXECUTION_CONFIRMATION", "EXECUTION_STATUS"}
         if message["kind"] not in allowed or (message["kind"] == "REQUEST" and message["id"] != message["request_id"]):
             raise HTTPException(422, "Direction du canal RFQ invalide")
         UUID(message["id"]); UUID(message["request_id"])
@@ -410,7 +434,7 @@ def receive(session, packet):
                 raise HTTPException(409, "Identité de message réutilisée avec un autre contenu")
             receipt = json.loads(stored.receipt_json)
         else:
-            channel_current(session, channel, protective=operation == "CANCEL" or message["kind"] in {"CLOSE", "WITHDRAW"})
+            channel_current(session, channel, protective=operation == "CANCEL" or message["kind"] in {"CLOSE", "WITHDRAW", "EXECUTION_CONFIRMATION", "EXECUTION_REQUEST", "EXECUTION_STATUS"})
             last = session.exec(select(RfqTransportInbox).where(RfqTransportInbox.channel_id == channel.id,
                 RfqTransportInbox.request_message_id == message["request_id"])
                 .order_by(RfqTransportInbox.sequence.desc())).first()
@@ -418,6 +442,8 @@ def receive(session, packet):
                 raise HTTPException(409, "Séquence RFQ incomplète : livraison précédente requise")
             if operation == "HISTORY" and message["kind"] != "QUOTE":
                 raise HTTPException(422, "Seule une cotation peut être reçue comme historique")
+            if operation == 'CANCEL' and message['kind'] in {'EXECUTION_REQUEST', 'EXECUTION_CONFIRMATION', 'EXECUTION_STATUS'}:
+                raise HTTPException(422, 'Une exécution électronique ne s’annule pas par un accusé de transport.')
             item = None if operation == "CANCEL" else (receive_request(session, channel, message)
                 if message["kind"] == "REQUEST" else receive_event(session, channel, message))
             receipt = {"found": True, "message_id": message["id"], "payload_hash": message["payload_hash"],
@@ -426,6 +452,12 @@ def receive(session, packet):
             session.add(RfqTransportInbox(id=message["id"], channel_id=channel.id, request_message_id=message["request_id"],
                 sequence=message["sequence"], payload_hash=message["payload_hash"], payload_json=canonical(message),
                 receipt_json=canonical(receipt), received_at=business_now()))
+            if message['kind'] in {'EXECUTION_REQUEST', 'EXECUTION_CONFIRMATION', 'EXECUTION_STATUS'}:
+                from ..db.models import RfqElectronicEvidence
+                # Persist the inbox parent before its evidence FK, within this same transaction.
+                session.flush()
+                session.add(RfqElectronicEvidence(message_id=message['id'], envelope_json=canonical(packet),
+                    received_at=business_now()))
             record_audit_event(session, result="SUCCESS", action="RFQ_REMOTE_MESSAGE_RECEIVED", object_type="RFQ_SOLICITATION",
                 object_id=item.id if item else None, actor_user_id=None, correlation_id=message["id"],
                 after={"kind": message["kind"], "payload_hash": message["payload_hash"], "result": receipt["result"]})
@@ -475,7 +507,7 @@ def retry_checks(session, row):
         later = session.exec(select(RfqQuotePublication).where(RfqQuotePublication.solicitation_id == item.id,
             RfqQuotePublication.revision > payload["revision"])).first()
         retired = bool((published and published.withdrawn_at) or later or round_row.state != "OPEN")
-    relation = channel_current(session, channel, protective=row.kind in {"CLOSE", "WITHDRAW", "READ"} or retired or retired_request)
+    relation = channel_current(session, channel, protective=row.kind in {"CLOSE", "WITHDRAW", "READ", "EXECUTION_CONFIRMATION", "EXECUTION_STATUS"} or retired or retired_request)
     if retired or retired_request:
         return "CANCEL"
     if row.kind == "WITHDRAW":
@@ -492,6 +524,10 @@ def retry_checks(session, row):
         failures = relationships.eligibility(session, relation, rfq, currency=payload["currency"], nominal=payload["nominal"])
         if failures:
             raise HTTPException(409, "; ".join(failures))
+    elif row.kind == 'EXECUTION_REQUEST':
+        from ..core.access import require_booking_permission
+        require_booking_permission(actor)
+        require_rfq_access(session, rfq.id, actor, 'book')
     elif row.kind == "QUOTE":
         rfq_bank.require_action(session, item.id, actor, "publish_quote")
         draft = session.get(RfqBankQuoteDraft, item.id)
@@ -533,6 +569,9 @@ def reconcile_closures(session):
         rfq = session.get(RfqRequest, round_row.rfq_id)
         if round_row.state == "OPEN" and rfq.status not in {"clos", "sans_suite"}:
             continue
+        if round_row.state == 'OPEN':
+            round_row.state = 'CLOSED'
+            session.add(round_row)
         prior = session.exec(select(RfqTransportOutbox).where(RfqTransportOutbox.solicitation_id == item.id,
             RfqTransportOutbox.kind == "CLOSE")).first()
         if not prior:

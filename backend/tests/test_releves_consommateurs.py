@@ -41,7 +41,8 @@ def _session():
 
 
 def _prix_plats(niveau):
-    def fake(tickers, start, end):
+    def fake(tickers, start, end, *, adjusted=False, allow_partial=False):
+        assert adjusted is False and allow_partial is True
         d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
         jours = [d0 + timedelta(days=k) for k in range((d1 - d0).days + 1)]
         return {"dates": [d.isoformat() for d in jours],

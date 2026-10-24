@@ -366,6 +366,7 @@ async function saveKid() {
         sri: kid.value.sri, mrm: kid.value.mrm, crm: kid.value.crm,
         vev: kid.value.vev, T_rhp: kid.value.T_rhp,
         horizons: kid.value.horizons, costs: kid.value.costs,
+        calculation_receipt: kid.value.calculation_receipt,
       }),
     })
     if (!res.ok) {

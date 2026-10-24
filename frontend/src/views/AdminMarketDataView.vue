@@ -8,7 +8,7 @@
         <div>
           <h1 class="page-title">Données de marché</h1>
           <p class="page-subtitle">
-            Cache de prix historiques Yahoo Finance — ajustés dividendes &amp; splits.
+            Historiques locaux Yahoo Finance — cours bruts et ajustés, couverture et ancienneté.
             <span v-if="!loading" class="ml-2" style="color: var(--subtle);">
               {{ okCount }}/{{ items.length }} séries OK
             </span>
@@ -74,13 +74,20 @@
                     <span v-if="item.loading" class="text-slate-500 animate-pulse">chargement…</span>
                     <span v-else-if="item.cache_status === 'ok'"
                           class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-900/50 text-green-400">OK</span>
-                    <span v-else-if="item.cache_status === 'stale'"
-                          class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-900/50 text-amber-400">Périmé</span>
+                    <span v-else-if="item.cache_status === 'unqualified' || item.cache_status === 'stale'"
+                          class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-900/50 text-amber-400">Non qualifié</span>
                     <span v-else-if="item.cache_status === 'error'"
                           class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-900/50 text-red-400 cursor-help"
                           :title="item.error">Erreur</span>
                     <span v-else
                           class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-500">Manquant</span>
+                    <div v-if="item.bases" class="mt-1 text-[10px] text-slate-500">
+                      <div v-for="(basis, key) in item.bases" :key="key">
+                        {{ key === 'adjusted' ? 'Ajusté' : 'Brut' }} : {{ basis.status }}
+                        <span v-if="basis.freshness?.age_days != null"> · {{ basis.freshness.age_days }} j</span>
+                        <span v-if="basis.long_gaps"> · {{ basis.long_gaps }} lacune(s)</span>
+                      </div>
+                    </div>
                   </td>
                   <td class="py-2 pr-4 font-mono text-slate-400 whitespace-nowrap">{{ item.date_max || '—' }}</td>
                   <td class="py-2 pr-4 text-slate-500 whitespace-nowrap">{{ item.currency || '—' }}</td>
@@ -159,12 +166,8 @@ async function fetchOne(item) {
       item.error = data.detail || 'Erreur'
       item.cache_status = 'error'
     } else {
-      item.available    = true
-      item.date_min     = data.date_min
-      item.date_max     = data.date_max
-      item.rows         = data.rows
-      item.currency     = data.currency
-      item.cache_status = 'ok'
+      Object.assign(item, data)
+      item.cache_status = data.consumer_available ? 'ok' : (data.cache_status || 'unqualified')
     }
   } catch (e) {
     item.error = e.message

@@ -14,15 +14,21 @@ présentée comme un contrôle. Elles se sont perdues une fois ; qu'un test les
 tienne.
 """
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import event
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
 
-from backend.app.main import app
-from backend.app.api.auth import get_current_user
+from backend.app.api import auth, pricing
+from backend.app.db.database import get_session
+from backend.app.db.models import Entity, User
 from backend.app.services.llm import LlmError
 from backend.app.services.llm.providers import Completion
 from backend.app.services.llm.analysis import (
     CADRE, INTENTIONS, analyse_produit, construire_prompts,
 )
+from backend.tests.test_business_permissions import access_case
 
 RESUME = """# Phoenix Mémoire — 4 sous-jacents
 
@@ -36,10 +42,32 @@ PARAM AC_BAR = 100 %
 
 @pytest.fixture
 def client():
-    app.dependency_overrides[get_current_user] = lambda: object()
-    with TestClient(app) as test_client:
-        yield test_client
-    app.dependency_overrides.pop(get_current_user, None)
+    """Exercise real authentication and pricing rights on an isolated database."""
+    engine = create_engine("sqlite://", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+
+    @event.listens_for(engine, "connect")
+    def foreign_keys(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    SQLModel.metadata.create_all(engine)
+    try:
+        with Session(engine) as session:
+            session.add(Entity(id=1, name="Product analysis test organization"))
+            session.flush()
+            user = User(username="analysis-front", email="analysis@example.test",
+                        password_hash="test-only", entity_id=1, role="user")
+            session.add(user)
+            session.commit()
+            app = FastAPI()
+            app.include_router(pricing.router)
+            app.dependency_overrides[get_session] = lambda: session
+            with TestClient(app) as test_client:
+                test_client.headers["Authorization"] = "Bearer " + auth._make_token(
+                    user.id, user.role, user.entity_id)
+                yield test_client
+    finally:
+        engine.dispose()
 
 
 # ── L'aperçu ne peut pas mentir sur l'envoi ─────────────────────────
@@ -188,3 +216,100 @@ def test_les_intentions_exposees_sont_celles_qui_existent(client):
     res = client.get("/api/product/analyse/intentions")
     assert res.status_code == 200
     assert {i["id"] for i in res.json()["intentions"]} == set(INTENTIONS)
+
+
+ANALYSIS_ROUTES = [
+    ("GET", "/api/product/analyse/intentions"),
+    ("POST", "/api/product/analyse/prompt"),
+    ("POST", "/api/product/analyse"),
+]
+
+
+def _analysis_request(client, method, path):
+    payload = {"resume": RESUME, "intention": "critique"} if method == "POST" else None
+    return client.request(method, path, **({"json": payload} if payload else {}))
+
+
+@pytest.fixture
+def forbid_completion(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("An unauthorized request or preview reached the language model")
+
+    monkeypatch.setattr("backend.app.services.llm.providers.complete_with_metadata", forbidden)
+
+
+@pytest.mark.parametrize("method,path", ANALYSIS_ROUTES)
+@pytest.mark.parametrize("token", [None, "invalid-token"], ids=["missing_token", "invalid_token"])
+def test_analysis_routes_require_authentication(access_case, forbid_completion, method, path, token):
+    _, _, login, _ = access_case
+    client = login("front")
+    client.headers.pop("Authorization")
+    if token:
+        client.headers["Authorization"] = "Bearer " + token
+    response = _analysis_request(client, method, path)
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize("method,path", ANALYSIS_ROUTES)
+@pytest.mark.parametrize("actor", ["ops", "checker"])
+def test_analysis_routes_refuse_secondary_profiles(access_case, forbid_completion, method, path, actor):
+    _, _, login, _ = access_case
+    response = _analysis_request(login(actor), method, path)
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Votre profil ne permet pas cette action."}
+
+
+@pytest.mark.parametrize("actor", ["front", "superuser"])
+def test_authorized_analysis_http_preserves_preview_and_provenance(access_case, monkeypatch, actor):
+    _, _, login, _ = access_case
+    sent = []
+
+    def capture(**kwargs):
+        sent.append(kwargs)
+        return Completion("  Avis exploratoire  ", "offline-analysis")
+
+    monkeypatch.setattr("backend.app.services.llm.providers.complete_with_metadata", capture)
+    client = login(actor)
+    payload = {"resume": RESUME, "intention": "critique", "question": "regarde le funding",
+               "provider": "ollama", "model": "requested-analysis"}
+    intentions = client.get("/api/product/analyse/intentions")
+    assert intentions.status_code == 200
+    assert {item["id"] for item in intentions.json()["intentions"]} == set(INTENTIONS)
+    preview = client.post("/api/product/analyse/prompt", json=payload)
+    assert preview.status_code == 200
+    assert sent == []
+    response = client.post("/api/product/analyse", json=payload)
+    assert response.status_code == 200
+    result = response.json()
+    assert len(sent) == 1
+    for field in ["system", "user"]:
+        assert sent[0][field] == preview.json()[field] == result["prompt"][field]
+    assert result["prompt"]["system"] == CADRE
+    assert result["prompt"]["user"].endswith(RESUME)
+    assert result["base_hash"] == preview.json()["base_hash"]
+    assert result["prompt_version"] == preview.json()["prompt_version"]
+    assert result["texte"] == "Avis exploratoire"
+    assert result["provider"] == "ollama"
+    assert result["requested_model"] == "requested-analysis"
+    assert result["effective_model"] == "offline-analysis"
+    assert result["intention_label"] == INTENTIONS["critique"]["label"]
+    assert result["generated_at"] and result["generation_id"] and result["elapsed_ms"] >= 0
+
+
+@pytest.mark.parametrize("change,expected", [("demoted", 403), ("disabled", 401), ("revoked", 401)])
+def test_analysis_checks_current_user_state_after_token_issuance(access_case, forbid_completion, change, expected):
+    session, users, login, _ = access_case
+    client = login("front")
+    assert client.get("/api/product/analyse/intentions").status_code == 200
+    user = users["front"]
+    if change == "demoted":
+        user.role = "checker"
+    elif change == "disabled":
+        user.is_active = False
+    else:
+        auth.revoke_user_sessions(session, user)
+    session.add(user)
+    session.commit()
+    response = _analysis_request(client, "POST", "/api/product/analyse")
+    assert response.status_code == expected
