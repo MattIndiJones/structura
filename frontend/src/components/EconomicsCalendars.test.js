@@ -204,13 +204,13 @@ describe('PARAM() et calendriers propres à chaque observation', () => {
 })
 
 describe('choix contractuel de combinaison', () => {
-  it('ne choisit aucune règle à la place du structureur et conserve les termes sérialisés', async () => {
+  it('propose toutes ouvertes, permet une surcharge et conserve les termes sérialisés', async () => {
     const values = reactive({ first_observation_date: '2027-01-31', end_date: '2028-01-31', frequency: { value: 1, unit: 'Y' } })
     mocks.fetch.mockResolvedValue(response({ observation_codes: ['NYSE', 'XETR'], settlement_codes: ['TARGET'] }))
     app = renderer.createApp({ setup(props, ctx) { state = CalendarPolicyFields.setup({ values, currency: 'EUR' }, ctx); return () => null } })
     app.provide(ssrContextKey, { modules: new Set() }); app.mount({}); await flush()
     state.selectCalendars('observation', { target: { selectedOptions: [{ value: 'NYSE' }, { value: 'XETR' }] } })
-    expect(values.observation_join).toBe('')
+    expect(values.observation_join).toBe('all_open')
     values.observation_join = 'all_open'
     values.settlement_calendars = ['TARGET']; values.settlement_join = 'all_open'
     const terms = serializeCalendars([{ name: 'OBS', kind: 'schedule' }], { OBS: values }, '2026-10-31')

@@ -89,6 +89,7 @@ it.each(['override','date','replacement','round_trip'])('une réponse RFQ tardiv
 })
 it.each([null,0])('le comparateur refuse les données inconnues et accepte le vrai zéro : %s',async q=>{
   const store=usePricingStore();vi.spyOn(store,'ensureScriptValidated').mockResolvedValue(true)
+  Object.assign(store.underlyings[0], {ticker:'A',ccy:'EUR'})
   await mount(ComparatorTab)
   fetch.mockImplementation(async url=>reply(String(url).includes('hist_vol')?market(q):{price:.98}))
   const row={tickers:['A'],corr_matrix:[[1]]};await state.quotePrice(row)

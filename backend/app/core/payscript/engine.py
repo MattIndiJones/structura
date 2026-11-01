@@ -4560,7 +4560,8 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                             T_max: float, user_params: dict,
                             tickers: list[str], r: float = 0.03,
                             origine: date | str | None = None,
-                            reference_levels: dict[str, float] | None = None) -> dict | None:
+                            reference_levels: dict[str, float] | None = None,
+                            history_policy: dict | None = None) -> dict | None:
     """Replay PayScript using actual historical close prices.
 
     Chaque date de l'échéancier se lit à sa DATE — voir `_LectureParDate`.
@@ -4581,6 +4582,11 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             anchor=shifted_origin, currency=binding.calendar_currency)
         T_max = effective_T_max(compiled, T_max)
     lecture = _LectureParDate(dates, start_idx, getattr(compiled, "origine", None), origine)
+    if history_policy is not None:
+        if origine is not None:
+            raise ValueError("La convention Following/strict est réservée au backtest glissant.")
+        from ..backtest_history import BacktestObservationReader
+        lecture = BacktestObservationReader(lecture, dates, tickers, **history_policy)
 
     # Les blocs d'une même DATE s'exécutent ensemble, dans l'ordre du script —
     # le regroupement du `step_map` du moteur, par date et non par pas : deux
@@ -4620,7 +4626,8 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
 
     def _closes_on(tk: str, ds: list[float]) -> list[float]:
         """Closes of `tk` at a window's dates — "last close <= date", the same
-        convention as _closest_price.
+        convention as _closest_price by default. An explicit backtest policy
+        instead resolves each fixing to its genuine common following date.
 
         Un cours absent est REPORTÉ depuis la dernière séance connue, jamais
         sauté : sauter réduisait la fenêtre en silence, et une moyenne sur trois
@@ -4712,7 +4719,8 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     def _rv_at(hi: int) -> float:
         """Annualized realized vol of the WOF series up to day hi included."""
         k = bisect.bisect_right(wof_days, hi) - 1
-        t_y = (hi - start_idx) / SY_H
+        t_y = ((date.fromisoformat(dates[hi])-date.fromisoformat(dates[start_idx])).days / 365.25
+               if history_policy is not None else (hi - start_idx) / SY_H)
         return math.sqrt(rv_cum[k] / t_y) if k >= 0 and t_y > 0 else 0.0
 
     # Partie deja realisee de la fenetre de depart, PAR SOUS-JACENT et en
@@ -4789,6 +4797,8 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     prev_hi = start_idx   # last day scanned for running extrema (inception = spot 1.0, already the seed)
 
     for t_obs in sorted(step_map.keys()):
+        if done and history_policy is not None:
+            break
         hi = lecture.indice(t_obs)
         if hi is None:
             break                   # cette date n'est pas encore dans l'historique
@@ -4826,9 +4836,11 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             return out
 
         spots = _levels(None)
-        # Le temps du contrat, pas celui de la séance lue : un flux garde la
-        # year-fraction de sa constatation, et un rappel désigne sa date.
-        t_y = t_obs
+        # Official replay keeps contractual time. The explicit backtest policy
+        # uses the actual observation date without backdating future quotes.
+        t_y = lecture.effective_time(t_obs) if history_policy is not None else t_obs
+        if history_policy is not None and abs(t_obs-T_max) <= 1e-6:
+            T_actual = t_y
         ctx.update({"spots": spots, "s_prev": list(ctx["spots"]),
                     "s_min": list(s_min_run), "s_max": list(s_max_run),
                     "realvol": _rv_at(hi),
@@ -4858,10 +4870,18 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                 payment_t = (_payments[ev_i]
                              if ev_i < len(_payments) and _payments[ev_i] is not None
                              else t_y)
+                payment_date = lecture.jour(payment_t).isoformat()
+                historical_dates = {}
+                if history_policy is not None:
+                    contractual_payment = (_payments[ev_i]
+                        if ev_i < len(_payments) and _payments[ev_i] is not None else t_obs)
+                    payment_t, payment_date, requested_payment = lecture.payment(t_obs, contractual_payment)
+                    historical_dates = {"requested_date": lecture.jour(t_obs).isoformat(),
+                                        "requested_payment_date": requested_payment}
                 cfs.append({
                     "t": t_y, "cf": fl["v"], "date": dates[hi],
                     "payment_t": payment_t,
-                    "payment_date": lecture.jour(payment_t).isoformat(),
+                    "payment_date": payment_date, **historical_dates,
                 })
             if st["done"]:
                 done = True
@@ -4871,6 +4891,9 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     if not done and mat_events:
         mhi = lecture.indice(T_max)
         if mhi is not None and mhi >= 0:
+            maturity_t = lecture.effective_time(T_max) if history_policy is not None else T_max
+            if history_policy is not None:
+                T_actual = maturity_t
             w_win, b_win = _historical_running_extrema(prices_by_ticker, tickers, ref, prev_hi, mhi)
             wof_run = min(wof_run, w_win)
             bof_run = max(bof_run, b_win)
@@ -4885,7 +4908,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             ctx.update({"spots": spots or [1.0]*n, "s_prev": list(ctx["spots"]),
                         "s_min": list(s_min_run), "s_max": list(s_max_run),
                         "realvol": _rv_at(mhi),
-                        "t": T_max,
+                        "t": maturity_t,
                         "wof_min": wof_run, "bof_max": bof_run})
             for ev in mat_events:
                 if done:
@@ -4898,10 +4921,16 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                         f"Erreur d'exécution du script (événement {ev.type}, t={ctx['t']:.4f}) : {e}"
                     ) from e
                 for fl in st["flows"]:
+                    payment_t, payment_date = T_max, lecture.jour(T_max).isoformat()
+                    historical_dates = {}
+                    if history_policy is not None:
+                        due = lecture.maturity_payment_t if lecture.maturity_payment_t is not None else T_max
+                        payment_t, payment_date, requested_payment = lecture.payment(T_max, due)
+                        historical_dates = {"requested_date": lecture.jour(T_max).isoformat(),
+                                            "requested_payment_date": requested_payment}
                     cfs.append({
-                        "t": T_max, "cf": fl["v"], "date": dates[mhi],
-                        "payment_t": T_max,
-                        "payment_date": lecture.jour(T_max).isoformat(),
+                        "t": maturity_t, "cf": fl["v"], "date": dates[mhi],
+                        "payment_t": payment_t, "payment_date": payment_date, **historical_dates,
                     })
                 if st["done"]:
                     done = True
@@ -4931,6 +4960,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
         # rejeu aboutit, mais la constatation porte en partie sur une valeur
         # reportée : une liste vide est la seule qui autorise à n'en rien dire.
         "releves_reportes": sorted(reportes),
+        **({"history_adjustments": lecture.report()} if history_policy is not None else {}),
         # S₀ par ticker, en cours, quand la fenêtre de départ est CLOSE : la
         # réduction de ses relevés. Tout l'état ci-dessous est exprimé dans ces
         # unités — un MtM résiduel qui mesurerait le spot du jour contre le seul

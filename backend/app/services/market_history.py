@@ -164,6 +164,58 @@ def align_history(tickers, series, start, end, adjusted, sources, failures, allo
     return payload
 
 
+def align_backtest_history(tickers, series, start, end, adjusted, sources, failures, allow_partial=False):
+    """A genuine common axis, with independent source dates retained for diagnostics.
+
+    The backtest resolves missing required observations explicitly. Neither the
+    global freshness rule nor an implicit previous-close fill applies here.
+    """
+    tickers = list(dict.fromkeys(tickers))
+    bounded = {tk: clean_series(value).loc[start:end] for tk, value in series.items() if tk in tickers}
+    observed = {tk: {day.date().isoformat(): float(value) for day, value in values.items()}
+                for tk, values in bounded.items()}
+    missing = [tk for tk in tickers if not observed.get(tk)]
+    included = [tk for tk in tickers if tk not in missing]
+    excluded = [{"ticker": tk, "reason": failures.get(tk, "NO_OBSERVATIONS")} for tk in missing]
+    common = (sorted(set.intersection(*(set(observed[tk]) for tk in included)))
+              if included and (not missing or allow_partial) else [])
+    payload = dict(
+        dates=common, prices={tk: [observed[tk][day] for day in common] for tk in tickers if tk not in missing},
+        observation_dates={tk: sorted(values) for tk, values in observed.items()},
+        first_dates={tk: min(values) for tk, values in observed.items() if values},
+        effective_dates={tk: max(values) for tk, values in observed.items() if values},
+        requested_start=start, requested_end=end, start_effective=common[0] if common else None,
+        end_effective=common[-1] if common else None, adjusted=bool(adjusted),
+        price_type="ADJUSTED_CLOSE" if adjusted else "UNADJUSTED_CLOSE",
+        sources=sources, missing=missing, missing_reasons={row['ticker']: row for row in excluded},
+        warnings=([{"code": "INCOMPLETE_HISTORY", "excluded": excluded,
+                    "message": "Univers réduit : historiques absents explicitement exclus."}] if excluded else []),
+        coverage={"requested": tickers, "included": included, "excluded": excluded,
+                  "complete": not missing and bool(common), "allow_partial": bool(allow_partial)},
+        alignment="GENUINE_COMMON_OBSERVATIONS", finality="UNVERIFIED_PROVIDER_BAR",
+    )
+    if missing and (not allow_partial or not included):
+        payload["error"] = "Historique absent pour : " + ", ".join(missing)
+    elif not common:
+        payload["error"] = "Aucune date de cours valide commune aux sous-jacents dans la période demandée."
+    return payload
+
+
+@market_storage.consistent_read
+def backtest_history_bounds(tickers, end):
+    """Read existing private observations only; opening the form never downloads."""
+    series, sources = {}, {}
+    for ticker in dict.fromkeys(tickers):
+        values, source = local_history(ticker, "1900-01-01", end, False)
+        if values is not None:
+            series[ticker], sources[ticker] = values, source
+    result = align_backtest_history(tickers, series, "1900-01-01", end, False, sources, {})
+    return {key: result[key] for key in ("first_dates", "effective_dates", "start_effective", "end_effective", "missing")} | {
+        "available": result["coverage"]["complete"], "local_only": True,
+        "message": result.get("error", "Début commun déterminé depuis les cours locaux non ajustés."),
+    }
+
+
 @market_storage.consistent_read
 def storage_status(ticker, asof):
     bases = {}

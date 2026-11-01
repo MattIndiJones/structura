@@ -440,8 +440,10 @@ class ProbaRequest(AnalysisBase):
 
 
 class BacktestRequest(AnalysisBase):
-    start_date: str = "2010-01-01"
+    start_date: Optional[str] = None
     end_date: Optional[str] = None
+    history_mode: str = Field(default="following", pattern="^(following|strict)$")
+    max_delay_days: int = Field(default=10, ge=0, le=31)
     freq: int = Field(default=21, ge=1, le=252)
     invest_pct: float = Field(default=100.0, gt=0, le=200)
     rf_rate: float = 2.0
@@ -465,11 +467,23 @@ class BacktestCompareRequest(BaseModel):
     anchor: Optional[date] = None   # see PricingRequest.anchor
     basket_size: int = Field(default=1, ge=1, le=5)
     shortlist_n: int = Field(default=8, ge=2, le=20)
-    start_date: str = "2010-01-01"
+    start_date: Optional[str] = None
     end_date: Optional[str] = None
+    history_mode: str = Field(default="following", pattern="^(following|strict)$")
+    max_delay_days: int = Field(default=10, ge=0, le=31)
+    strike_date: Optional[date] = None
+    value_date: Optional[date] = None
+    payment_date: Optional[date] = None
+    settlement_ccy: Optional[str] = None
     freq: int = Field(default=21, ge=1, le=252)
     invest_pct: float = Field(default=100.0, gt=0, le=200)
     rf_rate: float = 2.0
+
+
+class BacktestCompareDetailRequest(BaseModel):
+    comparison: BacktestCompareRequest
+    tickers: List[str] = Field(min_length=1, max_length=5)
+    history_hash: str = Field(pattern='^[0-9a-f]{64}$')
 
 
 class MtfRequest(AnalysisBase):

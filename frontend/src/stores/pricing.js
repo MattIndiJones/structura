@@ -1,4 +1,6 @@
 import { calendarPolicy } from '../utils/payscriptEconomics.js'
+import { suggestedCalendars, syncCalendarDefault, calendarDefaultState,
+  hasCalendarDefaultState, registerCalendarDefaults } from '../composables/useCalendarDefaults.js'
 import { defineStore } from 'pinia'
 import { ref, reactive, computed, watch } from 'vue'
 import { apiFetch, apiErrorMessage } from '../utils/api.js'
@@ -183,9 +185,12 @@ export const usePricingStore = defineStore('pricing', () => {
     // fenêtre, auquel cas il lui faut un objet pour l'accueillir. Le serveur
     // accepte les deux formes.
     if (kind === 'single') {
-      return reduction ? reactive({ date: '', ..._defaultWindow(scope) }) : ''
+      if (!reduction) return ''
+      const value = reactive({ date: '', ..._defaultWindow(scope) })
+      calendarDefaultState(value)
+      return value
     }
-    return reactive({
+    const value = reactive({
       start_date: '', first_observation_date: '', period_start_date: '', end_date: '', roll_date: '',
       frequency: { value: null, unit: 'M' }, stub: 'short_last',
       sub_frequency: kind === 'nested_schedule' ? { value: 1, unit: 'M' } : null,
@@ -195,6 +200,8 @@ export const usePricingStore = defineStore('pricing', () => {
       convention: 'none', settlement_lag: 0,
       ...(reduction ? _defaultWindow(scope) : {}),
     })
+    calendarDefaultState(value)
+    return value
   }
 
   function _tenorStr(t) {
@@ -218,6 +225,8 @@ export const usePricingStore = defineStore('pricing', () => {
         constatOverrides[c.name] = calendarShapes[c.name][c.kind]
           ? JSON.parse(JSON.stringify(calendarShapes[c.name][c.kind]))
           : Object.assign(c.kind === 'single' ? { date: '' } : _defaultConstatValue(c.kind, c.reduction, c.window_scope), common)
+        if (constatOverrides[c.name] && typeof constatOverrides[c.name] === 'object')
+          registerCalendarDefaults(constatOverrides[c.name])
       }
       calendarKinds[c.name] = c.kind
       if (!(c.name in constatOverrides)) {
@@ -237,6 +246,7 @@ export const usePricingStore = defineStore('pricing', () => {
         delete v.window_length; delete v.window_frequency
       }
     }
+    _applyCalendarDefaults()
   }
 
   const initialFixingName = computed(() => scriptConstats.value.find(c => c.role === 'initial_fixing')?.name || null)
@@ -475,6 +485,8 @@ export const usePricingStore = defineStore('pricing', () => {
   // another payoff while continuing to display the booked reference.
   const contractTermsLocked = computed(() => !!openedDeal.value || !!currentProduct.value?.execution
     || (!!currentProduct.value && !editingProductTerms.value))
+  watch(() => JSON.stringify([globalParams.deal_ccy, underlyings.value.map(u => [u.ticker, u.exchange])]),
+    _applyCalendarDefaults, { flush: 'sync' })
 
   function beginProductTermsEdit() {
     if (!currentProduct.value || currentProduct.value.execution || openedDeal.value || currentRfqId.value) {
@@ -691,6 +703,16 @@ export const usePricingStore = defineStore('pricing', () => {
     return _constatsFrom(constatOverrides, scriptConstats.value)
   }
 
+  function _applyCalendarDefaults() {
+    if (contractTermsLocked.value) return
+    const proposed = suggestedCalendars(underlyings.value, globalParams.deal_ccy)
+    for (const calendar of scriptConstats.value) {
+      const value = constatOverrides[calendar.name]
+      if (value && typeof value === 'object' && hasCalendarDefaultState(value)) for (const purpose of ['observation', 'settlement'])
+        syncCalendarDefault(value, proposed, purpose)
+    }
+  }
+
   /**
    * Un jeu de CONSTAT, de la forme STOCKÉE vers la forme que le serveur attend.
    *
@@ -763,7 +785,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // shared by loadFromDb (library reload), loadFromRfq (RFQ→Deal booking
   // prefill) and loadFromDeal (reopening a booked deal), all of which
   // receive the same {name: value} constats blob.
-  function _restoreConstats(saved) {
+  function _restoreConstats(saved, defaults = false) {
     for (const [k, v] of Object.entries(saved || {})) {
       if (!(k in constatOverrides)) continue
       if (typeof v === 'string') {
@@ -776,9 +798,13 @@ export const usePricingStore = defineStore('pricing', () => {
         // instead of silently leaving the field empty.
         if (typeof ov === 'string') {
           constatOverrides[k] = { ...v }
+          registerCalendarDefaults(constatOverrides[k], defaults)
           continue
         }
         if (ov && typeof ov === 'object') {
+          for (const field of ['observation_calendars', 'observation_join', 'settlement_calendars', 'settlement_join'])
+            if (!Object.hasOwn(v, field)) delete ov[field]
+          registerCalendarDefaults(ov, false)
           Object.assign(ov, JSON.parse(JSON.stringify(calendarPolicy(v))))
           // Une date unique portant une fenêtre est stockée comme objet : sa
           // date vit dans `date`, pas dans start_date.
@@ -1731,10 +1757,14 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   // ── Historical backtest ───────────────────────────────────────────
+  let backtestRevision = 0
   async function runBacktest(params = {}) {
     const preparing = _prepareCalculation()
     if (preparing && !(await preparing)) return
-    loading.value = true; error.value = null
+    const revision = ++backtestRevision
+    const inputs = JSON.stringify(_snapshotInputs())
+    const isCurrent = () => revision === backtestRevision && inputs === JSON.stringify(_snapshotInputs())
+    loading.value = true; error.value = null; backtest.value = null
     _startProgress(8000)
     try {
       const res = await apiFetch('/api/backtest', {
@@ -1742,17 +1772,21 @@ export const usePricingStore = defineStore('pricing', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ..._baseBody(),
-          start_date: params.start_date || '2010-01-01',
+          start_date: params.start_date || null,
           end_date: params.end_date || null,
-          freq: params.freq || 21,
-          invest_pct: params.invest_pct || (result.value ? result.value.price * 100 : 100),
-          rf_rate: params.rf_rate || 2.0,
+          freq: params.freq ?? 21,
+          invest_pct: params.invest_pct ?? (result.value ? result.value.price * 100 : 100),
+          rf_rate: params.rf_rate ?? 2.0,
+          history_mode: params.history_mode ?? 'following',
+          max_delay_days: params.max_delay_days ?? 10,
         }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err) }
-      else { backtest.value = await res.json(); rightTab.value = 'backtest' }
-    } catch (e) { error.value = e.message }
-    finally { loading.value = false; _stopProgress() }
+      const payload = await res.json()
+      if (!isCurrent()) return
+      if (!res.ok) error.value = apiErrorMessage(payload)
+      else { backtest.value = payload; rightTab.value = 'backtest' }
+    } catch (e) { if (isCurrent()) error.value = e.message }
+    finally { if (revision === backtestRevision) { loading.value = false; _stopProgress() } }
   }
 
   // ── Underlying comparator — backtest the script against a candidate pool
@@ -1767,10 +1801,13 @@ export const usePricingStore = defineStore('pricing', () => {
   const comparatorError = ref('')
   const comparatorLoading = ref(false)
 
-  async function runBacktestCompare(candidates, params = {}) {
+  let comparatorRevision = 0
+  async function runBacktestCompare(candidates, params = {}, contextCurrent = () => true) {
     const preparing = _prepareCalculation(message => { comparatorError.value = message })
     if (preparing && !(await preparing)) return
-    comparatorLoading.value = true; comparatorError.value = ''
+    const revision = ++comparatorRevision, inputs = JSON.stringify(_snapshotInputs())
+    const isCurrent = () => revision === comparatorRevision && contextCurrent() && inputs === JSON.stringify(_snapshotInputs())
+    comparatorLoading.value = true; comparatorError.value = ''; comparator.value = null
     try {
       const res = await apiFetch('/api/backtest/compare', {
         method: 'POST',
@@ -1794,22 +1831,23 @@ export const usePricingStore = defineStore('pricing', () => {
           anchor: globalParams.strike_date || globalParams.value_date || null,
           basket_size: params.basket_size || 1,
           shortlist_n: params.shortlist_n || 8,
-          start_date: params.start_date || '2010-01-01',
+          start_date: params.start_date || null,
           end_date: params.end_date || null,
-          freq: params.freq || 21,
-          invest_pct: params.invest_pct || 100,
-          rf_rate: params.rf_rate || 2.0,
+          freq: params.freq ?? 21,
+          invest_pct: params.invest_pct ?? 100,
+          rf_rate: params.rf_rate ?? 2.0,
+          history_mode: params.history_mode ?? 'following',
+          max_delay_days: params.max_delay_days ?? 10,
         }),
       })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || `Erreur ${res.status}`)
-      }
-      comparator.value = await res.json()
+      const payload = await res.json()
+      if (!isCurrent()) return
+      if (!res.ok) throw new Error(apiErrorMessage(payload))
+      comparator.value = payload
     } catch (e) {
-      comparatorError.value = e.message
+      if (isCurrent()) comparatorError.value = e.message
     } finally {
-      comparatorLoading.value = false
+      if (revision === comparatorRevision) comparatorLoading.value = false
     }
   }
 
@@ -2549,7 +2587,9 @@ export const usePricingStore = defineStore('pricing', () => {
     script.value = plan.model.script
     await parseScript({ validation: plan.validation })
     Object.assign(paramOverrides, JSON.parse(JSON.stringify(plan.params)))
-    _restoreConstats(plan.constats)
+    _restoreConstats(plan.constats, true)
+    for (const value of Object.values(constatOverrides)) if (value && typeof value === 'object') registerCalendarDefaults(value)
+    _applyCalendarDefaults()
     error.value = null
     leftTab.value = 'economics'
     _markSessionBaseline()

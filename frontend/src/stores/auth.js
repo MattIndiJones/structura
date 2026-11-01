@@ -21,6 +21,10 @@ export const useAuthStore = defineStore('auth', () => {
   const canAdministerOrganization = computed(() => isAdmin.value || isOrganizationAdmin.value)
   function hasBusinessCapability(capability, roles) {
     if (!user.value || user.value.is_active === false) return false
+    // The full local Admin workspace keeps its standalone business rights,
+    // including with older servers that publish an empty capabilities list.
+    if (user.value.role === 'admin' && user.value.admin_workbench === true
+        && user.value.installation?.kind === 'platform') return roles.includes('admin')
     if (user.value.installation) return user.value.capabilities?.includes(capability) === true
     return roles.includes(user.value.role)
   }

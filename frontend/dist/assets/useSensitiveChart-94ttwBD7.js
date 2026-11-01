@@ -1,0 +1,1 @@
+function e(e={},t){if(!t)return e;let n=Object.keys(e.scales||{}),r=n.length?n:[`x`,`y`],i={};for(let t of r){let n=(e.scales||{})[t]||{};i[t]={...n,ticks:{...n.ticks||{},display:!1}}}return{...e,scales:i,plugins:{...e.plugins,tooltip:{...e.plugins?.tooltip,enabled:!1}}}}export{e as t};

@@ -27,7 +27,16 @@ def capabilities(user) -> list[str]:
         "operations": ["business.read", "book", "operations.prepare", "trading.settle"],
         "controller": ["business.read", "operations.validate"],
     }
-    return grants.get(profile(user), [])
+    if not getattr(user, "is_active", True):
+        return []
+    effective_profile = profile(user)
+    if effective_profile == "technical_admin":
+        from ..hybrid.config import current_config
+        # Match has_capability: the standalone/full Admin keeps business rights.
+        # Technical accounts in managed installations gain no additional rights.
+        if current_config() is None:
+            effective_profile = "superuser"
+    return grants.get(effective_profile, [])
 
 
 def has_capability(user, capability: str) -> bool:

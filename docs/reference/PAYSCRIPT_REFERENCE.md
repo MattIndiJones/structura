@@ -363,6 +363,16 @@ Chaque configuration CONSTAT peut porter deux choix indépendants :
 | `settlement_join` | Même choix explicite pour la combinaison de plusieurs centres. |
 | `settlement_lag` | Entier de 0 à 30 jours ouvrés sur les centres de règlement, sans conversion ni troncature. |
 
+Le formulaire propose pour les nouveaux calendriers une place déduite du ticker
+ou de son marché et le calendrier de règlement de la devise du deal (EUR → TARGET).
+Milan (`XMIL`) et Paris (`XPAR`) sont des places d'observation, pas des centres
+de règlement. Une place inconnue produit une approximation bancaire signalée.
+Les choix sont présentés dans des sélecteurs repliables ; la combinaison est
+masquée avec un seul calendrier et proposée à « toutes ouvertes » avec plusieurs.
+Les deux combinaisons restent indépendantes. Une surcharge arrête le suivi du
+défaut pour le champ concerné ; les termes chargés et les contrats figés sont
+préservés. Voir [la note de mise en œuvre](../projects/pricing/CALENDARS_COMPARATOR_2026-11-01.md).
+
 Ces champs appartiennent aux termes économiques du produit, pas à la syntaxe
 PayScript. Les relevés des fenêtres utilisent les calendriers **d'observation**.
 Un choix `any_open` ne fournit aucun fixing pour une place fermée : la

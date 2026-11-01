@@ -284,7 +284,7 @@ onMounted(load)
             <label v-if="form.otc_allowed"><input v-model="form.csa_required" type="checkbox" /> CSA requis pour l’OTC</label>
           </div>
           <div v-if="form.otc_allowed" class="form-grid">
-            <p class="field-note">Les accords sont administrés dans <RouterLink to="/ccr" class="text-blue-600 underline">Risque de contrepartie</RouterLink>. Une référence active est exigée pour l’OTC.</p>
+            <p class="field-note">Les accords sont administrés dans <RouterLink to="/risk/ccr" class="text-blue-600 underline">Risque de contrepartie</RouterLink>. Une référence active est exigée pour l’OTC.</p>
             <label>Identifiant de l’accord cadre
               <input v-model.number="form.master_agreement_id" type="number" min="1" required class="input" />
             </label>

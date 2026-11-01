@@ -1312,7 +1312,9 @@ AT MATURITE:
 
     expect(store.maturityDate).toBe('2029-09-15')
     await vi.waitFor(() => expect(store.maturityDate).toBe('2029-09-17'))
-    expect(appels).toEqual([{ date: '2029-09-15', currency: 'EUR', convention: 'following' }])
+    expect(appels).toEqual([{ date: '2029-09-15', currency: 'EUR', convention: 'following',
+      observation_calendars: ['TARGET'], observation_join: 'all_open',
+      settlement_calendars: ['TARGET'], settlement_join: 'all_open' }])
     expect(store.pricingBody().maturity_date).toBe('2029-09-17')
   })
 

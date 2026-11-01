@@ -1,5 +1,33 @@
 # Notes du projet Structura
 
+[Rapport général et reprise sur un autre ordinateur — 01/11](audits/RAPPORT_PROJET_ET_REPRISE_2026-11-01.md)
+— Avis sur le projet, architecture et points forts, corrections de la conversation,
+priorités, preuves et limites. Procédure de reprise du code et distinction avec
+la migration des données privées.
+
+[Comparateur : prix indicatif et détails graphiques — 01/11](projects/pricing/COMPARATOR_DETAILS_PRICING_2026-11-01.md)
+— Qualification des séances pour la volatilité du prix indicatif, contexte du
+Pricer préservé, en-têtes sur une ligne et détail sélectionnable avec les graphiques
+du backtest général. Replay lié au classement par empreinte des observations ;
+validation isolée et limites dans la note.
+
+[Calendriers compacts et comparateur Following — 01/11](projects/pricing/CALENDARS_COMPARATOR_2026-11-01.md)
+— Places proposées selon les titres, règlement selon la devise du deal, Milan et
+Paris disponibles, choix personnalisés préservés. Comparateur avec début commun,
+Following à 10 jours et dates exportables ; validation isolée et limites dans la note.
+
+[Backtest : début commun et Following — 01/11](projects/pricing/BACKTEST_HISTORY_FOLLOWING_2026-11-01.md)
+— Début proposé depuis les cours locaux, Following à 10 jours calendaires par
+défaut, mode strict, disclaimer et détail exportable des dates ajustées. Validation
+ciblée et limites de la recette synthétique dans la note ; redémarrage habituel
+du backend nécessaire pour charger le code local.
+
+[Accès au Pricer et cohérence des routes — 01/11](audits/ROUTE_ACCESS_FIXES_2026-11-01.md)
+— Retour à l’accueil du workspace Admin corrigé pour Pricer/Optimizer, capacités
+serveur alignées et lien Trading → CCR réparé. Onze tests backend ciblés,
+924 tests frontend et build réussis ; trois contrôles navigateur avec API simulées.
+Services préexistants et données métier préservés ; limites dans la note.
+
 [Corrections des trois défauts majeurs — 24/10](audits/INSTITUTIONAL_MAJOR_FIXES_2026-10-24.md)
 — Booking OTC avec accord effectif, diffusion aux dates contractuelles et horloge
 CCR métier ; 531 tests backend ciblés, 784 frontend, parcours UI isolés et rejeu CCR.

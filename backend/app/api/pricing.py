@@ -1,4 +1,6 @@
 import itertools
+import hashlib
+import json
 from datetime import date
 import math
 import os
@@ -9,7 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from ..core.schemas import (
     PricingRequest, PricingResponse, ParseRequest, ParseResponse,
-    ProfileRequest, PathsRequest, ProbaRequest, BacktestRequest, BacktestCompareRequest,
+    ProfileRequest, PathsRequest, ProbaRequest, BacktestRequest, BacktestCompareRequest, BacktestCompareDetailRequest,
     MtfRequest, MtfDrilldownRequest, ScriptGenerateRequest,
 )
 from ..core.payscript.parser import analysis_origin, parse_script, resolve_analysis_constats, effective_T_max
@@ -742,8 +744,27 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
 
+@router.get("/backtest/history-bounds")
+def backtest_history_bounds_endpoint(tickers: str, end_date: str | None = None):
+    """Suggest a common start using existing observations, without provider I/O."""
+    from ..runtime import business_today
+    from ..services.market_history import backtest_history_bounds
+    names = list(dict.fromkeys(value.strip().upper() for value in tickers.split(",") if value.strip()))
+    if not 1 <= len(names) <= 12:
+        raise HTTPException(422, "Précisez de un à douze sous-jacents.")
+    try:
+        end = date.fromisoformat(end_date).isoformat() if end_date else business_today().isoformat()
+    except ValueError:
+        raise HTTPException(422, "Date de fin invalide.") from None
+    return backtest_history_bounds(names, end)
+
+
 @router.post("/backtest")
 def backtest_endpoint(req: BacktestRequest):
+    return _run_historical_backtest(req)
+
+
+def _run_historical_backtest(req: BacktestRequest, history_data=None):
     """Historical backtest — replay script on actual Yahoo Finance price history."""
     try:
         compiled = parse_script(req.script)
@@ -751,9 +772,9 @@ def backtest_endpoint(req: BacktestRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    tickers = [u.ticker for u in req.underlyings if u.ticker.strip()]
-    if not tickers:
-        raise HTTPException(status_code=422, detail="Aucun ticker défini dans les sous-jacents.")
+    tickers = [u.ticker.strip().upper() for u in req.underlyings]
+    if not tickers or not all(tickers):
+        raise HTTPException(status_code=422, detail="Renseignez un ticker pour chaque sous-jacent du panier.")
 
     T_eff = effective_T_max(compiled, req.T)
     try:
@@ -763,7 +784,7 @@ def backtest_endpoint(req: BacktestRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
     # Load historical prices
-    px_data = load_hist_prices(tickers, req.start_date, req.end_date)
+    px_data = history_data if history_data is not None else load_hist_prices(tickers, req.start_date, req.end_date, raw_history=True)
     if "error" in px_data:
         raise HTTPException(status_code=422, detail=px_data["error"])
 
@@ -778,23 +799,28 @@ def backtest_endpoint(req: BacktestRequest):
     # compter l'horizon à 252 par an laisserait les dernières fenêtres finir
     # au-delà de l'historique, sans remboursement, avec un rendement faux.
     max_start = derniere_fenetre(compiled, dates, T_eff)
-    if max_start < 1:
+    if max_start < 0:
         raise HTTPException(status_code=422, detail="Historique trop court pour la maturité du produit.")
     days_T = seances_jusqu_a(compiled, dates, 0, T_eff) or 0
 
     windows = list(range(0, max_start + 1, req.freq))
-    results = []
+    results, raw_irrs = [], []
     excluded: list[dict] = []
     invest_dec = req.invest_pct / 100.0
+    history_policy = _backtest_replay_policy(req, px_data)
+    adjustments = []
 
     try:
         for si in windows:
             res = eval_script_on_history(
-                compiled, dates, prices, si, T_eff, req.user_params, tickers, req.r
+                compiled, dates, prices, si, T_eff, req.user_params, tickers, req.r,
+                history_policy=history_policy,
             )
             if res is None:
                 continue
-            cfs = [{"t": 0.0, "cf": -invest_dec}] + res["cash_flows"]
+            adjustments.extend(res.get("history_adjustments", []))
+            cfs = [{"t": 0.0, "cf": -invest_dec}] + [
+                {**flow, "t": flow.get("payment_t", flow["t"])} for flow in res["cash_flows"]]
             irr = compute_irr(cfs)
             if irr is None:
                 # A window whose IRR cannot be defined is dropped — but it is
@@ -802,6 +828,7 @@ def backtest_endpoint(req: BacktestRequest):
                 # loses its worst cases without anyone noticing.
                 excluded.append({"date": dates[si], "reason": "IRR non défini"})
                 continue
+            raw_irrs.append(irr)
             results.append({
                 "date": dates[si],
                 "irr": round(irr, 4),
@@ -814,7 +841,7 @@ def backtest_endpoint(req: BacktestRequest):
     if not results:
         raise HTTPException(status_code=422, detail="Aucun résultat de backtest (données insuffisantes ou script incompatible).")
 
-    irrs = [r["irr"] for r in results]
+    irrs = raw_irrs
     n = len(irrs)
     sorted_irrs = sorted(irrs)
     mean_irr = sum(irrs) / n
@@ -838,7 +865,10 @@ def backtest_endpoint(req: BacktestRequest):
     overlap_pct = round(100 * max(0, days_T - req.freq) / days_T, 1) if days_T else 0.0
 
     return {
-        "market_data": {key:px_data.get(key) for key in ("coverage","freshness","warnings","effective_dates","sources")},
+        "market_data": {key:px_data.get(key) for key in (
+            "coverage","freshness","warnings","first_dates","effective_dates","sources",
+            "start_effective","end_effective","alignment","price_type")},
+        "history_policy": _backtest_result_policy(req, px_data, adjustments),
         "rows": results,
         "n_windows": n,
         "mean_irr": round(mean_irr, 4),
@@ -863,10 +893,57 @@ def backtest_endpoint(req: BacktestRequest):
 # two-stage funnel (individual screen, then combinations only within the
 # shortlist) — an exhaustive combinatorial scan is not feasible.
 
+def _backtest_replay_policy(req, px_data):
+    policy = dict(mode=req.history_mode, max_delay_days=req.max_delay_days,
+                  observation_dates=px_data.get('observation_dates'))
+    if req.payment_date:
+        policy['maturity_payment_t'] = (req.payment_date-analysis_origin(req)).days/365.25
+    return policy
+
+
+def _comparison_history_hash(history):
+    payload = {key: history.get(key) for key in ('dates', 'prices', 'observation_dates', 'price_type')}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+
+
+@router.post('/backtest/compare/detail')
+def backtest_comparison_detail(req: BacktestCompareDetailRequest):
+    comparison = req.comparison
+    candidates = {candidate.ticker.strip().upper(): candidate for candidate in comparison.candidates if candidate.ticker.strip()}
+    names = [ticker.strip().upper() for ticker in req.tickers]
+    if len(set(names)) != comparison.basket_size or len(names) != comparison.basket_size or any(tk not in candidates for tk in names):
+        raise HTTPException(422, 'Panier sélectionné incohérent avec la comparaison.')
+    history = load_hist_prices(list(candidates), comparison.start_date, comparison.end_date,
+                               allow_partial=True, raw_history=True)
+    if history.get('error'):
+        raise HTTPException(422, history['error'])
+    if _comparison_history_hash(history) != req.history_hash:
+        raise HTTPException(409, 'L’historique a changé depuis ce classement. Relancez la comparaison pour consulter un détail cohérent.')
+    backtest = BacktestRequest(**{**comparison.model_dump(),
+        'underlyings': [candidates[tk] for tk in names],
+        'corr_matrix': [[float(i == j) for j in range(len(names))] for i in range(len(names))]})
+    result = _run_historical_backtest(backtest, history)
+    result['history_policy']['comparison_basis'] = 'COMMON_USABLE_UNIVERSE_OBSERVATIONS'
+    return {**result, 'selected_tickers': names, 'history_hash': req.history_hash}
+
+
+def _backtest_result_policy(req, px_data, adjustments):
+    from ..core.backtest_history import BACKTEST_HISTORY_VERSION, BACKTEST_HISTORY_DISCLAIMER
+    dates = px_data['dates']
+    return {"version": BACKTEST_HISTORY_VERSION, "mode": req.history_mode,
+        "max_delay_days": req.max_delay_days, "requested_start": req.start_date,
+        "requested_end": req.end_date, "effective_start": dates[0], "effective_end": dates[-1],
+        "adjustments": adjustments, "adjustment_count": len(adjustments),
+        "adjusted_underlyings": sorted({row["ticker"] for row in adjustments}),
+        "disclaimer": BACKTEST_HISTORY_DISCLAIMER if adjustments else "",
+        "payment_convention": "CONTRACTUAL_PAYMENT_DATE_PLUS_OBSERVATION_CALENDAR_DELAY",
+        "monitoring": "AVAILABLE_DAILY_CLOSES_ONLY"}
+
+
 def _windowed_backtest(compiled, dates, prices, tickers, T_eff, freq, r, invest_pct, user_params,
-                        return_windows=False):
+                        return_windows=False, *, history_policy=None, history_adjustments=None):
     """Sliding-window historical replay for a fixed set of tickers — the
-    core loop shared by /backtest, /backtest/compare and the reinvestment
+    core loop shared by /backtest/compare and the reinvestment
     proposal (api/deals.py). Returns summary stats only by default (the
     comparator only needs the ranking) — return_windows=True additionally
     attaches a per-window {start_date, irr, early_recall} list, used by the
@@ -874,26 +951,36 @@ def _windowed_backtest(compiled, dates, prices, tickers, T_eff, freq, r, invest_
     price history (opt-in: keeps /backtest/compare's response light across
     its up-to-20-candidate pool)."""
     max_start = derniere_fenetre(compiled, dates, T_eff)
-    if max_start < 1:
+    if max_start < (0 if history_policy is not None else 1):
         return None
 
     windows = range(0, max_start + 1, freq)
     invest_dec = invest_pct / 100.0
     irrs, early_recalls = [], 0
-    n_excluded = 0
+    n_excluded, n_adjustments = 0, 0
+    excluded_windows = []
     window_rows = [] if return_windows else None
     for si in windows:
-        res = eval_script_on_history(compiled, dates, prices, si, T_eff, user_params, tickers, r)
+        res = eval_script_on_history(compiled, dates, prices, si, T_eff, user_params, tickers, r,
+            **({'history_policy': history_policy} if history_policy is not None else {}))
         if res is None:
             n_excluded += 1
+            excluded_windows.append({'date': dates[si], 'reason': 'Rejeu indisponible'})
             continue
-        cfs = [{"t": 0.0, "cf": -invest_dec}] + res["cash_flows"]
+        for row in res.get('history_adjustments', []):
+            n_adjustments += 1
+            if history_adjustments is not None:
+                history_adjustments[(row['window_start'], row['ticker'], row['requested_date'])] = row
+        flows = ([{**flow, 't': flow.get('payment_t', flow['t'])} for flow in res['cash_flows']]
+                 if history_policy is not None else res['cash_flows'])
+        cfs = [{"t": 0.0, "cf": -invest_dec}] + flows
         irr = compute_irr(cfs)
         if irr is None:
             # Counted, not merely skipped: this comparator ranks candidates
             # against each other, so two of them dropping a different number
             # of windows are not being compared on the same basis.
             n_excluded += 1
+            excluded_windows.append({'date': dates[si], 'reason': 'TRI non défini'})
             continue
         irrs.append(irr)
         if res["early_recall"]:
@@ -922,6 +1009,9 @@ def _windowed_backtest(compiled, dates, prices, tickers, T_eff, freq, r, invest_
     }
     if return_windows:
         result["windows"] = window_rows
+    if history_policy is not None:
+        result['n_adjustments'] = n_adjustments
+        result['excluded_windows'] = excluded_windows
     return result
 
 
@@ -945,7 +1035,7 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
 
     tickers, ticker_name = [], {}
     for c in req.candidates:
-        tk = c.ticker.strip()
+        tk = c.ticker.strip().upper()
         if tk and tk not in ticker_name:
             tickers.append(tk)
             ticker_name[tk] = c.name or tk
@@ -962,7 +1052,7 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    px_data = load_hist_prices(tickers, req.start_date, req.end_date, allow_partial=True)
+    px_data = load_hist_prices(tickers, req.start_date, req.end_date, allow_partial=True, raw_history=True)
     if "error" in px_data:
         raise HTTPException(status_code=422, detail=px_data["error"])
     dates = px_data.get("dates", [])
@@ -973,18 +1063,48 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
     if not tickers:
         raise HTTPException(status_code=422, detail="Aucun historique trouvé pour ces tickers.")
 
+    adjustments = {}
+    history_policy = _backtest_replay_policy(req, px_data)
+
+    def evaluate(names):
+        try:
+            return _windowed_backtest(compiled, dates, prices, names, T_eff, req.freq, req.r,
+                req.invest_pct, req.user_params, history_policy=history_policy,
+                history_adjustments=adjustments)
+        except ValueError as exc:
+            raise HTTPException(422, f"Comparaison ({', '.join(names)}), dates communes à l’univers : {exc}") from exc
+
+    def response(stage, results, shortlist, **extra):
+        policy = _backtest_result_policy(req, px_data, sorted(adjustments.values(),
+            key=lambda row: (row['window_start'], row['requested_date'], row['ticker'])))
+        policy['comparison_basis'] = 'COMMON_USABLE_UNIVERSE_OBSERVATIONS'
+        context = req.model_dump(mode='json')
+        if not req.anchor and not req.strike_date:
+            context['anchor'] = analysis_origin(req).isoformat()
+        if not req.end_date:
+            from ..runtime import business_today
+            context['end_date'] = px_data.get('requested_end') or business_today().isoformat()
+        return {"requested_tickers": requested_tickers, "excluded_universe": excluded_universe,
+            "comparison_context": {'request': context, 'history_hash': _comparison_history_hash(px_data)},
+            "market_coverage": px_data.get('coverage'),
+            "market_data": {key: px_data.get(key) for key in ('sources', 'first_dates', 'effective_dates',
+                'warnings', 'alignment', 'price_type', 'coverage')},
+            "history_policy": policy, "stage": stage, "results": results, "shortlist": shortlist, **extra}
+
     # Stage 1 — every candidate alone, cheap (O(N) backtests)
     stage1 = []
     for tk in tickers:
-        summary = _windowed_backtest(compiled, dates, prices, [tk], T_eff, req.freq, req.r, req.invest_pct, req.user_params)
+        summary = evaluate([tk])
         if summary is not None:
             stage1.append({"tickers": [tk], "names": [ticker_name[tk]], "corr_matrix": [[1.0]], **summary})
+        else:
+            excluded_universe[tk] = {'ticker': tk, 'reason': 'NO_USABLE_BACKTEST_WINDOW'}
     if not stage1:
         raise HTTPException(status_code=422, detail="Aucun résultat de backtest (historique insuffisant pour tous les candidats).")
     stage1.sort(key=lambda r_: r_["median_irr"], reverse=True)
 
     if req.basket_size == 1:
-        return {"requested_tickers": requested_tickers, "excluded_universe": excluded_universe, "market_coverage":px_data.get("coverage"), "stage": "individual", "results": stage1, "shortlist": [r_["tickers"][0] for r_ in stage1]}
+        return response('individual', stage1, [row['tickers'][0] for row in stage1])
 
     # Stage 2 — combinations, but only within the top performers of stage 1
     shortlist = [r_["tickers"][0] for r_ in stage1[:req.shortlist_n]]
@@ -1002,7 +1122,7 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
     combos = []
     for combo in itertools.combinations(shortlist, req.basket_size):
         combo = list(combo)
-        summary = _windowed_backtest(compiled, dates, prices, combo, T_eff, req.freq, req.r, req.invest_pct, req.user_params)
+        summary = evaluate(combo)
         if summary is not None:
             combos.append({
                 "tickers": combo, "names": [ticker_name[tk] for tk in combo],
@@ -1012,4 +1132,4 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
         raise HTTPException(status_code=422, detail="Aucune combinaison exploitable (historique insuffisant).")
     combos.sort(key=lambda r_: r_["median_irr"], reverse=True)
 
-    return {"requested_tickers": requested_tickers, "excluded_universe": excluded_universe, "market_coverage":px_data.get("coverage"), "stage": "combinations", "results": combos, "shortlist": shortlist, "individual": stage1}
+    return response('combinations', combos, shortlist, individual=stage1)

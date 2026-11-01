@@ -45,7 +45,8 @@ _NAMED = {
     'SGX': ('financial', 'SGX', None),
     'SIX': ('financial', 'SIX', None),
 }
-CALENDAR_CODES = tuple(sorted({*_SPECS, *_NAMED}))
+EXCHANGE_CALENDARS = {'XMIL', 'XPAR'}
+CALENDAR_CODES = tuple(sorted({*_SPECS, *_NAMED, *EXCHANGE_CALENDARS}))
 OBSERVATION_CODES = CALENDAR_CODES
 SETTLEMENT_CODES = tuple(sorted({*_SPECS, 'TARGET'}))
 
@@ -139,6 +140,9 @@ def is_business_day(day: date, currency: CalendarInput) -> bool:
         return all(opened) if currency.join == 'all_open' else any(opened)
     if day.weekday() >= 5:
         return False
+    if (currency or '').upper() in EXCHANGE_CALENDARS:
+        from .fixing_finality import session_calendar
+        return bool(session_calendar(currency.upper(), day.year).is_session(day.isoformat()))
     return day not in _calendar(currency)
 
 

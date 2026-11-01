@@ -23,7 +23,7 @@ except ImportError:
 
 
 def load_hist_vol(tickers: list[str], period: str = "1y",
-                  asof: Optional[str] = None, window_days: int | None = None) -> dict:
+                  asof: Optional[str] = None, window_days: int | None = None, *, session_aware: bool = False) -> dict:
     """One dated common-sample RMS estimator for every entry point."""
     from ..core.calibration import calibration_history_start, realized_market
     from ..runtime import business_today
@@ -34,9 +34,13 @@ def load_hist_vol(tickers: list[str], period: str = "1y",
         if window is None or not 20 <= window <= 2520:
             return {"error": "Période inconnue ou fenêtre hors bornes : préciser window_days entre 20 et 2520."}
         history = load_hist_prices(tickers, calibration_history_start(requested, window).isoformat(),
-                                   requested.isoformat(), adjusted=True)
+                                   requested.isoformat(), adjusted=True,
+                                   **({'raw_history': True} if session_aware else {}))
         if history.get("error"):
             return history
+        if session_aware:
+            from .calibration_sessions import qualify_calibration_sessions
+            history = qualify_calibration_sessions(history, tickers, requested)
         calibrated = realized_market(history.get("prices", {}), tickers, window)
         matrix = np.asarray(calibrated["corr"], dtype=float)
         if not np.isfinite(matrix).all() or np.linalg.eigvalsh(matrix).min() < -1e-8:
@@ -150,15 +154,16 @@ def vider_cache_prix() -> None:
         _cache_epoch += 1
 
 
-def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
+def load_hist_prices(tickers: list[str], start: str | None, end: Optional[str] = None,
                      adjusted: bool = False, provider: str = DEFAULT_MARKET_DATA_PROVIDER,
-                     allow_partial: bool = False) -> dict:
+                     allow_partial: bool = False, *, raw_history: bool = False) -> dict:
     """Coalesce identical reads; every caller receives an independent snapshot."""
     tickers = list(tickers)
     from ..core import market_storage, market_policy
     from ..runtime import business_today
     from .scenario_market import configured_path
-    build = lambda: _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_partial)
+    build = lambda: _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_partial,
+                                              **({"raw_history": True} if raw_history else {}))
     if configured_path():
         return deepcopy(build())
     try:
@@ -168,7 +173,7 @@ def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
     with _cache_lock:
         epoch = _cache_epoch
         key = (storage_revision, epoch, provider, tuple(tickers), start, end or business_today().isoformat(),
-               adjusted, allow_partial, market_policy.POLICY_VERSION, market_policy.HISTORY_MAX_AGE_DAYS)
+               adjusted, allow_partial, raw_history, market_policy.POLICY_VERSION, market_policy.HISTORY_MAX_AGE_DAYS)
         cached = _cache_prix.get(key)
         if cached and time.monotonic()-cached[0] < _TTL_PRIX:
             return deepcopy(cached[1])
@@ -198,13 +203,31 @@ def load_hist_prices(tickers: list[str], start: str, end: Optional[str] = None,
             _cache_inflight.pop(key, None)
 
 
-def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_partial):
+def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_partial, *, raw_history=False):
     """Provider observations with durable local reuse and explicit coverage."""
     from ..runtime import business_today
     from ..core import market_policy, market_storage
-    from .market_history import local_history, store_history, align_history, _path as shared_path
+    from .market_history import local_history, store_history, align_history, align_backtest_history, _path as shared_path
     from .scenario_market import configured_path, history
+    auto_start = start is None and raw_history
+    start = "1900-01-01" if auto_start else start
+    if start is None:
+        return {"error": "Une date de début est requise."}
     if configured_path():
+        if raw_history:
+            individual = {tk: history([tk], start, end, adjusted) for tk in dict.fromkeys(tickers)}
+            frames = {tk: pd.Series(item["prices"][tk], index=pd.to_datetime(item["dates"]))
+                      for tk, item in individual.items() if not item.get("error")}
+            result = align_backtest_history(tickers, frames, start, end or business_today().isoformat(),
+                adjusted, {tk: {"provider": individual[tk].get("provider"), "storage": "SCENARIO"}
+                           for tk in frames}, {tk: item["error"] for tk, item in individual.items() if item.get("error")}, allow_partial)
+            metadata = next((item for item in individual.values() if not item.get('error')),
+                            next(iter(individual.values()), {}))
+            for key in ("provider", "price_type"):
+                if key in metadata:
+                    result[key] = metadata[key]
+            result['warnings'].extend(metadata.get('warnings', []))
+            return result
         result = history(tickers, start, end, adjusted)
         if result.get("error"):
             return result
@@ -226,12 +249,13 @@ def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_pa
         local, source = local_history(ticker, start, end, adjusted)
         local_window = local.loc[(local.index >= pd.Timestamp(start)) & (local.index <= pd.Timestamp(end))] if local is not None else None
         usable = (local_window is not None and not local_window.empty
-                  and source.get("requested_start", start) <= start
+                  and (auto_start or source.get("requested_start", start) <= start)
                   and market_policy.freshness(local_window.index[-1].date(), requested_end, "history")["qualified"])
         selected = local_window if usable else None
         if selected is None and _HAS_YF:
             try:
-                frame = yf.Ticker(ticker).history(start=start,
+                history_range = {"period": "max"} if auto_start else {"start": start}
+                frame = yf.Ticker(ticker).history(**history_range,
                     end=(requested_end+timedelta(days=1)).isoformat(), auto_adjust=adjusted)
                 if not frame.empty and "Close" in frame:
                     selected = market_storage.validate_frame(frame[['Close']], ('Close',))['Close']
@@ -258,7 +282,8 @@ def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_pa
         except (OSError,ValueError) as exc:
             for ticker in fetched:
                 sources[ticker]['storage_error'] = str(exc)
-    payload = align_history(tickers, series, start, end, adjusted, sources, failures, allow_partial)
+    payload = (align_backtest_history(tickers, series, start, end, adjusted, sources, failures, allow_partial)
+               if raw_history else align_history(tickers, series, start, end, adjusted, sources, failures, allow_partial))
     payload["retrieved_at"] = datetime.utcnow().isoformat()
     payload["fetched_at"] = min((source["fetched_at"] for source in sources.values() if source.get("fetched_at")), default=None)
     payload["age_sessions"] = {tk:_business_sessions_between(date.fromisoformat(day), requested_end)

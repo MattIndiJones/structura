@@ -38,6 +38,26 @@ describe('les permissions métier reflètent le profil actif', () => {
     auth.user = { ...auth.user, capabilities: [] }
     expect(auth.canBook).toBe(false)
   })
+
+  it('conserve les droits du workspace Admin complet avec une ancienne réponse serveur', () => {
+    const auth = useAuthStore()
+    auth.user = { role: 'admin', admin_workbench: true, capabilities: [], installation: { kind: 'platform' } }
+    expect([auth.canPrice, auth.canBook, auth.canManageTrading, auth.canSettleTrading]).toEqual([true, true, true, true])
+    auth.user = { ...auth.user, is_active: false }
+    expect([auth.canPrice, auth.canBook, auth.canManageTrading, auth.canSettleTrading]).toEqual([false, false, false, false])
+  })
+
+  it.each([
+    ['admin', false, 'platform'],
+    ['admin', true, 'organization'],
+    ['platform_admin', true, 'platform'],
+    ['ops_maker', true, 'platform'],
+    ['checker', true, 'platform'],
+  ])('ne transpose pas les droits Admin à %s, workspace=%s, installation=%s', (role, admin_workbench, kind) => {
+    const auth = useAuthStore()
+    auth.user = { role, admin_workbench, capabilities: [], installation: { kind } }
+    expect([auth.canPrice, auth.canBook, auth.canManageTrading, auth.canSettleTrading]).toEqual([false, false, false, false])
+  })
 })
 
 describe('la déconnexion ne laisse rien derrière', () => {

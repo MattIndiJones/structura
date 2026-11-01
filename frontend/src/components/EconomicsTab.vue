@@ -280,7 +280,7 @@
       <h2 class="label">Calendriers du script</h2>
       <PayScriptCalendars :declarations="calendarControls" :values="store.constatOverrides"
         :frozen="contractTermsLocked" :frozen-schedule="store.currentProduct?.terms?.schedule || store.openedDeal?.schedule"
-        :currency="store.globalParams.deal_ccy"
+        :currency="store.globalParams.deal_ccy" :underlyings="store.underlyings"
         :initial-date="store.startDate" :explicit-fixing="!!store.initialFixingName" />
     </fieldset>
 

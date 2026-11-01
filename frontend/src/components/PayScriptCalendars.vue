@@ -35,7 +35,7 @@
           <div class="flex gap-1"><input type="number" min="1" class="input w-16" v-model.number="values[c.name].sub_frequency.value" /><select class="select" v-model="values[c.name].sub_frequency.unit"><option>D</option><option>W</option><option>M</option><option>Y</option></select></div>
         </label>
       </div>
-      <CalendarPolicyFields v-if="values[c.name] && typeof values[c.name] === 'object'" :values="values[c.name]" :currency="currency" />
+      <CalendarPolicyFields v-if="values[c.name] && typeof values[c.name] === 'object'" :values="values[c.name]" :currency="currency" :underlyings="underlyings" :frozen="frozen" />
       <details v-if="c.kind !== 'single'" :open="advancedCalendar(values[c.name])" class="mt-3 text-xs">
         <summary class="cursor-pointer text-slate-500">Réglages avancés du calendrier</summary>
         <div class="flex flex-wrap gap-3 mt-2">
@@ -62,7 +62,7 @@ import ConstatWindowFields from './ConstatWindowFields.vue'
 import ObservationSchedule from './ObservationSchedule.vue'
 import CalendarPolicyFields from './CalendarPolicyFields.vue'
 import { serializeCalendars, fixingDate, tenorString } from '../utils/payscriptEconomics.js'
-const props = defineProps({ declarations: Array, values: Object, currency: String, initialDate: String, explicitFixing: Boolean, frozen: Boolean, frozenSchedule: Object })
+const props = defineProps({ declarations: Array, values: Object, currency: String, underlyings: { type: Array, default: () => [] }, initialDate: String, explicitFixing: Boolean, frozen: Boolean, frozenSchedule: Object })
 function advancedCalendar(value) {
   return (value?.stub && value.stub !== 'short_last') || !!(value?.roll_date && value.roll_date !== value.first_observation_date && value.roll_date !== value.period_start_date)
 }
