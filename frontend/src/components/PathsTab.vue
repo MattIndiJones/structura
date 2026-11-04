@@ -27,6 +27,7 @@
 
     <!-- Chart -->
     <div v-else class="card">
+      <LocalVolWingNotice :wings="store.paths.local_vol_wings" />
       <SensitiveChart>
         <div style="height:340px;position:relative;">
           <canvas ref="chartCanvas"></canvas>
@@ -42,6 +43,42 @@
         </span>
       </div>
     </div>
+
+    <section v-if="store.paths && 'local_vol_trace' in store.paths" class="card">
+      <div class="text-xs font-bold uppercase tracking-wider">Dupire · Passage sous 60 %</div>
+      <p v-if="!localVolTrace" class="mt-2 text-sm text-slate-600">
+        Aucun franchissement sous 60 % avant la sortie du produit dans cette simulation.
+      </p>
+      <template v-else>
+        <p class="mt-2 text-xs text-slate-600">
+          Trajectoire choisie dans la simulation de cet onglet. La vol locale est lue au spot de début du pas.
+          Le pas suivant utilise la vol locale au nouveau spot.
+        </p>
+        <div class="table-shell overflow-x-auto mt-3">
+          <table>
+            <thead><tr>
+              <th>Pas</th><th>Temps (années)</th><th>Spot début (% réf.)</th>
+              <th>Vol locale utilisée</th><th>Spot fin (% réf.)</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="row in visibleTraceSteps" :key="row.step"
+                :class="{ 'bg-amber-100': row.step === localVolTrace.crossing_step }">
+                <td>{{ row.step }}<span v-if="row.step === localVolTrace.crossing_step"> · Franchissement</span></td>
+                <td>{{ formatTraceTime(row.start_time) }} → {{ formatTraceTime(row.end_time) }}</td>
+                <td><SensitiveValue>{{ formatPercent(row.start_spot * 100, 2) }}</SensitiveValue></td>
+                <td><SensitiveValue>{{ formatPercent(row.local_vol * 100, 2) }}</SensitiveValue></td>
+                <td><SensitiveValue>{{ formatPercent(row.end_spot * 100, 2) }}</SensitiveValue></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <button v-if="showFullTrace || visibleTraceSteps.length < localVolTrace.steps.length"
+          type="button" class="btn-secondary text-xs mt-3"
+          :aria-expanded="showFullTrace" @click="showFullTrace = !showFullTrace">
+          {{ showFullTrace ? 'Revenir autour du franchissement' : 'Afficher tous les pas' }}
+        </button>
+      </template>
+    </section>
   </div>
 </template>
 
@@ -52,6 +89,7 @@ import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import { applyChartTheme, axisNumber, chartTheme } from '../charts/theme.js'
 import SensitiveValue from './SensitiveValue.vue'
+import LocalVolWingNotice from './LocalVolWingNotice.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
 import { formatPercent } from '../utils/format.js'
@@ -66,6 +104,15 @@ applyChartTheme(Chart)
 const store = usePricingStore()
 const demo = useDemoModeStore()
 const chartCanvas = ref(null)
+const showFullTrace = ref(false)
+const localVolTrace = computed(() => store.paths?.local_vol_trace)
+const visibleTraceSteps = computed(() => {
+  const trace = localVolTrace.value
+  if (!trace) return []
+  if (showFullTrace.value) return trace.steps
+  return trace.steps.filter(row => Math.abs(row.step - trace.crossing_step) <= 5)
+})
+const formatTraceTime = value => value.toLocaleString('fr-FR', { maximumFractionDigits: 3 })
 let chartInstance = null
 
 const yAxisLabel = computed(() => {
@@ -173,7 +220,10 @@ async function renderChart() {
   })
 }
 
-watch(() => store.paths, renderChart)
+watch(() => store.paths, () => {
+  showFullTrace.value = false
+  renderChart()
+})
 watch(() => demo.enabled, renderChart)
 onMounted(renderChart)
 onUnmounted(() => { if (chartInstance) chartInstance.destroy() })

@@ -1,5 +1,27 @@
 # Notes du projet Structura
 
+[MTF : paiements différés, créances et deux populations — 03/11](projects/pricing/MTF_DEFERRED_SETTLEMENT_2026-11-03.md)
+— Créances conservées après rappel/maturité, distinction tous scénarios/engagements
+non réglés, drill-down rapproché et contexte contrôlé ; 207 cas backend ciblés,
+966 frontend, build et recette navigateur desktop/390 px. Suite de l'audit quant :
+maturité garantie hors grille, MTF limité au GBM, résumé des taux effectifs et
+sélection initiale des indicateurs corrigés ; 98 cas backend ciblés et recette UI.
+Depuis le 04/11, le Pricer propose aussi Heston, SABR et Local Vol avec
+comparaison A/B en parallèle. LSV reste soumis à la qualification du levier.
+
+[Historique maximal Yahoo et contrôle de tout le référentiel — 03/11](projects/pricing/YAHOO_MAX_HISTORY_2026-11-03.md)
+— Backtest sans limitation par un cache court, conservation des acquisitions maximales,
+59 tickers vérifiés et relecture hors réseau ; limites CSI 300/ajusté UniCredit,
+168 cas backend ciblés, 964 frontend et build.
+
+[Recharger le marché : fermetures de bourse et séance en cours — 03/11](projects/pricing/MARKET_RELOAD_SESSIONS_2026-11-03.md)
+— Correction du rejet BNP `UNBOUNDED_HISTORY_GAP`, qualification par séances et
+exclusion des barres intrajournalières ; 59 tests backend ciblés, 961 frontend et build.
+
+[Lanceur : présentation et adaptation aux petites fenêtres — 03/11](projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md)
+— Thème ivoire et bleu nuit, accès Admin prioritaire, cartes compactes ;
+14 tests ciblés et contrôles de disposition Tkinter, capture native indisponible.
+
 [Rapport général et reprise sur un autre ordinateur — 01/11](audits/RAPPORT_PROJET_ET_REPRISE_2026-11-01.md)
 — Avis sur le projet, architecture et points forts, corrections de la conversation,
 priorités, preuves et limites. Procédure de reprise du code et distinction avec

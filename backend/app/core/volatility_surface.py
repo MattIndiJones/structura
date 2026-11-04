@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 import math
 
 import numpy as np
+from scipy.optimize import brentq
 from scipy.special import ndtr
 
 
@@ -111,9 +112,8 @@ class SSVISurface:
 class TermSSVISurface(SSVISurface):
     """SSVI with increasing piecewise-linear forward ATM total variance.
 
-    Shared rho/eta constrain wing edits across maturities. This preserves the
-    sufficient all-strike calendar conditions, rather than checking a finite
-    strike grid and calling it an arbitrage certificate.
+    A common rho and either the original eta profile or certified psi knots
+    preserve the sufficient all-strike calendar conditions.
     """
 
     def __init__(self, payload):
@@ -132,6 +132,40 @@ class TermSSVISurface(SSVISurface):
         super().__init__(atm_vol=math.sqrt(terminal/horizon),
                          rho=float(payload['rho']), eta=float(payload['eta']),
                          shape_scale=float(payload.get('shape_scale', .04)), max_expiry=horizon)
+        self.wings = None
+        if payload.get('wing_nodes') is not None:
+            self.wings = np.asarray(payload['wing_nodes'], dtype=float)
+            if (self.wings.ndim != 2 or self.wings.shape[1] != 2 or not len(self.wings)
+                    or not np.all(np.isfinite(self.wings)) or np.any(self.wings[:, 0] <= 0)
+                    or np.any(np.diff(self.wings[:, 0]) <= 0) or self.wings[-1, 0] > horizon):
+                raise ValueError('Maturités des piliers d’aile invalides.')
+            self.wing_theta = np.array([self._theta(t)[0] for t in self.wings[:, 0]])
+            psi = self.wings[:, 1]
+            factor = 1 + abs(self.rho)
+            if (np.any(psi < 0) or np.any(np.diff(psi) < -1e-12)
+                    or np.any(np.diff(psi / self.wing_theta) > 1e-12)
+                    or np.any(psi * factor >= 4)
+                    or np.any(psi**2 / self.wing_theta * factor > 4)):
+                raise ValueError('Piliers d’aile incompatibles avec les bornes SSVI sans arbitrage.')
+
+    def _phi(self, theta):
+        if self.wings is None:
+            phi = self.eta/math.sqrt(self.shape_scale+theta)
+            return phi, -.5*phi/(self.shape_scale+theta)
+        # Linear psi=theta*phi in theta preserves nondecreasing psi and
+        # nonincreasing phi. Butterfly bounds hold at the knots and between them
+        # by convexity of psi²/theta; beyond the last knot psi stays constant.
+        ts = self.wing_theta
+        ps = self.wings[:, 1]
+        i = np.searchsorted(ts, theta, side='right')
+        if i == 0:
+            return ps[0]/ts[0], 0.
+        if i == len(ts):
+            psi, slope = ps[-1], 0.
+        else:
+            slope = (ps[i]-ps[i-1])/(ts[i]-ts[i-1])
+            psi = ps[i-1]+slope*(theta-ts[i-1])
+        return psi/theta, (slope-psi/theta)/theta
 
     def _theta(self, t):
         times = np.r_[0., self.nodes[:, 0]]
@@ -150,8 +184,7 @@ class TermSSVISurface(SSVISurface):
         if not np.all(np.isfinite(k)):
             raise ValueError('Strike non fini dans la surface.')
         theta, slope = self._theta(expiry)
-        phi = self.eta/math.sqrt(self.shape_scale+theta)
-        dphi = -.5*phi/(self.shape_scale+theta)
+        phi, dphi = self._phi(theta)
         z = phi*k+self.rho
         root = np.sqrt(z*z+1-self.rho**2)
         base = 1+self.rho*phi*k+root
@@ -168,6 +201,13 @@ class TermSSVISurface(SSVISurface):
         result=super().certificate()
         result['parameters']['atm_nodes']=self.nodes.tolist()
         result['interpolation']='Increasing piecewise-linear ATM total variance'
+        if self.wings is not None:
+            psi = self.wings[:, 1]
+            factor = 1 + abs(self.rho)
+            result['parameters']['wing_nodes'] = self.wings.tolist()
+            result['wing_interpolation'] = 'Piecewise-linear theta*phi in ATM total variance'
+            result['butterfly_slope_bound'] = float(max(psi)*factor)
+            result['butterfly_curvature_bound'] = float(max(psi**2/self.wing_theta)*factor)
         return result
 
 
@@ -188,3 +228,87 @@ def surface_from_underlying(underlying, horizon=None):
     if horizon is not None:
         payload['max_expiry'] = max(payload.get('max_expiry', 10.), horizon)
     return TermSSVISurface(payload)
+
+
+def fit_left_wing(payload, expiry, strike, target, horizon, rate, dividend):
+    """Raise one left-wing target while changing other wing knots only as needed."""
+    base = TermSSVISurface(payload)
+    horizon = max(horizon, expiry)
+    if expiry > base.max_expiry:
+        raise ValueError('La cible est hors de l’horizon de la surface.')
+    current = float(base.implied_vol(strike, expiry))
+    if target <= current + 1e-7:
+        return payload, current, 'already_at_or_above'
+
+    times = sorted(set(base.nodes[:, 0]) | {expiry, base.max_expiry}
+                   | (set(base.wings[:, 0]) if base.wings is not None else set()))
+    if len(times) > 64:
+        raise ValueError('La surface contient trop de piliers d’aile.')
+    theta = np.array([base._theta(t)[0] for t in times])
+    psi = np.array([w*base._phi(w)[0] for w in theta])
+    i = times.index(expiry)
+    factor = 1+abs(base.rho)
+    caps = np.minimum((4-1e-8)/factor, np.sqrt((4-1e-8)*theta/factor))
+    ceiling = min(np.min(caps[i:]), np.min(caps[:i+1]*theta[i]/theta[:i+1]))
+
+    # A raised knot requires at least the same psi afterwards and the same phi
+    # beforehand. The pointwise maximum preserves both calendar inequalities.
+    weights = np.minimum(1., theta/theta[i])
+    def candidate(level):
+        return {**payload, 'mode': 'manual',
+                'wing_nodes': list(zip(times, np.maximum(psi, level*weights).tolist()))}
+
+    if ceiling <= psi[i]:
+        return payload, current, 'ssvi'
+    log_strike = math.log(strike)
+    def point_vol(level):
+        x = level/theta[i]*log_strike
+        w = .5*theta[i]*(1+base.rho*x+math.sqrt((x+base.rho)**2+1-base.rho**2))
+        return math.sqrt(w/expiry)
+
+    upper = ceiling
+    reason = 'ssvi'
+    if point_vol(upper) >= target:
+        upper = brentq(lambda level: point_vol(level)-target, psi[i], upper)
+        reason = 'target'
+
+    # Check the pricing grid at both resolutions, plus both sides of knots.
+    # Leave a small margin for changes in the valuation time grid. The engine
+    # also checks the grid of the actual valuation at runtime.
+    knots = [t for t in times if t < horizon]
+    checks = np.array(sorted({1e-5, horizon, *knots, *(t-1e-7 for t in knots if t > 1e-7),
+                              *(t+1e-7 for t in knots if t+1e-7 < horizon)}))
+    for resolution in (52, 104):
+        n = max(1, round(resolution*horizon))
+        checks = np.r_[checks, (np.arange(n)+.5)*horizon/n]
+    spots = np.linspace(math.log(.01), math.log(10.), 300)
+    def accepted(level):
+        proposal = candidate(level)
+        surface = TermSSVISurface({**proposal, 'max_expiry': max(base.max_expiry, horizon)})
+        try:
+            for t in checks:
+                local = surface.local_vol(spots-(rate-dividend)*t, t)
+                if np.any(~np.isfinite(local)) or np.any(local > 2.995):
+                    return None
+        except ValueError:
+            return None
+        return proposal
+
+    proposal = accepted(upper)
+    if proposal is None:
+        lo, hi = psi[i], upper
+        proposal = accepted(lo)
+        if proposal is None:
+            return payload, current, 'dupire'
+        for _ in range(17):
+            mid = (lo+hi)/2
+            trial = accepted(mid)
+            if trial is None:
+                hi = mid
+            else:
+                lo, proposal = mid, trial
+        upper, reason = lo, 'dupire'
+    achieved = point_vol(upper)
+    if achieved <= current + 1e-6:
+        return payload, current, reason
+    return proposal, achieved, reason

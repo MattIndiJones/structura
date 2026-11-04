@@ -88,10 +88,13 @@ class ValuationContext:
     # worker reconstruction; the compiled script remains the run-time argument.
     script_text: str = ""
     constats: dict = field(default_factory=dict)
+    gbm_atm_curve: bool = False
     schema_version: int = SCHEMA_VERSION
 
     def to_dict(self) -> dict:
         payload = asdict(self)
+        if not self.gbm_atm_curve:
+            payload.pop('gbm_atm_curve')
         # Fail here, close to construction, rather than much later when a VaR
         # worker or JSON column tries to serialize a live object.
         canonical_json(payload)
@@ -143,13 +146,13 @@ def run_analysis(script, context: ValuationContext, kind: str, **options):
     return result
 
 
-def validate_mtf_context(script, context: ValuationContext, *, payment_aware=False):
+def validate_mtf_context(script, context: ValuationContext, *, payment_aware=False, aligned_grid=False):
     """Refuse inputs the nested replay cannot preserve, before any MC work."""
     from .payscript.engine import _mtf_reject_unsupported
 
     _mtf_reject_unsupported(context.model, context.barrier_monitoring,
                             context.yield_curve, context.sigma_r,
-                            context.underlyings)
+                            context.underlyings, aligned_grid=aligned_grid)
     if context.funding_curve or context.funding_spread:
         raise ValueError(
             "Le funding (spread ou courbe) n'est pas encore supporté en "
@@ -174,7 +177,8 @@ def validate_mtf_context(script, context: ValuationContext, *, payment_aware=Fal
 
 
 def run_valuation(script, context: ValuationContext | dict, *,
-                  per_path_flows=False, flows_at_payment=False, **overrides):
+                  per_path_flows=False, flows_at_payment=False, additional_grid_dates=(),
+                  lsv_leverage=None, **overrides):
     """Run one valuation; ``overrides`` contains scenario/Greek bumps only."""
     from .payscript.engine import run_mc
 
@@ -249,6 +253,12 @@ def run_valuation(script, context: ValuationContext | dict, *,
     }
     if per_path_flows:
         kwargs.update(per_path_flows=True, flows_at_payment=flows_at_payment)
+    if additional_grid_dates:
+        kwargs['additional_grid_dates'] = additional_grid_dates
+    if ctx.gbm_atm_curve:
+        kwargs['gbm_atm_curve'] = True
+    if lsv_leverage is not None:
+        kwargs['lsv_leverage'] = lsv_leverage
     kwargs.update(overrides)
     return run_mc(**kwargs)
 

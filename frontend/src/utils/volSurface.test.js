@@ -1,8 +1,21 @@
 import { describe,it,expect } from 'vitest'
-import { classifyUnderlying,makeSurface,surfaceVol,validateSurface,moveSurfaceNode,shiftSurface,resizeSurfaceLevel } from './volSurface.js'
+import { applyAtmScenario,classifyUnderlying,makeSurface,surfaceVol,validateSurface,moveSurfaceNode,shiftSurface,resizeSurfaceLevel } from './volSurface.js'
 import { rfqBasketFromParams,rfqUnderlyingToParams } from './rfqBasket.js'
 
 describe('editable coherent equity smiles',()=>{
+  it.each([['flat',25,25],['contango',25+5/9,27.5],
+    ['backwardation',25-5/9,22.5],['hump',27.5,25]])(
+    'builds the ten editable annual ATM points for %s without altering the smile',
+    (scenario, atThree, atTen) => {
+      const original = makeSurface('index',25)
+      const surface = applyAtmScenario(original,scenario)
+      expect(surface.atm_nodes.map(([t])=>t)).toEqual([1,2,3,4,5,6,7,8,9,10])
+      expect([surface.profile,surface.rho,surface.eta]).toEqual([original.profile,original.rho,original.eta])
+      expect(surfaceVol(surface,1)).toBeCloseTo(25)
+      expect(surfaceVol(surface,3)).toBeCloseTo(atThree)
+      expect(surfaceVol(surface,10)).toBeCloseTo(atTen)
+      expect(moveSurfaceNode(surface,4,1,surfaceVol(surface,4)+.1).atm_scenario).toBe('custom')
+    })
   it('uses catalogue class and excludes volatility indices and unknown instruments',()=>{
     const groups=[{group:'Actions FR',items:[{ticker:'GLE.PA'}]},
       {group:'Banques',items:[{ticker:'JPM'}]}, {group:'Luxe',items:[{ticker:'CPRI'}]}]

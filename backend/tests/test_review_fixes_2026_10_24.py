@@ -62,7 +62,6 @@ def test_http_intermediate_kid_refuses_unsupported_context_before_mc(authenticat
 @pytest.mark.parametrize("route", ["/api/mtf", "/api/mtf/drilldown"])
 @pytest.mark.parametrize("hypothesis", [
     {"funding_spread": .02}, {"funding_curve": [[1., .02]]},
-    {"strike_date": "2026-01-01", "payment_date": "2027-02-01"},
 ])
 def test_http_mtf_and_detail_refuse_unsupported_context(authenticated_client, route, hypothesis):
     authenticated_client.app.include_router(pricing.router)

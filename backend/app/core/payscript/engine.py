@@ -346,8 +346,13 @@ def _dupire_vol(K: float, T: float, sigma0: float, skew: float, curvature: float
     if not (math.isfinite(dwdT) and math.isfinite(den)) or den <= 1e-9 or dwdT <= 0:
         raise ValueError('Smile legacy non admissible en Local Vol : densité ou variance calendaire invalide. Requalifiez explicitement la surface.')
     sig = math.sqrt(dwdT / den)
-    if not math.isfinite(sig) or not 0 < sig <= 3:
-        raise ValueError('Smile legacy hors du domaine numérique Local Vol (0, 300 %].')
+    if not math.isfinite(sig) or sig <= 0:
+        raise ValueError('Smile legacy : volatilité locale non finie ou non positive.')
+    if sig > 3:
+        raise ValueError(
+            f'Smile legacy : volatilité locale de {100*sig:.2f} % au niveau {100*K:.2f} % '
+            f'du spot de référence à {T:.4f} an. Plafond numérique : 300 %.'
+        )
     return sig
 
 
@@ -416,7 +421,34 @@ def _build_dividend_step_matrix(underlyings, ts: int, dt: float) -> np.ndarray |
     return q_steps
 
 
-def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int = 50):
+_SSVI_LOCAL_VOL_LIMIT = 3.
+_SSVI_PROTECTED_LOG_FORWARD = (math.log(.20), math.log(1.80))
+
+
+def _extend_ssvi_local_vol_wings(row, log_forward):
+    """Bound only contiguous outer runs above the numerical limit."""
+    valid = np.flatnonzero(row <= _SSVI_LOCAL_VOL_LIMIT)
+    if not len(valid):
+        return None
+    first, last = int(valid[0]), int(valid[-1])
+    if len(valid) != last - first + 1:
+        return None
+    # Preserve the interpolation segment containing each protected endpoint.
+    lower, upper = _SSVI_PROTECTED_LOG_FORWARD
+    if (first and log_forward[first] > lower) or (last < len(row) - 1 and log_forward[last] < upper):
+        return None
+    wings = {}
+    if first:
+        row[:first] = _SSVI_LOCAL_VOL_LIMIT
+        wings["left"] = math.exp(log_forward[first - 1])
+    if last < len(row) - 1:
+        row[last + 1:] = _SSVI_LOCAL_VOL_LIMIT
+        wings["right"] = math.exp(log_forward[last + 1])
+    return wings
+
+
+def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int = 50,
+                   *, allow_ssvi_wings=False, wing_diagnostics=None):
     """Precompute local vol grid (ts, nK) for each underlying asset.
 
     Takes the run's rate term rather than a scalar so the Black-Scholes prices
@@ -429,6 +461,7 @@ def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int 
     logKmin, logKmax = ((math.log(.01), math.log(10.)) if has_surface
                        else (math.log(.20), math.log(3.)))
     Ks = [math.exp(logKmin + i/(nK-1)*(logKmax-logKmin)) for i in range(nK)]
+    log_spots = np.log(Ks)
     grids = []
     dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
     for asset_index, u in enumerate(underlyings):
@@ -436,6 +469,7 @@ def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int 
             from ..volatility_surface import surface_from_underlying
             surface = surface_from_underlying(u, _time_at(dt, ts))
             grid = np.empty((ts, nK), dtype=np.float64)
+            wing_steps = {}
             for step in range(ts):
                 t = (_time_at(dt, step) + .5 * _durations(dt, ts)[step])
                 # Integrate the same carry used by the diffusion, interpolated
@@ -446,9 +480,30 @@ def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int 
                 carry -= (u.get('q',.02)*t if dividend_steps is None else
                           float(np.dot(dividend_steps[:step,asset_index], _durations(dt, ts)[:step]))+
                           .5*_durations(dt, ts)[step]*float(dividend_steps[step,asset_index]))
-                grid[step] = surface.local_vol(np.log(Ks)-carry,t)
-            if not np.all(np.isfinite(grid)) or np.any(grid <= 0) or np.any(grid > 3):
-                raise ValueError('Surface de volatilité hors du domaine numérique Local Vol/LSV.')
+                log_forward = log_spots - carry
+                row = surface.local_vol(log_forward, t)
+                if not np.all(np.isfinite(row)) or np.any(row <= 0):
+                    raise ValueError('Surface Local Vol/LSV : volatilité locale non finie ou non positive.')
+                if allow_ssvi_wings and np.any(row > _SSVI_LOCAL_VOL_LIMIT):
+                    wings = _extend_ssvi_local_vol_wings(row, log_forward)
+                    if wings is not None:
+                        for side, boundary in wings.items():
+                            wing_steps.setdefault(side, []).append(dict(t=t, boundary_forward=boundary))
+                grid[step] = row
+            if np.any(grid > _SSVI_LOCAL_VOL_LIMIT):
+                step, node = np.unravel_index(np.argmax(grid), grid.shape)
+                t = _time_at(dt, step) + .5 * _durations(dt, ts)[step]
+                raise ValueError(
+                    f'Surface Local Vol/LSV : volatilité locale de {100*grid[step, node]:.2f} % '
+                    f'au niveau {100*Ks[node]:.2f} % du spot de référence à {t:.4f} an. '
+                    'Plafond numérique : 300 %.'
+                )
+            if wing_diagnostics is not None:
+                for side, steps in wing_steps.items():
+                    wing_diagnostics.append(dict(
+                        underlying_index=asset_index,
+                        underlying=u.get("name") or u.get("ticker") or f"S{asset_index + 1}",
+                        side=side, limit=_SSVI_LOCAL_VOL_LIMIT, steps=steps))
             grids.append(grid)
             continue
         sig0 = u.get("sigma", 0.20)
@@ -486,10 +541,31 @@ def _seed_spot(spot_mult) -> np.ndarray:
     return arr if arr.ndim == 2 else arr[:, None]
 
 
+def _atm_step_vols(underlyings, dt, ts):
+    """Integrate ATM total variance over the original simulation grid."""
+    lengths = _durations(dt, ts)
+    times = np.r_[0., np.cumsum(lengths)]
+    columns = []
+    for underlying in underlyings:
+        surface = underlying.get("vol_surface")
+        if not surface or times[-1] > surface["max_expiry"] + 1e-8:
+            raise ValueError("La courbe ATM doit couvrir tout l’horizon du GBM.")
+        nodes = np.asarray(surface["atm_nodes"], dtype=float)
+        vols = nodes[:, 1]
+        if np.all(vols == vols[0]):
+            columns.append(np.full(ts, vols[0]))
+            continue
+        knots = np.r_[0., nodes[:, 0]]
+        variances = np.r_[0., nodes[:, 0]*vols**2]
+        total = np.interp(times, knots, variances) + np.maximum(times-knots[-1], 0.)*vols[-1]**2
+        columns.append(np.sqrt(np.diff(total)/lengths))
+    return np.column_stack(columns)
+
+
 def _simulate_gbm(ts: int, n: int, N: int, dt: float, sq_dt: float,
                   underlyings, r_eff: float, L: np.ndarray,
                   Z: np.ndarray, spot_mult=None, vol_add=None,
-                  r_path=None, Z_r=None, vol_out=None) -> np.ndarray:
+                  r_path=None, Z_r=None, vol_out=None, *, step_vols=None) -> np.ndarray:
     """Vectorized GBM — all paths at once via cumsum. Returns (ts+1, n, N).
 
     r_path (ts, N) and Z_r (ts, N) are the optional stochastic-rate level and raw
@@ -514,9 +590,9 @@ def _simulate_gbm(ts: int, n: int, N: int, dt: float, sq_dt: float,
     r_term = r_eff if r_path is None else r_path
     dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
     for i, u in enumerate(underlyings):
-        sig = u.get("sigma", 0.20)
+        sig = u.get("sigma", 0.20) if step_vols is None else step_vols[:, i, None]
         if vol_add is not None:
-            sig = max(0.005, sig + vol_add[i])
+            sig = np.maximum(0.005, sig + vol_add[i])
         if vol_out is not None:
             vol_out[:, i, :] = sig
         z_i = _blend_rate_factor(Zc[:, i, :], Z_r, u.get("rho_rS", 0.0)) if Z_r is not None else Zc[:, i, :]
@@ -535,7 +611,7 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
                      underlyings, r_eff: float, L: np.ndarray,
                      Z: np.ndarray, Zv: np.ndarray,
                      spot_mult=None, vol_add=None, r_path=None, Z_r=None,
-                     vol_out=None) -> np.ndarray:
+                     vol_out=None, *, factor_init=None, factor_out=None) -> np.ndarray:
     """Vectorized Heston QE simulation (Andersen 2007) — step-major, every
     path advanced together per step via numpy array ops (same structure as
     _simulate_lv/_simulate_lsv), using _heston_qe_vectorized for the QE draw
@@ -568,6 +644,10 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
         S[0] = _seed_spot(spot_mult)
 
     V = [np.full(N, u.get("v0", 0.04), dtype=np.float64) for u in underlyings]
+    if factor_init is not None:
+        V = list(factor_init)
+    if factor_out is not None:
+        factor_out[0] = V
     dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
 
     lengths = _durations(dt, ts)
@@ -592,6 +672,8 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
             V_next = _heston_qe_vectorized(V_old, kap, th, xi, dt, zv)
             V_bar  = (V_old + V_next) / 2
             V[i]   = V_next
+            if factor_out is not None:
+                factor_out[step + 1, i] = V_next
 
             sig_add = vol_add[i] if vol_add is not None else 0.0
             sv = np.sqrt(np.maximum(0.0, V_bar)) + sig_add
@@ -636,7 +718,7 @@ def _simulate_sabr(ts: int, n: int, N: int, dt: float, sq_dt: float,
                    underlyings, r_eff: float, L: np.ndarray,
                    Z: np.ndarray, Za: np.ndarray,
                    spot_mult=None, vol_add=None, r_path=None, Z_r=None,
-                   vol_out=None) -> np.ndarray:
+                   vol_out=None, *, factor_init=None, factor_out=None) -> np.ndarray:
     """Vectorized SABR SDE simulation (Euler-Maruyama) — step-major, every
     path advanced together per step via numpy array ops, same structure as
     _simulate_heston above. Formulas UNCHANGED from the original per-path
@@ -661,6 +743,10 @@ def _simulate_sabr(ts: int, n: int, N: int, dt: float, sq_dt: float,
         S[0] = _seed_spot(spot_mult)
 
     alpha = [np.full(N, u.get("alpha", 0.20), dtype=np.float64) for u in underlyings]
+    if factor_init is not None:
+        alpha = list(factor_init)
+    if factor_out is not None:
+        factor_out[0] = alpha
     dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
 
     lengths = _durations(dt, ts)
@@ -704,8 +790,17 @@ def _simulate_sabr(ts: int, n: int, N: int, dt: float, sq_dt: float,
             drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5 * sig**2
             S[step + 1, i, :] = S_c * np.exp(drift * dt + sig * sq_dt * z_S)
             alpha[i] = alpha_new
+            if factor_out is not None:
+                factor_out[step + 1, i] = alpha_new
 
     return S
+
+
+def _local_vol_at_spot(spot, row, log_min, log_step, bump=0.):
+    position = (np.log(np.maximum(spot, 1e-8)) - log_min) / log_step
+    node = np.clip(position.astype(int), 0, len(row)-2)
+    weight = np.clip(position-node, 0., 1.)
+    return np.maximum(row[node]*(1.-weight) + row[node+1]*weight + bump, .001)
 
 
 def _simulate_lv(ts: int, n: int, N: int, dt: float, sq_dt: float,
@@ -738,16 +833,8 @@ def _simulate_lv(ts: int, n: int, N: int, dt: float, sq_dt: float,
         r_term = r_eff if r_path is None else r_path[step]
         for i, u in enumerate(underlyings):
             S_c = S[step, i, :]
-            logS = np.log(np.maximum(S_c, 1e-8))
-            kif = (logS - logKmin) / dlogK
-            k0 = np.clip(kif.astype(int), 0, nK-2)
-            frac = np.clip(kif - k0, 0.0, 1.0)
-            g = lv_grids[i]
-            lvs = g[step, k0] * (1.0-frac) + g[step, k0+1] * frac
-            if vol_add is not None:
-                lvs = np.maximum(lvs + vol_add[i], 0.001)
-            else:
-                lvs = np.maximum(lvs, 0.001)
+            bump = vol_add[i] if vol_add is not None else 0.
+            lvs = _local_vol_at_spot(S_c, lv_grids[i][step], logKmin, dlogK, bump)
             if vol_out is not None:
                 vol_out[step, i, :] = lvs
             z_i = _blend_rate_factor(Zc[step, i, :], Z_r[step], u.get("rho_rS", 0.0)) if Z_r is not None else Zc[step, i, :]
@@ -803,7 +890,7 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
                    underlyings, r_eff: float, L: np.ndarray, Z: np.ndarray, Zv: np.ndarray,
                    lv_grids, nK: int, logKmin: float, logKmax: float,
                    spot_mult=None, vol_add=None, r_path=None, Z_r=None,
-                   vol_out=None) -> np.ndarray:
+                   vol_out=None, *, leverage_grids=None, factor_init=None, factor_out=None) -> np.ndarray:
     """Local-Stochastic Vol (Guyon & Henry-Labordère) — a stochastic variance
     process (the same Heston QE dynamics as _simulate_heston, but vectorized
     via _heston_qe_vectorized) whose effect on the spot is rescaled at every
@@ -854,7 +941,11 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
     if spot_mult is not None:
         S[0] = _seed_spot(spot_mult)
 
-    V = [np.full(N, u.get("v0", 0.04), dtype=np.float64) for u in underlyings]
+    V = [np.full(N, u.get("v0", 0.04), dtype=np.float64) if factor_init is None
+         else np.asarray(factor_init[i], dtype=np.float64).copy()
+         for i, u in enumerate(underlyings)]
+    if factor_out is not None:
+        factor_out[0] = V
 
     dlogK = (logKmax - logKmin) / (nK - 1)
     # Preserve conditional spot resolution when an offline target supplies a
@@ -902,12 +993,15 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
             # own shocks, so it's safe to use in both the bucketing and the
             # spot update below. Confirmed empirically by
             # test_heston_spot_process_is_martingale-style E[S_T] check.
-            conditional_bucket = np.clip(((logS-logKmin)/conditional_step).astype(int),
-                                          0, conditional_buckets-2)
-            E_V_given_S = _lsv_conditional_variance(conditional_bucket, V_old,
-                                                   conditional_buckets)
-
-            leverage = np.clip(lv_target / np.sqrt(np.maximum(E_V_given_S, 1e-6)), 0.2, 5.0)
+            if leverage_grids is None:
+                conditional_bucket = np.clip(((logS-logKmin)/conditional_step).astype(int),
+                                              0, conditional_buckets-2)
+                E_V_given_S = _lsv_conditional_variance(conditional_bucket, V_old,
+                                                       conditional_buckets)
+                leverage = np.clip(lv_target / np.sqrt(np.maximum(E_V_given_S, 1e-6)), 0.2, 5.0)
+            else:
+                row = leverage_grids[i][step]
+                leverage = row[k0] * (1.0-frac) + row[k0+1] * frac
             eff_vol = leverage * np.sqrt(np.maximum(V_old, 0.0))
             if vol_add is not None:
                 eff_vol = eff_vol + vol_add[i]
@@ -922,6 +1016,8 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
             drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5*eff_vol**2
             S[step+1, i, :] = S_c * np.exp(drift*dt + eff_vol*sq_dt*z_i)
             V[i] = V_next
+            if factor_out is not None:
+                factor_out[step + 1, i] = V_next
 
     return S
 
@@ -1705,6 +1801,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 flows_at_payment: bool = False,
                 reference_spots=None,
                 flow_labels_out: list | None = None,
+                flow_observations_out: list | None = None,
                 analysis_out: list | None = None) -> list[float]:
     """Evaluate PayScript on pre-computed spot paths. Observation-only loop.
 
@@ -1774,6 +1871,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
         # structure here that grows with the number of flows.
         path_flows: list | None = [] if flows_out is not None else None
         path_labels: list | None = [] if flow_labels_out is not None else None
+        path_observations = [] if flow_observations_out is not None else None
         if _sprev is None:
             _spots0 = [1.0] * n
         else:
@@ -1877,6 +1975,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     ctx["total_cf_raw"] += fl["v"]
                     if path_flows is not None and fl["v"] != 0:
                         path_flows.append((t_pay if flows_at_payment and t_pay is not None else ctx["t"], fl["v"]))
+                        if path_observations is not None:
+                            path_observations.append(ctx['t'])
                         if path_labels is not None:
                             path_labels.append(fl["lbl"])
                     if record:
@@ -1933,6 +2033,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                     ctx["total_cf_raw"] += fl["v"]
                     if path_flows is not None and fl["v"] != 0:
                         path_flows.append((mat_pay_t if flows_at_payment and mat_pay_t is not None else ctx["t"], fl["v"]))
+                        if path_observations is not None:
+                            path_observations.append(ctx['t'])
                         if path_labels is not None:
                             path_labels.append(fl["lbl"])
                     if record:
@@ -1962,6 +2064,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             flows_out.append(path_flows)
         if flow_labels_out is not None:
             flow_labels_out.append(path_labels)
+        if flow_observations_out is not None:
+            flow_observations_out.append(path_observations)
         if stop_times_out is not None and not ctx["done"]:
             stop_times_out.append(float(axis[ts]))
         if state_out is not None:
@@ -2287,7 +2391,8 @@ def run_mc(script: CompiledScript,
            realvol_state_init: dict | None = None,
            fix_state_init: dict | None = None,
            per_path_flows: bool = False, per_path_flow_labels: bool = False,
-           analysis_out: dict | None = None, flows_at_payment: bool = False):
+           analysis_out: dict | None = None, flows_at_payment: bool = False,
+           additional_grid_dates=(), gbm_atm_curve=False, lsv_leverage=None):
 
     t0 = time.perf_counter()
     _validate_short_rate_parameters(sigma_r, a_r)
@@ -2311,9 +2416,10 @@ def run_mc(script: CompiledScript,
     if use_bridge:
         validate_bridge_domain(underlyings, corr, model, sigma_r > 0)
     refinement = resolve_bridge_substeps(corr, bridge_substeps) if use_bridge and n > 1 else None
-    grid_dates = [strike_set_t]
+    grid_dates = [strike_set_t, *additional_grid_dates]
     grid_dates.extend(node[0] for u in underlyings for node in (u.get("dividend_curve") or []))
     ts, dt = _simulation_axis(T, script, grid_dates)
+    step_vols = _atm_step_vols(underlyings, dt, ts) if gbm_atm_curve else None
     ensure_budget(
         estimate_mc(
             simulation_steps=ts,
@@ -2382,8 +2488,24 @@ def run_mc(script: CompiledScript,
     r_det = None if rates.step_fwd is None else rates.step_fwd[:, None]
 
     lv_data = None
+    local_vol_wings = []
+    lsv_limits = []
+    if use_lsv:
+        from .lsv_leverage import frozen_leverage, supports_frozen_lsv
+        frozen_lsv = supports_frozen_lsv(
+            underlyings, yield_curve=yield_curve, sigma_r=sigma_r,
+            barrier_monitoring=barrier_monitoring, strike_set_t=strike_set_t,
+            residual=spot_base is not None or fix_state_init is not None)
+    else:
+        frozen_lsv = False
     if use_lv or use_lsv:
-        lv_data = _build_lv_grid(underlyings, rates, ts, dt)
+        lv_data = _build_lv_grid(underlyings, rates, ts, dt, allow_ssvi_wings=use_lv or frozen_lsv,
+                                 wing_diagnostics=local_vol_wings)
+    if frozen_lsv and lsv_leverage is None:
+        lsv_leverage = frozen_leverage(underlyings, r_eff, _durations(dt, ts), lv_data, diagnostics=lsv_limits)
+    if lsv_leverage is not None and (not frozen_lsv or len(lsv_leverage) != n
+                                    or any(g.shape != (ts, lv_data[1]) for g in lsv_leverage)):
+        raise ValueError("Le levier LSV ne correspond pas à la grille de pricing.")
 
     # Optional stochastic short rate: a single shared Gaussian factor (ABM when
     # a_r=0, Hull-White when a_r>0 — see _stochastic_rate_paths). sigma_r=0 is
@@ -2434,6 +2556,34 @@ def run_mc(script: CompiledScript,
             samples.append({'times': [round(_time_at(dt, i), 12) for i in steps],
                             'wof': [round(float(paths[i, :, pi].min()), 4) for i in steps],
                             'outcome': rows[pi]['outcome']})
+        if not (use_lv and n == 1 and analysis_out.get('display_limit', 0)):
+            return
+        threshold = .60
+        grids, nodes, lo, hi = lv_data
+        log_step = (hi-lo)/(nodes-1)
+        bump = vol_add[0] if vol_add is not None else 0.
+        for pi, row in enumerate(rows):
+            previous = analysis_out.get('local_vol_trace')
+            if previous and previous['crossing_step'] < len(previous['steps']):
+                break
+            stop = row['stop_time']
+            end = min(ts, max(0, _step_at(dt, stop))) if stop is not None else ts
+            spots = paths[:end+1, 0, pi]
+            crossings = np.flatnonzero((spots[:-1] >= threshold) & (spots[1:] < threshold))
+            if not len(crossings):
+                continue
+            crossing = int(crossings[0])
+            if previous and crossing == end-1:
+                continue
+            analysis_out['local_vol_trace'] = {
+                'threshold': threshold, 'crossing_step': crossing+1,
+                'steps': [{
+                    'step': i+1, 'start_time': float(_time_at(dt, i)),
+                    'end_time': float(_time_at(dt, i+1)),
+                    'start_spot': float(spots[i]), 'end_spot': float(spots[i+1]),
+                    'local_vol': float(_local_vol_at_spot(spots[i], grids[0][i], lo, log_step, bump)),
+                } for i in range(end)],
+            }
 
     # A Greeks delta/gamma bump passes a spot_mult that differs from the
     # baseline to shock one asset's spot. Feeding that straight into the
@@ -2488,7 +2638,7 @@ def run_mc(script: CompiledScript,
         lv_grids, nK, lkm, lkx = lv_data
         S_base = _simulate_lsv(ts, n, N_pairs, dt, sq_dt, underlyings,
                                 r_eff, L, Z, Zv, lv_grids, nK, lkm, lkx, _sim_spot_mult, vol_add,
-                                r_path_base, Z_r, vol_out=vol_base)
+                                r_path_base, Z_r, vol_out=vol_base, leverage_grids=lsv_leverage)
     elif use_lv:
         lv_grids, nK, lkm, lkx = lv_data
         S_base = _simulate_lv(ts, n, N_pairs, dt, sq_dt, underlyings,
@@ -2501,7 +2651,7 @@ def run_mc(script: CompiledScript,
     else:
         S_base = _simulate_gbm(ts, n, N_pairs, dt, sq_dt, underlyings,
                                 r_eff, L, Z, _sim_spot_mult, vol_add, r_path_base, Z_r,
-                                vol_out=vol_base)
+                                vol_out=vol_base, step_vols=step_vols)
     S_base = _apply_delayed_bump(S_base)
     # Bridge extrema from the (possibly bumped) paths — the bridge scales with
     # the level in log-space, so post-bump is the consistent order. Uniform
@@ -2606,7 +2756,7 @@ def run_mc(script: CompiledScript,
         elif use_lsv:
             S_anti = _simulate_lsv(ts, n, N_pairs, dt, sq_dt, underlyings,
                                     r_eff, L, Z, Zv, lv_grids, nK, lkm, lkx, _sim_spot_mult, vol_add,
-                                    r_path_anti, Z_r_anti, vol_out=vol_anti)
+                                    r_path_anti, Z_r_anti, vol_out=vol_anti, leverage_grids=lsv_leverage)
         elif use_lv:
             S_anti = _simulate_lv(ts, n, N_pairs, dt, sq_dt, underlyings,
                                    r_eff, L, Z, lv_grids, nK, lkm, lkx, _sim_spot_mult, vol_add,
@@ -2618,7 +2768,7 @@ def run_mc(script: CompiledScript,
         else:
             S_anti = _simulate_gbm(ts, n, N_pairs, dt, sq_dt, underlyings,
                                     r_eff, L, Z, _sim_spot_mult, vol_add, r_path_anti, Z_r_anti,
-                                    vol_out=vol_anti)
+                                    vol_out=vol_anti, step_vols=step_vols)
         S_anti = _apply_delayed_bump(S_anti)
         br_min_a, br_max_a = _bridge_extrema(
             S_anti, vol_anti, dt, rng, corr, substeps=refinement,
@@ -2737,6 +2887,9 @@ def run_mc(script: CompiledScript,
         "barrier_monitoring": barrier_monitoring,
         "barrier_monitoring_note": bridge_note(n, corr, refinement) if use_bridge else None,
         "barrier_monitoring_details": bridge_details,
+        **({"local_vol_wings": local_vol_wings} if local_vol_wings else {}),
+        **({"lsv_frozen_leverage": True} if frozen_lsv else {}),
+        **({"lsv_limits": lsv_limits} if lsv_limits else {}),
         # Publish the actual distinct contractual fixings used by each window.
         "constatation_windows": _window_report(script, ts, dt) or None,
     }
@@ -3219,6 +3372,8 @@ def _run_analysis(script, underlyings, corr_matrix, r, T_max, N, model, seed,
                                   'normal': 'At-or-above-par nominal payoff without STOP',
                                   'autocall': 'Explicit PayScript STOP',
                                   'percentiles': 'Discounted total cash flows at valuation value date'})
+    if display_limit and model == 'localvol' and len(underlyings) == 1:
+        result['local_vol_trace'] = details.get('local_vol_trace')
     return result
 
 
@@ -3387,11 +3542,14 @@ def _shift_events_for_mtf(events: list[CompiledEvent], t0: float,
     return shifted
 
 
-def _mtf_past_step_map(script: CompiledScript, step_k: int, dt=1.0 / SY) -> dict[int, list]:
+def _mtf_past_step_map(script: CompiledScript, step_k: int, dt=1.0 / SY, *, at_maturity=False) -> dict[int, list]:
     """AT events the outer scenario has already resolved by the mark date, keyed
     by weekly step. Complement of _shift_events_for_mtf by construction — same
     `max(1, round(d * SY)) <= step_k` test on both sides, one written once."""
-    past, _, _ = _event_schedule(script.events, step_k, dt, horizon=_time_at(dt, step_k), date_tolerance=1e-12)
+    # The in-life calendar is rounded to six decimals, while its horizon is
+    # exact. Only at maturity use the same tolerance as the initial pricer.
+    tolerance = 1e-6 if at_maturity else 1e-12
+    past, _, _ = _event_schedule(script.events, step_k, dt, horizon=_time_at(dt, step_k), date_tolerance=tolerance)
     return past
 
 
@@ -3413,10 +3571,11 @@ def _mtf_residual_script(script: CompiledScript, t0: float, T_max: float) -> tup
     return residual, step_map, mat_events, ts_eff
 
 
-def _exact_mtf_residual(script, t0, horizon):
+def _exact_mtf_residual(script, t0, horizon, intervals=None):
     residual = replace(script, events=_shift_events_for_mtf(script.events, t0, exact=True),
                        strike_fix_dates=[d-t0 for d in (script.strike_fix_dates or []) if d > t0+1e-12] or None)
-    ts, dt = _simulation_axis(horizon-t0, residual)
+    ts, dt = (_simulation_axis(horizon-t0, residual) if intervals is None
+              else (len(intervals), intervals))
     schedule, maturity, _ = _event_schedule(residual.events, ts, dt, horizon=horizon-t0)
     return residual, schedule, maturity, ts, dt
 
@@ -3512,7 +3671,7 @@ def _scenario_realise(etat: dict | None, i: int) -> dict | None:
 
 
 def _simulate_mtf_outer(underlyings, corr_matrix, r: float, mtm_dates: list[float],
-                         N: int, seed: int, spot_mult=None, *, time_steps=None) -> np.ndarray:
+                         N: int, seed: int, spot_mult=None, *, time_steps=None, step_vols=None) -> np.ndarray:
     """Outer scenario generator: N correlated GBM paths from t=0 to the last MTM date.
 
     Returns the spot tensor only. It used to also return running worst-of-min /
@@ -3527,12 +3686,77 @@ def _simulate_mtf_outer(underlyings, corr_matrix, r: float, mtm_dates: list[floa
     L = cholesky(corr_matrix, n)
     Z = default_rng(seed).standard_normal((ts, n, N))
     return _simulate_gbm(ts, n, N, dt, sq_dt, underlyings, r, L, Z,
-                         spot_mult=spot_mult)
+                         spot_mult=spot_mult, step_vols=step_vols)
+
+
+MTF_PRICER_MODELS = frozenset(('constant', 'heston', 'sabr', 'localvol', 'lsv'))
+
+
+def mtf_simulation_axis(script, maturity, marks, aligned_grid):
+    horizon = maturity if aligned_grid else max(maturity, marks[-1])
+    return _simulation_axis(horizon, script, [maturity, *marks])
+
+
+def _mtf_model_paths(model, underlyings, r, L, intervals, count, rng, spot,
+                     local_grid=None, factor_init=None, factor_out=None, step_vols=None):
+    steps, assets = len(intervals), len(underlyings)
+    sqrt_dt = np.sqrt(intervals)
+    shocks = rng.standard_normal((steps, assets, count))
+    args = (steps, assets, count, intervals, sqrt_dt, underlyings, r, L, shocks)
+    if model in ('heston', 'sabr'):
+        simulate = _simulate_heston if model == 'heston' else _simulate_sabr
+        return simulate(*args, rng.standard_normal(shocks.shape), spot,
+                        factor_init=factor_init, factor_out=factor_out)
+    if model == 'localvol':
+        return _simulate_lv(*args, *local_grid, spot)
+    if model == 'lsv':
+        return _simulate_lsv(*args, rng.standard_normal(shocks.shape), *local_grid[:4], spot,
+                             leverage_grids=local_grid[4], factor_init=factor_init, factor_out=factor_out)
+    return _simulate_gbm(*args, spot, step_vols=step_vols)
+
+
+def _mtf_outer_state(model, underlyings, corr, r, marks, count, seed, spot, intervals, step_vols=None,
+                     *, wing_diagnostics=None, lsv_leverage=None):
+    if model == 'constant':
+        return (_simulate_mtf_outer(underlyings, corr, r, marks, count, seed,
+                                    spot_mult=spot, time_steps=intervals, step_vols=step_vols), None, None)
+    steps, assets = len(intervals), len(underlyings)
+    factors = None
+    local_grid = None
+    if model in ('heston', 'sabr', 'lsv'):
+        factors = np.empty((steps + 1, assets, count))
+    if model in ('localvol', 'lsv'):
+        local_grid = _build_lv_grid(underlyings, _build_rate_term([], steps, intervals, r), steps, intervals,
+                                    allow_ssvi_wings=True, wing_diagnostics=wing_diagnostics)
+    if model == 'lsv':
+        if lsv_leverage is None or any(grid.shape != (steps, local_grid[1]) for grid in lsv_leverage):
+            raise ValueError("Le levier LSV doit être qualifié sur la grille du Mark to Future.")
+        local_grid += (lsv_leverage,)
+    spots = _mtf_model_paths(model, underlyings, r, cholesky(corr, assets), intervals,
+                             count, default_rng(seed), spot, local_grid, factor_out=factors)
+    return spots, factors, local_grid
+
+
+def _mtf_inner_paths(model, underlyings, r, L, dt, n_inner, seed, k, start, end,
+                     spot, factors, local_grid, step, step_vols=None):
+    chunk = slice(start, end)
+    initial_spot = np.repeat(spot[:, chunk], n_inner, axis=1)
+    initial_factor = None if factors is None else np.repeat(factors[step, :, chunk], n_inner, axis=1)
+    if local_grid is not None:
+        grids, nK, lo, hi = local_grid[:4]
+        leverage = local_grid[4] if model == 'lsv' else None
+        local_grid = ([grid[step:] for grid in grids], nK, lo, hi)
+        if leverage is not None:
+            local_grid += (tuple(grid[step:] for grid in leverage),)
+    rng = default_rng(seed + 1_000_003 * (k + 1) + start)
+    return _mtf_model_paths(model, underlyings, r, L, dt, (end-start)*n_inner, rng,
+                            initial_spot, local_grid, initial_factor,
+                            step_vols=None if step_vols is None else step_vols[step:step+len(dt)])
 
 
 def _mtf_reject_unsupported(model: str, barrier_monitoring: str,
                             yield_curve, sigma_r: float,
-                            underlyings=None) -> None:
+                            underlyings=None, *, aligned_grid=False) -> None:
     """Capabilities Mark-to-Future does not carry. Shared by the fan and the
     drill-down so the two can never disagree on what they accept — a drill-down
     that priced a scenario the fan refuses would explain a number nobody sees."""
@@ -3558,11 +3782,15 @@ def _mtf_reject_unsupported(model: str, barrier_monitoring: str,
             "l'année 1 donnerait un éventail cohérent en apparence mais faux. "
             "Repassez en dividende plat pour cette analyse."
         )
-    if model == "lsv":
+    supported = MTF_PRICER_MODELS if aligned_grid else {'constant'}
+    if model not in supported:
+        if aligned_grid:
+            raise ValueError("Modèle indisponible en Mark-to-Future. Le levier LSV doit être qualifié avant activation.")
         raise ValueError(
-            "Local-Stochastic Vol n'est pas encore supporté en Mark-to-Future "
-            "(le rebucketing par pas de temps ne s'intègre pas encore à la boucle "
-            "chunkée). Choisissez un autre modèle (Heston, SABR, Local Vol, Constant)."
+            "Le Mark-to-Future et son drill-down sont disponibles uniquement en "
+            "Constant (GBM). Les scénarios extérieurs et le repricing intérieur "
+            "doivent utiliser la même dynamique ; Heston, SABR, Local Vol et LSV "
+            "ne sont pas encore pris en charge de bout en bout."
         )
     if barrier_monitoring == "continuous":
         raise ValueError(
@@ -3626,6 +3854,102 @@ def _mtf_date_stats(pvs: np.ndarray, p0: float) -> dict:
     }
 
 
+def _mtf_payment_args(script, event_map, maturity, payment, intervals, r, *, collect=False):
+    """The same flat-rate payment convention for outer replay, inner PV and detail."""
+    pay_map = {}
+    for step, occurrences in event_map.items():
+        dates = []
+        for occurrence in occurrences:
+            # _event_schedule emits single-date occurrences, preserving payment dates.
+            observed = occurrence.dates[0]
+            paid = occurrence.payment_dates[0] if occurrence.payment_dates else observed
+            if payment is not None and abs(observed - maturity) < 1e-6:
+                paid = payment
+            if not math.isfinite(paid) or paid < observed - 1e-6:
+                raise ValueError('Date de paiement invalide ou antérieure à la constatation.')
+            dates.append(paid)
+        pay_map[step] = dates
+    final = payment if payment is not None else maturity
+    if not math.isfinite(final) or final < maturity - 1e-6:
+        raise ValueError('Le paiement final doit être à la maturité ou après.')
+    return dict(pay_map=pay_map, pay_df={p: math.exp(-r*p) for row in pay_map.values() for p in row},
+                mat_pay_t=final, mat_pay_df=math.exp(-r*final), flows_at_payment=collect)
+
+
+def mtf_date_grid(script, maturity, n_dates, payment=None, dates=None):
+    """Keep the legacy base grid and expose the final settlement tail when needed."""
+    if dates is not None:
+        grid = [float(d) for d in dates]
+    else:
+        grid = build_mtf_dates(maturity, n_dates)
+        last = max([maturity, payment if payment is not None else maturity,
+                    *[p for ev in script.events for p in (ev.payment_dates or [])]])
+        if last > maturity + 1e-6:
+            grid = sorted(set([*grid, maturity, (maturity+last)/2, last]))
+    if (not grid or any(not math.isfinite(d) or d <= 0 for d in grid)
+            or any(a >= b for a,b in zip(grid,grid[1:])) or len(grid) > 400):
+        raise ValueError('Dates de valorisation positives, finies et strictement croissantes requises (400 maximum).')
+    return grid
+
+
+def _mtf_replay(script, paths, step, intervals, maturity, payment, r, user_params,
+                underlyings, state=None, initial_flows=None):
+    """Replay observations once; a STOP stops optionality, never its unpaid claims."""
+    inherited = dict(state or {})
+    inherited.pop('spot_mult', None)
+    inherited.pop('spot_base', None)
+    fix = inherited.pop('fix_state_init', None)
+    matured = _time_at(intervals, step) >= maturity-1e-9
+    event_map = _mtf_past_step_map(script, step, intervals, at_maturity=matured)
+    observed, _, _, levels = _constater(script, paths[:step+1], step, len(underlyings), paths.shape[2],
+                                       None, None, fix, event_map, dt=intervals)
+    states, flows, labels, observations = [], [], [], []
+    _eval_paths(script, observed, step, len(underlyings), paths.shape[2], intervals, r, user_params,
+        event_map, [ev for ev in script.events if ev.type == 'AT_MATURITY'] if matured else [], {},
+        record=False, state_out=states, flows_out=flows, flow_labels_out=labels,
+        flow_observations_out=observations, lvl_map=levels,
+        rank_map=_rangs_observation(event_map,intervals),
+        **_mtf_payment_args(script,event_map,maturity,payment,intervals,r,collect=True),
+        **inherited, reference_spots=_basket_references(underlyings))
+    ledger = [[dict(observation_t=o, payment_t=p, amount=v, lbl=label)
+               for (p,v),o,label in zip(row,obs,ls)] for row,obs,ls in zip(flows,observations,labels)]
+    for row, dated in zip(ledger,flows):
+        for original in initial_flows or []:
+            row.append(dict(original))
+            dated.append((original['payment_t'], original['amount']))
+    alive = np.array([not s['done'] and not matured for s in states])
+    return observed, states, flows, ledger, alive
+
+
+def _mtf_claim_rows(ledger, mark, r):
+    """Known unpaid cash flows are deterministic conditional on the outer history."""
+    return [dict(t=f['payment_t']-mark, t_abs=f['payment_t'], observation_t=f['observation_t'],
+                 payment_t=f['payment_t'], lbl=f['lbl'], status='ACQUIRED_UNPAID', proba=100.,
+                 e_amount=f['amount']*100, amount_if_fires=f['amount']*100,
+                 df=math.exp(-r*(f['payment_t']-mark)),
+                 pv=f['amount']*100*math.exp(-r*(f['payment_t']-mark)))
+            for f in ledger if f['payment_t'] > mark+1e-9 and f['amount'] != 0]
+
+
+def _mtf_known_only_row(flows,mark,r,n_outer,main_price):
+    claims = _mtf_claim_rows(flows,mark,r)
+    pv = sum(f['pv'] for f in claims)
+    values = np.full(n_outer,pv)
+    pending = bool(claims)
+    return dict(t=mark,pvs=values.tolist(),pvs_alive=[],alive=[False]*n_outer,n_alive=0,
+        outstanding=[pending]*n_outer,pending_settlement=[pending]*n_outer,
+        n_outstanding=n_outer if pending else 0,n_pending_settlement=n_outer if pending else 0,
+        n_settled=0 if pending else n_outer,terminated_pct=100.,n_outer=n_outer,
+        pending_pvs=values.tolist(),pvs_outstanding=values.tolist() if pending else [],
+        stats_all=_mtf_date_stats(values,main_price),
+        stats_outstanding=_mtf_date_stats(values,main_price) if pending else None,
+        stats=None,thin=True,thin_all=n_outer<MTF_MIN_ALIVE,
+        thin_outstanding=n_outer<MTF_MIN_ALIVE or not pending,
+        realized_flows=[[(f['payment_t'],f['amount']) for f in flows] for _ in range(n_outer)],
+        settled_flows=[[f for f in flows if f['payment_t'] <= mark+1e-9] for _ in range(n_outer)],
+        unsettled_flows=[claims for _ in range(n_outer)])
+
+
 def run_mark_to_future(script: CompiledScript,
                         underlyings,
                         corr_matrix,
@@ -3652,7 +3976,8 @@ def run_mark_to_future(script: CompiledScript,
                         outer_times: list[float] | None = None,
                         credit_exposure: bool = False,
                         maturity_payment_t: float | None = None,
-                        progress=None) -> dict:
+                        progress=None, initial_flows=None, initial_terminated=False,
+                        aligned_grid=False, gbm_atm_curve=False, lsv_leverage=None) -> dict:
     """Run the full nested Monte Carlo Mark-to-Future analysis (see module section
     docstring above). main_price is the t=0 fair price (% of notional); it is only
     used as the threshold for the P(MTM >= P0) diagnostic.
@@ -3667,7 +3992,11 @@ def run_mark_to_future(script: CompiledScript,
     would carry the curve and the whole fan would not, including the P0 threshold
     the fan is compared against."""
     _mtf_reject_unsupported(model, barrier_monitoring, yield_curve, sigma_r,
-                            underlyings)
+                            underlyings, aligned_grid=aligned_grid)
+    if aligned_grid:
+        validate_model(model, underlyings)
+        if outer_paths is not None or outer_times is not None:
+            raise ValueError("La grille du Pricer exige ses propres scénarios extérieurs.")
     t_run0 = time.perf_counter()
     user_params = user_params or {}
     n = len(underlyings)
@@ -3675,18 +4004,19 @@ def run_mark_to_future(script: CompiledScript,
     # evenly-spaced grid. The PRIIPs intermediate horizons use it: they need
     # the value at 1 year and at RHP/2 specifically, and that value is what
     # this function already computes correctly for a recallable product.
-    mtm_dates = ([float(d) for d in mtm_dates]
-                 if mtm_dates else build_mtf_dates(T_max, n_dates))
-    if (not mtm_dates or any(not math.isfinite(d) or d <= 0 for d in mtm_dates)
-            or any(a >= b for a, b in zip(mtm_dates, mtm_dates[1:]))
-            or (not credit_exposure and mtm_dates[-1] >= T_max)):
-        raise ValueError("Dates de valorisation positives, croissantes et antérieures à la maturité requises.")
+    mtm_dates = mtf_date_grid(script,T_max,n_dates,maturity_payment_t,mtm_dates)
+    if initial_terminated:
+        return dict(main_price=main_price,n_outer=n_outer,n_inner=n_inner,n_dates=len(mtm_dates),
+            mtm_dates=mtm_dates,settlement_convention='AFTER_PAYMENTS_DUE_ON_MARK_DATE',
+            terminated_at_origin=True,elapsed_ms=(time.perf_counter()-t_run0)*1000,
+            results=[_mtf_known_only_row(initial_flows or [],t,r,n_outer,main_price) for t in mtm_dates])
     outer_horizon = max(T_max, mtm_dates[-1])
-    budget_steps, _ = _simulation_axis(outer_horizon, script, mtm_dates)
+    budget_steps, _ = mtf_simulation_axis(script, T_max, mtm_dates, aligned_grid)
     if outer_times is not None:
         budget_steps = max(budget_steps, len(outer_times)-1)
     _peak_paths = max(n_outer, min(MTF_MAX_BATCH, n_outer * n_inner))
-    _total_paths = n_outer + n_outer * n_inner * len(mtm_dates)
+    repriced_dates = (sum(t < T_max - 1e-9 for t in mtm_dates) if aligned_grid else len(mtm_dates))
+    _total_paths = n_outer + n_outer * n_inner * repriced_dates
     ensure_budget(
         estimate_mc_batch(
             operation="mark_to_future",
@@ -3721,37 +4051,27 @@ def run_mark_to_future(script: CompiledScript,
     fix_hist = _state.pop("fix_state_init", None)
     outer_horizon = max(T_max, mtm_dates[-1])
     if outer_times is None:
-        outer_ts, outer_dt = _simulation_axis(outer_horizon, script, mtm_dates)
+        # Maturity is contractual even when the requested marks omit it.
+        # Replay must execute its payoff before carrying the settlement claim.
+        outer_ts, outer_dt = mtf_simulation_axis(script, T_max, mtm_dates, aligned_grid)
         outer_dt = _durations(outer_dt, outer_ts)
     else:
         outer_dt = np.diff(outer_times)
         outer_ts = len(outer_dt)
-        for d in [*mtm_dates, *[d for ev in script.events for d in ev.dates if d <= outer_horizon]]:
+        for d in [T_max, *mtm_dates, *[d for ev in script.events for d in ev.dates if d <= outer_horizon]]:
             if abs(_time_at(outer_dt, _step_at(outer_dt, d))-d) > 1e-8:
                 raise ValueError("Scénarios extérieurs sans date contractuelle exacte.")
-    S_outer = outer_paths if outer_paths is not None else _simulate_mtf_outer(
-        underlyings, corr_matrix, r, mtm_dates, n_outer, seed, spot_mult=_spot0, time_steps=outer_dt)
+    step_vols = _atm_step_vols(underlyings, outer_dt, outer_ts) if gbm_atm_curve else None
+    local_vol_wings = []
+    if outer_paths is None:
+        S_outer, factors, local_grid = _mtf_outer_state(
+            model, underlyings, corr_matrix, r, mtm_dates, n_outer, seed, _spot0, outer_dt, step_vols,
+            wing_diagnostics=local_vol_wings, lsv_leverage=lsv_leverage)
+    else:
+        S_outer, factors, local_grid = outer_paths, None, None
     if S_outer.shape != (outer_ts+1, n, n_outer):
         raise ValueError("Dimensions des scénarios extérieurs incohérentes")
 
-    def credit_payments(contract, event_map, maturity, payment, intervals):
-        pay_map = {}
-        for ev in contract.events:
-            if ev.type == "AT_MATURITY":
-                continue
-            for idx, d in enumerate(ev.dates):
-                step = max(1, _step_at(intervals, d))
-                if step not in event_map:
-                    continue
-                p = (ev.payment_dates[idx] if ev.payment_dates and idx < len(ev.payment_dates) else d)
-                if payment is not None and abs(d - maturity) < 1e-6:
-                    p = payment
-                pay_map.setdefault(step, []).append(p)
-        return pay_map, {p: math.exp(-r * p) for rows in pay_map.values() for p in rows}
-
-    use_heston = model == "heston"
-    use_lv     = model == "localvol"
-    use_sabr   = model == "sabr"
     L = cholesky(corr_matrix, n)
     outer_per_chunk = max(1, MTF_MAX_BATCH // n_inner)
 
@@ -3761,63 +4081,14 @@ def run_mark_to_future(script: CompiledScript,
             progress(k, len(mtm_dates))
         step_k = _step_at(outer_dt, min(t0, T_max))
         past_dt = outer_dt[:step_k]
-        credit_matured = credit_exposure and t0 >= T_max-1e-12
-        if credit_matured:
-            step_k = max(1, _step_at(outer_dt, T_max))
-        spot_k = S_outer[step_k]                # (n, N_outer) — spot at this MTM date
-
-        # ── Replay each outer scenario from inception to the mark date ──────
-        # Without this the inner repricing restarted the contract from scratch:
-        # a product already recalled kept being marked as alive (an autocall
-        # certain to be called at its first observation stayed near 107% of
-        # notional for the rest of its original life, on a fan so degenerate
-        # that min and max coincided across every scenario). Coupon memory, the
-        # observation counter and realized extrema were lost the same way.
-        #
-        # The past events are evaluated on the outer paths themselves, with the
-        # maturity block withheld — the product has not matured, it has merely
-        # reached t0 — and the resulting per-scenario state is fed straight
-        # into the inner simulation.
-        past_step_map = _mtf_past_step_map(script, step_k, past_dt)
-
-        outer_states: list[dict] = []
-        # Dated flows of what each scenario has ALREADY been paid before the
-        # mark date. `realized_cf` is their present value, which is enough to
-        # report cash but not to work out the return the investor earned on
-        # it — that needs the dates, and a scenario recalled before this
-        # horizon has a shorter life than the horizon itself.
-        outer_flows: list[list] = []
-        _S_past, _, _, _lvl_past = _constater(
-            script, S_outer[:step_k + 1], step_k, n, n_outer, None, None,
-            fix_hist, past_step_map, dt=past_dt)
-        credit_past_args = {}
-        if credit_exposure:
-            pm, pdf = credit_payments(script, past_step_map, T_max, maturity_payment_t, past_dt)
-            final_pay = maturity_payment_t if maturity_payment_t is not None else T_max
-            credit_past_args = dict(pay_map=pm, pay_df=pdf, mat_pay_t=final_pay,
-                                    mat_pay_df=math.exp(-r * final_pay), flows_at_payment=True)
-        _eval_paths(script, _S_past, step_k, n, n_outer, past_dt, r,
-                    user_params, past_step_map,
-                    [ev for ev in script.events if ev.type == "AT_MATURITY"] if credit_matured else [], {}, record=False,
-                    state_out=outer_states, flows_out=outer_flows,
-                    lvl_map=_lvl_past,
-                    rank_map=_rangs_observation(past_step_map, past_dt), **credit_past_args, **_state, reference_spots=_basket_references(underlyings))
-
-        alive = np.array([not st["done"] for st in outer_states])
-        if credit_matured:
-            alive[:] = False
-        # Cash already paid out, expressed at t0 (the replay discounts to t=0).
-        # There is deliberately no "cash already paid" series here any more.
-        # It only ever described the RECALLED scenarios, and those now leave
-        # the sample entirely — so it documented rows nobody looks at, while
-        # inviting the reader to add it to a mark it does not belong to. It
-        # also carried an exp(r*t0) factor, i.e. the coupon reinvested at the
-        # risk-free rate, which a mark-to-future has no business assuming.
-        #
-        # The dated flows survive as `realized_flows` because the PRIIPs
-        # horizons genuinely need them: there the question is "what did the
-        # investor receive and when", and an internal rate of return cannot be
-        # computed without the dates. Different question, different screen.
+        matured = t0 >= T_max-1e-9
+        spot_k = S_outer[step_k]
+        _S_past, outer_states, outer_flows, ledger, alive = _mtf_replay(
+            script,S_outer,step_k,past_dt,T_max,maturity_payment_t,r,user_params,
+            underlyings,state,initial_flows)
+        claim_rows = [_mtf_claim_rows(row,t0,r) for row in ledger]
+        pending_pvs = np.array([sum(f['pv'] for f in row) for row in claim_rows])
+        pending = np.array([bool(row) for row in claim_rows])
         wof_min_k = np.array([st["wof_min"] for st in outer_states])
         bof_max_k = np.array([st["bof_max"] for st in outer_states])
         index_k = np.array([st["index"] for st in outer_states], dtype=np.int64)
@@ -3834,7 +4105,7 @@ def run_mark_to_future(script: CompiledScript,
         # partir la vol réalisée intérieure d'un rendement fantôme de -log(S0).
         wof0_k = _S_past[step_k].min(axis=0)    # (N_outer,)
 
-        if credit_matured:
+        if matured:
             scenario_pvs = np.zeros(n_outer)
         else:
             # has_stop and the fixing window used to be dropped when rebuilding the
@@ -3850,22 +4121,10 @@ def run_mark_to_future(script: CompiledScript,
             # résiduel ne simule que les relevés à venir.
             releves_k = _mtf_releves_realises(script, _S_past, step_k, outer_dt)
             residual_script, step_map, mat_events, ts_eff, dt = _exact_mtf_residual(
-                script, t0, T_max)
-            sq_dt = np.sqrt(dt)
-            credit_inner_args = {}
-            if credit_exposure:
-                final_pay = (maturity_payment_t if maturity_payment_t is not None else T_max) - t0
-                pm, pdf = credit_payments(residual_script, step_map, T_max - t0, final_pay, dt)
-                credit_inner_args = dict(pay_map=pm, pay_df=pdf, mat_pay_t=final_pay,
-                                         mat_pay_df=math.exp(-r * final_pay))
-
-            lv_grids = nK = lkm = lkx = None
-            if use_lv:
-                # Mark-to-Future is flat-rate throughout (outer, inner and
-                # discounting) — no caller passes it a curve. Wiring it to one is a
-                # new capability, not a fix, and is out of this change's scope.
-                lv_grids, nK, lkm, lkx = _build_lv_grid(
-                    underlyings, _build_rate_term([], ts_eff, dt, r), ts_eff, dt)
+                script, t0, T_max, outer_dt[step_k:] if aligned_grid else None)
+            dt = _durations(dt, ts_eff)
+            final_pay = (maturity_payment_t if maturity_payment_t is not None else T_max)-t0
+            credit_inner_args = _mtf_payment_args(residual_script,step_map,T_max-t0,final_pay,dt,r)
 
             scenario_pvs = np.empty(n_outer, dtype=np.float64)
 
@@ -3877,25 +4136,8 @@ def run_mark_to_future(script: CompiledScript,
                 N_chunk = n_chunk * n_inner
 
                 sl = slice(start, end)
-                spot_chunk = np.repeat(spot_k[:, sl], n_inner, axis=1)             # (n, N_chunk)
-
-                rng = default_rng(seed + 1_000_003 * (k + 1) + start)
-                Z = rng.standard_normal((ts_eff, n, N_chunk))
-
-                if use_heston:
-                    Zv = rng.standard_normal((ts_eff, n, N_chunk))
-                    S_in = _simulate_heston(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L,
-                                             Z, Zv, spot_chunk)
-                elif use_lv:
-                    S_in = _simulate_lv(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L, Z,
-                                         lv_grids, nK, lkm, lkx, spot_chunk)
-                elif use_sabr:
-                    Za = rng.standard_normal((ts_eff, n, N_chunk))
-                    S_in = _simulate_sabr(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L,
-                                           Z, Za, spot_chunk)
-                else:
-                    S_in = _simulate_gbm(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L,
-                                          Z, spot_chunk)
+                S_in = _mtf_inner_paths(model, underlyings, r, L, dt, n_inner, seed, k,
+                                       start, end, spot_k, factors, local_grid, step_k, step_vols)
 
                 # Chaque scenario exterieur arrive au mark avec SA part de fenetre
                 # de depart deja fixee, et SES releves deja constates des fenetres a
@@ -3929,43 +4171,34 @@ def run_mark_to_future(script: CompiledScript,
                 # Each outer scenario's MTF value = mean of its N_inner inner PVs (% notional).
                 scenario_pvs[start:end] = np.array(payoffs).reshape(n_chunk, n_inner).mean(axis=1) * 100
 
-        # A terminated contract has no residual value to mark, so it LEAVES the
-        # sample — it is not marked at zero and not shown at its redemption
-        # value either. Zeroing it looked defensible and was not: the recalled
-        # scenarios piled up at 0 and took over the bottom of the distribution,
-        # so the published P05 was made of products that had just paid ~108%
-        # and finished, while the genuinely worst outcome — a live product
-        # deep under its barrier, worth 40-50% — sat in the middle of the fan.
-        # The chart hid the risk it exists to show, and the median printed 0%
-        # from the date more than half the paths had been called.
-        #
-        # Every figure below is therefore CONDITIONAL on the contract still
-        # being alive at t0. The survival rate is published beside it: read
-        # apart, a conditional percentile says nothing about the book.
-        scenario_pvs = np.where(alive, scenario_pvs, 0.0)
-        if credit_exposure:
-            # Observation is not settlement: stopped contracts still carry
-            # their unpaid receivables. All scenarios remain in CCR quantiles.
-            scenario_pvs += np.array([
-                sum(cf * 100 * math.exp(-r * (pay - t0))
-                    for pay, cf in flows if pay > t0 + 1e-9)
-                for flows in outer_flows
-            ])
+        scenario_pvs = np.where(alive,scenario_pvs,0.) + pending_pvs
+        outstanding = alive | pending
+        outstanding_pvs = scenario_pvs[outstanding]
         alive_pvs = scenario_pvs[alive]
         n_alive = int(alive.sum())
 
         results.append({
             "t": t0,
-            # Per-scenario marks, 0 on the terminated ones — kept for callers
-            # that pair them with `alive` (the PRIIPs horizons do). The chart
-            # must read `pvs_alive`.
+            # Economic mark in every original scenario, including unpaid claims.
+            # Legacy `stats`/`alive` describe optionality; new views use explicit
+            # stats_all/stats_outstanding and their matching population masks.
             "pvs": [round(float(v), 4) for v in scenario_pvs],
             "pvs_alive": [round(float(v), 4) for v in alive_pvs],
             "terminated_pct": round(float((~alive).mean() * 100), 2),
             "n_alive": n_alive,
             "n_outer": int(n_outer),
-            # One list of (t, montant) per outer scenario: everything paid out
-            # before this mark date, at the dates it was paid.
+            "outstanding": outstanding.tolist(), "pending_settlement": ((~alive)&pending).tolist(),
+            "n_outstanding": int(outstanding.sum()), "n_pending_settlement": int(((~alive)&pending).sum()),
+            "n_settled": int((~outstanding).sum()), "pending_pvs": pending_pvs.tolist(),
+            "pvs_outstanding": outstanding_pvs.tolist(),
+            "stats_all": _mtf_date_stats(scenario_pvs, main_price),
+            "stats_outstanding": _mtf_date_stats(outstanding_pvs,main_price) if outstanding.any() else None,
+            "thin_all": n_outer < MTF_MIN_ALIVE, "thin_outstanding": int(outstanding.sum()) < MTF_MIN_ALIVE,
+            "settled_flows": [[f for f in row if f['payment_t'] <= t0+1e-9] for row in ledger],
+            "unsettled_flows": claim_rows,
+
+            # Fixed flows with payment dates, including future payments. KID/CCR
+            # keep this contract; the UI uses settled_flows/unsettled_flows.
             "realized_flows": outer_flows,
             "alive": [bool(a) for a in alive],
             # Conditional on survival. None only when nothing survives at all —
@@ -3984,8 +4217,10 @@ def run_mark_to_future(script: CompiledScript,
         "main_price": round(main_price, 4),
         "n_outer": n_outer,
         "n_inner": n_inner,
-        "n_dates": n_dates,
+        "n_dates": len(mtm_dates), "mtm_dates": mtm_dates,
+        "settlement_convention": "AFTER_PAYMENTS_DUE_ON_MARK_DATE",
         "results": results,
+        **({"local_vol_wings": local_vol_wings} if local_vol_wings else {}),
         "elapsed_ms": round((time.perf_counter() - t_run0) * 1000, 1),
     }
 
@@ -4020,8 +4255,10 @@ def _mtf_flux_rows(flux_map: dict, n_paths: int, t0: float) -> list[dict]:
     for v in flux_map.values():
         n_fire, tot, pv = v["n"], v["sum"], v["pv"]
         rows.append({
-            "t": round(v["t"], 6),                       # années depuis t0
-            "t_abs": round(t0 + v["t"], 6),              # années depuis aujourd'hui
+            "t": round(v.get('t_pay',v['t']),6),
+            "t_abs": round(t0+v.get('t_pay',v['t']),6),
+            "observation_t": t0+v['t'], "payment_t": t0+v.get('t_pay',v['t']),
+            "status": 'CONDITIONAL',
             "lbl": v["lbl"],
             "proba": round(n_fire / n_paths * 100, 3),   # % des chemins internes
             "e_amount": round(tot / n_paths * 100, 6),   # espérance, % du nominal
@@ -4113,7 +4350,9 @@ def run_mtf_drilldown(script: CompiledScript,
                       mtm_dates: list[float] | None = None,
                       yield_curve=None,
                       sigma_r: float = 0.0,
-                      max_scenarios: int = 12) -> dict:
+                      max_scenarios: int = 12, state=None, maturity_payment_t=None,
+                      initial_flows=None, initial_terminated=False, aligned_grid=False,
+                      gbm_atm_curve=False, lsv_leverage=None) -> dict:
     """Full explain of a handful of outer scenarios at one Mark-to-Future date.
 
     `scenario_ids` are indices into the fan's `pvs` / `alive` arrays. The date
@@ -4123,14 +4362,15 @@ def run_mtf_drilldown(script: CompiledScript,
     mode this whole design exists to prevent, so the grid is echoed back in the
     response for the caller to check against the fan it came from."""
     _mtf_reject_unsupported(model, barrier_monitoring, yield_curve, sigma_r,
-                            underlyings)
+                            underlyings, aligned_grid=aligned_grid)
+    if aligned_grid:
+        validate_model(model, underlyings)
     t_run0 = time.perf_counter()
     user_params = user_params or {}
     n = len(underlyings)
     dt = 1.0 / SY
 
-    grid = ([float(d) for d in mtm_dates] if mtm_dates
-            else build_mtf_dates(T_max, n_dates))
+    grid = mtf_date_grid(script,T_max,n_dates,maturity_payment_t,mtm_dates)
     t0 = float(t0)
     k = next((i for i, d in enumerate(grid) if abs(d - t0) < 1e-6), None)
     if k is None:
@@ -4140,13 +4380,6 @@ def run_mtf_drilldown(script: CompiledScript,
             f"une autre grille produirait un mark voisin mais différent de celui "
             f"affiché. Relancez le Mark-to-Future ou demandez une date de la grille."
         )
-    ts_full, full_dt = _simulation_axis(T_max, script, grid)
-    full_dt = _durations(full_dt, ts_full)
-    step_k = _step_at(full_dt, t0)
-    past_dt = full_dt[:step_k]
-    if step_k < 1:
-        raise ValueError(f"Date de valorisation trop proche de t=0 : {t0}.")
-
     ids = []
     for i in scenario_ids:
         i = int(i)
@@ -4160,6 +4393,33 @@ def run_mtf_drilldown(script: CompiledScript,
         raise ValueError(
             f"{len(ids)} scénarios demandés, {max_scenarios} au maximum — chacun "
             f"rejoue {n_inner} chemins internes et renvoie sa trajectoire complète.")
+    if initial_terminated:
+        row = _mtf_known_only_row(initial_flows or [],t0,r,n_outer,main_price)
+        claims = row['unsettled_flows'][0]
+        settled = row['settled_flows'][0]
+        scenarios = []
+        for i in ids:
+            scenarios.append(dict(id=i,label=(labels[scenario_ids.index(i)] if labels and scenario_ids.index(i)<len(labels) else None),
+                alive=False,outstanding=bool(claims),status='PENDING_SETTLEMENT' if claims else 'SETTLED',
+                mtf=row['pvs'][i],pending_pv=row['pvs'][i],residual_mark=0.,sum_pv=row['pvs'][i],pv_residual=0.,
+                future_flows=claims,unsettled_flows=claims,
+                realized_flows=[dict(t=f['payment_t'],observation_t=f['observation_t'],v=f['amount']*100,lbl=f['lbl']) for f in settled],
+                realized_cash=sum(f['amount']*100 for f in settled),recall_proba=None,expected_life=None,
+                wof_t0=None,spots_t0=[],path=dict(t=[],wof=[],assets=[[] for _ in underlyings]),observations=[],
+                final=dict(stop_t=0.,recalled=True,total_undiscounted=sum(f['amount']*100 for f in initial_flows or []),
+                    pv_at_0=sum(f['amount']*100*math.exp(-r*f['payment_t']) for f in initial_flows or [] if f['payment_t']>0),
+                    flows=[dict(t=f['payment_t'],v=f['amount']*100) for f in initial_flows or []])))
+        return dict(t=t0,k=k,step_k=0,mtm_dates=grid,main_price=main_price,n_outer=n_outer,n_inner=n_inner,
+            T_max=T_max,r=r,n_assets=n,asset_names=[u.get('name','Sous-jacent') for u in underlyings],
+            barriers=[],scenarios=scenarios,terminated_at_origin=True,elapsed_ms=(time.perf_counter()-t_run0)*1000)
+    t0 = grid[k]
+    ts_full, full_dt = mtf_simulation_axis(script, T_max, grid, aligned_grid)
+    full_dt = _durations(full_dt, ts_full)
+    step_k = _step_at(full_dt, min(t0,T_max))
+    past_dt = full_dt[:step_k]
+    if step_k < 1:
+        raise ValueError(f"Date de valorisation trop proche de t=0 : {t0}.")
+
     _outer_per_chunk = max(1, MTF_MAX_BATCH // n_inner)
     _chunk_starts = {(i // _outer_per_chunk) * _outer_per_chunk for i in ids}
     _chunk_paths = [
@@ -4190,55 +4450,62 @@ def run_mtf_drilldown(script: CompiledScript,
     # The fan stops at its last mark date; the drill-down needs the rest of the
     # trajectory to show what this scenario actually ends up paying. Extending
     # the horizon is safe precisely because the prefix is bit-identical.
-    S_full = _simulate_mtf_outer(underlyings, corr_matrix, r, [T_max], n_outer, seed, time_steps=full_dt)
+    step_vols = _atm_step_vols(underlyings, full_dt, ts_full) if gbm_atm_curve else None
+    local_vol_wings = []
+    S_full, factors, local_grid = _mtf_outer_state(
+        model, underlyings, corr_matrix, r, grid, n_outer, seed,
+        (state or {}).get('spot_mult'), full_dt, step_vols, wing_diagnostics=local_vol_wings,
+        lsv_leverage=lsv_leverage)
     S_outer = S_full[:step_k + 1]
 
     # ── Replay to the mark date (same call as the fan) ──────────────
-    outer_states: list[dict] = []
-    outer_flows: list[list] = []
-    _S_past, _, _, _lvl_past = _constater(
-        script, S_outer, step_k, n, n_outer, None, None,
-        None, _mtf_past_step_map(script, step_k, past_dt), dt=past_dt)
-    _eval_paths(script, _S_past, step_k, n, n_outer, past_dt, r, user_params,
-                _mtf_past_step_map(script, step_k, past_dt), [], {}, record=False,
-                state_out=outer_states, flows_out=outer_flows, lvl_map=_lvl_past,
-                rank_map=_rangs_observation(_mtf_past_step_map(script, step_k, past_dt), past_dt), reference_spots=_basket_references(underlyings))
-    alive = np.array([not st["done"] for st in outer_states])
-    fix_state_k, _ = _mtf_realized_fix(script, S_outer, step_k, full_dt)
-    # Mêmes relevés déjà constatés que l'éventail, scénario par scénario.
-    releves_k = _mtf_releves_realises(script, _S_past, step_k, full_dt)
-    residual_script, step_map, mat_events, ts_eff, dt = _exact_mtf_residual(script, t0, T_max)
+    _S_past, outer_states, outer_flows, ledger, alive = _mtf_replay(
+        script,S_full,step_k,past_dt,T_max,maturity_payment_t,r,user_params,underlyings,state,initial_flows)
+    fix_state_k = _fusionner_realise((state or {}).get('fix_state_init'),
+                                    _mtf_realized_fix(script,S_full,step_k,full_dt)[0])
+    releves_k = _mtf_releves_realises(script,_S_past,step_k,full_dt)
+    matured = t0 >= T_max-1e-9
+    if not matured:
+        residual_script, step_map, mat_events, ts_eff, dt = _exact_mtf_residual(
+            script, t0, T_max, full_dt[step_k:] if aligned_grid else None)
+        dt = _durations(dt, ts_eff)
+        final_pay = (maturity_payment_t if maturity_payment_t is not None else T_max)-t0
+        inner_payment_args = _mtf_payment_args(residual_script,step_map,T_max-t0,final_pay,dt,r)
+    else:
+        ts_eff, dt = 0, np.array([])
+        inner_payment_args = {}
 
-    use_heston, use_lv, use_sabr = model == "heston", model == "localvol", model == "sabr"
-    sq_dt = np.sqrt(dt)
     L = cholesky(corr_matrix, n)
     outer_per_chunk = max(1, MTF_MAX_BATCH // n_inner)
-    lv_grids = nK = lkm = lkx = None
-    if use_lv:
-        lv_grids, nK, lkm, lkx = _build_lv_grid(
-            underlyings, _build_rate_term([], ts_eff, dt, r), ts_eff, dt)
 
     # ── Full-script evaluation of each trajectory, out to maturity ──
     # One path, the real script (maturity block included): what this scenario
-    # ends up being worth. This is a single realization along a GBM outer path,
+    # ends up being worth. This is a single realization along an outer path,
     # NOT a price — it is the number the mark is an expectation of, and showing
     # the two side by side is the point of the panel.
-    full_step_map, full_mat, _ = _event_schedule(script.events, ts_full, full_dt, horizon=T_max)
+    contract_steps = _step_at(full_dt,T_max)
+    contract_dt = full_dt[:contract_steps]
+    full_step_map, full_mat, _ = _event_schedule(script.events,contract_steps,contract_dt,horizon=T_max)
+    full_payment_args = _mtf_payment_args(script,full_step_map,T_max,maturity_payment_t,contract_dt,r,collect=True)
+    inherited = dict(state or {})
+    inherited.pop('spot_mult',None); inherited.pop('spot_base',None)
+    inherited_fix = inherited.pop('fix_state_init',None)
 
     out_scen: list[dict] = []
     for i in ids:
-        path_i = np.ascontiguousarray(S_full[:, :, i:i + 1])          # (ts_full+1, n, 1)
+        path_i = np.ascontiguousarray(S_full[:contract_steps+1, :, i:i + 1])          # (ts_full+1, n, 1)
         wof_i = path_i[1:].min(axis=1)[:, 0]                          # (ts_full,)
         flux_full: dict = {}
         stops: list = []
         flows_full: list = []
-        _p_i, _, _, _p_lvl = _constater(script, path_i, ts_full, n, 1, None, None,
-                                        None, full_step_map, dt=full_dt)
+        _p_i, _, _, _p_lvl = _constater(script,path_i,contract_steps,n,1,None,None,
+                                        inherited_fix,full_step_map,dt=contract_dt)
         pay_full, pay_raw = _eval_paths(
-            script, _p_i, ts_full, n, 1, full_dt, r, user_params,
-            full_step_map, full_mat, flux_full, record=True,
-            stop_times_out=stops, flows_out=flows_full, lvl_map=_p_lvl,
-            rank_map=_rangs_observation(full_step_map, full_dt), reference_spots=_basket_references(underlyings))
+            script,_p_i,contract_steps,n,1,contract_dt,r,user_params,
+            full_step_map,full_mat,flux_full,record=True,
+            stop_times_out=stops,flows_out=flows_full,lvl_map=_p_lvl,
+            rank_map=_rangs_observation(full_step_map,contract_dt),
+            **full_payment_args,**inherited,reference_spots=_basket_references(underlyings))
         stop_t = float(stops[0]) if stops else T_max
         stop_step = _step_at(full_dt, stop_t)
         fired: dict[int, list] = {}
@@ -4247,30 +4514,35 @@ def run_mtf_drilldown(script: CompiledScript,
             fired.setdefault(s, []).append(
                 {"lbl": v["lbl"], "v": round(v["sum"] * 100, 6)})
 
+        acquired = _mtf_claim_rows(ledger[i],t0,r)
+        settled = [f for f in ledger[i] if f['payment_t'] <= t0+1e-9]
+        outstanding = bool(alive[i]) or bool(acquired)
         out_scen.append({
             "id": i,
             "label": lab[i],
             "alive": bool(alive[i]),
-            "wof_t0": round(float(S_full[step_k, :, i].min()), 6),
-            "spots_t0": [round(float(v), 6) for v in S_full[step_k, :, i]],
+            "outstanding": outstanding,
+            "status": 'PAYOFF_ACTIVE' if alive[i] else 'PENDING_SETTLEMENT' if acquired else 'SETTLED',
+            "unsettled_flows": acquired, "pending_pv": sum(f['pv'] for f in acquired),
+
+            "wof_t0": round(float(S_full[_step_at(full_dt,t0), :, i].min()), 6),
+            "spots_t0": [round(float(v), 6) for v in S_full[_step_at(full_dt,t0), :, i]],
             # Trajectoire complète (hebdomadaire), t=0 inclus.
             "path": {
                 "t": _times(full_dt, ts_full).tolist(),
                 "wof": [1.0] + [round(float(v), 6) for v in wof_i],
                 "assets": [[round(float(v), 6) for v in S_full[:, a, i]] for a in range(n)],
             },
-            "observations": _mtf_observations(script, wof_i, ts_full, step_k,
+            "observations": _mtf_observations(script, wof_i, contract_steps, step_k,
                                               stop_step, fired, full_dt),
             # Ce qui a DÉJÀ été encaissé avant la date de valorisation.
-            "realized_flows": [
-                {"t": round(t, 6), "v": round(v * 100, 6),
-                 "pv_t0": round(v * math.exp(-r * (t - t0)) * 100, 6)}
-                for t, v in outer_flows[i]],
-            "realized_cash": round(sum(v for _t, v in outer_flows[i]) * 100, 6),
+            "realized_flows": [dict(t=f['payment_t'],observation_t=f['observation_t'],v=f['amount']*100,
+                                     lbl=f['lbl']) for f in settled],
+            "realized_cash": sum(f['amount']*100 for f in settled),
             # Payoff RÉEL de cette trajectoire si on la laisse courir.
             "final": {
                 "stop_t": round(stop_t, 6),
-                "recalled": bool(stop_step < ts_full),
+                "recalled": bool(stop_step < contract_steps),
                 "total_undiscounted": round(float(pay_raw[0]) * 100, 6),
                 "pv_at_0": round(float(pay_full[0]) * 100, 6),
                 "flows": [{"t": round(t, 6), "v": round(v * 100, 6)}
@@ -4285,28 +4557,17 @@ def run_mtf_drilldown(script: CompiledScript,
 
     marks: dict[int, dict] = {}
     for start, members in by_chunk.items():
+        if matured:
+            for i in members:
+                marks[i] = dict(mtf=0.,future_flows=[],sum_pv=0.,recall_proba=None,expected_life=None)
+            continue
+
         end = min(n_outer, start + outer_per_chunk)
         n_chunk = end - start
         N_chunk = n_chunk * n_inner
         sl = slice(start, end)
-        spot_chunk = np.repeat(S_full[step_k][:, sl], n_inner, axis=1)
-        # Same key as run_mark_to_future: seed + 1_000_003*(k+1) + start.
-        rng = default_rng(seed + 1_000_003 * (k + 1) + start)
-        Z = rng.standard_normal((ts_eff, n, N_chunk))
-        if use_heston:
-            Zv = rng.standard_normal((ts_eff, n, N_chunk))
-            S_in = _simulate_heston(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L,
-                                    Z, Zv, spot_chunk)
-        elif use_lv:
-            S_in = _simulate_lv(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L, Z,
-                                lv_grids, nK, lkm, lkx, spot_chunk)
-        elif use_sabr:
-            Za = rng.standard_normal((ts_eff, n, N_chunk))
-            S_in = _simulate_sabr(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L,
-                                  Z, Za, spot_chunk)
-        else:
-            S_in = _simulate_gbm(ts_eff, n, N_chunk, dt, sq_dt, underlyings, r, L,
-                                 Z, spot_chunk)
+        S_in = _mtf_inner_paths(model, underlyings, r, L, dt, n_inner, seed, k,
+                               start, end, S_full[step_k], factors, local_grid, step_k, step_vols)
 
         for i in members:
             j = i - start
@@ -4337,7 +4598,7 @@ def run_mtf_drilldown(script: CompiledScript,
                                     "t": float(outer_states[i]["realvol_t"])},
                 lvl_map=_lvl_i,
                 rank_map=_rangs_observation(step_map, dt),
-             reference_spots=_basket_references(underlyings))
+             **inner_payment_args, reference_spots=_basket_references(underlyings))
             mtf_i = float(np.mean(payoffs)) * 100
             rows = _mtf_flux_rows(flux, n_inner, t0)
             mat_t = T_max-t0
@@ -4352,15 +4613,13 @@ def run_mtf_drilldown(script: CompiledScript,
 
     for sc in out_scen:
         m = marks[sc["id"]]
-        # Un contrat éteint n'a pas de valeur résiduelle à marquer : il sort de
-        # l'échantillon dans l'éventail, et le panneau doit dire la même chose
-        # plutôt que d'exhiber le prix d'un produit qui n'existe plus.
-        sc["mtf"] = m["mtf"] if sc["alive"] else 0.0
-        sc["residual_mark"] = m["mtf"]
-        sc["future_flows"] = m["future_flows"] if sc["alive"] else []
-        sc["sum_pv"] = m["sum_pv"] if sc["alive"] else 0.0
-        sc["recall_proba"] = m["recall_proba"] if sc["alive"] else None
-        sc["expected_life"] = m["expected_life"] if sc["alive"] else None
+        conditional = m['future_flows'] if sc['alive'] else []
+        sc['mtf'] = (m['mtf'] if sc['alive'] else 0.) + sc['pending_pv']
+        sc['residual_mark'] = m['mtf']
+        sc['future_flows'] = sc['unsettled_flows'] + conditional
+        sc['sum_pv'] = sum(f['pv'] for f in sc['future_flows'])
+        sc['recall_proba'] = m['recall_proba'] if sc['alive'] else None
+        sc['expected_life'] = m['expected_life'] if sc['alive'] else None
         # Écart de reconstitution : somme des VA des flux futurs - mark. Nul par
         # construction, publié pour que le tableau soit vérifiable à l'écran.
         sc["pv_residual"] = round(sc["sum_pv"] - sc["mtf"], 9)
@@ -4368,7 +4627,7 @@ def run_mtf_drilldown(script: CompiledScript,
     return {
         "t": t0,
         "k": k,
-        "step_k": step_k,
+        "step_k": _step_at(full_dt,t0),
         "mtm_dates": grid,
         "main_price": round(main_price, 4),
         "n_outer": n_outer,
@@ -4379,6 +4638,7 @@ def run_mtf_drilldown(script: CompiledScript,
         "asset_names": [u.get("name") or f"S{a + 1}" for a, u in enumerate(underlyings)],
         "barriers": _mtf_barriers(script, script_source, user_params),
         "scenarios": out_scen,
+        **({"local_vol_wings": local_vol_wings} if local_vol_wings else {}),
         "elapsed_ms": round((time.perf_counter() - t_run0) * 1000, 1),
     }
 

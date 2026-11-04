@@ -47,7 +47,7 @@
         </div>
         <div class="mc-param-field">
           <label class="label">Date de valorisation
-            <HelpTip text="Date à laquelle on veut la valeur du produit. Laissée vide, ou égale à la constatation initiale, on price à l'émission. Postérieure, le passé est rejoué sur les cours réellement constatés — coupons déjà versés, mémoire accumulée, barrières franchies — et seule la vie restante est simulée. C'est ce qui distingue un mark-to-market d'un prix d'émission." />
+            <HelpTip text="La date du jour est proposée pour un nouveau pricing. Une modification recharge le marché à la date choisie. Après la constatation initiale, les événements passés sont rejoués et seule la vie restante est simulée." />
           </label>
           <input v-model="store.globalParams.valuation_date" type="date" class="input"
                  @change="store.onValuationDateChange()" />

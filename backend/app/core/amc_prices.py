@@ -149,7 +149,8 @@ def _save_series(key, frame, ticker='', *, shared=False, expected=None):
             scale = 100 if is_gbx_ticker(ticker,frame.attrs.get('currency','')) else 1
             for field,adjusted in [('close',True),('price_close',False)]:
                 store_history(ticker,frame[field]*scale,adjusted,
-                    frame.attrs['requested_start'],frame.attrs['requested_end'],transaction=pending)
+                    frame.attrs['requested_start'],frame.attrs['requested_end'],transaction=pending,
+                    full_history=frame.attrs.get('history_scope') == 'MAX_AVAILABLE_REQUESTED')
     return dict(key=_slug(key),ticker=ticker,rows=len(frame),date_min=str(frame.index.min().date()),
                 date_max=str(frame.index.max().date()),currency=frame.attrs['currency'],
                 source=frame.attrs['source'],price_type=frame.attrs['price_type'],unit=frame.attrs['unit'])
@@ -162,13 +163,14 @@ def fetch_prices(key: str, ticker: str, start: str | None = None, end: str | Non
     ticker = ticker.strip().upper()
     from ..services.market_history import _path as shared_path
     expected = market_storage.versions([_logical_price_path(key),shared_path(ticker,True),shared_path(ticker,False)])
-    first = datetime.date.fromisoformat(start) if start else datetime.date(2000,1,1)
+    first = datetime.date.fromisoformat(start) if start else datetime.date(1900,1,1)
     last = datetime.date.fromisoformat(end) if end else business_today()+datetime.timedelta(days=1)
     if first >= last:
         raise ValueError('Période de téléchargement invalide (fin exclusive).')
     instrument = yf.Ticker(ticker)
-    adjusted = instrument.history(start=first.isoformat(),end=last.isoformat(),auto_adjust=True)
-    raw = instrument.history(start=first.isoformat(),end=last.isoformat(),auto_adjust=False)
+    history_range = {'start': first.isoformat()} if start else {'period': 'max'}
+    adjusted = instrument.history(**history_range,end=last.isoformat(),auto_adjust=True)
+    raw = instrument.history(**history_range,end=last.isoformat(),auto_adjust=False)
     if adjusted.empty or raw.empty or 'Close' not in adjusted or 'Close' not in raw:
         raise ValueError('Cours bruts ou ajustés absents ; aucun remplacement.')
     try:
@@ -191,6 +193,10 @@ def fetch_prices(key: str, ticker: str, start: str | None = None, end: str | Non
         raw_price_type='UNADJUSTED_CLOSE',unit='CURRENCY',adjustment_date=business_today().isoformat(),
         requested_start=first.isoformat(),requested_end=(last-datetime.timedelta(days=1)).isoformat(),
         fetched_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+    if not start:
+        adjusted.attrs.update(history_scope='MAX_AVAILABLE_REQUESTED',
+            full_history_requested_end=(last-datetime.timedelta(days=1)).isoformat(),
+            full_history_checked_at=adjusted.attrs['fetched_at'])
     return _save_series(key,adjusted,ticker,shared=True,expected=expected)
 
 

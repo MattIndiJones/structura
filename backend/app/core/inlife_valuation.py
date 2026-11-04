@@ -333,7 +333,7 @@ def _compiler_variante(variant: VariantTerms, p: InLifeProduct,
 
 def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
                    T_elapsed: float, asof: date,
-                   variant: Optional[VariantTerms] = None) -> Residual:
+                   variant: Optional[VariantTerms] = None, *, retain_terminated=False) -> Residual:
     """Rejoue le passé sur cours réels et construit le produit résiduel.
 
     L'historique arrive de l'appelant, en cours NUS : un payoff ne se lit pas
@@ -433,7 +433,7 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
     )
     if replay is None:
         raise ValuationError("Replay impossible — S₀ introuvable dans l'historique")
-    if replay["early_recall"]:
+    if replay["early_recall"] and not retain_terminated:
         # The old wording pointed at "refresh the lifecycle", which stopped
         # being actionable when fixings became governed: a refresh only updates
         # INDICATIVE monitoring data and raises a proposal — resolving the deal
@@ -472,7 +472,7 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
     return _assembler_residuel(
         p, market, underlyings_json, compiled, variant, T_elapsed, state,
         realized_cfs, norm_spots, s0_map, prices, dates_list,
-        user_params, replay, start_idx, r_frac, pre_strike=False)
+        user_params, replay, start_idx, r_frac, pre_strike=False, retain_terminated=retain_terminated)
 
 
 def _assembler_residuel(p: InLifeProduct, market: dict, underlyings_json: list,
@@ -481,7 +481,7 @@ def _assembler_residuel(p: InLifeProduct, market: dict, underlyings_json: list,
                         norm_spots: list, s0_map: dict, prices: dict,
                         dates_list: list, user_params: dict, replay: dict,
                         start_idx: int, r_frac: float, pre_strike: bool,
-                        strike_set_t: Optional[float] = None) -> Residual:
+                        strike_set_t: Optional[float] = None, retain_terminated=False) -> Residual:
     """Monte le produit à pricer une fois le passé connu — ou une fois établi
     qu'il n'y en a pas.
 
@@ -497,6 +497,13 @@ def _assembler_residuel(p: InLifeProduct, market: dict, underlyings_json: list,
     # sous eux que les coupons ont été versés et que le produit n'a pas été
     # rappelé. À partir d'ici on price la vie restante, et une variante peut
     # substituer ses propres termes. Les deux ne se rencontrent jamais.
+    if retain_terminated and (replay['early_recall'] or T_elapsed >= p.tenor-1e-6):
+        return Residual(early_recall=True,T_actual=replay.get('T_actual'),compiled=compiled,
+            residual_script=compiled,state=state,realized_flows=realized_cfs,
+            norm_spots=norm_spots,engine_uls=_engine_underlyings(market,underlyings_json),T_elapsed=T_elapsed,r_frac=r_frac,
+            prices=prices,dates_list=dates_list,user_params=user_params,replay=replay,
+            pricing_script_text=p.script_snapshot,pricing_constats=market.get('constats') or {})
+
     pricing = compiled
     texte_px = p.script_snapshot
     calendrier_px = market.get("constats") or {}

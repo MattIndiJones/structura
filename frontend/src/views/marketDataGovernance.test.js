@@ -35,6 +35,14 @@ const market=q=>({vols:{A:.23456789},div_yields:q==null?{}:{A:q},n_obs:252,
   dividend_profiles:{A:q==null?{ok:false,error:'feed absent'}:{ok:true,yield_declared:q,asof_effective:'2026-08-27'}},
   estimator:{volatility:'RMS_LOG_RETURNS'},corr:{A:{A:1}},tickers:['A']})
 
+it('affiche tous les groupes personnalisés du référentiel dans le catalogue marché', async()=>{
+  fetch.mockResolvedValue(reply([{key:'A',ticker:'A',category:'Banques italiennes',label:'Alpha'},
+    {key:'B',ticker:'B',category:'Indices Asie',label:'Beta'}]))
+  await mount(AdminMarketDataView)
+  expect(state.byCategory.value.map(group=>group.name)).toEqual(['Indices Asie','Banques italiennes'])
+  expect(state.byCategory.value.flatMap(group=>group.items).map(item=>item.ticker).sort()).toEqual(['A','B'])
+})
+
 it('référence, surcharge et valeur exacte survivent au panier RFQ',()=>{
   const row={ticker:'A',sigma:23.456789,q:1}
   recordMarketReference(row,market(.01),'A');row.q=2.00123

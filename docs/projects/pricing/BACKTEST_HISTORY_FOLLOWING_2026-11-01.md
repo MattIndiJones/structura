@@ -1,5 +1,9 @@
 # Backtest historique : début commun et Following explicite
 
+La règle de chargement et le rôle de la date locale décrits ici ont été remplacés
+par [l'acquisition maximale Yahoo du 03/11](YAHOO_MAX_HISTORY_2026-11-03.md).
+Les règles de Following ci-dessous restent applicables.
+
 État local au 01/11/2026. Le backtest principal du Pricer propose désormais le
 premier début commun connu et une convention explicite pour les cours absents.
 Le choix confirmé par Philippe est **10 jours calendaires maximum par défaut**.

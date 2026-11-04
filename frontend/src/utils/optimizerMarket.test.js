@@ -60,12 +60,13 @@ describe('Optimizer market snapshot', () => {
     store.underlyings[0].ticker='TEST';store.underlyings[0].sigma=27
     store.underlyings[0].q=3;store.underlyings[0].dividendCurveEnabled=true;store.underlyings[0].dividendDecay=10
     store.globalParams.T=3;store.globalParams.strike_date='2026-10-08'
+    store.globalParams.valuation_date='2026-10-09'
     store.fundingCurve.enabled=true;store.fundingCurve.mode='flat';store.fundingCurve.level=1.5
     const input=store.optimizerMarketInputs()
     expect(input.underlyings[0].sigma).toBe(.27)
     expect(input.underlyings[0].dividend_curve[1][1]).toBeCloseTo(.027)
     expect(input.funding_spread).toBe(.015)
-    expect(input.as_of).toBe('2026-10-08')
+    expect(input.as_of).toBe('2026-10-09')
     expect(optimizerMarketFromPricer(input).market.underlyings[0].sigma).toBe(.27)
   })
 })

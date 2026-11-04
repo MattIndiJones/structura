@@ -72,7 +72,7 @@ describe('charger un exemple prérempli dans le Pricer', () => {
     expect([store.yieldCurve, store.fundingCurve]).toEqual(curves)
     expect(store.globalParams).toMatchObject({ model: 'local_vol', r: 2.8, N: 12345, nominal: 2500000,
       strike_date: '2026-10-07', value_date: '2026-10-07', maturity_date: prepared.maturityDate,
-      payment_date: prepared.paymentDate, valuation_date: '' })
+      payment_date: prepared.paymentDate, valuation_date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) })
     expect(store.paramOverrides).toEqual({ COUPON: 10, M_AC_BAR: 100, M_KI_BAR: 60 })
     expect(store.buildConstats().STARTDATE).toMatchObject({ date: '2026-10-07' })
     expect(store.buildConstats().OBSERVATIONDATES).toMatchObject({ first_observation_date: '2027-10-07', frequency: '1Y', settlement_lag: 3 })
@@ -950,6 +950,7 @@ describe('les calculs transmettent la session au serveur', () => {
     })
     const store = usePricingStore()
     const initialScript = store.script
+    store.globalParams.valuation_date = '2026-09-14'
     Object.assign(store.paramOverrides, { COUPON: 8, M_AC_BAR: 100, M_KI_BAR: 60 })
     Object.assign(store.constatOverrides, { STARTDATE: '2026-09-14', OBSERVATIONDATES: { first_observation_date: '2027-09-14', end_date: '2029-09-14', frequency: { value: 1, unit: 'Y' } } })
     await store[method]()
@@ -1489,6 +1490,33 @@ describe('la date de valorisation pilote le marché et le moteur', () => {
     expect(store.underlyings[0].q).toBe(3.1303)
     expect(store.marketDataEffectiveDate).toBe('2026-09-11')
     expect(store.result).toBeNull()
+  })
+})
+
+describe('recharger le marché sur les séances de bourse', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it.each(['one', 'all'])('qualifie les séances pour le chargement %s et applique le marché reçu', async mode => {
+    const store = usePricingStore()
+    Object.assign(store.underlyings[0], { name: 'BNP Paribas', ticker: 'BNP.PA', sigma: 30, q: 2 })
+    store.globalParams.valuation_date = ''
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({
+      tickers: ['BNP.PA'], vols: { 'BNP.PA': .24 }, corr: { 'BNP.PA': { 'BNP.PA': 1 } },
+      dividend_profiles: { 'BNP.PA': { ok: true, yield_declared: .045 } },
+      requested_asof: '2026-11-03', asof_effective: '2026-11-02', n_obs: 252,
+    }) }))
+
+    if (mode === 'one') await store.loadYfOne(0)
+    else await store.loadYfAll()
+
+    const request = new URL(fetch.mock.calls[0][0], 'http://localhost')
+    expect(request.pathname).toBe('/api/finance/hist_vol')
+    expect(request.searchParams.get('session_aware')).toBe('true')
+    expect(request.searchParams.get('window_days')).toBe('252')
+    expect(request.searchParams.has('asof')).toBe(false)
+    expect(store.underlyings[0]).toMatchObject({ sigma: 24, q: 4.5, ticker: 'BNP.PA' })
+    expect(store.marketDataEffectiveDate).toBe('2026-11-02')
+    expect(store.yfStatus).not.toContain('⚠')
   })
 })
 

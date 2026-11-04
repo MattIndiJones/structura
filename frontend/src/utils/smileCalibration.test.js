@@ -1,6 +1,6 @@
 import { beforeEach,afterEach,describe,it,expect,vi } from 'vitest'
-import { calibrateUnderlying } from './smileCalibration.js'
-import { makeSurface } from './volSurface.js'
+import { applyHestonCalibration, calibrateUnderlying, explicitHestonCalibration } from './smileCalibration.js'
+import { applyAtmScenario, makeSurface } from './volSurface.js'
 
 const result={parameters:{v0:.09,theta:.1,kappa:1.2,xi:.4,rho_h:-.8},max_price_error_bp:2,max_digital_error_bp:4,method:'Fourier Heston',approximate:true,
   success:true,qualified:true,calibration_evidence:{version:1,server_signature:'server-test-evidence'}}
@@ -63,5 +63,34 @@ describe('surface-driven model parameter synchronization',()=>{
   it('sends the actual long horizon so its exclusions cannot be hidden',async()=>{
     await calibrateUnderlying(underlying(),'heston',15,3)
     expect(JSON.parse(fetch.mock.calls[0][1].body).horizon).toBe(15)
+  })
+  it('proposes an ATM fit and only applies it while the inputs still match', async () => {
+    const u = underlying()
+    u.vol_surface = applyAtmScenario(u.vol_surface, 'flat')
+    const dossier = { model:'heston', heston_fit:{mode:'atm'}, target:u.vol_surface,
+      qualification:{qualified:true}, parameters:result.parameters,
+      context:{rate:.03,dividend:.02,fit_horizon:10},
+      controls:{max_vanilla_error_bp:2,max_digital_error_bp:70} }
+    fetch.mockResolvedValueOnce({ ok:true, json:async()=>({
+      ...result, dossier, calibration_evidence:{...result.calibration_evidence,dossier:structuredClone(dossier)},
+    }) })
+    await calibrateUnderlying(u, 'heston', 3, 3, undefined, { explicit:true })
+    expect(JSON.parse(fetch.mock.calls[0][1].body).heston_fit).toEqual({mode:'atm'})
+    expect(u.kappa).toBe(2)
+    expect(explicitHestonCalibration(u, 3, 3)).toBeNull()
+    expect(applyHestonCalibration(u, 3, 3)).toBe(true)
+    expect(explicitHestonCalibration(u, 3, 3)?.status).toBe('ready')
+    u.vol_surface.atm_nodes[2][1] += .01
+    expect(explicitHestonCalibration(u, 3, 3)).toBeNull()
+  })
+  it('refuses a calibration response that applies a different objective', async () => {
+    const u = underlying()
+    u.vol_surface = applyAtmScenario(u.vol_surface, 'contango')
+    u.heston_fit = {mode:'atm_digital'}
+    fetch.mockResolvedValueOnce({ok:true,json:async()=>({
+      ...result,dossier:{heston_fit:{mode:'atm'}},
+    })})
+    await expect(calibrateUnderlying(u,'heston',3,3,undefined,{explicit:true})).rejects.toThrow(/mode de calibration/)
+    expect(u.kappa).toBe(2)
   })
 })

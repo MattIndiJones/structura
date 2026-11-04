@@ -25,13 +25,16 @@ def clean_series(series):
     return out.where(np.isfinite(out) & (out > 0)).dropna()
 
 
-def store_history(ticker, series, adjusted, requested_start, requested_end, *, transaction=None):
+def store_history(ticker, series, adjusted, requested_start, requested_end, *, transaction=None, full_history=False):
     path = _path(ticker, adjusted)
     frame = market_storage.validate_frame(series.to_frame('close'))
     with (nullcontext(transaction) if transaction else market_storage.transaction()) as pending:
         stored = pending.path(path)
-        if stored.exists() and not adjusted:
+        scope = {}
+        if stored.exists() and not adjusted and not full_history:
             old = market_storage.validate_frame(pd.read_parquet(stored))
+            scope = {key: old.attrs[key] for key in ("history_scope", "full_history_requested_end", "full_history_checked_at")
+                     if key in old.attrs}
             frame = pd.concat([old, frame]).loc[lambda x: ~x.index.duplicated(keep="last")].sort_index()
             requested_start = min(requested_start, old.attrs.get("requested_start", requested_start))
             requested_end = max(requested_end, old.attrs.get("requested_end", requested_end))
@@ -39,11 +42,15 @@ def store_history(ticker, series, adjusted, requested_start, requested_end, *, t
                            price_type="ADJUSTED_CLOSE" if adjusted else "UNADJUSTED_CLOSE",
                            requested_start=requested_start, requested_end=requested_end,
                            fetched_at=datetime.now(timezone.utc).isoformat(), finality="UNVERIFIED_PROVIDER_BAR")
+        if full_history:
+            scope = dict(history_scope="MAX_AVAILABLE_REQUESTED", full_history_requested_end=requested_end,
+                         full_history_checked_at=frame.attrs["fetched_at"])
+        frame.attrs.update(scope)
         pending.parquet(path, frame)
 
 
 @market_storage.consistent_read
-def local_history(ticker, start, end, adjusted):
+def local_history(ticker, start, end, adjusted, *, prefer_full=False):
     """Select a complete local basis before considering an external fetch."""
     candidates = []
     path = market_storage.current_path(_path(ticker, adjusted))
@@ -79,11 +86,13 @@ def local_history(ticker, start, end, adjusted):
         series, source = candidate
         observed = series.loc[(series.index >= pd.Timestamp(start)) & (series.index <= pd.Timestamp(end))]
         if observed.empty:
-            return False, pd.Timestamp.min, 0
+            return False, False, pd.Timestamp.min, 0
         effective = observed.index[-1]
         complete = (source.get('requested_start', start) <= start
                     and market_policy.freshness(effective.date(), end, 'history')['qualified'])
-        return complete, effective, len(observed)
+        maximum_requested = (prefer_full and source.get("history_scope") == "MAX_AVAILABLE_REQUESTED"
+                             and source.get("full_history_requested_end", "") >= end)
+        return maximum_requested, complete, effective, len(observed)
     return max(candidates, key=coverage) if candidates else (None, {})
 
 

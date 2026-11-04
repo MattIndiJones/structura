@@ -4,8 +4,8 @@ import { effectScope, reactive, nextTick } from 'vue'
 import { usePricingStore } from './pricing.js'
 import { useRfqStore } from './rfq.js'
 import { useObservationPreview } from '../composables/useObservationPreview.js'
-import { calibrateUnderlying } from '../utils/smileCalibration.js'
-import { makeSurface } from '../utils/volSurface.js'
+import { calibrateUnderlying, fitAndApplyHeston } from '../utils/smileCalibration.js'
+import { applyAtmScenario, makeSurface } from '../utils/volSurface.js'
 
 const reply=(data,status=200)=>({ok:status>=200 && status<300,status,json:async()=>data})
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r});return {promise,resolve}}
@@ -15,6 +15,22 @@ beforeEach(()=>{setActivePinia(createPinia());localStorage.clear()})
 afterEach(()=>{scope?.stop();scope=null;vi.unstubAllGlobals()})
 const market={vols:{A:.37},tickers:['A'],missing:[],n_obs:252,corr:{A:{A:1}}}
 const dividend={ok:true,yield_declared:.01,pays_dividends:false,dividends:[]}
+
+it('charge le panier une fois à la date du jour puis à la nouvelle date', async () => {
+  const store = usePricingStore()
+  const now = new Date()
+  const today = new Date(now.getTime() - now.getTimezoneOffset()*60000).toISOString().slice(0,10)
+  expect(store.globalParams.valuation_date).toBe(today)
+  store.underlyings[0].ticker = 'A'
+  vi.stubGlobal('fetch', vi.fn(async url => reply(String(url).includes('hist_vol') ? market : dividend)))
+  await Promise.all([store.onUnderlyingSelection(), store.onUnderlyingSelection()])
+  store.globalParams.valuation_date = '2026-09-01'
+  await store.onValuationDateChange()
+  const dates = fetch.mock.calls.filter(([url]) => url.includes('hist_vol'))
+    .map(([url]) => new URL(url, 'http://localhost').searchParams.get('asof'))
+  expect(dates).toEqual([today, '2026-09-01'])
+  expect(store.underlyings[0].sigma).toBe(37)
+})
 
 it.each(['one','all'].flatMap(mode=>['ticker','override','replacement','date','correlation','round_trip'].map(change=>[mode,change])))(
   'le chargement %s ignore une réponse après changement %s',async(mode,change)=>{
@@ -40,6 +56,7 @@ it.each(['one','all'])('le chargement courant %s applique le marché et conserve
   vi.stubGlobal('fetch',vi.fn(async url=>reply(String(url).includes('hist_vol')?market:dividend)))
   await (mode==='one'?store.loadYfOne(0):store.loadYfAll())
   expect(store.underlyings[0]).toMatchObject({sigma:37,q:1,vol_level_source:'realized'})
+  expect(store.underlyings[0]).toMatchObject({v0:13.69,theta:13.69})
   expect(store.yfStatus).toContain('✓')
 })
 
@@ -54,18 +71,75 @@ it('un override pendant la seconde requête dividendes reste conservé',async()=
 const fit={parameters:{v0:.09,theta:.1,kappa:1.2,xi:.4,rho_h:-.8},success:true,qualified:true,
   calibration_evidence:{version:1,server_signature:'server-test-evidence'}}
 const underlying=()=>reactive({ticker:'A',sigma:30,q:2,vol_surface:makeSurface('equity',30),kappa:2})
-it('le Pricer explique un refus de qualification et ne transmet aucun prix',async()=>{
+it('un nouveau pricing Dupire part d’un smile plat à 20 % sans surface renseignée', async () => {
+  const store = usePricingStore()
+  store.script = 'AT MATURITY:\n  PAY 1'
+  Object.assign(store.globalParams, {model:'localvol', strike_date:'2026-11-04', valuation_date:'2026-11-04'})
+  vi.stubGlobal('fetch', vi.fn(async url => reply(url === '/api/price'
+    ? {price:.89} : {ok:true,params:[],constats:[]})))
+  await store.runPricing()
+  const request = JSON.parse(fetch.mock.calls.find(([url])=>url==='/api/price')[1].body)
+  expect(request.model).toBe('localvol')
+  expect(request.underlyings[0]).toMatchObject({sigma:.2, skew:0, curvature:0, vol_surface:null})
+})
+
+it('le Pricer utilise les paramètres affichés sans appeler le solveur Heston',async()=>{
   const store=usePricingStore()
-  store.script='AT MATURITY:\n  PAY 1';store.globalParams.model='heston'
+  store.script='AT MATURITY:\n  PAY 1'
+  Object.assign(store.globalParams, {model:'heston',strike_date:'2026-11-04',valuation_date:'2026-11-04'})
   Object.assign(store.underlyings[0],underlying())
-  vi.stubGlobal('fetch',vi.fn(async url=>reply(url==='/api/volatility/calibrate'
-    ? {...fit,qualified:false,qualification:{reasons:['Écart digitale supérieur à 10 pb.']}}
-    : {ok:true,params:[],constats:[]})))
+  vi.stubGlobal('fetch',vi.fn(async url=>reply(url==='/api/price'
+    ? {price:.89} : {ok:true,params:[],constats:[]})))
   await store.runPricing()
   expect(store.underlyings[0].kappa).toBe(2)
-  expect(store.underlyings[0].smile_calibration.status).toBe('unqualified')
-  expect(store.error).toMatch(/exploratoire.*digitale/)
-  expect(fetch.mock.calls.some(([url])=>url==='/api/price')).toBe(false)
+  expect(fetch.mock.calls.some(([url])=>url==='/api/volatility/calibrate')).toBe(false)
+  const request = JSON.parse(fetch.mock.calls.find(([url])=>url==='/api/price')[1].body)
+  expect(request.underlyings[0]).toMatchObject({v0:.09,theta:.09,kappa:2,smile_parameter_mode:'manual'})
+  expect(store.result._inputs.hestonUncalibrated).toHaveLength(1)
+})
+it.each(['atm_digital', 'atm_smile'])('deux pricings Heston réutilisent le dossier signé %s après réouverture', async mode => {
+  const store = usePricingStore()
+  store.script = 'AT MATURITY:\n  PAY 1'
+  Object.assign(store.globalParams, { model:'heston', T:3, r:3, strike_date:'2026-11-04', valuation_date:'2026-11-04' })
+  const u = store.underlyings[0]
+  Object.assign(u, underlying(), { vol_surface:applyAtmScenario(makeSurface('equity',30),'contango'),
+    heston_fit:{mode} })
+  const dossier = { model:'heston', target:JSON.parse(JSON.stringify(u.vol_surface)),
+    heston_fit:{mode}, context:{ rate:.03, dividend:.02, fit_horizon:10 },
+    qualification:{qualified:true,thresholds_bp:{}}, parameters:fit.parameters,
+    controls:{max_vanilla_error_bp:45,max_digital_error_bp:8} }
+  const evidence = {...fit.calibration_evidence,dossier}
+  vi.stubGlobal('fetch',vi.fn(async url => reply(url === '/api/volatility/calibrate'
+    ? {...fit,dossier,calibration_evidence:evidence}
+    : url === '/api/parse' ? {ok:true,params:[],constats:[]} : {price:.89})))
+
+  const applied = await fitAndApplyHeston(u,3,3,()=>({underlying:u,model:'heston',horizon:3,rate:3}))
+  expect(applied).toBe(true)
+  await store.runPricing()
+  delete u.smile_calibration
+  delete u.heston_fit
+  await store.runPricing()
+
+  const calls = fetch.mock.calls
+  const calibrations = calls.filter(([url])=>url==='/api/volatility/calibrate')
+  expect(calibrations).toHaveLength(1)
+  expect(JSON.parse(calibrations[0][1].body).heston_fit.mode).toBe(mode)
+  const prices = calls.filter(([url])=>url==='/api/price')
+  expect(prices).toHaveLength(2)
+  expect(prices.every(([, options]) => JSON.parse(options.body).underlyings[0]
+    .calibration_evidence.dossier.heston_fit.mode === mode)).toBe(true)
+  expect(store.result.price).toBe(.89)
+  expect(store.result._inputs.underlyings[0].hestonFitUsed).toBe(mode)
+})
+
+it('une mise à jour du niveau de référence préserve la variance Heston saisie', () => {
+  const store=usePricingStore(),u=store.underlyings[0]
+  u.sigma=35
+  expect([u.v0,u.theta]).toEqual([12.25,12.25])
+  u.smile_parameter_mode='manual'
+  u.v0=9
+  u.sigma=40
+  expect([u.v0,u.theta]).toEqual([9,12.25])
 })
 it('une calibration lancée à 3 % ne s’applique pas après passage à 4 %',async()=>{
   const wait=deferred(),u=underlying(),context=reactive({model:'heston',horizon:4,rate:3})
@@ -89,7 +163,7 @@ it.each([true,false])('deux calibrations chevauchées restent indépendantes, an
 })
 it('le Pricer refuse de transmettre un pricing préparé avec une calibration périmée',async()=>{
   const store=usePricingStore(),wait=deferred()
-  store.script='AT MATURITY:\n  PAY 1';store.globalParams.model='heston';store.globalParams.r=3
+  store.script='AT MATURITY:\n  PAY 1';store.globalParams.model='sabr';store.globalParams.r=3
   Object.assign(store.underlyings[0],underlying())
   vi.stubGlobal('fetch',vi.fn(async url=>url==='/api/volatility/calibrate'?wait.promise:
     reply(url==='/api/parse'?{ok:true,params:[],constats:[]}:{price:1})))
@@ -101,7 +175,7 @@ it('le Pricer refuse de transmettre un pricing préparé avec une calibration p�
 })
 it('une ancienne préparation ne bloque pas le pricing de la nouvelle calibration',async()=>{
   const store=usePricingStore(),first=deferred(),last=deferred()
-  store.script='AT MATURITY:\n  PAY 1';store.globalParams.model='heston';store.globalParams.r=3
+  store.script='AT MATURITY:\n  PAY 1';store.globalParams.model='sabr';store.globalParams.r=3
   Object.assign(store.underlyings[0],underlying())
   const fits=[]
   vi.stubGlobal('fetch',vi.fn(async url=>{

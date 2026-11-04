@@ -8,7 +8,7 @@
         <div>
           <h1 class="page-title">Données de marché</h1>
           <p class="page-subtitle">
-            Historiques locaux Yahoo Finance — cours bruts et ajustés, couverture et ancienneté.
+            Tous les titres du référentiel — historique maximal Yahoo, cours bruts et ajustés conservés localement.
             <span v-if="!loading" class="ml-2" style="color: var(--subtle);">
               {{ okCount }}/{{ items.length }} séries OK
             </span>
@@ -86,6 +86,8 @@
                         {{ key === 'adjusted' ? 'Ajusté' : 'Brut' }} : {{ basis.status }}
                         <span v-if="basis.freshness?.age_days != null"> · {{ basis.freshness.age_days }} j</span>
                         <span v-if="basis.long_gaps"> · {{ basis.long_gaps }} lacune(s)</span>
+                        <div>{{ basis.date_min || '—' }} → {{ basis.date_max || '—' }} · {{ basis.rows || 0 }} cours</div>
+                        <div>{{ basis.source?.history_scope === 'MAX_AVAILABLE_REQUESTED' ? 'Historique maximal demandé' : 'Cache partiel : maximum Yahoo non vérifié' }}</div>
                       </div>
                     </div>
                   </td>
@@ -131,7 +133,7 @@ const byCategory = computed(() => {
     if (!map[item.category]) map[item.category] = []
     map[item.category].push(item)
   }
-  return CATEGORY_ORDER.filter(c => map[c]).map(c => ({ name: c, items: map[c] }))
+  return [...new Set([...CATEGORY_ORDER, ...Object.keys(map)])].filter(c => map[c]).map(c => ({ name: c, items: map[c] }))
 })
 
 const okCount      = computed(() => items.value.filter(i => i.cache_status === 'ok').length)

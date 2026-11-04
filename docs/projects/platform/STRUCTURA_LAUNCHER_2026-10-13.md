@@ -3,6 +3,24 @@
 Date : 13/10/2026. Branche : `codex/hybrid-saas-foundation`.
 Changements locaux, sans commit, push ni merge.
 
+## Refonte visuelle du 03/11/2026
+
+Le lanceur adopte un fond ivoire, une identité latérale bleu nuit et des accents
+cuivrés. L'accès Admin est présenté horizontalement, avec son action principale
+bien visible ; les quatre accès secondaires sont regroupés en cartes compactes.
+Les boutons, aides, bordures, états de focus et détails techniques sont harmonisés.
+La colonne de marque s'efface sous 1 000 pixels de largeur. Au format initial
+1 100 × 820 sur le poste vérifié, les cinq accès tiennent sans défilement ; les
+petites fenêtres conservent le défilement des cartes et les commandes en pied.
+
+Vérification locale : 14 tests ciblés du lanceur réussis, compilation Python et
+contrôle de disposition Tkinter à 1 100 × 820, 900 × 760 et 720 × 610, sans
+débordement des contrôles ni erreur de callback. Le panneau de détails est exercé
+ouvert et fermé. La capture native Windows n'a pas abouti ; ces mesures ne valent
+pas une recette visuelle par capture. Le menu a été rouvert depuis le raccourci.
+Aucun serveur métier ni agent n'est lancé par cette vérification. Les choix de
+lancement, l'identité des installations et le périmètre d'arrêt sont conservés.
+
 ## Reprise du workspace historique — 24/10/2026
 
 Le [correctif du changement de compte depuis Admin](../../audits/ADMIN_ACCOUNT_SWITCH_2026-10-24.md)

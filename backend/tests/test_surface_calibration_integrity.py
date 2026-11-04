@@ -52,6 +52,70 @@ def test_qualification_is_distinct_from_optimizer_success(vanilla, digital, succ
     assert calibration.qualification(success, vanilla, digital)['qualified'] is expected
 
 
+def test_explicit_heston_pricer_uses_the_signed_vanilla_limit_but_checks_digitals(flat_fit):
+    req = request_for(flat_fit)
+    u = req.underlyings[0]
+    u.vol_surface = VolatilitySurfaceParams(**(target() | {
+        'atm_scenario': 'flat', 'atm_nodes': [[t, .2] for t in range(1, 11)],
+    }))
+    dossier = deepcopy(flat_fit['dossier'])
+    dossier['target'] = u.vol_surface.model_dump()
+    dossier['context']['fit_horizon'] = 10.
+    dossier['heston_fit'] = {'vanilla_limit_bp': 10.}
+    dossier['controls'].update(max_vanilla_error_bp=8., max_digital_error_bp=9.)
+    dossier['qualification'] = calibration.qualification(True, 8., 9., vanilla_limit_bp=10.)
+    u.calibration_evidence = sign_calibration(dossier, secret=SECRET)
+    validate_pricing_calibrations(req, req.T, secret=SECRET)
+    dossier['controls']['max_digital_error_bp'] = 11.
+    u.calibration_evidence = sign_calibration(dossier, secret=SECRET)
+    with pytest.raises(ValueError, match='non qualifiée'):
+        validate_pricing_calibrations(req, req.T, secret=SECRET)
+
+
+def test_optional_heston_fit_uses_signed_context_without_error_limits(flat_fit):
+    req = request_for(flat_fit)
+    u = req.underlyings[0]
+    u.vol_surface = VolatilitySurfaceParams(**(target() | {
+        'atm_scenario': 'flat', 'atm_nodes': [[t, .2] for t in range(1, 11)],
+    }))
+    dossier = deepcopy(flat_fit['dossier'])
+    dossier['target'] = u.vol_surface.model_dump()
+    dossier['context']['fit_horizon'] = 10.
+    dossier['heston_fit'] = {'mode': 'atm_digital'}
+    dossier['controls'].update(max_vanilla_error_bp=450., max_digital_error_bp=110.)
+    dossier['qualification'].update(thresholds_bp={})
+    u.calibration_evidence = sign_calibration(dossier, secret=SECRET)
+    validate_pricing_calibrations(req, req.T, secret=SECRET)
+    u.q = .03
+    with pytest.raises(ValueError, match='périmée'):
+        validate_pricing_calibrations(req, req.T, secret=SECRET)
+
+
+def test_full_smile_fit_improves_eighty_wings_with_an_atm_cap():
+    vol, q = .34952353, .028009
+    surface = VolatilitySurfaceParams(**(target(vol, .85) | {
+        'atm_scenario': 'contango',
+        'atm_nodes': [[t, vol * (1 + .1 * (t - 1) / 9)] for t in range(1, 11)],
+    }))
+    fit = calibration.calibrate_surface(surface.model_dump(), 'heston', 3., dividend=q,
+                                        heston_fit={'mode': 'atm_smile'})
+    dossier, parameters = fit['dossier'], fit['parameters']
+    grid, optimizer = dossier['grid'], dossier['optimizer']
+    assert grid['wing_strikes'] == [.2, .4, .6, .8, 1.2, 1.4, 1.6, 1.8]
+    assert grid['expiries'] == list(range(1, 11))
+    assert optimizer['wing_refined'] and optimizer['wing_points'] == 80
+    assert optimizer['wing_rms_after_vol_points'] < optimizer['wing_rms_before_vol_points']
+    assert parameters['rho_h'] < 0
+    controls = dossier['controls']
+    target_calls = np.array(controls['target_calls'])
+    assert np.max(np.abs(np.array(controls['model_calls'])[:, 4] - target_calls[:, 4])) * 1e4 <= 5.00001
+    req = PricingRequest(script='AT MATURITY:\n  PAY MAX(S[1]-1,0)', model='heston',
+        T=3, N=1000, corr_matrix=[[1]], underlyings=[dict(
+            name='S1', sigma=vol, q=q, vol_surface=surface, **parameters,
+            calibration_evidence=sign_calibration(dossier, secret=SECRET))])
+    validate_pricing_calibrations(req, req.T, secret=SECRET)
+
+
 def test_material_seven_year_pillar_changes_objective_and_fit():
     a = calibration.calibrate_surface(target(.3, .85), 'heston', 10.)
     p = target(.3, .85)

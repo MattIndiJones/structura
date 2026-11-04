@@ -26,6 +26,9 @@
         <div v-if="store.marketDataLoading" class="text-xs truncate" style="color: var(--accent);">
           ↻ Mise à jour du marché à la date de valorisation…
         </div>
+        <div v-if="store.result && store.resultIsStale" class="text-xs text-amber-700">
+          Les paramètres ont changé. Relancez le pricing pour actualiser le prix.
+        </div>
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
@@ -46,10 +49,10 @@
         </button>
         <button
           class="btn-primary flex items-center gap-2 text-sm"
-          :disabled="store.loading || store.marketDataLoading || (!!store.parseError && !store.scriptDirty)"
+          :disabled="store.loading || store.marketDataLoading || store.hestonCalibrationPending || (!!store.parseError && !store.scriptDirty)"
           @click="store.runPricing()">
           <span v-if="store.loading" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-          {{ store.marketDataLoading ? 'Marché…' : store.loading ? 'Calcul…' : '▶ Pricer' }}
+          {{ store.marketDataLoading ? 'Marché…' : store.hestonCalibrationPending ? 'Calibration…' : store.loading ? 'Calcul…' : '▶ Pricer' }}
         </button>
       </div>
       <AlertMessage v-if="store.error" class="w-full min-w-0">

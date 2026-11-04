@@ -38,7 +38,8 @@ def fake_provider(monkeypatch, values):
     class Instrument:
         fast_info = {'currency':'EUR'}
         def __init__(self, ticker): self.ticker = ticker
-        def history(self, start, end, auto_adjust=True, **kwargs):
+        def history(self, start=None, end=None, auto_adjust=True, **kwargs):
+            start = start or '1900-01-01'
             calls.append((self.ticker, start, end, auto_adjust))
             series = values.get(self.ticker, pd.Series(dtype=float, index=pd.DatetimeIndex([])))
             series = series.loc[(series.index >= pd.Timestamp(start)) & (series.index < pd.Timestamp(end))]
@@ -217,6 +218,7 @@ def test_reference_override_and_exact_value_survive_receipt_product_and_reopen(p
     assert market['references']['q']['value'] == .01 and market['overrides']['q'] == .0200123
     booked = product_client.post('/api/deals', json={
         'product_id':product['product_id'], 'product_terms_version':product['terms_version'],
+        'transaction_format':'NOTE', 'instrument_family':'NOTE',
         'sens':'vente','contrepartie':'Banque Test','counterparty_id':1,'devise':'EUR',
         'nominal':1_000_000,'fair_value':98.,'price_traded':98.,'trade_date':'2026-09-14',
         'strike_date':'2026-09-14','value_date':'2026-09-16','maturity_date':'2027-09-14',
@@ -294,7 +296,7 @@ def test_full_backtest_refuses_missing_asset_but_comparison_records_reduction(mo
     assert error.value.status_code == 422 and 'B' in error.value.detail
     result = backtest_compare_endpoint(BacktestCompareRequest(candidates=assets,**common))
     assert result['requested_tickers'] == ['A','B'] and result['shortlist'] == ['A']
-    assert result['excluded_universe']['B']['reason'] == 'NO_OBSERVATIONS'
+    assert result['excluded_universe']['B']['reason'] == 'MAX_HISTORY_UNAVAILABLE'
     assert not result['market_coverage']['complete']
 
 

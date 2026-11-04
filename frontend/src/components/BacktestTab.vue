@@ -22,7 +22,7 @@
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs mb-4">
         <div>
           <label class="label">Date de début
-            <HelpTip text="Par défaut, première date commune des cours locaux non ajustés. Sans historique local, le début sera déterminé au chargement explicite. Une date saisie reste votre choix ; le résultat indiquera le début réellement utilisé." />
+            <HelpTip text="Par défaut, tout l’historique Yahoo disponible est utilisé et conservé. La date locale affichée est provisoire : le début commun sera déterminé au lancement depuis les cours non ajustés de tous les titres. Une date saisie manuellement reste votre choix." />
           </label>
           <input v-model="form.start_date" type="date" class="input" aria-label="Date de début du backtest" @input="history.manualStart.value = true" />
           <button v-if="history.manualStart.value" class="text-xs underline mt-1" @click="history.useSuggestedStart">Utiliser le début commun</button>
@@ -75,7 +75,7 @@
       <p v-if="history.loading.value" class="text-xs mb-2" role="status">Recherche du début commun dans l’historique local…</p>
       <p v-else-if="history.error.value" class="text-xs text-amber-600 mb-2" role="status">{{ history.error.value }} Le début automatique pourra être déterminé au lancement.</p>
       <p v-else-if="!history.suggestedStart.value" class="text-xs text-slate-500 mb-2">Sans début commun local connu, laissez la date vide : elle sera déterminée au chargement de l’historique.</p>
-      <p v-else class="text-xs text-slate-500 mb-2">Premier cours commun local disponible : {{ formatDate(history.suggestedStart.value) }}.</p>
+      <p v-else class="text-xs text-slate-500 mb-2">Début commun local provisoire : {{ formatDate(history.suggestedStart.value) }}. Au lancement, recherche de l’historique maximal Yahoo et conservation pour les prochains calculs.</p>
       <p v-if="form.history_mode === 'following'" class="text-xs text-slate-500 mb-3">Une substitution décale la constatation et son paiement du même nombre de jours calendaires. Le résultat peut différer du contrat initial.</p>
       <div class="flex justify-end">
         <button class="btn-primary text-xs px-5" :disabled="store.loading || history.loading.value || !canRun" @click="launchBacktest">
@@ -132,7 +132,7 @@ const history = useBacktestHistory(store, form)
 const canRun = computed(() => store.underlyings.length > 0 && store.underlyings.every(u => u.ticker?.trim()))
 
 function launchBacktest() {
-  store.runBacktest({ ...form.value })
+  store.runBacktest({ ...form.value, start_date: history.manualStart.value ? form.value.start_date : null })
 }
 
 </script>

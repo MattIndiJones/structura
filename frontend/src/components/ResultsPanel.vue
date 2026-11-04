@@ -20,6 +20,9 @@
 
   <!-- ── Résultats ─────────────────────────────────────────────── -->
   <div v-else-if="tab === 'results'" class="flex flex-col gap-4">
+    <p v-if="inputs?.hestonUncalibrated?.length" class="text-sm text-amber-700" role="status">
+      Heston non calibré pour {{ inputs.hestonUncalibrated.join(', ') }}. Prix calculé avec les paramètres affichés.
+    </p>
     <!-- Bandeau de valorisation en cours de vie. Entierement calcule depuis la
          reponse : il ne peut pas se desynchroniser d un mode qu on aurait
          choisi ailleurs, puisqu il n y a pas de mode. -->
@@ -90,6 +93,21 @@
       </div>
     </div>
 
+    <LocalVolWingNotice :wings="store.result.local_vol_wings" />
+    <p v-if="store.result.lsv_frozen_leverage" class="my-2 text-xs text-slate-500">
+      LSV · levier estimé sur un échantillon indépendant puis figé pour le pricing.
+    </p>
+    <details v-if="store.result.lsv_limits?.length" class="my-2 text-xs text-amber-700">
+      <summary>LSV · cible Dupire hors de portée dans certaines zones</summary>
+      <p v-for="limit in store.result.lsv_limits" :key="limit.underlying">
+        <SensitiveValue>
+          {{ limit.underlying }} · {{ limit.steps.length }} pas entre
+          {{ formatNumber(limit.steps[0].t, 3) }} et {{ formatNumber(limit.steps.at(-1).t, 3) }} an.
+          Niveaux extrêmes {{ formatPercent(100 * Math.min(...limit.steps.map(s => s.min_spot)), 1) }}
+          à {{ formatPercent(100 * Math.max(...limit.steps.map(s => s.max_spot)), 1) }} du spot de référence.
+        </SensitiveValue>
+      </p>
+    </details>
     <div v-if="store.result.corr_repair"
          class="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-400">
       ⚠ La matrice de corrélation a été ajustée pour permettre sa factorisation
@@ -174,7 +192,13 @@
               <SensitiveValue>{{ u.ticker }}</SensitiveValue>
             </span>
             <span class="text-xs text-slate-400">
-              σ <span class="font-mono font-semibold text-slate-200"><SensitiveValue>{{ formatPercent(u.sigma, 2) }}</SensitiveValue></span>
+              {{ inputs.model === 'heston' ? 'σ réf.' : 'σ' }}
+              <span class="font-mono font-semibold text-slate-200"><SensitiveValue>{{ formatPercent(u.sigma, 2) }}</SensitiveValue></span>
+            </span>
+            <span v-if="inputs.model === 'heston'" class="text-xs text-slate-400">
+              √V₀ <SensitiveValue>{{ formatPercent(10 * Math.sqrt(u.v0), 2) }}</SensitiveValue>
+              · √θ <SensitiveValue>{{ formatPercent(10 * Math.sqrt(u.theta), 2) }}</SensitiveValue>
+              <template v-if="HESTON_FIT_LABELS[u.hestonFitUsed]"> · {{ HESTON_FIT_LABELS[u.hestonFitUsed] }}</template>
             </span>
             <span class="text-xs text-slate-400">
               q <span class="font-mono font-semibold text-slate-200"><SensitiveValue>{{ formatPercent(u.q, 3) }}</SensitiveValue></span>
@@ -553,11 +577,13 @@ import MtfTab      from './MtfTab.vue'
 import SimulationTab from './SimulationTab.vue'
 import ScenarioGrid from './ScenarioGrid.vue'
 import SensitiveValue from './SensitiveValue.vue'
+import LocalVolWingNotice from './LocalVolWingNotice.vue'
 import SensitiveChart from './SensitiveChart.vue'
 import HelpTip from './HelpTip.vue'
 import FluxDecomposition from './FluxDecomposition.vue'
 import { formatDate, formatGreek, formatInt, formatNumber, formatPercent } from '../utils/format.js'
 import { withIndicativeDeltas } from '../utils/greekDisplay.js'
+import { HESTON_FIT_LABELS } from '../utils/volSurface.js'
 
 Chart.register(BarElement, BarController, CategoryScale, LinearScale, Tooltip)
 applyChartTheme(Chart)

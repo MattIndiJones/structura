@@ -28,7 +28,7 @@ def isolated_history(tmp_path, monkeypatch):
 def store(ticker, dates=None, scale=1):
     dates = dates or ['2024-01-02', '2024-01-04', '2024-01-05', '2024-01-08']
     values = pd.Series([scale*(100+i+i*i*.1) for i in range(len(dates))], index=pd.to_datetime(dates))
-    market_history.store_history(ticker, values, False, dates[0], dates[-1])
+    market_history.store_history(ticker, values, False, dates[0], dates[-1], full_history=True)
     return values
 
 
@@ -88,7 +88,7 @@ def test_missing_candidate_is_reported_and_full_backtest_stays_strict():
     store('A')
     result = pricing.backtest_compare_endpoint(request())
     assert result['shortlist'] == ['A']
-    assert result['excluded_universe']['B']['reason'] == 'NO_OBSERVATIONS'
+    assert result['excluded_universe']['B']['reason'] == 'MAX_HISTORY_UNAVAILABLE'
     assert result['market_coverage']['complete'] is False
     assert result['history_policy']['effective_start'] == '2024-01-02'
     full = market_data.load_hist_prices(['A', 'B'], None, '2024-01-08', raw_history=True)

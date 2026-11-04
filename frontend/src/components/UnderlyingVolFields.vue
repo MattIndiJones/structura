@@ -32,6 +32,8 @@
             <div><label class="label">ρ_h corr (%)
                 <HelpTip text="Corrélation entre le choc sur le spot et le choc sur la variance. Négative (typique actions) = effet levier, la vol monte quand le spot baisse, ce qui pentifie le skew (puts plus chers que calls à même distance du strike)." /></label>
               <SensitiveValue mode="input"><input v-model.number="au.rho_h" @change="markModelManual" type="number" step="1" class="input" /></SensitiveValue></div>
+            <p v-if="model === 'heston' && au._hestonVarianceAnchor != null && !au.calibration_evidence && au.smile_parameter_mode !== 'manual'"
+              class="col-span-full text-slate-500">Hypothèse de départ : √V₀ et √θ ancrées sur σ de référence. Modifiez les paramètres Heston pour choisir une autre hypothèse.</p>
           </template>
 
           <!-- SABR params -->
@@ -56,13 +58,13 @@
               <label class="label">Skew <span class="text-slate-600 font-normal">(%/ln(K/F))</span>
                 <HelpTip text="Pente du smile paramétrique par unité de log-moneyness. Négatif = puts OTM plus chers que calls OTM (skew actions typique)." />
               </label>
-              <SensitiveValue mode="input"><input v-model.number="au.skew" type="number" step="1" class="input" placeholder="-10" /></SensitiveValue>
+              <SensitiveValue mode="input"><input v-model.number="au.skew" type="number" step="1" class="input" placeholder="0" /></SensitiveValue>
             </div>
             <div>
               <label class="label">Convexité <span class="text-slate-600 font-normal">(%)</span>
                 <HelpTip text="Courbure du smile paramétrique — contrôle à quel point les deux ailes (calls et puts très OTM) remontent par rapport au centre." />
               </label>
-              <SensitiveValue mode="input"><input v-model.number="au.curvature" type="number" step="0.5" class="input" placeholder="5" /></SensitiveValue>
+              <SensitiveValue mode="input"><input v-model.number="au.curvature" type="number" step="0.5" class="input" placeholder="0" /></SensitiveValue>
             </div>
           </template>
 
@@ -100,6 +102,6 @@ const { au, model, horizon, rateModel, rate } = defineProps({
 })
 
 function markModelManual() {
-  if (au.vol_surface) au.smile_parameter_mode = 'manual'
+  au.smile_parameter_mode = 'manual'
 }
 </script>

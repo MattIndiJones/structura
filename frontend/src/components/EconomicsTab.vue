@@ -495,13 +495,17 @@ function onRemoveUnderlying() {
 function onTickerSelect(ticker) {
   if (contractTermsLocked.value) return
   catalogError.value = ''
-  try { selectCatalogUnderlying(activeU.value, ticker, store.script) }
+  try {
+    selectCatalogUnderlying(activeU.value, ticker, store.script)
+    store.onUnderlyingSelection()
+  }
   catch (e) { catalogError.value = e.message }
 }
 
 function onTickerBlur() {
   if (contractTermsLocked.value) return
   activeU.value.ticker = activeU.value.ticker.trim().toUpperCase()
+  store.onUnderlyingSelection()
 }
 
 const { previewEvents, datesByCalendar, closesPassees: pastCloses, calendarError } = useObservationPreview(

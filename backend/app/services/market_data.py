@@ -40,7 +40,8 @@ def load_hist_vol(tickers: list[str], period: str = "1y",
             return history
         if session_aware:
             from .calibration_sessions import qualify_calibration_sessions
-            history = qualify_calibration_sessions(history, tickers, requested)
+            history = qualify_calibration_sessions(
+                history, tickers, requested, venue_loader=_calibration_venue)
         calibrated = realized_market(history.get("prices", {}), tickers, window)
         matrix = np.asarray(calibrated["corr"], dtype=float)
         if not np.isfinite(matrix).all() or np.linalg.eigvalsh(matrix).min() < -1e-8:
@@ -66,6 +67,19 @@ def load_hist_vol(tickers: list[str], period: str = "1y",
     except Exception as exc:
         logger.exception("load_hist_vol")
         return {"error": str(exc)}
+
+
+def _calibration_venue(ticker: str) -> dict:
+    """Source an unknown listing venue; never infer its exchange from currency."""
+    if not _HAS_YF:
+        return {}
+    try:
+        metadata = yf.Ticker(ticker).get_history_metadata() or {}
+        return {"exchange": metadata.get("exchangeName"),
+                "timezone": metadata.get("exchangeTimezoneName")}
+    except Exception:
+        logger.debug("Calibration venue unavailable for %s", ticker, exc_info=True)
+        return {}
 
 
 # ── Cache d'historique ──────────────────────────────────────────────
@@ -156,14 +170,15 @@ def vider_cache_prix() -> None:
 
 def load_hist_prices(tickers: list[str], start: str | None, end: Optional[str] = None,
                      adjusted: bool = False, provider: str = DEFAULT_MARKET_DATA_PROVIDER,
-                     allow_partial: bool = False, *, raw_history: bool = False) -> dict:
+                     allow_partial: bool = False, *, raw_history: bool = False, full_history: bool = False) -> dict:
     """Coalesce identical reads; every caller receives an independent snapshot."""
     tickers = list(tickers)
     from ..core import market_storage, market_policy
     from ..runtime import business_today
     from .scenario_market import configured_path
     build = lambda: _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_partial,
-                                              **({"raw_history": True} if raw_history else {}))
+                                              **({"raw_history": True} if raw_history else {}),
+                                              **({"full_history": True} if full_history else {}))
     if configured_path():
         return deepcopy(build())
     try:
@@ -173,7 +188,7 @@ def load_hist_prices(tickers: list[str], start: str | None, end: Optional[str] =
     with _cache_lock:
         epoch = _cache_epoch
         key = (storage_revision, epoch, provider, tuple(tickers), start, end or business_today().isoformat(),
-               adjusted, allow_partial, raw_history, market_policy.POLICY_VERSION, market_policy.HISTORY_MAX_AGE_DAYS)
+               adjusted, allow_partial, raw_history, full_history, market_policy.POLICY_VERSION, market_policy.HISTORY_MAX_AGE_DAYS)
         cached = _cache_prix.get(key)
         if cached and time.monotonic()-cached[0] < _TTL_PRIX:
             return deepcopy(cached[1])
@@ -203,13 +218,14 @@ def load_hist_prices(tickers: list[str], start: str | None, end: Optional[str] =
             _cache_inflight.pop(key, None)
 
 
-def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_partial, *, raw_history=False):
+def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_partial, *, raw_history=False, full_history=False):
     """Provider observations with durable local reuse and explicit coverage."""
     from ..runtime import business_today
     from ..core import market_policy, market_storage
     from .market_history import local_history, store_history, align_history, align_backtest_history, _path as shared_path
     from .scenario_market import configured_path, history
     auto_start = start is None and raw_history
+    full_history = full_history or auto_start
     start = "1900-01-01" if auto_start else start
     if start is None:
         return {"error": "Une date de début est requise."}
@@ -243,45 +259,63 @@ def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_pa
     except ValueError as exc:
         return {"error": str(exc)}
     end = requested_end.isoformat()
-    series, sources, failures, fetched = {}, {}, {}, {}
+    series, sources, failures, fetched, fetched_full = {}, {}, {}, {}, {}
     expected = market_storage.versions([shared_path(ticker,adjusted) for ticker in tickers])
-    for ticker in tickers:
-        local, source = local_history(ticker, start, end, adjusted)
+    for ticker in dict.fromkeys(tickers):
+        local, source = local_history(ticker, start, end, adjusted, **({"prefer_full": True} if full_history else {}))
         local_window = local.loc[(local.index >= pd.Timestamp(start)) & (local.index <= pd.Timestamp(end))] if local is not None else None
         usable = (local_window is not None and not local_window.empty
                   and (auto_start or source.get("requested_start", start) <= start)
                   and market_policy.freshness(local_window.index[-1].date(), requested_end, "history")["qualified"])
-        selected = local_window if usable else None
+        if full_history:
+            usable = (local_window is not None and not local_window.empty
+                      and source.get("history_scope") == "MAX_AVAILABLE_REQUESTED"
+                      and source.get("full_history_requested_end", "") >= end)
+        selected = (local.loc[:end] if full_history else local_window) if usable else None
+        maximum_download = full_history or (adjusted and source.get('history_scope') == 'MAX_AVAILABLE_REQUESTED')
         if selected is None and _HAS_YF:
             try:
-                history_range = {"period": "max"} if auto_start else {"start": start}
+                history_range = {"period": "max"} if maximum_download else {"start": start}
                 frame = yf.Ticker(ticker).history(**history_range,
                     end=(requested_end+timedelta(days=1)).isoformat(), auto_adjust=adjusted)
                 if not frame.empty and "Close" in frame:
                     selected = market_storage.validate_frame(frame[['Close']], ('Close',))['Close']
-                    selected = selected.loc[(selected.index >= pd.Timestamp(start)) & (selected.index <= pd.Timestamp(end))]
+                    selected = selected.loc[(selected.index >= pd.Timestamp("1900-01-01" if maximum_download else start)) & (selected.index <= pd.Timestamp(end))]
                     if not selected.empty:
                         source = dict(provider=provider, storage="PROVIDER", fetched_at=datetime.utcnow().isoformat(),
-                                      requested_start=start, requested_end=end, finality="UNVERIFIED_PROVIDER_BAR")
+                                      requested_start="1900-01-01" if maximum_download else start, requested_end=end, finality="UNVERIFIED_PROVIDER_BAR")
                         fetched[ticker] = selected
+                        fetched_full[ticker] = maximum_download
+                        if maximum_download:
+                            source.update(history_scope="MAX_AVAILABLE_REQUESTED", full_history_requested_end=end,
+                                          full_history_checked_at=source["fetched_at"])
             except Exception as exc:
-                failures[ticker] = f"PROVIDER_UNAVAILABLE: {type(exc).__name__}"
-        if selected is None or selected.empty:
+                failures[ticker] = (f"INVALID_PROVIDER_HISTORY: {exc}" if isinstance(exc, ValueError)
+                                    else f"PROVIDER_UNAVAILABLE: {type(exc).__name__}")
+        if (selected is None or selected.empty) and not full_history:
             selected = local_window
         if selected is not None and not selected.empty:
-            series[ticker] = selected
+            series[ticker] = selected.loc[start:end]
+            source.update(available_observations=len(selected), first_observation=selected.index[0].date().isoformat(),
+                          last_observation=selected.index[-1].date().isoformat())
             sources[ticker] = source
         else:
-            failures.setdefault(ticker, "NO_OBSERVATIONS")
+            failures.setdefault(ticker, "MAX_HISTORY_UNAVAILABLE" if full_history else "NO_OBSERVATIONS")
     if fetched:
         try:
             with market_storage.transaction() as pending:
                 pending.require_unchanged(expected)
                 for ticker,values in fetched.items():
-                    store_history(ticker,values,adjusted,start,end,transaction=pending)
+                    store_history(ticker,values,adjusted,"1900-01-01" if fetched_full[ticker] else start,end,
+                                  transaction=pending, full_history=fetched_full[ticker])
+                    sources[ticker]['persisted'] = True
         except (OSError,ValueError) as exc:
             for ticker in fetched:
                 sources[ticker]['storage_error'] = str(exc)
+                sources[ticker]['persisted'] = False
+                if full_history:
+                    series.pop(ticker, None)
+                    failures[ticker] = "HISTORY_PERSISTENCE_FAILED"
     payload = (align_backtest_history(tickers, series, start, end, adjusted, sources, failures, allow_partial)
                if raw_history else align_history(tickers, series, start, end, adjusted, sources, failures, allow_partial))
     payload["retrieved_at"] = datetime.utcnow().isoformat()

@@ -1,6 +1,7 @@
 import itertools
 import hashlib
 import json
+from dataclasses import replace
 from datetime import date
 import math
 import os
@@ -12,18 +13,19 @@ from pydantic import BaseModel
 from ..core.schemas import (
     PricingRequest, PricingResponse, ParseRequest, ParseResponse,
     ProfileRequest, PathsRequest, ProbaRequest, BacktestRequest, BacktestCompareRequest, BacktestCompareDetailRequest,
-    MtfRequest, MtfDrilldownRequest, ScriptGenerateRequest,
+    MtfRequest, MtfComparisonRequest, MtfDrilldownRequest, ScriptGenerateRequest,
 )
 from ..core.payscript.parser import analysis_origin, parse_script, resolve_analysis_constats, effective_T_max
 from ..core.payscript.engine import (
     run_mc, compute_greeks,
     run_payoff_profile, run_mc_paths, run_mc_proba,
     eval_script_on_history, compute_irr, derniere_fenetre, seances_jusqu_a,
-    run_mark_to_future, run_mtf_drilldown, MTF_MAX_BATCH,
+    run_mark_to_future, run_mtf_drilldown, MTF_MAX_BATCH, mtf_date_grid, mtf_simulation_axis,
 )
 from ..services.market_data import load_hist_prices
 from ..core.calendars import UnsupportedCurrency
 from ..core.compute_budget import (
+    ABSOLUTE_WORK_LIMIT, WORKER_MEMORY_LIMIT_BYTES, estimate_mc,
     count_compiled_dates,
     ensure_budget,
     estimate_mc_batch,
@@ -145,7 +147,12 @@ def price_endpoint(req: PricingRequest):
     T_eff = effective_T_max(compiled, req.T)
 
     try:
-        validate_pricing_calibrations(req, T_eff, secret=receipt_signing_secret())
+        from ..core.payscript.lsv_leverage import supports_frozen_lsv
+        frozen_lsv = req.model == "lsv" and supports_frozen_lsv(
+            uls, yield_curve=req.yield_curve, sigma_r=req.sigma_r,
+            barrier_monitoring=req.barrier_monitoring)
+        if not frozen_lsv:
+            validate_pricing_calibrations(req, T_eff, secret=receipt_signing_secret())
         validate_compiled_dates(compiled)
         calculation_budget = estimate_pricing_request(
             corr_matrix=corr,
@@ -160,6 +167,12 @@ def price_endpoint(req: PricingRequest):
                              if req.compute_greeks else None),
             expanded_dates=count_compiled_dates(compiled),
         )
+        if frozen_lsv:
+            from ..core.payscript.lsv_leverage import TRAINING_PATHS
+            calculation_budget = replace(
+                calculation_budget,
+                work_units=calculation_budget.work_units + calculation_budget.steps * n * TRAINING_PATHS,
+                estimated_peak_bytes=max(calculation_budget.estimated_peak_bytes, 96 * TRAINING_PATHS))
         ensure_budget(calculation_budget)
         valuation_context = valuation_context_from_request(req, compiled)
         result = run_valuation(compiled, valuation_context)
@@ -214,6 +227,9 @@ def price_endpoint(req: PricingRequest):
         barrier_monitoring=result.get("barrier_monitoring", req.barrier_monitoring),
         barrier_monitoring_note=result.get("barrier_monitoring_note"),
         barrier_monitoring_details=result.get("barrier_monitoring_details"),
+        local_vol_wings=result.get("local_vol_wings"),
+        lsv_frozen_leverage=result.get("lsv_frozen_leverage"),
+        lsv_limits=result.get("lsv_limits"),
     )
 
 
@@ -273,7 +289,7 @@ def analysis_user_params(req, ctx):
     return ctx.user_params if ctx is not None else req.user_params
 
 
-def residual_context_or_none(req):
+def residual_context_or_none(req, *, retain_terminated=False):
     """Contexte résiduel quand la requête est en cours de vie, sinon None.
 
     Import différé : inlife.py importe déjà ce module, un import au sommet
@@ -287,8 +303,8 @@ def residual_context_or_none(req):
     # La variante suit le prix jusque dans les analytiques : sans ça l'onglet
     # Probabilités décrirait le produit d'origine sous un prix d'avenant, ce
     # qui est exactement l'écart qu'on vient de fermer partout ailleurs.
-    ctx = build_request_residual(req, variant_terms_or_none(req))
-    if ctx.residuel.early_recall:
+    ctx = build_request_residual(req, variant_terms_or_none(req), **({"retain_terminated":True} if retain_terminated else {}))
+    if ctx.residuel.early_recall and not retain_terminated:
         raise HTTPException(422, 'Produit rappelé : aucune optionalité résiduelle à analyser.')
     return ctx
 
@@ -394,6 +410,226 @@ def proba_endpoint(req: ProbaRequest):
     return res
 
 
+def _mtf_context_fingerprint(script,valuation,dates,flows,req,*,reference_price=None):
+    from ..core.product.calendar import EVENT_FIELDS
+    calendar = dict(events=[dict(type=event.type,**{key:getattr(event,key) for key in EVENT_FIELDS})
+                            for event in script.events],strike_fix_dates=script.strike_fix_dates,
+                    strike_fix_reduction=script.strike_fix_reduction,releves_realises=script.releves_realises)
+    payload = dict(version='mtf-settlement-v1',calendar=calendar,script=valuation.script_text,
+        underlyings=valuation.underlyings,corr=valuation.corr_matrix,r=valuation.r,T=valuation.T,
+        model=valuation.model,state=valuation.state,user_params=valuation.user_params,
+        payment=valuation.maturity_payment_t,dates=dates,flows=flows,
+        n_outer=req.n_outer,n_inner=req.n_inner,seed=req.seed)
+    if req.reference_paths is not None:
+        payload.update(version='mtf-aligned-model-v1', reference_paths=req.reference_paths,
+                       reference_price=req.main_price if reference_price is None else reference_price,
+                       antithetic=valuation.antithetic, barrier_monitoring=valuation.barrier_monitoring)
+    if req.gbm_atm_curve or req.indicative_heston:
+        payload.update(gbm_atm_curve=req.gbm_atm_curve, indicative_heston=req.indicative_heston)
+    if req.model == 'lsv':
+        from ..core.payscript.lsv_leverage import LEVERAGE_VERSION
+        payload['leverage_version'] = LEVERAGE_VERSION
+    encoded=json.dumps(payload,sort_keys=True,separators=(',',':'),allow_nan=False,
+        default=lambda value:value.tolist() if hasattr(value,'tolist') else value.isoformat())
+    if req.gbm_atm_curve or req.indicative_heston or req.model == 'lsv':
+        from ..core.valuation_context import json_transport_fingerprint
+        return json_transport_fingerprint(json.loads(encoded))
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _mtf_initial_flows(ctx, req):
+    if ctx is None:
+        return []
+    flows = []
+    for flow in ctx.residuel.realized_flows:
+        observed = float(flow['t'])-ctx.T_elapsed
+        payment = float(flow.get('payment_t',flow['t']))-ctx.T_elapsed
+        if flow.get('payment_date'):
+            payment = (date.fromisoformat(flow['payment_date'])-ctx.valuation).days/365.25
+        if req.payment_date is not None and abs(float(flow['t'])-ctx.produit.tenor) < 1e-6:
+            payment = ctx.payment_t
+        flows.append(dict(observation_t=observed,payment_t=payment,amount=float(flow['cf']),
+                          lbl=flow.get('lbl',flow.get('label','Flux constaté'))))
+    return flows
+
+
+def _mtf_request_dates(req,script,horizon,payment,ctx,flows):
+    if ctx is not None and ctx.residuel.early_recall:
+        last = max([f['payment_t'] for f in flows if f['payment_t'] > 0] or [1/365.25])
+        return mtf_date_grid(script,max(last,1/365.25),req.n_dates,
+            dates=req.mtm_dates if req.mtm_dates is not None else
+                [last*(i+1)/req.n_dates for i in range(req.n_dates)])
+    return mtf_date_grid(script,horizon,req.n_dates,payment,req.mtm_dates)
+
+
+_MTF_MODEL_FIELDS = frozenset(('v0', 'kappa', 'theta', 'xi', 'rho_h', 'alpha', 'beta',
+                               'rho', 'nu', 'skew', 'curvature', 'smile_parameter_mode',
+                               'calibration_evidence'))
+
+
+def _mtf_comparison_key(req):
+    shared = req.model_dump(mode='json', exclude={'model', 'main_price', 'gbm_atm_curve', 'indicative_heston'})
+    for underlying in shared['underlyings']:
+        for field in _MTF_MODEL_FIELDS:
+            underlying.pop(field, None)
+    return shared
+
+
+def _resolve_pricer_mtf(req):
+    ctx = residual_context_or_none(req, retain_terminated=True)
+    script = ctx.script if ctx is not None else resolve_analysis_constats(parse_script(req.script), req)
+    if not script.events and ctx is None:
+        raise ValueError('Aucun événement AT défini dans le script.')
+    validate_compiled_dates(script)
+    valuation = valuation_context_from_request(req, script, residual=ctx, paths=req.reference_paths)
+    flows = _mtf_initial_flows(ctx, req)
+    dates = _mtf_request_dates(req, script, valuation.T, valuation.maturity_payment_t, ctx, flows)
+    return ctx, script, valuation, flows, dates
+
+
+def _validate_atm_mtf_options(req, valuation, residual):
+    if not (req.gbm_atm_curve or req.indicative_heston):
+        return
+    if (req.reference_paths is None or residual is not None or valuation.T > 10. + 1e-9
+            or any(u.get('ccyh') or u.get('sigma_fx')*u.get('rho_sfx')
+                   for u in valuation.underlyings)):
+        raise ValueError('L’étude ATM est disponible à l’émission, jusqu’à 10 ans et sans quanto.')
+    if req.gbm_atm_curve and (req.model != 'constant' or any(
+        not (u.get('vol_surface') or {}).get('atm_scenario') for u in valuation.underlyings
+    )):
+        raise ValueError('Le GBM sur courbe ATM exige une courbe par scénario pour chaque sous-jacent.')
+    if req.indicative_heston and req.model != 'heston':
+        raise ValueError('L’option de calibration indicative est réservée à Heston.')
+
+
+def _pricer_mtf_job(req, resolved):
+    from ..core.compute.pricers.mtf import freeze_mtf_script
+
+    ctx, script, shared, flows, dates = resolved
+    # Replay and market fixing happen once. Only model inputs can differ.
+    underlyings = [dict(u, **v.model_dump(include=_MTF_MODEL_FIELDS))
+                   for u, v in zip(shared.underlyings, req.underlyings)]
+    if len(underlyings) != len(shared.underlyings) or len(underlyings) != len(req.underlyings):
+        raise ValueError('Panier incompatible avec le contexte du Mark to Future.')
+    valuation = replace(shared, model=req.model, underlyings=underlyings, gbm_atm_curve=req.gbm_atm_curve)
+    _validate_atm_mtf_options(req, valuation, ctx)
+    _validate_lsv_mtf_scope(req, valuation, ctx)
+    validate_mtf_context(script, valuation, payment_aware=True, aligned_grid=True)
+    terminated = bool(ctx and ctx.residuel.early_recall)
+    if not terminated and req.model != 'lsv':
+        validate_pricing_calibrations(req, valuation.T, secret=receipt_signing_secret(),
+                                      allow_indicative_heston=req.indicative_heston)
+    budget = dict(work_units=0, estimated_peak_bytes=0)
+    if not terminated:
+        steps, _ = mtf_simulation_axis(script, valuation.T, dates, True)
+        common = dict(maturity_years=valuation.T, simulation_steps=steps, model=req.model,
+                      underlyings=len(underlyings), expanded_dates=count_compiled_dates(script))
+        peak = min(MTF_MAX_BATCH, req.n_outer * req.n_inner)
+        inner_runs = sum(t < valuation.T - 1e-9 for t in dates)
+        fan = estimate_mc_batch(operation='mark_to_future', paths_per_run=max(peak, req.n_outer),
+                                total_runs=(req.n_outer + req.n_outer * req.n_inner * inner_runs)
+                                / max(peak, req.n_outer), antithetic=False, **common)
+        outer = estimate_mc(operation='mark_to_future_outer', paths=req.n_outer, antithetic=False, **common)
+        reference = estimate_mc(operation='mark_to_future_reference', paths=req.reference_paths,
+                                antithetic=req.antithetic, **common)
+        budget = fan.to_dict()
+        budget['work_units'] = fan.work_units + reference.work_units
+        if req.model == 'lsv':
+            budget['work_units'] += _lsv_qualification_work(steps, len(underlyings))
+        budget['estimated_peak_bytes'] = max(reference.estimated_peak_bytes,
+                                             fan.estimated_peak_bytes + outer.estimated_peak_bytes)
+        if req.model == 'lsv':
+            from ..core.payscript.lsv_leverage import CONTROL_PATHS
+            budget['estimated_peak_bytes'] = max(budget['estimated_peak_bytes'], 384 * CONTROL_PATHS)
+        budget['estimated_peak_mb'] = round(budget['estimated_peak_bytes'] / 1024**2, 1)
+    settings = dict(mtm_dates=dates, n_outer=req.n_outer, n_inner=req.n_inner, n_dates=req.n_dates,
+                    initial_flows=flows, initial_terminated=terminated)
+    job = dict(context=valuation.to_dict(), script=freeze_mtf_script(script, valuation.script_text),
+               settings=settings)
+    return job, valuation, budget
+
+
+def _validate_lsv_mtf_scope(req, valuation, residual):
+    if req.model != 'lsv':
+        return
+    from ..core.payscript.lsv_leverage import supports_frozen_lsv
+    if (req.reference_paths is None or not supports_frozen_lsv(
+            valuation.underlyings, yield_curve=valuation.yield_curve, sigma_r=valuation.sigma_r,
+            barrier_monitoring=valuation.barrier_monitoring, strike_set_t=valuation.strike_set_t,
+            residual=residual is not None)):
+        raise ValueError("La qualification LSV en MTF exige une surface SSVI par titre, à l’émission, "
+                         "sans quanto, avec taux et dividendes plats et monitoring hebdomadaire.")
+
+
+def _lsv_qualification_work(steps, underlyings):
+    from ..core.payscript.lsv_leverage import CONTROL_PATHS, CONTROL_SEEDS, TRAINING_PATHS
+    return steps * underlyings * (TRAINING_PATHS + 2 * CONTROL_PATHS * len(CONTROL_SEEDS))
+
+
+def _check_mtf_budget(budgets):
+    if (sum(b['work_units'] for b in budgets) > ABSOLUTE_WORK_LIMIT
+            or sum(b['estimated_peak_bytes'] for b in budgets) > WORKER_MEMORY_LIMIT_BYTES):
+        raise ValueError('Budget cumulé du Mark to Future dépassé. Réduisez les chemins ou le nombre de dates.')
+
+
+def _finish_pricer_mtf(fan, req, resolved, valuation, budget):
+    ctx, script, _, flows, dates = resolved
+    origin = ctx.valuation if ctx is not None else analysis_origin(req)
+    fan.update(context_fingerprint=_mtf_context_fingerprint(
+        script, valuation, dates, flows, req, reference_price=fan['main_price']),
+        origin_date=origin.isoformat(), in_life=ctx is not None, calculation_budget=budget)
+    if req.model == 'lsv':
+        fan['lsv_qualification'] = _lsv_mtf_receipt(
+            fan['context_fingerprint'], fan.pop('lsv_leverage_digest'))
+    if ctx is not None:
+        fan.update(valuation_date=origin.isoformat(), years_remaining=round(ctx.T_remaining, 12))
+    if req.gbm_atm_curve:
+        fan['gbm_atm_curve'] = True
+    if req.indicative_heston:
+        fan['indicative_heston'] = True
+        fan['calibration_diagnostics'] = [
+            dict(underlying=u.name, **{key: controls[key] for key in (
+                'max_atm_error_bp', 'max_wing_error_bp', 'max_barrier_digital_error_bp', 'near_bounds')})
+            for u in req.underlyings for controls in [u.calibration_evidence['dossier']['controls']]
+        ]
+    return fan
+
+
+def _lsv_mtf_receipt(fingerprint, leverage_digest):
+    from ..services.product_receipts import _signature
+    return _signature(receipt_signing_secret(), dict(context=fingerprint, leverage=leverage_digest),
+                      domain='mtf-lsv-qualification-v1:')
+
+
+@router.post('/mtf/compare')
+def mtf_comparison_endpoint(request: MtfComparisonRequest):
+    from ..core.compute.executor import run_batch
+
+    a, b = request.a, request.b
+    if ((a.model, a.gbm_atm_curve) == (b.model, b.gbm_atm_curve)
+            or a.reference_paths is None or _mtf_comparison_key(a) != _mtf_comparison_key(b)):
+        raise HTTPException(422, 'Comparez deux modèles différents sur un même produit, marché et paramétrage Monte Carlo.')
+    try:
+        resolved = _resolve_pricer_mtf(a)
+        jobs, prepared, results = [], {}, {}
+        for index, req in enumerate((a, b)):
+            try:
+                payload, valuation, budget = _pricer_mtf_job(req, resolved)
+                prepared[index] = req, valuation, budget
+                jobs.append((index, payload))
+            except ValueError as error:
+                results[index] = dict(model=req.model, error=str(error))
+        _check_mtf_budget([budget for _, _, budget in prepared.values()])
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    for job in run_batch('mark_to_future', jobs, max_workers=2):
+        req, valuation, budget = prepared[job.job_id]
+        results[job.job_id] = (dict(model=req.model, result=_finish_pricer_mtf(
+            job.result, req, resolved, valuation, budget)) if job.ok
+            else dict(model=req.model, error=job.error))
+    return dict(a=results[0], b=results[1])
+
+
 @router.post("/mtf")
 def mtf_endpoint(req: MtfRequest):
     """Mark-to-Future — nested Monte Carlo: distribution of future mark-to-model
@@ -402,7 +638,18 @@ def mtf_endpoint(req: MtfRequest):
     En cours de vie, l'éventail part du niveau du jour et de l'état déjà réalisé :
     les scénarios extérieurs composent leur propre histoire par-dessus celle que
     le passé a écrite, au lieu de repartir d'un produit neuf."""
-    ctx = residual_context_or_none(req)
+    if req.reference_paths is None and (req.gbm_atm_curve or req.indicative_heston):
+        raise HTTPException(422, 'L’étude ATM exige un prix initial recalculé par modèle.')
+    if req.reference_paths is not None:
+        from ..core.compute.pricers.mtf import price_mtf_job
+        try:
+            resolved = _resolve_pricer_mtf(req)
+            job, valuation, budget = _pricer_mtf_job(req, resolved)
+            _check_mtf_budget([budget])
+            return _finish_pricer_mtf(price_mtf_job(job), req, resolved, valuation, budget)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+    ctx = residual_context_or_none(req,retain_terminated=True)
     try:
         if ctx is not None:
             compiled, uls = ctx.script, ctx.underlyings
@@ -414,7 +661,7 @@ def mtf_endpoint(req: MtfRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    if not compiled.events:
+    if not compiled.events and ctx is None:
         raise HTTPException(status_code=422, detail="Aucun événement AT défini dans le script.")
 
     corr = req.corr_matrix
@@ -425,14 +672,16 @@ def mtf_endpoint(req: MtfRequest):
     if T_eff is None:
         T_eff = effective_T_max(compiled, req.T)
     try:
-        validate_mtf_context(compiled, valuation_context_from_request(
-            req, compiled, residual=ctx, paths=req.n_inner))
+        valuation = valuation_context_from_request(req,compiled,residual=ctx,paths=req.n_inner)
+        validate_mtf_context(compiled,valuation,payment_aware=True)
+        dated_flows = _mtf_initial_flows(ctx,req)
+        mtm_dates = _mtf_request_dates(req,compiled,T_eff,valuation.maturity_payment_t,ctx,dated_flows)
         validate_compiled_dates(compiled)
         peak_paths = max(req.n_outer, min(MTF_MAX_BATCH, req.n_outer * req.n_inner))
-        total_paths = req.n_outer + req.n_outer * req.n_inner * req.n_dates
+        total_paths = req.n_outer + req.n_outer * req.n_inner * len(mtm_dates)
         calculation_budget = estimate_mc_batch(
             operation="mark_to_future",
-            maturity_years=T_eff,
+            maturity_years=max(T_eff,mtm_dates[-1]),
             underlyings=n,
             paths_per_run=peak_paths,
             total_runs=total_paths / peak_paths,
@@ -445,6 +694,8 @@ def mtf_endpoint(req: MtfRequest):
             compiled, uls, corr, r_eff, T_eff,
             main_price=req.main_price,
             state=etat,
+            initial_flows=dated_flows, initial_terminated=bool(ctx and ctx.residuel.early_recall),
+            maturity_payment_t=valuation.maturity_payment_t, mtm_dates=mtm_dates,
             model=req.model,
             n_outer=req.n_outer,
             n_inner=req.n_inner,
@@ -461,6 +712,8 @@ def mtf_endpoint(req: MtfRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    res["context_fingerprint"] = _mtf_context_fingerprint(compiled,valuation,mtm_dates,dated_flows,req)
+    res["origin_date"] = (ctx.valuation if ctx is not None else analysis_origin(req)).isoformat()
     res["in_life"] = ctx is not None
     if ctx is not None:
         res["valuation_date"] = ctx.valuation.isoformat()
@@ -675,25 +928,39 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
     Rejoue les mêmes tirages que /api/mtf (mêmes graine, grille de dates et
     découpage en lots) : le mark renvoyé ici est celui de l'éventail, pas une
     ré-estimation voisine."""
+    ctx = residual_context_or_none(req,retain_terminated=True)
     try:
-        compiled = parse_script(req.script)
-        compiled = resolve_analysis_constats(compiled, req)
+        compiled = ctx.script if ctx is not None else resolve_analysis_constats(parse_script(req.script),req)
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=422,detail=str(e))
 
     if not compiled.events:
         raise HTTPException(status_code=422, detail="Aucun événement AT défini dans le script.")
 
-    uls = [u.model_dump() for u in req.underlyings]
+    uls = ctx.underlyings if ctx is not None else [u.model_dump() for u in req.underlyings]
     corr = req.corr_matrix
     n = len(uls)
     if len(corr) != n or any(len(row) != n for row in corr):
         raise HTTPException(status_code=422, detail="Matrice de corrélation invalide.")
 
-    T_eff = effective_T_max(compiled, req.T)
+    T_eff = ctx.T_remaining if ctx is not None else effective_T_max(compiled,req.T)
+    aligned = req.reference_paths is not None
     try:
-        validate_mtf_context(compiled, valuation_context_from_request(
-            req, compiled, paths=req.n_inner))
+        valuation = valuation_context_from_request(req,compiled,residual=ctx,paths=req.n_inner)
+        _validate_atm_mtf_options(req, valuation, ctx)
+        if aligned:
+            valuation = replace(valuation, underlyings=[dict(u, **v.model_dump(include=_MTF_MODEL_FIELDS))
+                                for u, v in zip(valuation.underlyings, req.underlyings)])
+        _validate_lsv_mtf_scope(req, valuation, ctx)
+        validate_mtf_context(compiled,valuation,payment_aware=True,aligned_grid=aligned)
+        if req.indicative_heston:
+            validate_pricing_calibrations(req, valuation.T, secret=receipt_signing_secret(),
+                                          allow_indicative_heston=True)
+        dated_flows = _mtf_initial_flows(ctx,req)
+        mtm_dates = _mtf_request_dates(req,compiled,T_eff,valuation.maturity_payment_t,ctx,dated_flows)
+        fingerprint = _mtf_context_fingerprint(compiled,valuation,mtm_dates,dated_flows,req)
+        if (aligned or req.context_fingerprint is not None) and req.context_fingerprint != fingerprint:
+            raise HTTPException(409,'Le contexte réalisé a changé depuis l’éventail. Relancez le Mark to Future avant d’ouvrir le détail.')
         validate_compiled_dates(compiled)
         outer_per_chunk = max(1, MTF_MAX_BATCH // req.n_inner)
         chunk_starts = {
@@ -709,7 +976,7 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
         total_paths = req.n_outer + sum(chunk_paths)
         calculation_budget = estimate_mc_batch(
             operation="mark_to_future_drilldown",
-            maturity_years=T_eff,
+            maturity_years=T_eff if aligned and T_eff > 0 else max(T_eff,mtm_dates[-1]),
             underlyings=n,
             paths_per_run=peak_paths,
             total_runs=total_paths / peak_paths,
@@ -718,8 +985,20 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
             expanded_dates=count_compiled_dates(compiled),
         )
         ensure_budget(calculation_budget)
+        leverage = None
+        if req.model == 'lsv':
+            import hmac
+            from ..core.payscript.lsv_leverage import leverage_digest, prepare_mtf_leverage
+            if not req.lsv_qualification:
+                raise HTTPException(409, "La qualification LSV est absente. Relancez le Mark to Future.")
+            leverage = prepare_mtf_leverage(compiled, valuation, mtm_dates, qualify=False)
+            if not hmac.compare_digest(req.lsv_qualification, _lsv_mtf_receipt(fingerprint, leverage_digest(leverage))):
+                raise HTTPException(409, "Le levier LSV a changé. Relancez le Mark to Future.")
         result = run_mtf_drilldown(
-            compiled, uls, corr, req.r, T_eff,
+            compiled, valuation.underlyings, corr, valuation.r, T_eff,
+            state=ctx.mc_kwargs if ctx is not None else None,
+            initial_flows=dated_flows, initial_terminated=bool(ctx and ctx.residuel.early_recall),
+            maturity_payment_t=valuation.maturity_payment_t, mtm_dates=mtm_dates,
             main_price=req.main_price,
             t0=req.t,
             scenario_ids=req.scenario_ids,
@@ -733,11 +1012,18 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
             n_inner=req.n_inner,
             n_dates=req.n_dates,
             seed=req.seed,
-            user_params=req.user_params,
+            user_params=analysis_user_params(req,ctx),
             barrier_monitoring=req.barrier_monitoring,
             yield_curve=req.yield_curve,
             sigma_r=req.sigma_r,
+            aligned_grid=aligned,
+            gbm_atm_curve=req.gbm_atm_curve,
+            lsv_leverage=leverage,
         )
+        result["context_fingerprint"] = fingerprint
+        result["model"] = req.model
+        result["origin_date"] = (ctx.valuation if ctx is not None else analysis_origin(req)).isoformat()
+        result["in_life"] = ctx is not None
         result["calculation_budget"] = calculation_budget.to_dict()
         return result
     except ValueError as e:
@@ -784,7 +1070,7 @@ def _run_historical_backtest(req: BacktestRequest, history_data=None):
         raise HTTPException(status_code=422, detail=str(e))
 
     # Load historical prices
-    px_data = history_data if history_data is not None else load_hist_prices(tickers, req.start_date, req.end_date, raw_history=True)
+    px_data = history_data if history_data is not None else load_hist_prices(tickers, req.start_date, req.end_date, raw_history=True, full_history=True)
     if "error" in px_data:
         raise HTTPException(status_code=422, detail=px_data["error"])
 
@@ -914,7 +1200,7 @@ def backtest_comparison_detail(req: BacktestCompareDetailRequest):
     if len(set(names)) != comparison.basket_size or len(names) != comparison.basket_size or any(tk not in candidates for tk in names):
         raise HTTPException(422, 'Panier sélectionné incohérent avec la comparaison.')
     history = load_hist_prices(list(candidates), comparison.start_date, comparison.end_date,
-                               allow_partial=True, raw_history=True)
+                               allow_partial=True, raw_history=True, full_history=True)
     if history.get('error'):
         raise HTTPException(422, history['error'])
     if _comparison_history_hash(history) != req.history_hash:
@@ -1052,7 +1338,7 @@ def backtest_compare_endpoint(req: BacktestCompareRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    px_data = load_hist_prices(tickers, req.start_date, req.end_date, allow_partial=True, raw_history=True)
+    px_data = load_hist_prices(tickers, req.start_date, req.end_date, allow_partial=True, raw_history=True, full_history=True)
     if "error" in px_data:
         raise HTTPException(status_code=422, detail=px_data["error"])
     dates = px_data.get("dates", [])

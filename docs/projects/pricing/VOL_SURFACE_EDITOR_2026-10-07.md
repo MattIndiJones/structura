@@ -39,7 +39,18 @@ conservés sont restaurées ; elles ne sont pas remplacées par un nouveau défa
 L’échelle de forme vaut 0,04. Les maturités initiales sont 3 mois, 6 mois,
 1, 2, 3, 5, 7 et 10 ans, avec extension au ténor contractuel au-delà de 10 ans.
 Le niveau ATM initial est plat ; le smile s’atténue avec la maturité.
-Les strikes affichés sont 60, 80, 100, 120 et 140 % **du forward**.
+Les strikes affichés vont de 20 à 180 % **du forward**, par pas de 20 points.
+Dans le Pricer Heston, la courbe ATM est une cible indicative. Le bouton
+« Calibrer et appliquer Heston » ajuste les calls ATM forward annuels sur dix
+ans. « Calls ATM + digitales » ajoute les digitales aux strikes 60 % et 100 %
+du spot. « Calls ATM + smile complet » ajuste d'abord l'ATM puis minimise le
+RMS des 80 prix de calls d'aile (prix ramenés en équivalent points de vol par
+le vega cible, avec plancher). L'écart ATM absolu est plafonné à 5 pb par
+échéance si l'ATM seul y parvient, sinon à son écart maximal vérifié + 0,5 pb.
+Fourier adaptatif vérifie le plafond et le gain sur les ailes avant application.
+Les digitales restent des contrôles dans ce mode. Sans calibration ni saisie
+manuelle, les variances Heston par défaut d'une nouvelle étude suivent le carré
+de la volatilité de référence.
 
 Le niveau choisi agit continûment via θ(t) et φ(θ), sans seuil de régime.
 Sur le profil Actions à 30 %, la vol 1 an à 80 % du forward vaut environ
@@ -62,6 +73,14 @@ Courbes, matrice et champs partagent les mêmes données. L’édition des cellu
 reconstruit la même surface cohérente, avec une tolérance maximale de 0,10 point
 de vol pour une cible d’aile. Une cible hors de cette famille est refusée.
 Annulation et réinitialisation du profil sont disponibles.
+
+Le réglage « Ajuster l’aile gauche » saisit une vol implicite cible à une
+échéance et un strike de 20 à 80 % du forward. La courbe ATM sert d’ancre.
+Le solveur relève les piliers d’aile nécessaires puis interpole theta × phi en
+variance totale ATM, sous contraintes SSVI de calendrier et de butterfly.
+Il vérifie aussi la grille Dupire en taux et dividende plats sur l’horizon
+de l’étude. L’interface affiche la vol retenue et la contrainte qui limite
+la hausse. Le moteur vérifie à nouveau sa propre grille au pricing.
 
 Les variances ATM totales sont strictement croissantes et interpolées
 linéairement depuis l’origine. Au-delà du dernier pilier, l’ATM de ce pilier est

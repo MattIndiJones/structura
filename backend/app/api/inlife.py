@@ -281,7 +281,7 @@ def variant_terms_or_none(req) -> VariantTerms | None:
     return None if terms.est_vide() else terms
 
 
-def build_request_residual(req, variant: VariantTerms | None = None) -> ResidualContext:
+def build_request_residual(req, variant: VariantTerms | None = None, *, retain_terminated=False) -> ResidualContext:
     """Rejoue le passé d'une requête et rend le contexte résiduel.
 
     Lève HTTPException(422) avec un motif lisible plutôt que de rendre un
@@ -296,7 +296,7 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
     l'identique.
     """
     valuation = req.valuation_date or req.strike_date
-    if valuation >= req.maturity_date:
+    if valuation >= req.maturity_date and not retain_terminated:
         raise HTTPException(
             422, f"La date de valorisation ({valuation}) atteint la maturité "
                  f"({req.maturity_date}) : il n'y a plus d'optionnalité à valoriser.")
@@ -384,7 +384,7 @@ def build_request_residual(req, variant: VariantTerms | None = None) -> Residual
     T_elapsed = (valuation - req.strike_date).days / 365.25
     try:
         residuel = build_residual(produit, prices, dates_list, T_elapsed,
-                                  valuation, variant=variant)
+                                  valuation, variant=variant, retain_terminated=retain_terminated)
     except ValuationError as exc:
         raise HTTPException(422, str(exc))
 
@@ -516,6 +516,7 @@ def price_in_life(
         "barrier_monitoring": res.get("barrier_monitoring", req.barrier_monitoring),
         "barrier_monitoring_note": res.get("barrier_monitoring_note"),
         "barrier_monitoring_details": res.get("barrier_monitoring_details"),
+        "local_vol_wings": res.get("local_vol_wings"),
         "ic95": res["ic95"],
         # Les mêmes statistiques que /api/price. Elles ne partaient pas d'ici,
         # si bien que médiane, VaR, P(retour > 100 %), spread inter-quartile,

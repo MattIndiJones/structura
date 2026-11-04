@@ -85,6 +85,20 @@ it('le formulaire propose Following avec dix jours et exige tous les tickers du 
   expect(state.canRun.value).toBe(false)
 })
 
+it.each(['backtest', 'comparator'])('le lancement %s ne transforme pas le cache court en début manuel', async mode => {
+  const store = usePricingStore(); store.underlyings[0].ticker = 'A'
+  vi.stubGlobal('fetch', async () => reply(bounds('2024-01-02')))
+  await mount(() => (mode === 'backtest' ? BacktestTab : ComparatorTab).setup({}, { expose() {} }))
+  const run = vi.spyOn(store, mode === 'backtest' ? 'runBacktest' : 'runBacktestCompare').mockResolvedValue({})
+  const launch = () => mode === 'backtest' ? state.launchBacktest() : state.launch()
+  launch()
+  expect(run.mock.calls[0][mode === 'backtest' ? 0 : 1].start_date).toBeNull()
+  state.history.manualStart.value = true
+  state.form.value.start_date = '2024-01-10'
+  launch()
+  expect(run.mock.calls[1][mode === 'backtest' ? 0 : 1].start_date).toBe('2024-01-10')
+})
+
 it.each([{}, { start_date: '2024-01-10', history_mode: 'strict', max_delay_days: 0, rf_rate: 0 }])(
   'transmet la convention et préserve les choix explicites %j', async params => {
     const store = usePricingStore(); store.script = 'AT MATURITY:\n  PAY 1'; store.underlyings[0].ticker = 'A'

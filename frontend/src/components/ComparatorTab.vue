@@ -82,7 +82,7 @@
       </div>
       <p v-if="history.loading.value" class="text-xs mb-2" role="status">Recherche du début commun local…</p>
       <p v-else-if="history.error.value" class="text-xs text-amber-600 mb-2" role="status">{{ history.error.value }} Le début automatique sera recherché au lancement.</p>
-      <p v-else-if="history.suggestedStart.value" class="text-xs text-slate-500 mb-2">Premier cours commun local disponible : {{ formatDate(history.suggestedStart.value) }}.</p>
+      <p v-else-if="history.suggestedStart.value" class="text-xs text-slate-500 mb-2">Début commun local provisoire : {{ formatDate(history.suggestedStart.value) }}. Au lancement, recherche de l’historique maximal Yahoo et conservation pour les prochains calculs.</p>
       <p v-else class="text-xs text-slate-500 mb-2">Sans début commun local connu, laissez la date vide pour un début automatique au lancement.</p>
       <p class="text-xs text-slate-500 mb-3">Les candidats sont comparés sur les mêmes dates communes de l’univers exploitable. Following décale la constatation et son paiement du même nombre de jours calendaires.</p>
       <div class="flex justify-end">
@@ -246,7 +246,7 @@ function launch() {
     .map(c => ({ ticker: c.ticker?.trim().toUpperCase() || '', name: labelFor(c.ticker?.trim().toUpperCase() || '') }))
     .filter(c => c.ticker)
   const context = JSON.stringify([pool.value, form.value, basketSize.value])
-  store.runBacktestCompare(candidates, { ...form.value, basket_size: basketSize.value },
+  store.runBacktestCompare(candidates, { ...form.value, start_date: history.manualStart.value ? form.value.start_date : null, basket_size: basketSize.value },
     () => context === JSON.stringify([pool.value, form.value, basketSize.value]))
 }
 

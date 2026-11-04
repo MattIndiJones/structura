@@ -1,9 +1,17 @@
 // Surface ATM nodes always use engine fractions, including in editable snapshots.
-export const SMILE_STRIKES = [.6, .8, 1, 1.2, 1.4]
+export const SMILE_STRIKES = [.2, .4, .6, .8, 1, 1.2, 1.4, 1.6, 1.8]
 export const SMILE_TENORS = [.25, .5, 1, 2, 3, 5, 7, 10]
 export const SMILE_PROFILES = {
   equity: { label: 'Actions', sigma: 30, rho: -.75, eta: .85 },
   index: { label: 'Indices actions', sigma: 20, rho: -.80, eta: 1.05 },
+}
+export const ATM_SCENARIOS = {
+  flat: 'Plate', contango: 'Contango', backwardation: 'Backwardation', hump: 'Bosse',
+}
+export const HESTON_FIT_LABELS = {
+  atm: 'Calls ATM uniquement',
+  atm_digital: 'Calls ATM + digitales',
+  atm_smile: 'Calls ATM + smile complet',
 }
 export const cloneSurface = s => s ? JSON.parse(JSON.stringify(s)) : null
 
@@ -25,6 +33,23 @@ export function makeSurface(profile, sigma, horizon = 10) {
     shape_scale: .04, max_expiry: max, atm_nodes: times.map(t => [t, Number(sigma)/100]) }
 }
 
+export function applyAtmScenario(surface, scenario) {
+  if (!Object.hasOwn(ATM_SCENARIOS, scenario)) throw Error('Scénario ATM inconnu.')
+  const s = cloneSurface(surface)
+  const base = surfaceVol(s, 1) / 100
+  s.atm_nodes = Array.from({ length: 10 }, (_, i) => {
+    const t = i + 1
+    const slope = i / 9
+    const shift = scenario === 'contango' ? .1 * slope
+      : scenario === 'backwardation' ? -.1 * slope
+      : scenario === 'hump' ? .1 * (t <= 3 ? i / 2 : (10 - t) / 7) : 0
+    return [t, base * (1 + shift)]
+  })
+  s.atm_scenario = scenario
+  s.mode = 'manual'
+  return validateSurface(s)
+}
+
 export function thetaAt(s, t) {
   const nodes = [[0,0], ...s.atm_nodes.map(([time,vol]) => [time,time*vol*vol])]
   const last = nodes.at(-1)
@@ -35,7 +60,18 @@ export function thetaAt(s, t) {
 }
 
 export function surfaceVol(s, t, strike = 1) {
-  const theta=thetaAt(s,t), phi=s.eta/Math.sqrt(s.shape_scale+theta), k=Math.log(strike)
+  const theta=thetaAt(s,t), k=Math.log(strike)
+  let phi=s.eta/Math.sqrt(s.shape_scale+theta)
+  if (s.wing_nodes?.length) {
+    const index=s.wing_nodes.findIndex(([time])=>time>t)
+    if (index===0) phi=s.wing_nodes[0][1]/thetaAt(s,s.wing_nodes[0][0])
+    else if (index<0) phi=s.wing_nodes.at(-1)[1]/theta
+    else {
+      const [t0,p0]=s.wing_nodes[index-1], [t1,p1]=s.wing_nodes[index]
+      const theta0=thetaAt(s,t0), theta1=thetaAt(s,t1)
+      phi=(p0+(p1-p0)*(theta-theta0)/(theta1-theta0))/theta
+    }
+  }
   const w=.5*theta*(1+s.rho*phi*k+Math.sqrt((phi*k+s.rho)**2+1-s.rho**2))
   return Math.sqrt(w/t)*100
 }
@@ -53,6 +89,17 @@ export function validateSurface(s) {
   const theta=thetaAt(s,s.max_expiry), phi=s.eta/Math.sqrt(s.shape_scale+theta)
   if (theta*phi*(1+Math.abs(s.rho))>=4 || theta*phi**2*(1+Math.abs(s.rho))>4)
     throw Error('Ce smile dépasse les bornes SSVI sans arbitrage. Réduisez la pente ou la convexité.')
+  if (s.wing_nodes) {
+    let lastTime=0, lastPsi=0, lastPhi=Infinity
+    for (const [t,psi] of s.wing_nodes) {
+      const theta=thetaAt(s,t), phi=psi/theta, factor=1+Math.abs(s.rho)
+      if (!Number.isFinite(t) || !Number.isFinite(psi) || t<=lastTime || t>s.max_expiry
+          || psi<0 || psi<lastPsi-1e-12 || phi>lastPhi+1e-12
+          || psi*factor>=4 || psi*phi*factor>4)
+        throw Error('Cette modification est incompatible avec les piliers d’aile. Réinitialisez le profil pour repartir de sa forme globale.')
+      lastTime=t; lastPsi=psi; lastPhi=phi
+    }
+  }
   return s
 }
 
@@ -66,6 +113,7 @@ export function shiftSurface(surface, tenor, delta, all = false) {
     else { s.atm_nodes.push([tenor,(current+delta)/100]); s.atm_nodes.sort((a,b)=>a[0]-b[0]) }
   }
   s.mode='manual'
+  if (s.atm_scenario) s.atm_scenario = 'custom'
   return validateSurface(s)
 }
 
@@ -119,8 +167,20 @@ export function resizeSurfaceLevel(u) {
   } catch(e) { synchronizeSurfaceLevel(u);u.smile_error=e.message }
 }
 
+export function hasExplicitHestonFit(u, model) {
+  return model === 'heston' && Boolean(u.vol_surface?.atm_scenario)
+}
+
+export function hestonFitOptions(u) {
+  return { mode: u.heston_fit?.mode ?? u.calibration_evidence?.dossier?.heston_fit?.mode ?? 'atm' }
+}
+
 export function surfaceCalibrationKey(u,model,horizon,rate) {
-  return JSON.stringify([u.vol_surface,model,horizon,rate,u.q,u.smile_parameter_mode,
-    u.ticker,u.ccy,u.sigma,
-    ['v0','theta','kappa','xi','rho_h','alpha','beta','rho','nu'].map(k=>u[k])])
+  const scenario = hasExplicitHestonFit(u, model)
+  const fitHorizon = scenario && horizon <= 10 ? 10 : Number(horizon)
+  const fields = scenario ? ['v0','theta','kappa','xi','rho_h']
+    : ['v0','theta','kappa','xi','rho_h','alpha','beta','rho','nu']
+  return JSON.stringify([u.vol_surface,model,fitHorizon,Number(rate),Number(u.q),u.smile_parameter_mode || 'automatic',
+    u.ticker,u.ccy,Number(u.sigma),scenario ? hestonFitOptions(u).mode : null,
+    fields.map(k=>Number(u[k]))])
 }

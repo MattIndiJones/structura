@@ -1,7 +1,7 @@
 import math
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import date
 
 from .compute_budget import (
@@ -75,11 +75,19 @@ class VolatilitySurfaceParams(BaseModel):
     shape_scale: float = Field(default=.04, gt=0, le=10)
     max_expiry: float = Field(default=10, gt=0, le=MAX_MATURITY_YEARS)
     atm_nodes: List[List[float]] = Field(min_length=1, max_length=20)
+    wing_nodes: list[tuple[float, float]] | None = Field(
+        default=None, min_length=1, max_length=64, exclude_if=lambda value: value is None)
+    atm_scenario: Literal['flat', 'contango', 'backwardation', 'hump', 'custom'] | None = Field(
+        default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode='after')
     def validate_surface(self):
         from .volatility_surface import TermSSVISurface
         TermSSVISurface(self.model_dump())
+        if self.atm_scenario is not None and (
+            self.max_expiry < 10 or [node[0] for node in self.atm_nodes] != list(range(1, 11))
+        ):
+            raise ValueError('Une courbe ATM par scénario requiert les dix piliers annuels de 1 à 10 ans.')
         return self
 
 
@@ -317,6 +325,9 @@ class PricingResponse(BaseModel):
     barrier_monitoring: str = "weekly"
     barrier_monitoring_note: Optional[str] = None
     barrier_monitoring_details: Optional[Dict[str, Any]] = None
+    local_vol_wings: Optional[List[Dict[str, Any]]] = None
+    lsv_frozen_leverage: Optional[bool] = None
+    lsv_limits: Optional[List[Dict[str, Any]]] = None
 
 
 class ParseRequest(BaseModel):
@@ -489,10 +500,19 @@ class BacktestCompareDetailRequest(BaseModel):
 class MtfRequest(AnalysisBase):
     """Mark-to-Future — nested Monte Carlo. main_price is the t=0 fair price
     (% of notional, from a prior /price call), used as the P(MTM >= P0) threshold."""
+    mtm_dates: Optional[List[float]] = Field(default=None, min_length=1, max_length=400)
     main_price: float
+    reference_paths: Optional[int] = Field(default=None, ge=1000, le=200000)
+    gbm_atm_curve: bool = False
+    indicative_heston: bool = False
     n_outer: int = Field(default=200, ge=20, le=2000)
     n_inner: int = Field(default=500, ge=50, le=5000)
     n_dates: int = Field(default=5, ge=2, le=12)
+
+
+class MtfComparisonRequest(BaseModel):
+    a: MtfRequest
+    b: MtfRequest
 
 
 from .ai_contract import AiOptions
@@ -527,7 +547,13 @@ class MtfDrilldownRequest(AnalysisBase):
     scenario_ids sont des indices dans les tableaux `pvs` / `alive` de la réponse
     /api/mtf — le client sélectionne lui-même ses quantiles, ce qui évite de
     recalculer tout l'éventail pour en expliquer cinq trajectoires."""
+    mtm_dates: Optional[List[float]] = Field(default=None, min_length=1, max_length=400)
+    context_fingerprint: Optional[str] = Field(default=None, pattern=r'^[a-f0-9]{64}$')
+    lsv_qualification: Optional[str] = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     main_price: float
+    reference_paths: Optional[int] = Field(default=None, ge=1000, le=200000)
+    gbm_atm_curve: bool = False
+    indicative_heston: bool = False
     t: float
     scenario_ids: List[int] = Field(min_length=1, max_length=12)
     labels: List[str] = []

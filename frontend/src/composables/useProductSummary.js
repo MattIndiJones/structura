@@ -109,9 +109,14 @@ function lignesMarche(inputs) {
   const MODELES = { constant: 'Constant (GBM)', heston: 'Heston', sabr: 'SABR',
                      localvol: 'Dupire (local vol)', lsv: 'Local-stochastic vol' }
   L.push(`- Modèle de diffusion : ${MODELES[inputs.model] || inputs.model}`)
-  if (inputs.sigma_r) L.push(`- Taux stochastique : σ_r ${pct(inputs.sigma_r)}, a ${nb(inputs.a_r, 2)}`)
-  L.push(`- Monte Carlo : ${nb(inputs.N, 0)} chemins, graine ${inputs.seed}`
-    + `${inputs.antithetic ? ', variantes antithétiques' : ''}`
+  // Also interpret historical snapshots which retained inactive form defaults.
+  const sigmaR = inputs.rateModel === 'deterministic' ? 0 : inputs.sigma_r
+  const aR = inputs.rateModel === 'abm' ? 0 : inputs.a_r
+  if (sigmaR) L.push(`- Taux stochastique : σ_r ${pct(sigmaR)}, a ${nb(aR, 2)}`)
+  const sample = inputs.antithetic
+    ? `${nb(inputs.N, 0)} paires antithétiques (${nb(inputs.N * 2, 0)} trajectoires)`
+    : `${nb(inputs.N, 0)} trajectoires`
+  L.push(`- Monte Carlo : ${sample}, graine ${inputs.seed}`
     + `, monitoring de barrière ${inputs.barrierMonitoring === 'continuous' ? 'continu' : 'hebdomadaire'}`)
   return L
 }

@@ -141,7 +141,9 @@ class LauncherWindow:
     def __init__(self, root, controller):
         import tkinter as tk
         from tkinter import ttk
-        from .launcher_widgets import BACKGROUND, INK, RoundedButton, icon, rounded
+        from .launcher_widgets import (
+            BACKGROUND, INK, MUTED, BORDER, NAVY, COPPER, BrandPanel, RoundedButton,
+        )
         self.root, self.controller = root, controller
         self.events = queue.Queue()
         self.busy = False
@@ -150,107 +152,123 @@ class LauncherWindow:
         self.details_visible = False
         self.descriptions = []
         self.card_titles = []
+        self.panels = []
         root.title("Structura — Votre espace de travail")
-        width, height = min(980, root.winfo_screenwidth() - 80), min(820, root.winfo_screenheight() - 100)
+        width = min(1100, root.winfo_screenwidth() - 80)
+        height = min(820, root.winfo_screenheight() - 100)
         root.geometry(f"{width}x{height}+{max(0, (root.winfo_screenwidth() - width) // 2)}+{max(0, (root.winfo_screenheight() - height) // 2 - 25)}")
-        root.minsize(min(width, 660), min(height, 540))
+        root.minsize(min(width, 720), min(height, 610))
         root.configure(background=BACKGROUND)
         style = ttk.Style(root)
         style.theme_use("clam")
         style.configure("TFrame", background=BACKGROUND)
-        style.configure("Card.TFrame", background="#ffffff")
         style.configure("TLabel", background=BACKGROUND, foreground=INK, font=("Segoe UI", 10))
-        style.configure("Card.TLabel", background="#ffffff")
-        style.configure("Title.TLabel", background="#ffffff", font=("Segoe UI", 12, "bold"))
-        style.configure("Description.TLabel", background="#ffffff", foreground="#58677b", font=("Segoe UI", 10))
-        style.configure("TButton", font=("Segoe UI", 10), padding=(14, 9), borderwidth=0, background="#e7edf5", foreground="#15375a")
-        style.map("TButton", background=[("active", "#dbe5f1")], foreground=[("disabled", "#94a0b0")])
-        style.configure("Primary.TButton", background="#15375a", foreground="#ffffff")
-        style.map("Primary.TButton", background=[("active", "#244c76"), ("disabled", "#b6c3d1")], foreground=[("disabled", "#ffffff")])
-        style.configure("Stop.TButton", background="#fce9e9", foreground="#a32b35")
-        style.map("Stop.TButton", background=[("active", "#f8d8db")])
-        style.configure("Help.TButton", background="#edf2f8", foreground="#315e88", padding=(7, 3), font=("Segoe UI", 10, "bold"))
-        style.configure("TCombobox", padding=(10, 7), font=("Segoe UI", 10), fieldbackground="#f4f7fb", arrowcolor="#54708c", bordercolor="#dce5ef", lightcolor="#f4f7fb", darkcolor="#f4f7fb")
-        style.map("TCombobox", fieldbackground=[("readonly", "#f4f7fb"), ("disabled", "#edf1f6")], foreground=[("readonly", INK), ("disabled", "#98a6b7")], selectbackground=[("readonly", "#f4f7fb")], selectforeground=[("readonly", INK)])
-        style.configure("Horizontal.TProgressbar", background="#5f92bb", troughcolor=BACKGROUND, borderwidth=0, thickness=3)
-        style.configure("Vertical.TScrollbar", background="#d4deea", troughcolor=BACKGROUND, borderwidth=0, arrowsize=10)
-        frame = ttk.Frame(root, padding=26)
-        frame.pack(fill="both", expand=True)
+        style.configure("TCombobox", padding=(9, 6), font=("Segoe UI", 10),
+                        fieldbackground="#f7f8f5", arrowcolor=MUTED, bordercolor=BORDER,
+                        lightcolor=BORDER, darkcolor=BORDER)
+        style.map("TCombobox", fieldbackground=[("readonly", "#f7f8f5"), ("disabled", "#ecefeb")],
+                  foreground=[("readonly", INK), ("disabled", "#98a39f")],
+                  selectbackground=[("readonly", "#f7f8f5")], selectforeground=[("readonly", INK)])
+        style.configure("Horizontal.TProgressbar", background=COPPER, troughcolor=BACKGROUND,
+                        borderwidth=0, thickness=3)
+        style.configure("Vertical.TScrollbar", background="#d8ddd7", troughcolor=BACKGROUND,
+                        borderwidth=0, arrowsize=10)
+        self.shell = tk.Frame(root, background=BACKGROUND)
+        self.shell.pack(fill="both", expand=True)
+        self.shell.columnconfigure(1, weight=1)
+        self.shell.rowconfigure(0, weight=1)
+        self.brand_panel = BrandPanel(self.shell)
+        self.brand_panel.grid(row=0, column=0, sticky="ns")
+        frame = tk.Frame(self.shell, background=BACKGROUND, padx=30, pady=24)
+        frame.grid(row=0, column=1, sticky="nsew")
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(1, weight=1)
-        header = ttk.Frame(frame)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 22))
-        icon(header, "admin", background=BACKGROUND).pack(side="left", padx=(0, 13))
-        brand = ttk.Frame(header)
-        brand.pack(side="left")
-        ttk.Label(brand, text="Structura", font=("Segoe UI", 24, "bold")).pack(anchor="w")
-        ttk.Label(brand, text="Choisissez votre espace de travail", foreground="#7c8da1", font=("Segoe UI", 10)).pack(anchor="w", pady=(1, 0))
-        badge = tk.Canvas(header, width=156, height=28, background=BACKGROUND, highlightthickness=0)
-        badge.pack(side="right", anchor="center")
-        rounded(badge, 1, 1, 154, 26, 13, fill="#e5f1ed", outline="")
-        badge.create_oval(13, 11, 19, 17, fill="#4b927a", outline="")
-        badge.create_text(89, 14, text="DÉVELOPPEMENT", fill="#3e7c69", font=("Segoe UI", 8, "bold"))
-        content = ttk.Frame(frame)
+        header = tk.Frame(frame, background=BACKGROUND)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
+        header.columnconfigure(0, weight=1)
+        tk.Label(header, text="BIENVENUE DANS STRUCTURA", background=BACKGROUND,
+                 foreground=MUTED, font=("Segoe UI", 8, "bold")).grid(row=0, column=0, sticky="w")
+        self.heading = tk.Label(header, text="Votre espace de travail", background=BACKGROUND,
+                                foreground=INK, font=("Segoe UI", 22, "bold"), anchor="w")
+        self.heading.grid(row=1, column=0, sticky="w", pady=(5, 0))
+        tk.Label(header, text="DÉVELOPPEMENT", background="#eeebe3", foreground="#8a765b",
+                 font=("Segoe UI", 7, "bold"), padx=9, pady=5).grid(row=0, column=1, sticky="e")
+        content = tk.Frame(frame, background=BACKGROUND)
         content.grid(row=1, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(content, orient="vertical", style="Vertical.TScrollbar")
-        self.body_scrollbar = scrollbar
-        scrollbar.pack(side="right", fill="y")
-        self.canvas = tk.Canvas(content, background=BACKGROUND, highlightthickness=0, yscrollcommand=self.update_scrollbar)
+        self.body_scrollbar = ttk.Scrollbar(content, orient="vertical", style="Vertical.TScrollbar")
+        self.body_scrollbar.pack(side="right", fill="y")
+        self.canvas = tk.Canvas(content, background=BACKGROUND, highlightthickness=0,
+                                yscrollcommand=self.update_scrollbar)
         self.canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.configure(command=self.canvas.yview)
-        self.body = ttk.Frame(self.canvas)
+        self.body_scrollbar.configure(command=self.canvas.yview)
+        self.body = tk.Frame(self.canvas, background=BACKGROUND)
         self.body_window = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
         self.body.bind("<Configure>", lambda event: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", self.resize_body)
         root.bind("<MouseWheel>", self.scroll_body, add="+")
+        root.bind("<Configure>", self.resize_window, add="+")
         self.buttons = []
-        self.card("Structura Admin", "Produits, pricing, RFQ, clients et administration.\nVotre application complète dans un espace dédié.", "admin")
-        ttk.Label(self.body, text="ACCÈS RAPIDES", font=("Segoe UI", 9, "bold"), foreground="#8494a8").pack(anchor="w", padx=4, pady=(17, 10))
-        self.secondary = ttk.Frame(self.body)
+        self.card("Structura Admin", "Produits, pricing, RFQ et suivi de vie.\nVotre application complète.", "admin")
+        section = tk.Frame(self.body, background=BACKGROUND)
+        section.pack(fill="x", pady=(18, 11))
+        tk.Label(section, text="EXPLORER LES ESPACES", background=BACKGROUND,
+                 foreground=MUTED, font=("Segoe UI", 8, "bold")).pack(side="left")
+        tk.Label(section, text="Choisissez votre accès", background=BACKGROUND,
+                 foreground="#929b9e", font=("Segoe UI", 8)).pack(side="right")
+        self.secondary = tk.Frame(self.body, background=BACKGROUND)
         self.secondary.pack(fill="x")
         for column in (0, 1):
             self.secondary.columnconfigure(column, weight=1, uniform="cards")
         for row in (0, 1):
             self.secondary.rowconfigure(row, weight=1, uniform="cards")
         for title, description, action in (
-            ("Simulation avec agents", "Configurer et consulter les campagnes. Aucun agent lancé à l’ouverture.", "simulation"),
-            ("Les six organisations", "Démarrer les six installations privées et ouvrir leur portail.", "all"),
-            ("Console SaaS", "Consulter l’annuaire et superviser les installations.", "platform"),
+            ("Simulation avec agents", "Préparer et consulter vos campagnes.\nAucun agent lancé à l’ouverture.", "simulation"),
+            ("Les six organisations", "Retrouver les installations privées\net leur portail commun.", "all"),
+            ("Console SaaS", "Consulter l’annuaire et superviser\nles installations.", "platform"),
         ):
             self.card(title, description, action)
-        organization_row = self.card("Une organisation", "Accéder à son super utilisateur, dans sa propre installation.", "organization")
+        organization_row = self.card("Une organisation", "Ouvrir directement son espace.", "organization")
         self.organizations = [c for c in controller.configs if c.kind == "organization"]
-        self.organization = ttk.Combobox(organization_row, state="readonly", values=[c.name for c in self.organizations])
+        self.organization = ttk.Combobox(organization_row, state="readonly", width=15,
+                                        values=[c.name for c in self.organizations])
         self.organization.current(0)
-        self.organization.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(0, 9))
-        controls = ttk.Frame(frame)
+        self.organization.grid(row=2, column=0, columnspan=2, sticky="ew", padx=(0, 10))
+        controls = tk.Frame(frame, background=BACKGROUND)
         controls.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+        tk.Frame(controls, background=BORDER, height=1).pack(fill="x", pady=(0, 13))
+        actions = tk.Frame(controls, background=BACKGROUND)
+        actions.pack(fill="x")
         for text, action in (("État des services", "status"), ("Arrêter Structura", "stop")):
-            button = RoundedButton(controls, text=text, command=lambda choice=action: self.execute(choice), background=BACKGROUND,
-                                   fill="#fbe9ea" if action == "stop" else "#e7edf5", foreground="#ac4752" if action == "stop" else INK,
-                                   hover="#f6dce0" if action == "stop" else "#dbe6f2", width=168 if action == "stop" else 156)
-            button.pack(side="left")
+            button = RoundedButton(actions, text=text, command=lambda choice=action: self.execute(choice),
+                                   background=BACKGROUND, fill=BACKGROUND, border=BORDER,
+                                   foreground="#9a5354" if action == "stop" else INK,
+                                   hover="#f8eeeb" if action == "stop" else "#eaeee9", width=151, height=35,
+                                   font=("Segoe UI", 9))
+            button.pack(side="left", padx=(0, 7))
             self.buttons.append(button)
-            self.help_button(controls, action).pack(side="left", padx=(5, 12))
-        self.details_button = RoundedButton(controls, text="Détails ▾", command=self.toggle_details, background=BACKGROUND, fill=BACKGROUND, hover="#e7edf5", width=98)
+            self.help_button(actions, action).pack(side="left", padx=(0, 12))
+        self.details_button = RoundedButton(actions, text="Détails ▾", command=self.toggle_details,
+                                            background=BACKGROUND, fill=BACKGROUND, hover="#eaeee9",
+                                            width=87, height=35, font=("Segoe UI", 9))
         self.details_button.pack(side="right")
-        status = ttk.Frame(frame)
-        status.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        status = tk.Frame(frame, background=BACKGROUND)
+        status.grid(row=3, column=0, sticky="ew", pady=(11, 0))
         self.message = tk.StringVar(value="Prêt à travailler")
-        self.status_dot = tk.Canvas(status, width=14, height=20, background=BACKGROUND, highlightthickness=0)
+        self.status_dot = tk.Canvas(status, width=12, height=18, background=BACKGROUND, highlightthickness=0)
         self.status_dot.pack(side="left", padx=(0, 5))
-        self.dot = self.status_dot.create_oval(3, 7, 9, 13, fill="#66a28c", outline="")
-        ttk.Label(status, textvariable=self.message, wraplength=700, foreground="#718399", font=("Segoe UI", 9)).pack(side="left", anchor="w")
-        self.activity = ttk.Progressbar(status, mode="indeterminate")
-        self.activity.pack(fill="x", pady=(8, 0))
-        self.activity.pack_forget()
-        output_frame = ttk.Frame(frame)
+        self.dot = self.status_dot.create_oval(2, 6, 8, 12, fill="#6f9d88", outline="")
+        self.status_label = tk.Label(status, textvariable=self.message, background=BACKGROUND,
+                                     wraplength=600, foreground=MUTED, font=("Segoe UI", 9), justify="left")
+        self.status_label.pack(side="left", anchor="w")
+        self.activity = ttk.Progressbar(frame, mode="indeterminate")
+        output_frame = tk.Frame(frame, background=BACKGROUND)
         output_frame.grid(row=4, column=0, sticky="ew", pady=(12, 0))
         self.output_frame = output_frame
         scrollbar = ttk.Scrollbar(output_frame)
         scrollbar.pack(side="right", fill="y")
         self.output = tk.Text(output_frame, height=5, wrap="word", state="disabled", yscrollcommand=scrollbar.set,
-                              font=("Segoe UI", 9), relief="flat", background="#eaf0f7", foreground="#62768e", padx=14, pady=12)
+                              font=("Consolas", 9), relief="flat", background="#eeefe9",
+                              foreground="#637580", padx=14, pady=12)
         self.output.pack(fill="both", expand=True)
         scrollbar.configure(command=self.output.yview)
         output_frame.grid_remove()
@@ -258,55 +276,71 @@ class LauncherWindow:
         controller.progress = lambda message: self.events.put(("progress", message))
         root.after(100, self.poll)
 
+    def resize_window(self, event):
+        if event.widget is not self.root:
+            return
+        if event.width < 1000:
+            self.brand_panel.grid_remove()
+        else:
+            self.brand_panel.grid()
+
     def card(self, title, description, action):
         import tkinter as tk
-        from .launcher_widgets import INK, RoundedPanel, RoundedButton, icon, rounded
+        from .launcher_widgets import INK, MUTED, NAVY, RoundedPanel, RoundedButton, icon
         hero = action == "admin"
-        surface = "#183c60" if hero else "#ffffff"
-        panel = RoundedPanel(self.body if hero else self.secondary, fill=surface, border=surface if hero else "#e1e8f0", padding=23 if hero else 18)
+        surface = "#ffffff"
+        panel = RoundedPanel(self.body if hero else self.secondary, fill=surface, padding=20 if hero else 16)
+        self.panels.append(panel)
         if hero:
             panel.pack(fill="x")
         else:
             row, column = {"simulation": (0, 0), "all": (0, 1), "platform": (1, 0), "organization": (1, 1)}[action]
-            panel.grid(row=row, column=column, sticky="nsew", padx=(0, 7) if column == 0 else (7, 0), pady=(0, 12))
+            panel.grid(row=row, column=column, sticky="nsew", padx=(0, 6) if column == 0 else (6, 0), pady=(0, 12))
         card = panel.body
-        card.columnconfigure(1 if not hero else 0, weight=1)
+        card.columnconfigure(0 if hero else 1, weight=1)
         if hero:
-            tk.Label(card, text="VOTRE ACCÈS PRINCIPAL", background=surface, foreground="#90c6bb", font=("Segoe UI", 8, "bold")).grid(row=0, column=0, sticky="w")
-            tk.Label(card, text=title, background=surface, foreground="#ffffff", font=("Segoe UI", 23, "bold")).grid(row=1, column=0, sticky="w", pady=(6, 4))
-            label = tk.Label(card, text=description, background=surface, foreground="#c4d4e4", font=("Segoe UI", 10), justify="left", anchor="w", wraplength=450)
-            label.grid(row=2, column=0, sticky="w", pady=(0, 15))
+            tk.Label(card, text="APPLICATION COMPLÈTE", background=surface, foreground="#a07d50",
+                     font=("Segoe UI", 8, "bold")).grid(row=0, column=0, sticky="w")
+            tk.Label(card, text=title, background=surface, foreground=INK,
+                     font=("Segoe UI", 20, "bold")).grid(row=1, column=0, sticky="w", pady=(5, 5))
+            label = tk.Label(card, text=description, background=surface, foreground=MUTED,
+                             font=("Segoe UI", 10), justify="left", anchor="w")
+            label.grid(row=2, column=0, sticky="ew")
             self.help_button(card, action).grid(row=0, column=1, sticky="ne")
-            graphic = tk.Canvas(card, width=125, height=95, background=surface, highlightthickness=0)
-            graphic.grid(row=1, column=1, rowspan=3, padx=(15, 7))
-            for x, y, color in ((30, 6, "#305577"), (17, 18, "#3e6989"), (4, 30, "#537e9c")):
-                rounded(graphic, x, y, 78, 51, 8, fill=color, outline="")
-            graphic.create_line(18, 51, 48, 51, fill="#a9d5d0", width=3, capstyle="round")
-            graphic.create_line(18, 61, 64, 61, fill="#d3e4ed", width=2, capstyle="round")
-            self.descriptions.append((label, 1, 210))
+            self.descriptions.append((label, 1, 300))
         else:
-            icon(card, action).grid(row=0, column=0, sticky="w", padx=(0, 10))
-            title_label = tk.Label(card, text=title, background=surface, foreground=INK, font=("Segoe UI", 12, "bold"), anchor="w", justify="left", wraplength=230)
+            icon(card, action).grid(row=0, column=0, sticky="nw", padx=(0, 10))
+            title_label = tk.Label(card, text=title, background=surface, foreground=INK,
+                                   font=("Segoe UI", 11, "bold"), anchor="w", justify="left", wraplength=220)
             title_label.grid(row=0, column=1, sticky="w")
             self.card_titles.append(title_label)
-            self.help_button(card, action).grid(row=0, column=2, sticky="e", padx=(8, 0))
-            label = tk.Label(card, text=description, background=surface, foreground="#7a8b9e", font=("Segoe UI", 10), justify="left", anchor="w", wraplength=310)
-            label.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 12))
-            self.descriptions.append((label, 2, 58))
-        button = RoundedButton(card, text="Entrer dans Structura  →" if hero else "Ouvrir  →", command=lambda: self.execute(action),
-                               background=surface, fill="#ffffff" if hero else "#edf2f8", foreground=INK,
-                               hover="#e6f2f3" if hero else "#e1eaf5", width=225 if hero else 118, height=41 if hero else 35)
-        button.grid(row=3 if hero or action == "organization" else 2, column=0, columnspan=1 if hero else 3, sticky="w")
+            self.help_button(card, action).grid(row=0, column=2, sticky="ne", padx=(6, 0))
+            label = tk.Label(card, text=description, background=surface, foreground=MUTED,
+                             font=("Segoe UI", 9), justify="left", anchor="w")
+            label.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 10))
+            card.rowconfigure(2, weight=1)
+            self.descriptions.append((label, 2, 50))
+        button = RoundedButton(card, text="Entrer dans Structura  →" if hero else "Ouvrir  →",
+                               command=lambda: self.execute(action), background=surface,
+                               fill=NAVY if hero else "#eef2f3", foreground="#ffffff" if hero else INK,
+                               hover="#254c64" if hero else "#e1e9ec", width=230 if hero else 108,
+                               height=40 if hero else 33, font=("Segoe UI", 10 if hero else 9, "bold"))
+        if hero:
+            button.grid(row=1, column=1, rowspan=2, sticky="se", padx=(18, 0))
+        elif action == "organization":
+            button.grid(row=2, column=2, sticky="e")
+        else:
+            button.grid(row=2, column=0, columnspan=3, sticky="sw")
         self.buttons.append(button)
         return card
 
     def help_button(self, parent, action):
         from .launcher_widgets import BACKGROUND, RoundedButton
         background = BACKGROUND if parent.winfo_class() == "TFrame" else parent.cget("background")
-        dark = action == "admin"
         button = RoundedButton(parent, text="?", command=lambda: self.show_help(action), background=background,
-                               fill="#315677" if dark else "#f0f4f9", foreground="#c9dce9" if dark else "#69849f",
-                               hover="#416b8e" if dark else "#e0eaf5", width=29, height=29, radius=15)
+                               fill="#f3f3ee", foreground="#7a868c",
+                               hover="#e8ece6", width=27, height=27, radius=14,
+                               font=("Segoe UI", 9))
         button.bind("<Enter>", lambda event: self.show_tooltip(button, action), add="+")
         button.bind("<FocusIn>", lambda event: self.show_tooltip(button, action), add="+")
         button.bind("<Leave>", self.hide_tooltip, add="+")
@@ -337,10 +371,11 @@ class LauncherWindow:
 
     def resize_body(self, event):
         self.canvas.itemconfigure(self.body_window, width=event.width)
+        self.status_label.configure(wraplength=max(260, event.width - 45))
         for label, columns, margin in self.descriptions:
             label.configure(wraplength=max(160, event.width // columns - margin))
         for label in self.card_titles:
-            label.configure(wraplength=max(95, event.width // 2 - 148))
+            label.configure(wraplength=max(95, event.width // 2 - 140))
 
     def update_scrollbar(self, first, last):
         self.body_scrollbar.set(first, last)
@@ -374,7 +409,7 @@ class LauncherWindow:
         for button in self.buttons:
             button.configure(state="disabled")
         self.organization.configure(state="disabled")
-        self.activity.pack(fill="x", pady=(8, 0))
+        self.activity.grid(row=5, column=0, sticky="ew", pady=(8, 0))
         self.activity.start(12)
         self.status_dot.itemconfigure(self.dot, fill="#6695ba")
         self.message.set("Traitement en cours…")
@@ -405,7 +440,7 @@ class LauncherWindow:
                     continue
                 self.busy = False
                 self.activity.stop()
-                self.activity.pack_forget()
+                self.activity.grid_remove()
                 self.status_dot.itemconfigure(self.dot, fill="#66a28c")
                 self.organization.configure(state="readonly")
                 for button in self.buttons:

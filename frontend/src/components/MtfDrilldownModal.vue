@@ -20,6 +20,7 @@
     <AlertMessage v-else-if="errorMsg" kind="error">{{ errorMsg }}</AlertMessage>
 
     <template v-else-if="drill">
+      <LocalVolWingNotice :wings="drill.local_vol_wings" />
       <!-- Sélecteur de scénario -->
       <div class="flex flex-wrap items-center gap-2">
         <button v-for="(sc, i) in drill.scenarios" :key="sc.id"
@@ -32,6 +33,7 @@
           <span class="opacity-70 font-mono ml-1">{{ pf(sc.mtf) }}</span>
         </button>
         <div class="ml-auto text-[11px] text-slate-500">
+          <span v-if="drill.model">{{ MTF_MODEL_LABELS[drill.model] || drill.model }} · </span>
           {{ drill.n_inner }} chemins internes par scénario · calcul {{ Math.round(drill.elapsed_ms) }} ms
         </div>
       </div>
@@ -59,7 +61,7 @@
               <div class="text-[11px] text-slate-600 mb-1">MTF à {{ fmtY(drill.t) }} (valeur en {{ fmtY(drill.t) }})</div>
               <div class="text-xl font-bold font-mono text-[var(--accent)]">{{ pf(sc.mtf) }}</div>
               <div class="text-[11px] text-slate-500 mt-1">
-                {{ sc.alive ? 'Contrat encore vivant' : 'Contrat déjà éteint — rien à marquer' }}
+                {{ sc.alive ? 'Payoff actif' : sc.outstanding ? 'Payoff arrêté — créances encore impayées' : 'Engagement intégralement réglé' }}
               </div>
             </div>
             <div class="flex-1 min-w-[180px] rounded-[10px] p-3"
@@ -76,7 +78,7 @@
             </div>
             <div class="flex-1 min-w-[180px] rounded-[10px] p-3"
                  style="background: var(--surface2); border: 1px solid var(--border);">
-              <div class="text-[11px] text-slate-600 mb-1">Déjà encaissé avant {{ fmtY(drill.t) }}</div>
+              <div class="text-[11px] text-slate-600 mb-1">Cash contractuellement échu à {{ fmtY(drill.t) }}</div>
               <div class="text-xl font-bold font-mono text-slate-700">{{ pf(sc.realized_cash) }}</div>
               <div class="text-[11px] text-slate-500 mt-1">
                 {{ sc.realized_flows.length }} flux — hors du mark, par construction
@@ -108,7 +110,7 @@
                   <HelpTip :text="`Écart relatif du worst-of au niveau ${b.name} (${fmtLvl(b)}), comparé via ${b.observable}. Positif = au-dessus du niveau.`" />
                 </th>
                 <th class="text-left py-1.5 pr-3 font-semibold">Statut</th>
-                <th class="text-left py-1.5 font-semibold">Flux payés</th>
+                <th class="text-left py-1.5 font-semibold">Flux constatés</th>
               </tr>
             </thead>
             <tbody>
@@ -142,15 +144,16 @@
         <div class="card !p-4 overflow-x-auto">
           <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
             Détail du calcul du Mark-to-Future
-            <HelpTip text="Chaque ligne est un flux du script, tel qu'il se comporte sur les chemins internes partant de ce scénario. Probabilité = part des chemins où il se déclenche ; E[montant] = espérance sur TOUS les chemins (donc déjà pondérée par la probabilité) ; VA = E[montant] × facteur d'actualisation. La somme des VA est le mark." />
+            <HelpTip text="Chaque ligne est soit une créance déjà acquise (probabilité 100 %), soit un flux encore conditionnel sur les chemins internes. Les contributions sont actualisées à leurs dates de paiement. Probabilité = part des chemins où il se déclenche ; E[montant] = espérance sur TOUS les chemins (donc déjà pondérée par la probabilité) ; VA = E[montant] × facteur d'actualisation. La somme des VA est le mark." />
           </div>
-          <div v-if="!sc.alive" class="text-xs text-amber-600 py-2">
-            Contrat éteint à cette date : plus aucun flux futur, le mark est nul par construction.
+          <div v-if="!sc.outstanding && !sc.alive" class="text-xs text-amber-600 py-2">
+            Engagement intégralement réglé : la valeur résiduelle est nulle ; le cash déjà échu figure séparément.
           </div>
           <table v-else class="w-full text-xs border-collapse">
             <thead>
               <tr class="border-b border-[var(--border)] text-slate-500">
-                <th class="text-left py-1.5 pr-3 font-semibold">Date</th>
+                <th class="text-left py-1.5 pr-3 font-semibold">Constatation</th>
+                <th class="text-left py-1.5 pr-3 font-semibold">Paiement</th>
                 <th class="text-left py-1.5 pr-3 font-semibold">Flux</th>
                 <th class="text-right py-1.5 pr-3 font-semibold">Probabilité</th>
                 <th class="text-right py-1.5 pr-3 font-semibold whitespace-nowrap">Montant si déclenché</th>
@@ -161,10 +164,11 @@
             </thead>
             <tbody>
               <tr v-for="(f, i) in sc.future_flows" :key="i" class="border-b border-[var(--border)]/40">
+                <td class="py-1.5 pr-3 font-mono whitespace-nowrap">{{ fmtDate(f.observation_t) }}</td>
                 <td class="py-1.5 pr-3 font-mono whitespace-nowrap">
-                  {{ fmtY(f.t_abs) }}<span class="text-slate-400 text-[10px] ml-1">(+{{ fmtY(f.t) }})</span>
+                  {{ fmtDate(f.t_abs) }}<span class="text-slate-400 text-[10px] ml-1">(+{{ fmtY(f.t) }})</span>
                 </td>
-                <td class="py-1.5 pr-3">{{ f.lbl }}</td>
+                <td class="py-1.5 pr-3">{{ f.lbl }}<span v-if="f.status === 'ACQUIRED_UNPAID'" class="block text-amber-600">Créance acquise impayée</span><span v-else class="block text-slate-500">Flux encore conditionnel</span></td>
                 <td class="py-1.5 pr-3 text-right font-mono">{{ formatPercent(f.proba, 1) }}</td>
                 <td class="py-1.5 pr-3 text-right font-mono text-slate-500">{{ pf(f.amount_if_fires) }}</td>
                 <td class="py-1.5 pr-3 text-right font-mono">{{ pf(f.e_amount) }}</td>
@@ -172,11 +176,11 @@
                 <td class="py-1.5 text-right font-mono font-semibold">{{ pf(f.pv) }}</td>
               </tr>
               <tr class="border-t-2 border-[var(--border2)] font-bold">
-                <td class="py-2 pr-3" colspan="6">Total — Mark-to-Future</td>
+                <td class="py-2 pr-3" colspan="7">Total — Mark-to-Future</td>
                 <td class="py-2 text-right font-mono text-[var(--accent)]">{{ pf(sc.sum_pv) }}</td>
               </tr>
               <tr v-if="Math.abs(sc.pv_residual) > 1e-6">
-                <td class="py-1 pr-3 text-[11px] text-amber-600" colspan="6">
+                <td class="py-1 pr-3 text-[11px] text-amber-600" colspan="7">
                   Écart de reconstitution (somme des VA − mark)
                 </td>
                 <td class="py-1 text-right font-mono text-[11px] text-amber-600">{{ sc.pv_residual.toExponential(2) }}</td>
@@ -188,7 +192,7 @@
         <!-- Coupons déjà acquis -->
         <div v-if="sc.realized_flows.length" class="card !p-4 overflow-x-auto">
           <div class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
-            Flux déjà encaissés avant la date de valorisation
+            Flux dont le règlement contractuel est échu
             <HelpTip text="Ces montants sont sortis du produit : ils ne font plus partie du mark. Ils sont rappelés ici parce que le rendement d'une position les inclut, alors que sa valeur résiduelle ne les inclut pas." />
           </div>
           <table class="w-full text-xs border-collapse">
@@ -196,14 +200,14 @@
               <tr class="border-b border-[var(--border)] text-slate-500">
                 <th class="text-left py-1.5 pr-3 font-semibold">Date</th>
                 <th class="text-right py-1.5 pr-3 font-semibold">Montant</th>
-                <th class="text-right py-1.5 font-semibold">Valeur en {{ fmtY(drill.t) }}</th>
+                <th class="text-right py-1.5 font-semibold">Constatation</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(f, i) in sc.realized_flows" :key="i" class="border-b border-[var(--border)]/40">
-                <td class="py-1.5 pr-3 font-mono">{{ fmtY(f.t) }}</td>
+                <td class="py-1.5 pr-3 font-mono">{{ fmtDate(f.t) }}</td>
                 <td class="py-1.5 pr-3 text-right font-mono">{{ pf(f.v) }}</td>
-                <td class="py-1.5 text-right font-mono text-slate-500">{{ pf(f.pv_t0) }}</td>
+                <td class="py-1.5 text-right font-mono text-slate-500">{{ fmtDate(f.observation_t) }}</td>
               </tr>
             </tbody>
           </table>
@@ -214,6 +218,8 @@
 </template>
 
 <script setup>
+import LocalVolWingNotice from './LocalVolWingNotice.vue'
+import { MTF_MODEL_LABELS } from '../utils/mtfViews.js'
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import BaseModal from './ui/BaseModal.vue'
 import HelpTip from './HelpTip.vue'
@@ -221,7 +227,7 @@ import AlertMessage from './ui/AlertMessage.vue'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { demoChartOptions } from '../composables/useSensitiveChart.js'
 import { applyChartTheme, axisTick, chartTheme } from '../charts/theme.js'
-import { formatPercent, formatNumber } from '../utils/format.js'
+import { formatPercent, formatNumber, formatDate } from '../utils/format.js'
 import {
   Chart, LineElement, LineController, PointElement,
   CategoryScale, LinearScale, Filler, Tooltip, Legend,
@@ -253,6 +259,12 @@ const sc = computed(() => props.drill?.scenarios?.[activeIdx.value] || null)
 
 const pf = v => (v === null || v === undefined) ? '—' : formatPercent(v, 2)
 const fmtY = v => (v === null || v === undefined) ? '—' : `${formatNumber(v, 2)}Y`
+const fmtDate = t => {
+  if (t == null || !props.drill?.origin_date) return fmtY(t)
+  const day = new Date(props.drill.origin_date + 'T00:00:00Z')
+  day.setUTCDate(day.getUTCDate() + Math.round(t * 365.25))
+  return formatDate(day.toISOString().slice(0, 10))
+}
 const fmtSigned = v => (v >= 0 ? '+' : '') + formatPercent(v, 1)
 const fmtLvl = b => b.is_pct ? formatPercent(b.level * 100, 1) : formatNumber(b.level, 4)
 
@@ -268,8 +280,8 @@ const headline = computed(() => {
   const s = sc.value
   const tiles = [
     { label: 'Simulation n°', val: `#${s.id}` },
-    { label: `Worst-of à ${fmtY(props.drill.t)}`, val: pf(s.wof_t0 * 100) },
-    { label: 'Statut', val: s.alive ? 'Vivant' : 'Éteint',
+    { label: `Worst-of à ${fmtY(props.drill.t)}`, val: pf(s.wof_t0 == null ? null : s.wof_t0 * 100) },
+    { label: 'Statut', val: s.alive ? 'Payoff actif' : s.outstanding ? 'Créance impayée' : 'Réglé',
       cls: s.alive ? 'text-[var(--positive)]' : 'text-[var(--muted)]' },
     { label: 'MTF', val: pf(s.mtf), cls: 'text-[var(--accent)]' },
   ]
@@ -291,6 +303,7 @@ function renderPath() {
   if (!props.modelValue || !sc.value || !pathCanvas.value) return
   const s = sc.value
   const d = props.drill
+  if (!s.path.t.length) return
   const markIdx = d.step_k
 
   // Les barrières sont des lignes horizontales constantes : elles se lisent

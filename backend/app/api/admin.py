@@ -710,6 +710,7 @@ def update_entity(
 
 # ── Market data catalog ────────────────────────────────────────────────
 
+# Retained for portfolio labels; market-data administration reads Underlying.
 _CATALOG = [
     # Indices US
     {"key": "SPX",  "ticker": "^GSPC",     "label": "S&P 500",           "category": "Indices US"},
@@ -789,19 +790,28 @@ _CATALOG = [
 
 
 @router.get("/market-data")
-def market_data_catalog(admin: Annotated[User, Depends(get_current_admin)]):
+def market_data_catalog(admin: Annotated[User, Depends(get_current_admin)],
+                        session: Annotated[Session, Depends(get_session)]):
     from ..services.market_history import storage_status
     from ..runtime import business_today
     stored = {s["key"]: s for s in _price_status()}
     today = business_today()
     result = []
-    for item in _CATALOG:
+    reference = session.exec(select(Underlying).order_by(Underlying.ticker, Underlying.id)).all()
+    seen = set()
+    for underlying in reference:
+        ticker = underlying.ticker.strip().upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        item = dict(key=ticker, ticker=ticker, label=underlying.label,
+                    category=underlying.group_name, active=underlying.active)
         slug = _slug(item["key"])
         s = stored.get(slug, {})
         result.append({
             **item,
             "slug":         slug,
-            "currency":     s.get("currency", ""),
+            "currency":     s.get("currency", underlying.ccy),
             **storage_status(item["ticker"], today.isoformat()),
         })
     return result

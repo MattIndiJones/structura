@@ -10,6 +10,23 @@
     </p>
     <p v-if="policy.disclaimer" role="alert" class="text-amber-600">{{ policy.disclaimer }}</p>
     <p v-if="policy.comparison_basis" class="text-slate-500">Période et clôtures communes à tous les candidats disposant d’un historique ; ajustements identiques dédupliqués entre les comparaisons.</p>
+    <details v-if="sources.length">
+      <summary class="cursor-pointer font-semibold">Historique Yahoo conservé par sous-jacent</summary>
+      <div class="overflow-auto mt-3 max-h-64">
+        <table class="w-full text-xs">
+          <thead><tr class="border-b"><th class="text-left p-1">Ticker</th><th class="text-left p-1">Première clôture</th>
+            <th class="text-left p-1">Dernière clôture</th><th class="text-right p-1">Cours</th><th class="text-left p-1">Chargement</th></tr></thead>
+          <tbody><tr v-for="source in sources" :key="source.ticker" class="border-b">
+            <td class="p-1"><SensitiveValue>{{ source.ticker }}</SensitiveValue></td>
+            <td class="p-1">{{ formatDate(source.first_observation) }}</td><td class="p-1">{{ formatDate(source.last_observation) }}</td>
+            <td class="p-1 text-right">{{ source.available_observations }}</td>
+            <td class="p-1">{{ source.history_scope === 'MAX_AVAILABLE_REQUESTED' ? 'Maximum Yahoo demandé' : 'Période limitée' }}
+              · {{ source.storage === 'PROVIDER' ? 'Téléchargé et conservé' : 'Réutilisé depuis le cache' }}</td>
+          </tr></tbody>
+        </table>
+      </div>
+      <p class="mt-2 text-slate-500">Clôtures non ajustées des dividendes. Une demande maximale ne certifie pas l’absence de lacunes chez Yahoo ; le début commun du panier et la période choisie déterminent les cours utilisés.</p>
+    </details>
     <details v-if="rows.length">
       <summary class="cursor-pointer font-semibold">Dates ajustées — {{ rows.length }} ajustement(s),
         {{ policy.adjusted_underlyings?.length || 0 }} sous-jacent(s)</summary>
@@ -44,6 +61,9 @@ import { formatDate } from '../utils/format.js'
 
 const props = defineProps({ result: { type: Object, required: true } })
 const policy = computed(() => props.result.history_policy)
+const sources = computed(() => Object.entries(props.result.market_data?.sources || {})
+  .filter(([, source]) => source.provider === 'YAHOO_FINANCE')
+  .map(([ticker, source]) => ({ ticker, ...source })))
 const rows = computed(() => policy.value?.adjustments || [])
 const page = ref(0)
 const pageCount = computed(() => Math.ceil(rows.value.length / 50))

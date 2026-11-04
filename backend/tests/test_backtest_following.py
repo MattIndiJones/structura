@@ -143,9 +143,9 @@ def test_common_axis_keeps_genuine_prices_and_first_dates_without_any_fill():
     assert result["observation_dates"]["A"][0] == "2024-01-02"
 
 
-def test_local_default_start_does_not_fetch_an_older_history(monkeypatch):
+def test_verified_max_history_is_reused_without_an_older_history_fetch(monkeypatch):
     values = pd.Series([100., 120.], index=pd.to_datetime(["2024-01-02", "2024-01-12"]))
-    market_history.store_history("A", values, False, "2024-01-02", "2024-01-12")
+    market_history.store_history("A", values, False, "2024-01-02", "2024-01-12", full_history=True)
     class ForbiddenProvider:
         def Ticker(self, *_):
             pytest.fail("Existing raw observations must be reused")
@@ -220,7 +220,7 @@ def test_api_returns_reproducible_adjustments_and_irr_at_the_effective_payment_d
     request = BacktestRequest(script=f"AT {T}:\n  PAY 1.001\n  STOP", T=T,
         underlyings=[dict(name="A", ticker="A")], corr_matrix=[[1.]], end_date="2024-01-08", freq=252)
     result = pricing.backtest_endpoint(request)
-    assert calls[0][0][1] is None and calls[0][1] == {"raw_history": True}
+    assert calls[0][0][1] is None and calls[0][1] == {"raw_history": True, "full_history": True}
     assert result["history_policy"]["max_delay_days"] == 10
     assert result["history_policy"]["adjustment_count"] == 1
     assert result["history_policy"]["disclaimer"]

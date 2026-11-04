@@ -9,10 +9,10 @@ import { courbeDividende } from '../composables/useDividendCurve.js'
 import { CALCULATION_LIMITS, estimatePricingCalculation } from '../utils/calculationBudget.js'
 import { buildModelCalendars } from '../utils/productModels.js'
 import { normaliseCorrelation } from '../utils/rfqBasket.js'
-import { defaultUnderlying, fractionToPercent, fractionToPercentExact, PERCENT_MARKET_FIELDS } from '../utils/underlyingDefaults.js'
+import { anchorDefaultHestonVariance, defaultUnderlying, fractionToPercent, fractionToPercentExact, PERCENT_MARKET_FIELDS } from '../utils/underlyingDefaults.js'
 import { underlyingGroups } from '../data/commonUnderlyings.js'
 import { classifyUnderlying, makeSurface, resizeSurfaceLevel, surfaceCalibrationKey } from '../utils/volSurface.js'
-import { calibrateUnderlying } from '../utils/smileCalibration.js'
+import { calibrateUnderlying, explicitHestonCalibration } from '../utils/smileCalibration.js'
 import { recordMarketReference, marketProvenanceFields } from '../utils/marketProvenance.js'
 import { readPricingConfiguration } from '../utils/pricingConfiguration.js'
 
@@ -299,7 +299,7 @@ export const usePricingStore = defineStore('pricing', () => {
     // Date à laquelle on veut la valeur. Vide ou égale au strike, on price à
     // l'émission ; postérieure, on rejoue le passé et on ne simule que la vie
     // restante. Le mode ne se choisit pas, il se déduit de cette date.
-    valuation_date: '',
+    valuation_date: _localTodayIso(),
     // 'deterministic' (r constant) | 'abm' (gaussien sans retour à la moyenne)
     // | 'hull_white' (gaussien avec retour à la moyenne)
     rateModel: 'deterministic',
@@ -330,6 +330,7 @@ export const usePricingStore = defineStore('pricing', () => {
       } else if (before && sigma!==before[2] && u.vol_surface && Number(sigma)>0) {
         resizeSurfaceLevel(u)
       }
+      anchorDefaultHestonVariance(u)
     }
   }, { flush: 'sync' })
 
@@ -577,6 +578,12 @@ export const usePricingStore = defineStore('pricing', () => {
   const transcribeEngines = ref(null)
   // Corps de requête ayant produit `mtf`, rejoué à l'identique par le drill-down.
   const mtfBody   = ref(null)
+  const mtfComparison = ref(null)
+  const mtfActiveLeg = ref(null)
+  const mtfLoading = ref(false)
+  const mtfContext = ref(null)
+  let mtfRevision = 0
+  let mtfDrillRevision = 0
   const mtfDrill  = ref(null)
   const mtfDrillLoading = ref(false)
   const mtfDrillError   = ref(null)
@@ -647,8 +654,16 @@ export const usePricingStore = defineStore('pricing', () => {
     return up
   }
 
-  function _buildUls() {
-    return underlyings.value.map(u => ({
+  function _hestonEvidence(u, horizon = globalParams.T, rate = globalParams.r) {
+    if (yieldCurve.enabled || _rateParams().sigma_r || u.dividendCurveEnabled || u.ccyh
+        || u.sigma_fx * u.rho_sfx) return null
+    return explicitHestonCalibration(u, horizon, rate)?.calibration_evidence ?? null
+  }
+
+  function _buildUls(rows = underlyings.value, model = globalParams.model) {
+    return rows.map(u => {
+      const evidence = model === 'heston' ? _hestonEvidence(u) : u.calibration_evidence
+      return {
       name: u.name, ticker: u.ticker, ccy: u.ccy, spot0: u.spot0 || null,
       sigma: u.sigma / 100,
       q: u.q / 100,
@@ -672,11 +687,12 @@ export const usePricingStore = defineStore('pricing', () => {
       skew: u.skew / 100,
       curvature: u.curvature / 100,
       asset_class: u.asset_class || 'unknown',
-      smile_parameter_mode: u.smile_parameter_mode || 'automatic',
-      ...(u.calibration_evidence ? {calibration_evidence: JSON.parse(JSON.stringify(u.calibration_evidence))} : {}),
+      smile_parameter_mode: model === 'heston' && !evidence ? 'manual' : u.smile_parameter_mode || 'automatic',
+      ...(evidence ? {calibration_evidence: JSON.parse(JSON.stringify(evidence))} : {}),
       vol_surface: u.vol_surface ? JSON.parse(JSON.stringify(u.vol_surface)) : null,
       ...marketProvenanceFields(u),
-    }))
+      }
+    })
   }
 
   // La dérivation vit dans useDividendCurve : l'écran d'appel d'offres en a
@@ -1096,16 +1112,28 @@ export const usePricingStore = defineStore('pricing', () => {
     })
   }
 
+  const hestonCalibrationPending = computed(() => globalParams.model === 'heston'
+    && underlyings.value.some(u => u.smile_calibration?.explicit && u.smile_calibration.status === 'loading'
+      && u.smile_calibration.key === surfaceCalibrationKey(u, 'heston', globalParams.T, globalParams.r)))
+
   let _preparationRevision=0
   function _prepareCalculation(report = message => { error.value = message }) {
     const revision=++_preparationRevision
     const activeReport=message=>{if(revision===_preparationRevision) report(message)}
+    if (hestonCalibrationPending.value) {
+      report('La calibration Heston est en cours. Relancez le Pricer dès qu’elle est appliquée.')
+      return Promise.resolve(false)
+    }
     if (editingProductTerms.value) {
       report('Conservez la nouvelle version des termes avant de calculer ou de transmettre ce produit.')
       return Promise.resolve(false)
     }
     const scriptReady=_prepareScriptCalculation(activeReport)
-    const items=underlyings.value.filter(u=>u.vol_surface && ['heston','sabr','lsv'].includes(globalParams.model))
+    const frozenLsv = globalParams.model === 'lsv' && !usesDatedPricing()
+      && !yieldCurve.enabled && !_rateParams().sigma_r && globalParams.barrierMonitoring === 'weekly'
+      && underlyings.value.every(u => u.vol_surface && !_buildDividendCurve(u).length
+        && !Number(u.ccyh) && !(u.sigma_fx * u.rho_sfx))
+    const items=underlyings.value.filter(u=>!frozenLsv && u.vol_surface && ['sabr','lsv'].includes(globalParams.model))
     if(!items.length) return scriptReady
     const context=()=>({model:globalParams.model,horizon:globalParams.T,rate:globalParams.r})
     const signature=()=>JSON.stringify([globalParams,script.value,paramOverrides,constatOverrides,
@@ -1157,6 +1185,7 @@ export const usePricingStore = defineStore('pricing', () => {
   // run time so the "Résultats" summary stays accurate even if the user keeps
   // editing params afterward — it describes THIS price, not the current form.
   function _snapshotInputs() {
+    const rates = _rateParams()
     return {
       underlyings: underlyings.value.map(u => ({
         ...JSON.parse(JSON.stringify(u)),
@@ -1164,11 +1193,15 @@ export const usePricingStore = defineStore('pricing', () => {
         dividendCurveEnabled: !!u.dividendCurveEnabled,
         dividendDecay: u.dividendDecay,
         dividendCurve: _buildDividendCurve(u),
+        hestonFitUsed: globalParams.model === 'heston'
+          ? _hestonEvidence(u)?.dossier?.heston_fit?.mode ?? null : null,
       })),
       corrMatrix: corrMatrix.value.map(row => [...row]),
       r: globalParams.r, T: globalParams.T, N: globalParams.N, seed: globalParams.seed,
       model: globalParams.model, antithetic: globalParams.antithetic,
-      rateModel: globalParams.rateModel, sigma_r: globalParams.sigma_r, a_r: globalParams.a_r,
+      hestonUncalibrated: globalParams.model === 'heston'
+        ? underlyings.value.filter(u=>!_hestonEvidence(u)).map(u=>u.name) : [],
+      rateModel: globalParams.rateModel, sigma_r: rates.sigma_r * 100, a_r: rates.a_r,
       barrierMonitoring: globalParams.barrierMonitoring,
       trade_date: globalParams.trade_date, strike_date: globalParams.strike_date,
       value_date: globalParams.value_date,
@@ -1538,6 +1571,7 @@ export const usePricingStore = defineStore('pricing', () => {
    *  la vie restante est simulée. Voir api/inlife.py pour pourquoi un simple
    *  « repartir du bon spot » ne suffirait pas sur un produit à mémoire. */
   async function runInLifePricing() {
+    while (automaticMarketRequest) await automaticMarketRequest.promise
     const preparing = _prepareCalculation()
     if (preparing && !(await preparing)) return
     let request
@@ -1573,6 +1607,7 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   async function runPricing() {
+    while (automaticMarketRequest) await automaticMarketRequest.promise
     // Pricing, Greeks and booking validate the script first and stop on error.
     const preparing = _prepareCalculation()
     if (preparing && !(await preparing)) return
@@ -1960,70 +1995,184 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   // ── Mark to Future (nested Monte Carlo) ────────────────────────────
-  async function runMtf(params = {}) {
-    if (!result.value) { error.value = 'Lancez d\'abord un pricing (▶ Pricer).'; return }
-    const preparing = _prepareCalculation()
-    if (preparing && !(await preparing)) return
-    const n_outer = params.n_outer || 200
-    const n_inner = params.n_inner || 500
-    const n_dates = params.n_dates || 5
-    const body = {
-      ..._baseBody(),
-      main_price: result.value.price * 100,
-      n_outer, n_inner, n_dates,
-      seed: 42,
-    }
-    loading.value = true; error.value = null
-    // Rough cost calibration: ~4.7s for the 200×500×5 default on a GBM/local-vol model.
-    _startProgress((n_outer * n_inner * n_dates / 500000) * 4700)
+  const mtfIsStale = computed(() => mtfContext.value !== null &&
+    (mtfContext.value !== _mtfContextKey() || resultIsStale.value || !result.value))
+
+  function _mtfContextKey() {
     try {
-      const res = await apiFetch('/api/mtf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
-      else {
-        mtf.value = await res.json()
-        // Le corps EXACT qui a produit cet éventail. Le drill-down le rejoue tel
-        // quel au lieu de reconstruire un _baseBody() : sinon une modification du
-        // script entre le lancement et le clic expliquerait un autre produit que
-        // celui affiché, sans que rien ne le signale.
-        mtfBody.value = body
-        mtfDrill.value = null
-        rightTab.value = 'mtf'
-      }
-    } catch (e) { error.value = e.message }
-    finally { loading.value = false; _stopProgress() }
+      return JSON.stringify([_requestKey(_baseBody()), currentProduct.value, openedDeal.value?.id])
+    } catch {
+      return null
+    }
   }
 
-  // Explication détaillée de scénarios choisis à une date de l'éventail.
-  // `ids` sont des indices dans mtf.results[i].pvs — le client sait déjà quel
-  // scénario porte quel quantile, inutile de refaire tourner tout l'éventail.
-  async function runMtfDrilldown({ t, ids, labels = [] }) {
-    if (!mtf.value || !mtfBody.value) {
-      mtfDrillError.value = 'Lancez d\'abord un Mark to Future.'
+  function _clearMtf() {
+    mtfRevision++
+    mtfLoading.value = false
+    mtfContext.value = null
+    mtfComparison.value = null
+    mtfActiveLeg.value = null
+    _applyMtfResult(null, null)
+  }
+
+  function _applyMtfResult(fan, body) {
+    mtfDrillRevision++
+    mtfDrill.value = null
+    mtfDrillLoading.value = false
+    mtfDrillError.value = null
+    mtf.value = fan
+    mtfBody.value = fan ? { ...body, main_price: fan.main_price ?? body.main_price,
+      mtm_dates: fan.mtm_dates, context_fingerprint: fan.context_fingerprint,
+      ...(fan.lsv_qualification ? { lsv_qualification: fan.lsv_qualification } : {}) } : null
+  }
+
+  function selectMtfLeg(key) {
+    const leg = mtfComparison.value?.[key]
+    if (!leg?.result || mtfActiveLeg.value === key) return
+    mtfActiveLeg.value = key
+    _applyMtfResult(leg.result, leg.body)
+  }
+
+  async function _mtfModelBody(base, model, market, horizon) {
+    if (model === 'gbm_atm_curve') return { ...base, model: 'constant', gbm_atm_curve: true }
+    const indicative = model === 'heston_indicative'
+    if (indicative) model = 'heston'
+    if (!['constant', 'heston', 'sabr', 'localvol', 'lsv'].includes(model)) {
+      throw Error('Modèle indisponible en MTF. Le levier LSV doit être qualifié avant activation.')
+    }
+    if (!['heston', 'sabr'].includes(model)) return { ...base, model }
+    const inputs = structuredClone(market)
+    await Promise.all(inputs.map(async u => {
+      if (indicative) {
+        if (!u.vol_surface?.atm_scenario) throw Error(`${u.name} · choisissez une courbe ATM par scénario.`)
+        u.smile_parameter_mode = 'automatic'
+        if (u.smile_calibration?.status !== 'unqualified' ||
+            u.smile_calibration.key !== surfaceCalibrationKey(u, model, horizon, base.r * 100)) {
+          await calibrateUnderlying(u, model, horizon, base.r * 100)
+        }
+        const fit = u.smile_calibration
+        if (fit?.success !== true || !fit.calibration_evidence) {
+          throw Error(`${u.name} · calibration Heston non convergée.`)
+        }
+        for (const [key, value] of Object.entries(fit.parameters)) u[key] = key === 'kappa' ? value : value * 100
+        u.calibration_evidence = fit.calibration_evidence
+        return
+      }
+      if (model === 'heston') {
+        u.calibration_evidence = _hestonEvidence(u, horizon, base.r * 100)
+        if (u.vol_surface && !u.calibration_evidence) u.smile_parameter_mode = 'manual'
+        return
+      }
+      if (!u.vol_surface || u.smile_parameter_mode === 'manual') return
+      await calibrateUnderlying(u, model, horizon, base.r * 100)
+      if (u.smile_calibration?.status !== 'ready') {
+        throw Error(`${u.name} · calibration ${model === 'sabr' ? 'SABR' : 'Heston'} non qualifiée.`)
+      }
+    }))
+    const fields = ['v0', 'kappa', 'theta', 'xi', 'rho_h', 'alpha', 'beta', 'rho', 'nu',
+      'smile_parameter_mode', 'calibration_evidence']
+    const engineInputs = _buildUls(inputs, null)
+    const calibrated = base.underlyings.map((u, i) => {
+      const input = engineInputs[i]
+      if (!input || input.name !== u.name || input.ticker !== u.ticker) {
+        throw Error('Le panier du modèle ne correspond pas au produit valorisé.')
+      }
+      const parameters = Object.fromEntries(fields.filter(key => key in input).map(key => [key, input[key]]))
+      return { ...u, ...parameters }
+    })
+    return { ...base, model, underlyings: calibrated, ...(indicative ? { indicative_heston: true } : {}) }
+  }
+
+  async function _fetchMtf(endpoint, body) {
+    const response = await apiFetch(endpoint, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const data = await response.json()
+    if (!response.ok) throw Error(apiErrorMessage(data, 'Calcul Mark to Future impossible.'))
+    return data
+  }
+
+  async function runMtf(params = {}) {
+    if (!result.value) { error.value = "Lancez d'abord un pricing (▶ Pricer)."; return }
+    if (resultIsStale.value) {
+      error.value = 'Le prix de référence est périmé. Relancez le pricing avant le Mark to Future.'
       return
     }
+    if (editingProductTerms.value) { error.value = 'Conservez les termes avant de lancer le MTF.'; return }
+    const revision = ++mtfRevision
+    mtfLoading.value = true
+    error.value = null
+    const reference = result.value
+    let key = null
+    const current = () => revision === mtfRevision && result.value === reference &&
+      (key === null || key === _mtfContextKey())
+    try {
+      const preparing = _prepareScriptCalculation(message => { if (current()) error.value = message })
+      if (preparing && !(await preparing)) return
+      if (!current() || resultIsStale.value) return
+      key = _mtfContextKey()
+      const market = JSON.parse(JSON.stringify(underlyings.value))
+      const referencePaths = reference._inputs?.N ?? globalParams.N
+      const request = await _authoritativeProductRequest({ ..._baseBody(), N: referencePaths })
+      if (!current()) return
+      const base = { ...request, main_price: reference.price * 100, reference_paths: referencePaths,
+        n_outer: params.n_outer || 200, n_inner: params.n_inner || 500, n_dates: params.n_dates || 5, seed: 42 }
+      const horizon = reference.valuation_context?.T ?? reference.calculation_budget?.maturity_years ?? request.T
+      const models = [params.model || request.model]
+      if (params.modelB) models.push(params.modelB)
+      if (models.length === 2 && models[0] === models[1]) throw Error('Sélectionnez deux modèles différents.')
+      const prepared = await Promise.allSettled(models.map(model => _mtfModelBody(base, model, market, horizon)))
+      if (!current()) return
+      if (models.length === 1) {
+        if (prepared[0].status === 'rejected') throw prepared[0].reason
+        const body = prepared[0].value
+        const fan = await _fetchMtf('/api/mtf', body)
+        if (!current()) return
+        mtfComparison.value = null
+        mtfActiveLeg.value = null
+        _applyMtfResult(fan, body)
+      } else {
+        const legs = Object.fromEntries(prepared.map((leg, i) => [['a', 'b'][i], leg.status === 'fulfilled'
+          ? { model: models[i], body: leg.value } : { model: models[i], error: leg.reason.message }]))
+        if (legs.a.body && legs.b.body) {
+          const pair = await _fetchMtf('/api/mtf/compare', { a: legs.a.body, b: legs.b.body })
+          Object.assign(legs.a, pair.a, { model: models[0] })
+          Object.assign(legs.b, pair.b, { model: models[1] })
+        } else {
+          const leg = legs.a.body ? legs.a : legs.b
+          if (leg.body) {
+            try { leg.result = await _fetchMtf('/api/mtf', leg.body) }
+            catch (failure) { leg.error = failure.message }
+          }
+        }
+        if (!current()) return
+        mtfComparison.value = legs
+        mtfActiveLeg.value = null
+        const available = legs.a.result ? 'a' : legs.b.result ? 'b' : null
+        if (available) selectMtfLeg(available)
+        else _applyMtfResult(null, null)
+      }
+      mtfContext.value = key
+      rightTab.value = 'mtf'
+    } catch (e) { if (current()) error.value = e.message }
+    finally { if (revision === mtfRevision) mtfLoading.value = false }
+  }
+
+  async function runMtfDrilldown({ t, ids, labels = [] }) {
+    if (mtfIsStale.value || !mtf.value || !mtfBody.value) {
+      mtfDrillError.value = 'Relancez le Mark to Future avant d’ouvrir le détail.'
+      return
+    }
+    const revision = ++mtfDrillRevision
+    const body = mtfBody.value
     mtfDrillLoading.value = true
     mtfDrillError.value = null
+    mtfDrill.value = null
     try {
-      const res = await apiFetch('/api/mtf/drilldown', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...mtfBody.value, t, scenario_ids: ids, labels }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        mtfDrillError.value = err.detail || 'Erreur serveur'
-        mtfDrill.value = null
-      } else {
-        mtfDrill.value = await res.json()
-      }
+      const detail = await _fetchMtf('/api/mtf/drilldown', { ...body, t, scenario_ids: ids, labels })
+      if (revision === mtfDrillRevision && !mtfIsStale.value) mtfDrill.value = detail
     } catch (e) {
-      mtfDrillError.value = e.message
-      mtfDrill.value = null
-    } finally { mtfDrillLoading.value = false }
+      if (revision === mtfDrillRevision && !mtfIsStale.value) mtfDrillError.value = e.message
+    } finally { if (revision === mtfDrillRevision) mtfDrillLoading.value = false }
   }
 
   // ── Simulation: PARAM solver + 2D price grid ───────────────────────
@@ -2134,6 +2283,8 @@ export const usePricingStore = defineStore('pricing', () => {
   const marketDataEffectiveDate = ref('')
   let _marketDataRevision = 0
   let _marketContextRevision = 0
+  let automaticMarketRequest = null
+  let lastAutomaticMarketKey = null
   watch(()=>JSON.stringify([underlyings.value,corrMatrix.value,globalParams,currentProduct.value,openedDeal.value?.id]),
     ()=>{ _marketContextRevision++ },{flush:'sync'})
   function _marketResponseCurrent(revision, contextRevision) {
@@ -2160,6 +2311,7 @@ export const usePricingStore = defineStore('pricing', () => {
   function _histVolUrl(tickers, asof = '') {
     const params = new URLSearchParams({
       tickers: tickers.join(','), period: '1y', window_days: '252',
+      session_aware: 'true',
     })
     if (asof) params.set('asof', asof)
     return `/api/finance/hist_vol?${params}`
@@ -2179,7 +2331,7 @@ export const usePricingStore = defineStore('pricing', () => {
   function _invalidatePricingOutputs() {
     _pricingRevision += 1
     result.value = null; profile.value = null; paths.value = null
-    proba.value = null; backtest.value = null; mtf.value = null
+    proba.value = null; backtest.value = null; _clearMtf()
     solver.value = null; grid.value = null; scenarios.value = null
     kid.value = null; comparator.value = null
     rightTab.value = 'empty'
@@ -2272,16 +2424,25 @@ export const usePricingStore = defineStore('pricing', () => {
         if (vol == null) return
         const div = dividendProfiles[pairIndex]
         const q = div?.ok ? div.yield_declared : null
-        underlyings.value[idx].vol_level_source = 'realized'
-        underlyings.value[idx].sigma = fractionToPercentExact(vol)
-        underlyings.value[idx].alpha = fractionToPercentExact(vol)
-        if (q != null) underlyings.value[idx].q = fractionToPercentExact(q)
+        const references = u.market_data?.references
+        const overridden = field => options.automatic && references?.[field]?.ticker === tick
+          && Number(u[field])/100 !== (references[field].applied_value ?? references[field].value)
+        const keepSigma = overridden('sigma')
+        const keepQ = overridden('q')
+        if (!keepSigma) {
+          u.vol_level_source = 'realized'
+          u.sigma = fractionToPercentExact(vol)
+          u.alpha = fractionToPercentExact(vol)
+        }
+        if (q != null && !keepQ) u.q = fractionToPercentExact(q)
         if (!contractTermsLocked.value
             && /^Sous-jacent \d+$/.test(underlyings.value[idx].name || '')) {
           underlyings.value[idx].name = tick
         }
         underlyings.value[idx].dividendProfile = div?.ok ? div : null
         recordMarketReference(underlyings.value[idx],data,tick,div)
+        if (keepSigma) u.market_data.references.sigma.applied_value = vol
+        if (keepQ && q != null) u.market_data.references.q.applied_value = q
       })
 
       // Apply correlation matrix
@@ -2300,8 +2461,31 @@ export const usePricingStore = defineStore('pricing', () => {
       const divWarning = missingDividends.length
         ? ` · q conservé pour ${missingDividends.join(', ')}` : ''
       yfStatus.value = `✓ ${fnd} — σ, q, corr mis à jour · ${data.n_obs} rendements${_marketDateLabel(data, requestedAsOf)}${divWarning}${miss}`
+      return !data.missing?.length && pairs.every(({tick}) => data.vols?.[tick] != null)
     } catch (e) { if (_marketResponseCurrent(revision,contextRevision)) yfStatus.value = '⚠ ' + e.message }
     finally { if (revision === _marketDataRevision) marketDataLoading.value = false }
+  }
+
+  function onUnderlyingSelection() {
+    if (contractTermsLocked.value) return
+    return _loadAutomaticMarket()
+  }
+
+  function _loadAutomaticMarket() {
+    const asof = globalParams.valuation_date
+    const tickers = underlyings.value.map(u => (u.ticker || '').trim().toUpperCase())
+    if (!asof || !tickers.some(Boolean)) return
+    const key = JSON.stringify([asof, tickers])
+    if (automaticMarketRequest?.key === key) return automaticMarketRequest.promise
+    if (lastAutomaticMarketKey === key && !automaticMarketRequest) return
+    const pending = {key, promise: null}
+    automaticMarketRequest = pending
+    pending.promise = loadYfAll({ asof, automatic: true }).then(success => {
+      if (automaticMarketRequest === pending && success) lastAutomaticMarketKey = key
+    }).finally(() => {
+      if (automaticMarketRequest === pending) automaticMarketRequest = null
+    })
+    return pending.promise
   }
 
   async function onValuationDateChange() {
@@ -2311,7 +2495,7 @@ export const usePricingStore = defineStore('pricing', () => {
       yfStatus.value = '⚠ Renseignez une date de valorisation pour charger le marché.'
       return
     }
-    await loadYfAll({ asof, automatic: true })
+    await _loadAutomaticMarket()
   }
 
   /** Clôtures NUES à une date, par ticker : { TICKER: {close, date} }.
@@ -2363,7 +2547,7 @@ export const usePricingStore = defineStore('pricing', () => {
     // produit chargé dans le store.
     _pricingRevision += 1
     result.value = null; profile.value = null; paths.value = null
-    proba.value = null; backtest.value = null; mtf.value = null
+    proba.value = null; backtest.value = null; _clearMtf()
     solver.value = null; grid.value = null; scenarios.value = null
     kid.value = null
     comparator.value = null
@@ -2389,6 +2573,8 @@ export const usePricingStore = defineStore('pricing', () => {
     // A Yahoo response belonging to the product being left must never land on
     // the next product that reuses this global Pinia store.
     _marketDataRevision += 1
+    automaticMarketRequest = null
+    lastAutomaticMarketKey = null
     relacherVariante()
     currentScriptId.value = null
     currentScriptName.value = ''
@@ -2423,7 +2609,7 @@ export const usePricingStore = defineStore('pricing', () => {
       sigma_r: 1.5, a_r: 0.3, barrierMonitoring: 'weekly',
       nominal: 1_000_000,
       trade_date: today, strike_date: '', value_date: '',
-      maturity_date: '', payment_date: '', valuation_date: '',
+      maturity_date: '', payment_date: '', valuation_date: today,
     })
     yfStatus.value = ''
     marketDataAsOf.value = ''
@@ -2578,7 +2764,7 @@ export const usePricingStore = defineStore('pricing', () => {
     Object.assign(globalParams, globals, {
       strike_date: plan.strikeDate, value_date: plan.strikeDate,
       maturity_date: plan.maturityDate, payment_date: plan.paymentDate,
-      valuation_date: '', T: plan.T,
+      valuation_date: globalParams.valuation_date || _localTodayIso(), T: plan.T,
     })
     Object.assign(yieldCurve, curve); Object.assign(fundingCurve, funding)
     yfStatus.value = market[0]
@@ -2660,7 +2846,7 @@ export const usePricingStore = defineStore('pricing', () => {
       value_date: terms.value_date || '',
       maturity_date: terms.maturity_date || '',
       payment_date: terms.payment_date || '',
-      valuation_date: market.valuation_date || '',
+      valuation_date: market.valuation_date || _localTodayIso(),
       barrierMonitoring: market.barrier_monitoring || 'weekly',
       rateModel: Number(market.sigma_r || 0) === 0
         ? 'deterministic' : (Number(market.a_r || 0) === 0 ? 'abm' : 'hull_white'),
@@ -3424,9 +3610,10 @@ export const usePricingStore = defineStore('pricing', () => {
     scriptDirty, validationReport, validateScript, ensureScriptValidated,
     underlyings, corrMatrix, activeUnderlyingIdx,
     globalParams, maturityDate, maturityDateEditable, yieldCurve, greekSel, selectedGreeks,
-    pricingEstimate, greeksEstimate, calculationLimits: CALCULATION_LIMITS,
+    pricingEstimate, greeksEstimate, hestonCalibrationPending, calculationLimits: CALCULATION_LIMITS,
     result, resultIsStale, profile, paths, proba, backtest, mtf, solver, grid, scenarios, kid,
     mtfDrill, mtfDrillLoading, mtfDrillError, runMtfDrilldown,
+    mtfComparison, mtfActiveLeg, mtfIsStale, mtfLoading, selectMtfLeg,
     scriptGen, scriptGenLoading,
     scriptGenerationProvenance,
     scriptAssistantPayload, adoptGeneratedScript,
@@ -3456,7 +3643,7 @@ export const usePricingStore = defineStore('pricing', () => {
       ? { ...scriptGenerationProvenance.value,
           modified_after_adoption: script.value !== adoptedGeneratedScriptText.value }
       : null,
-    loadYfOne, loadYfAll, onValuationDateChange, loadStrikeCloses,
+    loadYfOne, loadYfAll, onValuationDateChange, onUnderlyingSelection, loadStrikeCloses,
     setMaturityDate, syncTenorFromMaturity, maturityError,
     addUnderlying, removeUnderlying,
     resetToDefaults, releaseSession, sessionRouteKey, loadFromDb, loadVariant, saveVariant, variantInfo,
