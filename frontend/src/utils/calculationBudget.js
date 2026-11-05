@@ -54,8 +54,8 @@ function greekRuns(selected, underlyings) {
 }
 
 function oneRun({ maturityYears, underlyings, paths, model, antithetic,
-  continuousMonitoring, stochasticRates, expandedDates = 0, repricings = 1 }) {
-  const steps = Math.max(1, Math.round(maturityYears * 52))
+  continuousMonitoring, stochasticRates, expandedDates = 0, repricings = 1, stepsPerYear = 52 }) {
+  const steps = Math.max(1, Math.round(maturityYears * stepsPerYear))
   let workFactor = MODEL_WORK[model] ?? 1
   if (antithetic) workFactor *= 2
   if (continuousMonitoring) workFactor *= 1.35
@@ -75,7 +75,7 @@ function oneRun({ maturityYears, underlyings, paths, model, antithetic,
 
 export function estimatePricingCalculation({ script = '', maturityYears, underlyings,
   paths, model, antithetic = true, continuousMonitoring = false,
-  stochasticRates = false, selectedGreeks = [] }) {
+  stochasticRates = false, selectedGreeks = [], stepsPerYear = 52 }) {
   const maturity = Number(maturityYears)
   const assets = Number(underlyings)
   const nPaths = Number(paths)
@@ -84,6 +84,7 @@ export function estimatePricingCalculation({ script = '', maturityYears, underly
   const reasons = []
   const warnings = []
 
+  if (![52, 104, 208].includes(stepsPerYear)) reasons.push('Grille de diffusion invalide')
   if (!Number.isFinite(maturity) || maturity <= 0) reasons.push('Maturité invalide')
   else if (maturity > CALCULATION_LIMITS.maxMaturityYears) reasons.push('Maturité supérieure à 30 ans')
   else if (maturity > CALCULATION_LIMITS.maturityWarningYears) warnings.push('Maturité longue')
@@ -101,7 +102,7 @@ export function estimatePricingCalculation({ script = '', maturityYears, underly
   }
 
   const input = { maturityYears: maturity, underlyings: assets, paths: nPaths, model,
-    antithetic, continuousMonitoring, stochasticRates, expandedDates }
+    antithetic, continuousMonitoring, stochasticRates, expandedDates, stepsPerYear }
   const base = oneRun(input)
   const runs = greekRuns(selectedGreeks, assets)
   const greekPaths = Math.max(1_000, Math.floor(nPaths / 4))

@@ -317,3 +317,15 @@ def test_two_underlying_correlation_change_uses_archived_matrix():
         else:
             assert step["delta_pts"] == 0
     assert result["residual_pts"] == 0
+
+
+def test_changed_diffusion_grid_is_separated_from_market_moves(calculated):
+    session,user,deal,first=calculated
+    second=cloned_run(session,first,lambda p:p['valuation_context'].__setitem__('steps_per_year',104))
+    comparison=core.compare_runs(first,second)
+    assert comparison['available']
+    contributions={step['label']:step['delta_pts'] for step in comparison['steps']}
+    assert 'Grille de diffusion' in contributions
+    assert all(value==0 for label,value in contributions.items() if label!='Grille de diffusion')
+    assert sum(contributions.values())+comparison['residual_pts']==pytest.approx(comparison['delta_pts'],abs=1e-12)
+    assert any('Grilles de diffusion différentes' in warning for warning in comparison['warnings'])

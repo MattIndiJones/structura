@@ -140,6 +140,48 @@ describe('MtM quotidien du Booking', () => {
     expect(state.mtmResults[1].mtm).toBe(1.03)
   })
 
+  it('reprend la grille du booking et transmet une surcharge sans recalibrer', async () => {
+    const fetch = vi.fn(async () => reply({ mtm: 1.03 }))
+    vi.stubGlobal('fetch', fetch)
+    const state = useBookingMtm(undefined, { bookedGrid: () => 104 })
+    expect(state.mtmGridFor(1)).toBe(104)
+    expect(state.mtmGridChoiceFor(1)).toBe('booking')
+    state.setMtmGrid(1, '208')
+    await state.runMtm(1)
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ steps_per_year: 208, recalibrate: 'none' })
+    state.setMtmGrid(1, '52')
+    expect(state.mtmResults[1]).toBeNull()
+    expect(state.mtmGridFor(1)).toBe(52)
+    state.setMtmGrid(1, 'booking')
+    expect(state.mtmGridFor(1)).toBe(104)
+  })
+
+  it('restaure la grille sélectionnée et refuse un résultat tardif d’une autre grille', async () => {
+    const pending = deferred()
+    vi.stubGlobal('fetch', vi.fn(() => pending.promise))
+    const state = useBookingMtm(undefined, { bookedGrid: () => 104 })
+    const restoration = state.loadSavedMtm(1)
+    expect(fetch.mock.calls[0][0]).toContain('booking_grid=true')
+    state.setMtmGrid(1, 208)
+    pending.resolve(reply([saved({ result: { mtm: 1.02, valuation_date: localDay(), market_used: { steps_per_year: 104 } } })]))
+    await restoration
+    expect(state.mtmResults[1]).toBeNull()
+    fetch.mockResolvedValueOnce(reply([saved({ result: { mtm: 1.03, valuation_date: localDay(), market_used: { steps_per_year: 208 } } })]))
+    await state.loadSavedMtm(1)
+    expect(fetch.mock.calls[1][0]).toContain('steps_per_year=208')
+    expect(state.mtmResults[1].mtm).toBe(1.03)
+  })
+
+  it('ne restaure pas un ancien calcul à 52 pour un booking à 104', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply([saved()])))
+    const state = useBookingMtm(undefined, { bookedGrid: () => 104 })
+    await state.loadSavedMtm(1)
+    expect(state.mtmResults[1]).toBeUndefined()
+    state.setMtmGrid(1, 52)
+    await state.loadSavedMtm(1)
+    expect(state.mtmResults[1].mtm).toBe(1.02)
+  })
+
   it('ne passe en GBM réalisé que sur sélection explicite', async () => {
     const fetch = vi.fn(async () => reply({ mtm: 1.03 }))
     vi.stubGlobal('fetch', fetch)

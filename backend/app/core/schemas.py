@@ -1,3 +1,4 @@
+from .simulation_grid import GridFrequency
 import math
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -208,6 +209,8 @@ class UnderlyingParams(BaseModel):
 
 
 class PricingRequest(BaseModel):
+    steps_per_year: GridFrequency = 52
+
     model_config = ConfigDict(allow_inf_nan=False)
 
     script: str = Field(max_length=MAX_SCRIPT_CHARS)
@@ -288,6 +291,8 @@ class PricingRequest(BaseModel):
 
 
 class PricingResponse(BaseModel):
+    steps_per_year: GridFrequency = 52
+    time_axis: Optional[Dict[str, Any]] = None
     price: float
     ic95: List[float]
     median: float
@@ -326,6 +331,8 @@ class PricingResponse(BaseModel):
     barrier_monitoring_note: Optional[str] = None
     barrier_monitoring_details: Optional[Dict[str, Any]] = None
     local_vol_wings: Optional[List[Dict[str, Any]]] = None
+    surface_context: Optional[Dict[str, Any]] = None
+    lsv_calibration: Optional[Dict[str, Any]] = None
     lsv_frozen_leverage: Optional[bool] = None
     lsv_limits: Optional[List[Dict[str, Any]]] = None
 
@@ -369,6 +376,8 @@ class VariantOverrides(BaseModel):
 
 
 class AnalysisBase(BaseModel):
+    steps_per_year: GridFrequency = 52
+
     """Shared fields for profile / paths / proba / backtest / mtf requests."""
     model_config = ConfigDict(allow_inf_nan=False)
 

@@ -602,7 +602,7 @@ describe('les economics d’un deal rouvert restent autoritatifs', () => {
 
     expect(store.globalParams.nominal).toBe(2_500_000)
     expect(store.openedDeal).toEqual({
-      id: 7, reference: 'DEAL-7', contract_version: 3,
+      id: 7, reference: 'DEAL-7', contract_version: 3, booked_steps_per_year: 52,
       counterparty_id: 11, ccr_netting_set_id: 9,
       uat_batch_id: 21, devise: 'USD',
     })

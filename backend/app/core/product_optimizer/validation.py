@@ -122,7 +122,7 @@ def validate_candidate(req, candidate, shortlist_size):
                             "family_confidence": .95, "per_check_alpha": alpha,
                             "interval_method": "Bonferroni; normal price, empirical Bernstein bounded analytics",
                             "runs": runs, "compatibility": comparisons,
-                            "time_steps_per_year": 52, "parameter_frozen":definition["key"],
+                            "time_steps_per_year": inputs.get("steps_per_year",52), "parameter_frozen":definition["key"],
                             "coupon_frozen": definition["key"] == "coupon"}
     apply_summary(candidate, runs[-1])
     inputs.update(N=2*req.search.simulations, seed=VALIDATION_SEEDS[-1])

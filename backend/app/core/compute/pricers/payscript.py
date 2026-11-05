@@ -83,6 +83,7 @@ def price_payscript_job(payload: dict) -> dict:
         vol_add=payload.get("vol_add"),
         dr=payload.get("dr", 0.0),
         barrier_monitoring=payload.get("barrier_monitoring", "weekly"),
+            steps_per_year=payload.get("steps_per_year", 52),
         maturity_payment_t=maturity_payment_t,
         value_date_t=value_date_t,
     )

@@ -1,6 +1,8 @@
 """Explicit nonuniform simulation intervals shared by diffusion and contracts."""
 import numpy as np
 
+from ..simulation_grid import grid_frequency
+
 
 def durations(dt, steps):
     values = np.asarray(dt, dtype=float)
@@ -61,6 +63,6 @@ def contract_axis(horizon, script=None, extra_dates=(), frequency=52):
 
 
 def metadata(policy, horizon, steps, dt):
-    return {"policy": policy, "horizon": horizon, "steps": steps,
+    return {"steps_per_year": grid_frequency(), "policy": policy, "horizon": horizon, "steps": steps,
             "dt": horizon / steps, "grid_times": times(dt, steps).tolist(),
             "event_order": "CONTRACT_TIME_THEN_SOURCE_ORDER"}

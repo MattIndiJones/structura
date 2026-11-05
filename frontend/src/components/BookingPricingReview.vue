@@ -2,7 +2,7 @@
   <div class="space-y-4 text-sm" style="color: var(--text)">
     <p class="text-xs" style="color: var(--muted)">
       Ces paramètres seront enregistrés avec le deal. Le MtM reprendra par défaut le modèle,
-      les volatilités, les corrélations, les taux et le funding du booking, avec les cours et la
+      les volatilités, les corrélations, les taux, le funding et la grille du booking, avec les cours et la
       date de valorisation choisis. Le nombre de trajectoires décrit le pricing initial.
     </p>
     <p v-if="!hasReceipt" class="rounded-lg border border-amber-600/50 bg-amber-950/20 p-3 text-xs text-amber-400">
@@ -15,7 +15,8 @@
       <div><dt class="text-xs" style="color: var(--muted)">Trajectoires du prix initial</dt><dd>{{ number(snapshot.N) }}</dd></div>
       <div><dt class="text-xs" style="color: var(--muted)">Modèle de taux</dt><dd>{{ rateModelLabel }}</dd></div>
       <div><dt class="text-xs" style="color: var(--muted)">Funding</dt><dd>{{ fundingLabel }}</dd></div>
-      <div><dt class="text-xs" style="color: var(--muted)">Barrières</dt><dd>{{ snapshot.barrierMonitoring === 'continuous' ? 'Monitoring continu' : 'Grille hebdomadaire' }}</dd></div>
+      <div><dt class="text-xs" style="color: var(--muted)">Barrières</dt><dd>{{ snapshot.barrierMonitoring === 'continuous' ? 'Monitoring continu' : 'Monitoring sur grille MC' }}</dd></div>
+      <div><dt class="text-xs" style="color: var(--muted)">Grille de diffusion</dt><dd>{{ snapshot.pricing_input?.steps_per_year ?? snapshot.stepsPerYear ?? 52 }} pas/an</dd></div>
       <div><dt class="text-xs" style="color: var(--muted)">Tirages antithétiques</dt><dd>{{ snapshot.antithetic ? 'Oui' : 'Non' }}</dd></div>
       <div v-if="pricingDate"><dt class="text-xs" style="color: var(--muted)">Date du prix initial</dt><dd>{{ pricingDate }}</dd></div>
       <div v-if="snapshot.rateModel !== 'deterministic' && snapshot.sigma_r != null"><dt class="text-xs" style="color: var(--muted)">σ taux</dt><dd>{{ pct(snapshot.sigma_r) }}</dd></div>

@@ -29,3 +29,11 @@ describe('estimation du coût de pricing', () => {
     expect(dense.workUnits).toBeGreaterThan(unique.workUnits)
   })
 })
+
+it('multiplie le coût et la mémoire selon la grille retenue', () => {
+  const coarse = estimatePricingCalculation({ ...base, stepsPerYear: 52, selectedGreeks: ['delta'] })
+  const fine = estimatePricingCalculation({ ...base, stepsPerYear: 208, selectedGreeks: ['delta'] })
+  expect(fine.workUnits).toBeGreaterThan(3.9 * coarse.workUnits)
+  expect(fine.peakBytes).toBeGreaterThan(3.9 * coarse.peakBytes)
+  expect(estimatePricingCalculation({ ...base, stepsPerYear: 53 }).blocked).toBe(true)
+})

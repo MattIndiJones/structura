@@ -21,12 +21,13 @@ from ..runtime import business_today
 from ..services.market_data import (
     dividend_profile, load_hist_prices, market_data_provider_for_deal,
 )
+from .simulation_grid import GridFrequency, snapshot_grid, grid_warning
 from .calibration import calibration_history_start, realized_market
 from .inlife_valuation import InLifeProduct, ValuationError, build_residual
 from .market_snapshot import snapshot_rate, snapshot_rate_is_default
 from .valuation_context import (
     ValuationContext, deterministic_cashflow_pv,
-    funding_from_market_snapshot, run_valuation,
+    funding_from_market_snapshot, run_valuation, residual_surface_anchor,
 )
 from .risk_lifecycle import deal_risk_state, terminal_dates_by_deal
 from ..services.product_repository import ProductError, load_product
@@ -42,6 +43,7 @@ class MtmOverrideUL(BaseModel):
 
 
 class MtmRequest(BaseModel):
+    steps_per_year: Optional[GridFrequency] = None
     recalibrate: Literal["none", "realized"] = "none"
     overrides: Optional[dict[str, MtmOverrideUL]] = None
     r: Optional[float] = None
@@ -172,6 +174,8 @@ def mtm_core(
                 "Date contractuelle de paiement atteinte — valorisation contractuelle hors périmètre. "
                 "Le règlement bancaire n'est pas confirmé ici ; le suivi des impayés relève du rapprochement de trésorerie.")
         market = json.loads(deal.market_snapshot_json or "{}")
+        booked_grid = snapshot_grid(market)
+        effective_grid = body.steps_per_year if body.steps_per_year is not None else booked_grid
         elapsed_origin = terms.strike_date
         elapsed = max(0.0, (today - elapsed_origin).days / 365.25)
         funding_curve, funding_spread = valuation_funding(body, market, elapsed)
@@ -207,6 +211,9 @@ def mtm_core(
             "n_paths": 0, "elapsed_ms": 0.0,
             "market_used": {
                 "source": "known_settlement",
+                "steps_per_year": effective_grid, "booked_steps_per_year": booked_grid,
+                "grid_warning": grid_warning(booked_grid, effective_grid),
+                "diffusion_required": False,
                 "model": "deterministic_cashflow",
                 "r": round(r_frac * 100.0, 4),
                 "funding_spread": round(funding_spread * 100.0, 6),
@@ -475,8 +482,12 @@ def mtm_core(
     antithetic = bool(market.get("antithetic", True))
     N_used = max(1000, min(100000, n_paths))
     if progress:
-        progress("pricing")
+        progress("lsv_pricing" if model_used == "lsv" else "pricing")
+    booked_grid = snapshot_grid(market)
+    effective_grid = body.steps_per_year if body.steps_per_year is not None else booked_grid
     valuation_context = ValuationContext(
+        steps_per_year=effective_grid,
+        local_vol_anchor=residual_surface_anchor(model_used, engine_uls, norm_spots, pre_strike=pre_strike),
         underlyings=engine_uls, corr_matrix=corr, r=r_frac, T=T_remaining,
         N=N_used, model=model_used, seed=seed, antithetic=antithetic,
         user_params=user_params, yield_curve=yc,
@@ -619,7 +630,13 @@ def mtm_core(
         # Effective market parameters of the future MC leg — always present so
         # a MtM number can never be quoted without knowing what priced it.
         "market_used": {
+            "surface_context": result.get("surface_context"),
+            "lsv_calibration": result.get("lsv_calibration"),
+            "local_vol_wings": result.get("local_vol_wings"),
             "time_axis": result.get("time_axis"),
+            "steps_per_year": effective_grid,
+            "booked_steps_per_year": booked_grid,
+            "grid_warning": grid_warning(booked_grid, effective_grid),
             "source": source,
             "model": model_used,
             "r": round(r_frac * 100.0, 4),
@@ -709,6 +726,8 @@ def mtm_core(
         "unsettled_pv": unsettled_pv,
         "unsettled_cash_flows": unsettled_flows,
         "seed": seed,
+        "steps_per_year": effective_grid,
+        "local_vol_anchor": valuation_context.local_vol_anchor,
         "N_used": N_used,
         "valuation_context": valuation_context.to_dict(),
     }

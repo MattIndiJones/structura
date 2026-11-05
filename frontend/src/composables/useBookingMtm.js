@@ -3,7 +3,7 @@ import { apiFetch } from '../utils/api.js'
 
 export function standardMtmRequest(request) {
   const known = ['recalibrate', 'r', 'overrides', 'window_days', 'valuation_date',
-    'funding_curve', 'funding_spread', 'funding_source_reference']
+    'funding_curve', 'funding_spread', 'funding_source_reference', 'steps_per_year']
   return (request.recalibrate ?? 'none') === 'none' && request.r == null
     && !Object.keys(request.overrides || {}).length && (request.window_days ?? 252) === 252
     && ['funding_curve', 'funding_spread', 'funding_source_reference'].every(k => request[k] == null)
@@ -55,12 +55,13 @@ export async function readMtmResponse(response, onProgress, interruptedMessage =
   }
 }
 
-export function useBookingMtm(dayProvider = localDay, { archived = false } = {}) {
+export function useBookingMtm(dayProvider = localDay, { archived = false, bookedGrid = () => 52 } = {}) {
   const todayIso = ref(dayProvider())
   const mtmLoading = reactive({})
   const mtmResults = reactive({})
   const mtmMode = reactive({})
   const mtmDate = reactive({})
+  const mtmGrid = reactive({})
   const mtmProgress = reactive({})
   const runningGeneration = {}
   const restored = new Set()
@@ -72,7 +73,7 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
     if (today === todayIso.value) return
     todayIso.value = today
     generation++
-    for (const state of [mtmResults, mtmMode, mtmDate]) {
+    for (const state of [mtmResults, mtmMode, mtmDate, mtmGrid]) {
       for (const id of Object.keys(state)) delete state[id]
     }
     restored.clear()
@@ -82,6 +83,19 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
   // an explicit alternative: it deliberately switches the engine to GBM.
   const mtmModeFor = id => mtmMode[id] || 'booking'
   const mtmDateFor = id => mtmDate[id] || todayIso.value
+  const mtmGridFor = id => mtmGrid[id] ?? bookedGrid(id)
+  const mtmGridChoiceFor = id => mtmGrid[id] ?? 'booking'
+  function setMtmGrid(id, value) {
+    syncDay()
+    if (mtmLoading[id]) return
+    if (value === 'booking') delete mtmGrid[id]
+    else {
+      const frequency = Number(value)
+      if (![52, 104, 208].includes(frequency)) return
+      mtmGrid[id] = frequency
+    }
+    invalidate(id)
+  }
   function invalidate(id) {
     revisions[id] = (revisions[id] || 0) + 1
     mtmResults[id] = null
@@ -119,9 +133,21 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
       query.set('created_before', end.toISOString())
     }
     try {
-      const response = await apiFetch(`/api/deals/valuation-runs/latest-mtm?${query}`)
-      if (!response.ok) throw new Error('Historique indisponible')
-      const runs = await response.json()
+      const groups = new Map()
+      for (const id of pending) {
+        const grid = mtmGrid[id] ?? 'booking'
+        if (!groups.has(grid)) groups.set(grid, [])
+        groups.get(grid).push(id)
+      }
+      const runs = (await Promise.all([...groups].map(async ([grid, ids]) => {
+        const parameters = new URLSearchParams(query)
+        parameters.set('deal_ids', ids.join(','))
+        if (grid === 'booking') parameters.set('booking_grid', 'true')
+        else parameters.set('steps_per_year', String(grid))
+        const response = await apiFetch(`/api/deals/valuation-runs/latest-mtm?${parameters}`)
+        if (!response.ok) throw new Error('Historique indisponible')
+        return response.json()
+      }))).flat()
       syncDay()
       if (generation !== epoch) return
       for (const saved of runs) {
@@ -133,6 +159,8 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
         if (!(id in versions) || versions[id] !== (revisions[id] || 0) || mtmLoading[id] || mtmResults[id]) continue
         if (!timestamp || (!archived && localDay(timestamp) !== day) || valuationDate !== day) continue
         if (!standardMtmRequest(request)) continue
+        const savedGrid = result.market_used?.steps_per_year ?? result.market_used?.time_axis?.steps_per_year ?? 52
+        if (savedGrid !== mtmGridFor(id)) continue
         if (mtmModeFor(id) !== 'booking' || mtmDateFor(id) !== day) continue
         if (result.mtm == null && !result.resolved_pending) continue
         mtmResults[id] = { ...result, _runCreatedAt: timestamp.toISOString(), _restored: true }
@@ -157,6 +185,7 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
         body: JSON.stringify({
           recalibrate: mtmModeFor(id) === 'realized' ? 'realized' : 'none',
           valuation_date: mtmDateFor(id),
+          ...(mtmGrid[id] != null ? { steps_per_year: mtmGrid[id] } : {}),
         }),
       })
       const data = await readMtmResponse(response, phase => { mtmProgress[id] = phase })
@@ -180,6 +209,7 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
       preparing: 'Préparation du calcul et vérification des données de marché…',
       history: 'Chargement des cours à la date de valorisation…',
       calibration: 'Chargement et calibration des paramètres de marché…',
+      lsv_pricing: 'Calibration indépendante du levier LSV, qualification et calcul du MtM… La préparation est réutilisée pour les calculs compatibles.',
       pricing: 'Paramètres prêts — calcul du MtM en cours…',
       saving: 'Calcul terminé — enregistrement du résultat…',
     }[mtmProgress[id]] || 'Calcul du MtM en cours…'
@@ -187,6 +217,7 @@ export function useBookingMtm(dayProvider = localDay, { archived = false } = {})
 
   return {
     todayIso, mtmLoading, mtmResults, mtmModeFor, mtmDateFor, setMtmMode, setMtmDate,
+    mtmGridFor, mtmGridChoiceFor, setMtmGrid,
     loadSavedMtms, loadSavedMtm: id => loadSavedMtms([id]), runMtm, mtmProgressLabel, syncDay, invalidateMtm: invalidate,
   }
 }

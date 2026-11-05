@@ -9,6 +9,8 @@ from pathlib import Path
 import tempfile
 import numpy as np
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from ..core.simulation_grid import with_request_grid
+from ..core.payscript.engine import _simulation_axis
 from pydantic import BaseModel
 from ..core.schemas import (
     PricingRequest, PricingResponse, ParseRequest, ParseResponse,
@@ -71,6 +73,7 @@ def _clean_flux(flux_map: dict) -> dict:
 
 
 @router.post("/parse", response_model=ParseResponse)
+@with_request_grid
 def parse_endpoint(req: ParseRequest):
     try:
         compiled = parse_script(req.script)
@@ -109,6 +112,7 @@ def parse_endpoint(req: ParseRequest):
 
 
 @router.post("/price", response_model=PricingResponse)
+@with_request_grid
 def price_endpoint(req: PricingRequest):
     # Sync (threadpool) on purpose: run_mc is CPU-bound for seconds — an
     # `async def` here would hold the event loop and freeze the whole API
@@ -166,7 +170,8 @@ def price_endpoint(req: PricingRequest):
             selected_greeks=(req.selected_greeks
                              if req.compute_greeks else None),
             expanded_dates=count_compiled_dates(compiled),
-        )
+            steps_per_year=req.steps_per_year,
+            simulation_steps=_simulation_axis(T_eff,compiled, steps_per_year=req.steps_per_year)[0])
         if frozen_lsv:
             from ..core.payscript.lsv_leverage import TRAINING_PATHS
             calculation_budget = replace(
@@ -190,11 +195,13 @@ def price_endpoint(req: PricingRequest):
                 barrier_monitoring=req.barrier_monitoring,
                 maturity_payment_t=maturity_payment_t,
                 value_date_t=value_date_t,
-            )
+            steps_per_year=req.steps_per_year)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     return PricingResponse(
+        steps_per_year=req.steps_per_year, time_axis=result.get("time_axis"),
+        surface_context=result.get('surface_context'), lsv_calibration=result.get('lsv_calibration'),
         price=result["price"],
         ic95=result["ic95"],
         median=result["median"],
@@ -234,6 +241,7 @@ def price_endpoint(req: PricingRequest):
 
 
 @router.post("/profile")
+@with_request_grid
 def profile_endpoint(req: ProfileRequest):
     """Payoff profile — sweep spot 40%–200%, quasi-deterministic.
 
@@ -269,7 +277,7 @@ def profile_endpoint(req: ProfileRequest):
         validate_compiled_dates(compiled)
         validate_problem_dimensions(T_eff, n)
         res = run_payoff_profile(compiled, uls, corr, r_eff, T_eff,
-                                  analysis_user_params(req, ctx), state=etat)
+                                  analysis_user_params(req, ctx), state=etat, steps_per_year=req.steps_per_year)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     res["in_life"] = ctx is not None
@@ -279,6 +287,7 @@ def profile_endpoint(req: ProfileRequest):
     return res
 
 
+@with_request_grid
 def analysis_user_params(req, ctx):
     """Les PARAM que l'analytique doit employer.
 
@@ -289,6 +298,7 @@ def analysis_user_params(req, ctx):
     return ctx.user_params if ctx is not None else req.user_params
 
 
+@with_request_grid
 def residual_context_or_none(req, *, retain_terminated=False):
     """Contexte résiduel quand la requête est en cours de vie, sinon None.
 
@@ -310,6 +320,7 @@ def residual_context_or_none(req, *, retain_terminated=False):
 
 
 @router.post("/paths")
+@with_request_grid
 def paths_endpoint(req: PathsRequest):
     """Monte Carlo sample paths for visualization."""
     ctx = residual_context_or_none(req)
@@ -360,6 +371,7 @@ def paths_endpoint(req: PathsRequest):
 
 
 @router.post("/proba")
+@with_request_grid
 def proba_endpoint(req: ProbaRequest):
     """Probability analysis — P(autocall), P(KI), expected life, percentiles."""
     ctx = residual_context_or_none(req)
@@ -410,6 +422,7 @@ def proba_endpoint(req: ProbaRequest):
     return res
 
 
+@with_request_grid
 def _mtf_context_fingerprint(script,valuation,dates,flows,req,*,reference_price=None):
     from ..core.product.calendar import EVENT_FIELDS
     calendar = dict(events=[dict(type=event.type,**{key:getattr(event,key) for key in EVENT_FIELDS})
@@ -419,7 +432,9 @@ def _mtf_context_fingerprint(script,valuation,dates,flows,req,*,reference_price=
         underlyings=valuation.underlyings,corr=valuation.corr_matrix,r=valuation.r,T=valuation.T,
         model=valuation.model,state=valuation.state,user_params=valuation.user_params,
         payment=valuation.maturity_payment_t,dates=dates,flows=flows,
-        n_outer=req.n_outer,n_inner=req.n_inner,seed=req.seed)
+        n_outer=req.n_outer,n_inner=req.n_inner,seed=req.seed,steps_per_year=req.steps_per_year)
+    if valuation.local_vol_anchor is not None:
+        payload['local_vol_anchor'] = valuation.local_vol_anchor
     if req.reference_paths is not None:
         payload.update(version='mtf-aligned-model-v1', reference_paths=req.reference_paths,
                        reference_price=req.main_price if reference_price is None else reference_price,
@@ -437,6 +452,7 @@ def _mtf_context_fingerprint(script,valuation,dates,flows,req,*,reference_price=
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+@with_request_grid
 def _mtf_initial_flows(ctx, req):
     if ctx is None:
         return []
@@ -453,13 +469,14 @@ def _mtf_initial_flows(ctx, req):
     return flows
 
 
+@with_request_grid
 def _mtf_request_dates(req,script,horizon,payment,ctx,flows):
     if ctx is not None and ctx.residuel.early_recall:
         last = max([f['payment_t'] for f in flows if f['payment_t'] > 0] or [1/365.25])
         return mtf_date_grid(script,max(last,1/365.25),req.n_dates,
             dates=req.mtm_dates if req.mtm_dates is not None else
-                [last*(i+1)/req.n_dates for i in range(req.n_dates)])
-    return mtf_date_grid(script,horizon,req.n_dates,payment,req.mtm_dates)
+                [last*(i+1)/req.n_dates for i in range(req.n_dates)], steps_per_year=req.steps_per_year)
+    return mtf_date_grid(script,horizon,req.n_dates,payment,req.mtm_dates, steps_per_year=req.steps_per_year)
 
 
 _MTF_MODEL_FIELDS = frozenset(('v0', 'kappa', 'theta', 'xi', 'rho_h', 'alpha', 'beta',
@@ -467,6 +484,7 @@ _MTF_MODEL_FIELDS = frozenset(('v0', 'kappa', 'theta', 'xi', 'rho_h', 'alpha', '
                                'calibration_evidence'))
 
 
+@with_request_grid
 def _mtf_comparison_key(req):
     shared = req.model_dump(mode='json', exclude={'model', 'main_price', 'gbm_atm_curve', 'indicative_heston'})
     for underlying in shared['underlyings']:
@@ -475,6 +493,7 @@ def _mtf_comparison_key(req):
     return shared
 
 
+@with_request_grid
 def _resolve_pricer_mtf(req):
     ctx = residual_context_or_none(req, retain_terminated=True)
     script = ctx.script if ctx is not None else resolve_analysis_constats(parse_script(req.script), req)
@@ -487,6 +506,7 @@ def _resolve_pricer_mtf(req):
     return ctx, script, valuation, flows, dates
 
 
+@with_request_grid
 def _validate_atm_mtf_options(req, valuation, residual):
     if not (req.gbm_atm_curve or req.indicative_heston):
         return
@@ -502,6 +522,7 @@ def _validate_atm_mtf_options(req, valuation, residual):
         raise ValueError('L’option de calibration indicative est réservée à Heston.')
 
 
+@with_request_grid
 def _pricer_mtf_job(req, resolved):
     from ..core.compute.pricers.mtf import freeze_mtf_script
 
@@ -521,7 +542,7 @@ def _pricer_mtf_job(req, resolved):
                                       allow_indicative_heston=req.indicative_heston)
     budget = dict(work_units=0, estimated_peak_bytes=0)
     if not terminated:
-        steps, _ = mtf_simulation_axis(script, valuation.T, dates, True)
+        steps, _ = mtf_simulation_axis(script, valuation.T, dates, True, steps_per_year=req.steps_per_year)
         common = dict(maturity_years=valuation.T, simulation_steps=steps, model=req.model,
                       underlyings=len(underlyings), expanded_dates=count_compiled_dates(script))
         peak = min(MTF_MAX_BATCH, req.n_outer * req.n_inner)
@@ -535,12 +556,12 @@ def _pricer_mtf_job(req, resolved):
         budget = fan.to_dict()
         budget['work_units'] = fan.work_units + reference.work_units
         if req.model == 'lsv':
-            budget['work_units'] += _lsv_qualification_work(steps, len(underlyings))
+            budget['work_units'] += _lsv_qualification_work(steps, len(underlyings), residual=valuation.local_vol_anchor is not None)
         budget['estimated_peak_bytes'] = max(reference.estimated_peak_bytes,
                                              fan.estimated_peak_bytes + outer.estimated_peak_bytes)
         if req.model == 'lsv':
             from ..core.payscript.lsv_leverage import CONTROL_PATHS
-            budget['estimated_peak_bytes'] = max(budget['estimated_peak_bytes'], 384 * CONTROL_PATHS)
+            budget['estimated_peak_bytes'] = max(budget['estimated_peak_bytes'], 1536 * CONTROL_PATHS)
         budget['estimated_peak_mb'] = round(budget['estimated_peak_bytes'] / 1024**2, 1)
     settings = dict(mtm_dates=dates, n_outer=req.n_outer, n_inner=req.n_inner, n_dates=req.n_dates,
                     initial_flows=flows, initial_terminated=terminated)
@@ -549,6 +570,7 @@ def _pricer_mtf_job(req, resolved):
     return job, valuation, budget
 
 
+@with_request_grid
 def _validate_lsv_mtf_scope(req, valuation, residual):
     if req.model != 'lsv':
         return
@@ -556,14 +578,17 @@ def _validate_lsv_mtf_scope(req, valuation, residual):
     if (req.reference_paths is None or not supports_frozen_lsv(
             valuation.underlyings, yield_curve=valuation.yield_curve, sigma_r=valuation.sigma_r,
             barrier_monitoring=valuation.barrier_monitoring, strike_set_t=valuation.strike_set_t,
-            residual=residual is not None)):
-        raise ValueError("La qualification LSV en MTF exige une surface SSVI par titre, à l’émission, "
+            residual=residual is not None and valuation.local_vol_anchor is None)):
+        raise ValueError("La qualification LSV en MTF exige une surface SSVI par titre, après fixing initial, "
                          "sans quanto, avec taux et dividendes plats et monitoring hebdomadaire.")
 
 
-def _lsv_qualification_work(steps, underlyings):
-    from ..core.payscript.lsv_leverage import CONTROL_PATHS, CONTROL_SEEDS, TRAINING_PATHS
-    return steps * underlyings * (TRAINING_PATHS + 2 * CONTROL_PATHS * len(CONTROL_SEEDS))
+def _lsv_qualification_work(steps, underlyings, *, residual=False):
+    from ..core.payscript.lsv_leverage import (CONTROL_PATHS, CONTROL_SEEDS, TRAINING_PATHS,
+        RESIDUAL_TRAINING_PATHS, RESIDUAL_CONTROL_SEEDS)
+    training=RESIDUAL_TRAINING_PATHS if residual else TRAINING_PATHS
+    seeds=RESIDUAL_CONTROL_SEEDS if residual else CONTROL_SEEDS
+    return steps * underlyings * (training + 2 * CONTROL_PATHS * len(seeds))
 
 
 def _check_mtf_budget(budgets):
@@ -572,6 +597,7 @@ def _check_mtf_budget(budgets):
         raise ValueError('Budget cumulé du Mark to Future dépassé. Réduisez les chemins ou le nombre de dates.')
 
 
+@with_request_grid
 def _finish_pricer_mtf(fan, req, resolved, valuation, budget):
     ctx, script, _, flows, dates = resolved
     origin = ctx.valuation if ctx is not None else analysis_origin(req)
@@ -631,6 +657,7 @@ def mtf_comparison_endpoint(request: MtfComparisonRequest):
 
 
 @router.post("/mtf")
+@with_request_grid
 def mtf_endpoint(req: MtfRequest):
     """Mark-to-Future — nested Monte Carlo: distribution of future mark-to-model
     values of the product, under the risk-neutral measure with frozen market params.
@@ -709,7 +736,7 @@ def mtf_endpoint(req: MtfRequest):
             # against, with nothing on screen saying so.
             yield_curve=req.yield_curve,
             sigma_r=req.sigma_r,
-        )
+        steps_per_year=req.steps_per_year, local_vol_anchor=valuation.local_vol_anchor)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     res["context_fingerprint"] = _mtf_context_fingerprint(compiled,valuation,mtm_dates,dated_flows,req)
@@ -734,6 +761,7 @@ def script_providers_endpoint(ollama_url: str | None = None):
 
 
 @router.post("/script/prompt")
+@with_request_grid
 def script_prompt_endpoint(req: ScriptGenerateRequest):
     """Le prompt exact qui partirait, sans appeler de modèle.
 
@@ -760,6 +788,7 @@ class ProductAnalysisRequest(AiOptions):
 
 
 @router.post("/product/analyse")
+@with_request_grid
 def product_analyse_endpoint(req: ProductAnalysisRequest):
     """Second avis d'un modèle sur un produit déjà pricé.
 
@@ -781,6 +810,7 @@ def product_analyse_endpoint(req: ProductAnalysisRequest):
 
 
 @router.post("/product/analyse/prompt")
+@with_request_grid
 def product_analyse_prompt_endpoint(req: ProductAnalysisRequest):
     """Les deux messages qui PARTIRAIENT, sans appeler le modèle.
 
@@ -806,6 +836,7 @@ def product_intentions_endpoint():
 
 
 @router.post("/script/generate")
+@with_request_grid
 def script_generate_endpoint(req: ScriptGenerateRequest):
     """Assistant de scripting — description en français vers script PayScript.
 
@@ -922,6 +953,7 @@ def script_transcribe_endpoint(audio: UploadFile = File(...)):
 
 
 @router.post("/mtf/drilldown")
+@with_request_grid
 def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
     """Mark-to-Future — explication détaillée de scénarios choisis à une date.
 
@@ -1019,7 +1051,7 @@ def mtf_drilldown_endpoint(req: MtfDrilldownRequest):
             aligned_grid=aligned,
             gbm_atm_curve=req.gbm_atm_curve,
             lsv_leverage=leverage,
-        )
+        steps_per_year=req.steps_per_year, local_vol_anchor=valuation.local_vol_anchor)
         result["context_fingerprint"] = fingerprint
         result["model"] = req.model
         result["origin_date"] = (ctx.valuation if ctx is not None else analysis_origin(req)).isoformat()
@@ -1046,10 +1078,12 @@ def backtest_history_bounds_endpoint(tickers: str, end_date: str | None = None):
 
 
 @router.post("/backtest")
+@with_request_grid
 def backtest_endpoint(req: BacktestRequest):
     return _run_historical_backtest(req)
 
 
+@with_request_grid
 def _run_historical_backtest(req: BacktestRequest, history_data=None):
     """Historical backtest — replay script on actual Yahoo Finance price history."""
     try:
@@ -1179,6 +1213,7 @@ def _run_historical_backtest(req: BacktestRequest, history_data=None):
 # two-stage funnel (individual screen, then combinations only within the
 # shortlist) — an exhaustive combinatorial scan is not feasible.
 
+@with_request_grid
 def _backtest_replay_policy(req, px_data):
     policy = dict(mode=req.history_mode, max_delay_days=req.max_delay_days,
                   observation_dates=px_data.get('observation_dates'))
@@ -1193,6 +1228,7 @@ def _comparison_history_hash(history):
 
 
 @router.post('/backtest/compare/detail')
+@with_request_grid
 def backtest_comparison_detail(req: BacktestCompareDetailRequest):
     comparison = req.comparison
     candidates = {candidate.ticker.strip().upper(): candidate for candidate in comparison.candidates if candidate.ticker.strip()}
@@ -1213,6 +1249,7 @@ def backtest_comparison_detail(req: BacktestCompareDetailRequest):
     return {**result, 'selected_tickers': names, 'history_hash': req.history_hash}
 
 
+@with_request_grid
 def _backtest_result_policy(req, px_data, adjustments):
     from ..core.backtest_history import BACKTEST_HISTORY_VERSION, BACKTEST_HISTORY_DISCLAIMER
     dates = px_data['dates']
@@ -1312,6 +1349,7 @@ def _realized_corr(prices: dict, tickers: list) -> list:
 
 
 @router.post("/backtest/compare")
+@with_request_grid
 def backtest_compare_endpoint(req: BacktestCompareRequest):
     try:
         compiled = parse_script(req.script)

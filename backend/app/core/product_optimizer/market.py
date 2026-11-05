@@ -56,5 +56,6 @@ def freeze_market(market):
 
 
 def market_engine_kwargs(inputs):
-    return {name:inputs.get(name, [] if name.endswith("curve") else 0.)
-            for name in ("yield_curve", "funding_curve", "funding_spread")}
+    return {"steps_per_year": inputs.get("steps_per_year",52),
+            **{name:inputs.get(name, [] if name.endswith("curve") else 0.)
+               for name in ("yield_curve", "funding_curve", "funding_spread")}}

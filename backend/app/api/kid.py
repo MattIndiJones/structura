@@ -193,7 +193,7 @@ def _horizon_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
         yield_curve=context.yield_curve, sigma_r=context.sigma_r,
         credit_exposure=True, maturity_payment_t=context.maturity_payment_t,
         state=context.state,
-    )
+    steps_per_year=context.steps_per_year)
     row = mtf["results"][0]
     marks = np.array(row["pvs"], dtype=np.float64) / 100.0        # residual value at T_cap
 

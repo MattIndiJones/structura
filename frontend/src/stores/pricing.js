@@ -312,7 +312,7 @@ export const usePricingStore = defineStore('pricing', () => {
     // 'weekly' (extrema aux pas hebdomadaires de la grille MC, historique)
     // | 'continuous' (pont brownien intra-pas : WOF_MIN/S_MIN/BOF_MAX reflètent
     // le chemin continu — P(KI) plus élevée, jambe put mieux valorisée)
-    barrierMonitoring: 'weekly',
+    barrierMonitoring: 'weekly', stepsPerYear: 52,
   })
 
   // ── Yield curve (term structure of zero rates) ────────────────────
@@ -412,6 +412,7 @@ export const usePricingStore = defineStore('pricing', () => {
     maturityYears: globalParams.T,
     underlyings: underlyings.value.length,
     paths: globalParams.N,
+    stepsPerYear: globalParams.stepsPerYear,
     model: globalParams.model,
     antithetic: globalParams.antithetic,
     continuousMonitoring: globalParams.barrierMonitoring === 'continuous',
@@ -894,6 +895,7 @@ export const usePricingStore = defineStore('pricing', () => {
         : [],
       ..._fundingPayload(),
       barrier_monitoring: globalParams.barrierMonitoring,
+      steps_per_year: globalParams.stepsPerYear,
       constats: frozen?.constats ?? _buildConstats(),
       // Les trois dates et la devise, exactement comme pour la valorisation en
       // cours de vie. Elles ne partaient pas d'ici : le serveur recevait un
@@ -1129,7 +1131,7 @@ export const usePricingStore = defineStore('pricing', () => {
       return Promise.resolve(false)
     }
     const scriptReady=_prepareScriptCalculation(activeReport)
-    const frozenLsv = globalParams.model === 'lsv' && !usesDatedPricing()
+    const frozenLsv = globalParams.model === 'lsv' && !isPreStrike()
       && !yieldCurve.enabled && !_rateParams().sigma_r && globalParams.barrierMonitoring === 'weekly'
       && underlyings.value.every(u => u.vol_surface && !_buildDividendCurve(u).length
         && !Number(u.ccyh) && !(u.sigma_fx * u.rho_sfx))
@@ -1202,7 +1204,7 @@ export const usePricingStore = defineStore('pricing', () => {
       hestonUncalibrated: globalParams.model === 'heston'
         ? underlyings.value.filter(u=>!_hestonEvidence(u)).map(u=>u.name) : [],
       rateModel: globalParams.rateModel, sigma_r: rates.sigma_r * 100, a_r: rates.a_r,
-      barrierMonitoring: globalParams.barrierMonitoring,
+      barrierMonitoring: globalParams.barrierMonitoring, stepsPerYear: globalParams.stepsPerYear,
       trade_date: globalParams.trade_date, strike_date: globalParams.strike_date,
       value_date: globalParams.value_date,
       // La dernière constatation telle qu'elle a été envoyée au moteur, pour
@@ -1512,6 +1514,7 @@ export const usePricingStore = defineStore('pricing', () => {
         : [],
       ..._fundingPayload(),
       barrier_monitoring: globalParams.barrierMonitoring,
+      steps_per_year: globalParams.stepsPerYear,
       ..._rateParams(),
     })
   }
@@ -2606,7 +2609,7 @@ export const usePricingStore = defineStore('pricing', () => {
     Object.assign(globalParams, {
       r: 3.0, T: null, N: 20000, seed: 42, model: 'constant',
       antithetic: true, deal_ccy: 'EUR', rateModel: 'deterministic',
-      sigma_r: 1.5, a_r: 0.3, barrierMonitoring: 'weekly',
+      sigma_r: 1.5, a_r: 0.3, barrierMonitoring: 'weekly', stepsPerYear: 52,
       nominal: 1_000_000,
       trade_date: today, strike_date: '', value_date: '',
       maturity_date: '', payment_date: '', valuation_date: today,
@@ -2847,7 +2850,7 @@ export const usePricingStore = defineStore('pricing', () => {
       maturity_date: terms.maturity_date || '',
       payment_date: terms.payment_date || '',
       valuation_date: market.valuation_date || _localTodayIso(),
-      barrierMonitoring: market.barrier_monitoring || 'weekly',
+      barrierMonitoring: market.barrier_monitoring || 'weekly', stepsPerYear: market.steps_per_year ?? 52,
       rateModel: Number(market.sigma_r || 0) === 0
         ? 'deterministic' : (Number(market.a_r || 0) === 0 ? 'abm' : 'hull_white'),
       sigma_r: fractionToPercentExact(market.sigma_r || 0),
@@ -2969,7 +2972,7 @@ export const usePricingStore = defineStore('pricing', () => {
       rateModel: market.rateModel ?? globalParams.rateModel,
       sigma_r: market.sigma_r ?? globalParams.sigma_r,
       a_r: market.a_r ?? globalParams.a_r,
-      barrierMonitoring: market.barrierMonitoring ?? 'weekly',
+      barrierMonitoring: market.barrierMonitoring ?? 'weekly', stepsPerYear: market.pricing_input?.steps_per_year ?? market.stepsPerYear ?? 52,
       trade_date: deal.trade_date,
       strike_date: deal.strike_date,
       value_date: deal.value_date,
@@ -3064,6 +3067,7 @@ export const usePricingStore = defineStore('pricing', () => {
     const retainedSchedule = deal.schedule || deal.frozen_schedule?.schedule
     openedDeal.value = {
       id: deal.id, reference: deal.reference, contract_version: deal.contract_version,
+      booked_steps_per_year: market.pricing_input?.steps_per_year ?? market.stepsPerYear ?? 52,
       product_id: deal.product_id, product_terms_version: deal.product_terms_version,
       counterparty_id: deal.counterparty_id, ccr_netting_set_id: deal.ccr_netting_set_id,
       uat_batch_id: deal.uat_batch_id, devise: deal.devise,
@@ -3148,7 +3152,7 @@ export const usePricingStore = defineStore('pricing', () => {
         ? 'deterministic' : (Number(p.a_r || 0) === 0 ? 'abm' : 'hull_white'),
       sigma_r: fractionToPercent(p.sigma_r || 0),
       a_r: Number(p.a_r || 0),
-      barrierMonitoring: p.barrier_monitoring || 'weekly',
+      barrierMonitoring: p.barrier_monitoring || 'weekly', stepsPerYear: p.steps_per_year ?? 52,
     })
     if (Array.isArray(p.yield_curve) && p.yield_curve.length) {
       yieldCurve.enabled = true
@@ -3395,7 +3399,7 @@ export const usePricingStore = defineStore('pricing', () => {
         seed: globalParams.seed, model: globalParams.model,
         antithetic: globalParams.antithetic, deal_ccy: globalParams.deal_ccy,
         rateModel: globalParams.rateModel, sigma_r: globalParams.sigma_r, a_r: globalParams.a_r,
-        barrierMonitoring: globalParams.barrierMonitoring,
+        barrierMonitoring: globalParams.barrierMonitoring, stepsPerYear: globalParams.stepsPerYear,
         trade_date: globalParams.trade_date,
         strike_date: globalParams.strike_date,
         value_date: globalParams.value_date,

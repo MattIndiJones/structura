@@ -628,8 +628,15 @@ def generate_valuation_pdf(data: dict) -> bytes:
         f"réalisé du produit (observations passées : {mtm.get('obs_passees', 0)}, extrema "
         f"atteints, coupons mémorisés) est hérité comme condition initiale de la "
         f"simulation. Modèle de diffusion : {model} ; taux d'actualisation : "
-        f"{mu.get('r', '—')}% ; {src}.", S_BODY))
+        f"{mu.get('r', '—')}% ; {src}. Grille : {mu.get('steps_per_year',52)} pas/an "
+        f"(booking : {mu.get('booked_steps_per_year',mu.get('steps_per_year',52))}). "
+        f"{mu.get('grid_warning') or ''}", S_BODY))
     story.append(Spacer(1, 6))
+    if mu.get('surface_context'):
+        story.append(Paragraph("Surface résiduelle ancrée au spot courant, fixings contractuels conservés. "
+            + ("Variance initiale : v0 du contexte, hypothèse non observée. Levier LSV qualifié sur "
+               "vanilles (5 pb) et digitales (10 pb), par rapport à Dupire sur la même grille. "
+               "Ces seuils ne mesurent pas le biais de discrétisation par rapport à la surface SSVI continue." if mu.get('lsv_calibration') else ""), S_BODY))
     story.append(_annex_market_table(mu, data.get("underlyings") or []))
     corr = mu.get("corr") or []
     if len(corr) > 1:

@@ -96,7 +96,7 @@ def frozen_greeks(run, evidence, progress):
                model_used=c["model"], seed=c["seed"], user_params=c["user_params"],
                sigma_r=c["sigma_r"], a_r=c["a_r"], yc=c["yield_curve"],
                funding_curve=c["funding_curve"], funding_spread=c["funding_spread"],
-               barrier_monitoring=c["barrier_monitoring"], antithetic=c["antithetic"],
+               barrier_monitoring=c["barrier_monitoring"], local_vol_anchor=c.get("local_vol_anchor"), steps_per_year=c.get("steps_per_year",52), antithetic=c["antithetic"],
                state=p["state"], norm_spots=p["norm_spots"], strike_set_t=c["strike_set_t"],
                residual_payment_t=c["maturity_payment_t"], underlyings_json=c["underlyings"])
     try:
@@ -158,6 +158,8 @@ def _compare_runs(first, second, progress=lambda phase: None, replay=True):
     if reason:
         res["warnings"].append(reason + " Écart observé uniquement, sans attribution causale.")
         return res
+    if ca.get("steps_per_year",52) != cb.get("steps_per_year",52):
+        res["warnings"].append(f"Grilles de diffusion différentes : {ca.get('steps_per_year',52)} puis {cb.get('steps_per_year',52)} pas/an. Effet numérique isolé en fin de décomposition.")
     progress("Vérification des deux calculs archivés")
     start = float(price_var_scenario_job(a)["price"])
     end = float(price_var_scenario_job(b)["price"])
@@ -185,12 +187,14 @@ def _compare_runs(first, second, progress=lambda phase: None, replay=True):
         previous = value
     step("Temps et état réalisé", ("T_elapsed", "passe_jusqu_a", "state", "unsettled_pv", "unsettled_cash_flows"),
          ("T", "maturity_payment_t", "value_date_t", "strike_set_t", "state"))
-    step("Spots", ("norm_spots",))
+    step("Spots", ("norm_spots",), ("local_vol_anchor",))
     step("Dividendes", underlying="dividend")
     step("Diffusion et change", underlying="remaining")
     step("Corrélations", ("corr",), ("corr_matrix",))
     step("Taux", nested=("r", "yield_curve", "sigma_r", "a_r"))
     step("Financement", nested=("funding_curve", "funding_spread"))
+    if ca.get("steps_per_year",52) != cb.get("steps_per_year",52):
+        step("Grille de diffusion", nested=("steps_per_year",))
     res.update(available=True, residual_pts=(m2["mtm"] - previous) * 100)
     return res
 

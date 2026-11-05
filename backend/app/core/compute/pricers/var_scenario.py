@@ -127,6 +127,7 @@ def price_var_scenario_job(payload: dict) -> dict:
             maturity_payment_t=payload.get("residual_payment_t"),
             strike_set_t=payload.get("strike_set_t"),
             barrier_monitoring=payload.get("barrier_monitoring", "weekly"),
+            steps_per_year=payload.get("steps_per_year", 52),
             wof_min_init=state["wof_min"], bof_max_init=state["bof_max"],
             index_offset=state["index"], memo_init=state["memo"], accum_init=state["accum"],
             s_min_init=state["s_min"], s_max_init=state["s_max"], s_prev_init=state["s_prev"],

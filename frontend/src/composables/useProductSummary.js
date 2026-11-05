@@ -117,7 +117,7 @@ function lignesMarche(inputs) {
     ? `${nb(inputs.N, 0)} paires antithétiques (${nb(inputs.N * 2, 0)} trajectoires)`
     : `${nb(inputs.N, 0)} trajectoires`
   L.push(`- Monte Carlo : ${sample}, graine ${inputs.seed}`
-    + `, monitoring de barrière ${inputs.barrierMonitoring === 'continuous' ? 'continu' : 'hebdomadaire'}`)
+    + `, grille ${inputs.stepsPerYear ?? 52} pas/an, monitoring de barrière ${inputs.barrierMonitoring === 'continuous' ? 'continu' : 'sur grille MC'}`)
   return L
 }
 

@@ -139,6 +139,18 @@
           </select>
         </div>
         <div class="mc-param-field">
+          <label class="label">Grille de diffusion (pas/an)
+            <HelpTip text="52 ≈ 7 jours, 104 ≈ 3,5 jours, 208 ≈ 1,75 jour. Les dates contractuelles exactes complètent la grille. Le réglage retenu est conservé au booking." />
+          </label>
+          <select v-model.number="store.globalParams.stepsPerYear" class="select" aria-label="Grille de diffusion (pas/an)">
+            <option :value="52">52 — rapide (défaut)</option><option :value="104">104 — intermédiaire</option><option :value="208">208 — fin</option>
+          </select>
+          <p v-if="store.openedDeal && (store.openedDeal.booked_steps_per_year ?? 52) !== store.globalParams.stepsPerYear"
+            class="text-xs text-amber-600 mt-1" role="status">
+            {{ valuationGridWarning(store.openedDeal.booked_steps_per_year ?? 52, store.globalParams.stepsPerYear) }}
+          </p>
+        </div>
+        <div class="mc-param-field">
           <label class="label">Seed
             <HelpTip text="Convention globale du moteur : seed 42 pour tous les pricings. Elle sert à la reproductibilité numérique et ne constitue pas un paramètre économique du deal." />
           </label>
@@ -148,10 +160,10 @@
         </div>
         <div class="mc-param-field">
           <label class="label">Monitoring barrières
-            <HelpTip width="w-72" text="Hebdomadaire : les extrema (WOF_MIN, S_MIN, BOF_MAX) sont observés aux pas de la grille MC (52/an) — une barrière contractuellement continue ou daily est alors sous-estimée. Continu : un pont brownien reconstitue les extrema intra-pas — P(KI) plus élevée, la jambe put d'un autocall est mieux valorisée. Les valeurs aux dates d'observation (WOF, fixings) restent inchangées." />
+            <HelpTip width="w-72" text="Sur grille MC : les extrema (WOF_MIN, S_MIN, BOF_MAX) sont observés aux pas de la grille de diffusion choisie — une barrière contractuellement continue ou daily est alors sous-estimée. Continu : un pont brownien reconstitue les extrema intra-pas — P(KI) plus élevée, la jambe put d'un autocall est mieux valorisée. Les valeurs aux dates d'observation (WOF, fixings) restent inchangées." />
           </label>
           <select v-model="store.globalParams.barrierMonitoring" class="select">
-            <option value="weekly">Hebdo. (grille MC)</option>
+            <option value="weekly">Sur grille MC — {{ store.globalParams.stepsPerYear }} pas/an</option>
             <option value="continuous">Continu (pont)</option>
           </select>
         </div>
@@ -353,6 +365,7 @@ import FundingCurveCard from './FundingCurveCard.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
 import { formatNumber } from '../utils/format.js'
+import { valuationGridWarning } from '../utils/simulationGrid.js'
 
 const store = usePricingStore()
 const marque = useVariantMark(store)

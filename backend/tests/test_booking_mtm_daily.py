@@ -160,3 +160,56 @@ def test_progress_is_delivered_before_computation_completes():
         assert remaining[-1] == {"type": "result", "data": {"mtm": 1}}
 
     asyncio.run(consume())
+
+
+def test_restoration_filters_grid_before_selecting_latest_run(book):
+    session, user, deal = book
+    market = json.loads(deal.market_snapshot_json)
+    market['stepsPerYear'] = 104
+    deal.market_snapshot_json = json.dumps(market)
+    session.add(deal)
+    coarse = add_run(session, deal, datetime(2026,9,17,10), mode='none')
+    fine = add_run(session, deal, datetime(2026,9,17,11), mode='none', steps_per_year=104)
+    fine.result_json = json.dumps({'mtm':1.03, 'valuation_date':'2026-09-17',
+                                  'market_used':{'steps_per_year':104}})
+    session.add(fine); session.commit()
+    add_run(session, deal, datetime(2026,9,17,12), mode='none')
+    # A newer coarse calculation cannot conceal the booked-grid run.
+    assert api.latest_mtm_runs(user,session,str(deal.id),booking_grid=True)[0]['id']==fine.id
+    assert api.latest_mtm_runs(user,session,str(deal.id),steps_per_year=104)[0]['id']==fine.id
+    assert api.latest_mtm_runs(user,session,str(deal.id),steps_per_year=208)==[]
+    assert api.latest_mtm_runs(user,session,str(deal.id),steps_per_year=52)[0]['id']!=fine.id
+
+
+def test_restoration_grid_query_accepts_numeric_http_values(book):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    session,user,deal = book
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[api.get_current_user] = lambda: user
+    app.dependency_overrides[api.get_session] = lambda: session
+    with TestClient(app) as client:
+        for frequency in (52,104,208):
+            response=client.get('/api/deals/valuation-runs/latest-mtm',
+                params={'deal_ids':deal.id,'steps_per_year':frequency})
+            assert response.status_code==200, response.text
+        assert client.get('/api/deals/valuation-runs/latest-mtm',
+            params={'deal_ids':deal.id,'steps_per_year':53}).status_code==422
+
+
+@pytest.mark.parametrize('frequency',[52,104,208])
+def test_grid_does_not_change_known_unsettled_cashflows(book,frequency):
+    import math
+    session,user,deal=book
+    market=json.loads(deal.market_snapshot_json);market['stepsPerYear']=104
+    deal.market_snapshot_json=json.dumps(market)
+    deal.status='en_reglement';deal.settlement_amount=1.1
+    deal.settlement_date=(date.today()+timedelta(days=3)).isoformat()
+    session.add(deal);session.commit()
+    result,_=api._mtm_core(deal,session,body=api.MtmRequest(steps_per_year=frequency))
+    assert result['n_paths']==0
+    assert result['mtm']==pytest.approx(1.1*math.exp(-.03*3/365.25),abs=1e-12)
+    assert result['market_used']['steps_per_year']==frequency
+    assert result['market_used']['booked_steps_per_year']==104
+    assert not result['market_used']['diffusion_required']

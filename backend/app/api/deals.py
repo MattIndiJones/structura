@@ -46,6 +46,7 @@ from ..core.lifecycle_controls import (
     horizon_contractuel, official_input_hash, replay_official_fixings,
     semantic_maturity_outcome,
 )
+from ..core.simulation_grid import GridFrequency, snapshot_grid, grid_frequency
 from ..core.market_snapshot import snapshot_rate, snapshot_rate_is_default
 from ..core.payoff_families import canonical_payoff_family, normalize_new_payoff_family
 from ..core.watchlist_observations import watchlist_observations
@@ -6681,7 +6682,7 @@ def reinvest_roll_endpoint(
             yield_curve=yc, funding_curve=funding_curve,
             funding_spread=funding_spread, sigma_r=sigma_r, a_r=a_r,
             barrier_monitoring=market.get("barrierMonitoring", "weekly"),
-        )
+        steps_per_year=snapshot_grid(market))
     except ValueError as e:
         raise HTTPException(422, f"Pricing de la reconduction impossible : {e}")
 
@@ -6792,7 +6793,7 @@ def _reinvest_valuation_context(deal, market, base_ul, r, horizon, paths, model,
         a_r=(market.get('a_r',0.) or 0.) if rate_model=='hull_white' else 0.,
         barrier_monitoring=market.get('barrierMonitoring','weekly'),
         maturity_payment_t=horizon+lag, value_date_t=settlement,
-        user_params=user_params, script_text=deal.script_snapshot, constats=market.get('constats') or {})
+        user_params=user_params, script_text=deal.script_snapshot, constats=market.get('constats') or {}, steps_per_year=snapshot_grid(market))
 
 
 def _reinvest_context(deal: Deal, req_T: float | None):
@@ -7201,7 +7202,7 @@ def deal_greeks(
         antithetic=ctx["antithetic"], state=_greeks_state(ctx),
         strike_set_t=ctx.get("strike_set_t"),
         maturity_payment_t=ctx.get("residual_payment_t"),
-    )
+    steps_per_year=ctx.get("steps_per_year", 52), local_vol_anchor=ctx.get("local_vol_anchor"))
 
     per_underlying: dict[str, dict] = {}
     scalar: dict[str, float | None] = {}
@@ -7265,6 +7266,7 @@ def deal_greeks(
 
 
 class MtmExplainRequest(BaseModel):
+    steps_per_year: Optional[GridFrequency] = None
     """Body of POST /{deal_id}/mtm/explain. date1 defaults to the deal's value
     date (booking), date2 to today. `recalibrate` sets the σ source at date 2 ;
     at date 1 the rule is fixed (booking σ when date1 = value date, realized σ
@@ -7352,7 +7354,7 @@ def _run_explain_step(cal: dict, spot: dict, uls: list, corr, model: str,
             "realvol_state_init": st["realvol_state"],
             "fix_state_init": st["fix_state"],
         },
-    )
+    steps_per_year=common.get("steps_per_year", 52), local_vol_anchor=spot.get("local_vol_anchor", common.get("local_vol_anchor")))
     from ..core.valuation_context import unsettled_cashflows_pv
     return run_valuation(cal["residual_script"], context)["price"] + unsettled_cashflows_pv({
         **common, "unsettled_cash_flows": cal.get("unsettled_cash_flows", [])})
@@ -7398,7 +7400,7 @@ def _residual_greeks(ctx: dict, n_paths: int) -> list[dict]:
         antithetic=ctx["antithetic"], state=_greeks_state(ctx),
         strike_set_t=ctx.get("strike_set_t"),
         maturity_payment_t=ctx.get("residual_payment_t"),
-    )
+    steps_per_year=ctx.get("steps_per_year", 52), local_vol_anchor=ctx.get("local_vol_anchor"))
     out = []
     for i, u in enumerate(ctx["underlyings_json"]):
         delta = raw.get(f"delta_{i+1}")
@@ -7453,8 +7455,8 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
     # σ à d1 : booking si d1 = date de valeur (l'effet véga répond alors à
     # « pricé à cette vol, le marché a fait autrement »), réalisée sinon.
     body1 = MtmRequest(recalibrate="none" if d1 == value_d else "realized",
-                       window_days=body.window_days)
-    body2 = MtmRequest(recalibrate=body.recalibrate, window_days=body.window_days)
+                       window_days=body.window_days, steps_per_year=body.steps_per_year)
+    body2 = MtmRequest(recalibrate=body.recalibrate, window_days=body.window_days, steps_per_year=body.steps_per_year)
 
     p1, c1 = _mtm_core(deal, session, n_paths, body1, asof=d1)
     if p1.get("resolved_pending") or c1 is None:
@@ -7467,7 +7469,7 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
     from ..core.valuation_attribution import (
         ATTRIBUTION_VERSION, CASH_BASIS, contractual_cash_in_period, with_dividend_inputs,
     )
-    common = {"r_frac": c1["r_frac"], "yc": c1["yc"], "sigma_r": c1["sigma_r"],
+    common = {"local_vol_anchor": c1.get("local_vol_anchor"), "steps_per_year": c1.get("steps_per_year", 52), "r_frac": c1["r_frac"], "yc": c1["yc"], "sigma_r": c1["sigma_r"],
               "a_r": c1["a_r"], "antithetic": c1["antithetic"],
               "user_params": c1["user_params"], "bm": c1["barrier_monitoring"],
               "funding_curve": c1.get("funding_curve", []),
@@ -7482,7 +7484,7 @@ def _explain_core(deal: Deal, session: Session, n_paths: int,
             "strike_set_t": c2.get("strike_set_t"),
             "residual_payment_t": c2.get("residual_payment_t"),
             "unsettled_cash_flows": c2.get("unsettled_cash_flows", [])}
-    spot2 = {"norm_spots": c2["norm_spots"], "state": c2["state"]}
+    spot2 = {"norm_spots": c2["norm_spots"], "state": c2["state"], "local_vol_anchor": c2.get("local_vol_anchor")}
     # Calendar, realized payoff state and receivables are one lifecycle bundle.
     # Moving only the calendar deletes an observed but still unpaid coupon.
     time_state = {"norm_spots": c1["norm_spots"], "state": c2["state"]}
@@ -7807,6 +7809,8 @@ def latest_mtm_runs(
     created_before: Optional[datetime] = None,
     valuation_date: Optional[date] = None,
     recalibrate: Optional[Literal["none", "realized"]] = None,
+    steps_per_year: Optional[int] = None,
+    booking_grid: bool = False,
 ):
     """Latest persisted MtM for each requested accessible deal.
 
@@ -7818,6 +7822,11 @@ def latest_mtm_runs(
     before picking a winner, so a newer booking-mode run cannot hide today's
     latest current-market valuation.
     """
+    if steps_per_year is not None:
+        try:
+            steps_per_year = grid_frequency(steps_per_year)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     try:
         requested_ids = {
             int(raw) for raw in deal_ids.split(",") if raw.strip()
@@ -7863,6 +7872,13 @@ def latest_mtm_runs(
         if recalibrate is not None:
             if not standard_mtm_request(request, recalibrate):
                 continue
+        expected_grid = steps_per_year
+        if expected_grid is None and booking_grid:
+            expected_grid = snapshot_grid(json.loads(deal.market_snapshot_json or "{}"))
+        saved_market = row["result"].get("market_used") or {}
+        saved_grid = saved_market.get("steps_per_year", (saved_market.get("time_axis") or {}).get("steps_per_year", 52))
+        if expected_grid is not None and saved_grid != expected_grid:
+            continue
         seen.add(run.deal_id)
         latest.append(row)
     return latest

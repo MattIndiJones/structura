@@ -97,6 +97,28 @@
     <p v-if="store.result.lsv_frozen_leverage" class="my-2 text-xs text-slate-500">
       LSV · levier estimé sur un échantillon indépendant puis figé pour le pricing.
     </p>
+    <p v-if="store.result.surface_context" class="my-2 text-xs text-slate-500">
+      Surface résiduelle ancrée au spot courant ; fixings contractuels conservés.
+      <span v-if="store.result.surface_context.variance_policy === 'CONTEXT_V0_ASSUMPTION'">
+        Variance initiale : v₀ du contexte de valorisation, hypothèse non observée.
+      </span>
+    </p>
+    <details v-if="store.result.lsv_calibration?.status === 'QUALIFIED'" class="my-2 text-xs text-slate-500">
+      <summary>LSV résiduel · levier qualifié par rapport à Dupire sur la même grille</summary>
+      <p v-for="u in store.result.lsv_calibration.underlyings" :key="u.underlying">
+        <SensitiveValue>{{ u.underlying }} · maximum écart + incertitude à 95 % :
+          vanilles {{ formatNumber(u.worst_vanilla_bp, 2) }} / 5 pb ;
+          digitales {{ formatNumber(u.worst_digital_bp, 2) }} / 10 pb.</SensitiveValue>
+      </p>
+    </details>
+    <details v-if="surfaceBenchmarkIssues(store.result.lsv_calibration).length" class="my-2 text-xs text-amber-700">
+      <summary>Contrôle direct SSVI : {{ surfaceBenchmarkIssues(store.result.lsv_calibration).length }} point(s) hors incertitude et tolérance — affiner la grille</summary>
+      <p>Le contrôle du levier et le biais de discrétisation par rapport à la surface continue sont distincts.</p>
+      <p v-for="(row,index) in surfaceBenchmarkIssues(store.result.lsv_calibration)" :key="index">
+        <SensitiveValue>{{ row.underlying }} · {{ row.kind }} · {{ formatNumber(row.expiry,3) }} an · strike {{ formatNumber(100*row.strike,1) }} % du spot courant :
+          {{ formatNumber(row.lsv_vs_surface_bp,2) }} ± {{ formatNumber(row.lsv_half_ci95_bp,2) }} pb (IC 95 %), tolérance {{ row.limit_bp }} pb.</SensitiveValue>
+      </p>
+    </details>
     <details v-if="store.result.lsv_limits?.length" class="my-2 text-xs text-amber-700">
       <summary>LSV · cible Dupire hors de portée dans certaines zones</summary>
       <p v-for="limit in store.result.lsv_limits" :key="limit.underlying">
@@ -252,7 +274,7 @@
           <!-- Constatations sur période : ce que la fenêtre a réellement pesé -->
           <div v-if="fenetresConstatation.length" class="bg-slate-800/50 rounded-lg px-3 py-2">
             <div class="text-slate-500 mb-1">Fenêtres de constatation
-              <HelpTip width="w-80" text="Nombre de points de grille réellement retenus par chaque fenêtre, contre le nombre demandé. La grille de simulation est hebdomadaire : une fenêtre déclarée quotidienne s'y ramène (30 jours ouvrés ≈ 6 points), ce qui coûte quelques points de base par rapport à un moyennage quotidien. En dessous d'une semaine il ne reste qu'un point et le moyennage n'a pas eu lieu du tout." />
+              <HelpTip width="w-80" text="Nombre de points réellement retenus par chaque fenêtre, contre le nombre demandé. Les dates contractuelles complètent la grille de diffusion choisie (52, 104 ou 208 pas/an). Un nombre insuffisant de relevés doit être vérifié avant utilisation du prix." />
             </div>
             <div v-for="(w, i) in fenetresConstatation" :key="i"
                  class="text-[11px] font-mono flex items-baseline gap-1.5"
@@ -337,7 +359,7 @@
             <div class="text-slate-500 mb-1">Modèle taux
               <HelpTip text="Déterministe = taux plat/courbe figée, pas de risque de taux dans la simulation. ABM/Hull-White = taux court stochastique — affecte l'actualisation ET, si le sous-jacent a un ρ(r,S) non nul, la trajectoire simulée elle-même." />
             </div>
-            <div class="font-mono font-semibold text-slate-200 text-sm"><SensitiveValue>{{ rateModelLabel(inputs) }}</SensitiveValue></div>
+          <div class="font-mono font-semibold text-slate-200 text-sm"><SensitiveValue>{{ rateModelLabel(inputs) }}</SensitiveValue></div>
           </div>
 
         </div>
@@ -350,6 +372,9 @@
           <span class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-400">
             N <span class="font-mono font-semibold text-slate-200 ml-1"><SensitiveValue>{{ formatInt(inputs.N) }}</SensitiveValue></span>
             <HelpTip text="Nombre de chemins Monte Carlo demandé. Plus N est grand, plus l'IC 95% affiché sur le prix se resserre (en 1/√N) — mais le temps de calcul croît linéairement." />
+          </span>
+          <span class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-400">
+            Grille <span class="font-mono font-semibold text-slate-200 ml-1">{{ store.result.steps_per_year ?? inputs.stepsPerYear ?? 52 }} pas/an</span>
           </span>
           <span class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-400">
             Seed <span class="font-mono font-semibold text-slate-200 ml-1"><SensitiveValue>{{ inputs.seed }}</SensitiveValue></span>
@@ -561,6 +586,7 @@
 </template>
 
 <script setup>
+import { surfaceBenchmarkIssues } from '../utils/lsvDiagnostics.js'
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'

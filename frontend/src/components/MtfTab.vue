@@ -95,6 +95,8 @@
             {{ row.underlying }} · <SensitiveValue>ATM {{ fmtBp(row.max_atm_error_bp) }}, ailes {{ fmtBp(row.max_wing_error_bp) }}, digitales 60/100 % {{ fmtBp(row.max_barrier_digital_error_bp) }}</SensitiveValue>
             <span v-if="row.near_bounds.length"> · Bornes {{ row.near_bounds.join(', ') }}</span>
           </p>
+          <p v-if="leg.result.lsv_calibration">Levier LSV qualifié vs Dupire sur la même grille. v₀ du contexte : hypothèse non observée.</p>
+          <p v-if="surfaceBenchmarkIssues(leg.result.lsv_calibration).length" class="text-amber-700" role="note">Contrôle direct SSVI : {{ surfaceBenchmarkIssues(leg.result.lsv_calibration).length }} point(s) hors incertitude et tolérance ; affiner la grille.</p>
           <p>P₀ <SensitiveValue>{{ pf(leg.result.main_price) }}</SensitiveValue></p>
           <p v-if="leg.result.reference_ci95">IC 95 % <SensitiveValue>{{ leg.result.reference_ci95.map(pf).join(' à ') }}</SensitiveValue></p>
           <button class="btn-secondary text-xs" :aria-pressed="store.mtfActiveLeg === key"
@@ -115,6 +117,8 @@
         <LocalVolWingNotice :wings="store.mtf.local_vol_wings" />
         {{ modelLabels[store.mtf.gbm_atm_curve ? 'gbm_atm_curve' : store.mtf.indicative_heston ? 'heston_indicative' : store.mtf.model] }}
         · P₀ <SensitiveValue>{{ pf(store.mtf.main_price) }}</SensitiveValue>
+        <p v-if="store.mtf.lsv_calibration">Levier LSV qualifié vs Dupire sur la même grille. v₀ du contexte : hypothèse non observée.</p>
+        <p v-if="surfaceBenchmarkIssues(store.mtf.lsv_calibration).length" class="text-amber-700" role="note">Contrôle direct SSVI : {{ surfaceBenchmarkIssues(store.mtf.lsv_calibration).length }} point(s) hors incertitude et tolérance ; affiner la grille.</p>
         <span v-if="store.mtf.reference_ci95"> · IC 95 % <SensitiveValue>{{ store.mtf.reference_ci95.map(pf).join(' à ') }}</SensitiveValue></span>
         <p v-if="store.mtf.indicative_heston" class="text-amber-700" role="status">Surface indicative · les écarts de calibration contribuent aux écarts de MTF.</p>
         <p v-for="row in store.mtf.calibration_diagnostics || []" :key="row.underlying">
@@ -324,6 +328,7 @@
 
 <script setup>
 import LocalVolWingNotice from './LocalVolWingNotice.vue'
+import { surfaceBenchmarkIssues } from '../utils/lsvDiagnostics.js'
 import { MTF_MODEL_LABELS as modelLabels, mtfRowsForView } from '../utils/mtfViews.js'
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { usePricingStore } from '../stores/pricing.js'
@@ -353,9 +358,9 @@ const modelB = ref(store.mtfComparison?.b?.model || 'heston')
 const effectiveModelA = computed(() => modelA.value || store.globalParams.model)
 const mtfUnavailableReason = computed(() => {
   if (!Object.hasOwn(modelLabels, effectiveModelA.value)) return 'Le levier LSV doit être qualifié avant activation. Choisissez un modèle disponible dans cet onglet.'
-  if (!compareMode.value && effectiveModelA.value === 'lsv'
-      && (store.usesDatedPricing() || !store.underlyings.every(u => u.vol_surface))) {
-    return 'Le levier LSV doit être qualifié à l’émission avec une surface SSVI pour chaque sous-jacent.'
+  if ((effectiveModelA.value === 'lsv' || (compareMode.value && modelB.value === 'lsv'))
+      && (store.isPreStrike() || !store.underlyings.every(u => u.vol_surface))) {
+    return 'Le levier LSV doit être qualifié avec une surface SSVI pour chaque sous-jacent, après le fixing initial.'
   }
   if (compareMode.value && modelB.value === effectiveModelA.value) return 'Sélectionnez deux modèles différents.'
   if (store.globalParams.rateModel !== 'deterministic' && store.globalParams.sigma_r > 0) return 'Le Mark to Future exige des taux déterministes (σr = 0). Sélectionnez ce mode et relancez le pricing avant le MTF.'

@@ -15,7 +15,7 @@ from ..db.models import Deal, DealEvent, ValuationRun
 
 
 _ENGINE_FILES = (
-    "payscript/engine.py", "payscript/bridge.py", "payscript/time_grid.py", "payscript/parser.py", "payscript/bindings.py", "payscript/schedule_model.py", "schedule.py", "valuation_context.py",
+    "simulation_grid.py", "payscript/lsv_leverage.py", "payscript/engine.py", "payscript/bridge.py", "payscript/time_grid.py", "payscript/parser.py", "payscript/bindings.py", "payscript/schedule_model.py", "schedule.py", "valuation_context.py",
     "deal_valuation.py", "inlife_valuation.py", "smile_calibration.py", "volatility_surface.py",
     "compute/pricers/var_scenario.py", "product/calendar.py", "calendars.py", "payscript/simulation.py",
 )

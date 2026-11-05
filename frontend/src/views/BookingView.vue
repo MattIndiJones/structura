@@ -589,6 +589,27 @@
                     @click.stop @change="setMtmDate(d.id, $event.target.value)"
                     title="Date à laquelle le deal et son marché sont valorisés" />
                 </label>
+                <label class="deal-basis">
+                  <span class="deal-label">Grille de diffusion (pas/an)</span>
+                  <select class="select deal-panel__select w-full text-xs py-1.5" :aria-label="'Grille de valorisation ' + d.id"
+                    :value="mtmGridChoiceFor(d.id)" :disabled="mtmLoading[d.id] || authStore.readOnly" @click.stop
+                    @change="setMtmGrid(d.id, $event.target.value)">
+                    <option value="booking">Grille du booking — {{ bookedGrid(d.market_snapshot) }} pas/an</option>
+                    <option :value="52">52 — rapide</option><option :value="104">104 — intermédiaire</option><option :value="208">208 — fin</option>
+                  </select>
+                </label>
+                <p v-if="mtmGridFor(d.id) !== bookedGrid(d.market_snapshot)" class="deal-alert" role="status">
+                  {{ valuationGridWarning(bookedGrid(d.market_snapshot), mtmGridFor(d.id)) }}
+                </p>
+                <p v-if="mtmResults[d.id]?.market_used?.surface_context" class="deal-basis-note">
+                  Surface ancrée au spot courant, fixings contractuels conservés.
+                  <span v-if="mtmResults[d.id].market_used.surface_context.variance_policy === 'CONTEXT_V0_ASSUMPTION'">
+                    v₀ est l’hypothèse de variance du contexte, pas une observation de marché.
+                  </span>
+                </p>
+                <p v-if="surfaceBenchmarkIssues(mtmResults[d.id]?.market_used?.lsv_calibration).length" class="deal-alert" role="note">
+                  Contrôle direct SSVI : {{ surfaceBenchmarkIssues(mtmResults[d.id].market_used.lsv_calibration).length }} point(s) hors incertitude et tolérance. Affiner la grille ; la qualification du levier par rapport à Dupire est distincte.
+                </p>
                 <p class="deal-basis-note">
                   {{ mtmModeFor(d.id) === 'realized'
                     ? 'Volatilité réalisée du marché actuel : calcul en GBM. Le taux et le funding restent ceux du booking.'
@@ -675,6 +696,8 @@
                       </div>
                       <div class="deal-mtm__ci">
                         Valorisation au {{ formatDate(mtmResultDate(d.id)) }}
+                        · grille {{ mtmResults[d.id].market_used?.steps_per_year ?? 52 }} pas/an
+                        <span v-if="mtmResults[d.id].market_used?.lsv_calibration?.status === 'QUALIFIED'"> · levier LSV qualifié vs Dupire (même grille)</span>
                         <span v-if="mtmResults[d.id]._runCreatedAt">
                           · {{ mtmResults[d.id]._restored ? (authStore.readOnly ? 'calcul archivé, enregistré le' : 'calcul du jour restauré, enregistré le') : 'calcul effectué le' }} {{ new Date(mtmResults[d.id]._runCreatedAt).toLocaleString('fr-FR') }}
                         </span>
@@ -1136,6 +1159,9 @@
 </template>
 
 <script setup>
+import { surfaceBenchmarkIssues } from '../utils/lsvDiagnostics.js'
+import { bookedGrid, valuationGridWarning } from '../utils/simulationGrid.js'
+
 import ActionMenu from '../components/ui/ActionMenu.vue'
 import BackLink from '../components/ui/BackLink.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
@@ -1626,7 +1652,8 @@ async function refreshBook() {
 const {
   todayIso, mtmLoading, mtmResults, mtmModeFor, mtmDateFor, setMtmMode, setMtmDate,
   loadSavedMtms, loadSavedMtm, runMtm, mtmProgressLabel, syncDay, invalidateMtm,
-} = useBookingMtm(() => authStore.readOnly ? authStore.user.consultation.date : localDay(), { archived: authStore.readOnly })
+  mtmGridFor, mtmGridChoiceFor, setMtmGrid,
+} = useBookingMtm(() => authStore.readOnly ? authStore.user.consultation.date : localDay(), { archived: authStore.readOnly, bookedGrid: id => bookedGrid(dealsStore.deals.find(deal => deal.id === id)?.market_snapshot) })
 let dayTimer
 function refreshDay() {
   syncDay()
@@ -1718,6 +1745,7 @@ async function runGreeks(id) {
       body: JSON.stringify({
         recalibrate: mode === 'realized' ? 'realized' : 'none',
         valuation_date: mtmDateFor(id),
+        steps_per_year: mtmGridFor(id),
       }),
     })
     const data = await res.json()
@@ -1797,6 +1825,7 @@ async function runExplain(d) {
         date1: explainD1[d.id] || defaultExplainStart(d),
         date2: explainD2[d.id] || todayIso.value,
         recalibrate: mtmModeFor(d.id) === 'realized' ? 'realized' : 'none',
+        steps_per_year: mtmGridFor(d.id),
       }),
     })
     const data = await res.json()

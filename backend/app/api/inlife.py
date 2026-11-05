@@ -25,6 +25,9 @@ from datetime import date, timedelta
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from ..core.simulation_grid import GridFrequency
+from ..core.simulation_grid import with_request_grid
+from ..core.payscript.engine import _simulation_axis
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..core.inlife_valuation import (
@@ -55,6 +58,7 @@ router = APIRouter(prefix="/api", tags=["pricing"])
 
 
 class InLifePricingRequest(BaseModel):
+    steps_per_year: GridFrequency = 52
     """Un produit et la date à laquelle on veut le valoriser."""
     model_config = ConfigDict(allow_inf_nan=False)
 
@@ -261,6 +265,7 @@ class ResidualContext:
         return [[self.T_remaining, courbe[-1][1]]]
 
 
+@with_request_grid
 def variant_terms_or_none(req) -> VariantTerms | None:
     """Les termes d'avenant portés par une requête, s'il y en a.
 
@@ -281,6 +286,7 @@ def variant_terms_or_none(req) -> VariantTerms | None:
     return None if terms.est_vide() else terms
 
 
+@with_request_grid
 def build_request_residual(req, variant: VariantTerms | None = None, *, retain_terminated=False) -> ResidualContext:
     """Rejoue le passé d'une requête et rend le contexte résiduel.
 
@@ -403,6 +409,7 @@ def build_request_residual(req, variant: VariantTerms | None = None, *, retain_t
 
 
 @router.post("/price/in-life")
+@with_request_grid
 def price_in_life(
     req: InLifePricingRequest,
     current: Annotated[User, Depends(get_current_pricer)],
@@ -446,7 +453,8 @@ def price_in_life(
             selected_greeks=(req.selected_greeks
                              if req.compute_greeks else None),
             expanded_dates=count_compiled_dates(residuel.residual_script),
-        )
+            steps_per_year=req.steps_per_year,
+            simulation_steps=_simulation_axis(T_remaining,residuel.residual_script, steps_per_year=req.steps_per_year)[0])
         ensure_budget(calculation_budget)
         from ..core.valuation_context import valuation_context_from_request
         valuation_context = valuation_context_from_request(req, residuel.residual_script, residual=ctx)
@@ -484,7 +492,7 @@ def price_in_life(
                     "realvol_state": etat["realvol_state"],
                     "fix_state": etat["fix_state"],
                 },
-            )
+            steps_per_year=req.steps_per_year, local_vol_anchor=valuation_context.local_vol_anchor)
         except ValueError as exc:
             raise HTTPException(422, f"Greeks résiduels impossibles : {exc}")
 
@@ -512,6 +520,11 @@ def price_in_life(
         "valuation_context": valuation_context.to_dict(),
         "frozen_calendar": freeze_calendar(residuel.compiled),
         "T_elapsed": T_elapsed,
+        "steps_per_year": req.steps_per_year,
+        "surface_context": res.get("surface_context"),
+        "lsv_calibration": res.get("lsv_calibration"),
+        "lsv_frozen_leverage": res.get("lsv_frozen_leverage"),
+        "lsv_limits": res.get("lsv_limits"),
         "time_axis": res.get("time_axis"),
         "barrier_monitoring": res.get("barrier_monitoring", req.barrier_monitoring),
         "barrier_monitoring_note": res.get("barrier_monitoring_note"),
@@ -590,6 +603,7 @@ class ImpliedFundingRequest(InLifePricingRequest):
 
 
 @router.post("/price/implied-funding")
+@with_request_grid
 def implied_funding(
     req: ImpliedFundingRequest,
     current: Annotated[User, Depends(get_current_pricer)],

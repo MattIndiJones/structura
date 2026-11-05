@@ -104,11 +104,11 @@ def residual_greeks(ctx: dict, n_paths: int) -> list[dict]:
         sigma_r=ctx["sigma_r"], a_r=ctx["a_r"], yield_curve=ctx["yc"],
         funding_curve=ctx.get("funding_curve", []),
         funding_spread=ctx.get("funding_spread", 0.0),
-        barrier_monitoring=ctx["barrier_monitoring"],
+        barrier_monitoring=ctx["barrier_monitoring"], steps_per_year=ctx.get("steps_per_year",52),
         antithetic=ctx["antithetic"], state=_greeks_state(ctx),
         strike_set_t=ctx.get("strike_set_t"),
         maturity_payment_t=ctx.get("residual_payment_t"),
-    )
+     local_vol_anchor=ctx.get("local_vol_anchor"))
     rows = []
     for index, underlying in enumerate(ctx["underlyings_json"]):
         delta = raw.get(f"delta_{index + 1}")

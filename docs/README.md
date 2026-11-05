@@ -1,5 +1,11 @@
 # Notes du projet Structura
 
+[LSV résiduel : STM et SG–STM aux grilles 52/104/208 — 05/11](projects/pricing/LSV_RESIDUAL_2026-11-05.md)
+— Levier figé et ancrage au spot courant, six MtM et quatre MTF validés, diagnostic SSVI distinct, caps inchangés ; recette isolée et scripts de reproduction.
+
+[Grille de diffusion 52/104/208 : pricing, booking et MtM — 05/11](projects/pricing/SIMULATION_GRID_2026-11-05.md)
+— Réglage conservé au booking, surcharge libre avec avertissement, archives/rejeu, MTF et attribution numérique ; recette STM / SG–STM et limite LSV résiduelle documentée.
+
 [MTF : paiements différés, créances et deux populations — 03/11](projects/pricing/MTF_DEFERRED_SETTLEMENT_2026-11-03.md)
 — Créances conservées après rappel/maturité, distinction tous scénarios/engagements
 non réglés, drill-down rapproché et contexte contrôlé ; 207 cas backend ciblés,

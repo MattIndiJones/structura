@@ -37,6 +37,7 @@ def test_pricing_booking_mtm_au_strike_conservent_le_meme_produit(monkeypatch):
     )
     priced = price_endpoint(request)
     body = DealCreate(
+        transaction_format="EMTN", instrument_family="NOTE",
         contrepartie="Banque", counterparty_id=1, nominal=1_000_000,
         fair_value=priced.price * 100, price_traded=priced.price * 100,
         trade_date=strike.isoformat(), strike_date=strike.isoformat(),

@@ -40,6 +40,7 @@ def price_mtf_job(payload):
         leverage = prepare_mtf_leverage(script, ctx, settings['mtm_dates'], qualify=True)
     unpaid = sum(flow['amount'] * math.exp(-ctx.r * flow['payment_t'])
                  for flow in flows if flow['payment_t'] > 1e-9)
+    reference = {}
     if terminated:
         price, ci = unpaid, [unpaid, unpaid]
     else:
@@ -51,10 +52,14 @@ def price_mtf_job(payload):
         script, ctx.underlyings, ctx.corr_matrix, ctx.r, ctx.T, round(100 * price, 4),
         model=ctx.model, seed=ctx.seed, state=ctx.state, user_params=ctx.user_params,
         barrier_monitoring=ctx.barrier_monitoring, maturity_payment_t=ctx.maturity_payment_t,
-        aligned_grid=True, gbm_atm_curve=ctx.gbm_atm_curve, lsv_leverage=leverage, **settings,
-    )
+        aligned_grid=True, local_vol_anchor=ctx.local_vol_anchor, gbm_atm_curve=ctx.gbm_atm_curve, lsv_leverage=leverage, **settings,
+    steps_per_year=ctx.steps_per_year)
     fan.update(model=ctx.model, reference_ci95=[100 * value for value in ci],
                reference_paths=ctx.N, reference_seed=reference_seed)
+    if reference.get('surface_context') is not None:
+        fan['surface_context'] = reference['surface_context']
+    if reference.get('lsv_calibration') is not None:
+        fan['lsv_calibration'] = reference['lsv_calibration']
     if leverage is not None:
         from ...payscript.lsv_leverage import leverage_digest
         fan['lsv_leverage_digest'] = leverage_digest(leverage)

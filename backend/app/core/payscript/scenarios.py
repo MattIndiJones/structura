@@ -53,7 +53,7 @@ def compute_scenario_grid(script_text: str, underlyings, corr_matrix, r: float, 
                            strike_set_t: float | None = None,
                            maturity_payment_t: float | None = None,
                            value_date_t: float = 0.0,
-                           max_workers: int = DEFAULT_MAX_WORKERS) -> dict:
+                           max_workers: int = DEFAULT_MAX_WORKERS, steps_per_year: int = 52) -> dict:
     """2D stress grid: price(spot_shock, vol_shock) for every combination, plus
     the unshocked base price for reference (computed independently of whether
     0.0 is actually present in the shock lists).
@@ -70,7 +70,7 @@ def compute_scenario_grid(script_text: str, underlyings, corr_matrix, r: float, 
             script_text=script_text, constat_values=constat_values,
             constat_anchor=constat_anchor, constat_currency=constat_currency,
             underlyings=underlyings, corr=corr_matrix, r=r, T=T,
-            n_paths=N, model=model, seed=seed, user_params=user_params,
+            n_paths=N, model=model, seed=seed, user_params=user_params, steps_per_year=steps_per_year,
             spot_shock=spot_shock, vol_shock=vol_shock,
             yield_curve=yield_curve or [], sigma_r=sigma_r, a_r=a_r,
             barrier_monitoring=barrier_monitoring,

@@ -200,3 +200,29 @@ it('affiche dès réception la même première date qu’après réouverture, sa
   await nextTick()
   expect(state.tileRow.value.t).toBe(.75)
 })
+
+it('autorise le MTF LSV après strike avec une surface par titre', async () => {
+  const store=usePricingStore()
+  store.result={price:.85}
+  store.globalParams.model='lsv'
+  store.globalParams.strike_date='2025-11-03'
+  store.globalParams.valuation_date='2026-11-05'
+  store.underlyings[0].vol_surface={rho:-.75,eta:.85,atm_nodes:[[1,.54],[3,.54]]}
+  const html=await renderToString(createSSRApp(MtfTab).use(pinia))
+  expect(html).not.toContain('doit être qualifié')
+  expect(html).not.toMatch(/<button[^>]*btn-primary[^>]*disabled/)
+})
+
+it('le pricing LSV résiduel ne déclenche pas une calibration Heston implicite', async () => {
+  const store=usePricingStore()
+  store.script='AT MATURITY:\n  PAY 1'
+  Object.assign(store.globalParams,{model:'lsv',strike_date:'2025-11-03',value_date:'2025-11-03',maturity_date:'2028-11-03',payment_date:'2028-11-08',valuation_date:'2026-11-05',T:3})
+  Object.assign(store.underlyings[0],{ticker:'STMPA.PA',vol_surface:{rho:-.75,eta:.85,atm_nodes:[[1,.54],[3,.54]]},smile_parameter_mode:'automatic'})
+  vi.stubGlobal('fetch',vi.fn(async url=>({ok:true,json:async()=>url==='/api/parse'
+    ? {ok:true,params:[],constats:[],has_maturity_event:true}: {price:.85}})))
+  await store.runPricing()
+  expect(fetch.mock.calls.some(([url])=>url==='/api/volatility/calibrate')).toBe(false)
+  const request=fetch.mock.calls.find(([url])=>url==='/api/price/in-life')
+  expect(request).toBeTruthy()
+  expect(JSON.parse(request[1].body).model).toBe('lsv')
+})

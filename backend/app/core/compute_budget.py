@@ -6,6 +6,8 @@ leaving a wide margin above Structura's current product templates.
 """
 from __future__ import annotations
 
+from .simulation_grid import grid_frequency
+
 import math
 from dataclasses import asdict, dataclass
 from .payscript.bridge import basket_bridge_substeps, resolve_bridge_substeps
@@ -133,6 +135,7 @@ def estimate_mc(
     corr_matrix=None,
     bridge_refinement=None,
     simulation_steps: int | None = None,
+    steps_per_year: int | None = None,
 ) -> CalculationEstimate:
     validate_problem_dimensions(maturity_years, underlyings)
     if paths < 1:
@@ -145,7 +148,7 @@ def estimate_mc(
             f"(maximum {MAX_EXPANDED_DATES:,})."
         )
 
-    steps = max(1, round(maturity_years * 52))
+    steps = max(1, round(maturity_years * grid_frequency(steps_per_year)))
     if simulation_steps is not None:
         if not isinstance(simulation_steps, int) or simulation_steps < steps:
             raise ValueError("Nombre de pas de simulation invalide.")
@@ -259,6 +262,8 @@ def estimate_pricing_request(
     selected_greeks: list[str] | None = None,
     expanded_dates: int = 0,
     corr_matrix=None,
+    steps_per_year: int = 52,
+    simulation_steps: int | None = None,
 ) -> CalculationEstimate:
     """Estimate one synchronous pricing request, including requested Greeks.
 
@@ -266,7 +271,7 @@ def estimate_pricing_request(
     work, while peak memory remains the larger of one main or Greek run.
     """
     base = estimate_mc(
-        operation="pricing",
+        operation="pricing", steps_per_year=steps_per_year, simulation_steps=simulation_steps,
         corr_matrix=corr_matrix,
         maturity_years=maturity_years,
         underlyings=underlyings,
@@ -283,7 +288,7 @@ def estimate_pricing_request(
 
     greek_paths = max(1_000, paths // 4)
     greek = estimate_mc(
-        operation="greeks",
+        operation="greeks", steps_per_year=steps_per_year, simulation_steps=simulation_steps,
         corr_matrix=None if "corr" in (selected_greeks or []) else corr_matrix,
         maturity_years=maturity_years,
         underlyings=underlyings,
@@ -384,6 +389,7 @@ def estimate_var_portfolio(bases: list[dict], scenario_count: int,
             maturity_years=float(ctx.get("T") or base.get("T_remaining") or 0.0),
             underlyings=underlyings,
             paths=int(ctx.get("N") or base.get("n_paths") or 0),
+            steps_per_year=ctx.get("steps_per_year", 52),
             model=str(ctx.get("model") or base.get("model_used") or "constant"),
             antithetic=bool(ctx.get("antithetic", base.get("antithetic", True))),
             continuous_monitoring=(ctx.get("barrier_monitoring") == "continuous"),

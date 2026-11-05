@@ -311,6 +311,7 @@ def runtime(trade, request):
               r=req.r, T=T, N=max(1000, request.n_inner), model=req.model, seed=request.seed,
               user_params=req.user_params, yield_curve=req.yield_curve, funding_curve=req.funding_curve,
               funding_spread=req.funding_spread, sigma_r=req.sigma_r, barrier_monitoring=req.barrier_monitoring,
+              steps_per_year=req.steps_per_year,
               maturity_payment_t=(req.payment_date-origin).days / 365.25 if req.payment_date else T,
               script_text=req.script, constats=req.constats)
         context = ctx.to_dict()
@@ -604,7 +605,7 @@ def evaluate_inputs(inputs, progress=None):
                             maturity_payment_t=ctx.get("maturity_payment_t"),
                             progress=(lambda done, total: progress({"stage": "stress" if inputs.get("stress_pass") else "projection",
                                 "deal_id": trade.get("deal_id"), "reference": trade["reference"],
-                                "completed": trade_index, "total": len(trades), "horizon": done, "horizons": total})) if progress else None)
+                                "completed": trade_index, "total": len(trades), "horizon": done, "horizons": total})) if progress else None, steps_per_year=ctx.get("steps_per_year", 52))
                     matrix[1:] = np.array([r["pvs"] for r in mtf["results"]]) * trade["nominal"] / 100 * sign
                     for flow in trade.get("unsettled_flows", []):
                         remaining = ((date.fromisoformat(flow["payment_date"]) - request.as_of_date).days / 365.25

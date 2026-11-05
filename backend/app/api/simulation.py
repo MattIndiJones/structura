@@ -4,6 +4,7 @@ Both endpoints share the same validation shape: parse the script, check the
 requested PARAM name(s) actually exist in it, check the correlation matrix
 dimensions, then delegate to core/payscript/simulation.py for the math.
 """
+from ..core.simulation_grid import with_request_grid
 from fastapi import APIRouter, Depends, HTTPException
 from ..core.schemas import SolverRequest, GridRequest
 from ..core.payscript.parser import parse_script, resolve_analysis_constats, resolve_constats, effective_T_max
@@ -25,6 +26,7 @@ router = APIRouter(
 )
 
 
+@with_request_grid
 def _parse_and_validate(req) -> tuple:
     """Common setup: parse the script, build underlyings/corr, check dimensions.
     Returns (compiled, uls, corr, T_eff) — T_eff is req.T extended to cover
@@ -76,6 +78,7 @@ def _check_param_exists(compiled, param_name: str):
 
 
 @router.post("/solve")
+@with_request_grid
 def solve_endpoint(req: SolverRequest):
     """Bisection solve: find the PARAM value that hits a target price."""
     from .pricing import analysis_user_params
@@ -124,6 +127,7 @@ def solve_endpoint(req: SolverRequest):
 
 
 @router.post("/grid")
+@with_request_grid
 def grid_endpoint(req: GridRequest):
     """2D price heatmap over two PARAM ranges."""
     from .pricing import analysis_user_params

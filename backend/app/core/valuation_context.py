@@ -13,6 +13,8 @@ scenario bumps override only the requested fields.
 """
 from __future__ import annotations
 
+from .simulation_grid import grid_frequency
+
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import date
@@ -89,10 +91,21 @@ class ValuationContext:
     script_text: str = ""
     constats: dict = field(default_factory=dict)
     gbm_atm_curve: bool = False
+    local_vol_anchor: list[float] | None = None
+    steps_per_year: int = field(default_factory=grid_frequency)
     schema_version: int = SCHEMA_VERSION
+
+    def __post_init__(self):
+        self.steps_per_year = grid_frequency(self.steps_per_year)
+        if self.local_vol_anchor is not None:
+            if (len(self.local_vol_anchor) != len(self.underlyings)
+                    or any(not math.isfinite(x) or x <= 0 for x in self.local_vol_anchor)):
+                raise ValueError('Ancrage de surface invalide : un spot positif par sous-jacent est requis.')
 
     def to_dict(self) -> dict:
         payload = asdict(self)
+        if self.local_vol_anchor is None:
+            payload.pop('local_vol_anchor')
         if not self.gbm_atm_curve:
             payload.pop('gbm_atm_curve')
         # Fail here, close to construction, rather than much later when a VaR
@@ -102,9 +115,22 @@ class ValuationContext:
 
 
 def valuation_context_from_dict(payload: dict) -> ValuationContext:
+    payload = {"steps_per_year": 52, **payload}
     known = {name for name in ValuationContext.__dataclass_fields__}
     return ValuationContext(**{key: deepcopy(value) for key, value in payload.items()
                                if key in known})
+
+
+def residual_surface_anchor(model, underlyings, spots, *, pre_strike=False):
+    """Sticky forward-moneyness at the valuation date, distinct from payoff S0.
+
+    Legacy surfaces keep their archived coordinate convention. An MTF carries
+    this anchor unchanged: future marks never silently reset the market model.
+    """
+    if (not pre_strike and model in ('localvol', 'lsv')
+            and underlyings and all(u.get('vol_surface') for u in underlyings)):
+        return [float(spot) for spot in spots]
+    return None
 
 
 def valuation_context_from_request(req, compiled, *, residual=None, paths=None):
@@ -119,6 +145,10 @@ def valuation_context_from_request(req, compiled, *, residual=None, paths=None):
         corr_matrix=deepcopy(req.corr_matrix), r=residual.r if residual is not None else req.r,
         T=residual.T_remaining if residual is not None else effective_T_max(compiled, req.T),
         N=paths if paths is not None else req.N, model=req.model, seed=42,
+        steps_per_year=getattr(req, "steps_per_year", 52),
+        local_vol_anchor=(residual_surface_anchor(req.model, residual.underlyings,
+            residual.residuel.norm_spots, pre_strike=residual.residuel.pre_strike)
+            if residual is not None else None),
         antithetic=req.antithetic, user_params=deepcopy(residual.user_params if residual is not None else req.user_params),
         yield_curve=curve(req.yield_curve), funding_curve=curve(req.funding_curve),
         funding_spread=req.funding_spread, sigma_r=req.sigma_r, a_r=req.a_r,
@@ -137,7 +167,7 @@ def run_analysis(script, context: ValuationContext, kind: str, **options):
     kwargs = {key: deepcopy(getattr(context, key)) for key in (
         'underlyings', 'corr_matrix', 'r', 'model', 'seed', 'antithetic', 'user_params',
         'yield_curve', 'funding_curve', 'funding_spread', 'sigma_r', 'a_r',
-        'barrier_monitoring', 'maturity_payment_t', 'value_date_t', 'strike_set_t')}
+        'barrier_monitoring', 'maturity_payment_t', 'value_date_t', 'strike_set_t', 'steps_per_year', 'local_vol_anchor')}
     kwargs.update(T_max=context.T, state=deepcopy(context.state), **options)
     kwargs['N_stat' if kind == 'paths' else 'N'] = context.N
     result = (run_mc_paths if kind == 'paths' else run_mc_proba)(script, **kwargs)
@@ -237,6 +267,8 @@ def run_valuation(script, context: ValuationContext | dict, *,
         "T_max": ctx.T,
         "N": ctx.N,
         "model": ctx.model,
+        "steps_per_year": ctx.steps_per_year,
+        "local_vol_anchor": deepcopy(ctx.local_vol_anchor),
         "seed": ctx.seed,
         "antithetic": ctx.antithetic,
         "user_params": deepcopy(ctx.user_params),
@@ -360,6 +392,7 @@ def market_snapshot_from_pricing_input(payload: dict) -> dict:
         "sigma_r": sigma_r * 100.0,
         "a_r": a_r,
         "barrierMonitoring": payload.get("barrier_monitoring") or "weekly",
+        "stepsPerYear": grid_frequency(payload.get("steps_per_year", 52)),
         "yieldCurve": [
             {"label": _pillar_label(float(t)), "T": float(t),
              "rate": float(rate) * 100.0}
@@ -409,6 +442,8 @@ def verify_pricing_receipt(receipt: dict) -> dict:
             from .schemas import PricingRequest
             legacy_input = pricing_input_payload(
                 PricingRequest.model_validate(pricing_input))
+            if "steps_per_year" not in pricing_input:
+                legacy_input.pop("steps_per_year", None)
             accepted.add(canonical_fingerprint(legacy_input))
         except (TypeError, ValueError):
             pass

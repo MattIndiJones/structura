@@ -1,4 +1,5 @@
 """Scenario API endpoint — stress grid: price under combined spot x vol shocks."""
+from ..core.simulation_grid import with_request_grid
 from fastapi import APIRouter, Depends, HTTPException
 from ..core.schemas import ScenarioRequest
 from ..core.payscript.parser import analysis_origin, parse_script, resolve_analysis_constats, effective_T_max
@@ -19,6 +20,7 @@ router = APIRouter(
 
 
 @router.post("/scenarios")
+@with_request_grid
 def scenarios_endpoint(req: ScenarioRequest):
     """2D stress grid — price(spot_shock, vol_shock) plus the unshocked base price."""
     from .pricing import analysis_user_params, residual_context_or_none
@@ -94,7 +96,7 @@ def scenarios_endpoint(req: ScenarioRequest):
             ctx.script_text if ctx is not None else req.script,
             uls, corr, r_eff, T_eff, req.model, req.seed,
             analysis_user_params(req, ctx),
-            req.spot_shocks, req.vol_shocks, N=req.N,
+            req.spot_shocks, req.vol_shocks, N=req.N, steps_per_year=req.steps_per_year,
             yield_curve=yc, sigma_r=req.sigma_r, a_r=req.a_r,
             barrier_monitoring=req.barrier_monitoring,
             constat_values=(ctx.constats if ctx is not None else req.constats) or None,
