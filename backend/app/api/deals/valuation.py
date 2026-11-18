@@ -12,7 +12,9 @@ from ...runtime import business_today
 from ...db.models import Deal, User, ValuationRun
 from ..auth import get_current_user
 from ..valuation_progress import valuation_progress_response
-from ...services.market_data import dividend_profile, load_hist_prices
+from ...services.market_data import (
+    dividend_profile, load_hist_prices, load_session_calibration_history,
+)
 from ...services.archived_documents import DocumentSelection
 from ...core.calibration import realized_market
 from ...core.simulation_grid import GridFrequency, snapshot_grid, grid_frequency
@@ -147,6 +149,7 @@ def _mtm_core(deal: Deal, session: Session, n_paths: int = 20000,
         load_prices=load_hist_prices,
         dividend_loader=dividend_profile,
         realized_loader=realized_market,
+        calibration_loader=load_session_calibration_history,
         progress=progress,
     )
 

@@ -81,7 +81,8 @@ def reinvest_roll_endpoint(
     # Vol/div rafraîchies depuis Yahoo (pas de source de vol implicite — voir
     # MEMORY) ; en cas d'échec on retombe sur les valeurs du snapshot de
     # booking plutôt que d'échouer toute la reconduction.
-    vol_data = load_hist_vol(tickers)
+    # Same estimator as the Pricer: common real closes of each venue.
+    vol_data = load_hist_vol(tickers, session_aware=True)
     vol_refreshed = "error" not in vol_data
     if vol_refreshed:
         for u, tk in zip(engine_uls, tickers):
@@ -136,6 +137,7 @@ def reinvest_roll_endpoint(
         "price_current": deal.fair_value,
         "current_spots": current_spots,
         "vol_refreshed": vol_refreshed,
+        "vol_refresh_error": None if vol_refreshed else vol_data.get("error"),
         "sigma_used": {tk: round(u["sigma"], 4) for tk, u in zip(tickers, engine_uls)},
     }
 
@@ -153,7 +155,7 @@ def _price_reinvest_candidate(compiled, base_ul: dict, r_frac: float, T: float, 
     from ...core.payscript.engine import run_mc_proba
     from ...services.market_data import load_hist_vol
 
-    vol_data = load_hist_vol([ticker], period=vol_period)
+    vol_data = load_hist_vol([ticker], period=vol_period, session_aware=True)
     if "error" in vol_data or ticker not in vol_data.get("vols", {}):
         return {"ticker": ticker, "name": name,
                 "error": vol_data.get("error", "Vol Yahoo indisponible pour ce ticker")}

@@ -22,6 +22,11 @@ def isolated_market(tmp_path, monkeypatch):
     monkeypatch.delenv('STRUCTURA_SCENARIO_MARKET', raising=False)
     monkeypatch.setattr(market_data, '_HAS_YF', False)
     monkeypatch.setattr(market_data, 'dividend_profile', lambda *args, **kwargs: dict(ok=True, yield_declared=.02))
+    # amc_prices binds its directory at first import, which another collected
+    # module may trigger before this fixture: the real CS.PA series would then
+    # fill the omitted sessions these tests rely on.
+    from backend.app.core import amc_prices
+    monkeypatch.setattr(amc_prices, '_load_ticker_map', lambda: {})
     market_data.vider_cache_prix()
     yield
     market_data.vider_cache_prix()
@@ -100,7 +105,9 @@ def session_history(asof='2026-04-14', omitted=None, ticker='CS.PA'):
 
 def test_realized_reference_accepts_easter_closures_without_filling_or_changing_its_estimator():
     values = session_history()
-    assert 'UNBOUNDED_HISTORY_GAP' in market_data.load_hist_vol(['CS.PA'], asof='2026-04-14')['error']
+    # Since 18/11/2026 the generic continuity rule no longer reads a venue
+    # closure as a gap either (test_venue_closures.py).
+    assert not market_data.load_hist_vol(['CS.PA'], asof='2026-04-14').get('error')
     data = market_data.load_hist_vol(['CS.PA'], asof='2026-04-14', session_aware=True)
     assert not data.get('error'), data
     returns = np.diff(np.log(values.to_numpy()))[-252:]

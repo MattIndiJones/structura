@@ -56,3 +56,85 @@ diagnostic. Aucune suite backend complète lancée, aucun commit ni push.
 Redémarrer le backend par le lanceur, puis actualiser le navigateur avec Ctrl+F5
 avant de recharger le marché pour appliquer aussi la sélection des séances
 terminées et la résolution des places de cotation.
+
+## Complément du 18/11/2026 : MtM du deal en « Marché actuel »
+
+Constaté sur un autocall GLE.PA (STRU-20261105-001) : « Historique incomplet ou hors
+politique : GLE.PA (UNBOUNDED_HISTORY_GAP) » au calcul du MtM en marché actuel. Même
+cause qu'ici : la recalibration réalisée de `core/deal_valuation.mtm_core` lisait sa
+fenêtre d'un an sur le chemin générique, qui compte Pâques (quatre jours sans séance sur
+Euronext) et Noël un jeudi comme des lacunes. Ce correctif du 03/11 n'avait couvert que
+le Pricer et le comparateur.
+
+Le chargement qualifié est désormais une seule fonction,
+`services/market_data.load_session_calibration_history`, utilisée par
+`load_hist_vol(session_aware=True)` et par le MtM : les deux chemins ne peuvent plus
+diverger. Une place inconnue ou une clôture manquante sur une séance ouverte donnent un
+422 avec la raison ; aucun cours n'est remplacé. Sur la série réelle de GLE.PA au
+18/11/2026 : 355 séances, volatilité réalisée de 34,73 % sur 252 rendements. Tests :
+`test_mtm_realized_sessions.py`.
+
+**Premier passage incomplet, corrigé le même jour.** Le cœur choisissait le chargeur
+qualifié quand aucun chargeur de prix n'était injecté. Or la route
+(`api/deals/valuation._mtm_core`) injecte explicitement `load_hist_prices` : l'écran
+gardait le refus, alors que les tests, qui appelaient le cœur sans injection, passaient.
+Le chargeur de calibration est désormais une dépendance explicite (`calibration_loader`),
+transmise par la route. Le test passe par la route, et échoue si on retire cette ligne.
+Vérifié de bout en bout par la route sur STRU-20261105-001 (base en lecture seule) :
+MtM 87,83 %, σ réalisée 34,73 %.
+
+Deux corrections du harnais de test vont avec :
+
+- `deals_patch.patch_deals(..., "load_hist_prices", ...)` fait aussi suivre la
+  recalibration, comme le faisait l'ancienne injection ;
+- `amc_prices` fige son répertoire au premier import. Un autre module de test collecté
+  avant peut donc faire lire au test le vrai magasin AMC, où la séance retirée existe.
+  Le test coupe ce magasin.
+
+## Complément du 18/11/2026 (2) : la règle de continuité elle-même
+
+En préparant l'extension aux autres appels, la mesure sur les vraies séries a montré que
+le défaut ne venait pas des appels mais de la règle de continuité. `align_history` comptait
+les jours calendaires entre deux cotations, **cours nus et ajustés confondus** :
+
+| Chemin générique, arrêté au 18/11/2026 | Avant | Après |
+|---|---|---|
+| GLE.PA depuis le 05/01/2026 (Pâques) | refusé | 225 dates |
+| GLE.PA depuis le 17/11/2025 (Noël un jeudi, Pâques) | refusé | 257 dates |
+| GLE.PA + AAPL depuis le 05/01/2026 | refusé | 227 dates |
+| UCG.MI + STMPA.PA + SAP.DE depuis le 01/06/2024 | refusé | 631 dates |
+| AAPL depuis le 05/01/2026 | 221 dates | 221 dates |
+
+Le rejeu du cycle de vie d'un deal européen frappé avant Pâques 2026 était donc refusé
+lui aussi, et avec lui le MtM même en mode booking, les constatations, le P&L explain,
+les notes, la VaR et le CCR : seize appels passent par ce chemin.
+
+**La correction** (`core/venue_closures.py`) retire du décompte, et de l'âge d'un cours
+reporté dans un panier sur plusieurs places, les **jours de semaine où la place du titre
+est fermée**. Les week-ends comptent comme avant et une séance ouverte sans cotation reste
+une lacune. La règle ne cesse donc que de pénaliser les fermetures : elle n'accepte rien
+qu'elle refusait pour une autre raison. La place est celle que déclare le fournisseur,
+sinon celle du suffixe du ticker. Une place inconnue garde la règle calendaire et le refus.
+La table des suffixes est désormais unique et partagée avec la qualification de
+calibration. Le contrôle de `storage_status` suit la même règle. Le panier
+GLE.PA + AAPL garde une seule séance reportée, le lundi de Pâques, où New York cote et
+Paris est fermé.
+
+**Ce qui ne change pas** : la limite de trois jours de D03 elle-même, et le contrôle de
+fraîcheur à la date demandée (`market_policy.freshness`). Une valorisation **le** lundi de
+Pâques d'un titre parisien, dont la dernière clôture date du jeudi, reste refusée comme
+périmée. C'est le texte de D03, non modifié sans décision explicite.
+
+La **reconduction** calibre désormais comme le Pricer (`load_hist_vol(session_aware=True)`)
+et renvoie `vol_refresh_error` quand elle retombe sur la vol du booking. L'infobulle de
+l'écran Booking affiche cette raison au lieu d'un « Yahoo indisponible » systématique.
+La **VaR** et le **marché commun du CCR** n'ont pas eu besoin d'être modifiés : ils
+passaient par la règle corrigée.
+
+Tests : `test_venue_closures.py`. Les quatre tests de comportement échouent sans la
+correction ; les quatre tests de garde (lacune réelle, place inconnue, résolution de la
+place) passent dans les deux cas. `test_comparator_details_pricing.py` exigeait encore le
+refus du chemin générique ; c'est corrigé. Ses quatre tests de séance manquante
+échouaient aussi selon l'ordre de collecte, **avant cette correction déjà** : ils lisaient
+le vrai CS.PA du magasin AMC, figé au premier import. Sa fixture coupe désormais ce
+magasin.

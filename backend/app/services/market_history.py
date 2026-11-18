@@ -11,6 +11,17 @@ import pandas as pd
 from ..runtime import data_path
 from ..core import market_policy
 from ..core import market_storage
+from ..core.venue_closures import closures_between, quote_gaps, venue_calendar, weekday_closures
+
+
+def _carry_age(index, origins, closures):
+    """Calendar days since the last quote, minus the venue's weekday closures."""
+    age = (index.to_series()-origins).dt.days
+    known = origins.notna().to_numpy()
+    if closures is not None and closures.size and known.any():
+        closed = closures_between(closures, origins[known], index[known], include_upto=True)
+        age[known] = age[known].to_numpy()-closed
+    return age
 
 
 def _path(ticker, adjusted):
@@ -122,7 +133,13 @@ def align_history(tickers, series, start, end, adjusted, sources, failures, allo
     frame.index = pd.to_datetime(frame.index)
     frame = frame.loc[(frame.index >= pd.Timestamp(start)) & (frame.index <= pd.Timestamp(end))]
     origins = pd.DataFrame({tk: pd.Series(s.index, index=s.index) for tk, s in series.items()}).reindex(frame.index).ffill()
-    ages = pd.DataFrame({tk: (frame.index.to_series()-origins[tk]).dt.days for tk in frame})
+    # Ages and gaps exclude the weekday closures of each security's venue:
+    # Easter on Euronext is not a missing quote (core/venue_closures.py).
+    calendars = {tk: venue_calendar(tk, sources.get(tk)) for tk in series}
+    closures = {tk: weekday_closures(calendars[tk], min(s.index.min(), pd.Timestamp(start)),
+                                     max(s.index.max(), pd.Timestamp(end)))
+                for tk, s in series.items() if not s.empty}
+    ages = pd.DataFrame({tk: _carry_age(frame.index, origins[tk], closures.get(tk)) for tk in frame})
     maximum = market_policy.HISTORY_MAX_AGE_DAYS
     bounded = frame.ffill().where(ages <= (maximum if maximum is not None else 0))
     excluded, included, effective, last_quality = [], [], {}, {}
@@ -134,7 +151,7 @@ def align_history(tickers, series, start, end, adjusted, sources, failures, allo
         quality = market_policy.freshness(effective[ticker], end, "history")
         last_quality[ticker] = quality
         bad = ages[ticker].notna() & (ages[ticker] > (maximum if maximum is not None else 0))
-        gaps = series[ticker].index.to_series().diff().dt.days.dropna()-1
+        gaps = quote_gaps(series[ticker].index, closures[ticker])
         long_gaps = int((gaps > (maximum if maximum is not None else 0)).sum())
         if not quality["qualified"] or bad.any() or long_gaps:
             excluded.append(dict(ticker=ticker, reason=quality["status"] if not quality["qualified"] else "UNBOUNDED_HISTORY_GAP",
@@ -153,7 +170,8 @@ def align_history(tickers, series, start, end, adjusted, sources, failures, allo
                    coverage=dict(requested=list(tickers), included=included, excluded=excluded,
                                  complete=not excluded and bool(dates), allow_partial=bool(allow_partial)),
                    source_observation_dates={tk:[x.date().isoformat() for x in origins.loc[prices.index,tk]] for tk in included},
-                   carry_age_days={tk:[int(x) for x in ages.loc[prices.index,tk]] for tk in included})
+                   carry_age_days={tk:[int(x) for x in ages.loc[prices.index,tk]] for tk in included},
+                   closure_calendars={tk: calendars.get(tk) for tk in included})
     carried = {tk:sum(x > 0 for x in payload["carry_age_days"][tk]) for tk in included}
     payload["warnings"] = ([dict(code="BOUNDED_CARRY", carried_rows=carried,
                                  message="Clôtures reportées : dates sources et anciennetés disponibles ; finalité non certifiée.")]
@@ -237,7 +255,9 @@ def storage_status(ticker, asof):
         effective = series.index[-1].date().isoformat() if not series.empty else None
         quality = market_policy.freshness(effective, asof, "history")
         maximum = market_policy.HISTORY_MAX_AGE_DAYS
-        gaps = series.index.to_series().diff().dt.days.dropna()-1
+        closures = (weekday_closures(venue_calendar(ticker, source), series.index.min(), series.index.max())
+                    if not series.empty else None)
+        gaps = quote_gaps(series.index, closures) if closures is not None else pd.Series([], dtype=float)
         long_gaps = int((gaps > (maximum if maximum is not None else 0)).sum())
         bases[field] = dict(available=not series.empty, rows=len(series), source=source,
                             date_min=series.index.min().date().isoformat() if not series.empty else None,
