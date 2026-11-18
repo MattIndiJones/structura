@@ -5,7 +5,7 @@ Texte de référence : règlement délégué (UE) 2017/653 consolidé au 01/01/2
 de 2021/2268 incluses), lu sur EUR-Lex le 18/11/2026. Les numéros de points ci-dessous
 renvoient à ce texte.
 
-**Statut : non commité, toujours `INDICATIVE_NON_PRIIPS`.** La méthode est en place ; le KID
+**Statut : commité (`0c6bf91`), toujours `INDICATIVE_NON_PRIIPS`.** La méthode est en place ; le KID
 n'est pas conforme pour autant tant que les limites listées plus bas subsistent et qu'aucune
 validation indépendante n'a eu lieu.
 
