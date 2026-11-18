@@ -10,6 +10,10 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Découpage du store du Pricer — 18/11](projects/pricing/DECOUPAGE_STORE_PRICING_2026-11-18.md)
+— `stores/pricing.js` (3 668 lignes) en quatorze modules installés sur un contexte partagé ; même
+interface pour les composants, 999 tests frontend et build. Tour dans l'application à faire.
+
 [Découpage d'engine.py — 18/11](projects/pricing/DECOUPAGE_ENGINE_2026-11-18.md)
 — 5 431 lignes réparties en onze modules (simulateurs, vol locale, taux, évaluation, `run_mc`,
 Greeks, analytiques, Mark-to-Future, détail MTF, backtest) derrière une façade qui réexporte tout.
