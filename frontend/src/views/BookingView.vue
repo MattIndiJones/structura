@@ -914,7 +914,8 @@
                 <span class="text-slate-500">
                   nouvelle échéance <span class="font-mono text-slate-300">{{ formatDate(rollResults[d.id].maturity_date) }}</span>
                 </span>
-                <span v-if="!rollResults[d.id].vol_refreshed" class="text-amber-400 text-[10px]" title="Yahoo Finance indisponible — vol du booking d'origine réutilisée">
+                <span v-if="!rollResults[d.id].vol_refreshed" class="text-amber-400 text-[10px]"
+                      :title="`Vol du booking d'origine réutilisée — ${rollResults[d.id].vol_refresh_error || 'historique de marché indisponible'}`">
                   ⚠ vol non rafraîchie
                 </span>
               </div>

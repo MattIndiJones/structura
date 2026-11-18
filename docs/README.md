@@ -52,6 +52,10 @@ comparaison A/B en parallèle. LSV reste soumis à la qualification du levier.
 [Recharger le marché : fermetures de bourse et séance en cours — 03/11](projects/pricing/MARKET_RELOAD_SESSIONS_2026-11-03.md)
 — Correction du rejet BNP `UNBOUNDED_HISTORY_GAP`, qualification par séances et
 exclusion des barres intrajournalières ; 59 tests backend ciblés, 961 frontend et build.
+Compléments du 18/11 : même correction pour le MtM du deal en marché actuel, puis règle de
+continuité corrigée à la source (un férié de place n'est plus une lacune, cours nus et
+ajustés, tous chemins) ; reconduction alignée sur le Pricer. Reste : fraîcheur D03 le
+jour même d'un férié, inchangée.
 
 [Lanceur : présentation et adaptation aux petites fenêtres — 03/11](projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md)
 — Thème ivoire et bleu nuit, accès Admin prioritaire, cartes compactes ;

@@ -6,10 +6,7 @@ consumer keeps genuine simultaneous closes and requires every expected quote.
 from datetime import date, timezone
 
 from ..core.fixing_finality import VENUES, session_calendar
-
-SUFFIX_CALENDARS = {'PA': 'XPAR', 'MI': 'XMIL', 'AS': 'XAMS', 'BR': 'XBRU', 'DE': 'XETR',
-                    'L': 'XLON', 'SW': 'XSWX', 'T': 'XTKS', 'HK': 'XHKG', 'SI': 'XSES',
-                    'MC': 'XMAD', 'TO': 'XTSE', 'AX': 'XASX'}
+from ..core.venue_closures import SUFFIX_CALENDARS  # noqa: F401  (one table, re-exported)
 
 
 def qualify_calibration_sessions(history, tickers, asof, *, venue_loader=None):
