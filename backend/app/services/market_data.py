@@ -33,15 +33,13 @@ def load_hist_vol(tickers: list[str], period: str = "1y",
         window = int(window_days) if window_days is not None else windows.get(period)
         if window is None or not 20 <= window <= 2520:
             return {"error": "Période inconnue ou fenêtre hors bornes : préciser window_days entre 20 et 2520."}
-        history = load_hist_prices(tickers, calibration_history_start(requested, window).isoformat(),
-                                   requested.isoformat(), adjusted=True,
-                                   **({'raw_history': True} if session_aware else {}))
+        start = calibration_history_start(requested, window).isoformat()
+        if session_aware:
+            history = load_session_calibration_history(tickers, start, requested)
+        else:
+            history = load_hist_prices(tickers, start, requested.isoformat(), adjusted=True)
         if history.get("error"):
             return history
-        if session_aware:
-            from .calibration_sessions import qualify_calibration_sessions
-            history = qualify_calibration_sessions(
-                history, tickers, requested, venue_loader=_calibration_venue)
         calibrated = realized_market(history.get("prices", {}), tickers, window)
         matrix = np.asarray(calibrated["corr"], dtype=float)
         if not np.isfinite(matrix).all() or np.linalg.eigvalsh(matrix).min() < -1e-8:
@@ -67,6 +65,26 @@ def load_hist_vol(tickers: list[str], period: str = "1y",
     except Exception as exc:
         logger.exception("load_hist_vol")
         return {"error": str(exc)}
+
+
+def load_session_calibration_history(tickers: list[str], start: str, asof: date,
+                                     provider: str | None = None) -> dict:
+    """Adjusted closes for a realized calibration, qualified on exchange sessions.
+
+    The generic continuity policy treats any interval above three calendar
+    days as an unbounded gap, so every one-year window crossing Easter or a
+    Thursday Christmas on a European venue was refused. Here each security
+    must instead quote on every session of its own venue: closures are not
+    gaps, and a missing close on an open session is still refused, with no
+    price substituted. Shared by the Pricer's realized volatility and the
+    deal mark-to-market on the current market, so the two cannot diverge.
+    Raises ValueError when a venue is unknown or a session close is missing."""
+    from .calibration_sessions import qualify_calibration_sessions
+    history = load_hist_prices(tickers, start, asof.isoformat(), adjusted=True,
+                               **({"provider": provider} if provider else {}), raw_history=True)
+    if history.get("error"):
+        return history
+    return qualify_calibration_sessions(history, tickers, asof, venue_loader=_calibration_venue)
 
 
 def _calibration_venue(ticker: str) -> dict:

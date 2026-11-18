@@ -19,7 +19,8 @@ from sqlmodel import Session, select
 from ..db.models import Deal, DealEvent
 from ..runtime import business_today
 from ..services.market_data import (
-    dividend_profile, load_hist_prices, market_data_provider_for_deal,
+    dividend_profile, load_hist_prices, load_session_calibration_history,
+    market_data_provider_for_deal,
 )
 from .simulation_grid import GridFrequency, snapshot_grid, grid_warning
 from .calibration import calibration_history_start, realized_market
@@ -98,6 +99,7 @@ def mtm_core(
     load_prices=None,
     dividend_loader=None,
     realized_loader=None,
+    calibration_loader=None,
     progress=None,
 ) -> tuple[dict, Optional[dict]]:
     """Residual mark-to-market of an ACTIVE deal: replay the frozen script on
@@ -119,6 +121,11 @@ def mtm_core(
     calendar and the realized-vol window all follow — this is what the P&L
     explain uses to build its two photos (EXPLICATION_VALO_DESIGN.md)."""
     injected_price_loader = load_prices is not None
+    # The realized recalibration reads its history through its own loader,
+    # qualified on exchange sessions. The API route injects load_hist_prices
+    # explicitly, so "no injected price loader" cannot be what selects it.
+    if calibration_loader is None and not injected_price_loader:
+        calibration_loader = load_session_calibration_history
     load_prices = load_prices or load_hist_prices
     dividend_loader = dividend_loader or dividend_profile
     realized_loader = realized_loader or realized_market
@@ -392,7 +399,7 @@ def mtm_core(
         # the time elapsed since the strike, and gave a forward-start deal one
         # week of history — too few returns, MtM refused.
         statistical_start = calibration_history_start(today, body.window_days).isoformat()
-        if injected_price_loader:
+        if calibration_loader is None:
             try:
                 statistical_px_data = load_prices(
                     tickers, statistical_start, today.isoformat(), adjusted=True)
@@ -402,9 +409,15 @@ def mtm_core(
                 # adjusted branch above.
                 statistical_px_data = px_data
         else:
-            statistical_px_data = load_prices(
-                tickers, statistical_start, today.isoformat(), adjusted=True,
-                provider=market_provider)
+            # Same qualification as the Pricer's realized volatility: every
+            # session of each venue must quote, closures are not gaps. The
+            # generic continuity rule refused any one-year window crossing
+            # Easter on a European listing (UNBOUNDED_HISTORY_GAP).
+            try:
+                statistical_px_data = calibration_loader(
+                    tickers, statistical_start, today, provider=market_provider)
+            except ValueError as e:
+                raise HTTPException(422, f"Recalibration réalisée impossible : {e}")
         if "error" in statistical_px_data:
             raise HTTPException(422, statistical_px_data["error"])
         try:
