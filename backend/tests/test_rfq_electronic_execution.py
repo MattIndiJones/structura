@@ -411,7 +411,7 @@ def test_bank_booking_cannot_change_the_confirmed_economics(electronic_case, fie
     assert not b.exec(select(Deal)).all()
 
 
-@pytest.mark.parametrize('field,value', [('request_hash', '0' * 64), ('execution_id', str(uuid4())),
+@pytest.mark.parametrize('field,value', [('request_hash', '0' * 64), ('execution_id', '00000000-0000-4000-8000-000000000000'),
     ('received_at', '2099-01-01T00:00:00Z'), ('decided_at', '2099-01-01T00:00:00Z')])
 def test_unbound_or_future_confirmation_cannot_confirm_local_agreement(electronic_case, field, value):
     case = electronic_case

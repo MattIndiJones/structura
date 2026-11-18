@@ -352,6 +352,22 @@ class CompiledEvent:
 
 
 # ── Expression transpiler ─────────────────────────────────────────
+# Python syntax the PayScript language does not have. The transpiler copies
+# every non-identifier character through, so `9**9**9**9` compiled into an
+# exponentiation that never returns, and a quote opened a string literal.
+# Refused at compilation: the language is + - * / and comparisons (§3.7).
+_FORBIDDEN_SYNTAX = ("**", "//", "<<", ">>", "'", '"', "\\", ";", "{", "}",
+                     "@", "~", "&", "|", "^", "`", "$", "?")
+
+
+def _check_syntax(src: str) -> None:
+    for token in _FORBIDDEN_SYNTAX:
+        if token in src:
+            raise ValueError(
+                f"opérateur ou caractère non pris en charge : {token!r} — PayScript "
+                f"n'admet que + - * /, les parenthèses et les comparaisons.")
+
+
 def _transpile_expr(src: str, unknown: set | None = None,
                      array_params: set | None = None) -> str:
     """unknown, when passed, collects (uppercased) identifiers that fall
@@ -361,6 +377,7 @@ def _transpile_expr(src: str, unknown: set | None = None,
     those resolve through _pobs (per-observation row lookup) instead of the
     plain memo get — scalar params keep the fast direct lookup."""
     s = src.strip()
+    _check_syntax(s)
     out = []
     i = 0
     while i < len(s):
@@ -545,8 +562,10 @@ def _compile_body(lines: list[dict], errors: list, base_indent: int = 0,
             except Exception as ex: errors.append(f'Ligne {no}: {ex}'); i += 1; continue
             if unknown is not None:
                 for name in refs: unknown[name] = no
-            lbl = lbl_raw.replace("'", "\\'")
-            out.append(f"if not _c['done'] and not _st['done']: _st['flows'].append({{'v': {e}, 'lbl': '{lbl}', 'leg': {no}}})")
+            # The label is data: repr() makes it a Python literal whatever it
+            # holds (quote, backslash, line break), instead of pasting it into
+            # the generated source between two quotes.
+            out.append(f"if not _c['done'] and not _st['done']: _st['flows'].append({{'v': {e}, 'lbl': {lbl_raw!r}, 'leg': {no}}})")
             i += 1; continue
 
         m = re.match(r'^ACCRUE\s+(.+?)(?:\s+"[^"]*")?\s*$', text, re.I)

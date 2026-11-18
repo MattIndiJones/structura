@@ -50,6 +50,20 @@ class SelectionTests(unittest.TestCase):
             with self.subTest(target=target), self.assertRaises(ValueError):
                 select_tests.manual_targets(self.root, target)
 
+    def test_push_compares_against_the_previous_tip_not_only_the_last_commit(self):
+        event_path = self.root / "event.json"
+        event_path.write_text(json.dumps({"before": "a" * 40}), encoding="utf-8")
+        env = {"GITHUB_EVENT_PATH": str(event_path), "GITHUB_OUTPUT": str(self.root / "output"),
+               "GITHUB_STEP_SUMMARY": str(self.root / "summary"), "GITHUB_EVENT_NAME": "push"}
+        calls = []
+        def git(*args):
+            calls.append(args)
+            return ""
+        with patch.dict(os.environ, env), patch.object(Path, "cwd", return_value=self.root), patch.object(select_tests, "git", side_effect=git):
+            select_tests.main()
+        self.assertIn(("diff", "--name-only", "--no-renames", "a" * 40, "HEAD"), calls)
+        self.assertNotIn(("rev-parse", "HEAD^"), calls)
+
     def test_only_manual_full_suite_can_select_test_directory(self):
         event_path = self.root / "event.json"
         event_path.write_text(json.dumps({"inputs": {"full_suite": "true"}}), encoding="utf-8")
