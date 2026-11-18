@@ -79,7 +79,10 @@ def main() -> None:
     inputs = event.get("inputs", {}) if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch" else {}
     full = str(inputs.get("full_suite", "false")).lower() == "true"
     pr = event.get("pull_request", {})
-    before = event.get("before") if event.get("action") == "synchronize" else None
+    pushed = os.environ["GITHUB_EVENT_NAME"] == "push"
+    before = event.get("before") if event.get("action") == "synchronize" or pushed else None
+    if before and set(before) == {"0"}:   # first push of a branch: no previous tip
+        before = None
     base = before or (git("merge-base", pr["base"]["sha"], "HEAD") if pr else git("rev-parse", "HEAD^"))
     changed = git("diff", "--name-only", "--no-renames", base, "HEAD").splitlines()
     targets, notes = select_backend(root, changed)

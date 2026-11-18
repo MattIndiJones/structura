@@ -35,6 +35,7 @@ from ..core.payscript.parser import parse_script, resolve_analysis_constats, res
 from .auth import get_current_user
 from ..db.database import get_session
 from ..db.models import User, EmtRecord, Indicative, Deal
+from ..core.regulatory_status import emt_status
 from ..core.product.models import FrozenObject
 from ..core.product.inputs import calculation_context, pricing_input
 from ..services.product_repository import ProductError, load_product, owned_record, stage_revision
@@ -234,6 +235,7 @@ def emt_compute(
             if features["has_autocall"]
             else "Recherche de performance liée au(x) sous-jacent(s)"
         ),
+        **emt_status(),
     }
 
 
@@ -332,6 +334,7 @@ def _emt_record_row(e: EmtRecord) -> dict:
         "negative_target_market": e.negative_target_market,
         "description": e.description,
         "created_at": e.created_at.isoformat(),
+        **emt_status(),
     }
 
 

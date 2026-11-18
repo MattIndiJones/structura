@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from .runtime import consultation_mode
+from .version import VERSION
 from .core.document_uploads import DocumentUploadLimitMiddleware
 from .api.pricing import router as pricing_router
 from .api.volatility import router as volatility_router
@@ -70,7 +71,7 @@ from zoneinfo import ZoneInfo
 app = FastAPI(
     title="Structura — PayScript Pricing Engine",
     description="Monte Carlo pricing engine for structured products",
-    version="0.2.0",
+    version=VERSION,
 )
 
 app.add_middleware(DocumentUploadLimitMiddleware)
@@ -235,7 +236,7 @@ DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 @app.get("/health")
 async def health():
-    result = {"status": "ok", "version": "0.1.0"}
+    result = {"status": "ok", "version": VERSION}
     if os.environ.get("STRUCTURA_INSTANCE_ID"):
         result.update(instance_id=os.environ["STRUCTURA_INSTANCE_ID"], process_id=os.getpid())
     if os.environ.get("STRUCTURA_BOOTSTRAP_PROFILE") == "admin_workbench":

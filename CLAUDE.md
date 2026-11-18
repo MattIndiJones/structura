@@ -50,8 +50,21 @@ en français. Code, commentaires, noms de fichiers/variables : anglais.
   en fin de tâche. Dans tous ces cas : les tests du domaine touché, et rien de
   plus.
 - Si un doute subsiste sur la portée réelle d'un changement, le dire en une
-  phrase et proposer la commande — c'est à Philippe de décider de payer les six
-  minutes, pas à la session.
+  phrase et proposer la commande — c'est à Philippe de décider de payer les
+  treize minutes, pas à la session.
+- **Quand Philippe la demande, la suite complète tourne en parallèle** :
+  `python -m pytest backend/tests -q -n auto --dist load`, depuis la racine
+  (`pytest-xdist`, dans `requirements.txt`). Mesuré le 18/11/2026 sur 8 cœurs :
+  **12 min 50** contre 53 min 46 en séquentiel, 4 394 tests verts. Sur ce poste,
+  ajouter `--basetemp=<dossier temporaire accessible>` : le dossier par défaut de
+  pytest y est refusé. Un paramètre de test doit être déterministe (pas de
+  `uuid4()` ni d'horloge dans un `parametrize`), sinon les processus ne collectent
+  pas les mêmes tests. Pour des tests ciblés, rester en séquentiel : démarrer huit
+  processus coûte plus que ce qu'ils font gagner sur un fichier.
+- **La CI** (`.github/workflows/`) : `ci.yml` lance les tests des fichiers modifiés
+  et de leurs consommateurs directs sur chaque PR **et chaque push sur `main`** ;
+  `nightly.yml` lance les suites complètes backend et frontend chaque nuit de
+  semaine. C'est ce passage nocturne qui fait office de garde-fou, pas la session.
 - Une modification de documentation seule ne justifie aucun pytest. Une modification
   de tests seule se valide d'abord avec les tests modifiés ; la suite complète n'est
   pas requise par défaut.

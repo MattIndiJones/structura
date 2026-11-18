@@ -349,6 +349,8 @@ Non revérifiés ici : les neuf anomalies corrigées de la recette graphique du 
 
 Tests rejoués : 31 fichiers des fenêtres de constatation, des analytiques et du MtM avant strike (673 tests), et les 9 fichiers CCR et risque (151 tests), tous verts. La suite complète n'est pas rejouée.
 
+**Durée de la suite complète, 18/11.** `pytest-xdist` réparti sur les 8 cœurs : **12 min 50** (`-n 8 --dist load`) et 13 min 55 (`-n 6 --dist loadfile`), contre 53 min 46 en séquentiel ; les deux passages sont verts. Un seul test empêchait le parallèle : un paramètre tiré par `uuid4()` à la collection, que chaque processus voyait différemment. Gagner davantage demanderait d'alléger les tests eux-mêmes ; le temps est très étalé (les 200 tests les plus lents font la moitié du total), donc chaque minute gagnée coûterait la sensibilité d'une centaine de tests Monte Carlo.
+
 **Lecture.** Le 23/10, la suite était entièrement verte. Les deux livraisons suivantes ont chacune cassé un écran métier sans que rien le signale : la CI ne sélectionne que les tests dont les fichiers ont changé, et la suite complète n'a pas été rejouée. C'est la démonstration du risque n° 1 de la synthèse.
 
 **Durée.** 3 042 s contre 1 500 s le 23/10, pour 10 % de tests en plus. Aucun fichier n'explique seul l'écart : les douze plus lents totalisent environ 1 460 s (cohérence des analytiques 203 s, générateur UAT 196 s, MtM avant strike 165 s). La suite tourne sur un seul processus, `pytest-xdist` n'étant pas installé. Le chiffre de « six minutes » de `CLAUDE.md` est périmé.
@@ -365,7 +367,7 @@ Ce n'est pas un défaut de prix. C'est la preuve que **`main` porte un test roug
 
 | Élément | État | Preuve |
 |---|---|---|
-| Déclenchement | Sur demande de fusion et à la main. **Rien sur un commit direct** | [ci.yml:3-14](../../.github/workflows/ci.yml) |
+| Déclenchement | Sur demande de fusion et à la main. **Rien sur un commit direct** — corrigé le 18/11 : aussi sur chaque push dans `main`, plus une suite complète nocturne | [ci.yml:3-14](../../.github/workflows/ci.yml) |
 | Périmètre | Tests **sélectionnés** d'après les fichiers modifiés ; suite complète sur demande manuelle seulement | [ci.yml:40-66](../../.github/workflows/ci.yml), [select_tests.py](../../.github/scripts/select_tests.py) |
 | Dernière suite backend complète | **23/10/2026**, 3 943 succès, sur un arbre non commité à cette date. Depuis : environ 450 tests de plus, trois livraisons | [BACKEND_FULL_VALIDATION_2026-10-23.md](BACKEND_FULL_VALIDATION_2026-10-23.md) ; collecte du jour |
 | Analyse statique | **Absente** : ni lint, ni typage, ni formateur | Aucun fichier de configuration |
@@ -432,14 +434,14 @@ Effort : **S** ≤ 2 jours · **M** ≤ 2 semaines · **L** > 2 semaines.
 |---|---|---|---|---|---|
 | P0-0 | **Deux écrans cassés en production** : Product Optimizer depuis le 05/11, générateur UAT depuis le 24/10 (6.1 bis) | `core/payscript/simulation.py:72`, `services/uat_generation.py:964` | **Corrigé le 18/11, non commité** ; les 52 tests concernés repassent | S | — |
 | P0-0 bis | Candidats de l'Optimizer rejetés pour un écart d'arrondi de 1e-6 (6.1 bis), 5 tests rouges depuis au moins le 01/11 | `core/product_optimizer/contracts.py`, `service.py:30-37`, `core/payscript/simulation.py` | **Corrigé le 18/11, non commité** : recherche à la demi-tolérance, tolérance de 1e-5, version de méthode v3 | S | — |
-| P0-1 | 69 échecs sur `main` (6.1 bis) | 12 fixtures de booking, 4 attentes numériques, 1 test de démarrage | Mettre les fixtures au contrôle juridique ; qualifier puis corriger les trois attentes non expliquées ; aligner le zéro-coupon sur `exp(−r·(T−t))` ; rejouer la suite complète | M | P0-0 |
-| P0-2 | Rien n'impose de contrôle à la livraison (6.2, 8) | `.github/workflows/ci.yml` | Suite complète **nocturne sur GitHub**, qui ne coûte rien au poste et respecte la règle locale des tests ciblés ; déclenchement sur `main` ; branche protégée | S | Dépôt GitHub |
-| P0-3 | Perte de données possible (D1, D4) | `db/database.py:28-36`, lanceur, ordonnanceur | Sauvegarde quotidienne par installation avec contrôle d'intégrité et rotation ; restauration testée ; mode WAL | S | — |
-| P0-4 | Barrière américaine mal servie par les deux modes (F1) : note surévaluée de 19 pb sur l'instance | `core/payscript/bridge.py`, `engine.py`, `schemas.py:239`, `MarketParams.vue:165` | Troisième mode « clôture quotidienne » par décalage de barrière sur la grille ; mode affiché dans chaque document ; sonde D ajoutée aux tests | M | — |
-| P0-5 | Documents réglementaires indicatifs sans marquage garanti (F5) | `api/kid.py`, `api/emt.py`, écrans associés | Mention « indicatif, non conforme » imposée par le serveur sur tout KID et EMT, jusqu'à P1-2 | S | — |
-| P0-6 | Dépôt alourdi et pièces possiblement sensibles (1.4, S11) | `frontend/dist`, `backend/_srv_*.log`, `tmp/pdfs`, `scratchpad_*` | Ne suivre qu'une génération du bundle, ou le construire à l'installation ; retirer journaux et fichiers de travail ; décider du sort de l'étude AMC dans l'historique | S | Décision sur la réécriture d'historique |
-| P0-7 | Script capable de bloquer le serveur (S2, S3) | `core/payscript/parser.py:355-429, 533-549` | Borner l'opérateur puissance, refuser les littéraux de chaîne dans les expressions, passer le libellé comme donnée ; délai sur le pricing interactif | S | — |
-| P0-8 | Livraisons non nommables (A9) | `main.py:73, 238`, `frontend/package.json` | Une seule source de version ; étiquette Git à chaque livraison | S | — |
+| P0-1 | 69 échecs sur `main` (6.1 bis) | — | **Fait le 18/11** : suite complète verte avant fusion, 4 394 réussis, 1 ignoré, 0 échec | M | — |
+| P0-2 | Rien n'impose de contrôle à la livraison (6.2, 8) | `.github/workflows/ci.yml`, `nightly.yml`, `.github/scripts/select_tests.py` | **Fait le 18/11, non commité** : `ci.yml` aussi sur chaque push dans `main`, comparé à l'état d'avant le push ; `nightly.yml` lance les suites complètes backend (parallèle) et frontend chaque nuit de semaine. Reste à protéger la branche sur GitHub | S | Réglage GitHub par Philippe |
+| P0-3 | Perte de données possible (D1, D4) | `db/database.py:28-36`, lanceur, ordonnanceur | **Écarté par Philippe le 18/11** tant que le produit n'est pas commercialisé | S | — |
+| P0-4 | Barrière américaine en clôture quotidienne absente (F1) : sur l'instance sondée, la note sort 19 pb trop haut en mode par défaut | `core/payscript/bridge.py`, `engine.py`, `schemas.py:239` | **Documenté, non prioritaire (décision du 18/11)**. Le mode retenu reste affiché avec chaque prix et chaque document de booking | M | — |
+| P0-5 | Statut indicatif des KID et EMT (F5) | `core/regulatory_status.py`, `api/kid.py`, `api/emt.py` | **Fait le 18/11, non commité.** Correction du constat initial : les écrans KID et EMT affichaient déjà une mise en garde. Ce qui manquait est la mention dans l'API et les archives : calcul et archives des deux documents portent désormais `methodology_status` et `regulatory_notice` | S | — |
+| P0-6 | Dépôt alourdi (1.4, S11) | `frontend/dist`, journaux, fichiers de travail | **Fait le 18/11** (`a93e9f0`). L'étude AMC reste dans l'historique et dans Structura, par décision de Philippe, jusqu'à son passage sous QISTRA | S | — |
+| P0-7 | Script capable de bloquer le serveur (S2, S3) | `core/payscript/parser.py` | **Fait le 18/11, non commité** : puissance, guillemets et syntaxe Python hors langage refusés à la compilation ; libellé de `PAY` passé comme littéral. Reste le délai et l'annulation du pricing interactif, qui exigent la file de calcul (P1-4) | S | — |
+| P0-8 | Livraisons non nommables (A9) | `backend/app/version.py`, `main.py`, `frontend/package.json` | **Fait le 18/11, non commité** : version unique 0.3.0, lue par l'API et `/health`, suivie par le front sous test. Étiquette `v0.3.0` à poser au commit | S | — |
 
 ### P1 — Rendre l'outil exploitable par un tiers accompagné
 

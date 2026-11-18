@@ -35,6 +35,7 @@ from ..db.models import User, KidRecord, Indicative, Deal
 from ..core.product.models import FrozenObject
 from ..core.product.inputs import calculation_context, pricing_input
 from ..services.product_repository import ProductError, load_product, owned_record, stage_revision
+from ..core.regulatory_status import kid_status
 from ..services.kid_receipts import issue_kid_receipt, bind_kid_receipt, archived_kid_status
 
 router = APIRouter(prefix="/api/kid", tags=["kid"])
@@ -440,7 +441,9 @@ def kid_compute(
             "ongoing": req.cost_ongoing,
         },
     }
-    return {**result, 'calculation_receipt': issue_kid_receipt(req, result, current, product)}
+    # The status sits outside the signed result: it describes the method,
+    # not the figures the receipt certifies.
+    return {**result, **kid_status(), 'calculation_receipt': issue_kid_receipt(req, result, current, product)}
 
 
 # ── Persistence — append-only, one row per generation ──────────────────
@@ -482,7 +485,7 @@ def _kid_record_row(k: KidRecord) -> dict:
         evidence = {'invalid': True}
     row['provenance_status'] = archived_kid_status(evidence, {**row, 'user_id': k.user_id})
     row['calculation_evidence'] = evidence or None
-    row['methodology_status'] = 'INDICATIVE_NON_PRIIPS'
+    row.update(kid_status())
     return row
 
 

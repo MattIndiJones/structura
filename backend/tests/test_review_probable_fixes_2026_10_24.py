@@ -48,6 +48,7 @@ def test_kid_retains_real_computation_and_contract_without_recomputing(product_c
     row = response.json()
     assert row['provenance_status'] == 'SERVER_COMPUTED'
     assert row['methodology_status'] == 'INDICATIVE_NON_PRIIPS'
+    assert 'non conforme PRIIPs' in row['regulatory_notice']
     assert row['horizons'] == body['horizons']
     assert row['calculation_evidence']['retained_product_id'] == product['product_id']
     assert row['calculation_evidence']['input']['r'] == .03
@@ -434,3 +435,20 @@ def test_simulation_refuses_invalid_explicit_private_credentials(tmp_path, passw
         'username': 'workshop_admin', 'email': 'bank@recette.invalid', 'password': password}), encoding='utf-8')
     with pytest.raises(RuntimeError, match='privés de simulation'):
         simulation_credentials(tmp_path)
+
+
+def test_kid_and_emt_responses_carry_their_indicative_status(product_client):
+    """The screens say a KID or an EMT is indicative; a figure read through the
+    API must say it too, from the computation itself."""
+    request = kid_input()
+    kid_response = product_client.post('/api/kid/compute', json=request)
+    assert kid_response.status_code == 200, kid_response.text
+    data = kid_response.json()
+    assert data['methodology_status'] == 'INDICATIVE_NON_PRIIPS'
+    assert 'non conforme PRIIPs' in data['regulatory_notice']
+    emt_response = product_client.post('/api/emt/compute', json={
+        **request, 'sri': data['sri'], 'mrm': data['mrm'], 'crm': data['crm']})
+    assert emt_response.status_code == 200, emt_response.text
+    emt = emt_response.json()
+    assert emt['methodology_status'] == 'INDICATIVE_NON_FINDATEX'
+    assert 'FinDatEx' in emt['regulatory_notice']

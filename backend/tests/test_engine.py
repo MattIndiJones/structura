@@ -1440,3 +1440,26 @@ def test_history_replay_script_using_s_min_no_crash():
                                  user_params={}, tickers=["TK1"], r=0.03)
     assert res is not None
     assert res["state"]["memo"]["LOW"] == pytest.approx(0.4)
+
+
+@pytest.mark.parametrize("expr", ["9**9**9**9", "1 // 2", "'a' * 3", "1 ^ 2", "1; 2", "{1}"])
+def test_python_syntax_outside_the_language_is_refused_at_compilation(expr):
+    """The transpiler copied every non-identifier character through: `9**9**9**9`
+    compiled into an exponentiation that never returns, a quote opened a Python
+    string. The language is + - * / and comparisons; anything else is refused
+    before a single path is drawn."""
+    with pytest.raises(ValueError, match="non pris en charge"):
+        parse_script(f"AT MATURITY\n  PAY {expr}\n")
+    with pytest.raises(ValueError, match="non pris en charge"):
+        parse_script(f"AT MATURITY\n  IF 1 > 0:\n    PAY 1\n  ELSE IF {expr}:\n    PAY 0\n")
+
+
+@pytest.mark.parametrize("label", ["remboursement de l'investisseur", "fin \\", r"chemin C:\temp"])
+def test_a_pay_label_is_data_whatever_it_contains(label):
+    """A label used to be pasted between two quotes in the generated source:
+    a trailing backslash broke the compilation. It is now a literal."""
+    cs = parse_script(f'AT MATURITY\n  PAY 1 "{label}"\n')
+    res = run_mc(cs, CALL_PARAMS, CORR, r=0.03, T_max=1.0, N=1000, model='constant',
+                 seed=42, antithetic=True, user_params={})
+    assert abs(res['price'] - math.exp(-0.03)) < 1e-6
+    assert [row['lbl'] for row in res['flux_table'].values()] == [label]
