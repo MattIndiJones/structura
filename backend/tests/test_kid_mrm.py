@@ -35,9 +35,9 @@ def test_perte_totale_ne_peut_pas_donner_la_note_la_plus_basse():
     assert _mrm_from_vev(0.9) == 7        # volatilité extrême
     # MRM 7 croisé au CRM par défaut ne doit jamais retomber dans le bas de
     # l'échelle du SRI.
-    assert _sri(7, 3) >= 6
-    assert _sri(1, 3) <= 2
-    assert kid._SRI_TABLE[6][2] == _sri(7, 3)
+    assert _sri(7, 3) == 7
+    # Annex II point 52: a CRM 3 issuer never takes the SRI below 3.
+    assert _sri(1, 3) == 3
 
 
 @pytest.mark.parametrize("vev,attendu", [
@@ -92,13 +92,15 @@ def _scenario_with_flows(flows):
     }
 
 
-def test_call_achete_12_double_a_un_tri_de_100_pourcent_sur_un_an():
+def test_call_achete_12_double_rend_100_pourcent_sur_un_an():
+    """Annex IV point 45: one year or less, the return is not annualised."""
     scenario = _scenario_with_flows([{"t": 1.0, "cf": 0.24}])
 
     row = _scenario_row(scenario, 1.0, 0.0, 0.0, 0.0, initial_price_pct=12.0)
 
     assert row["modere"]["amount"] == pytest.approx(20_000.0)
     assert row["modere"]["ann_return"] == pytest.approx(100.0)
+    assert row["modere"]["return_annualised"] is False
     assert row["modere"]["return_status"] == "computed"
 
 
@@ -112,7 +114,8 @@ def test_perte_integrale_de_la_prime_est_moins_cent_pourcent():
     assert row["stress"]["return_status"] == "total_loss"
 
 
-def test_montant_et_tri_utilisent_exactement_les_memes_flux_nets():
+def test_montant_publie_arrondi_a_dix_euros_sur_la_somme_des_flux_nets():
+    """Annex IV point 42: sum received, coupons included, rounded to 10 EUR."""
     scenario = _scenario_with_flows([
         {"t": 1.0, "cf": 0.08},
         {"t": 2.0, "cf": 1.08},
@@ -123,7 +126,8 @@ def test_montant_et_tri_utilisent_exactement_les_memes_flux_nets():
         cost_ongoing=2.0, initial_price_pct=100.0,
     )["modere"]
 
-    assert cell["amount"] == sum(f["cf"] for f in cell["net_flows"])
+    assert cell["value"] == pytest.approx(sum(f["cf"] for f in cell["net_flows"]), abs=0.011)
+    assert cell["amount"] == round(cell["value"] / 10) * 10
     # Le frais de sortie ne frappe que les flux de la date de sortie.
     assert cell["net_flows"][0]["cf"] == pytest.approx(800.0 * 0.98, abs=0.01)
     assert cell["net_flows"][1]["cf"] == pytest.approx(
@@ -131,26 +135,21 @@ def test_montant_et_tri_utilisent_exactement_les_memes_flux_nets():
 
 
 @pytest.mark.parametrize("annee_rappel", [1, 2, 3])
-def test_coupon_annuel_huit_pourcent_garde_un_tri_de_huit_pourcent(annee_rappel):
+def test_coupon_annuel_huit_pourcent_suit_la_formule_du_point_44(annee_rappel):
+    """(value / investment)^(1/T) - 1 over the scenario's own life, T being
+    its call date (Annex V point 17). Coupons are not reinvested: called at
+    year 3 after two 8 % coupons, 1.24 over three years is 7.44 % a year —
+    the text's figure, not the 8 % an IRR would give."""
     flows = [{"t": float(year), "cf": 0.08} for year in range(1, annee_rappel)]
     flows.append({"t": float(annee_rappel), "cf": 1.08})
     scenario = _scenario_with_flows(flows)
 
     cell = _scenario_row(
-        scenario, float(annee_rappel), 0.0, 0.0, 0.0,
+        scenario, 5.0, 0.0, 0.0, 0.0,
         initial_price_pct=100.0,
     )["modere"]
 
-    assert cell["ann_return"] == pytest.approx(8.0, abs=1e-6)
-
-
-def test_tri_ambigu_reste_non_calculable_et_ne_devient_pas_une_perte_totale():
-    scenario = _scenario_with_flows([
-        {"t": 1.0, "cf": 2.5},
-        {"t": 2.0, "cf": -1.55},
-    ])
-
-    cell = _scenario_row(scenario, 2.0, 0.0, 0.0, 0.0)["modere"]
-
-    assert cell["ann_return"] is None
-    assert cell["return_status"] == "not_computable"
+    total = 1.0 + 0.08 * annee_rappel
+    expected = (total ** (1 / annee_rappel) - 1) if annee_rappel > 1 else total - 1
+    assert cell["life"] == float(annee_rappel)
+    assert cell["ann_return"] == pytest.approx(round(expected * 100, 2), abs=1e-9)

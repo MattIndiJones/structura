@@ -208,7 +208,7 @@ def validate_mtf_context(script, context: ValuationContext, *, payment_aware=Fal
 
 def run_valuation(script, context: ValuationContext | dict, *,
                   per_path_flows=False, flows_at_payment=False, additional_grid_dates=(),
-                  lsv_leverage=None, **overrides):
+                  lsv_leverage=None, path_simulator=None, **overrides):
     """Run one valuation; ``overrides`` contains scenario/Greek bumps only."""
     from .payscript.engine import run_mc
 
@@ -291,6 +291,10 @@ def run_valuation(script, context: ValuationContext | dict, *,
         kwargs['gbm_atm_curve'] = True
     if lsv_leverage is not None:
         kwargs['lsv_leverage'] = lsv_leverage
+    if path_simulator is not None:
+        # PRIIPs bootstrap: the simulator replaces the model's diffusion and
+        # has no antithetic leg.
+        kwargs.update(path_simulator=path_simulator, antithetic=False)
     kwargs.update(overrides)
     return run_mc(**kwargs)
 

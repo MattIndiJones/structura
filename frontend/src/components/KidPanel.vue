@@ -15,21 +15,36 @@
              input below its neighbours' — the inputs share the row's baseline. -->
         <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 items-end">
           <div>
-            <label class="label">CRM (risque crédit)
-              <HelpTip text="Classe de risque de crédit de l'émetteur (notation), 1=AAA à 6=CCC et moins. Combiné au MRM (risque marché, calculé depuis la VEV) via la table PRIIPs pour donner le SRI final — un émetteur moins bien noté remonte le SRI même si le payoff est identique." />
+            <label class="label">Simulation
+              <HelpTip text="Bootstrap historique (annexe II, points 19 à 22) : cinq ans de cours quotidiens de chaque sous-jacent, une même date tirée pour tous, 10 000 simulations au moins. C'est la méthode qu'impose la Catégorie 3. La simulation risque-neutre du modèle de pricing reste disponible pour un produit sans historique exploitable, et le KID l'indique alors comme indicatif." />
+            </label>
+            <select v-model="params.simulation" class="select text-xs">
+              <option value="historical_bootstrap">Bootstrap historique (PRIIPs)</option>
+              <option value="risk_neutral_model">Modèle risque-neutre (indicatif)</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Émetteur (risque de crédit)
+              <HelpTip text="Annexe II, partie 2 : la note de l'émetteur donne un rang de qualité de crédit (AAA = 0 … CCC = 6), ajusté à la maturité du produit (jusqu'à 1 an, de 1 à 12 ans, au-delà), puis converti en classe CRM. Sans note, le rang par défaut est 3 pour un établissement de crédit ou un assureur régulé, 5 sinon. La classe CRM se croise ensuite avec le MRM dans la table du point 52." />
+            </label>
+            <select v-model="params.issuer" class="select text-xs">
+              <option v-for="r in ['AAA', 'AA', 'A', 'BBB', 'BB', 'B', 'CCC']" :key="r" :value="r">Note {{ r }}</option>
+              <option value="unrated_regulated">Non noté — établissement régulé</option>
+              <option value="unrated_other">Non noté — autre</option>
+              <option value="manual">Classe CRM saisie</option>
+            </select>
+          </div>
+          <div v-if="params.issuer === 'manual'">
+            <label class="label">CRM (saisi)
+              <HelpTip text="Classe de risque de crédit saisie directement, de 1 à 6, quand la note de l'émetteur ne s'applique pas (garantie, collatéral : annexe II, points 46 à 51)." />
             </label>
             <select v-model.number="params.crm" class="select text-xs">
-              <option :value="1">1 — AAA</option>
-              <option :value="2">2 — AA</option>
-              <option :value="3">3 — A / BBB (défaut)</option>
-              <option :value="4">4 — BB</option>
-              <option :value="5">5 — B</option>
-              <option :value="6">6 — CCC et moins</option>
+              <option v-for="c in 6" :key="c" :value="c">{{ c }}</option>
             </select>
           </div>
           <div>
             <label class="label">Prix d'émission / prime
-              <HelpTip text="Prix payé en % du nominal. Une note émise au pair reste à 100. Pour un produit non pair, par exemple un call acheté 12, saisissez 12 : le TRI partira de la prime effectivement perdue ou récupérée." />
+              <HelpTip text="Prix payé en % du nominal. Une note émise au pair reste à 100. Pour un produit non pair, par exemple un call acheté 12, saisissez 12 : la VaR et le rendement se mesurent alors contre la prime effectivement payée." />
             </label>
             <input v-model.number="params.initial_price_pct" type="number" step="0.01" min="0.01" max="1000" class="input text-xs" />
           </div>
@@ -66,10 +81,11 @@
       <div v-if="kid" class="mb-4 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2
                              text-[11px] leading-relaxed text-amber-200/90">
         <span class="font-bold">Document indicatif — méthodologie non conforme PRIIPs.</span>
-        Les scénarios de performance sont tirés d'une simulation risque-neutre, alors que le
-        règlement impose pour la Catégorie 3 une distribution historique ; la formule de VEV
-        et les horizons intermédiaires ne suivent pas non plus les prescriptions des RTS.
-        À usage d'analyse interne uniquement — ne pas diffuser comme KID réglementaire.
+        La méthode de Catégorie 3 du règlement délégué 2017/653 est implémentée : bootstrap historique,
+        VaR à 97,5 % et VEV, table SRI, CRM tiré de la note, scénarios, tension sous volatilité stressée,
+        périodes intermédiaires et coûts. Restent hors champ : la correction quanto, les sous-jacents de
+        type courbe, la composition fine des coûts (transaction, accessoires), et toute validation
+        indépendante. À usage d'analyse interne — ne pas diffuser comme KID réglementaire.
       </div>
       <div v-if="kid" class="card">
         <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
@@ -104,15 +120,35 @@
             <div class="flex items-center gap-2 text-xs">
               <span class="text-slate-500 w-36">Risque crédit (CRM)</span>
               <span class="font-mono font-bold text-slate-200">{{ kid.crm }} / 6</span>
+              <span v-if="kid.credit_risk" class="text-[10px] text-slate-500">{{ kid.credit_risk.basis }}</span>
+            </div>
+            <div v-if="kid.simulation" class="flex items-center gap-2 text-xs">
+              <span class="text-slate-500 w-36">Simulation
+                <HelpTip text="Méthode et données qui ont produit la distribution : période de l'historique, nombre de séances communes à tous les sous-jacents et nombre de simulations. Le bootstrap tire chaque jour simulé parmi ces séances." />
+              </span>
+              <span v-if="bootstrapped" class="font-mono text-[11px] text-slate-300">
+                bootstrap {{ kid.simulation.first_date }} → {{ kid.simulation.last_date }},
+                {{ formatInt(kid.simulation.observations) }} séances, {{ formatInt(kid.simulation.simulations) }} simulations
+              </span>
+              <span v-else class="font-mono text-[11px] text-amber-400">
+                modèle risque-neutre ({{ kid.simulation.model }}), {{ formatInt(kid.simulation.simulations) }} trajectoires — indicatif
+              </span>
             </div>
             <div class="flex items-center gap-2 text-xs">
               <span class="text-slate-500 w-36">VEV (équiv. vol)
-                <HelpTip text="Volatility Equivalent Value — la volatilité annualisée implicite qui, dans un modèle log-normal simple, produirait le même percentile 1% de perte à l'échéance que celui observé en simulation Monte Carlo sur ce produit précis. Une façon de résumer le risque de queue en un seul chiffre comparable entre produits." />
+                <HelpTip text="VaR-equivalent volatility (annexe II, point 17) : VEV = (√(3,842 − 2·ln VaR) − 1,96) / √T. La VaR est la valeur du produit à 97,5 % de confiance, actualisée au taux sans risque ; T est la durée recommandée, ou la date de rappel du scénario retenu s'il est rappelé avant. La classe MRM se lit ensuite dans la table du point 2." />
               </span>
               <span v-if="kid.vev != null" class="font-mono font-bold text-slate-200">{{ formatPercent(kid.vev, 1) }}</span>
               <span v-else class="font-mono font-bold text-red-400">n/d
-                <HelpTip text="Au moins 1% des scénarios perdent la totalité du capital : la VEV, qui passe par le logarithme du 1er percentile, n'a pas de valeur finie ici. Le risque marché est classé au maximum (MRM 7) — c'est le seul classement défendable pour un produit dont le percentile 1% est nul." />
+                <HelpTip text="Au moins 2,5 % des scénarios perdent la totalité du capital : la VaR à 97,5 % est nulle et la VEV, qui passe par son logarithme, n'a pas de valeur finie. Le risque marché est classé au maximum (MRM 7)." />
               </span>
+            </div>
+            <div v-if="kid.var_975 != null" class="flex items-center gap-2 text-xs">
+              <span class="text-slate-500 w-36">VaR 97,5 %
+                <HelpTip text="Valeur du produit au 2,5ᵉ percentile de la distribution simulée, actualisée au taux sans risque, pour 1 investi (annexe II, point 16). C'est le chiffre dont la VEV est tirée ; la durée indiquée est celle de ce scénario, sa date de rappel s'il est rappelé avant la durée recommandée." />
+              </span>
+              <span class="font-mono font-bold text-slate-200">{{ formatPercent(kid.var_975 * 100, 1) }}</span>
+              <span class="font-mono text-[10px] text-slate-500">sur {{ formatNumber(kid.var_years, 2) }} an(s)</span>
             </div>
             <div class="flex items-center gap-2 text-xs">
               <span class="text-slate-500 w-36">Durée recommandée
@@ -170,7 +206,7 @@
                   </div>
                   <div v-if="h[sc.key].ann_return != null" class="font-mono text-[10px] mt-0.5"
                     :class="h[sc.key].ann_return >= 0 ? 'text-emerald-400' : 'text-red-400'">
-                    {{ h[sc.key].ann_return >= 0 ? '+' : '' }}{{ formatPercent(h[sc.key].ann_return, 2) }} / an
+                    {{ h[sc.key].ann_return >= 0 ? '+' : '' }}{{ formatPercent(h[sc.key].ann_return, 2) }}{{ h[sc.key].return_annualised === false ? ' sur la période' : ' / an' }}
                   </div>
                   <div v-else class="text-[10px] mt-0.5 text-amber-400">
                     Rendement non calculable
@@ -178,6 +214,10 @@
                   <!-- Durée sur laquelle CE scénario a été annualisé. Un produit
                        rappelé par anticipation a vécu moins longtemps que l'en-tête
                        de colonne : sans cette mention le lecteur croit à une erreur. -->
+                  <div v-if="sc.key === 'stress' && h.stress.capped_at_unfavourable"
+                    class="text-[10px] text-slate-500 mt-0.5">ramené au défavorable</div>
+                  <div v-else-if="sc.key === 'stress' && h.stress.percentile"
+                    class="text-[10px] text-slate-500 mt-0.5">P{{ h.stress.percentile }} sous volatilité stressée</div>
                   <div v-if="h[sc.key].life && Math.abs(h[sc.key].life - h.T) > 0.01"
                     class="font-mono text-[10px] text-amber-500/80 mt-0.5">
                     rappel à {{ formatNumber(h[sc.key].life, 2) }} an{{ h[sc.key].life > 1 ? 's' : '' }}
@@ -190,10 +230,13 @@
 
         <p class="text-[10px] text-slate-600 mt-3 pt-3 border-t border-slate-800">
           Les scénarios défavorable / modéré / favorable correspondent aux percentiles P10 / P50 / P90 de la
-          distribution Monte Carlo. Le scénario stress correspond au P1. Le montant est la somme des flux
-          effectivement reçus ; le rendement est le TRI de ces flux à leurs dates, annualisé sur la durée de vie
-          réelle du scénario — un produit rappelé par anticipation porte donc sa propre durée, signalée sous le
-          rendement, et non celle de l'en-tête de colonne. Aucune hypothèse de réinvestissement n'est appliquée.
+          distribution simulée (annexe IV, points 21 à 23) ; en bootstrap, ils suivent le rendement historique
+          observé (point 25). Le scénario stress rejoue le bootstrap sous volatilité stressée et retient le P1 à un an,
+          le P5 au-delà, sans jamais dépasser le défavorable (points 20, 26 et 27). Le montant est la somme des flux reçus, coupons compris, sans réinvestissement, nette
+          de frais et arrondie à 10 € (point 42). Le rendement est (montant / investissement)^(1/T) − 1, T étant la
+          durée réelle du scénario — sa date de rappel s'il est rappelé (point 44) ; jusqu'à un an il n'est pas
+          annualisé (point 45). Périodes intermédiaires : un an pour une durée recommandée de 1 à 10 ans, plus la
+          mi-durée au-delà (points 32 à 34).
         </p>
       </div>
 
@@ -217,14 +260,27 @@
             <div class="text-slate-600 text-[10px] mt-1">{{ fmtAmount(10000 * kid.costs.exit / 100) }} € / 10 k€</div>
           </div>
         </div>
-        <div class="flex items-center justify-between mt-3 pt-3 border-t border-slate-800 text-xs">
-          <span class="text-slate-500">Impact total des coûts sur la durée recommandée
-            <HelpTip text="(frais d'entrée + frais de sortie) + frais courants × durée recommandée (T_rhp) — l'érosion cumulée en % du capital sur toute la durée de détention conseillée, à comparer au rendement attendu." />
-          </span>
-          <span class="font-mono font-bold text-amber-400">
-            {{ totalCostImpact }}
-          </span>
-        </div>
+        <h4 class="text-[11px] font-semibold text-slate-400 mt-4 mb-2">Coûts au fil du temps
+          <HelpTip text="Annexe VII, tableau 1, sur le scénario modéré : coûts totaux (écart entre le montant sans coûts et avec coûts) et incidence annuelle des coûts (écart entre les deux rendements, point 44). Euros à l'unité, pourcentages à une décimale (annexe VI, point 78)." />
+        </h4>
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-slate-500">
+              <th class="text-left font-medium pb-1">Sortie après</th>
+              <th class="text-right font-medium pb-1">Coûts totaux</th>
+              <th class="text-right font-medium pb-1">Incidence annuelle</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="h in kid.horizons" :key="'c' + h.T" class="border-t border-slate-800/60">
+              <td class="py-1.5 text-slate-300">{{ formatNumber(h.T, 2) }} an(s)</td>
+              <td class="py-1.5 text-right font-mono text-slate-200">{{ fmtAmount(h.costs_over_time?.total_costs ?? 0) }} €</td>
+              <td class="py-1.5 text-right font-mono text-amber-400">
+                {{ formatPercent(h.costs_over_time?.annual_cost_impact_pct ?? 0, 1) }}{{ h.costs_over_time?.annualised === false ? ' sur la période' : ' / an' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- ── Boutons sauvegarde / export ──────────────────────── -->
@@ -261,6 +317,8 @@ const saveError   = ref('')
 const saveConfirm = ref(false)
 
 const params = ref({
+  simulation: 'historical_bootstrap',
+  issuer: 'BBB',
   crm: 3,
   initial_price_pct: 100,
   cost_entry: 0,
@@ -270,7 +328,7 @@ const params = ref({
 
 // ── Scenarios metadata ────────────────────────────────────
 const scenarios = [
-  { key: 'stress',      label: 'Stress',      sub: 'Percentile 1%',  dot: 'bg-red-600',    labelClass: 'text-red-400' },
+  { key: 'stress',      label: 'Stress',      sub: 'Percentile extrême', dot: 'bg-red-600', labelClass: 'text-red-400' },
   { key: 'defavorable', label: 'Défavorable', sub: 'Percentile 10%', dot: 'bg-orange-500', labelClass: 'text-orange-400' },
   { key: 'modere',      label: 'Modéré',      sub: 'Percentile 50%', dot: 'bg-slate-400',  labelClass: 'text-slate-300' },
   { key: 'favorable',   label: 'Favorable',   sub: 'Percentile 90%', dot: 'bg-emerald-500',labelClass: 'text-emerald-400' },
@@ -293,13 +351,17 @@ function sriLabel(n) {
 // ── Formatting ───────────────────────────────────────────
 const fmtAmount = formatInt
 
-const totalCostImpact = computed(() => {
-  if (!kid.value) return '—'
-  const T = kid.value.T_rhp
-  const c = kid.value.costs
-  const impact = (c.entry + c.exit) / 100 + c.ongoing / 100 * T
-  return `-${formatPercent(impact * 100, 2)}`
-})
+
+// Annex II, Part 2: the issuer's rating drives the CRM unless it is entered.
+function creditInput() {
+  const issuer = params.value.issuer
+  if (issuer === 'manual') return { crm: params.value.crm }
+  if (issuer === 'unrated_regulated') return { issuer_unrated_regulated: true }
+  if (issuer === 'unrated_other') return { issuer_unrated_regulated: false }
+  return { issuer_rating: issuer }
+}
+
+const bootstrapped = computed(() => kid.value?.simulation?.method === 'historical_bootstrap')
 
 // ── Compute KID ──────────────────────────────────────────
 async function compute() {
@@ -321,7 +383,8 @@ async function compute() {
         ...store.pricingBody(),
         product_id: store.currentProduct?.product_id || null,
         product_terms_version: store.currentProduct?.terms_version || null,
-        crm: params.value.crm,
+        simulation: params.value.simulation,
+        ...creditInput(),
         initial_price_pct: params.value.initial_price_pct,
         cost_entry: params.value.cost_entry,
         cost_exit: params.value.cost_exit,

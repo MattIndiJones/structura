@@ -2403,9 +2403,18 @@ def run_mc(script: CompiledScript,
            per_path_flows: bool = False, per_path_flow_labels: bool = False,
            analysis_out: dict | None = None, flows_at_payment: bool = False,
            additional_grid_dates=(), gbm_atm_curve=False, lsv_leverage=None,
-           local_vol_anchor=None, qualify_lsv=None):
+           local_vol_anchor=None, qualify_lsv=None,
+           # Callable (ts, dt, n, N, rng) -> S (ts+1, n, N) replacing the
+           # model's diffusion — the PRIIPs historical bootstrap
+           # (core/priips_bootstrap.py). The payoff is evaluated as usual.
+           path_simulator=None):
 
     t0 = time.perf_counter()
+    if path_simulator is not None and (antithetic or barrier_monitoring == "continuous"
+                                       or sigma_r > 0 or spot_mult is not None):
+        raise ValueError(
+            "Trajectoires fournies : sans variables antithétiques, sans monitoring "
+            "continu, sans taux stochastique et sans choc de spot.")
     _validate_short_rate_parameters(sigma_r, a_r)
     if barrier_monitoring not in ("weekly", "continuous"):
         raise ValueError(
@@ -2468,7 +2477,8 @@ def run_mc(script: CompiledScript,
     # variance reduction comes from the negative correlation between legs, not from fewer draws.
     N_pairs = N
 
-    Z  = rng.standard_normal((ts, n, N_pairs))
+    # Supplied paths need no normal draws: their own generator consumes rng.
+    Z  = rng.standard_normal((ts, n, N_pairs)) if path_simulator is None else None
     Zv = rng.standard_normal((ts, n, N_pairs)) if (use_heston or use_lsv) else None
     Za = rng.standard_normal((ts, n, N_pairs)) if use_sabr   else None
 
@@ -2654,7 +2664,11 @@ def run_mc(script: CompiledScript,
     strike_step = (0 if not strike_set_t
                    else min(max(_step_at(dt, strike_set_t), 1), ts))
 
-    if use_heston:
+    if path_simulator is not None:
+        S_base = path_simulator(ts, dt, n, N_pairs, rng)
+        if S_base.shape != (ts + 1, n, N_pairs):
+            raise ValueError("Trajectoires fournies aux mauvaises dimensions.")
+    elif use_heston:
         S_base = _simulate_heston(ts, n, N_pairs, dt, sq_dt, underlyings,
                                    r_eff, L, Z, Zv, _sim_spot_mult, vol_add, r_path_base, Z_r,
                                    vol_out=vol_base)

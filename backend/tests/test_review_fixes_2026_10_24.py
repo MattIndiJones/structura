@@ -18,7 +18,10 @@ CORR = [[1.]]
 
 def payload(**changes):
     return dict(script="AT MATURITY:\n  PAY 1\n", underlyings=UL,
-                corr_matrix=CORR, r=.03, T=.25, N=1000, **changes)
+                corr_matrix=CORR, r=.03, T=.25, N=1000,
+                # Synthetic underlyings have no history: the model's risk-neutral
+                # simulation, explicitly (the default is the PRIIPs bootstrap).
+                simulation="risk_neutral_model", **changes)
 
 
 @pytest.mark.parametrize("funding", [0., .02])
@@ -54,7 +57,9 @@ def test_http_intermediate_kid_refuses_unsupported_context_before_mc(authenticat
         pytest.fail("Unsupported context must be refused before any pricing run")
     monkeypatch.setattr(kid, "run_valuation", forbidden)
     data = payload(**hypothesis)
-    data["T"] = 1.
+    # Annex IV point 34: no intermediate period up to one year. Two years
+    # gives the one-year period whose replay must refuse these contexts.
+    data["T"] = 2.
     response = authenticated_client.post("/api/kid/compute", json=data)
     assert response.status_code == 422, response.text
 
@@ -106,24 +111,28 @@ def test_kid_cash_and_receivable_are_distinct_around_payment(stop, horizon, r):
 def test_http_kid_frozen_calendar_keeps_claim_after_stop(authenticated_client, monkeypatch):
     authenticated_client.app.include_router(kid.router)
     source = "AT 0.25:\n  PAY 1\n  STOP\nAT MATURITY:\n  PAY 0\n"
-    request = kid.KidRequest(**{**payload(), "script": source, "T": 1.})
+    # Called at 0.25, paid at 1.5: at the one-year intermediate period of a
+    # two-year RHP (Annex IV point 32) the claim is still unpaid.
+    request = kid.KidRequest(**{**payload(), "script": source, "T": 2.})
     script = resolve_analysis_constats(parse_script(source), request)
-    script.events[0].payment_dates = [.75]
+    script.events[0].payment_dates = [1.5]
     real_replay = kid.run_mark_to_future
     def bounded_replay(*args, **kwargs):
         kwargs.update(n_outer=4, n_inner=8)
         return real_replay(*args, **kwargs)
     monkeypatch.setattr(kid, "run_mark_to_future", bounded_replay)
     data = payload(frozen_schedule=freeze_calendar(script))
-    data.update(script=source, T=1.)
+    data.update(script=source, T=2.)
     response = authenticated_client.post("/api/kid/compute", json=data)
     assert response.status_code == 200, response.text
     result = response.json()
-    half, full = result["horizons"]
-    assert half["modere"]["amount"] == round(10000 * math.exp(-.03 * .25), 2)
-    assert half["modere"]["net_flows"] == [{"t": .5, "cf": half["modere"]["amount"]}]
-    assert full["modere"]["net_flows"] == [{"t": .75, "cf": 10000.}]
-    assert result["full_price"] == pytest.approx(math.exp(-.03 * .75), abs=5.1e-5)
+    one_year, full = result["horizons"]
+    assert one_year["T"] == 1.0
+    assert one_year["modere"]["value"] == round(10000 * math.exp(-.03 * .5), 2)
+    assert one_year["modere"]["amount"] == 9850.0          # Annex IV point 42: nearest 10 EUR
+    assert one_year["modere"]["net_flows"] == [{"t": 1.0, "cf": one_year["modere"]["value"]}]
+    assert full["modere"]["net_flows"] == [{"t": 1.5, "cf": 10000.}]
+    assert result["full_price"] == pytest.approx(math.exp(-.03 * 1.5), abs=5.1e-5)
 
 
 @pytest.mark.parametrize("name", ["GEARING", "LEVERAGE"])

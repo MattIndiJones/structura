@@ -10,6 +10,11 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[KID : méthode de Catégorie 3 — 18/11](projects/pricing/KID_CATEGORIE_3_2026-11-18.md)
+— Bootstrap historique, VaR 97,5 % et VEV du règlement, table SRI corrigée (elle était
+transposée), CRM tiré de la note, tension sous volatilité stressée, coûts de l'annexe VII.
+Statut indicatif maintenu : quanto, courbes, coûts fins et validation indépendante hors champ. *Non commité.*
+
 [LSV résiduel : STM et SG–STM aux grilles 52/104/208 — 05/11](projects/pricing/LSV_RESIDUAL_2026-11-05.md)
 — Levier figé et ancrage au spot courant, six MtM et quatre MTF validés, diagnostic SSVI distinct, caps inchangés ; recette isolée et scripts de reproduction.
 

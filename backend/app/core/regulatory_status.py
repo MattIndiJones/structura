@@ -9,8 +9,10 @@ so that a figure read through the API or from an archive keeps its status.
 
 KID_STATUS = "INDICATIVE_NON_PRIIPS"
 KID_NOTICE = (
-    "Document indicatif — méthodologie non conforme PRIIPs (RTS) : VEV, SRI et "
-    "scénarios de performance à usage d'analyse interne uniquement, à ne pas "
+    "Document indicatif : méthode de Catégorie 3 du règlement délégué 2017/653 "
+    "implémentée (bootstrap historique, VaR 97,5 %, scénarios, tension, coûts), sans "
+    "validation indépendante, sans correction quanto ni sous-jacent de type courbe, "
+    "composition des coûts simplifiée — non conforme PRIIPs à ce titre, à ne pas "
     "diffuser comme KID réglementaire.")
 
 EMT_STATUS = "INDICATIVE_NON_FINDATEX"

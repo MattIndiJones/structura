@@ -30,7 +30,7 @@ def compute_and_save_body(client, *, linked=True):
     product = _create(client, key='kid-evidence', pricing_input=request)
     if linked:
         request.update(product_id=product['product_id'], product_terms_version=product['terms_version'])
-    response = client.post('/api/kid/compute', json=request)
+    response = client.post('/api/kid/compute', json={**request, 'simulation': 'risk_neutral_model'})
     assert response.status_code == 200, response.text
     data = response.json()
     return product, {**{k: data[k] for k in ('sri','mrm','crm','vev','T_rhp','horizons','costs','calculation_receipt')},
@@ -441,7 +441,7 @@ def test_kid_and_emt_responses_carry_their_indicative_status(product_client):
     """The screens say a KID or an EMT is indicative; a figure read through the
     API must say it too, from the computation itself."""
     request = kid_input()
-    kid_response = product_client.post('/api/kid/compute', json=request)
+    kid_response = product_client.post('/api/kid/compute', json={**request, 'simulation': 'risk_neutral_model'})
     assert kid_response.status_code == 200, kid_response.text
     data = kid_response.json()
     assert data['methodology_status'] == 'INDICATIVE_NON_PRIIPS'

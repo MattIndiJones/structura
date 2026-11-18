@@ -1,6 +1,7 @@
 """KID PRIIPs — Key Information Document analytical computation.
 
-Runs 3 Monte Carlo simulations (T_full, T_half, T_1Y) and returns:
+Runs one simulation to the recommended holding period, plus one per
+intermediate period of Annex IV points 32-34, and returns:
   - SRI (Synthetic Risk Indicator 1-7) from VEV / MRM / CRM
   - 4 PRIIPs scenarios (stress/défavorable/modéré/favorable) × 3 horizons
   - Annualized net returns after costs for a 10 000€ investment
@@ -9,7 +10,7 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from typing import Literal, Optional
 try:
     from typing import Annotated
 except ImportError:
@@ -35,41 +36,38 @@ from ..db.models import User, KidRecord, Indicative, Deal
 from ..core.product.models import FrozenObject
 from ..core.product.inputs import calculation_context, pricing_input
 from ..services.product_repository import ProductError, load_product, owned_record, stage_revision
+from ..core import priips, priips_bootstrap
 from ..core.regulatory_status import kid_status
 from ..services.kid_receipts import issue_kid_receipt, bind_kid_receipt, archived_kid_status
 
 router = APIRouter(prefix="/api/kid", tags=["kid"])
 
-# ── PRIIPs SRI lookup table [MRM-1][CRM-1] ───────────────────────────
-_SRI_TABLE = [
-    [1, 1, 2, 3, 4, 5],  # MRM 1
-    [1, 2, 2, 3, 4, 5],  # MRM 2
-    [2, 2, 3, 4, 4, 5],  # MRM 3
-    [3, 3, 4, 4, 5, 6],  # MRM 4
-    [4, 4, 4, 5, 6, 6],  # MRM 5
-    [5, 5, 5, 5, 6, 7],  # MRM 6
-    [6, 7, 7, 7, 7, 7],  # MRM 7
-]
-
-_VEV_THRESHOLDS = [0.005, 0.05, 0.12, 0.20, 0.30, 0.80]
+# ── PRIIPs classes: tables and formulas live in core/priips.py ─────────
+# The former local SRI table did not match Annex II point 52 (a common
+# autocall, MRM 5 / CRM 3, came out at SRI 4 instead of 5).
+_mrm_from_vev = priips.mrm_from_vev
+_sri = priips.sri
 
 
-def _mrm_from_vev(vev: float) -> int:
-    for i, thr in enumerate(_VEV_THRESHOLDS):
-        if vev < thr:
-            return i + 1
-    return 7
-
-
-def _sri(mrm: int, crm: int) -> int:
-    return _SRI_TABLE[max(0, min(mrm - 1, 6))][max(0, min(crm - 1, 5))]
+def _risk_free_df(t: float, r: float, yield_curve) -> float:
+    """Risk-free discount factor from today, on the same zero-rate pillars and
+    interpolation as the engine (engine._build_df_arr). Funding never enters:
+    Annex II point 16 discounts the VaR at the risk-free rate."""
+    if t <= 0:
+        return 1.0
+    if not yield_curve:
+        return math.exp(-r * t)
+    pillars = sorted(yield_curve, key=lambda p: p[0])
+    times, rates = [p[0] for p in pillars], [p[1] for p in pillars]
+    return math.exp(-float(np.interp(t, times, rates)) * t)
 
 
 # ── Single MC run ─────────────────────────────────────────────────────
 
 def _mc_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
                     antithetic, user_params, yield_curve, sigma_r, a_r,
-                    floor_price: float = 0.0, valuation_context=None) -> dict:
+                    floor_price: float = 0.0, valuation_context=None,
+                    path_simulator=None) -> dict:
     """Amounts held at the recommended holding period, per scenario.
 
     Only valid when T_cap reaches the product's own horizon: the script runs
@@ -96,7 +94,11 @@ def _mc_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
         model=model, seed=seed, antithetic=antithetic, user_params=user_params,
         yield_curve=yield_curve or [], sigma_r=sigma_r, a_r=a_r)
     context.T = T_eff
-    res = run_valuation(compiled, context, per_path_flows=True, flows_at_payment=True)
+    if path_simulator is not None:
+        # Annex II point 19: at least 10 000 simulations.
+        context.N = max(int(context.N), priips.MIN_SIMULATIONS)
+    res = run_valuation(compiled, context, per_path_flows=True, flows_at_payment=True,
+                        path_simulator=path_simulator)
     flows = [[(float(t) - context.value_date_t, float(v)) for t, v in stream]
              for stream in res["path_flows"]]
     if any(t < -1e-6 for stream in flows for t, _v in stream):
@@ -107,7 +109,12 @@ def _mc_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
     if floor_price > 0.01:
         px = np.where(px < 0.01, floor_price, px)
 
-    return _percentile_rows(px, flows, res["price"], T_eff)
+    out = _percentile_rows(px, flows, res["price"], T_eff)
+    curve = context.yield_curve or []
+    out["present_values"] = [sum(v * _risk_free_df(t, context.r, curve) for t, v in fl)
+                             for fl in flows]
+    out["lives"] = [max((t for t, _v in fl), default=T_eff) for fl in flows]
+    return out
 
 
 def _percentile_rows(amounts, flows, pv, t_eff) -> dict:
@@ -132,11 +139,11 @@ def _percentile_rows(amounts, flows, pv, t_eff) -> dict:
                 # Per unit invested — _scenario_row rescales them for costs.
                 "flows": cf}
 
-    rows = {f"p{p}": at(p) for p in (1, 10, 50, 90)}
+    rows = {f"p{p}": at(p) for p in (1, 5, 10, 50, 90)}
     return {
         "price": float(np.mean(amounts)),
         "pv": float(pv),
-        "p1": rows["p1"]["amount"], "p10": rows["p10"]["amount"],
+        "p1": rows["p1"]["amount"], "p5": rows["p5"]["amount"], "p10": rows["p10"]["amount"],
         "p50": rows["p50"]["amount"], "p90": rows["p90"]["amount"],
         "scenarios": rows,
         "T_eff": round(float(t_eff), 4),
@@ -146,7 +153,7 @@ def _percentile_rows(amounts, flows, pv, t_eff) -> dict:
 def _horizon_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
                          antithetic, user_params, yield_curve, sigma_r, a_r,
                          n_outer: int = 2000, n_inner: int = 250,
-                         valuation_context=None) -> dict:
+                         valuation_context=None, outer_simulator=None) -> dict:
     """Distribution of what an investor walks away with at an INTERMEDIATE
     horizon: cash already received, plus continuation value and unpaid claims,
     including claims surviving a contractual STOP.
@@ -184,6 +191,18 @@ def _horizon_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
         user_params=user_params, yield_curve=yield_curve or [],
         sigma_r=sigma_r, a_r=a_r)
     validate_mtf_context(compiled, context, payment_aware=True)
+    outer = {}
+    if outer_simulator is not None:
+        # Annex IV point 37: intermediate values estimated consistently with
+        # the RHP — the same historical bootstrap drives the market up to the
+        # exit date; the continuation value after it stays the model's.
+        from ..core.payscript.engine import mtf_simulation_axis
+        from ..core.simulation_grid import simulation_grid
+        with simulation_grid(context.steps_per_year):
+            outer_ts, outer_dt = mtf_simulation_axis(compiled, context.T, [T_cap], False)
+        outer = {"outer_paths": outer_simulator(outer_ts, outer_dt, len(context.underlyings),
+                                                n_outer, np.random.default_rng(context.seed)),
+                 "outer_times": priips_bootstrap.outer_axis_times(outer_dt, outer_ts)}
     mtf = run_mark_to_future(
         script=compiled, underlyings=context.underlyings,
         corr_matrix=context.corr_matrix, r=context.r, T_max=context.T,
@@ -193,7 +212,7 @@ def _horizon_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
         barrier_monitoring=context.barrier_monitoring,
         yield_curve=context.yield_curve, sigma_r=context.sigma_r,
         credit_exposure=True, maturity_payment_t=context.maturity_payment_t,
-        state=context.state,
+        state=context.state, **outer,
     steps_per_year=context.steps_per_year)
     row = mtf["results"][0]
     marks = np.array(row["pvs"], dtype=np.float64) / 100.0        # residual value at T_cap
@@ -219,24 +238,57 @@ def _horizon_percentiles(compiled, uls, corr, r, T_run, T_cap, N, model, seed,
     return out
 
 
+# ── Historical returns for the Category 3 bootstrap ───────────────────
+
+def _bootstrap_history(req, uls) -> "priips_bootstrap.HistoricalReturns":
+    """Five years of daily closes (Annex II point 22(a)), unadjusted — a
+    fixing is a raw close, and the drift correction removes the measured mean
+    anyway. Every underlying needs a ticker, and the strike currency must be
+    the asset's: the quanto term of point 22(c) is not implemented."""
+    from datetime import timedelta
+    from ..runtime import business_today
+    from ..services.market_data import load_hist_prices
+    tickers = [str(u.get("ticker") or "").strip() for u in uls]
+    if not all(tickers):
+        raise ValueError("Le bootstrap PRIIPs exige l'historique de chaque sous-jacent : "
+                         "un ticker manque. Choisissez la simulation risque-neutre (indicative).")
+    settlement = (getattr(req, "settlement_ccy", None) or "").upper()
+    foreign = [u.get("name") or t for u, t in zip(uls, tickers)
+               if settlement and (u.get("ccy") or settlement).upper() != settlement]
+    if foreign:
+        raise ValueError("Sous-jacent en devise différente de celle du produit ("
+                         + ", ".join(foreign) + ") : la correction quanto de l'annexe II, "
+                         "point 22(c), n'est pas implémentée.")
+    today = business_today()
+    start = today - timedelta(days=round(365.25 * priips_bootstrap.LOOKBACK_YEARS))
+    # raw_history, as the Pricer backtest: the freshness policy is built for
+    # fixings and refuses any five-year series with a gap longer than three
+    # days (a long Easter weekend is one). The bootstrap only needs the
+    # sessions common to every underlying, filtered by historical_returns.
+    data = load_hist_prices(tickers, start.isoformat(), today.isoformat(),
+                            adjusted=False, raw_history=True)
+    if data.get("error"):
+        raise ValueError(f"Historique indisponible pour le bootstrap : {data['error']}")
+    return priips_bootstrap.historical_returns(data["dates"], data["prices"], tickers)
+
+
 # ── Cost-adjusted scenario row ────────────────────────────────────────
 
 def _scenario_row(sc: dict, T_h: float, cost_entry: float,
                   cost_exit: float, cost_ongoing: float,
-                  initial_price_pct: float = 100.0) -> dict:
+                  initial_price_pct: float = 100.0, stress: dict | None = None) -> dict:
     """Convert scenario outcomes to KID display (10 000€ invested).
 
-    The annualised return is the IRR of the scenario's own dated flows — the
-    XIRR of the client's actual cash movements — recomputed net of costs, and
-    NOT `(amount/notional)^(1/T_h)`. Those two disagree the moment a product
-    pays before the end of the row's nominal horizon, which is the normal
-    case for anything callable: an autocall redeemed at year 1 with an 8%
-    coupon returns 8%, and used to be published at 1.55% because the exponent
-    said five years.
+    Annex IV points 42, 44 and 45: the amount is the sum received net of
+    costs, rounded to 10 EUR; the return is (value / investment)^(1/T) - 1
+    with T the scenario's OWN holding period — its call date when it is
+    called (Annex V point 17), never the label of the column. That is what
+    kept an autocall redeemed at year 1 with an 8 % coupon from being shown
+    at 1.55 % a year over a five-year RHP.
 
     `life` is the scenario's real holding period. It belongs on screen: two
-    cells of the same column can now legitimately carry different horizons,
-    and a reader who is not told will think one of them is wrong."""
+    cells of the same column can legitimately carry different horizons, and a
+    reader who is not told will think one of them is wrong."""
     investment = 10_000.0
     invested = investment * (1 - cost_entry / 100)
     # PayScript flows are expressed per unit of contractual notional.  A note
@@ -246,8 +298,9 @@ def _scenario_row(sc: dict, T_h: float, cost_entry: float,
     contract_notional = invested / (initial_price_pct / 100.0)
     scen = sc.get("scenarios") or {}
 
-    def _fmt(key: str, payoff: float) -> dict:
-        row = scen.get(key) or {}
+    def _fmt(key: str, payoff: float, source: dict | None = None) -> dict:
+        # `source`: another distribution's scenarios (the stressed run).
+        row = (scen if source is None else source).get(key) or {}
         life = row.get("life") or T_h
         # One canonical dated stream drives BOTH published amount and return.
         # Older cached scenario fixtures may not carry flows; representing the
@@ -267,31 +320,45 @@ def _scenario_row(sc: dict, T_h: float, cost_entry: float,
             exit_factor = (1 - cost_exit / 100) if abs(t - final_t) < 1e-10 else 1.0
             net_flows.append({"t": t, "cf": gross_cf * ongoing_factor * exit_factor})
 
-        # KID amounts are published to cents.  Freeze that exact dated series
-        # before both summing it and solving its IRR, so the displayed amount
-        # cannot differ by rounding from the cash flows behind the return.
         net_flows = [{"t": round(f["t"], 6), "cf": round(f["cf"], 2)}
                      for f in net_flows]
-        net = round(sum(f["cf"] for f in net_flows), 2)
-        ann_irr = compute_irr([{"t": 0.0, "cf": -investment}] + net_flows)
-        if ann_irr is None:
-            ann = None
-            return_status = "not_computable"
-        else:
-            ann = round(ann_irr * 100.0, 2)
-            return_status = "total_loss" if ann_irr == -1.0 else "computed"
+        value = round(sum(f["cf"] for f in net_flows), 2)
+        # Annex IV points 42, 44 and 45. The figure shown is the sum received,
+        # coupons included, without reinvestment, rounded to the nearest 10
+        # EUR; the return is (value / investment)^(1/T) - 1 over the scenario's
+        # own holding period, not annualised up to one year. It replaces the
+        # IRR of the dated flows the module used before: a three-year autocall
+        # paying 8 % a year shows 7.4 % a year here, as the text prescribes,
+        # not the 8 % an IRR gives.
+        ratio_return = priips.scenario_return(value, investment, life)
         return {
-            "amount": net,
-            "ann_return": ann,
-            "return_status": return_status,
+            "amount": priips.round_amount(value),
+            "value": value,
+            "ann_return": round(ratio_return * 100.0, 2),
+            "return_annualised": life > 1.0 + 1e-9,
+            "return_status": "total_loss" if ratio_return == -1.0 else "computed",
             "life": round(life, 4),
             "net_flows": net_flows,
         }
 
+    unfavourable = _fmt("p10", sc["p10"])
+    if stress is None:
+        # Risk-neutral (indicative) simulation: 1st percentile of the same run.
+        stress_cell = _fmt("p1", sc["p1"])
+    else:
+        # Annex IV points 26-27: the stressed bootstrap's own distribution, at
+        # the 1st percentile for a one-year holding period, the 5th otherwise.
+        key = "p1" if T_h <= 1.0 + 1e-9 else "p5"
+        stress_cell = _fmt(key, stress[key], stress.get("scenarios") or {})
+        stress_cell["percentile"] = int(key[1:])
+    # Annex IV point 20: the stress scenario shall not be better than the
+    # unfavourable one.
+    if stress_cell["value"] > unfavourable["value"]:
+        stress_cell = {**unfavourable, "capped_at_unfavourable": True}
     return {
         "T": round(T_h, 4),
-        "stress":      _fmt("p1", sc["p1"]),
-        "defavorable": _fmt("p10", sc["p10"]),
+        "stress":      stress_cell,
+        "defavorable": unfavourable,
         "modere":      _fmt("p50", sc["p50"]),
         "favorable":   _fmt("p90", sc["p90"]),
     }
@@ -303,10 +370,20 @@ class KidRequest(PricingRequest):
     product_id: Optional[int] = None
     product_terms_version: Optional[int] = None
     crm: int = Field(default=3, ge=1, le=6)
+    # Annex II, Part 2: when the issuer's rating is given, the CRM is derived
+    # from it (credit quality step adjusted to the maturity) and `crm` above is
+    # ignored. Without a rating, `issuer_unrated_regulated` selects the
+    # default step of point 43.
+    issuer_rating: Optional[Literal["AAA", "AA", "A", "BBB", "BB", "B", "CCC"]] = None
+    issuer_unrated_regulated: Optional[bool] = None
     initial_price_pct: float = Field(default=100.0, gt=0.0, le=1000.0)
     cost_entry: float = Field(default=0.0, ge=0, le=10)    # % one-shot
     cost_exit: float = Field(default=0.0, ge=0, le=10)     # % one-shot
     cost_ongoing: float = Field(default=0.0, ge=0, le=5)   # % per year
+    # Annex II points 19-22: Category 3 simulates by bootstrapping five years
+    # of daily historical returns. The model's risk-neutral simulation stays
+    # available, explicitly, for products without a usable history.
+    simulation: Literal["historical_bootstrap", "risk_neutral_model"] = "historical_bootstrap"
 
 
 # ── Endpoint ──────────────────────────────────────────────────────────
@@ -352,8 +429,28 @@ def kid_compute(
 
     context = valuation_context_from_request(req, compiled)
     T_full = context.T
-    T_half = T_full / 2.0
-    T_1y   = min(1.0, T_full)
+    # Annex IV points 32-34: one year for an RHP of one to ten years; one year
+    # and half the RHP (rounded up to a year end) from ten years. The former
+    # code always added half the RHP.
+    periods = priips.intermediate_periods(T_full)
+
+    bootstrap = None
+    if req.simulation == "historical_bootstrap":
+        try:
+            history = _bootstrap_history(req, uls)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        curve = req.yield_curve or []
+        bootstrap = {
+            "history": history,
+            # Annex II point 22(c): for the VaR, risk-neutral expectation.
+            "risk_neutral": priips_bootstrap.BootstrapSimulator(
+                history, "risk_neutral",
+                discount_factor=lambda t: _risk_free_df(t, req.r, curve),
+                dividend_yields=[float(u.get("q") or 0.0) for u in uls]),
+            # Annex IV point 25: for the scenarios, the observed return.
+            "historical": priips_bootstrap.BootstrapSimulator(history, "historical"),
+        }
 
     common = dict(
         compiled=compiled, uls=uls, corr=corr, r=req.r,
@@ -364,65 +461,82 @@ def kid_compute(
     )
 
     try:
-        if T_full > 0.5:
+        if periods:
             validate_mtf_context(compiled, context, payment_aware=True)
         # Step 1 — recommended holding period: the contract runs to term.
-        sc_full = _mc_percentiles(**common, T_cap=T_full, floor_price=0.0)
+        # With the bootstrap, two distributions: risk-neutral for the VaR
+        # (Annex II), historical for the scenarios (Annex IV point 25).
+        if bootstrap:
+            sc_risk = _mc_percentiles(**common, T_cap=T_full, path_simulator=bootstrap["risk_neutral"])
+            sc_full = _mc_percentiles(**common, T_cap=T_full, path_simulator=bootstrap["historical"])
+        else:
+            sc_full = sc_risk = _mc_percentiles(**common, T_cap=T_full, floor_price=0.0)
 
         # Step 2 — intermediate horizons, valued as a LIVING product (nested
         # replay, see _horizon_percentiles) rather than a truncated maturity.
-        # They are only computed when they are actually displayed below.
-        sc_half = sc_1y = None
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            fut_half = (ex.submit(_horizon_percentiles, **common, T_cap=T_half)
-                        if T_full > 0.5 else None)
-            fut_1y = (ex.submit(_horizon_percentiles, **common, T_cap=T_1y)
-                      if T_full > 1.0 else None)
-            if fut_half is not None:
-                sc_half = fut_half.result()
-            if fut_1y is not None:
-                sc_1y = fut_1y.result()
+        outer_simulator = bootstrap["historical"] if bootstrap else None
+        with ThreadPoolExecutor(max_workers=max(1, len(periods))) as ex:
+            futures = [ex.submit(_horizon_percentiles, **common, T_cap=t, outer_simulator=outer_simulator)
+                       for t in periods]
+            intermediate = [(t, f.result()) for t, f in zip(periods, futures)]
+
+        # Step 3 — stress scenario (Annex IV point 26): returns rescaled to the
+        # stressed volatility of EACH holding period, bootstrapped again.
+        stress_by_period = {}
+        if bootstrap:
+            stressed = {t: priips_bootstrap.BootstrapSimulator(
+                bootstrap["history"], "stress", stress_years=t) for t in [*periods, T_full]}
+            stress_by_period[T_full] = _mc_percentiles(
+                **common, T_cap=T_full, path_simulator=stressed[T_full])
+            for t in periods:
+                stress_by_period[t] = _horizon_percentiles(
+                    **common, T_cap=t, outer_simulator=stressed[t])
     except ValueError as e:
         raise HTTPException(422, str(e))
 
-    # VEV from the 1st-percentile OUTCOME at the RHP (PRIIPs Annex II).
-    # PayScript outcomes are per unit of contractual notional.  Convert that
-    # outcome to a factor of the actual purchase price: at par this is a no-op;
-    # a call bought for 12 is measured against 0.12, not against 1.00.
-    # (The VEV formula itself remains the module's own approximation rather
-    # than the RTS expression; that non-conformity is tracked separately.)
-    p1 = sc_full["p1"] / (req.initial_price_pct / 100.0)
-    if p1 > 0.0 and p1 < 1.0:
-        vev = math.sqrt(-2.0 * math.log(p1) / T_full)
-        mrm = _mrm_from_vev(vev)
-    elif p1 >= 1.0:
-        # The 1st percentile still repays par: no downside worth measuring.
-        vev, mrm = 0.0, 1
+    # Annex II points 16-17. The VaR is the value of the PRIIP at a 97.5 %
+    # confidence level, discounted to today at the risk-free rate, per unit
+    # invested — PayScript outcomes are per unit of contractual notional, so a
+    # call bought for 12 is measured against 0.12. T is the RHP, or the call
+    # date of that very outcome when it is called earlier.
+    # A non-positive VaR (total loss at the 2.5th percentile) has no finite VEV:
+    # it is the top of the scale, never the bottom.
+    price_factor = req.initial_price_pct / 100.0
+    var_value, var_years = priips.var_975(
+        [v / price_factor for v in sc_risk["present_values"]], sc_risk["lives"], T_full)
+    vev = priips.vev_from_var(var_value, var_years)
+    mrm = priips.mrm_from_vev(vev)
+    if req.issuer_rating is not None or req.issuer_unrated_regulated is not None:
+        credit = priips.crm_from_credit(req.issuer_rating, T_full,
+                                        unrated_regulated=bool(req.issuer_unrated_regulated))
     else:
-        # p1 <= 0 — at least 1% of scenarios wipe the investment out. The log
-        # is undefined, and a single `else: vev = 0.0` used to route this into
-        # the LOWEST risk class: a product that can lose everything came out at
-        # MRM 1, i.e. safer than a government bond. A total loss is by
-        # construction the top of the scale. The VEV itself has no finite value
-        # here and is reported as absent rather than as a number.
-        vev, mrm = None, 7
-
-    sri = _sri(mrm, req.crm)
+        credit = {"crm": req.crm, "basis": "classe CRM saisie"}
+    crm = credit["crm"]
+    sri = _sri(mrm, crm)
 
     # Build horizons list (ascending T)
     cost = (req.cost_entry, req.cost_exit, req.cost_ongoing, req.initial_price_pct)
-    horizons = []
-    if sc_1y is not None:
-        horizons.append(_scenario_row(sc_1y,   T_1y,   *cost))
-    if sc_half is not None:
-        horizons.append(_scenario_row(sc_half, T_half, *cost))
-    horizons.append(_scenario_row(sc_full, T_full, *cost))
+    horizons = [_scenario_row(sc, t, *cost, stress=stress_by_period.get(t)) for t, sc in intermediate]
+    horizons.append(_scenario_row(sc_full, T_full, *cost, stress=stress_by_period.get(T_full)))
+    # Annex VI points 70-71 and Annex VII table 1: costs over time, on the
+    # moderate scenario — the same scenario without costs against with costs.
+    for row, (t, sc) in zip(horizons, [*intermediate, (T_full, sc_full)]):
+        gross = _scenario_row(sc, t, 0.0, 0.0, 0.0, req.initial_price_pct)["modere"]
+        row["costs_over_time"] = priips.costs_over_time(
+            gross["value"], row["modere"]["value"], 10_000.0, row["modere"]["life"])
 
     result = {
         "sri":  sri,
         "mrm":  mrm,
-        "crm":  req.crm,
+        "crm":  crm,
+        "credit_risk": credit,
         "vev":  None if vev is None else round(vev * 100, 2),   # expressed in %
+        # Annex II point 16: 97.5 % value, risk-free discounted, per unit invested.
+        "var_975": round(var_value, 6), "var_years": round(var_years, 4),
+        "simulation": ({**bootstrap["history"].metadata(),
+                        "simulations": max(int(req.N), priips.MIN_SIMULATIONS)}
+                       if bootstrap else {"method": "risk_neutral_model", "model": req.model,
+                                          "simulations": int(req.N), "antithetic": bool(req.antithetic)}),
         "T_rhp": round(T_full, 4),
         "horizons": horizons,
         # The product's PRICE — a present value. `sc_full["price"]` is now the
@@ -439,6 +553,10 @@ def kid_compute(
             "entry":   req.cost_entry,
             "exit":    req.cost_exit,
             "ongoing": req.cost_ongoing,
+            # Annex VII table 2, simplified: one-off entry and exit costs on
+            # the amount invested, ongoing costs per year on that amount.
+            "composition": priips.cost_composition(
+                req.cost_entry, req.cost_exit, req.cost_ongoing, 10_000.0),
         },
     }
     # The status sits outside the signed result: it describes the method,
