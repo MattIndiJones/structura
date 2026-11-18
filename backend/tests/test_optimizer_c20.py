@@ -54,7 +54,10 @@ def test_financeable_rc_four_years_is_resolved_and_independently_confirmed():
     candidate=service.price_candidate(req,candidate)
     assert candidate.pricing_status=='PRICED',candidate.rejection_reasons
     settings=candidate.solver_diagnostics['settings']
-    assert settings['max_iter']>18 and settings['tol']==1e-6
+    import math
+    from backend.app.core.product_optimizer.contracts import SOLVER_TOLERANCE
+    assert settings['tol']==SOLVER_TOLERANCE
+    assert settings['max_iter']==math.ceil(math.log2((settings['hi']-settings['lo'])/(settings['tol']/2)))+1
     assert candidate.solver_diagnostics['result']['iterations']<=settings['max_iter']
     assert service.estimate_search(req)['solver']['max_iterations_per_candidate']==settings['max_iter']
     assert abs(candidate.fair_value-req.pricing_target)<=req.constraints.price_tolerance

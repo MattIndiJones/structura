@@ -1,5 +1,15 @@
 # Notes du projet Structura
 
+[Audit global fonctionnel, technique et produit — 16/11](audits/AUDIT_GLOBAL_EXECUTIF_2026-11-16.md)
+— Synthèse exécutive et [rapport technique](audits/AUDIT_GLOBAL_TECHNIQUE_2026-11-16.md) sur `main`,
+commit `eca6f52`, selon le cahier des charges de l'audit QISTRA : six axes, statuts
+opérationnel/partiel/simulé/prévu, roadmap P0–P3. Moteur recoupé par sondes indépendantes
+(Black-Scholes, Heston, barrière, funding) ; 997 tests frontend et build hors dépôt.
+Suite backend complète du 17/11 : 4 323 réussis, **69 échecs** — Product Optimizer cassé
+depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmées. Pas de
+barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
+périodique. Lecture seule du code, sans navigateur. *Suivi.*
+
 [LSV résiduel : STM et SG–STM aux grilles 52/104/208 — 05/11](projects/pricing/LSV_RESIDUAL_2026-11-05.md)
 — Levier figé et ancrage au spot courant, six MtM et quatre MTF validés, diagnostic SSVI distinct, caps inchangés ; recette isolée et scripts de reproduction.
 
