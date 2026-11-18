@@ -12,6 +12,7 @@ from backend.app.services.agent_workshop.configuration import preview
 from backend.app.services.agent_workshop.diagnostic import diagnostic_defaults, checked_action, review_due
 from backend.app.services.agent_workshop.historical_market import freeze_market, historical_history, market_path
 from backend.app.services.agent_workshop.store import CampaignConfig, Store
+from backend.tests.deals_patch import patch_deals
 
 
 def test_existing_cache_last_close_without_future_data_or_network(tmp_path, monkeypatch):
@@ -124,15 +125,15 @@ def test_closed_books_do_not_generate_repetitive_reviews():
 def test_manual_replay_stops_at_first_proven_call(monkeypatch):
     from types import SimpleNamespace
     from backend.app.api import deals
-    monkeypatch.setattr(deals,'business_today',lambda:date(2026,10,14))
+    patch_deals(monkeypatch, "business_today", lambda:date(2026,10,14))
     events=[SimpleNamespace(id=i,event_date=f'{2021+i}-12-14',t_years=i,event_index=i,
                             status='observé' if i<2 else 'futur',
                             fixing_status='VALIDATED' if i<2 else 'EXPECTED',
                             data_category='FIXING_OFFICIAL' if i<2 else 'EXPECTED') for i in range(3)]
-    monkeypatch.setattr(deals,'_get_events',lambda *_:events)
+    patch_deals(monkeypatch, "_get_events", lambda *_:events)
     replay=Mock(side_effect=[{'outcome':'en_cours'},
                             {'outcome':'callé','event_id':1,'settlement_date':'2022-12-19'}])
-    monkeypatch.setattr(deals,'replay_official_fixings',lambda d,p:(replay(d,p),[]))
+    patch_deals(monkeypatch, "replay_official_fixings", lambda d,p:(replay(d,p),[]))
     result,failures=deals._user_exception_lifecycle_evaluation(SimpleNamespace(id=1),None)
     assert result['outcome']=='callé' and not failures
     assert len(replay.call_args.args[1])==2

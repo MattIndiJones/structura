@@ -9,6 +9,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from backend.app.api import deals as deals_api
 from backend.app.db.models import Alert, Deal, DealEvent, SchedulerRun, User
 from backend.app.services import lifecycle_alerts as service
+from backend.tests.deals_patch import patch_deals
 
 TODAY = date(2026, 10, 20)
 DATES = ["2026-10-16", "2026-10-19", "2026-10-20"]
@@ -48,7 +49,7 @@ def contract(book, reference="WATCH", observable="S[1]", count=2):
 
 
 def prices(monkeypatch, values, **metadata):
-    monkeypatch.setattr(deals_api,"load_hist_prices",lambda *a,**k:
+    patch_deals(monkeypatch, "load_hist_prices", lambda *a,**k:
         dict(dates=DATES,prices=values,**metadata))
 
 
@@ -128,7 +129,7 @@ def test_current_price_respects_c11_source_age(book,monkeypatch,effective,availa
 
 def test_no_pre_strike_extremum_or_future_price_is_used(book,monkeypatch):
     deal=contract(book,observable="S_MIN[1]",count=1)
-    monkeypatch.setattr(deals_api,"load_hist_prices",lambda *a,**k:dict(
+    patch_deals(monkeypatch, "load_hist_prices", lambda *a,**k:dict(
         dates=["2026-10-15",*DATES,"2026-10-21"],prices={"TK1":[1,100,90,100,2]}))
     row=deals_api.build_watchlist_row(deal,book[0],TODAY)
     assert row["barriers"][0]["gap_pts"] == 30
@@ -252,7 +253,7 @@ def test_old_worker_cannot_overwrite_a_new_claim(book,monkeypatch,replacement,ra
 def test_future_strike_requires_no_market_call_and_is_expected_pending(book,monkeypatch):
     session,_=book
     deal=contract(book);deal.strike_date="2026-11-20";session.add(deal);session.commit()
-    monkeypatch.setattr(deals_api,"load_hist_prices",lambda *a,**k:pytest.fail("Future strike"))
+    patch_deals(monkeypatch, "load_hist_prices", lambda *a,**k:pytest.fail("Future strike"))
     row=deals_api.build_watchlist_row(deal,session,TODAY)
     assert row["barriers"][0]["value_status"] == "STRIKE_PENDING"
 
@@ -303,7 +304,7 @@ def test_t08_official_correction_updates_watchlist_without_rewriting_previous_re
     from backend.app.db.models import OfficialFixingVersion
     session,deal=coupon_deal()
     try:
-        monkeypatch.setattr(deals_api,"load_hist_prices",lambda *a,**k:dict(
+        patch_deals(monkeypatch, "load_hist_prices", lambda *a,**k:dict(
             dates=["2025-01-06","2026-01-06"],prices={"TK1":[30,40]}))
         asof=date(2026,1,6)
         old=deals_api.build_watchlist_row(deal,session,asof)
@@ -330,7 +331,7 @@ def test_pending_official_version_cannot_fall_back_to_provider_in_watchlist(monk
         coupon=_events(session,deal)[-1]
         version=session.get(OfficialFixingVersion,coupon.current_fixing_version_id)
         version.status="RECEIVED";session.add(version);session.commit()
-        monkeypatch.setattr(deals_api,"load_hist_prices",lambda *a,**k:dict(
+        patch_deals(monkeypatch, "load_hist_prices", lambda *a,**k:dict(
             dates=["2025-01-06","2026-01-06"],prices={"TK1":[100,40]}))
         with pytest.raises(HTTPException) as exc:
             deals_api.build_watchlist_row(deal,session,date(2026,1,6))
@@ -343,7 +344,7 @@ def test_official_fixing_is_newer_than_a_carried_provider_row(monkeypatch):
     from backend.tests.test_fixing_finality_registry import coupon_deal
     session,deal=coupon_deal()
     try:
-        monkeypatch.setattr(deals_api,"load_hist_prices",lambda *a,**k:dict(
+        patch_deals(monkeypatch, "load_hist_prices", lambda *a,**k:dict(
             dates=["2025-01-06","2026-01-05","2026-01-07"],prices={"TK1":[100,40,40]},
             effective_dates={"TK1":"2026-01-05"},source_observation_dates={
                 "TK1":["2025-01-06","2026-01-05","2026-01-05"]}))
@@ -358,7 +359,7 @@ def test_provider_outage_keeps_the_recent_official_watchlist_level(monkeypatch):
     from backend.tests.test_fixing_finality_registry import coupon_deal
     session,deal=coupon_deal()
     try:
-        monkeypatch.setattr(deals_api,"load_hist_prices",lambda *a,**k:{"error":"panne fournisseur"})
+        patch_deals(monkeypatch, "load_hist_prices", lambda *a,**k:{"error":"panne fournisseur"})
         row=deals_api.build_watchlist_row(deal,session,date(2026,1,7))
         assert row["wof"] == .9
         assert len(row["fixing_registry"]["official_fixings"]) == 2

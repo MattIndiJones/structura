@@ -29,6 +29,7 @@ from backend.app.db.models import (
 )
 from backend.app.db import database as database_api
 from backend.app.services.product_repository import stage_internal_product
+from backend.tests.deals_patch import patch_deals
 
 
 USER = SimpleNamespace(id=1, entity_id=7, role="user")
@@ -552,9 +553,7 @@ def test_fixing_audit_contains_before_after_reason_and_source():
 
 def test_audit_failure_prevents_fixing_persistence(monkeypatch):
     session = _session(); deal = _deal(session); event = _events(session, deal)[0]
-    monkeypatch.setattr(
-        deals_api, "record_audit_event",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("audit unavailable")))
+    patch_deals(monkeypatch, "record_audit_event", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("audit unavailable")))
     with pytest.raises(RuntimeError, match="audit unavailable"):
         deals_api.update_event(
             deal.id, event.id, _fixing_submission(event, {"UL1": 100.0}),
@@ -583,10 +582,8 @@ def test_validated_fixing_cannot_be_overwritten_and_creates_alert():
 
 def test_legacy_four_eyes_refresh_switches_to_automatic_fixings(monkeypatch):
     session = _session(); deal = _deal(session); maturity = _events(session, deal)[-1]
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes",
-        lambda *args: _yahoo_closes(deal))
-    monkeypatch.setattr(deals_api, "_evaluate_lifecycle", lambda *args: {
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: _yahoo_closes(deal))
+    patch_deals(monkeypatch, "_evaluate_lifecycle", lambda *args: {
         "outcome": "final", "event_id": maturity.id,
         "event_date": maturity.event_date, "realized_payout": 1.0,
     })
@@ -605,10 +602,8 @@ def test_legacy_four_eyes_refresh_switches_to_automatic_fixings(monkeypatch):
 
 def test_repeated_automatic_monitoring_applies_terminal_result_once(monkeypatch):
     session = _session(); deal = _deal(session); maturity = _events(session, deal)[-1]
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes",
-        lambda *args: _yahoo_closes(deal))
-    monkeypatch.setattr(deals_api, "_evaluate_lifecycle", lambda *args: {
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: _yahoo_closes(deal))
+    patch_deals(monkeypatch, "_evaluate_lifecycle", lambda *args: {
         "outcome": "final", "event_id": maturity.id,
         "event_date": maturity.event_date, "realized_payout": 1.0,
     })
@@ -625,9 +620,7 @@ def test_repeated_automatic_monitoring_applies_terminal_result_once(monkeypatch)
 
 def test_refresh_error_is_visible_audited_and_alerted(monkeypatch):
     session = _session(); deal = _deal(session)
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes",
-        lambda *args: {"error": "provider down"})
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: {"error": "provider down"})
     with pytest.raises(ValueError, match="provider down"):
         deals_api.refresh_deal_core(deal, session)
     assert session.exec(select(AuditEvent).where(
@@ -697,10 +690,8 @@ def _yahoo_closes(deal: Deal, *, maturity_close: float | None = 100.0) -> dict:
 def test_auto_yahoo_officializes_fixings_and_applies_terminal_lifecycle(monkeypatch):
     session = _session(); deal = _enable_auto_yahoo(session, _deal(session))
     maturity = _events(session, deal)[-1]
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes",
-        lambda *args: _yahoo_closes(deal))
-    monkeypatch.setattr(deals_api, "_evaluate_lifecycle", lambda *args: {
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: _yahoo_closes(deal))
+    patch_deals(monkeypatch, "_evaluate_lifecycle", lambda *args: {
         "outcome": "final", "event_id": maturity.id,
         "event_date": maturity.event_date, "realized_payout": 1.0,
     })
@@ -728,11 +719,8 @@ def test_auto_yahoo_waits_for_same_day_close_without_manual_exception(monkeypatc
     maturity = _events(session, deal)[-1]
     maturity.event_date = date.today().isoformat()
     session.add(maturity); session.commit()
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes",
-        lambda *args: _yahoo_closes(deal, maturity_close=None))
-    monkeypatch.setattr(
-        deals_api, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: _yahoo_closes(deal, maturity_close=None))
+    patch_deals(monkeypatch, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
 
     result = deals_api.refresh_deal_core(deal, session)
 
@@ -751,19 +739,16 @@ def test_auto_yahoo_revision_never_overwrites_an_official_fixing(monkeypatch):
     maturity.event_date = (date.today() + timedelta(days=30)).isoformat()
     deal.maturity_date = maturity.event_date
     session.add(maturity); session.add(deal); session.commit()
-    monkeypatch.setattr(
-        deals_api, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
+    patch_deals(monkeypatch, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
     first_data = _yahoo_closes(deal, maturity_close=None)
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes", lambda *args: first_data)
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: first_data)
     deals_api.refresh_deal_core(deal, session)
     strike = _events(session, deal)[0]
     assert json.loads(strike.spots_json) == {"UL1": 100.0}
 
     revised_data = _yahoo_closes(deal, maturity_close=None)
     revised_data["series"]["TK1"][deal.strike_date] = 101.0
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes", lambda *args: revised_data)
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: revised_data)
     result = deals_api.refresh_deal_core(deal, session)
 
     strike = _events(session, deal)[0]
@@ -787,11 +772,8 @@ def test_auto_yahoo_never_bypasses_a_pending_human_exception(monkeypatch):
     deals_api.update_event(
         deal.id, strike.id, _fixing_submission(strike, {"UL1": 100.0}),
         OPS_MAKER, session)
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes",
-        lambda *args: _yahoo_closes(deal, maturity_close=None))
-    monkeypatch.setattr(
-        deals_api, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: _yahoo_closes(deal, maturity_close=None))
+    patch_deals(monkeypatch, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
 
     result = deals_api.refresh_deal_core(deal, session)
 
@@ -868,9 +850,7 @@ def test_auto_exception_owner_can_explicitly_adopt_yahoo(monkeypatch):
         deal.id, strike.id, _fixing_submission(strike, {"UL1": 99.0}),
         OPS_MAKER, session)
     strike = session.get(DealEvent, strike.id)
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes",
-        lambda *args: _yahoo_closes(deal, maturity_close=None))
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: _yahoo_closes(deal, maturity_close=None))
 
     _resolve_auto_exception(session, deal, strike, action="USE_YAHOO")
 
@@ -895,10 +875,8 @@ def test_user_confirmed_exception_is_not_reopened_by_the_yahoo_feed(monkeypatch)
     _resolve_auto_exception(session, deal, strike)
     revised = _yahoo_closes(deal, maturity_close=None)
     revised["series"]["TK1"][deal.strike_date] = 101.0
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes", lambda *args: revised)
-    monkeypatch.setattr(
-        deals_api, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *args: revised)
+    patch_deals(monkeypatch, "_evaluate_lifecycle", lambda *args: {"outcome": "en_cours"})
 
     result = deals_api.refresh_deal_core(deal, session, actor_user_id=USER.id)
 
@@ -1036,7 +1014,7 @@ def test_resolution_rolls_back_authorization_and_application_if_audit_fails(monk
             raise RuntimeError("audit unavailable")
         return original_record_audit(*args, **kwargs)
 
-    monkeypatch.setattr(deals_api, "record_audit_event", fail_on_resolution_applied)
+    patch_deals(monkeypatch, "record_audit_event", fail_on_resolution_applied)
     with pytest.raises(RuntimeError, match="audit unavailable"):
         deals_api.validate_lifecycle_proposal(
             deal.id, proposal.id,
@@ -1063,7 +1041,7 @@ def test_resolution_rejection_rolls_back_the_intermediate_authorization(monkeypa
             return original_hash(*args, **kwargs)
         return "inputs-modifiés-entre-autorisation-et-application"
 
-    monkeypatch.setattr(deals_api, "official_input_hash", changing_hash)
+    patch_deals(monkeypatch, "official_input_hash", changing_hash)
     with pytest.raises(HTTPException) as exc:
         deals_api.validate_lifecycle_proposal(
             deal.id, proposal.id,

@@ -14,6 +14,7 @@ from backend.app.api import deals as deals_api
 from backend.app.api import portfolios as portfolios_api
 from backend.app.db.models import Deal, DealEvent, Portfolio
 from backend.tests.product_helpers import attach_product_to_deal
+from backend.tests.deals_patch import patch_deals
 
 TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=400)
@@ -27,7 +28,7 @@ BODY = deals_api.MtmExplainRequest(recalibrate="none")   # σ booking aux 2 date
 def offline_dividends(monkeypatch):
     # Historical date1 uses realized parameters even when date2 uses booking.
     # Preserve the fixture's booked q=0 without consulting an external provider.
-    monkeypatch.setattr(deals_api, 'dividend_profile', lambda *a, **kw: {'ok':False})
+    patch_deals(monkeypatch, "dividend_profile", lambda *a, **kw: {'ok':False})
 
 
 def _add_deal(s: Session, script: str, reference: str,
@@ -92,7 +93,7 @@ def test_portfolio_pnl_aggregates_spot_ramp(monkeypatch):
             return 100.0
         return 100.0 + 10.0 * min(1.0, (d - ramp_start).days / 60.0)
 
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices(price_at))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices(price_at))
     try:
         res = portfolios_api.pnl_explain_portfolio(p.id, USER, s, n_paths=4000, body=BODY)
 
@@ -136,8 +137,7 @@ def test_portfolio_pnl_skips_unexplainable_deal(monkeypatch):
 
     # Non-flat closes: at d1 ≠ value date _explain_core recalibrates σ on the
     # realized window, and a flat series (vol nulle) would 422 every deal.
-    monkeypatch.setattr(deals_api, "load_hist_prices",
-                        _fake_prices(lambda d: 100.0 + 0.5 * (d.toordinal() % 7)))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices(lambda d: 100.0 + 0.5 * (d.toordinal() % 7)))
     try:
         body = deals_api.MtmExplainRequest(
             recalibrate="none",
@@ -163,7 +163,7 @@ def test_global_pnl_spans_portfolios(monkeypatch):
     _add_deal(s, "AT MATURITY\n  PAY S[1]", "PNL-G1", nominal=1_000_000.0, portfolio_id=p1.id)
     _add_deal(s, "AT MATURITY\n  PAY S[1]", "PNL-G2", nominal=500_000.0, portfolio_id=p2.id)
 
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices(lambda d: 100.0))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices(lambda d: 100.0))
     try:
         res = portfolios_api.pnl_explain_global(USER, s, n_paths=4000, body=BODY)
         assert res["scope"] == "global"

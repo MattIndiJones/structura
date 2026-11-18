@@ -22,6 +22,7 @@ from backend.app.db.models import (
 from backend.app.db.trading_models import TradingRelationship, TradingExecution
 from backend.app.hybrid.business import HybridBootstrap
 from backend.tests.test_rfq import _rfq_params
+from backend.tests.deals_patch import patch_deals
 
 
 @pytest.fixture(params=[False, True], ids=["standalone", "organization"])
@@ -252,7 +253,7 @@ def test_operational_valuation_keeps_contract_scope(access_case, monkeypatch):
     created = _rfq_with_evidence(session, users["front"])
     d = _deal(session, users["front"], rfq_id=created["id"])
     # Isolate authorization from the numerical engine, covered by its own tests.
-    monkeypatch.setattr(deals, "_mtm_core", lambda *args: ({"price": .95}, None))
+    patch_deals(monkeypatch, "_mtm_core", lambda *args: ({"price": .95}, None))
     assert login("ops").post(f"/api/deals/{d.id}/mtm").status_code == 200
     assert login("checker").post(f"/api/deals/{d.id}/mtm").status_code == 200
     assert login("outsider").post(f"/api/deals/{d.id}/mtm").status_code == 404

@@ -15,6 +15,7 @@ from backend.app.core.ccr import service as credit
 from backend.tests.test_business_permissions import access_case
 from backend.tests.test_rfq_execution import execution_context, execution_case, booking_body
 from backend.tests.test_rfq import _rfq_params
+from backend.tests.deals_patch import patch_deals
 
 REASON = 'Booking exceptionnel autorisé après vérification du dossier juridique'
 
@@ -172,7 +173,7 @@ def test_audit_failure_rolls_back_deal_product_and_exception(execution_case, mon
         if kwargs['action'] == 'BOOKING_LEGAL_IDENTITY_EXCEPTION_APPROVED':
             raise IntegrityError('forced audit insertion failure', {}, RuntimeError('audit unavailable'))
         return original(session, **kwargs)
-    monkeypatch.setattr(deals, 'record_audit_event', fail_exception_audit)
+    patch_deals(monkeypatch, "record_audit_event", fail_exception_audit)
     with Session(engine) as session:
         from backend.app.db.models import ProductRecord
         before = len(session.exec(select(ProductRecord)).all())

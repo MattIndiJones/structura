@@ -144,7 +144,8 @@ def test_l_api_expose_le_lien_releve_constatation():
     import inspect
     from backend.app.api import deals as api
 
-    src = inspect.getsource(api)
+    # Since the package split the serializer lives in api/deals/serializers.py.
+    src = inspect.getsource(api._event_row)
     # La sérialisation d'un événement de deal porte les deux champs.
     i = src.index('"event_index": e.event_index,')
     bloc = src[i:i + 900]

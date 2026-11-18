@@ -10,6 +10,7 @@ from sqlmodel import select
 from fastapi import HTTPException
 
 from backend.app.api import deals as api
+from backend.tests.deals_patch import patch_deals
 from backend.app.core import fixing_finality as finality
 from backend.app.core.deal_valuation import mtm_core
 from backend.app.core.official_history import official_history
@@ -68,7 +69,7 @@ def test_intraday_cannot_create_official_version_or_coupon(monkeypatch):
     monkeypatch.setattr(finality, "utc_now", lambda: close)
     data=_yahoo_closes(d)
     data["sources"]["TK1"]["fetched_at"]=close.isoformat()
-    monkeypatch.setattr(api,"business_today",lambda:date.fromisoformat(event.event_date))
+    patch_deals(monkeypatch, "business_today", lambda:date.fromisoformat(event.event_date))
     changed,diagnostic=api._auto_validate_yahoo_event(d,event,json.loads(d.underlyings_json),data,s,1)
     assert changed and diagnostic is None and event.fixing_status=="VALIDATED"
     version=s.get(OfficialFixingVersion,event.current_fixing_version_id)
@@ -104,7 +105,7 @@ def test_total_outage_keeps_official_prefix_and_diagnoses_source(monkeypatch):
     s.add(maturity); s.commit()
     api._auto_validate_yahoo_event(d, strike, json.loads(d.underlyings_json), _yahoo_closes(d), s, 1)
     s.commit()
-    monkeypatch.setattr(api, "load_yahoo_reference_closes", lambda *a: {"error": "offline"})
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *a: {"error": "offline"})
     response = api.refresh_deal_core(d, s, 1)
     assert response["monitoring_error"] == "offline"
     assert strike.fixing_status == "VALIDATED" and d.status == "actif"
@@ -116,7 +117,7 @@ def test_exception_decision_rolls_back_and_same_request_can_retry(monkeypatch):
     before = event.current_fixing_version_id
     revisions = len(s.exec(select(ProductRevision)).all())
     original = api._user_exception_lifecycle_evaluation
-    monkeypatch.setattr(api, "_user_exception_lifecycle_evaluation", lambda *a: (_ for _ in ()).throw(RuntimeError("injected replay failure")))
+    patch_deals(monkeypatch, "_user_exception_lifecycle_evaluation", lambda *a: (_ for _ in ()).throw(RuntimeError("injected replay failure")))
     with pytest.raises(RuntimeError, match="injected replay"):
         _resolve_auto_exception(s, d, event)
     s.refresh(event)
@@ -124,7 +125,7 @@ def test_exception_decision_rolls_back_and_same_request_can_retry(monkeypatch):
     assert len(s.exec(select(OfficialFixingVersion)).all()) == 1
     assert len(s.exec(select(ProductRevision)).all()) == revisions
     assert s.get(OfficialFixingVersion, before).status == "RECEIVED"
-    monkeypatch.setattr(api, "_user_exception_lifecycle_evaluation", original)
+    patch_deals(monkeypatch, "_user_exception_lifecycle_evaluation", original)
     _resolve_auto_exception(s, d, event)
     assert event.fixing_status == "VALIDATED" and event.current_fixing_version_id != before
 
@@ -225,13 +226,13 @@ def test_failure_during_application_rolls_back_fixing_and_product(monkeypatch):
     def broken(*a,**kw):
         result=original(*a,**kw)
         raise RuntimeError("application failure after staging")
-    monkeypatch.setattr(api,"_auto_apply_lifecycle",broken)
+    patch_deals(monkeypatch, "_auto_apply_lifecycle", broken)
     with pytest.raises(RuntimeError,match="application failure"):
         _resolve_auto_exception(s,d,maturity)
     s.refresh(d); s.refresh(maturity)
     assert d.status=="actif" and maturity.current_fixing_version_id==pointer
     assert len(s.exec(select(OfficialFixingVersion)).all())==count
-    monkeypatch.setattr(api,"_auto_apply_lifecycle",original)
+    patch_deals(monkeypatch, "_auto_apply_lifecycle", original)
     _resolve_auto_exception(s,d,maturity)
     s.refresh(d)
     assert d.status in {"échu", "en_reglement"}

@@ -15,6 +15,7 @@ from sqlmodel import SQLModel, Session, create_engine
 from backend.app.api import deals as deals_api
 from backend.app.api import portfolios as portfolios_api
 from backend.app.db.models import Deal, DealEvent, Portfolio
+from backend.tests.deals_patch import patch_deals
 
 TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=100)
@@ -108,7 +109,7 @@ def test_portfolio_barriers_ranks_by_urgency_and_counts_severity(monkeypatch):
     _add_deal(s, AC_SCRIPT, "AC-ATT", "TK-AC-ATT", portfolio_id=p.id)
     _add_deal(s, KI_SCRIPT, "KI-OK", "TK-KI-OK", portfolio_id=p.id)
 
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices_by_ticker({
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices_by_ticker({
         "TK-KI-CRIT": 62.0,   # WOF .62 vs KI .6 -> gap +2.0pts -> critique
         "TK-AC-ATT": 97.0,    # WOF .97 vs AC 1.0 -> gap -3.0pts -> attention
         "TK-KI-OK": 100.0,    # WOF 1.0 vs KI .6 -> gap +40pts -> ok
@@ -140,7 +141,7 @@ def test_barriers_global_spans_portfolios(monkeypatch):
     _add_deal(s, KI_SCRIPT, "G1", "TK-G1", portfolio_id=p1.id)
     _add_deal(s, AC_SCRIPT, "G2", "TK-G2", portfolio_id=p2.id)
 
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices_by_ticker({
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices_by_ticker({
         "TK-G1": 100.0, "TK-G2": 100.0,
     }))
     try:
@@ -159,7 +160,7 @@ def test_barriers_deal_with_no_monitored_params_is_excluded(monkeypatch):
     s.add(p); s.commit(); s.refresh(p)
     _add_deal(s, "AT MATURITY:\n  PAY MAX(S[1] - 1.0, 0)", "VANILLA", "TK-VAN", portfolio_id=p.id)
 
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices_by_ticker({"TK-VAN": 100.0}))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices_by_ticker({"TK-VAN": 100.0}))
     try:
         res = portfolios_api.portfolio_barriers(p.id, USER, s)
         assert res["rows"] == []
@@ -185,7 +186,7 @@ def test_barriers_bucket_unexpected_failure_without_aborting_book(monkeypatch):
             raise RuntimeError("yfinance timeout")
         return good_fake(tickers, start, end, **kwargs)
 
-    monkeypatch.setattr(deals_api, "load_hist_prices", flaky)
+    patch_deals(monkeypatch, "load_hist_prices", flaky)
     try:
         res = portfolios_api.portfolio_barriers(p.id, USER, s)
         assert [r["reference"] for r in res["rows"]] == ["OK-DEAL"]

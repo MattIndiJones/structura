@@ -14,6 +14,7 @@ from backend.app.api.deals import (
 from backend.app.api.pricing import price_endpoint
 from backend.app.core.schemas import PricingRequest
 from backend.app.db.models import Counterparty, Deal, DealEvent, User
+from backend.tests.deals_patch import patch_deals
 
 
 SCRIPT = "AT MATURITY\n  PAY 1\n"
@@ -80,7 +81,7 @@ def test_pricing_booking_mtm_au_strike_conservent_le_meme_produit(monkeypatch):
         strike_event.status = "observé"
         session.add(strike_event)
         session.commit()
-        monkeypatch.setattr(deals_api, "load_hist_prices", lambda *_args, **_kwargs: {
+        patch_deals(monkeypatch, "load_hist_prices", lambda *_args, **_kwargs: {
             "dates": [strike.isoformat()], "prices": {"AAA": [100.0]},
         })
 
