@@ -10,6 +10,11 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Validation du moteur — 18/11](audits/VALIDATION_MOTEUR_2026-11-18.md)
+— Les contrôles des 07/10 et de l'audit passent sous pytest : GBM, Heston, barrière, funding, SABR
+(Hagan, EDP), Local Vol et LSV sur SSVI, Greeks contre formules fermées ; 47 tests. Biais de
+discrétisation mesuré à 52 pas/an sur les modèles à smile. Restent cotations bancaires, quanto, Hull-White.
+
 [KID : méthode de Catégorie 3 — 18/11](projects/pricing/KID_CATEGORIE_3_2026-11-18.md)
 — Bootstrap historique, VaR 97,5 % et VEV du règlement, table SRI corrigée (elle était
 transposée), CRM tiré de la note, tension sous volatilité stressée, coûts de l'annexe VII.
@@ -970,6 +975,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 | [AUDIT_AUTOCALL_SMILE_2026-10-06.md](audits/AUDIT_AUTOCALL_SMILE_2026-10-06.md) | 06/10 | Revue des prix mono / multi, référence GBM indépendante, arbitrage de la cible et contrôle du pas | GBM corroboré ; comparatif smile non validé en l’état | Surface sans arbitrage, calibration commune et convergence à reprendre |
 | [AUDIT_CALLS_MODELES_2026-10-07.md](audits/AUDIT_CALLS_MODELES_2026-10-07.md) | 07/10 | Première grille calls / puts sur cinq modèles et cas limites | Diagnostic initial | Prolongé par la validation du même jour |
 | [VALIDATION_MODELES_VOL_2026-10-07.md](audits/VALIDATION_MODELES_VOL_2026-10-07.md) | 07/10 | Correction LSV, référence SABR/PDE, vanilles et digitaux mono / marginales multi | Premier lot historique ; prolongé par le benchmark de cible commune | Limites de précision initiales traitées à 208 pas/an sur la grille du benchmark |
+| [VALIDATION_MOTEUR_2026-11-18.md](audits/VALIDATION_MOTEUR_2026-11-18.md) | 18/11 | Contrôles du 07/10 et sondes de l'audit passés sous pytest ; Greeks contre formules fermées ; biais à 52 pas/an | Suivi | Cotations bancaires, quanto, Hull-White, gamma de barrière |
 | [AUTOCALL_SURFACE_COMMUNE_2026-10-07.md](audits/AUTOCALL_SURFACE_COMMUNE_2026-10-07.md) | 07/10 | SSVI sans arbitrage, calibration, vanilles, convergence, dix autocalls et flux séparés | Benchmark hors interface exécuté ; 29 tests ciblés passent | Ajustements Heston/SABR imparfaits ; workflow surface et précision à intégrer |
 | [CONTRE_REVUE_APPLICATION_2026-10-24.md](audits/CONTRE_REVUE_APPLICATION_2026-10-24.md) | 24/10 | Contre-revue du rapport d'application : 22 constats A–F, carte de validité par domaine, plan de validation et critique du rapport | Six constats de catégorie A établis, aucun corrigé | CR01–CR08 ouverts ; arbitrages CR02 (statistique VEV), CR10 (graine), CR19 ; E.1 et N3/N5/W1 à exécuter |
 
