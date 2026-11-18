@@ -173,17 +173,24 @@ def test_corrected_fixing_rejects_archived_mtm_and_cached_greeks(scope_client):
     assert portfolios._greeks_snapshots([deal], session, date.today()) == {}
 
 
-def test_short_optional_projection_is_unavailable_instead_of_extended():
+def test_short_optional_projection_stays_within_its_life_instead_of_extended():
+    """A two-day trade used to be refused ('sous une semaine'); since the exact
+    contract axis (24/10/2026) it is projected. Its exposure marks must then
+    stop at its own horizon: the first mark used to sit one week out, beyond
+    maturity, and the post-payment zeros diluted the EPE (284 736 for a claim
+    of 1 000 000 outstanding over the whole life)."""
     from backend.tests.test_ccr import proposed
     trade = proposed()
-    trade['pricing'].update(T=2/365.25, strike_date=str(date.today()),
+    horizon = 2/365.25
+    trade['pricing'].update(T=horizon, strike_date=str(date.today()),
         script='AT MATURITY\n  PAY 1 "capital"')
     data = claim_inputs()
     data['trades'] = [trade]
     result = service.evaluate_inputs(data)
-    assert result['after']['cva'] is None and result['after']['pfe95'] is None
-    assert not result['decision']['booking_allowed']
-    assert any('sous une semaine' in e for e in result['errors'])
+    profile = result['after']['profile']
+    assert max(point['t'] for point in profile) <= horizon + 1e-9
+    assert result['after']['epe'] == pytest.approx(profile[0]['ee'])
+    assert result['after']['cva'] is not None
 
 
 def test_fixed_claims_net_only_over_their_actual_common_life():

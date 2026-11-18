@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.app.api import deals as api
+from backend.tests.deals_patch import patch_deals
 from backend.app.api.valuation_progress import valuation_progress_response
 from backend.app.db.models import Deal, DealEvent, User, ValuationRun
 
@@ -114,8 +115,8 @@ def test_stream_matches_regular_mtm_and_records_one_run(book, monkeypatch):
         return {"dates": [d.isoformat() for d in days],
                 "prices": {tk: [100 + (d.toordinal() % 7) * 0.1 for d in days] for tk in tickers}}
 
-    monkeypatch.setattr(api, "load_hist_prices", prices)
-    monkeypatch.setattr(api, "dividend_profile", lambda *args: {"ok": True, "yield_declared": 0.01})
+    patch_deals(monkeypatch, "load_hist_prices", prices)
+    patch_deals(monkeypatch, "dividend_profile", lambda *args: {"ok": True, "yield_declared": 0.01})
     body = api.MtmRequest(recalibrate="realized", valuation_date=date.today())
     regular = api.deal_mtm(deal.id, user, session, n_paths=1000, body=body)
     response = api.deal_mtm(deal.id, user, session, n_paths=1000, body=body, stream=True)
@@ -134,7 +135,7 @@ def test_stream_matches_regular_mtm_and_records_one_run(book, monkeypatch):
 
 def test_stream_reports_market_failure_without_persisting(book, monkeypatch):
     session, user, deal = book
-    monkeypatch.setattr(api, "load_hist_prices", lambda *args, **kwargs: {"error": "Cours indisponibles"})
+    patch_deals(monkeypatch, "load_hist_prices", lambda *args, **kwargs: {"error": "Cours indisponibles"})
     response = api.deal_mtm(deal.id, user, session, body=api.MtmRequest(recalibrate="realized"), stream=True)
     events = asyncio.run(collect(response))
     assert events[-1] == {"type": "error", "detail": "Cours indisponibles", "status": 422}

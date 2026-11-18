@@ -754,6 +754,8 @@ def _book_deal(body, current, s):
             s.add(rfq); s.commit()
     if body.counterparty_id is None and body.contrepartie in {"BNP Paribas", "UBS"}:
         body.counterparty_id = _legal_counterparty(s, body.contrepartie).id
+    if not body.transaction_format and not body.instrument_family:
+        body.transaction_format, body.instrument_family = "EMTN", "NOTE"
     return deals_api.book_deal(body, current, s)
 
 

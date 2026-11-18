@@ -986,6 +986,12 @@ def _book(spec: dict, target: User, product: dict | None, batch: UatGenerationBa
             market_snapshot=receipt["market_snapshot"],
             pricing_receipt=receipt,
             rfq_id=rfq.id if rfq else None,
+            # Booking refuses an unqualified legal form since 24/10/2026. Every
+            # UAT family is a structured note, never an OTC trade needing a
+            # netting set, so the generator states it explicitly.
+            transaction_format="EMTN",
+            instrument_family="NOTE",
+            documentation_reference="Programme EMTN fictif — recette UAT",
         ),
         target,
         session,

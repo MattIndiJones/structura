@@ -98,3 +98,32 @@ def test_price_grid_call_decreasing_in_strike():
                                param_y='UNUSED', y_min=0.0, y_max=0.0, y_steps=2, N=4000)
     row = grid['prices'][0]
     assert all(row[i] > row[i + 1] for i in range(len(row) - 1))
+
+
+PDI_SCRIPT = """
+PARAM KI = 70% "barriere"
+
+AT MATURITY:
+  IF WOF_MIN <= KI:
+    PAY MAX(1 - S[1], 0) "pdi"
+"""
+
+
+@pytest.mark.parametrize("steps", [104, 208])
+def test_solver_and_grid_use_the_requested_diffusion_grid(steps):
+    """`steps_per_year` used to raise TypeError in solve_for_param, so every
+    Product Optimizer candidate failed. The grid must also REACH the engine: a
+    barrier observed on a finer grid is hit more often, so the price moves."""
+    cs = parse_script(PDI_SCRIPT)
+    kw = dict(r=0.03, T=1.0, model='constant', seed=42, base_user_params={})
+    coarse = compute_price_grid(cs, CALL_PARAMS, CORR, **kw, param_x='KI', x_min=0.7, x_max=0.7, x_steps=1,
+                                param_y='KI', y_min=0.7, y_max=0.7, y_steps=1, N=4000)
+    fine = compute_price_grid(cs, CALL_PARAMS, CORR, **kw, param_x='KI', x_min=0.7, x_max=0.7, x_steps=1,
+                              param_y='KI', y_min=0.7, y_max=0.7, y_steps=1, N=4000, steps_per_year=steps)
+    assert fine['prices'][0][0] > coarse['prices'][0][0]
+
+    res = solve_for_param(cs, CALL_PARAMS, CORR, **kw, param_name='KI', target_price=fine['prices'][0][0],
+                          lo=0.5, hi=0.9, N=4000, tol=1e-5, max_iter=40, steps_per_year=steps)
+    direct = run_mc(cs, CALL_PARAMS, CORR, r=0.03, T_max=1.0, N=4000, model='constant', seed=42,
+                    antithetic=True, user_params={'KI': res['param_value']}, steps_per_year=steps)
+    assert abs(direct['price'] - res['achieved_price']) < 2e-6

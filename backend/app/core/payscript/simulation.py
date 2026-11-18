@@ -16,6 +16,7 @@ despite Monte Carlo noise.
 from __future__ import annotations
 from .parser import CompiledScript
 from .engine import run_mc
+from ..simulation_grid import with_simulation_grid
 
 # Every solver iteration / grid cell is a fresh full MC run, so cost scales as
 # N_eval * N (solver) or x_steps * y_steps * N (grid). Keep N modest by default.
@@ -69,6 +70,9 @@ def _solver_result(param_name: str, x: float, price: float, target: float, itera
     }
 
 
+# The solver inherits the caller's diffusion grid: every run_mc below reads
+# it from the scoped context, so `steps_per_year` is accepted, never ignored.
+@with_simulation_grid
 def solve_for_param(script: CompiledScript, underlyings, corr_matrix, r: float, T: float,
                      model: str, seed: int, base_user_params: dict,
                      param_name: str, target_price: float, lo: float, hi: float,
@@ -86,7 +90,8 @@ def solve_for_param(script: CompiledScript, underlyings, corr_matrix, r: float, 
     doesn't hold, the closest endpoint is returned with converged=False rather than
     raising, so the caller can inspect the trace and adjust [lo, hi].
     ``tol`` measures price error; ``param_tol`` only stops interval reduction.
-    Convergence is checked again at the six-decimal parameter being published.
+    Bisection searches to ``tol / 2``; convergence is checked again, at ``tol``,
+    on the six-decimal parameter being published.
     """
     def f(x: float) -> float:
         return _price_with_params(script, underlyings, corr_matrix, r, T, N, model, seed,
@@ -144,7 +149,10 @@ def solve_for_param(script: CompiledScript, underlyings, corr_matrix, r: float, 
         x_mid = (a + b) / 2
         f_mid = f(x_mid)
         trace.append({"iter": i, "x": x_mid, "price": f_mid + target_price})
-        if abs(f_mid) <= tol:
+        # Search to half the tolerance: the six-decimal publication must still
+        # fit within `tol` once repriced. Stopping at `tol` itself left no
+        # margin, and a solved parameter failed its own published check.
+        if abs(f_mid) <= tol / 2:
             return finish(x_mid, i, "price_tolerance")
         if (b - a) / 2 <= param_tol:
             return finish(x_mid, i, "parameter_tolerance", True)
@@ -158,6 +166,7 @@ def solve_for_param(script: CompiledScript, underlyings, corr_matrix, r: float, 
 
 # ── Grid: 2D price heatmap over two PARAMs ──────────────────────────
 
+@with_simulation_grid
 def compute_price_grid(script: CompiledScript, underlyings, corr_matrix, r: float, T: float,
                         model: str, seed: int, base_user_params: dict,
                         param_x: str, x_min: float, x_max: float, x_steps: int,

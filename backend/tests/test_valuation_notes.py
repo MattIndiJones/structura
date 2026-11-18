@@ -15,6 +15,7 @@ from backend.app.api import deals, valuation_notes as api
 from backend.app.core import valuation_notes as core
 from backend.app.core.valuation_runs import engine_identity
 from backend.app.db.models import User, ValuationRun, ValuationNote, ValuationNoteVersion
+from backend.tests.deals_patch import patch_deals
 
 
 @pytest.fixture
@@ -25,14 +26,14 @@ def calculated(book, monkeypatch):
                 for i in range((date.fromisoformat(end) - date.fromisoformat(start)).days + 1)]
         return {"dates": [d.isoformat() for d in days],
                 "prices": {t: [100 + .02 * i for i in range(len(days))] for t in tickers}}
-    monkeypatch.setattr(deals, "load_hist_prices", prices)
+    patch_deals(monkeypatch, "load_hist_prices", prices)
     result = deals.deal_mtm(deal.id, user, session, n_paths=400,
                            body=deals.MtmRequest(recalibrate="none", valuation_date=date.today()))
     run = session.get(ValuationRun, result["valuation_run_id"])
     def offline(*args, **kwargs):
         raise AssertionError("Valo Explain must not fetch live market inputs")
-    monkeypatch.setattr(deals, "load_hist_prices", offline)
-    monkeypatch.setattr(deals, "dividend_profile", offline)
+    patch_deals(monkeypatch, "load_hist_prices", offline)
+    patch_deals(monkeypatch, "dividend_profile", offline)
     return session, user, deal, run
 
 

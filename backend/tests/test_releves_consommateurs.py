@@ -19,6 +19,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from backend.app.api import deals as deals_api
 from backend.app.db.models import AuditEvent, Deal, DealEvent
+from backend.tests.deals_patch import patch_deals
 
 TODAY = date.today()
 STRIKE = TODAY - timedelta(days=400)
@@ -112,7 +113,7 @@ def test_la_watchlist_vise_la_prochaine_constatation(monkeypatch, avec_releves):
     Le cas sans relevés garde la lecture historique — même rang, même date."""
     s = _session()
     deal = _deal_moyenne(s, avec_releves=avec_releves)
-    monkeypatch.setattr(deals_api, "load_hist_prices", _prix_plats(97.0))
+    patch_deals(monkeypatch, "load_hist_prices", _prix_plats(97.0))
 
     row = deals_api.build_watchlist_row(deal, s, TODAY)
 
@@ -129,7 +130,7 @@ def test_l_alerte_de_rappel_compte_les_jours_jusqu_a_la_constatation(monkeypatch
     rappel dans 56 jours sur un produit qui ne peut rappeler que dans 330."""
     s = _session()
     deal = _deal_moyenne(s)
-    monkeypatch.setattr(deals_api, "load_hist_prices", _prix_plats(97.0))
+    patch_deals(monkeypatch, "load_hist_prices", _prix_plats(97.0))
     assert deals_api.build_watchlist_row(deal, s, TODAY)["days_to_next"] == 330
 
 
@@ -252,7 +253,7 @@ def test_la_watchlist_mesure_contre_le_s0_de_la_fenetre_de_depart(monkeypatch):
     lisaient la première version."""
     s = _session()
     deal = _deal_depart(s)
-    monkeypatch.setattr(deals_api, "load_hist_prices", _prix_plats(61.5))
+    patch_deals(monkeypatch, "load_hist_prices", _prix_plats(61.5))
 
     row = deals_api.build_watchlist_row(deal, s, TODAY)
 
@@ -270,7 +271,7 @@ def test_tant_qu_un_releve_de_depart_manque_s0_n_est_pas_defini(monkeypatch):
     None — « pas encore mesurable » —, jamais une valeur plausible."""
     s = _session()
     deal = _deal_depart(s, releve_manquant=True)
-    monkeypatch.setattr(deals_api, "load_hist_prices", _prix_plats(61.5))
+    patch_deals(monkeypatch, "load_hist_prices", _prix_plats(61.5))
 
     row = deals_api.build_watchlist_row(deal, s, TODAY)
 

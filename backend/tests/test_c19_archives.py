@@ -21,6 +21,7 @@ from backend.app.db.archive_integrity import migrate
 from backend.app.db.models import DealEvent, OptimizerResearch, ArchivedDocument, RfqRequest, RfqQuote
 from backend.app.services import archived_documents as archives
 from backend.app.services.rfq_model_reference import snapshot
+from backend.tests.deals_patch import patch_deals
 
 
 @pytest.mark.parametrize("upgraded", [False, True])
@@ -224,7 +225,7 @@ def proposal_request(**extra):
 def test_proposal_pdf_keeps_displayed_coupon_after_vol_changes_and_separate_successor(book,monkeypatch):
     session,user,deal=book
     source={"vol":.1}
-    monkeypatch.setattr(deals,"_reinvest_proposal_data",lambda *a:proposal_data(source["vol"]))
+    patch_deals(monkeypatch, "_reinvest_proposal_data", lambda *a:proposal_data(source["vol"]))
     displayed=deals.reinvest_proposal_endpoint(deal.id,proposal_request(),user,session)
     source["vol"]=.6
     first=deals.freeze_reinvest_proposal(deal.id,archives.ProposalFreeze(preview=displayed["preview"]),user,session)

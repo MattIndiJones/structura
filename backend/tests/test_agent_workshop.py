@@ -56,6 +56,7 @@ from backend.app.services.agent_workshop.brain import action_schema
 from backend.app.services.agent_workshop.lease import CampaignLease
 from backend.app.services.scenario_market import create_market, history
 from backend.app.runtime import business_today, data_path
+from backend.tests.deals_patch import patch_deals
 
 
 @pytest.fixture
@@ -225,8 +226,8 @@ def test_official_user_fixing_survives_missing_provider(monkeypatch):
     version=SimpleNamespace(id=12,status=FixingStatus.VALIDATED.value,capture_actor_type='USER')
     audit=[]
     session=SimpleNamespace(get=lambda model,key:version,add=audit.append)
-    monkeypatch.setattr(deals_api,'_auto_yahoo_event_values',lambda *args:({}, {}, [{'code':'MISSING'}],False))
-    monkeypatch.setattr(deals_api,'_auto_yahoo_exception',lambda *args,**kw:pytest.fail('An official fixing must not reopen'))
+    patch_deals(monkeypatch, "_auto_yahoo_event_values", lambda *args:({}, {}, [{'code':'MISSING'}],False))
+    patch_deals(monkeypatch, "_auto_yahoo_exception", lambda *args,**kw:pytest.fail('An official fixing must not reopen'))
     assert deals_api._auto_validate_yahoo_event(SimpleNamespace(),event,[],{},session,1)==(False,None)
     assert event.fixing_status==FixingStatus.VALIDATED.value
     assert event.current_fixing_version_id==12 and version.status==FixingStatus.VALIDATED.value
@@ -236,9 +237,9 @@ def test_official_user_fixing_survives_missing_provider(monkeypatch):
 def test_manual_maturity_uses_contract_date_not_rounded_time(monkeypatch):
     from backend.app.db.models import DealEvent
     event=DealEvent(id=1,deal_id=1,event_date='2026-04-08',t_years=.4983,fixing_status=FixingStatus.VALIDATED.value,data_category=DataCategory.FIXING_OFFICIAL.value)
-    monkeypatch.setattr(deals_api,'business_today',lambda:date(2026,4,8))
-    monkeypatch.setattr(deals_api,'_get_events',lambda *args:[event])
-    monkeypatch.setattr(deals_api,'replay_official_fixings',lambda *args:({'outcome':'final'},[]))
+    patch_deals(monkeypatch, "business_today", lambda:date(2026,4,8))
+    patch_deals(monkeypatch, "_get_events", lambda *args:[event])
+    patch_deals(monkeypatch, "replay_official_fixings", lambda *args:({'outcome':'final'},[]))
     result,failures=deals_api._user_exception_lifecycle_evaluation(SimpleNamespace(id=1,T=182/365.25,maturity_date='2026-04-08'),None)
     assert result['outcome']=='final' and not failures
 

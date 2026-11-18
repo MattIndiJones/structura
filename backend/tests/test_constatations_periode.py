@@ -107,13 +107,19 @@ def test_le_decompte_de_points_signale_une_fenetre_degeneree():
     res = _price(red0="AVG", red1="AVG", w0="10D", w1="30D", full=True)
     rows = {r["constatation"]: r for r in res["constatation_windows"]}
     assert rows["STRIKE_FIX"]["points_demandes"] == 10
-    assert rows["STRIKE_FIX"]["points_retenus"] == 2      # grille hebdomadaire
+    # Every contractual fixing is a grid date since 24/10/2026 (it was 2 on
+    # the weekly grid). The window starts ON the strike date: all ten count.
+    assert rows["STRIKE_FIX"]["points_retenus"] == 10
     assert rows["observation"]["points_demandes"] == 30
     assert not any(r["degeneree"] for r in res["constatation_windows"])
 
+    # On the weekly grid a 3-day window collapsed onto one step and was
+    # flagged degenerate. On exact contract dates it keeps its three closes;
+    # the flag stays reserved to a window whose dates really coincide.
     court = _price(red0="AVG", red1="AVG", w0="3D", w1="3D", full=True)
-    assert all(r["degeneree"] for r in court["constatation_windows"])
-    assert all(r["points_retenus"] == 1 for r in court["constatation_windows"])
+    assert not any(r["degeneree"] for r in court["constatation_windows"])
+    assert all(r["points_retenus"] == r["points_demandes"] == 3
+               for r in court["constatation_windows"])
 
 
 # ── 3. Non-commutativité : le cœur de la conception ────────────────────
@@ -131,9 +137,11 @@ def test_reduire_par_actif_puis_agreger_n_est_pas_l_inverse_sur_un_worst_of():
     wof_ponctuel = _price(agg="WOF", red0=None, red1=None)
     assert wof_fenetre != wof_ponctuel
     # L'ordre de grandeur qui compte : sur un worst-of, moyenner change le prix
-    # de plusieurs dizaines de bps — c'est ce que la mauvaise convention
-    # déplaçait silencieusement.
-    assert abs(wof_fenetre - wof_ponctuel) > 0.002
+    # de plus de dix bps — c'est ce que la mauvaise convention déplaçait
+    # silencieusement. Mesure d'instance : 17 bp depuis les dates
+    # contractuelles exactes (24/10/2026), au-delà de 20 bp sur l'ancienne
+    # grille hebdomadaire, qui ne retenait que quelques relevés par fenêtre.
+    assert abs(wof_fenetre - wof_ponctuel) > 0.001
 
 
 def test_la_commutativite_protege_le_panier_pas_le_worst_of():

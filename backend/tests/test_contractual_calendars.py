@@ -21,6 +21,7 @@ from backend.app.core.schedule import generate_schedule, generate_main_schedule,
 from backend.app.core.schemas import ScheduleRequest, BusinessDayRequest, WindowPreviewRequest, ParseRequest, PricingRequest
 from backend.tests.test_products import product_client
 from backend.tests.test_business_permissions import access_case
+from backend.tests.deals_patch import patch_deals
 
 SCRIPT = 'CONSTAT() OBS\nAT OBS:\n  PAY 0.01'
 ORIGIN = date(2026, 1, 31)
@@ -173,7 +174,7 @@ def test_param_arrays_expose_their_own_named_calendar_to_economics():
 
 def test_reinvestment_refuses_extra_observation_created_by_month_end_roll(monkeypatch):
     from backend.app.api import deals
-    monkeypatch.setattr(deals, 'business_today', lambda: date(2026, 10, 20))
+    patch_deals(monkeypatch, "business_today", lambda: date(2026, 10, 20))
     script = ('UNDERLYING Basket\nCONSTAT StartDate\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n' + SCRIPT)
     values = {'STARTDATE': '2026-01-31', 'OBS': {**VALUES, 'frequency': '3M',
         'first_observation_date': '2026-04-30', 'end_date': '2029-01-31'}}
@@ -286,7 +287,7 @@ def test_rfq_retains_explicit_policy_and_frozen_dates_with_real_desk(product_cli
 @pytest.mark.parametrize('explicit', [False, True])
 def test_reinvestment_refuses_partial_calendar_resizing_without_mutating_source(maturity, explicit, monkeypatch):
     from backend.app.api import deals
-    monkeypatch.setattr(deals, 'business_today', lambda: ORIGIN)
+    patch_deals(monkeypatch, "business_today", lambda: ORIGIN)
     values = {'OBS': {**VALUES, 'start_date': '2026-01-31', 'end_date': '2029-01-31', 'frequency': '3M'}}
     script = SCRIPT
     if explicit:

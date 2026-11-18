@@ -24,6 +24,7 @@ from backend.app.services.uat_generation import (
 from backend.app.services.product_repository import load_product
 from backend.app.core import fixing_finality
 from backend.tests.product_helpers import attach_product_to_deal
+from backend.tests.deals_patch import patch_deals
 
 
 configure_uat_workflows(deals_api, rfq_api, products_api)
@@ -44,7 +45,7 @@ def published_closes(monkeypatch):
             return today
 
     monkeypatch.setattr(generator, "date", GenerationDate)
-    monkeypatch.setattr(deals_api, "business_today", lambda: today)
+    patch_deals(monkeypatch, "business_today", lambda: today)
     monkeypatch.setattr(fixing_finality, "utc_now", lambda: clock)
     responses = []
 
@@ -79,7 +80,7 @@ def published_closes(monkeypatch):
         responses.append(payload)
         return payload
 
-    monkeypatch.setattr(deals_api, "load_yahoo_reference_closes", feed)
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", feed)
     return {"close": close, "responses": responses}
 
 
@@ -318,10 +319,7 @@ def test_each_uat_entry_path_preserves_one_product_identity(
 
 def test_post_booking_options_create_mtm_history_and_risk_runs(monkeypatch):
     session, admin, target = _session_and_users()
-    monkeypatch.setattr(
-        deals_api,
-        "_refresh_deal_core",
-        lambda *_args, **_kwargs: {
+    patch_deals(monkeypatch, "_refresh_deal_core", lambda *_args, **_kwargs: {
             "officialized": 0, "exceptions": [], "evaluation": {"outcome": "en_cours"},
         },
     )
@@ -341,16 +339,10 @@ def test_post_booking_options_create_mtm_history_and_risk_runs(monkeypatch):
             "mtm": 0.99,
         }
 
-    monkeypatch.setattr(
-        deals_api,
-        "deal_mtm",
-        lambda deal_id, current, session, n_paths, body: retain_run(
+    patch_deals(monkeypatch, "deal_mtm", lambda deal_id, current, session, n_paths, body: retain_run(
             deal_id, current, session, n_paths, body, run_type="MTM"),
     )
-    monkeypatch.setattr(
-        deals_api,
-        "deal_greeks",
-        lambda deal_id, current, session, n_paths, body: retain_run(
+    patch_deals(monkeypatch, "deal_greeks", lambda deal_id, current, session, n_paths, body: retain_run(
             deal_id, current, session, n_paths, body, run_type="GREEKS"),
     )
 
@@ -640,8 +632,7 @@ def test_periodic_historical_profile_rejects_non_periodic_product_selection():
 
 def test_provider_outage_reports_unfilled_fixings_without_inventing_s0(monkeypatch):
     session, admin, target = _session_and_users(integrity=True)
-    monkeypatch.setattr(deals_api, "load_yahoo_reference_closes",
-                        lambda *_args: {"error": "Provider unavailable"})
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *_args: {"error": "Provider unavailable"})
     batch = generate_batch(_request(
         target, mode="BOOKED_ONLY", count=1, product_types=["ATHENA"],
         underlying_tickers=["^STOXX50E"], max_underlyings=1,
@@ -673,7 +664,7 @@ def test_partial_history_keeps_the_official_prefix_and_reports_the_gap(monkeypat
                              for ticker, rows in payload["series"].items()}
         return payload
 
-    monkeypatch.setattr(deals_api, "load_yahoo_reference_closes", prefix_only)
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", prefix_only)
     batch = generate_batch(body, admin, session)
     scenario = batch["result"]["scenarios"][0]
     assert scenario["missing_fixings"] > 0
@@ -694,7 +685,7 @@ def test_refresh_failure_does_not_commit_a_half_applied_fixing(monkeypatch):
         args[4].flush()
         raise RuntimeError("Injected failure after fixing staging")
 
-    monkeypatch.setattr(deals_api, "_auto_validate_yahoo_event", fail_after_staging)
+    patch_deals(monkeypatch, "_auto_validate_yahoo_event", fail_after_staging)
     batch = generate_batch(_request(
         target, mode="BOOKED_ONLY", count=1, product_types=["ATHENA"],
         underlying_tickers=["^STOXX50E"], max_underlyings=1,

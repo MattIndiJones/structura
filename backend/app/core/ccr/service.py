@@ -542,7 +542,10 @@ def evaluate_inputs(inputs, progress=None):
         horizon = max([max(ctx["T"], ctx.get("maturity_payment_t") or 0) for ctx in live_contexts] + payments + [0.])
         # Exposure marks and all contract observations keep their exact times.
         # The shared diffusion is enriched separately with every fixing node.
-        marks = set(float(v) for v in np.linspace(1 / 52, horizon, request.n_dates))
+        # The first mark is one week out, unless the whole life is shorter:
+        # linspace(1/52, horizon) then ran BEYOND maturity and the zeros it
+        # added after payment diluted the EPE of a two-day trade.
+        marks = set(float(v) for v in np.linspace(min(1 / 52, horizon), horizon, request.n_dates))
         marks.update(t for t in payments if t > 0)
         for script, ctx in runtimes:
             if ctx:

@@ -13,6 +13,7 @@ from sqlmodel import SQLModel, Session, create_engine
 from backend.app.api import deals as deals_api
 from backend.app.db.models import Deal, DealEvent
 from backend.tests.product_helpers import attach_product_to_deal
+from backend.tests.deals_patch import patch_deals
 
 SCRIPT = """
 PARAM AC_BAR = 105%
@@ -80,7 +81,7 @@ BODY = deals_api.MtmExplainRequest(recalibrate="none")   # σ booking aux 2 date
 
 def _explain(monkeypatch, price_at, body=BODY):
     s, deal = _make_session()
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices(price_at))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices(price_at))
     try:
         return deals_api.deal_mtm_explain(deal.id, USER, s, n_paths=4000, body=body)
     finally:
@@ -136,7 +137,7 @@ def test_explain_chain_telescopes_exactly(monkeypatch):
 
 def test_explain_guards(monkeypatch):
     s, deal = _make_session()
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices(lambda d: 100.0))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices(lambda d: 100.0))
     with pytest.raises(HTTPException) as e:
         deals_api.deal_mtm_explain(
             deal.id, USER, s, n_paths=4000,
@@ -177,7 +178,7 @@ def test_payloads_are_json_serializable(monkeypatch):
                 f"{path}: type non-JSON {type(obj)} ({obj!r})"
 
     s, deal = _make_session()
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices(lambda d: 100.0))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices(lambda d: 100.0))
     try:
         request = deals_api.MtmRequest(
             recalibrate="none", valuation_date=TODAY,
@@ -209,11 +210,11 @@ def test_explain_report_returns_pdf(monkeypatch):
     """Smoke : la note PDF d'explication se génère de bout en bout (waterfall,
     sensibilités résiduelles incluses) et l'endpoint renvoie bien un PDF."""
     s, deal = _make_session()
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices(lambda d: 100.0))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices(lambda d: 100.0))
     try:
         result = deals_api.deal_mtm_explain(deal.id, USER, s, n_paths=4000, body=BODY)
         def no_repricing(*args, **kwargs): raise AssertionError("Export must not reprice")
-        monkeypatch.setattr(deals_api, "_explain_core", no_repricing)
+        patch_deals(monkeypatch, "_explain_core", no_repricing)
         resp = deals_api.deal_mtm_explain_report(deal.id, USER, s,
             body=deals_api.DocumentSelection(archive_id=result["archive_id"]))
         assert resp.media_type == "application/pdf"
@@ -229,7 +230,7 @@ def test_residual_greeks_sane(monkeypatch):
     105%) : delta positif (plus de spot → rappel plus probable), véga présent
     en GBM."""
     s, deal = _make_session()
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices(lambda d: 100.0))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices(lambda d: 100.0))
     try:
         _p, ctx = deals_api._mtm_core(deal, s, n_paths=4000,
                                       body=deals_api.MtmRequest(recalibrate="none"))

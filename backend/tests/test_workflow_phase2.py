@@ -27,6 +27,7 @@ from backend.app.services.product_lifecycle import lifecycle_snapshot
 from backend.app.services.product_repository import (
     load_product, stage_internal_product, stage_revision,
 )
+from backend.tests.deals_patch import patch_deals
 
 
 MAKER = SimpleNamespace(id=1, entity_id=7, role="user")
@@ -87,6 +88,9 @@ def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
         contract_version=1,
         product_id=product.product_id,
         product_terms_version=product.terms_version,
+        # Booking and amendments require an explicit legal form since 24/10.
+        transaction_format="EMTN",
+        instrument_family="NOTE",
     )
     session.add(deal)
     session.flush()
@@ -244,37 +248,27 @@ def test_auto_yahoo_refresh_uses_official_replay_as_lifecycle_truth(monkeypatch)
     deal = _deal(session)
     captured = {}
 
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes",
-        lambda *_args, **_kwargs: {"provider": "test"},
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *_args, **_kwargs: {"provider": "test"},
     )
-    monkeypatch.setattr(
-        deals_api, "_auto_validate_yahoo_event",
-        lambda *_args, **_kwargs: (False, None),
+    patch_deals(monkeypatch, "_auto_validate_yahoo_event", lambda *_args, **_kwargs: (False, None),
     )
-    monkeypatch.setattr(
-        deals_api, "_reference_history_arrays",
-        lambda *_args, **_kwargs: ([deal.strike_date], {"TK1": [100.0]}),
+    patch_deals(monkeypatch, "_reference_history_arrays", lambda *_args, **_kwargs: ([deal.strike_date], {"TK1": [100.0]}),
     )
-    monkeypatch.setattr(
-        deals_api, "replay_official_fixings",
-        lambda _deal, events: ({
+    patch_deals(monkeypatch, "replay_official_fixings", lambda _deal, events: ({
             "outcome": "en_cours",
             "event_id": events[-1].id,
             "event_date": events[-1].event_date,
             "realized_payout": 0.0,
         }, []),
     )
-    monkeypatch.setattr(
-        deals_api, "_evaluate_lifecycle",
-        lambda *_args, **_kwargs: {"outcome": "final", "realized_payout": 0.25},
+    patch_deals(monkeypatch, "_evaluate_lifecycle", lambda *_args, **_kwargs: {"outcome": "final", "realized_payout": 0.25},
     )
 
     def capture_apply(_deal, evaluation, _session, _actor_user_id):
         captured["evaluation"] = evaluation
         return None
 
-    monkeypatch.setattr(deals_api, "_auto_apply_lifecycle", capture_apply)
+    patch_deals(monkeypatch, "_auto_apply_lifecycle", capture_apply)
 
     response = deals_api._refresh_auto_yahoo_deal_core(
         deal, session, actor_user_id=99,
@@ -307,19 +301,15 @@ def test_auto_yahoo_stops_before_observations_after_an_autocall(monkeypatch):
     session.refresh(later)
     validated = []
 
-    monkeypatch.setattr(
-        deals_api, "load_yahoo_reference_closes",
-        lambda *_args, **_kwargs: {"provider": "test"},
+    patch_deals(monkeypatch, "load_yahoo_reference_closes", lambda *_args, **_kwargs: {"provider": "test"},
     )
 
     def validate(_deal, event, *_args):
         validated.append(event.id)
         return False, None
 
-    monkeypatch.setattr(deals_api, "_auto_validate_yahoo_event", validate)
-    monkeypatch.setattr(
-        deals_api, "_reference_history_arrays",
-        lambda *_args, **_kwargs: ([deal.strike_date], {"TK1": [100.0]}),
+    patch_deals(monkeypatch, "_auto_validate_yahoo_event", validate)
+    patch_deals(monkeypatch, "_reference_history_arrays", lambda *_args, **_kwargs: ([deal.strike_date], {"TK1": [100.0]}),
     )
 
     def replay(_deal, events):
@@ -331,14 +321,14 @@ def test_auto_yahoo_stops_before_observations_after_an_autocall(monkeypatch):
             "realized_payout": 1.08 if terminal else 0.0,
         }, [])
 
-    monkeypatch.setattr(deals_api, "replay_official_fixings", replay)
+    patch_deals(monkeypatch, "replay_official_fixings", replay)
     captured = {}
 
     def apply(_deal, evaluation, *_args):
         captured["evaluation"] = evaluation
         return None
 
-    monkeypatch.setattr(deals_api, "_auto_apply_lifecycle", apply)
+    patch_deals(monkeypatch, "_auto_apply_lifecycle", apply)
 
     deals_api._refresh_auto_yahoo_deal_core(
         deal, session, actor_user_id=99,
@@ -356,9 +346,7 @@ def test_admin_can_run_mtm_and_greeks_on_a_foreign_uat_deal(monkeypatch):
     deal = _deal(session)
     admin = SimpleNamespace(id=99, entity_id=None, role="admin")
     payload = {"resolved_pending": True, "message": "fixture"}
-    monkeypatch.setattr(
-        deals_api, "_mtm_core",
-        lambda *_args, **_kwargs: (payload, None),
+    patch_deals(monkeypatch, "_mtm_core", lambda *_args, **_kwargs: (payload, None),
     )
 
     assert deals_api.deal_mtm(deal.id, admin, session) == payload
@@ -391,9 +379,7 @@ def test_admin_watchlist_includes_foreign_uat_deals(monkeypatch):
     deal = _deal(session)
     admin = SimpleNamespace(id=99, entity_id=None, role="admin")
     regular_user = SimpleNamespace(id=99, entity_id=None, role="user")
-    monkeypatch.setattr(
-        deals_api, "build_watchlist_row",
-        lambda row, _session, _today: {
+    patch_deals(monkeypatch, "build_watchlist_row", lambda row, _session, _today: {
             "id": row.id, "min_gap": None, "days_to_next": None,
         },
     )
@@ -417,9 +403,7 @@ def test_watchlist_filters_on_commercial_ids_without_requiring_them(monkeypatch)
     deal.mandate_id = mandate.id
     session.add(deal); session.commit()
     admin = SimpleNamespace(id=99, entity_id=None, role="admin")
-    monkeypatch.setattr(
-        deals_api, "build_watchlist_row",
-        lambda row, _session, _today: {
+    patch_deals(monkeypatch, "build_watchlist_row", lambda row, _session, _today: {
             "id": row.id, "min_gap": None, "days_to_next": None,
         },
     )

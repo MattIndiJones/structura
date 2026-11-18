@@ -11,6 +11,7 @@ from backend.app.api import deals, portfolios
 from backend.app.core import valuation_notes
 from backend.app.db.models import Deal, DealEvent, ValuationRun
 from backend.tests.product_helpers import attach_product_to_deal
+from backend.tests.deals_patch import patch_deals
 
 USER = SimpleNamespace(id=1, role='user', entity_id=None)
 ORIGIN = date(2026, 1, 15)
@@ -46,9 +47,9 @@ def book(monkeypatch):
                     for i in range((date.fromisoformat(end)-date.fromisoformat(start)).days+1)]
             return {'dates':list(map(str,days)), 'prices':{tk:[100.]*len(days) for tk in tickers},
                     'provider':'SYNTHETIC'}
-        monkeypatch.setattr(deals, 'load_hist_prices', prices)
-        monkeypatch.setattr(deals, 'realized_market', lambda *a,**kw: {'sigma':{'TK1':.2}, 'corr':[[1]], 'n_returns':252})
-        monkeypatch.setattr(deals, 'dividend_profile', lambda *a,**kw: {'ok':True,'yield_declared':0.})
+        patch_deals(monkeypatch, "load_hist_prices", prices)
+        patch_deals(monkeypatch, "realized_market", lambda *a,**kw: {'sigma':{'TK1':.2}, 'corr':[[1]], 'n_returns':252})
+        patch_deals(monkeypatch, "dividend_profile", lambda *a,**kw: {'ok':True,'yield_declared':0.})
         yield session, deal
 
 
@@ -100,7 +101,7 @@ def linear_deal(book):
 
 def test_only_q_change_has_dividend_effect_and_no_vega(book, monkeypatch):
     linear_deal(book)
-    monkeypatch.setattr(deals, 'dividend_profile', lambda tk, asof: {
+    patch_deals(monkeypatch, "dividend_profile", lambda tk, asof: {
         'ok':True,'yield_declared':0. if asof < str(OBS) else .08})
     result = explain(book, date(2026,9,14), date(2026,9,16), 'realized')
     steps = {s['label']:s['delta_pts'] for s in result['steps']}
@@ -112,7 +113,7 @@ def test_only_q_change_has_dividend_effect_and_no_vega(book, monkeypatch):
 
 def test_portfolio_keeps_dividend_contribution(book, monkeypatch):
     linear_deal(book)
-    monkeypatch.setattr(deals, 'dividend_profile', lambda tk, asof: {
+    patch_deals(monkeypatch, "dividend_profile", lambda tk, asof: {
         'ok':True,'yield_declared':0. if asof < str(OBS) else .08})
     session, deal = book
     result = portfolios._run_explain_on_book([deal],session,1000,
@@ -204,7 +205,7 @@ def test_portfolio_uses_prices_before_rounding_points(book, monkeypatch):
     linear_deal(book)
     session, deal = book
     deal.nominal = 1e9
-    monkeypatch.setattr(deals,'dividend_profile',lambda tk,asof:{'ok':True,'yield_declared':0. if asof < str(OBS) else .0137})
+    patch_deals(monkeypatch, "dividend_profile", lambda tk,asof:{'ok':True,'yield_declared':0. if asof < str(OBS) else .0137})
     body = deals.MtmExplainRequest(date1='2026-09-14',date2='2026-09-16',recalibrate='realized')
     raw,_,_ = deals._explain_core(deal,session,1000,body)
     result = portfolios._run_explain_on_book([deal],session,1000,body)
@@ -226,9 +227,9 @@ def test_official_correction_changes_new_cash_but_not_archived_explain(monkeypat
     from backend.app.db.models import ArchivedDocument
     from backend.tests.test_mtm_explain import _fake_prices
     session, deal = coupon_deal()
-    monkeypatch.setattr(deals,'load_hist_prices',_fake_prices(lambda day:40.))
-    monkeypatch.setattr(deals,'realized_market',lambda *a,**kw:{'sigma':{'TK1':.2},'corr':[[1]],'n_returns':252})
-    monkeypatch.setattr(deals,'dividend_profile',lambda *a,**kw:{'ok':False})
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices(lambda day:40.))
+    patch_deals(monkeypatch, "realized_market", lambda *a,**kw:{'sigma':{'TK1':.2},'corr':[[1]],'n_returns':252})
+    patch_deals(monkeypatch, "dividend_profile", lambda *a,**kw:{'ok':False})
     body = deals.MtmExplainRequest(date1='2026-01-05',date2='2026-01-07',recalibrate='none')
     first = deals.deal_mtm_explain(deal.id,OPS_MAKER,session,n_paths=1000,body=body)
     assert first['flows_total_pts'] == 10

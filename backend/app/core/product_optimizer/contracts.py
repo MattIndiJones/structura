@@ -13,8 +13,13 @@ from .families import family_schema
 MAX_CANDIDATES = 256
 MAX_WORK = 250_000_000
 MAX_SECONDS = 120
-SOLVER_TOLERANCE = 1e-6
-OPTIMIZER_METHOD_VERSION = "optimizer-v2-resolution-budget"
+# Price tolerance of the bisection, in fraction of nominal. It must exceed what
+# publication alone moves: run_mc rounds the price to 1e-6 and the solved
+# parameter is published to six decimals, then repriced. At 1e-6 a coupon that
+# hit the target was rejected for 0.0002 % of nominal. 1e-5 (0.1 bp) stays far
+# below every economic tolerance (price_tolerance >= 1 bp, 50 bp by default).
+SOLVER_TOLERANCE = 1e-5
+OPTIMIZER_METHOD_VERSION = "optimizer-v3-publication-tolerance"
 MAX_PARALLEL_WORKERS = 4
 MAX_PARALLEL_MEMORY_BYTES = 256 * 1024**2
 VALIDATION_CANDIDATES = 5

@@ -15,6 +15,7 @@ from backend.app.api import shocks as shocks_api
 from backend.app.db.models import Deal, DealEvent, Portfolio, ShockRun
 from backend.app.core.product.inputs import terms_from_input
 from backend.app.services.product_repository import stage_internal_product
+from backend.tests.deals_patch import patch_deals
 
 TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=400)
@@ -94,7 +95,7 @@ def test_spot_shock_matches_closed_form(monkeypatch):
     price by exactly -0.20 (up to MC noise)."""
     s = _make_session()
     deal, tickers = _add_deal(s, "AT MATURITY\n  PAY S[1]", "SHOCK-1")
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices)
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices)
     try:
         body = shocks_api.ShockRequest(spot_shock_pct=-20.0)
         res = shocks_api.shock_deal(deal.id, body, USER, s, n_paths=40000)
@@ -110,7 +111,7 @@ def test_vol_shock_has_no_first_order_effect(monkeypatch):
     on the difference itself very small)."""
     s = _make_session()
     deal, tickers = _add_deal(s, "AT MATURITY\n  PAY S[1]", "SHOCK-2")
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices)
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices)
     try:
         body = shocks_api.ShockRequest(vol_shock_pts=30.0)
         res = shocks_api.shock_deal(deal.id, body, USER, s, n_paths=40000)
@@ -124,7 +125,7 @@ def test_rate_shock_reduces_zero_coupon_price(monkeypatch):
     r — a +100bp rate shock must reduce price."""
     s = _make_session()
     deal, tickers = _add_deal(s, "AT MATURITY\n  PAY 1", "SHOCK-3")
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices)
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices)
     try:
         body = shocks_api.ShockRequest(rate_shock_bp=100.0)
         res = shocks_api.shock_deal(deal.id, body, USER, s, n_paths=20000)
@@ -138,7 +139,7 @@ def test_corr_shock_no_op_on_single_underlying(monkeypatch):
     the diagonal to shift)."""
     s = _make_session()
     deal, tickers = _add_deal(s, "AT MATURITY\n  PAY S[1]", "SHOCK-4")
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices)
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices)
     try:
         body = shocks_api.ShockRequest(corr_shock_pts=50.0)
         res = shocks_api.shock_deal(deal.id, body, USER, s, n_paths=4000)
@@ -180,7 +181,7 @@ def test_choc_nul_ne_bouge_pas_un_deal_dont_le_spot_a_monte(monkeypatch):
     appliqué."""
     s = _make_session()
     deal, tickers = _add_deal(s, "AT MATURITY\n  PAY S[1]", "SHOCK-ZERO")
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices_ending_at(130.0))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices_ending_at(130.0))
     try:
         res = shocks_api.shock_deal(deal.id, shocks_api.ShockRequest(), USER, s,
                                     n_paths=8000)
@@ -197,7 +198,7 @@ def test_le_choc_de_spot_est_relatif_au_niveau_courant(monkeypatch):
     -0,26 point — et non les -0,50 que donnait un multiplicateur absolu."""
     s = _make_session()
     deal, tickers = _add_deal(s, "AT MATURITY\n  PAY S[1]", "SHOCK-REL")
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices_ending_at(130.0))
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices_ending_at(130.0))
     try:
         body = shocks_api.ShockRequest(spot_shock_pct=-20.0)
         res = shocks_api.shock_deal(deal.id, body, USER, s, n_paths=20000)
@@ -212,7 +213,7 @@ def test_corr_shock_runs_on_basket(monkeypatch):
     error and produce a finite, positive price."""
     s = _make_session()
     deal, tickers = _add_deal(s, "AT MATURITY\n  PAY WOF", "SHOCK-5", n_underlyings=2)
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices)
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices)
     try:
         body = shocks_api.ShockRequest(corr_shock_pts=30.0)
         res = shocks_api.shock_deal(deal.id, body, USER, s, n_paths=8000)
@@ -237,7 +238,7 @@ def test_portfolio_shock_aggregates_and_persists_one_run(monkeypatch):
     _add_deal(s, "AT MATURITY\n  PAY S[1]", "SHOCK-P2", nominal=500_000.0,
               portfolio_id=portfolio.id)
 
-    monkeypatch.setattr(deals_api, "load_hist_prices", _fake_prices)
+    patch_deals(monkeypatch, "load_hist_prices", _fake_prices)
     try:
         body = shocks_api.ShockRequest(spot_shock_pct=-10.0)
         res = shocks_api.shock_portfolio(portfolio.id, body, USER, s, n_paths=20000)

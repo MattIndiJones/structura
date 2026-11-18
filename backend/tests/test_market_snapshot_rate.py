@@ -27,6 +27,7 @@ from backend.app.core.market_snapshot import (
 )
 from backend.app.db.models import Deal, DealEvent, Portfolio, User
 from backend.tests.product_helpers import attach_product_to_deal
+from backend.tests.deals_patch import patch_deals
 
 USER = SimpleNamespace(id=1, entity_id=None, role="user")
 
@@ -145,8 +146,7 @@ def session_with_flat_history(monkeypatch):
         dates.append(d.isoformat())
         d += timedelta(days=1)
     payload = {"dates": dates, "prices": {"AAA": [100.0] * len(dates)}}
-    monkeypatch.setattr(deals_api, "load_hist_prices",
-                        lambda tickers, start, end=None: payload)
+    patch_deals(monkeypatch, "load_hist_prices", lambda tickers, start, end=None: payload)
     return session
 
 
@@ -236,10 +236,10 @@ def test_marche_actuel_rafraichit_le_niveau_de_dividende_et_garde_le_decay(
     session.add(deal)
     session.commit()
     session.refresh(deal)
-    monkeypatch.setattr(deals_api, "realized_market", lambda *_args, **_kwargs: {
+    patch_deals(monkeypatch, "realized_market", lambda *_args, **_kwargs: {
         "sigma": {"AAA": 0.2}, "corr": [[1.0]], "n_returns": 252,
     })
-    monkeypatch.setattr(deals_api, "dividend_profile", lambda *_args, **_kwargs: {
+    patch_deals(monkeypatch, "dividend_profile", lambda *_args, **_kwargs: {
         "ok": True, "yield_declared": 0.035,
     })
 

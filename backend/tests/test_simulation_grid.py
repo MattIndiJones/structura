@@ -17,6 +17,7 @@ from backend.app.core.schemas import PricingRequest
 from backend.app.core.simulation_grid import grid_frequency, simulation_grid
 from backend.app.core.valuation_runs import replay_valuation_run, stage_valuation_run
 from backend.app.db.models import Counterparty, Deal, DealEvent, User
+from backend.tests.deals_patch import patch_deals
 
 
 ATHENA = '''UNDERLYING Basket
@@ -116,7 +117,7 @@ def test_stm_pricing_booking_lifecycle_grid_override_and_replay(monkeypatch,bask
         event=next(e for e in session.exec(select(DealEvent).where(DealEvent.deal_id==deal.id)).all() if e.t_years==0.)
         event.spots_json=json.dumps({u['name']:100. for u in underlyings});event.source='fixture';event.status='observé'
         session.add(event);session.commit()
-        monkeypatch.setattr(deals_api,'load_hist_prices',lambda *a,**kw:dict(
+        patch_deals(monkeypatch, "load_hist_prices", lambda *a,**kw:dict(
             dates=[strike.isoformat(),(strike+timedelta(days=1)).isoformat()],
             prices={u['ticker']:[100.,99.] for u in underlyings}))
         original,ctx=deals_api._mtm_core(deal,session,n_paths=1000,body=MtmRequest(),asof=strike)

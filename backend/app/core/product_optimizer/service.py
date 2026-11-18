@@ -32,8 +32,9 @@ def solver_configuration(req, scale):
     definition = solution_definition(req)
     low, high = (getattr(req.constraints, definition[key])*scale for key in ("minimum_key", "maximum_key"))
     tolerance = min(SOLVER_TOLERANCE, req.constraints.price_tolerance/10)
-    # One extra halving guarantees the strict interval stopping condition.
-    iterations = max(1, math.ceil(math.log2((high-low)/tolerance)) + 1)
+    # The bisection searches to tolerance/2 (see solve_for_param); one extra
+    # halving guarantees the strict interval stopping condition.
+    iterations = max(1, math.ceil(math.log2((high-low)/(tolerance/2))) + 1)
     return {"lo": low, "hi": high, "tol": tolerance, "max_iter": iterations}
 
 
@@ -188,7 +189,7 @@ def price_candidate(req, candidate):
     # the upper endpoint also matches the target on the exploration sample.
     if definition["key"] != "coupon":
         endpoint = solved["trace"][1]
-        if abs(endpoint["price"]-req.pricing_target) <= min(1e-6,c.price_tolerance/10):
+        if abs(endpoint["price"]-req.pricing_target) <= solver["tol"]:
             value = high
             candidate.warnings.append("Borne haute retenue sur un plateau de prix ; maximum limité aux bornes de recherche.")
     setattr(candidate,definition["key"],value/fraction)
