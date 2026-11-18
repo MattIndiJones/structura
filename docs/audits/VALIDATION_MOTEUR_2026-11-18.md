@@ -79,6 +79,13 @@ interaction, ne le voit pas (+7,5 pb pour 8,6).
 dehors de la monnaie (digitales, barrières proches), pricer en SABR, Local Vol ou LSV au pas
 de 52 coûte de l'ordre de quelques points de base. Les grilles 104 et 208 existent pour cela.
 
+**Décision du 18/11 (Philippe) : le défaut reste à 52 pas**, les grilles plus fines étant trop
+longues en pricing courant. À la place, tout prix SABR, Local Vol ou LSV calculé à 52 pas
+porte un avertissement : champ `grid_notice` de `/api/price` et du pricing en cours de vie,
+affiché en encadré dans le panneau de résultats du Pricer (`core/simulation_grid.smile_grid_notice`,
+testé dans `test_simulation_grid.py` et `ResultsPanel.test.js`). Les autres modèles et les
+grilles 104 et 208 n'en portent pas.
+
 **Le gamma d'une barrière n'est pas fiable par bump.** Sur le put down-and-in, à ±3 % de spot
 et 40 000 trajectoires, le gamma s'écarte de la formule de +0,2 % à +23 % selon la graine.
 Delta, vega et rho restent à 4 % près. Le test ne contrôle donc pas ce gamma.

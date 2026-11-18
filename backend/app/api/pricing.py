@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import numpy as np
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from ..core.simulation_grid import with_request_grid
+from ..core.simulation_grid import smile_grid_notice, with_request_grid
 from ..core.payscript.engine import _simulation_axis
 from pydantic import BaseModel
 from ..core.schemas import (
@@ -234,6 +234,7 @@ def price_endpoint(req: PricingRequest):
         barrier_monitoring=result.get("barrier_monitoring", req.barrier_monitoring),
         barrier_monitoring_note=result.get("barrier_monitoring_note"),
         barrier_monitoring_details=result.get("barrier_monitoring_details"),
+        grid_notice=smile_grid_notice(req.model, req.steps_per_year),
         local_vol_wings=result.get("local_vol_wings"),
         lsv_frozen_leverage=result.get("lsv_frozen_leverage"),
         lsv_limits=result.get("lsv_limits"),

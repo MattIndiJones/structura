@@ -188,3 +188,19 @@ def test_legacy_unanchored_lsv_keeps_its_explicit_extreme_wing_refusal(frequency
         run_mc(parse_script('AT MATURITY:\n  PAY WOF'),
             [asset('STM','STMPA.PA',.54646136,.007388)],[[1.]],.03,3.,1000,
             model='lsv',spot_base=[.99],steps_per_year=frequency)
+
+
+@pytest.mark.parametrize('frequency',[52,104,208])
+@pytest.mark.parametrize('model',['constant','heston','sabr','localvol','lsv'])
+def test_only_smile_models_on_52_steps_carry_the_grid_notice(frequency, model):
+    """The default stays at 52 for speed; a smile-model price on it says the
+    discretisation bias the validation of 18/11/2026 measured."""
+    u=asset('STM','STMPA.PA',.25,.02)
+    u['vol_surface']['eta']=0.
+    quote=price_endpoint(PricingRequest(script='AT MATURITY:\n  PAY MAX(S[1] - 1, 0)',
+        underlyings=[u],corr_matrix=[[1.]],r=.03,T=.25,N=1000,model=model,
+        steps_per_year=frequency))
+    expected=model in ('sabr','localvol','lsv') and frequency==52
+    assert (quote.grid_notice is not None)==expected
+    if expected:
+        assert '104 ou 208 pas' in quote.grid_notice
