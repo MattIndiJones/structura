@@ -215,7 +215,8 @@ def _start_window_body():
         payment_date=(maturity + timedelta(days=5)).isoformat(), T=tenor,
         underlyings=[{"name": "UL1", "ticker": "TK1", "ccy": "EUR", "s0_abs": 100.0}],
         observation_times=[], script_snapshot=SCRIPT_DEPART,
-        market_snapshot={"constats": constats}, pricing_receipt=receipt)
+        market_snapshot={"constats": constats}, pricing_receipt=receipt,
+        transaction_format="EMTN", instrument_family="NOTE")
 
 
 @pytest.fixture

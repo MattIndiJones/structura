@@ -87,6 +87,9 @@ def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
         contract_version=1,
         product_id=product.product_id,
         product_terms_version=product.terms_version,
+        # Booking and amendments require an explicit legal form since 24/10.
+        transaction_format="EMTN",
+        instrument_family="NOTE",
     )
     session.add(deal)
     session.flush()

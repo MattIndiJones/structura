@@ -390,14 +390,18 @@ def test_un_deal_sans_client_se_booke_comme_avant(app_client):
 
 
 def test_un_deal_produit_peut_porter_une_structure_juridique_sans_client(app_client):
+    """La structure juridique est portée sans client. Une note plutôt qu'un
+    OTC : depuis le 24/10, un OTC exige un netting set à accord effectif, dont
+    les tests CCR ont la charge (test_institutional_major_fixes)."""
     reponse = app_client.post("/api/deals", json=_corps_deal(
-        transaction_format="OTC", instrument_family="Swap",
-        payoff_family="Swap", documentation_reference="ISDA-2026-17"))
+        transaction_format="EMTN", instrument_family="NOTE",
+        payoff_family="Phoenix", documentation_reference="Programme EMTN 2026-17"))
     assert reponse.status_code in (200, 201), reponse.text
     deal = reponse.json()
     assert deal["client_id"] is None
-    assert deal["transaction_format"] == "OTC"
-    assert deal["instrument_family"] == "Swap"
+    assert deal["transaction_format"] == "EMTN"
+    assert deal["instrument_family"] == "NOTE"
+    assert deal["documentation_reference"] == "Programme EMTN 2026-17"
 
 
 def test_un_deal_direct_client_exige_un_motif(app_client):

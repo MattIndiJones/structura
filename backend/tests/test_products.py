@@ -458,6 +458,7 @@ def test_booking_direct_rattache_l_execution_au_product(product_client):
         "observation_times": [1.0],
         "script_snapshot": pricing_input["script"],
         "market_snapshot": {}, "pricing_receipt": receipt,
+        "transaction_format": "EMTN", "instrument_family": "NOTE",
     })
     assert response.status_code == 201, response.text
     deal = response.json()
@@ -489,6 +490,7 @@ def test_booking_direct_cree_un_product_interne_sans_doublon(product_client):
         "underlyings": [{"name": "SX5E", "ticker": "^STOXX50E", "ccy": "EUR"}],
         "observation_times": [1.0], "script_snapshot": pricing_input["script"],
         "market_snapshot": {}, "pricing_receipt": receipt,
+        "transaction_format": "EMTN", "instrument_family": "NOTE",
     })
     assert response.status_code == 201, response.text
     deal = response.json()
@@ -527,6 +529,7 @@ def test_booking_depuis_un_indicatif_reutilise_exactement_son_product(product_cl
         "underlyings": [{"name": "SX5E", "ticker": "^STOXX50E", "ccy": "EUR"}],
         "observation_times": [1.0], "script_snapshot": pricing_input["script"],
         "market_snapshot": {}, "pricing_receipt": receipt,
+        "transaction_format": "EMTN", "instrument_family": "NOTE",
     })
     assert response.status_code == 201, response.text
     deal = response.json()

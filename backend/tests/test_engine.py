@@ -432,8 +432,9 @@ def test_mtf_zcb_is_deterministic():
                               model='constant', n_outer=5, n_inner=10, n_dates=3, seed=1)
 
     for row in mtf['results']:
-        ts_eff = max(1, round((T_max - row['t']) * 52))
-        expected = math.exp(-r * ts_eff / 52) * 100
+        # Exact contract dates since 24/10/2026: the residual life is T - t,
+        # no longer rounded to whole weekly steps (an error of up to 2.5 bp).
+        expected = math.exp(-r * (T_max - row['t'])) * 100
         assert abs(row['stats']['mean'] - expected) < 1e-6
         assert row['stats']['std'] < 1e-9
 

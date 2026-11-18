@@ -1213,6 +1213,12 @@ def test_startup_creates_product_tables_before_upgrading_legacy_rows(tmp_path, m
 
         monkeypatch.setattr(database_api, "engine", engine)
         monkeypatch.setattr(database_api, "_DB_PATH", db_path)
+        # Since C02 (20/10/2026) startup refuses an unidentified database: this
+        # legacy upgrade runs as an explicitly declared, isolated simulation.
+        monkeypatch.delenv("STRUCTURA_INSTALLATION_CONFIG", raising=False)
+        monkeypatch.setenv("STRUCTURA_BOOTSTRAP_PROFILE", "simulation")
+        monkeypatch.setenv("STRUCTURA_WORKSHOP_CHILD", "1")
+        monkeypatch.setenv("STRUCTURA_DATA_DIR", str(db_path.parent.resolve()))
         snapshots = []
         for _ in range(2):
             # Exercise the actual startup, including create_all, migrations and seeds.
