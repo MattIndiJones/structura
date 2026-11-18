@@ -140,6 +140,11 @@
          class="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-400">
       ⚠ {{ store.result.barrier_monitoring_note }}
     </div>
+    <div v-if="store.result.grid_notice" data-test="grid-notice"
+         class="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-400">
+      ⚠ {{ store.result.grid_notice }}
+      <HelpTip text="Le pas se choisit dans « Grille de diffusion », parmi les paramètres de marché (52, 104 ou 208 pas par an). 52 reste le défaut pour la vitesse ; SABR, vol locale et LSV figent leur volatilité sur chaque pas, ce qui aplatit le smile court et biaise les options en dehors de la monnaie. 104 ou 208 pas réduisent ce biais au prix d'un calcul deux à quatre fois plus long." />
+    </div>
 
     <!-- Tuiles stats -->
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">

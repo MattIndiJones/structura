@@ -7,6 +7,7 @@ import pytest
 
 from backend.app.core.payscript import engine as engine
 from backend.app.core.payscript.parser import parse_script
+from backend.tests.engine_patch import patch_engine
 
 MODELS = ["constant", "heston", "sabr", "localvol", "lsv"]
 UL = {"name":"A", "ticker":"TK1", "ccy":"EUR", "sigma":.2, "q":0.,
@@ -58,7 +59,7 @@ def test_funding_leaves_stochastic_rates_and_risk_free_factors_identical(monkeyp
         rates, dfs=original(*args, **kwargs)
         observed.append((rates.copy(), dfs.copy()))
         return rates, dfs
-    monkeypatch.setattr(engine,"_stochastic_rate_paths",capture)
+    patch_engine(monkeypatch, "_stochastic_rate_paths",capture)
     price()
     price(funding_curve=[[.5,.01],[2.,.04]],ds=.003)
     for clean, funded in zip(observed[:2], observed[2:]):
@@ -75,7 +76,7 @@ def test_mono_uses_the_joint_factor_in_every_simulator(model,rho,monkeypatch):
         combined=original(asset,rate,correlation)
         observed.append((np.asarray(combined).ravel(),np.asarray(rate).ravel()))
         return combined
-    monkeypatch.setattr(engine,"_blend_rate_factor",capture)
+    patch_engine(monkeypatch, "_blend_rate_factor",capture)
     ul=[{**UL,"rho_rS":rho}]
     engine.run_mc(parse_script("AT MATURITY:\n  PAY 1"),ul,[[1.]],.03,1/365.25,16000,
                   model=model,antithetic=False,sigma_r=.02,a_r=.3)
@@ -92,7 +93,7 @@ def test_joint_basket_covariance_is_preserved(monkeypatch):
         result=original(asset,rate,rho)
         observed.append((np.asarray(result).ravel(),np.asarray(rate).ravel()))
         return result
-    monkeypatch.setattr(engine,"_blend_rate_factor",capture)
+    patch_engine(monkeypatch, "_blend_rate_factor",capture)
     engine.run_mc(parse_script("AT MATURITY:\n  PAY 1"),[{**UL,"rho_rS":.6},{**UL,"name":"B","rho_rS":-.2}],
                   [[1.,.3],[.3,1.]],.03,1/365.25,16000,antithetic=False,sigma_r=.02)
     first,rate=observed[0]; second,_=observed[1]

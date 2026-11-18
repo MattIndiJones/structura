@@ -52,6 +52,26 @@ def with_request_grid(function):
     return scoped
 
 
+# Models whose volatility depends on the level reached: their skew is frozen
+# over each step, so a coarse grid biases the wings and the short smile.
+SMILE_MODELS = frozenset({'sabr', 'localvol', 'lsv'})
+
+SMILE_GRID_NOTICE = (
+    "Grille de 52 pas par an avec un modèle à smile : la discrétisation biaise les options "
+    "en dehors de la monnaie et le smile court. Mesures d'instance (validation du 18/11/2026) : "
+    "smile SABR à 3 mois aplati de 0,1 à 0,2 point de vol ; call 120 % à 1 an en vol locale "
+    "surévalué de 2 à 5 pb, ramené dans le bruit à 208 pas. Sur un produit court, une barrière "
+    "proche ou une digitale, recouper à 104 ou 208 pas.")
+
+
+def smile_grid_notice(model: str | None, steps_per_year=None) -> str | None:
+    """Warning carried by a price computed with a smile model on the 52-step
+    grid. The default stays at 52 for speed; the price says what it costs."""
+    if model not in SMILE_MODELS or grid_frequency(steps_per_year) != 52:
+        return None
+    return SMILE_GRID_NOTICE
+
+
 def snapshot_grid(market: dict) -> int:
     raw = (market.get('pricing_input') or {}).get('steps_per_year')
     if raw is None:

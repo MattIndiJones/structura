@@ -26,7 +26,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from ..core.simulation_grid import GridFrequency
-from ..core.simulation_grid import with_request_grid
+from ..core.simulation_grid import smile_grid_notice, with_request_grid
 from ..core.payscript.engine import _simulation_axis
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -529,6 +529,7 @@ def price_in_life(
         "barrier_monitoring": res.get("barrier_monitoring", req.barrier_monitoring),
         "barrier_monitoring_note": res.get("barrier_monitoring_note"),
         "barrier_monitoring_details": res.get("barrier_monitoring_details"),
+        "grid_notice": smile_grid_notice(req.model, req.steps_per_year),
         "local_vol_wings": res.get("local_vol_wings"),
         "ic95": res["ic95"],
         # Les mêmes statistiques que /api/price. Elles ne partaient pas d'ici,

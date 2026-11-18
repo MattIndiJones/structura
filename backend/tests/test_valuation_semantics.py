@@ -15,6 +15,7 @@ from backend.app.core.valuation_context import (
     ValuationContext, run_analysis, run_valuation, valuation_context_from_request,
     unsettled_cashflows_pv, deterministic_cashflow_pv,
 )
+from backend.tests.engine_patch import patch_engine
 
 
 def context(model='constant', antithetic=True):
@@ -96,7 +97,7 @@ def test_correlation_greek_uses_signed_admissible_denominator_and_base_antitheti
         calls.append(kw)
         delta=(kw.get('corr_delta') or {}).get('delta',0)
         return {'price':2*(corr[0][1]+delta)}
-    monkeypatch.setattr(engine,'run_mc',linear)
+    patch_engine(monkeypatch, 'run_mc',linear)
     g=engine.compute_greeks(parse_script('AT MATURITY:\n  PAY 1'),[{},{}],[[1,rho],[rho,1]],
         .03,1,2000,'constant',42,{},selected=['corr'],antithetic=False)
     assert g['corr_1_2']==2
@@ -106,7 +107,7 @@ def test_correlation_greek_uses_signed_admissible_denominator_and_base_antitheti
 
 
 def test_nonperturbable_one_factor_correlation_is_unavailable(monkeypatch):
-    monkeypatch.setattr(engine,'run_mc',lambda *a,**kw:{'price':1.})
+    patch_engine(monkeypatch, 'run_mc',lambda *a,**kw:{'price':1.})
     g=engine.compute_greeks(parse_script('AT MATURITY:\n  PAY 1'),[{}, {}, {}],
         [[1,1,1],[1,1,1],[1,1,1]],.03,1,2000,'constant',42,{},selected=['corr'])
     assert g['corr_1_2'] is None
@@ -114,7 +115,7 @@ def test_nonperturbable_one_factor_correlation_is_unavailable(monkeypatch):
 
 
 def test_lsv_vega_metadata_describes_actual_bump(monkeypatch):
-    monkeypatch.setattr(engine,'run_mc',lambda *a,**kw:{'price':1.+sum(kw.get('vol_add') or [])})
+    patch_engine(monkeypatch, 'run_mc',lambda *a,**kw:{'price':1.+sum(kw.get('vol_add') or [])})
     g=engine.compute_greeks(parse_script('AT MATURITY:\n  PAY 1'),[{'name':'S1','rho_h':-.9}],
         [[1]],.03,1,2000,'lsv',42,{},selected=['vega'])
     assert g['vega_1']==1

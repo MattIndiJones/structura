@@ -12,6 +12,7 @@ from backend.app.core.product_optimizer.contracts import OptimizationRequest
 from backend.app.services.llm.validate import validate
 from backend.tests.test_llm_scripting import UL
 from backend.tests.test_product_optimizer import request
+from backend.tests.engine_patch import patch_engine
 
 
 @pytest.mark.parametrize('instruction', ['PAY .08', 'STOP', 'SET X = 1', 'ACCRUE .08'])
@@ -144,7 +145,7 @@ def test_nonfinite_reference_price_is_never_qualified(monkeypatch):
         pv[:] = float('nan')
         return pv, rest
     q._run_panel.cache_clear()
-    monkeypatch.setattr(engine, '_eval_paths', nonfinite)
+    patch_engine(monkeypatch, '_eval_paths', nonfinite)
     with pytest.raises(ValueError, match='qualification'):
         q.qualify_payoff('phoenix_memoire', PRODUCTS['phoenix_memoire']['script'])
     q._run_panel.cache_clear()

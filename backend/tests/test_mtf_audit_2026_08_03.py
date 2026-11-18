@@ -23,12 +23,13 @@ from backend.app.core.payscript.parser import parse_script, resolve_constats
 from backend.app.core.payscript.engine import (
     run_mc, run_mark_to_future, build_mtf_dates, _mtf_date_stats, _mtf_step, SY,
 )
+from backend.tests.engine_patch import patch_engine
 
 
 @pytest.fixture(autouse=True)
 def _bound_test_mtf_batches(monkeypatch):
     """Exercise chunking without giving a statistical test a production-size peak."""
-    monkeypatch.setattr(payscript_engine, "MTF_MAX_BATCH", 5_000)
+    patch_engine(monkeypatch, "MTF_MAX_BATCH", 5_000)
 
 
 def _ul(**kw):

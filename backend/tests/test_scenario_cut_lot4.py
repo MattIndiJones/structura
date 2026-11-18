@@ -1,6 +1,7 @@
 """A future observation just beyond the replay cut remains simulated."""
 from backend.app.core.compute.pricers import scenario_grid, var_scenario
 from backend.app.core.payscript import engine
+from backend.tests.engine_patch import patch_engine
 
 
 SCRIPT = "AT 0.5\n  PAY 1\n"
@@ -32,7 +33,7 @@ def test_scenario_grid_worker_keeps_event_after_exact_replay_cut(monkeypatch):
         captured["dates"] = [d for event in script.events for d in event.dates]
         return {"price": 1.0}
 
-    monkeypatch.setattr(engine, "run_mc", fake_mc)
+    patch_engine(monkeypatch, "run_mc", fake_mc)
     result = scenario_grid.price_scenario_grid_job({
         "script_text": SCRIPT, "underlyings": [{"name": "UL1", "sigma": 0.2}],
         "corr": [[1.0]], "r": 0.03, "T": 0.01, "n_paths": 1000,

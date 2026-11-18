@@ -330,6 +330,9 @@ class PricingResponse(BaseModel):
     barrier_monitoring: str = "weekly"
     barrier_monitoring_note: Optional[str] = None
     barrier_monitoring_details: Optional[Dict[str, Any]] = None
+    # SABR, Local Vol or LSV on the 52-step grid: the discretisation bias the
+    # validation of 18/11/2026 measured, said with the price.
+    grid_notice: Optional[str] = None
     local_vol_wings: Optional[List[Dict[str, Any]]] = None
     surface_context: Optional[Dict[str, Any]] = None
     lsv_calibration: Optional[Dict[str, Any]] = None
