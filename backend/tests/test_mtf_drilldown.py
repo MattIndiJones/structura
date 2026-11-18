@@ -19,12 +19,13 @@ from backend.app.core.payscript.parser import parse_script
 from backend.app.core.payscript.engine import (
     run_mc, run_mark_to_future, run_mtf_drilldown, _simulate_mtf_outer, SY,
 )
+from backend.tests.engine_patch import patch_engine
 
 
 @pytest.fixture(autouse=True)
 def _bound_test_mtf_batches(monkeypatch):
     """Keep fan/detail identity coverage while forcing several small chunks."""
-    monkeypatch.setattr(payscript_engine, "MTF_MAX_BATCH", 5_000)
+    patch_engine(monkeypatch, "MTF_MAX_BATCH", 5_000)
 
 
 def _ul(**kw):

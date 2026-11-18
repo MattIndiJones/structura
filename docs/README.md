@@ -10,6 +10,11 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Découpage d'engine.py — 18/11](projects/pricing/DECOUPAGE_ENGINE_2026-11-18.md)
+— 5 431 lignes réparties en onze modules (simulateurs, vol locale, taux, évaluation, `run_mc`,
+Greeks, analytiques, Mark-to-Future, détail MTF, backtest) derrière une façade qui réexporte tout.
+Aucun calcul modifié ; remplacements des tests par `patch_engine`.
+
 [Validation du moteur — 18/11](audits/VALIDATION_MOTEUR_2026-11-18.md)
 — Les contrôles des 07/10 et de l'audit passent sous pytest : GBM, Heston, barrière, funding, SABR
 (Hagan, EDP), Local Vol et LSV sur SSVI, Greeks contre formules fermées ; 47 tests. Biais de

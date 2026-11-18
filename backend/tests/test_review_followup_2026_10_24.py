@@ -16,6 +16,7 @@ from backend.app.core.payscript.parser import parse_script, resolve_constats
 from backend.app.core.product.calendar import freeze_calendar, restore_calendar
 from backend.tests.test_ccr import inputs, proposed
 from backend.tests.test_market_data_lot4 import _deal, _session
+from backend.tests.engine_patch import patch_engine
 
 
 ORIGIN = date(2026, 1, 5)
@@ -76,7 +77,7 @@ def test_engine_refuses_invalid_compiled_dates_before_simulation(monkeypatch, wh
     compiled.events[0].dates = [when]
     def forbidden(*args, **kwargs):
         pytest.fail("An invalid observation must not start a diffusion")
-    monkeypatch.setattr(engine, "_simulate_gbm", forbidden)
+    patch_engine(monkeypatch, "_simulate_gbm", forbidden)
     with pytest.raises(ValueError, match="strictement positives"):
         engine.run_mc(compiled, UL, [[1.]], 0., 1., 4)
 

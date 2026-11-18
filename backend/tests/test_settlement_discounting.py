@@ -13,6 +13,7 @@ import pytest
 from backend.app.core.payscript import engine
 from backend.app.core.payscript.engine import run_mc
 from backend.app.core.payscript.parser import parse_script, resolve_constats
+from backend.tests.engine_patch import patch_engine
 
 UL = [dict(name="S1", ticker="", ccy="EUR",
            sigma=0.20, q=0.00, v0=0.04, kappa=2.0, theta=0.04, xi=0.35, rho_h=-0.70,
@@ -122,7 +123,7 @@ def test_les_greeks_reutilisent_les_dates_completes(monkeypatch):
         calls.append(kwargs)
         return {"price": 1.0}
 
-    monkeypatch.setattr(engine, "run_mc", fake_run_mc)
+    patch_engine(monkeypatch, "run_mc", fake_run_mc)
     engine.compute_greeks(
         parse_script(ZERO_COUPON), UL, CORR, R, 1.0, 4000, "constant", 42,
         {}, selected=["delta"], maturity_payment_t=1.02, value_date_t=0.01,

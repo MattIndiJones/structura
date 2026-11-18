@@ -7,6 +7,7 @@ import pytest
 from backend.app.core.payscript import engine
 from backend.app.core.payscript.parser import parse_script
 from backend.app.core.payscript.bridge import basket_bridge_substeps, bridge_extrema
+from backend.tests.engine_patch import patch_engine
 
 def conditional_inputs(n=2, paths=32000, sigma=.2):
     return np.ones((2,n,paths)), np.full((1,n,paths),sigma)
@@ -31,7 +32,7 @@ def test_complete_payoff_is_unchanged_when_the_same_conditional_path_is_duplicat
     original_bridge=engine._bridge_extrema
     def bridge(spots,vol,dt,rng,*args,**kwargs):
         return original_bridge(spots,vol,dt,np.random.default_rng(991),*args,**kwargs)
-    monkeypatch.setattr(engine,"_bridge_extrema",bridge)
+    patch_engine(monkeypatch, "_bridge_extrema",bridge)
     def paths(ts,n,N,*args,**kwargs):
         # One pre-sampled bank of endpoint paths, shared by mono and copies.
         base=np.ones((ts+1,n,N))
@@ -39,7 +40,7 @@ def test_complete_payoff_is_unchanged_when_the_same_conditional_path_is_duplicat
             kwargs["vol_out"][:]=0.
             kwargs["vol_out"][0]=.2
         return base
-    monkeypatch.setattr(engine,"_simulate_gbm",paths)
+    patch_engine(monkeypatch, "_simulate_gbm",paths)
     ul={"name":"A","sigma":.2,"q":0.}
     script=parse_script(source)
     mono=engine.run_mc(script,[ul],[[1.]],0.,1.,512,barrier_monitoring="continuous",per_path_flows=True)
@@ -93,7 +94,7 @@ def test_perfect_asset_factors_remain_identical_with_c15_rates(sigma_r,rho_rS,mo
         result=original(*args,**kwargs)
         observed.append(result.copy())
         return result
-    monkeypatch.setattr(engine,"_simulate_gbm",capture)
+    patch_engine(monkeypatch, "_simulate_gbm",capture)
     ul={"name":"A","sigma":.2,"q":0.,"rho_rS":rho_rS}
     engine.run_mc(parse_script("AT MATURITY:\n  PAY INDIC(WOF_MIN < .8)"),
         [ul,{**ul,"name":"B"}],[[1.,1.],[1.,1.]],.03,1.,64,
@@ -154,7 +155,7 @@ def test_correlation_greeks_keep_one_refinement_across_the_bump(monkeypatch):
     def fake(*args,**kwargs):
         calls.append(kwargs)
         return {"price":.95}
-    monkeypatch.setattr(engine,"run_mc",fake)
+    patch_engine(monkeypatch, "run_mc",fake)
     engine.compute_greeks(parse_script("AT MATURITY:\n  PAY 1"),
         [{"name":"A","sigma":.2},{"name":"B","sigma":.2}],
         [[1.,.49],[.49,1.]],.03,1.,2000,"constant",42,{},selected=["corr"],barrier_monitoring="continuous")
