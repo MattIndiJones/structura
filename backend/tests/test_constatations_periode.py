@@ -113,9 +113,13 @@ def test_le_decompte_de_points_signale_une_fenetre_degeneree():
     assert rows["observation"]["points_demandes"] == 30
     assert not any(r["degeneree"] for r in res["constatation_windows"])
 
+    # On the weekly grid a 3-day window collapsed onto one step and was
+    # flagged degenerate. On exact contract dates it keeps its three closes;
+    # the flag stays reserved to a window whose dates really coincide.
     court = _price(red0="AVG", red1="AVG", w0="3D", w1="3D", full=True)
-    assert all(r["degeneree"] for r in court["constatation_windows"])
-    assert all(r["points_retenus"] == 1 for r in court["constatation_windows"])
+    assert not any(r["degeneree"] for r in court["constatation_windows"])
+    assert all(r["points_retenus"] == r["points_demandes"] == 3
+               for r in court["constatation_windows"])
 
 
 # ── 3. Non-commutativité : le cœur de la conception ────────────────────

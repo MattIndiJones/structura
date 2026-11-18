@@ -1371,10 +1371,16 @@ def _window_steps(dates, ts: int, dt: float = 1.0 / SY) -> list[int]:
 
     Production grids contain each contractual date. Distinct dates therefore
     retain distinct weights; scalar grids remain supported for direct helper
-    clients using a deliberately synthetic clock."""
+    clients using a deliberately synthetic clock.
+
+    Step 0 is a real row of S (t=0, the diffusion origin). The former floor at
+    step 1 dated from the weekly grid, where a short window collapsed onto
+    step 0; on exact contract dates it only folded a fixing ON the strike date
+    into the next one, and the duplicate was dropped: a 10-day averaging-in
+    kept 9 closes."""
     if not dates:
         return []
-    return sorted({min(max(_step_at(dt, d), 1), ts) for d in dates})
+    return sorted({min(max(_step_at(dt, d), 0), ts) for d in dates})
 
 
 def _reduce_window(S: np.ndarray, steps: list[int], reduction: str) -> np.ndarray:
