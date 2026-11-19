@@ -21,6 +21,7 @@ from .api.pricing import router as pricing_router
 from .api.volatility import router as volatility_router
 from .api.ccr import router as ccr_router
 from .api.inlife import router as inlife_router
+from .api.pricing_jobs import router as pricing_jobs_router
 from .api.market_data import router as market_data_router
 from .api.simulation import router as simulation_router
 from .api.scenarios import router as scenarios_router
@@ -132,6 +133,11 @@ def on_startup():
     from .services.optimizer_research import recover
     from .db.database import engine
     recover(engine)
+    if not os.getenv("PYTEST_CURRENT_TEST") and os.getenv("STRUCTURA_WORKSHOP_CHILD") != "1":
+        # Warm the pricing workers now: a cold one spends seconds importing
+        # the application before its first price (P1-4).
+        from .core.compute.interactive import get_runner
+        get_runner().start()
 
 
 @app.on_event("shutdown")
@@ -143,6 +149,8 @@ async def stop_optimizer_researches():
         return
     from .services.optimizer_research import shutdown
     await asyncio.to_thread(shutdown)
+    from .core.compute.interactive import shutdown_runner
+    await asyncio.to_thread(shutdown_runner)
     from .services.agent_workshop.engine import manager
     await asyncio.to_thread(manager.shutdown)
     from .services.agent_workshop.consultation import consultations
@@ -175,6 +183,7 @@ async def start_lifecycle_scheduler():
     app.state.lifecycle_scheduler_task = task
 
 app.include_router(inlife_router)
+app.include_router(pricing_jobs_router)
 app.include_router(volatility_router)
 app.include_router(ccr_router)
 app.include_router(auth_router)

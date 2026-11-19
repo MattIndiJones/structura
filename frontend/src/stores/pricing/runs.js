@@ -1,6 +1,7 @@
 // Pricing, Greeks, profil, trajectoires, probabilités, backtest, comparateur, assistant de script et dictée.
 // Partie du store du Pricer (src/stores/pricing.js), découpé le 18/11/2026.
 import { apiErrorMessage, apiFetch } from '../../utils/api.js'
+import { JOB_TERMINAL, cancelQueuedCalculation, runQueuedCalculation } from '../../utils/pricingJobs.js'
 import { ref } from 'vue'
 import { _defaultUnderlying, _plausibleIsoDate } from './helpers.js'
 
@@ -16,6 +17,40 @@ export function installRuns(s) {
     scriptGenerationProvenance, selectedGreeks, transcribeEngines, underlyings,
     usesDatedPricing, validateScript, variantInfo, yieldCurve,
   } = s
+
+  // ── File de calcul interactive (P1-4) ─────────────────────────────
+  // Le prix, les Greeks et le spread implicite passent par la file du
+  // serveur (utils/pricingJobs.js) : l'écran suit le calcul et peut l'arrêter.
+  const pricingJob = ref(null)
+
+  async function _queuedCalculation(route, body) {
+    let mine = null
+    try {
+      return await runQueuedCalculation(route, body, {
+        onState: state => {
+          if (mine === null) mine = state.job_id
+          else if (pricingJob.value?.id !== mine) return
+          pricingJob.value = {
+            id: mine, queue_position: state.queue_position, elapsed_ms: state.elapsed_ms,
+            status: pricingJob.value?.id === mine && pricingJob.value.status === 'cancelling'
+              && !JOB_TERMINAL.has(state.status) ? 'cancelling' : state.status,
+          }
+        },
+        isCurrent: id => pricingJob.value?.id === id,
+      })
+    } finally {
+      if (mine !== null && pricingJob.value?.id === mine) pricingJob.value = null
+    }
+  }
+
+  /** Arrête le calcul en cours : le serveur tue son processus. */
+  async function cancelPricing() {
+    const job = pricingJob.value
+    if (!job || job.status === 'cancelling') return
+    pricingJob.value = { ...job, status: 'cancelling' }
+    try { await cancelQueuedCalculation(job.id) }
+    catch { /* le suivi du calcul rend l'issue */ }
+  }
 
   /** Corps de requête de la valorisation en cours de vie — partagé par le
    *  prix et les Greeks, pour qu'ils décrivent forcément le même produit. */
@@ -137,12 +172,9 @@ export function installRuns(s) {
     _startProgress((globalParams.N / 20000) * 350)
     try {
       request = await _authoritativeProductRequest(request)
-      const res = await apiFetch('/api/price/in-life', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      })
-      const data = await res.json()
+      const res = await _queuedCalculation('/api/price/in-life', request)
+      if (res.superseded) return
+      const data = res.data
       if (revision !== s._pricingRevision || requestKey !== _requestKey(_pricingBody())) {
         if (revision === s._pricingRevision) error.value = 'Les paramètres ont changé pendant le calcul. Relancez le pricing.'
         return
@@ -175,21 +207,18 @@ export function installRuns(s) {
     _startProgress((globalParams.N / 20000) * 350)
     try {
       request = await _authoritativeProductRequest(request)
-      const res = await apiFetch('/api/price', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...request,
-          compute_greeks: false,
-          selected_greeks: selectedGreeks.value,
-        }),
+      const res = await _queuedCalculation('/api/price', {
+        ...request,
+        compute_greeks: false,
+        selected_greeks: selectedGreeks.value,
       })
+      if (res.superseded) return
       if (revision !== s._pricingRevision || requestKey !== _requestKey(_pricingBody())) {
         if (revision === s._pricingRevision) error.value = 'Les paramètres ont changé pendant le calcul. Relancez le pricing.'
         return
       }
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
-      else { result.value = { ...(await res.json()), _inputs: inputs, _requestKey: requestKey }; rightTab.value = 'results' }
+      if (!res.ok) error.value = apiErrorMessage(res.data, 'Erreur serveur')
+      else { result.value = { ...res.data, _inputs: inputs, _requestKey: requestKey }; rightTab.value = 'results' }
     } catch (e) { error.value = e.message }
     finally {
       if (revision === s._pricingRevision) { loading.value = false; _stopProgress() }
@@ -214,19 +243,15 @@ export function installRuns(s) {
     loading.value = true; error.value = null; impliedFunding.value = null
     _startProgress((globalParams.N / 20000) * 3500)
     try {
-      const res = await apiFetch('/api/price/implied-funding', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // La bissection reprice une dizaine de fois : à 20 000 chemins ce
-        // serait quatre minutes pour un chiffre qu'on lit à quelques bps près.
-        // Même arbitrage que le solveur de paramètres, qui tourne à 8 000.
-        body: JSON.stringify({ ..._inLifeBody(),
-                                N: Math.min(globalParams.N, 8000),
-                                target_price: prixCiblePct / 100 }),
+      // La bissection reprice une dizaine de fois : à 20 000 chemins ce
+      // serait quatre minutes pour un chiffre qu'on lit à quelques bps près.
+      // Même arbitrage que le solveur de paramètres, qui tourne à 8 000.
+      const res = await _queuedCalculation('/api/price/implied-funding', {
+        ..._inLifeBody(), N: Math.min(globalParams.N, 8000), target_price: prixCiblePct / 100,
       })
-      const data = await res.json()
-      if (!res.ok) { error.value = apiErrorMessage(data, 'Erreur serveur'); return }
-      impliedFunding.value = data
+      if (res.superseded) return
+      if (!res.ok) { error.value = apiErrorMessage(res.data, 'Erreur serveur'); return }
+      impliedFunding.value = res.data
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
   }
@@ -258,19 +283,16 @@ export function installRuns(s) {
       // calculent sur la jambe résiduelle. Passer par /api/price bumpait le
       // produit NEUF depuis t=0 — des Greeks d'émission affichés à côté d'un
       // mark-to-market, sans rapport avec le chiffre au-dessus.
-      const res = await apiFetch(enCours ? '/api/price/in-life' : '/api/price', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      })
+      const res = await _queuedCalculation(enCours ? '/api/price/in-life' : '/api/price', request)
+      if (res.superseded) return
       if (revision !== s._pricingRevision || result.value?._requestKey !== requestKey
           || requestKey !== _requestKey(_pricingBody())) {
         if (revision === s._pricingRevision) error.value = 'Les paramètres ont changé pendant le calcul. Relancez le pricing.'
         return
       }
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
+      if (!res.ok) error.value = apiErrorMessage(res.data, 'Erreur serveur')
       else {
-        const data = await res.json()
+        const data = res.data
         result.value = {
           ...result.value,
           greeks: data.greeks,
@@ -545,5 +567,5 @@ export function installRuns(s) {
     validateScript()
   }
 
-  Object.assign(s, { _inLifeBody, _avecTermesDOrigine, _validatePricingDates, runInLifePricing, runPricing, impliedFunding, runImpliedFunding, runGreeks, runProfile, runPaths, runProba, backtestRevision, runBacktest, comparator, comparatorError, comparatorLoading, comparatorRevision, runBacktestCompare, adoptBasket, scriptAssistantPayload, loadTranscribeEngines, prepareTranscribe, transcribeAudio, adoptGeneratedScript })
+  Object.assign(s, { pricingJob, cancelPricing, _queuedCalculation, _inLifeBody, _avecTermesDOrigine, _validatePricingDates, runInLifePricing, runPricing, impliedFunding, runImpliedFunding, runGreeks, runProfile, runPaths, runProba, backtestRevision, runBacktest, comparator, comparatorError, comparatorLoading, comparatorRevision, runBacktestCompare, adoptBasket, scriptAssistantPayload, loadTranscribeEngines, prepareTranscribe, transcribeAudio, adoptGeneratedScript })
 }

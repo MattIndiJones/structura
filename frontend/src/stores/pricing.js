@@ -52,7 +52,7 @@ export const usePricingStore = defineStore('pricing', () => {
     mtfDrillLoading, mtfIsStale, mtfLoading, onUnderlyingSelection, onValuationDateChange,
     openedDeal, paramIsPct, paramOverrides, parameterConversions, parseError, parseScript,
     paths, pendingDealPrefill, prepareBookingFork, prepareTranscribe, pricingEstimate,
-    proba, productLoadNotice, productTitle, profile, progress, relacherVariante,
+    pricingJob, cancelPricing, proba, productLoadNotice, productTitle, profile, progress, relacherVariante,
     releaseSession, removeUnderlying, resetToDefaults, result, resultIsStale, rightTab,
     runBacktest, runBacktestCompare, runGreeks, runGrid, runImpliedFunding,
     runInLifePricing, runMtf, runMtfDrilldown, runPaths, runPricing, runProba, runProfile,
@@ -81,7 +81,7 @@ export const usePricingStore = defineStore('pricing', () => {
     scriptAssistantPayload, adoptGeneratedScript,
     transcribeEngines, loadTranscribeEngines, transcribeAudio, prepareTranscribe,
     comparator, comparatorError, comparatorLoading, runBacktestCompare, adoptBasket,
-    loading, error, progress, yfStatus, marketDataLoading, marketDataAsOf, marketDataEffectiveDate,
+    loading, error, progress, pricingJob, cancelPricing, yfStatus, marketDataLoading, marketDataAsOf, marketDataEffectiveDate,
     currentScriptId, currentScriptName,
     // Le corps que l'écran envoie pour SON prix. Exposé pour que la
     // comparaison de variantes s'y adosse plutôt que d'en refaire un —
