@@ -5,6 +5,7 @@ uses (amc_study.py), so both entry points share one implementation and can't
 drift out of sync again.
 """
 from __future__ import annotations
+import logging
 
 import dataclasses
 import datetime
@@ -25,6 +26,8 @@ from ..core.fifo.marks import (
     compute_scaling_factors_from_positions,
 )
 from ..core.fifo.pipeline import run_fifo_recon, detect_order_files
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/fifo", tags=["fifo"])
 
@@ -159,6 +162,7 @@ def fifo_detect(
         factors = compute_scaling_factors_from_positions(result_p1.open_positions, t0_prices)
         mode = _detect_qty_mode(factors)
     except Exception:
+        logger.warning("FIFO : détection du mode de quantité en échec, actions retenues", exc_info=True)
         mode = "shares"
         orders = []
 

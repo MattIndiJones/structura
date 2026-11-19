@@ -9,6 +9,7 @@ Two acquisition paths:
   2. Manual upload             (Excel or JSON)
 """
 from __future__ import annotations
+import logging
 
 import io
 import json
@@ -28,6 +29,8 @@ import yfinance as yf
 from ..runtime import data_path, business_today
 from . import market_storage
 from .reference_data import REFERENCE_CURRENCIES
+
+logger = logging.getLogger(__name__)
 
 _PRICE_STORE = data_path("underlying_prices")
 _PRICE_STORE.mkdir(parents=True, exist_ok=True)
@@ -380,6 +383,7 @@ def fx_quote_to(from_ccy: str | None, to_ccy: str = "EUR",
     try:
         series = get_fx_series(src, dst, end=provider_end).copy()
     except Exception as exc:
+        logger.warning("Change %s/%s indisponible", src, dst, exc_info=exc)
         return {**quote, **freshness(None, asof_date, "reporting_fx"), "reason": type(exc).__name__}
     series.index = pd.to_datetime(series.index).tz_localize(None)
     series = series.loc[~series.index.duplicated(keep="last")].sort_index()
@@ -684,6 +688,7 @@ def auto_populate_store(components: list[dict], since: str = "2010-01-01") -> di
             fetch_prices(isin,yf_symbol(isin,name),start=since)
             results[isin] = 'fetched'
         except Exception:
+            logger.warning("Téléchargement des cours de %s en échec", isin, exc_info=True)
             results[isin] = 'failed'
     return results
 

@@ -161,6 +161,7 @@ def refresh_book(session: Session, user_id: int | None = None, *, current=None) 
                         summary["errors"].append(f"{reference}: {result['error']}")
         except Exception as exc:
             session.rollback()
+            log.warning("Refresh du deal %s en échec", reference, exc_info=exc)
             message = str(getattr(exc, "detail", exc))
             result.update(status="FAILED", error=message)
             summary["errors"].append(f"{reference}: {result['stage']} — {message}")

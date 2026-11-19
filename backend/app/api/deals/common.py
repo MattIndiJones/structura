@@ -1,5 +1,6 @@
 """Shared booking/workflow helpers: economics, calendars, RFQ identity, workflow refusals."""
 from __future__ import annotations
+import logging
 import json
 from datetime import datetime, date, timedelta
 from typing import List
@@ -13,6 +14,8 @@ from ...core.agregats_officiels import calculer as calculer_agregat
 from ...core.rfq_controls import booking_terms_differences, product_terms, product_terms_hash
 from ...core.booking_contract import DealCreate
 from ...services.business_access import deal_entity_id as _deal_entity_id
+
+logger = logging.getLogger(__name__)
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -277,6 +280,7 @@ def _figer_echeancier(body) -> str:
         ech = getattr(compiled, "echeancier", None)
         return json.dumps(ech.to_dict()) if ech is not None else "{}"
     except Exception:
+        logger.warning("Échéancier non figé au booking : script non résolu", exc_info=True)
         return "{}"
 
 

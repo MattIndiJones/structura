@@ -310,6 +310,7 @@ def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_pa
                             source.update(history_scope="MAX_AVAILABLE_REQUESTED", full_history_requested_end=end,
                                           full_history_checked_at=source["fetched_at"])
             except Exception as exc:
+                logger.warning("Historique fournisseur de %s en échec", ticker, exc_info=exc)
                 failures[ticker] = (f"INVALID_PROVIDER_HISTORY: {exc}" if isinstance(exc, ValueError)
                                     else f"PROVIDER_UNAVAILABLE: {type(exc).__name__}")
         if (selected is None or selected.empty) and not full_history:

@@ -7,6 +7,7 @@ itself is pure arithmetic over immutable, date-matched GREEKS valuation runs
 on every screen load. What can be expensive is producing those per-deal
 Greeks, which stays an explicit action in the frontend."""
 from __future__ import annotations
+import logging
 import json
 import math
 from itertools import combinations
@@ -28,6 +29,8 @@ from ..core.amc_prices import fx_quote_to
 from ..core.risk_lifecycle import deal_risk_state, terminal_dates_by_deal
 from ..core.valuation_runs import current_fixings_match
 from ..core.risk_scope import DataScope, select_risk_deals, risk_scope_metadata
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/portfolios", tags=["portfolios"])
 
@@ -662,6 +665,7 @@ def _run_explain_on_book(deals: list[Deal], session: Session, n_paths: int,
                             "reason": e.detail})
             continue
         except Exception as e:
+            logger.exception("P&L explain du portefeuille : deal %s en échec", d.reference)
             errors.append({"deal_id": d.id, "reference": d.reference,
                            "error": str(e)})
             continue
@@ -951,6 +955,7 @@ def _aggregate_barriers(deals: list[Deal], session: Session) -> dict:
         try:
             row = build_watchlist_row(d, session, today)
         except Exception as e:
+            logger.exception("Barrières du portefeuille : deal %s en échec", d.reference)
             errors.append({"deal_id": d.id, "reference": d.reference, "error": str(e)})
             continue
         if row["barriers"]:
