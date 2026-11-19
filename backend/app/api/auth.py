@@ -2,6 +2,7 @@ import logging
 import os
 import secrets
 import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Optional
@@ -32,9 +33,18 @@ from ..core.instance_signing import (
     _LEAKED_SECRET, _SECRET_FILE, _load_secret, process_secret, receipt_signing_secret,
 )
 
-_SECRET = process_secret()
+from ..core.session_key import load_session_secret
+
+# Sessions have their own sealed key; .jwt_secret now signs receipts only
+# (P1-8, S5, core/session_key.py).
+_SECRET = load_session_secret()
 _ALGO = "HS256"
-_EXPIRE_DAYS = 7
+# P1-8 / S4: a token was valid for seven days, with no renewal. It now lasts
+# 30 minutes and the open tab renews it (POST /api/auth/refresh); a session
+# ends 12 hours after the password was given, whatever the renewals. A stolen
+# token is worth half an hour, and a full working day needs one login.
+ACCESS_MINUTES = 30
+SESSION_MAX_HOURS = 12
 
 _oauth2 = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
@@ -102,12 +112,28 @@ def _identity_config():
     return current_config() or workbench_config()
 
 
-def _make_token(user_id: int, role: str, entity_id: int | None, developer_origin=None, *, auth_version=0) -> str:
+def _session_start(payload: dict) -> int | None:
+    # Tokens issued before 19/11/2026 carry no auth_time: their issue time
+    # stands for it, so they too end 12 hours after it.
+    value = payload.get("auth_time", payload.get("iat"))
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def _session_over(started: int | None) -> bool:
+    return started is None or time.time() - started >= SESSION_MAX_HOURS * 3600
+
+
+def _make_token(user_id: int, role: str, entity_id: int | None, developer_origin=None, *, auth_version=0,
+                auth_time: int | None = None) -> str:
+    started = int(time.time()) if auth_time is None else int(auth_time)
+    expires = min(datetime.utcnow() + timedelta(minutes=ACCESS_MINUTES),
+                  datetime.utcfromtimestamp(started) + timedelta(hours=SESSION_MAX_HOURS))
     payload = {
         "sub": str(user_id),
         "role": role,
         "entity_id": entity_id,
-        "exp": datetime.utcnow() + timedelta(days=_EXPIRE_DAYS),
+        "exp": expires,
+        "auth_time": started,
         **session_claims(auth_version),
     }
     config = _identity_config()
@@ -138,6 +164,9 @@ def get_current_user(
         digest = session_digest(payload)
     except (JWTError, KeyError, ValueError, TypeError):
         raise exc
+    if _session_over(_session_start(payload)):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session de 12 heures écoulée : reconnectez-vous.",
+                            headers={"WWW-Authenticate": "Bearer"})
     user = consultation_sessions.load_user(session, user_id=user_id) if consultation_mode() else session.get(User, user_id)
     revoked = consultation_sessions.revoked(digest) if consultation_mode() else session.get(RevokedSession, digest)
     if not user or not user.is_active or payload["session_version"] != user.auth_version or revoked:
@@ -154,7 +183,7 @@ def get_current_user(
         if not marker or marker.installation_id != str(config.installation_id):
             raise exc
     if user.password_change_required and request and request.url.path not in {
-            "/api/auth/me", "/api/auth/password", "/api/auth/logout", "/api/auth/logout-all"}:
+            "/api/auth/me", "/api/auth/password", "/api/auth/logout", "/api/auth/logout-all", "/api/auth/refresh"}:
         raise HTTPException(403, "Changez le mot de passe provisoire avant de poursuivre.")
     return user
 
@@ -204,6 +233,18 @@ def change_password(body: PasswordChange, request: Request,
     revoke_user_sessions(session, current)
     _session_audit(session, "PASSWORD_CHANGE", current, request)
     session.commit()
+
+
+@router.post("/refresh")
+def refresh(current: Annotated[User, Depends(get_current_user)],
+            token: Annotated[str, Depends(_oauth2)]):
+    """A new 30-minute token for the same session. The session start is
+    carried over: renewing never extends it past 12 hours after the login."""
+    payload = jwt.get_unverified_claims(token)  # Already verified by get_current_user.
+    return {"access_token": _make_token(current.id, current.role, current.entity_id,
+                                        payload.get("developer_origin"), auth_version=current.auth_version,
+                                        auth_time=_session_start(payload)),
+            "token_type": "bearer", "expires_in": ACCESS_MINUTES * 60}
 
 
 @router.post("/logout", status_code=204)

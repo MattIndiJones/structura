@@ -465,6 +465,15 @@ class AuditEvent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
+class AuditChainLink(SQLModel, table=True):
+    """Hash link of one audit event to its predecessor (db/audit_integrity.py)."""
+    __tablename__ = "audit_chain"
+    event_id: int = Field(primary_key=True, foreign_key="audit_events.id")
+    prev_hash: Optional[str] = Field(default=None)
+    row_hash: str
+    sealed_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class UatGenerationBatch(SQLModel, table=True):
     """Admin-created, reproducible RFQ/deal test-data lot.
 
@@ -2045,3 +2054,5 @@ class ConstraintDefinition(SQLModel, table=True):
 
 from .archive_integrity import register as _register_archive_integrity
 _register_archive_integrity(OptimizerResearch.__table__, ArchivedDocument.__table__, VariantStudyArchive.__table__)
+from .audit_integrity import register as _register_audit_integrity
+_register_audit_integrity(AuditEvent.__table__, AuditChainLink.__table__)

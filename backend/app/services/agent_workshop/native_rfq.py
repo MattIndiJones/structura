@@ -141,12 +141,14 @@ class NativeRfq:
             page.locator('input[type="password"]').fill(credentials['password'])
             with page.expect_event('load'):
                 page.get_by_role('button', name='Se connecter', exact=True).click()
-            token = page.evaluate("sessionStorage.getItem('auth_token')")
-            if not token:
-                raise ValueError('Le contrôleur de publication ne dispose pas de session propre.')
-            self.checkers[key] = token
+            self.checkers[key] = page
+        # Read the token from the checker's tab at each decision: the tab
+        # renews its 30-minute token itself (P1-8, S4).
+        token = self.checkers[key].evaluate("sessionStorage.getItem('auth_token')")
+        if not token:
+            raise ValueError('Le contrôleur de publication ne dispose pas de session propre.')
         path = f'/api/rfq-inbox/{item}/validate'
-        response = t.http.post(t.actor(key)['url'] + path, headers={'Authorization':'Bearer ' + self.checkers[key]}, json=decision)
+        response = t.http.post(t.actor(key)['url'] + path, headers={'Authorization':'Bearer ' + token}, json=decision)
         t.calls.append({'method':'POST', 'path':path, 'status':response.status_code, 'profile':'checker'})
         response.raise_for_status()
         return response.json()

@@ -38,7 +38,8 @@ def prepare_controls(platform):
         if not keyfile.exists():
             keyfile.write_text(secrets.token_urlsafe(64), encoding="utf-8")
         if service == "admin_workbench" and not (directory / ".bootstrap_credentials.json").exists():
-            atomic_json(directory / ".bootstrap_credentials.json", {"admin": secrets.token_urlsafe(32)})
+            from ..core.secret_store import write_secret
+            write_secret(directory / ".bootstrap_credentials.json", json.dumps({"admin": secrets.token_urlsafe(32)}))
         atomic_json(directory / "platform.json", platform.public_descriptor())
         if service == "simulation_controller":
             from cryptography.hazmat.primitives import serialization
@@ -75,6 +76,8 @@ def owned_stop(app, request):
 def redirect_app(config):
     descriptor = json.loads((config.data_dir / "platform.json").read_text(encoding="utf-8"))
     app = FastAPI(title="Structura — accès historique", docs_url=None, redoc_url=None)
+    from ..core.security_headers import install_security_headers
+    install_security_headers(app)
 
     @app.get("/health")
     def health():

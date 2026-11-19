@@ -99,9 +99,12 @@ def test_central_service_has_no_business_schema_or_routes(tmp_path, monkeypatch)
         assert result["billing_enabled"] is False
         assert "data_dir" not in json.dumps(result)
         assert client.get("/api/deals", headers=headers).status_code == 404
-        wrong = jwt.decode(token, signing_secret(config), algorithms=["HS256"], audience=str(config.installation_id))
+        # Sessions are signed by the sealed session key, not the receipt key (P1-8, S5).
+        from backend.app.core.session_key import session_secret_at
+        session_key = session_secret_at(config.data_dir)
+        wrong = jwt.decode(token, session_key, algorithms=["HS256"], audience=str(config.installation_id))
         wrong["aud"] = "other-installation"
-        bad_token = jwt.encode(wrong, signing_secret(config), algorithm="HS256")
+        bad_token = jwt.encode(wrong, session_key, algorithm="HS256")
         assert client.get("/api/auth/me", headers={"Authorization": "Bearer " + bad_token}).status_code == 401
     assert not (config.data_dir / "structura.db").exists()
     with sqlite3.connect(config.data_dir / "platform.db") as connection:

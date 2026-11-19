@@ -1,10 +1,12 @@
 """Agent tools acting on public authenticated HTTP and real browser screens."""
+import base64
 from copy import deepcopy
 from datetime import date, timedelta
 import hashlib
 import json
 from pathlib import Path
 import secrets
+import time
 from uuid import uuid4
 from urllib.parse import urlparse
 import httpx
@@ -28,6 +30,7 @@ class Tools:
     def __init__(self, directory, state, browser, provision_owner=None, on_activity=None):
         self.directory, self.state, self.browser = directory, state, browser
         self.contexts, self.pages, self.tokens = {}, {}, {}
+        self.credentials = {}
         self.http = httpx.Client(timeout=90, trust_env=False)
         self.calls = []
         self.provision_owner = provision_owner
@@ -63,11 +66,12 @@ class Tools:
         response = self.http.post(self.actor(key)['url']+'/api/auth/login', data={k:credentials[k] for k in ('username','password')})
         response.raise_for_status()
         self.tokens[key] = response.json()['access_token']
+        self.credentials[key] = {k: credentials[k] for k in ('username', 'password')}
         who = self.api(key, 'GET', '/api/auth/me')
         if who['username'] != credentials['username']:
             raise ValueError('Identité de session inattendue.')
         self.actor(key).update(registered=True, online=True, username=who['username'], entity_id=who['entity_id'], account_role=who['role'], status='Prêt')
-        self.page(key).add_init_script('sessionStorage.setItem("auth_token", '+json.dumps(self.tokens[key])+');')
+        self.page(key).add_init_script('if (!sessionStorage.getItem("auth_token")) sessionStorage.setItem("auth_token", '+json.dumps(self.tokens[key])+');')
         self.refresh_native_facts(key)
         return {'prepared':True, 'registration_exercised':False}
 
@@ -141,6 +145,29 @@ class Tools:
                     case['trade_confirmed']=True
         return {'recovered_from':'NATIVE_RFQ','writes':0}
 
+    def _renew_token(self, key):
+        """Tokens last 30 minutes and sessions 12 hours (P1-8, S4), while a
+        campaign runs for hours: renew a token close to its end, and log in
+        again with the agent's own credentials once the session is over."""
+        token = self.tokens.get(key)
+        if not token:
+            return
+        try:
+            claims = token.split(".")[1]
+            expires = json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4)))["exp"]
+        except (IndexError, ValueError, KeyError, TypeError):
+            return
+        if expires - time.time() > 300:
+            return
+        url = self.actor(key)["url"]
+        reply = self.http.post(url + "/api/auth/refresh", headers={"Authorization": "Bearer " + token})
+        if reply.is_success:
+            self.tokens[key] = reply.json()["access_token"]
+        elif key in self.credentials:
+            login = self.http.post(url + "/api/auth/login", data=self.credentials[key])
+            if login.is_success:
+                self.tokens[key] = login.json()["access_token"]
+
     def api(self, key, method, path, body=None):
         if not path.startswith("/api/") or ".." in path or "#" in path or "\\" in path:
             raise ValueError("Une route API locale explicite est requise.")
@@ -150,6 +177,7 @@ class Tools:
         if path.startswith("/api/auth/") and path != "/api/auth/me":
             raise ValueError("La connexion et l'inscription passent par l'écran avec register.")
         self.notify_request(key, {"method": method, "path": path, "status": "PENDING"})
+        self._renew_token(key)
         for attempt in range(2):
             try:
                 response = self.http.request(method, self.actor(key)["url"] + path,
@@ -293,6 +321,7 @@ class Tools:
             register()
         page.wait_for_function("Boolean(sessionStorage.getItem('auth_token'))")
         self.tokens[key] = page.evaluate("sessionStorage.getItem('auth_token')")
+        self.credentials[key] = {k: credentials[k] for k in ("username", "password")}
         who = self.api(key, "GET", "/api/auth/me")
         if who["username"] != credentials["username"]:
             self.tokens.pop(key, None)

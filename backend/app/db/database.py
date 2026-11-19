@@ -74,6 +74,8 @@ def _migrate():
         migrate_quote_revisions(conn)
         from .archive_integrity import migrate as migrate_archive_integrity
         migrate_archive_integrity(conn)
+        from .audit_integrity import migrate as migrate_audit_integrity
+        migrate_audit_integrity(conn)
         for column, declaration in (("provider_id", "INTEGER REFERENCES rfq_providers(id)"),
                                     ("counterparty_id", "INTEGER REFERENCES counterparties(id)"),
                                     ("counterparty_name", "TEXT"), ("identity_frozen", "BOOLEAN NOT NULL DEFAULT 0")):

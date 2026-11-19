@@ -1,5 +1,14 @@
 // Browser sessions belong to a tab. Never import the former shared token.
 export function sessionToken() { return sessionStorage.getItem('auth_token') }
+/** Expiry of a token, in ms since the epoch, read from its own claims. */
+export function tokenExpiry(token) {
+  try {
+    const claims = JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return Number.isFinite(claims.exp) ? claims.exp * 1000 : null
+  } catch { return null }
+}
+/** A renewed token for the same session: the requests in flight stay. */
+export function replaceSessionToken(token) { sessionStorage.setItem('auth_token', token) }
 export function sessionInstallation() {
   try { return JSON.parse(sessionStorage.getItem('auth_installation') || 'null') } catch { return null }
 }

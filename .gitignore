@@ -22,6 +22,9 @@ node_modules/
 
 # Signing key generated per machine — must never be versioned (cf. auth.py)
 backend/data/.jwt_secret
+# Session key, sealed by Windows (core/session_key.py, P1-8)
+backend/data/.session_secret
+**/.session_secret
 
 # LLM provider API keys read by services/llm/keys.py. backend/data/ is NOT
 # ignored as a whole — only the patterns listed here — so each secret file

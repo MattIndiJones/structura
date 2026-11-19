@@ -90,12 +90,15 @@ def create_app():
     config = current_config()
     if not config or config.kind != "platform":
         raise RuntimeError("Manifeste central explicite requis.")
-    secret = signing_secret(config)
+    from ..core.session_key import session_secret_at
+    secret = session_secret_at(config.data_dir)   # sealed session key (P1-8, S5)
     @asynccontextmanager
     async def lifespan(app):
         initialize(config)
         yield
     app = FastAPI(title="Structura — plateforme locale de développement", lifespan=lifespan)
+    from ..core.security_headers import install_security_headers
+    install_security_headers(app)
     app.add_middleware(CORSMiddleware, allow_origins=origins(config),
                        allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["Authorization", "Content-Type", "X-Structura-Development"])
     oauth = OAuth2PasswordBearer(tokenUrl="/api/auth/login")

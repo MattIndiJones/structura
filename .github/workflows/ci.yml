@@ -55,7 +55,8 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -r requirements.lock.txt
+      # Every package pinned with the hash of each published file (P1-8, S12).
+      - run: python -m pip install --require-hashes -r requirements.lock.txt
       - run: python backend/scripts/check_environment.py
       - name: Tests backend sélectionnés
         shell: pwsh

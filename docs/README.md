@@ -10,6 +10,11 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Protections web, sessions, secrets, audit et dépendances — 19/11](projects/platform/SECURITE_P1_8_2026-11-19.md)
+— P1-8 : en-têtes de sécurité, jeton de 30 min renouvelé et session de 12 h, secrets scellés par
+Windows sauf la clé des reçus (désormais distincte de la clé de session), journal d'audit en ajout
+seul et chaîné, verrou complet par empreinte, `pip-audit` et `npm audit` chaque nuit.
+
 [Pricing interactif en file — 19/11](projects/platform/PRICING_INTERACTIF_P1_4_2026-11-19.md)
 — P1-4 : prix, Greeks et spread implicite du Pricer calculés dans des processus préchauffés,
 annulables, arrêtés à 600 s ou quand plus aucun écran ne les suit. Prix identique à la route
@@ -1050,6 +1055,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [SECURITE_P1_8_2026-11-19.md](projects/platform/SECURITE_P1_8_2026-11-19.md) | 19/11 | En-têtes, sessions courtes renouvelées, secrets scellés, audit chaîné, dépendances verrouillées (P1-8) | Fait localement | Clé RSA du portail, identifiants d'agents, rotation des canaux RFQ, frein de connexion persistant (S7) |
 | [PRICING_INTERACTIF_P1_4_2026-11-19.md](projects/platform/PRICING_INTERACTIF_P1_4_2026-11-19.md) | 19/11 | Pricing interactif en file : processus préchauffés, délai, annulation, abandon (P1-4) | Fait localement | Autres analyses du Pricer (profil, trajectoires, backtest, solveur, grille, MTF) |
 | [DIAGNOSTIC_P1_9_2026-11-19.md](projects/platform/DIAGNOSTIC_P1_9_2026-11-19.md) | 19/11 | Journaux par installation, erreurs absorbées, santé avec la base (P1-9) | Fait localement | Blocs AMC et de formatage ; métriques et alertes (P2-6) |
 | [ISOLATION_TESTS_2026-11-19.md](projects/platform/ISOLATION_TESTS_2026-11-19.md) | 19/11 | Isolation des données et intégrité référentielle des tests (P1-6) | Fait localement ; 49 fichiers exemptés | Vider `SANS_INTEGRITE`, aides partagées d'abord |
