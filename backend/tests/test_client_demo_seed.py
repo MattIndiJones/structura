@@ -32,9 +32,9 @@ from backend.scripts.seed_client_demo import (
 
 # Ces tests SUPPRIMENT — c'est le seul endroit où l'ordre compte, donc le seul
 # où l'absence de contrainte laisse passer un vrai défaut. D'où l'usage de la
-# fabrique de `conftest.py` plutôt que d'un `create_engine` nu. Voir ce
-# fichier-là pour la raison du choix « à la demande » plutôt que global.
-from backend.tests.conftest import _moteur_sqlite
+# fabrique de `sqlite_engines.py`, qui impose la contrainte même si ce module
+# entrait un jour dans les exemptions de `conftest.py`.
+from backend.tests.sqlite_engines import _moteur_sqlite
 
 
 def _moteur():
