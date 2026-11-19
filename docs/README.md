@@ -10,6 +10,11 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Isolation des tests et intégrité référentielle — 19/11](projects/platform/ISOLATION_TESTS_2026-11-19.md)
+— P1-6 : dossier de données temporaire pour toute la session de tests, clés étrangères appliquées
+par défaut aux moteurs SQLite des tests. 464 violations mesurées sur 49 fichiers, exemptés en attendant
+leurs fixtures. Non commité.
+
 [Découpage du store du Pricer — 18/11](projects/pricing/DECOUPAGE_STORE_PRICING_2026-11-18.md)
 — `stores/pricing.js` (3 668 lignes) en quatorze modules installés sur un contexte partagé ; même
 interface pour les composants, 999 tests frontend et build. Tour dans l'application à faire.
@@ -1036,6 +1041,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [ISOLATION_TESTS_2026-11-19.md](projects/platform/ISOLATION_TESTS_2026-11-19.md) | 19/11 | Isolation des données et intégrité référentielle des tests (P1-6) | Fait localement ; 49 fichiers exemptés | Vider `SANS_INTEGRITE`, aides partagées d'abord |
 | [WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md](projects/platform/WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md) | 14/10 | Paramètres pleine largeur, calendrier multi-RFQ, funding/marges, cadences, estimation et reprise | Raccordé localement ; recette ciblée sans IA | Lancer explicitement le suivi de cinq ans ; qualifier les branches non exercées et l’ergonomie détaillée |
 | [RFQ_NETWORK_ACTION_PLAN_2026-10-12.md](projects/platform/RFQ_NETWORK_ACTION_PLAN_2026-10-12.md) | 12/10 | Destinataires par organisation, réception bancaire, publication contrôlée, retour automatique et manuel ; lots 0 à 8 | Lot 0 cadré avec premier prototype ; lot 1 cadré | Compléments d'écran, choix du pilote, réalisation des lots 1 à 8 et recette réseau ; aucune reprise des anciens tests |
 | [RFQ_NETWORK_LOT_0_IMPLEMENTATION_2026-10-12.md](projects/platform/RFQ_NETWORK_LOT_0_IMPLEMENTATION_2026-10-12.md) | 12/10 | Prototype demandeur/banque ; préparation RFQ depuis Product, moteurs actuels, Pricer et scroll interne | Raccordement livré sur branche ; 154 tests backend ciblés, 424 frontend et build ; recette isolée | Propriété, droits, partenaires, réception bancaire, transport et booking réseau dans les lots suivants |
