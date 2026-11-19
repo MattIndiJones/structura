@@ -28,3 +28,5 @@ sqlmodel==0.0.38
 SQLAlchemy==2.0.51
 python-jose[cryptography]==3.5.0
 bcrypt==4.3.0
+# Parcours de bout en bout (e2e/, P1-10) et recettes de l’atelier.
+playwright==1.63.0

@@ -4,6 +4,7 @@ import router from './router/index.js'
 import App from './App.vue'
 import './style.css'
 import { installContextReloadGuard } from './composables/useContextChanges.js'
+import { installErrorHandling, mountSafely } from './utils/appErrors.js'
 installContextReloadGuard()
 
 // Note: le thème Chart.js (src/charts/theme.js) n'est PAS importé ici —
@@ -14,6 +15,9 @@ installContextReloadGuard()
 // propre chunk lazy-loadé existant — voir charts/theme.js.
 
 const app = createApp(App)
+// Before use(): an error while installing a plugin or mounting must already
+// reach the error screen rather than leave a blank page (P1-10, U1).
+installErrorHandling(app, router)
 app.use(createPinia())
 app.use(router)
-app.mount('#app')
+mountSafely(app, '#app')
