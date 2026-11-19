@@ -13,7 +13,7 @@ périodique. Lecture seule du code, sans navigateur. *Suivi.*
 [Isolation des tests et intégrité référentielle — 19/11](projects/platform/ISOLATION_TESTS_2026-11-19.md)
 — P1-6 : dossier de données temporaire pour toute la session de tests, clés étrangères appliquées
 par défaut aux moteurs SQLite des tests. 464 violations mesurées sur 49 fichiers, exemptés en attendant
-leurs fixtures. Non commité.
+leurs fixtures.
 
 [Découpage du store du Pricer — 18/11](projects/pricing/DECOUPAGE_STORE_PRICING_2026-11-18.md)
 — `stores/pricing.js` (3 668 lignes) en quatorze modules installés sur un contexte partagé ; même

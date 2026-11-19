@@ -1,7 +1,7 @@
 # Isolation des tests et intégrité référentielle par défaut
 
 État local au 19/11/2026. Réponse à P1-6 de l'[audit technique du 16/11](../../audits/AUDIT_GLOBAL_TECHNIQUE_2026-11-16.md),
-constats D2 et D5. Rien n'est commité à la date de cette note.
+constats D2 et D5.
 
 ## 1. Les données du poste sont hors d'atteinte (D5)
 
