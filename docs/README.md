@@ -59,8 +59,8 @@ comparaison A/B en parallèle. LSV reste soumis à la qualification du levier.
 exclusion des barres intrajournalières ; 59 tests backend ciblés, 961 frontend et build.
 Compléments du 18/11 : même correction pour le MtM du deal en marché actuel, puis règle de
 continuité corrigée à la source (un férié de place n'est plus une lacune, cours nus et
-ajustés, tous chemins) ; reconduction alignée sur le Pricer. Reste : fraîcheur D03 le
-jour même d'un férié, inchangée.
+ajustés, tous chemins) ; reconduction alignée sur le Pricer. Complément du 19/11 : D03
+à la date demandée, le jour où la place est fermée, le dernier cours connu fait foi.
 
 [Lanceur : présentation et adaptation aux petites fenêtres — 03/11](projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md)
 — Thème ivoire et bleu nuit, accès Admin prioritaire, cartes compactes ;

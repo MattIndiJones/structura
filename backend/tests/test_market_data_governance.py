@@ -68,7 +68,7 @@ def test_approved_policy_accepts_day_three_and_excludes_day_four(usage):
     assert accepted['max_age_days'] == 3 and accepted['age_days'] == 3
     assert not excluded['qualified'] and excluded['status'] == 'STALE'
     assert excluded['max_age_days'] == 3 and excluded['age_days'] == 4
-    assert accepted['policy_version'] == 'D03-C11-2026-10-21-3D'
+    assert accepted['policy_version'] == market_policy.POLICY_VERSION
 
 
 def test_sixty_day_suspension_is_excluded_instead_of_zero_returns(monkeypatch):

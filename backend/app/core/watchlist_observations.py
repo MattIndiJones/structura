@@ -2,6 +2,7 @@
 import math
 
 from .market_policy import freshness
+from .venue_closures import venue_calendar
 
 
 def _positive(value):
@@ -50,16 +51,17 @@ def watchlist_observations(underlyings, initial_levels, history, strike, asof):
         # received yesterday when its actual source close predates that fixing.
         last = max(observed, key=lambda i: (source_dates[i], dates[i])) if source_dates else observed[-1]
         effective = source_dates[last] if source_dates else history.get("effective_dates", {}).get(ticker) or dates[last]
-        quality = freshness(effective, asof, "history")
+        venue = venue_calendar(ticker, history.get("sources", {}).get(ticker))
+        quality = freshness(effective, asof, "history", venue)
         row.update(effective_date=effective, freshness=quality)
         if not quality["qualified"]:
             continue
         row.update(spot=valid[last], perf=valid[last] / initial, current_status="AVAILABLE")
         # No pre-strike fallback; no minimum over a partially missing window.
         # The common history can start late: never call that a since-strike path.
-        if (not indices or not freshness(strike, dates[indices[0]], "history")["qualified"]
+        if (not indices or not freshness(strike, dates[indices[0]], "history", venue)["qualified"]
                 or any(valid.get(i) is None for i in indices)
-                or any(not freshness(dates[a], dates[b], "history")["qualified"]
+                or any(not freshness(dates[a], dates[b], "history", venue)["qualified"]
                        for a, b in zip(indices, indices[1:]))):
             continue
         if source_dates and any(i >= len(source_dates) or source_dates[i] < strike for i in indices):

@@ -99,3 +99,68 @@ def test_storage_status_qualifies_a_history_across_easter():
     status = market_history.storage_status('GLE.PA', END)
     assert all(base['long_gaps'] == 0 for base in status['bases'].values())
     assert status['consumer_available']
+
+
+# ── D03 at the requested date: the last known close on a closed day ──
+# Decision of 19/11/2026: on a day the venue does not trade, the last known
+# close is the price. Before it, a GLE.PA valuation on Easter Monday was
+# refused as STALE: the Thursday close was four calendar days old.
+
+from backend.app.core import market_policy
+
+LAST_THURSDAY = '2026-04-02'
+
+
+def _store_until_thursday(ticker, venue):
+    index = session_calendar(venue, 2026).sessions_in_range(START, LAST_THURSDAY)
+    values = pd.Series(50 * np.exp(.001 * np.arange(len(index))), index=index)
+    for flag in (False, True):
+        market_history.store_history(ticker, values, flag, START, LAST_THURSDAY)
+    return values
+
+
+@pytest.mark.parametrize('asof, closed, accepted', [
+    (GOOD_FRIDAY, 1, True), (EASTER_MONDAY, 2, True),
+    ('2026-04-07', 2, True),      # five calendar days, three once Easter is removed
+    ('2026-04-08', 2, False),     # four: the D03 limit itself is unchanged
+])
+def test_the_last_close_before_a_closure_is_still_the_price(asof, closed, accepted):
+    quality = market_policy.freshness(LAST_THURSDAY, asof, 'history', 'XPAR')
+    assert quality['venue_closed_days'] == closed
+    assert quality['policy_age_days'] == quality['age_days'] - closed
+    assert quality['qualified'] is accepted
+    assert quality['status'] == ('CARRIED' if accepted else 'STALE')
+
+
+def test_without_a_venue_the_calendar_day_rule_is_kept():
+    assert not market_policy.freshness(LAST_THURSDAY, EASTER_MONDAY, 'history')['qualified']
+    # Reporting FX has no venue: a calendar passed by mistake changes nothing.
+    assert not market_policy.freshness(LAST_THURSDAY, EASTER_MONDAY, 'reporting_fx', 'XPAR')['qualified']
+
+
+def test_weekends_still_age_a_close():
+    # Friday 13/03 to Wednesday 18/03, Paris open on Monday and Tuesday.
+    quality = market_policy.freshness('2026-03-13', '2026-03-18', 'history', 'XPAR')
+    assert quality['venue_closed_days'] == 0 and not quality['qualified']
+
+
+@pytest.mark.parametrize('adjusted', [False, True])
+def test_a_valuation_on_easter_monday_takes_the_thursday_close(adjusted):
+    values = _store_until_thursday('GLE.PA', 'XPAR')
+    history = market_data.load_hist_prices(['GLE.PA'], START, EASTER_MONDAY, adjusted=adjusted)
+    assert not history.get('error'), history.get('error')
+    assert history['asof_effective'] == LAST_THURSDAY
+    assert history['prices']['GLE.PA'][-1] == pytest.approx(values.iloc[-1])
+    quality = history['freshness']['GLE.PA']
+    assert quality['status'] == 'CARRIED' and quality['venue_closed_days'] == 2
+
+
+def test_an_unknown_venue_is_still_stale_on_easter_monday():
+    _store_until_thursday('ZZZ', 'XPAR')
+    history = market_data.load_hist_prices(['ZZZ'], START, EASTER_MONDAY, adjusted=False)
+    assert 'STALE' in history['error']
+
+
+def test_storage_status_qualifies_easter_monday():
+    _store_until_thursday('GLE.PA', 'XPAR')
+    assert market_history.storage_status('GLE.PA', EASTER_MONDAY)['consumer_available']

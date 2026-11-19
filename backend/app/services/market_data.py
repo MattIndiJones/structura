@@ -11,6 +11,7 @@ import pandas as pd
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from ..core import market_storage
+from ..core.venue_closures import venue_calendar
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +285,8 @@ def _load_hist_prices_uncached(tickers, start, end, adjusted, provider, allow_pa
         local_window = local.loc[(local.index >= pd.Timestamp(start)) & (local.index <= pd.Timestamp(end))] if local is not None else None
         usable = (local_window is not None and not local_window.empty
                   and (auto_start or source.get("requested_start", start) <= start)
-                  and market_policy.freshness(local_window.index[-1].date(), requested_end, "history")["qualified"])
+                  and market_policy.freshness(local_window.index[-1].date(), requested_end, "history",
+                                              venue_calendar(ticker, source))["qualified"])
         if full_history:
             usable = (local_window is not None and not local_window.empty
                       and source.get("history_scope") == "MAX_AVAILABLE_REQUESTED"
@@ -387,7 +389,8 @@ def load_yahoo_reference_closes(
                     local = {d: v for d, v in cached["series"].items() if start <= d <= last_day.isoformat()}
                     if (local and cached["requested_start"] <= start
                             and qualify_close(last_day.isoformat(), cached["source"])["qualified"]
-                            and freshness(max(local), last_day, "history")["qualified"]):
+                            and freshness(max(local), last_day, "history",
+                                          venue_calendar(ticker, cached["source"]))["qualified"]):
                         series[ticker], splits[ticker] = local, cached["splits"]
                         sources[ticker] = {**cached["source"], "storage": "MARKET_REFERENCE"}
                         if cached.get("currency"):
@@ -576,7 +579,7 @@ def dividend_profile(ticker: str, asof: Optional[str] = None,
             return {"ok": False, "error": "Fenêtre de dividendes invalide."}
         cached = local_profile(symbole, fin.isoformat(), window_years)
         if cached:
-            cached["freshness"] = freshness(cached.get("asof_effective"), fin, "history")
+            cached["freshness"] = freshness(cached.get("asof_effective"), fin, "history", venue_calendar(symbole))
             if cached["freshness"]["qualified"]:
                 return cached
         if not _HAS_YF:
@@ -596,7 +599,7 @@ def dividend_profile(ticker: str, asof: Optional[str] = None,
             if local is not None:
                 local = local.loc[(local.index >= pd.Timestamp(marge)) & (local.index <= pd.Timestamp(fin))]
                 if (not local.empty and source.get('requested_start', marge) <= marge
-                        and freshness(local.index[-1].date(), fin, 'history')['qualified']):
+                        and freshness(local.index[-1].date(), fin, 'history', venue_calendar(symbole, source))['qualified']):
                     return local.to_frame('Close'), False
             return instrument.history(start=marge, end=borne, auto_adjust=adjusted), True
         nu, fetched_raw = observations(False)
@@ -676,7 +679,7 @@ def dividend_profile(ticker: str, asof: Optional[str] = None,
             "adjusted_cross_check": True,
             "fetched_at": datetime.utcnow().isoformat(),
             "storage": "PROVIDER",
-            "freshness": freshness(avant_fin.index[-1].date(), fin, "history"),
+            "freshness": freshness(avant_fin.index[-1].date(), fin, "history", venue_calendar(symbole)),
         }
         if not result["freshness"]["qualified"]:
             result.update(ok=False, error="Cours de référence du dividende hors politique de fraîcheur.")
