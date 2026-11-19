@@ -12,6 +12,15 @@
         <div v-if="store.progress > 0" class="progress-track">
           <div class="progress-fill" :style="{ width: store.progress + '%' }"></div>
         </div>
+        <div v-if="store.pricingJob" class="flex items-center gap-2 text-xs mt-1" style="color: var(--muted);">
+          <span>{{ pricingJobLabel(store.pricingJob) }}</span>
+          <HelpTip text="Le calcul tourne dans un processus séparé du serveur. Annuler l'arrête aussitôt ; le serveur l'arrête aussi au-delà de dix minutes, ou si plus aucun écran ne le suit." />
+          <button class="btn-secondary text-[11px] px-2 py-0.5"
+            :disabled="store.pricingJob.status === 'cancelling'"
+            @click="store.cancelPricing()">
+            {{ store.pricingJob.status === 'cancelling' ? 'Annulation…' : 'Annuler' }}
+          </button>
+        </div>
         <div v-else-if="store.result" class="hidden sm:flex items-center gap-3 text-xs" style="color: var(--muted);">
           <span class="font-bold text-sm" style="color: var(--accent);">
             <SensitiveValue>{{ (store.result.price * 100).toFixed(2) }}%</SensitiveValue>
@@ -145,6 +154,7 @@ import EmtPanel        from '../components/EmtPanel.vue'
 import SensitiveValue  from '../components/SensitiveValue.vue'
 import ProductContextBar from '../components/ProductContextBar.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
+import HelpTip from '../components/HelpTip.vue'
 import DealReferenceLink from '../components/DealReferenceLink.vue'
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -170,6 +180,16 @@ async function newPricing() {
 }
 
 const eventsInitialDealId = ref(store.openedDeal?.id || null)
+
+function pricingJobLabel(job) {
+  if (job.status === 'cancelling') return 'Arrêt du calcul…'
+  if (job.status === 'queued') {
+    return job.queue_position > 1
+      ? `En attente d’un processus de calcul (${job.queue_position - 1} calcul(s) devant)…`
+      : 'En attente d’un processus de calcul…'
+  }
+  return `Calcul en cours · ${Math.round((job.elapsed_ms || 0) / 1000)} s`
+}
 
 function formatWork(value) {
   if (value >= 1e9) return `${(value / 1e9).toFixed(1)} Md u.`

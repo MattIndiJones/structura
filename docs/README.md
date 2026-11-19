@@ -10,6 +10,11 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Pricing interactif en file — 19/11](projects/platform/PRICING_INTERACTIF_P1_4_2026-11-19.md)
+— P1-4 : prix, Greeks et spread implicite du Pricer calculés dans des processus préchauffés,
+annulables, arrêtés à 600 s ou quand plus aucun écran ne les suit. Prix identique à la route
+synchrone. 15 tests backend sur vrais processus, 11 frontend, build.
+
 [Diagnostic d'une installation — 19/11](projects/platform/DIAGNOSTIC_P1_9_2026-11-19.md)
 — P1-9 : journal tournant par installation, traces d'uvicorn et des tâches de fond, treize erreurs
 absorbées tracées, santé qui contrôle la base (`/health/ready` en 503). 13 tests, 1 082 consommateurs.
@@ -1045,6 +1050,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [PRICING_INTERACTIF_P1_4_2026-11-19.md](projects/platform/PRICING_INTERACTIF_P1_4_2026-11-19.md) | 19/11 | Pricing interactif en file : processus préchauffés, délai, annulation, abandon (P1-4) | Fait localement | Autres analyses du Pricer (profil, trajectoires, backtest, solveur, grille, MTF) |
 | [DIAGNOSTIC_P1_9_2026-11-19.md](projects/platform/DIAGNOSTIC_P1_9_2026-11-19.md) | 19/11 | Journaux par installation, erreurs absorbées, santé avec la base (P1-9) | Fait localement | Blocs AMC et de formatage ; métriques et alertes (P2-6) |
 | [ISOLATION_TESTS_2026-11-19.md](projects/platform/ISOLATION_TESTS_2026-11-19.md) | 19/11 | Isolation des données et intégrité référentielle des tests (P1-6) | Fait localement ; 49 fichiers exemptés | Vider `SANS_INTEGRITE`, aides partagées d'abord |
 | [WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md](projects/platform/WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md) | 14/10 | Paramètres pleine largeur, calendrier multi-RFQ, funding/marges, cadences, estimation et reprise | Raccordé localement ; recette ciblée sans IA | Lancer explicitement le suivi de cinq ans ; qualifier les branches non exercées et l’ergonomie détaillée |
