@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import mimetypes
 import os
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from .runtime import consultation_mode
 from .version import VERSION
+from .logging_setup import configure_logging, log_task_failure
 from .core.document_uploads import DocumentUploadLimitMiddleware
 from .api.pricing import router as pricing_router
 from .api.volatility import router as volatility_router
@@ -102,8 +104,23 @@ async def consultation_read_only(request: Request, call_next):
     return await call_next(request)
 
 
+logger = logging.getLogger(__name__)
+
+
+def _configure_process_logging():
+    """One rotating file per installation; console only in consultation mode,
+    which must not write into the installation it reads (P1-9)."""
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return None
+    from .runtime import data_path
+    path = configure_logging(None if consultation_mode() else data_path("logs"))
+    logger.info("Structura %s démarre ; journal : %s", VERSION, path or "console seule")
+    return path
+
+
 @app.on_event("startup")
 def on_startup():
+    _configure_process_logging()
     init_db()
     if consultation_mode():
         from .services.agent_workshop.lease import CampaignLease
@@ -153,7 +170,9 @@ async def start_lifecycle_scheduler():
             slot = next_run.astimezone(timezone.utc).replace(tzinfo=None)
             await asyncio.to_thread(run_scheduled_refresh, slot, "SCHEDULED")
 
-    asyncio.create_task(_daily_loop())
+    task = asyncio.create_task(_daily_loop())
+    task.add_done_callback(log_task_failure(logger, "ordonnanceur du cycle de vie"))
+    app.state.lifecycle_scheduler_task = task
 
 app.include_router(inlife_router)
 app.include_router(volatility_router)
@@ -215,13 +234,13 @@ async def start_rfq_transport():
             try:
                 await asyncio.to_thread(process_pending, engine, app.state.rfq_transport_stop.is_set)
             except Exception:
-                import logging
-                logging.getLogger(__name__).error("Cycle de transport RFQ interrompu ; reprise au cycle suivant")
+                logger.exception("Cycle de transport RFQ interrompu ; reprise au cycle suivant")
             try:
                 await asyncio.wait_for(app.state.rfq_transport_stop.wait(), timeout=2)
             except asyncio.TimeoutError:
                 pass
     app.state.rfq_transport_task = asyncio.create_task(run())
+    app.state.rfq_transport_task.add_done_callback(log_task_failure(logger, "transport RFQ"))
 
 
 @app.on_event("shutdown")
@@ -234,9 +253,44 @@ async def stop_rfq_transport():
 DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 
+def _database_check() -> dict:
+    """The schema is readable and the constraint enforced, as in production.
+
+    SQLite creates an empty file on connection: SELECT 1 alone would answer
+    "ok" for a missing or wrongly located database."""
+    from sqlalchemy import text
+    from .db.database import engine
+    try:
+        with engine.connect() as connection:
+            tables = connection.execute(text(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users'")).scalar_one()
+            foreign_keys = connection.execute(text("PRAGMA foreign_keys")).scalar_one()
+    except Exception as exc:
+        logger.exception("Contrôle de santé : base inaccessible")
+        return {"ok": False, "error": type(exc).__name__}
+    if not tables:
+        return {"ok": False, "error": "SCHEMA_ABSENT"}
+    return {"ok": bool(foreign_keys), "foreign_keys": bool(foreign_keys),
+            **({} if foreign_keys else {"error": "FOREIGN_KEYS_OFF"})}
+
+
+async def _database_status(timeout: float = 2.0) -> dict:
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_database_check), timeout)
+    except asyncio.TimeoutError:
+        logger.error("Contrôle de santé : la base ne répond pas en %s s", timeout)
+        return {"ok": False, "error": "TIMEOUT"}
+
+
 @app.get("/health")
 async def health():
-    result = {"status": "ok", "version": VERSION}
+    """Liveness and identity, plus the database check.
+
+    Launchers and the workshop identify their instance through this route and
+    require a 200: a failing database is reported as status "degraded" in the
+    body, and as a 503 on /health/ready."""
+    database = await _database_status()
+    result = {"status": "ok" if database["ok"] else "degraded", "version": VERSION, "database": database}
     if os.environ.get("STRUCTURA_INSTANCE_ID"):
         result.update(instance_id=os.environ["STRUCTURA_INSTANCE_ID"], process_id=os.getpid())
     if os.environ.get("STRUCTURA_BOOTSTRAP_PROFILE") == "admin_workbench":
@@ -252,6 +306,14 @@ async def health():
     if consultation_mode():
         result["read_only"] = True
     return result
+
+
+@app.get("/health/ready")
+async def ready():
+    """503 while the database check fails, for a supervisor or a load balancer."""
+    database = await _database_status()
+    return JSONResponse(status_code=200 if database["ok"] else 503,
+                        content={"ready": database["ok"], "version": VERSION, "database": database})
 
 
 @app.post("/_instance/stop", include_in_schema=False)

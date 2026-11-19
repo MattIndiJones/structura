@@ -305,6 +305,8 @@ def start(config, developer_access=False, launcher_id=None):
     env["STRUCTURA_DEVELOPER_ACCESS"] = "1" if developer_access else "0"
     env.update(STRUCTURA_INSTANCE_CONTROL_TOKEN=token, STRUCTURA_LAUNCH_ID=launch_id)
     command = [sys.executable, str(ROOT / "backend" / "run.py")]
+    from ..logging_setup import rotate_server_log
+    rotate_server_log(config.data_dir / "logs" / "server.log")
     with (config.data_dir / "logs" / "server.log").open("a", encoding="utf-8") as log:
         process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))

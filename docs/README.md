@@ -10,6 +10,10 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Diagnostic d'une installation — 19/11](projects/platform/DIAGNOSTIC_P1_9_2026-11-19.md)
+— P1-9 : journal tournant par installation, traces d'uvicorn et des tâches de fond, treize erreurs
+absorbées tracées, santé qui contrôle la base (`/health/ready` en 503). 13 tests, 1 082 consommateurs.
+
 [Isolation des tests et intégrité référentielle — 19/11](projects/platform/ISOLATION_TESTS_2026-11-19.md)
 — P1-6 : dossier de données temporaire pour toute la session de tests, clés étrangères appliquées
 par défaut aux moteurs SQLite des tests. 464 violations mesurées sur 49 fichiers, exemptés en attendant
@@ -59,8 +63,8 @@ comparaison A/B en parallèle. LSV reste soumis à la qualification du levier.
 exclusion des barres intrajournalières ; 59 tests backend ciblés, 961 frontend et build.
 Compléments du 18/11 : même correction pour le MtM du deal en marché actuel, puis règle de
 continuité corrigée à la source (un férié de place n'est plus une lacune, cours nus et
-ajustés, tous chemins) ; reconduction alignée sur le Pricer. Reste : fraîcheur D03 le
-jour même d'un férié, inchangée.
+ajustés, tous chemins) ; reconduction alignée sur le Pricer. Complément du 19/11 : D03
+à la date demandée, le jour où la place est fermée, le dernier cours connu fait foi.
 
 [Lanceur : présentation et adaptation aux petites fenêtres — 03/11](projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md)
 — Thème ivoire et bleu nuit, accès Admin prioritaire, cartes compactes ;
@@ -1041,6 +1045,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [DIAGNOSTIC_P1_9_2026-11-19.md](projects/platform/DIAGNOSTIC_P1_9_2026-11-19.md) | 19/11 | Journaux par installation, erreurs absorbées, santé avec la base (P1-9) | Fait localement | Blocs AMC et de formatage ; métriques et alertes (P2-6) |
 | [ISOLATION_TESTS_2026-11-19.md](projects/platform/ISOLATION_TESTS_2026-11-19.md) | 19/11 | Isolation des données et intégrité référentielle des tests (P1-6) | Fait localement ; 49 fichiers exemptés | Vider `SANS_INTEGRITE`, aides partagées d'abord |
 | [WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md](projects/platform/WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md) | 14/10 | Paramètres pleine largeur, calendrier multi-RFQ, funding/marges, cadences, estimation et reprise | Raccordé localement ; recette ciblée sans IA | Lancer explicitement le suivi de cinq ans ; qualifier les branches non exercées et l’ergonomie détaillée |
 | [RFQ_NETWORK_ACTION_PLAN_2026-10-12.md](projects/platform/RFQ_NETWORK_ACTION_PLAN_2026-10-12.md) | 12/10 | Destinataires par organisation, réception bancaire, publication contrôlée, retour automatique et manuel ; lots 0 à 8 | Lot 0 cadré avec premier prototype ; lot 1 cadré | Compléments d'écran, choix du pilote, réalisation des lots 1 à 8 et recette réseau ; aucune reprise des anciens tests |

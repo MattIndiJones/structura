@@ -100,7 +100,7 @@ def local_history(ticker, start, end, adjusted, *, prefer_full=False):
             return False, False, pd.Timestamp.min, 0
         effective = observed.index[-1]
         complete = (source.get('requested_start', start) <= start
-                    and market_policy.freshness(effective.date(), end, 'history')['qualified'])
+                    and market_policy.freshness(effective.date(), end, 'history', venue_calendar(ticker, source))['qualified'])
         maximum_requested = (prefer_full and source.get("history_scope") == "MAX_AVAILABLE_REQUESTED"
                              and source.get("full_history_requested_end", "") >= end)
         return maximum_requested, complete, effective, len(observed)
@@ -148,7 +148,7 @@ def align_history(tickers, series, start, end, adjusted, sources, failures, allo
             excluded.append(dict(ticker=ticker, reason=failures.get(ticker, "NO_OBSERVATIONS")))
             continue
         effective[ticker] = series[ticker].index.max().date().isoformat()
-        quality = market_policy.freshness(effective[ticker], end, "history")
+        quality = market_policy.freshness(effective[ticker], end, "history", calendars.get(ticker))
         last_quality[ticker] = quality
         bad = ages[ticker].notna() & (ages[ticker] > (maximum if maximum is not None else 0))
         gaps = quote_gaps(series[ticker].index, closures[ticker])
@@ -253,7 +253,7 @@ def storage_status(ticker, asof):
             continue
         series = series.loc[series.index <= pd.Timestamp(asof)]
         effective = series.index[-1].date().isoformat() if not series.empty else None
-        quality = market_policy.freshness(effective, asof, "history")
+        quality = market_policy.freshness(effective, asof, "history", venue_calendar(ticker, source))
         maximum = market_policy.HISTORY_MAX_AGE_DAYS
         closures = (weekday_closures(venue_calendar(ticker, source), series.index.min(), series.index.max())
                     if not series.empty else None)

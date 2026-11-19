@@ -6,6 +6,7 @@ workflow. Synthetic rows are tagged with an explicit batch id, making preview
 reproducible and cleanup strictly scoped to data created by this service.
 """
 from __future__ import annotations
+import logging
 
 import base64
 import hashlib
@@ -39,6 +40,8 @@ from ..db.models import (
     ValuationNote, ValuationNoteVersion, ArchivedDocument,
 )
 from .product_receipts import signed_receipt
+
+logger = logging.getLogger(__name__)
 
 
 deals_api = None
@@ -1063,6 +1066,7 @@ def _load_yahoo_fixings(deal: Deal, target: User, session: Session,
         outcome = deals_api.refresh_deal_core(
             deal, session, actor_user_id=target.id)
     except Exception as exc:  # provider outage, ticker gap, closed market
+        logger.warning("UAT : constatations de %s en échec", deal.reference, exc_info=exc)
         result["fixings_error"] = f"{type(exc).__name__}: {exc}"[:200]
         return result
     result["official_fixings"] = int(outcome.get("officialized") or 0)
@@ -1270,6 +1274,7 @@ def _materialize_post_booking_runs(
                     "mtm": payload.get("mtm"),
                 })
         except Exception as exc:
+            logger.warning("UAT : valorisation de %s en échec", deal.reference, exc_info=exc)
             detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
             result["calculation_errors"].append({
                 "deal_reference": deal.reference,
@@ -1296,6 +1301,7 @@ def _materialize_post_booking_runs(
                     "valuation_date": payload.get("valuation_date") or risk_date.isoformat(),
                 })
         except Exception as exc:
+            logger.warning("UAT : Greeks de %s en échec", deal.reference, exc_info=exc)
             detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
             result["calculation_errors"].append({
                 "deal_reference": deal.reference,

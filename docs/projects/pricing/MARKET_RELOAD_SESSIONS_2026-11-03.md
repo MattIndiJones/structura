@@ -138,3 +138,37 @@ refus du chemin générique ; c'est corrigé. Ses quatre tests de séance manqua
 échouaient aussi selon l'ordre de collecte, **avant cette correction déjà** : ils lisaient
 le vrai CS.PA du magasin AMC, figé au premier import. Sa fixture coupe désormais ce
 magasin.
+
+## Complément du 19/11/2026 : D03 à la date demandée
+
+**Décision de Philippe** : le jour où la place est fermée, on prend le dernier prix connu.
+
+La réserve du complément précédent est levée. `market_policy.freshness` reçoit désormais la
+place du titre et retire de l'ancienneté de la dernière clôture les jours de semaine où
+cette place est fermée, entre cette clôture et la date demandée. C'est la même règle que
+celle de la continuité. Une valorisation de GLE.PA le lundi de Pâques prend la clôture du
+jeudi : quatre jours calendaires, dont deux de fermeture, soit deux jours retenus.
+
+| Clôture du jeudi 02/04/2026, place XPAR | Calendaires | Fermés | Retenus | Statut |
+|---|---|---|---|---|
+| Vendredi saint 03/04 | 1 | 1 | 0 | reporté |
+| Lundi de Pâques 06/04 | 4 | 2 | 2 | reporté (refusé avant) |
+| Mardi 07/04 | 5 | 2 | 3 | reporté (refusé avant) |
+| Mercredi 08/04 | 6 | 2 | 4 | **périmé** |
+
+**Ce qui ne change pas** : la limite de trois jours ; les week-ends, qui comptent toujours ;
+une place inconnue, qui garde la règle calendaire et donc le refus ; le change de reporting,
+qui n'a pas de place. La version de la politique devient `D03-C11-2026-11-19-3D-VENUE`, et
+chaque statut de fraîcheur expose `venue_calendar`, `venue_closed_days` et
+`policy_age_days` à côté de l'ancienneté calendaire `age_days`.
+
+Appels raccordés : l'alignement des historiques, le choix du stock local avant un
+téléchargement, `storage_status`, la référence de marché, le profil de dividendes, et
+l'observation de la watchlist, qui suivait la même règle entre deux dates d'observation.
+Les fixings contractuels (`fixing_finality`) ne sont pas concernés : un fixing reste une
+constatation de séance, pas un cours reporté.
+
+Tests : dix cas ajoutés à `test_venue_closures.py`. Les neuf cas de comportement échouent
+sans la correction ; le dixième, la place inconnue toujours refusée, est une garde ;
+266 tests des consommateurs de la règle et 40 des chargements de prix réussis. Pas de
+mesure sur une série réelle à cette date.

@@ -19,6 +19,7 @@ paid per job. This is also why a job's payload must be plain, picklable data
 (see pricers/payscript.py's docstring) — a worker process has never seen the
 caller's live Python objects."""
 from __future__ import annotations
+import logging
 from concurrent.futures import (
     FIRST_COMPLETED, ThreadPoolExecutor, ProcessPoolExecutor, wait,
 )
@@ -27,6 +28,8 @@ from typing import Callable, Optional
 
 from .job import JobResult
 from .pricers import PRICERS
+
+logger = logging.getLogger(__name__)
 
 
 def _run_one(kind: str, payload: dict) -> dict:
@@ -134,6 +137,8 @@ def run_batch(
                 try:
                     emit(JobResult(job_id=job_id, ok=True, result=future.result()))
                 except Exception as exc:
+                    # A process pool attaches the worker's traceback as the cause.
+                    logger.warning("Calcul %s en échec", job_id, exc_info=exc)
                     emit(JobResult(job_id=job_id, ok=False, error=str(exc)))
             fill()
     finally:

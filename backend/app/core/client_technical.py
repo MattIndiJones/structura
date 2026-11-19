@@ -24,6 +24,7 @@ Ce qui n'est pas extractible reste **None** — jamais zéro. Un coupon inconnu 
 un coupon nul ne se ressemblent que pour qui ne lit pas.
 """
 from __future__ import annotations
+import logging
 
 import re
 from collections import defaultdict
@@ -33,6 +34,8 @@ from sqlmodel import Session, select
 
 from ..db.models import Underlying
 from .payoff_terms import classify_param_barrier
+
+logger = logging.getLogger(__name__)
 
 
 # ── Niveaux d'un deal booké ───────────────────────────────────────────
@@ -64,6 +67,7 @@ def niveaux_du_script(script: Optional[str], user_params: Optional[dict] = None)
         from .payscript.parser import parse_script
         compile_ = parse_script(script)
     except Exception:
+        logger.warning("Script du snapshot client illisible", exc_info=True)
         # Un snapshot illisible ne doit pas faire tomber la fiche : on rend
         # « rien » plutôt qu'une exception, et l'écran affiche « — ».
         return vide
