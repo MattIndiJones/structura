@@ -19,6 +19,7 @@ from sqlmodel import SQLModel
 
 from .config import credentials, read_config, signing_secret
 from ..services.agent_workshop.lease import CampaignLease
+from ..db.migrations import BOOKKEEPING_TABLES
 
 
 def fingerprint(path):
@@ -50,7 +51,7 @@ def _inspect(connection, config):
 
     tables = {r[0] for r in connection.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'")}
-    if tables - (set(SQLModel.metadata.tables) | {"app_migrations"}):
+    if tables - (set(SQLModel.metadata.tables) | BOOKKEEPING_TABLES):
         raise RuntimeError("Schéma inconnu ; adoption refusée.")
     if not {"users", "entities", "audit_events"} <= tables:
         raise RuntimeError("Schéma Admin historique incomplet ; adoption refusée.")

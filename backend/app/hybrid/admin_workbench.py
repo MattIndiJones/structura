@@ -7,6 +7,7 @@ from sqlmodel import SQLModel, Field
 from sqlalchemy import text
 
 from .config import credentials, read_config
+from ..db.migrations import BOOKKEEPING_TABLES
 
 
 class AdminWorkbenchIdentity(SQLModel, table=True):
@@ -24,7 +25,7 @@ def preflight(engine, installation):
     with engine.connect() as connection:
         tables = {row[0] for row in connection.execute(text(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'"))}
-        if tables - (set(SQLModel.metadata.tables) | {"app_migrations"}):
+        if tables - (set(SQLModel.metadata.tables) | BOOKKEEPING_TABLES):
             raise RuntimeError("Schéma du workspace Admin non identifié ; aucune mise à jour appliquée.")
         marker = connection.execute(text("SELECT installation_id FROM admin_workbench_identity WHERE id=1")).first() \
             if "admin_workbench_identity" in tables else None
@@ -37,7 +38,7 @@ def preflight(engine, installation):
             if "hybrid_bootstrap" in tables and connection.execute(text("SELECT 1 FROM hybrid_bootstrap LIMIT 1")).first():
                 raise RuntimeError("Identités métier et Admin incompatibles ; aucune mise à jour appliquée.")
             return
-        for table in tables - {"app_migrations"}:
+        for table in tables - BOOKKEEPING_TABLES:
             identifier = '"' + table.replace('"', '""') + '"'
             if connection.execute(text(f"SELECT 1 FROM {identifier} LIMIT 1")).first():
                 raise RuntimeError("Base Admin occupée sans identité attestée ; provisionnement explicite requis avant toute migration.")

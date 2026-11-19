@@ -1,0 +1,832 @@
+"""Migration 1 — the schema as it stood on 19/11/2026, frozen (P1-7, D3).
+
+Until this date every startup replayed some six hundred lines of conditional
+ALTER TABLE, plus three one-shot data repairs guarded by markers in
+`app_migrations`. They are gathered here unchanged, as the base every later
+migration builds on:
+
+- on a database created before 19/11, they bring it to that day's schema, as
+  they always did, then never run again;
+- on a fresh database, create_all() has already laid the current tables, so
+  each step finds its column present and does nothing; the indexes and the
+  table rebuilds still apply.
+
+This file, with the four helper modules it calls (FROZEN_WITH), must not
+change any more: test_schema_migrations pins their fingerprint. A new schema
+change is a new file, m0002_..., never an edit here.
+
+Not transactional: these steps predate the runner and commit as they go. Each
+one checks before it acts, so a crash halfway is simply resumed at the next
+start, which is exactly how they behaved until now.
+"""
+from datetime import datetime
+
+from sqlalchemy import text
+from sqlmodel import Session, select
+
+from ..models import Deal, DealPortfolioMembership, LifecycleProposal, Portfolio, RfqQuote, RfqRequest
+
+VERSION = 1
+NAME = "Base figée au 19/11/2026"
+TRANSACTIONAL = False
+FROZEN_WITH = (
+    "..rfq_quote_migrations",
+    "..organization_scope_migrations",
+    "..trading_migrations",
+    "..product_migrations",
+)
+
+
+def upgrade(engine):
+    apply_schema_patches(engine)
+    retire_four_eyes_fixing_policy(engine)
+    backfill_portfolio_memberships(engine)
+    backfill_rfq_statuses(engine)
+
+
+def migrate_underlying_classes(conn):
+    columns = {row[1] for row in conn.execute(text("PRAGMA table_info(underlyings)"))}
+    if columns and "asset_class" not in columns:
+        conn.execute(text("ALTER TABLE underlyings ADD COLUMN asset_class TEXT NOT NULL DEFAULT 'unknown'"))
+
+
+def apply_schema_patches(engine):
+    """Additive, idempotent schema patches for columns added to tables that
+    already exist in deployed databases — create_all() only creates missing
+    tables, it never ALTERs an existing one. Frozen on 19/11/2026: a new
+    change is a new numbered migration, never an edit here."""
+    with engine.connect() as conn:
+        user_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(users)"))}
+        for column, declaration in (("auth_version", "INTEGER NOT NULL DEFAULT 0"),
+                                    ("password_change_required", "BOOLEAN NOT NULL DEFAULT 0")):
+            if user_columns and column not in user_columns:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {column} {declaration}"))
+        conn.commit()
+        quote_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_quotes)"))}
+        if quote_columns and "model_reference_json" not in quote_columns:
+            conn.execute(text("ALTER TABLE rfq_quotes ADD COLUMN model_reference_json TEXT"))
+        from ..rfq_quote_migrations import migrate_quote_revisions
+        migrate_quote_revisions(conn)
+        for column, declaration in (("provider_id", "INTEGER REFERENCES rfq_providers(id)"),
+                                    ("counterparty_id", "INTEGER REFERENCES counterparties(id)"),
+                                    ("counterparty_name", "TEXT"), ("identity_frozen", "BOOLEAN NOT NULL DEFAULT 0")):
+            if quote_columns and column not in quote_columns:
+                conn.execute(text(f"ALTER TABLE rfq_quotes ADD COLUMN {column} {declaration}"))
+        conn.commit()
+        from ..organization_scope_migrations import migrate_organization_scopes
+        migrate_organization_scopes(conn)
+        from ..trading_migrations import migrate_settlement_evidence
+        migrate_settlement_evidence(conn)
+        conn.commit()
+        migrate_underlying_classes(conn)
+        conn.commit()
+        ccr_deal_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deals)"))}
+        if ccr_deal_cols and "legal_identity_exception_json" not in ccr_deal_cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN legal_identity_exception_json TEXT"))
+            conn.commit()
+        if ccr_deal_cols and "ccr_netting_set_id" not in ccr_deal_cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN ccr_netting_set_id INTEGER REFERENCES ccr_netting_sets(id)"))
+            conn.commit()
+        from ..product_migrations import migrate_product_links
+        migrate_product_links(conn)
+        conn.commit()
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                key TEXT PRIMARY KEY,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.commit()
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deals)"))}
+        if "indicative_id" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN indicative_id INTEGER"))
+            conn.commit()
+
+        ev_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deal_events)"))}
+        if ev_cols and "parent_event_id" not in ev_cols:
+            # Les relevés d'une constatation moyennée : ils portent leur propre
+            # fixing officiel, et pointent la constatation qu'ils alimentent.
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN parent_event_id INTEGER"))
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN reduction TEXT DEFAULT ''"))
+            conn.commit()
+
+        if "schedule_json" not in cols:
+            # L'échéancier contractuel figé au booking. Vide sur les deals
+            # antérieurs : ils s'afficheront comme dépourvus d'échéancier figé,
+            # ce qui est la vérité, plutôt que d'en voir un reconstruit après
+            # coup et donc potentiellement différent de leur term sheet.
+            conn.execute(text(
+                "ALTER TABLE deals ADD COLUMN schedule_json TEXT DEFAULT '{}'"))
+            conn.commit()
+
+        if "payment_date" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN payment_date TEXT DEFAULT ''"))
+            conn.commit()
+
+        if "realized_payout" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN realized_payout REAL"))
+            conn.commit()
+
+        if "settlement_amount" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN settlement_amount REAL"))
+            conn.commit()
+
+        if "resolution_outcome" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN resolution_outcome TEXT"))
+        if "settlement_date" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN settlement_date TEXT"))
+            conn.commit()
+
+        if "product_type" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN product_type TEXT DEFAULT ''"))
+            conn.commit()
+
+        if "fixing_policy" not in cols:
+            conn.execute(text(
+                "ALTER TABLE deals ADD COLUMN fixing_policy TEXT DEFAULT 'AUTO_YAHOO'"))
+            conn.commit()
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_deals_fixing_policy ON deals (fixing_policy)"))
+        conn.commit()
+
+        if "uat_batch_id" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN uat_batch_id INTEGER"))
+            conn.commit()
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_deals_uat_batch_id ON deals (uat_batch_id)"))
+        conn.commit()
+
+        if "greeks_json" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN greeks_json TEXT DEFAULT '{}'"))
+            conn.commit()
+
+        if "greeks_computed_at" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN greeks_computed_at DATETIME"))
+            conn.commit()
+
+        if "latest_valuation_run_id" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN latest_valuation_run_id INTEGER"))
+            conn.commit()
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_deals_latest_valuation_run_id "
+            "ON deals (latest_valuation_run_id)"))
+        conn.commit()
+
+        if "portfolio_id" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN portfolio_id INTEGER"))
+            conn.commit()
+
+        # Provenance des scripts écrits par l'assistant IA. Colonnes vides pour
+        # tout script existant : « écrit à la main », ce qui est le cas.
+        script_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(scripts)"))}
+        if script_cols:
+            for col, ddl in (("ai_provider", "TEXT DEFAULT ''"),
+                             ("ai_model", "TEXT DEFAULT ''"),
+                             ("ai_prompt", "TEXT DEFAULT ''"),
+                             ("ai_generated_at", "DATETIME"),
+                             ("ai_provenance_json", "TEXT DEFAULT '{}'"),
+                             ("parent_id", "INTEGER"),
+                             ("variant_title", "TEXT DEFAULT ''"),
+                             ("variant_mode", "TEXT DEFAULT ''"),
+                             ("variant_delta_json", "TEXT DEFAULT '{}'")):
+                if col not in script_cols:
+                    conn.execute(text(f"ALTER TABLE scripts ADD COLUMN {col} {ddl}"))
+                    conn.commit()
+
+        rfq_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_requests)"))}
+        if rfq_cols and "ao_date" not in rfq_cols:
+            conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN ao_date TEXT DEFAULT ''"))
+            conn.commit()
+
+        if rfq_cols and "uat_batch_id" not in rfq_cols:
+            conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN uat_batch_id INTEGER"))
+            conn.commit()
+        if rfq_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_rfq_requests_uat_batch_id "
+                "ON rfq_requests (uat_batch_id)"))
+            conn.commit()
+
+        if "contract_version" not in cols:
+            conn.execute(text(
+                "ALTER TABLE deals ADD COLUMN contract_version INTEGER DEFAULT 1"))
+            conn.commit()
+        if rfq_cols and "model_input_hash" not in rfq_cols:
+            # Legacy model prices remain deliberately unproven (NULL hash).
+            conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN model_input_hash TEXT"))
+            conn.commit()
+
+        portfolio_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(portfolios)"))}
+        if portfolio_cols and "is_default" not in portfolio_cols:
+            conn.execute(text("ALTER TABLE portfolios ADD COLUMN is_default BOOLEAN DEFAULT 0"))
+            conn.commit()
+
+        cpty_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(counterparties)"))}
+        if cpty_cols and "limit_eur" not in cpty_cols:
+            conn.execute(text("ALTER TABLE counterparties ADD COLUMN limit_eur REAL"))
+            conn.commit()
+
+        if "rfq_id" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN rfq_id INTEGER"))
+            conn.commit()
+
+        rfq_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_requests)"))}
+        if rfq_cols and "selected_quote_id" not in rfq_cols:
+            conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN selected_quote_id INTEGER"))
+            conn.commit()
+
+        quote_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_quotes)"))}
+        if quote_cols and "last_look" not in quote_cols:
+            conn.execute(text("ALTER TABLE rfq_quotes ADD COLUMN last_look BOOLEAN DEFAULT 0"))
+            conn.commit()
+        if quote_cols and "parent_quote_id" not in quote_cols:
+            conn.execute(text("ALTER TABLE rfq_quotes ADD COLUMN parent_quote_id INTEGER"))
+            conn.commit()
+        if quote_cols and "firmness" not in quote_cols:
+            # UNKNOWN is the only honest migration for a historical quote whose
+            # firm/indicative nature was never captured.
+            conn.execute(text(
+                "ALTER TABLE rfq_quotes ADD COLUMN firmness TEXT DEFAULT 'UNKNOWN'"))
+            conn.commit()
+        if quote_cols and "valid_until" not in quote_cols:
+            conn.execute(text("ALTER TABLE rfq_quotes ADD COLUMN valid_until DATETIME"))
+            conn.commit()
+
+        event_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(deal_events)"))}
+        if event_cols and "indicative_spots_json" not in event_cols:
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN indicative_spots_json TEXT DEFAULT '{}'"))
+            conn.commit()
+        if event_cols and "fixing_status" not in event_cols:
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN fixing_status TEXT "
+                "DEFAULT 'MANUAL_REVIEW_REQUIRED'"))
+            conn.commit()
+        if event_cols and "data_category" not in event_cols:
+            conn.execute(text(
+                "ALTER TABLE deal_events ADD COLUMN data_category TEXT DEFAULT 'UNKNOWN'"))
+            conn.commit()
+        if event_cols and "validated_by" not in event_cols:
+            conn.execute(text("ALTER TABLE deal_events ADD COLUMN validated_by INTEGER"))
+            conn.commit()
+        if event_cols and "validated_at" not in event_cols:
+            conn.execute(text("ALTER TABLE deal_events ADD COLUMN validated_at DATETIME"))
+            conn.commit()
+        if event_cols and "applied_at" not in event_cols:
+            conn.execute(text("ALTER TABLE deal_events ADD COLUMN applied_at DATETIME"))
+            conn.commit()
+        for name, ddl in (
+            ("current_fixing_version_id", "INTEGER"),
+            ("fixing_version", "INTEGER DEFAULT 0"),
+            ("fixing_entered_by", "INTEGER"),
+            ("fixing_entered_at", "DATETIME"),
+            ("fixing_provider", "TEXT"),
+            ("fixing_source_type", "TEXT"),
+            ("fixing_external_reference", "TEXT"),
+            ("fixing_observed_at", "DATETIME"),
+            ("fixing_venue", "TEXT"),
+            ("fixing_calendar", "TEXT"),
+            ("fixing_timezone", "TEXT"),
+            ("fixing_evidence_sha256", "TEXT"),
+            ("fixing_record_sha256", "TEXT"),
+            ("fixing_reason", "TEXT"),
+        ):
+            if event_cols and name not in event_cols:
+                conn.execute(text(f"ALTER TABLE deal_events ADD COLUMN {name} {ddl}"))
+                conn.commit()
+
+        proposal_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(lifecycle_proposals)"))}
+        for name, ddl in (
+            ("official_result_json", "TEXT"),
+            ("official_input_hash", "TEXT"),
+            ("official_replayed_at", "DATETIME"),
+            ("comparison_status", "TEXT"),
+        ):
+            if proposal_cols and name not in proposal_cols:
+                conn.execute(text(
+                    f"ALTER TABLE lifecycle_proposals ADD COLUMN {name} {ddl}"))
+                conn.commit()
+
+        fixing_version_cols = {
+            row[1] for row in conn.execute(
+                text("PRAGMA table_info(official_fixing_versions)"))}
+        for name, ddl in (
+            ("evidence_filename", "TEXT DEFAULT ''"),
+            ("evidence_content_type", "TEXT DEFAULT 'application/octet-stream'"),
+            ("evidence_size_bytes", "INTEGER DEFAULT 0"),
+            ("evidence_payload_b64", "TEXT DEFAULT ''"),
+            ("capture_actor_type", "TEXT DEFAULT 'USER'"),
+        ):
+            if fixing_version_cols and name not in fixing_version_cols:
+                conn.execute(text(
+                    f"ALTER TABLE official_fixing_versions ADD COLUMN {name} {ddl}"))
+                conn.commit()
+
+        amendment_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(trade_amendment_requests)"))}
+        for name, ddl in (
+            ("base_contract_version", "INTEGER DEFAULT 1"),
+            ("decision_reason", "TEXT"),
+            ("rejected_by", "INTEGER"),
+            ("rejected_at", "DATETIME"),
+            ("applied_by", "INTEGER"),
+            ("applied_at", "DATETIME"),
+            ("applied_contract_version", "INTEGER"),
+            ("credit_check_json", "TEXT"),
+        ):
+            if amendment_cols and name not in amendment_cols:
+                conn.execute(text(
+                    f"ALTER TABLE trade_amendment_requests ADD COLUMN {name} {ddl}"))
+                conn.commit()
+
+        rfq_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_requests)"))}
+        if rfq_cols and "kind" not in rfq_cols:
+            conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN kind TEXT DEFAULT 'indicatif'"))
+            conn.commit()
+
+        # Pre-existing RFQs land on 'achat' like new ones: this module solicits
+        # "fournisseurs", so buying is what they were, even though the old
+        # best-quote logic (highest price wins) implicitly assumed the opposite.
+        # Their stored prices don't move — only which one is flagged as best.
+        if rfq_cols and "sens" not in rfq_cols:
+            conn.execute(text("ALTER TABLE rfq_requests ADD COLUMN sens TEXT DEFAULT 'achat'"))
+            conn.commit()
+
+        if "rfq_provenance_json" not in cols:
+            conn.execute(text("ALTER TABLE deals ADD COLUMN rfq_provenance_json TEXT"))
+            conn.commit()
+
+        provider_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_providers)"))}
+        if provider_cols and "counterparty_id" not in provider_cols:
+            conn.execute(text("ALTER TABLE rfq_providers ADD COLUMN counterparty_id INTEGER"))
+            conn.commit()
+
+        # ── Client Intelligence ───────────────────────────────────────
+        # Les tables du module arrivent seules par create_all(). Seules
+        # ces colonnes-ci s'ajoutent à des tables déjà déployées. Toutes
+        # nullables sans valeur par défaut : une ligne existante reste
+        # exactement ce qu'elle était, non rattachée, et aucun code existant
+        # ne lit ces colonnes. C'est ce qui rend la migration réversible de
+        # fait — les ignorer revient à revenir en arrière.
+        for name, ddl in (
+            ("client_id", "INTEGER"),
+            ("opportunity_id", "INTEGER"),
+            ("primary_affiliation_id", "INTEGER"),
+            ("mandate_id", "INTEGER"),
+            ("client_provenance_json", "TEXT"),
+            ("client_attribution_json", "TEXT"),
+            ("transaction_format", "TEXT"),
+            ("instrument_family", "TEXT"),
+            ("payoff_family", "TEXT"),
+            ("payoff_description", "TEXT"),
+            ("documentation_reference", "TEXT"),
+            ("commercial_reason", "TEXT"),
+        ):
+            if name not in cols:
+                conn.execute(text(f"ALTER TABLE deals ADD COLUMN {name} {ddl}"))
+                conn.commit()
+        for idx, col in (
+            ("ix_deals_client_id", "client_id"),
+            ("ix_deals_opportunity_id", "opportunity_id"),
+            ("ix_deals_primary_affiliation_id", "primary_affiliation_id"),
+            ("ix_deals_mandate_id", "mandate_id"),
+            ("ix_deals_transaction_format", "transaction_format"),
+            ("ix_deals_instrument_family", "instrument_family"),
+            ("ix_deals_payoff_family", "payoff_family"),
+        ):
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS {idx} ON deals ({col})"))
+            conn.commit()
+
+        rfq_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(rfq_requests)"))}
+        for name, ddl in (
+            ("opportunity_id", "INTEGER"),
+            ("client_id", "INTEGER"),
+            ("mandate_id", "INTEGER"),
+            ("primary_affiliation_id", "INTEGER"),
+            ("commercial_context_json", "TEXT"),
+            ("transaction_format", "TEXT"),
+            ("instrument_family", "TEXT"),
+            ("payoff_family", "TEXT"),
+            ("payoff_description", "TEXT"),
+            ("documentation_reference", "TEXT"),
+            ("selection_reason_code", "TEXT"),
+            ("selection_reason_note", "TEXT"),
+        ):
+            if rfq_cols and name not in rfq_cols:
+                conn.execute(text(f"ALTER TABLE rfq_requests ADD COLUMN {name} {ddl}"))
+                conn.commit()
+        if rfq_cols:
+            for idx, col in (
+                ("ix_rfq_requests_opportunity_id", "opportunity_id"),
+                ("ix_rfq_requests_client_id", "client_id"),
+                ("ix_rfq_requests_mandate_id", "mandate_id"),
+                ("ix_rfq_requests_primary_affiliation_id", "primary_affiliation_id"),
+                ("ix_rfq_requests_transaction_format", "transaction_format"),
+                ("ix_rfq_requests_instrument_family", "instrument_family"),
+                ("ix_rfq_requests_payoff_family", "payoff_family"),
+                ("ix_rfq_requests_selection_reason_code", "selection_reason_code"),
+            ):
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS {idx} ON rfq_requests ({col})"))
+            conn.commit()
+
+        opportunity_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(opportunities)"))}
+        for name, ddl in (
+            ("mandate_id", "INTEGER"),
+            ("transaction_format", "TEXT"),
+            ("instrument_family", "TEXT"),
+            ("payoff_family", "TEXT"),
+            ("payoff_description", "TEXT"),
+            ("data_origin", "TEXT DEFAULT 'demo'"),
+        ):
+            if opportunity_cols and name not in opportunity_cols:
+                conn.execute(text(f"ALTER TABLE opportunities ADD COLUMN {name} {ddl}"))
+                conn.commit()
+        if opportunity_cols:
+            for idx, col in (
+                ("ix_opportunities_mandate_id", "mandate_id"),
+                ("ix_opportunities_transaction_format", "transaction_format"),
+                ("ix_opportunities_instrument_family", "instrument_family"),
+                ("ix_opportunities_payoff_family", "payoff_family"),
+                ("ix_opportunities_data_origin", "data_origin"),
+            ):
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS {idx} ON opportunities ({col})"))
+            conn.commit()
+
+        # `clients` est une table neuve, donc create_all() la pose entière sur
+        # une base à jour. Ce garde-fou ne sert qu'à la fenêtre étroite où une
+        # base aurait été créée avec la première version de la table, avant que
+        # les contraintes scalaires et leur verrou n'y soient ajoutés :
+        # create_all() ne complète jamais une table qui existe déjà.
+        client_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(clients)"))}
+        for name, ddl in (
+            ("ticket_min", "REAL"),
+            ("ticket_max", "REAL"),
+            ("ticket_currency", "TEXT DEFAULT 'EUR'"),
+            ("maturity_min_months", "INTEGER"),
+            ("maturity_max_months", "INTEGER"),
+            ("min_rating", "TEXT"),
+            ("max_concentration_pct", "REAL"),
+            ("constraints_version", "INTEGER DEFAULT 1"),
+            # Les données commerciales présentes lors de l'introduction du
+            # Lot 0 sont fictives. Une donnée réelle sera requalifiée
+            # explicitement, jamais supposée telle par la migration.
+            ("data_origin", "TEXT DEFAULT 'demo'"),
+            ("market_data_provider", "TEXT DEFAULT 'YAHOO_FINANCE'"),
+        ):
+            if client_cols and name not in client_cols:
+                conn.execute(text(f"ALTER TABLE clients ADD COLUMN {name} {ddl}"))
+                conn.commit()
+        if client_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_clients_market_data_provider "
+                "ON clients (market_data_provider)"))
+            conn.commit()
+
+        batch_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(compute_batches)"))}
+        if batch_cols:
+            for name, ddl in (
+                ("lease_token", "TEXT"),
+                ("lease_expires_at", "DATETIME"),
+                ("heartbeat_at", "DATETIME"),
+                ("cancel_requested_at", "DATETIME"),
+                ("cost_estimate_json", "TEXT DEFAULT '{}'"),
+            ):
+                if name not in batch_cols:
+                    conn.execute(text(
+                        f"ALTER TABLE compute_batches ADD COLUMN {name} {ddl}"))
+                    conn.commit()
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_compute_batches_lease_token "
+                "ON compute_batches (lease_token)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_compute_batches_lease_expires_at "
+                "ON compute_batches (lease_expires_at)"))
+            conn.commit()
+
+        job_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(compute_jobs)"))}
+        if job_cols:
+            if "lease_token" not in job_cols:
+                conn.execute(text("ALTER TABLE compute_jobs ADD COLUMN lease_token TEXT"))
+            if "attempt" not in job_cols:
+                conn.execute(text("ALTER TABLE compute_jobs ADD COLUMN attempt INTEGER DEFAULT 0"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_compute_jobs_lease_token "
+                "ON compute_jobs (lease_token)"))
+            conn.commit()
+
+        # La première version de ClientMandate appelait le texte libre
+        # `notes`. Le Lot 1 l'expose sous le nom métier `comment`. Une base
+        # existante doit donc recevoir la nouvelle colonne et conserver le
+        # contenu déjà saisi ; create_all() ne modifie pas une table existante.
+        mandate_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(client_mandates)"))}
+        if mandate_cols and "comment" not in mandate_cols:
+            conn.execute(text(
+                "ALTER TABLE client_mandates ADD COLUMN comment TEXT"))
+            if "notes" in mandate_cols:
+                conn.execute(text(
+                    "UPDATE client_mandates SET comment = notes "
+                    "WHERE notes IS NOT NULL"))
+            conn.commit()
+
+        # Même garde-fou que pour `clients` : tables neuves posées entières par
+        # create_all(), ces ALTER ne servent qu'à une base créée entre deux
+        # versions du module.
+        histo_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(client_trade_history)"))}
+        for name, ddl in (
+            ("import_batch_id", "INTEGER"),
+            ("traded_with_us", "BOOLEAN"),   # NULL = on ne sait pas
+            ("price_pct", "REAL"),
+            ("mandate_id", "INTEGER"),
+            ("transaction_format", "TEXT"),
+            ("instrument_family", "TEXT"),
+            ("payoff_family", "TEXT"),
+            ("payoff_description", "TEXT"),
+            ("documentation_reference", "TEXT"),
+            ("natural_key", "TEXT"),
+        ):
+            if histo_cols and name not in histo_cols:
+                conn.execute(text(
+                    f"ALTER TABLE client_trade_history ADD COLUMN {name} {ddl}"))
+                conn.commit()
+        if histo_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_client "
+                "ON client_trade_history (client_id)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_affiliation "
+                "ON client_trade_history (affiliation_id)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_mandate "
+                "ON client_trade_history (mandate_id)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_transaction_format "
+                "ON client_trade_history (transaction_format)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_instrument_family "
+                "ON client_trade_history (instrument_family)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_trade_history_payoff_family "
+                "ON client_trade_history (payoff_family)"))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "uq_client_trade_history_natural_key "
+                "ON client_trade_history (entity_id, natural_key) "
+                "WHERE natural_key IS NOT NULL"))
+            conn.commit()
+
+        import_batch_cols = {row[1] for row in conn.execute(
+            text("PRAGMA table_info(client_import_batches)"))}
+        if import_batch_cols and "file_fingerprint" not in import_batch_cols:
+            conn.execute(text(
+                "ALTER TABLE client_import_batches "
+                "ADD COLUMN file_fingerprint TEXT DEFAULT ''"))
+            conn.commit()
+        if import_batch_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_client_import_batches_fingerprint "
+                "ON client_import_batches (entity_id, file_fingerprint)"))
+            conn.commit()
+
+        # Les prochaines actions historiques deviennent des relances ouvertes.
+        # NOT EXISTS rend cette reprise idempotente et empêche une relance
+        # clôturée de ressusciter à chaque démarrage.
+        followup_table = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='interaction_follow_ups'"),).first()
+        if followup_table:
+            conn.execute(text("""
+                INSERT INTO interaction_follow_ups (
+                    entity_id, interaction_id, client_id, opportunity_id,
+                    owner_user_id, title, due_date, status,
+                    created_by_user_id, created_at, updated_at
+                )
+                SELECT i.entity_id, i.id, i.client_id, i.opportunity_id,
+                       i.user_id, i.next_action, i.next_action_date, 'open',
+                       i.user_id, i.created_at, i.updated_at
+                FROM interactions i
+                WHERE TRIM(COALESCE(i.next_action, '')) <> ''
+                  AND NOT EXISTS (
+                    SELECT 1 FROM interaction_follow_ups f
+                    WHERE f.interaction_id = i.id)
+            """))
+            conn.commit()
+
+        indic_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(indicatives)"))}
+        if indic_cols and "opportunity_id" not in indic_cols:
+            conn.execute(text("ALTER TABLE indicatives ADD COLUMN opportunity_id INTEGER"))
+            conn.commit()
+        if indic_cols:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_indicatives_opportunity_id "
+                "ON indicatives (opportunity_id)"))
+            conn.commit()
+
+        make_kid_vev_nullable(conn)
+        migrate_kid_evidence(conn)
+        conn.execute(text(
+            "INSERT OR IGNORE INTO app_migrations(key) VALUES (:key)"),
+            {"key": "lot7_operational_columns_v1"})
+        conn.commit()
+
+
+def make_kid_vev_nullable(conn) -> None:
+    """Migrate old NOT NULL VEV storage to the total-loss-aware contract."""
+    columns = conn.execute(text("PRAGMA table_info(kid_records)")).all()
+    vev = next((row for row in columns if row[1] == "vev"), None)
+    if not vev or not vev[3]:
+        return
+    # Preserve columns already added by later migrations when upgrading an
+    # older NOT NULL VEV table. The base layout remains compatible with old DBs.
+    names = {row[1] for row in columns}
+    extra = [name for name in ('product_id', 'product_terms_version', 'calculation_evidence_json') if name in names]
+    declarations = {'product_id': 'INTEGER REFERENCES products(id)',
+                    'product_terms_version': 'INTEGER', 'calculation_evidence_json': 'TEXT'}
+    schema_objects = conn.execute(text("""
+        SELECT sql FROM sqlite_master
+        WHERE tbl_name='kid_records' AND type IN ('index','trigger') AND sql IS NOT NULL
+    """)).scalars().all()
+    definitions = ','.join(name + ' ' + declarations[name] for name in extra)
+    extra_definition = definitions + ',' if definitions else ''
+    extra_select = ',' + ','.join(extra) if extra else ''
+    conn.execute(text(f"""
+        CREATE TABLE kid_records__vev_nullable (
+            id INTEGER NOT NULL PRIMARY KEY,
+            indicative_id INTEGER,
+            deal_id INTEGER,
+            user_id INTEGER NOT NULL,
+            product_title VARCHAR NOT NULL,
+            sri INTEGER NOT NULL,
+            mrm INTEGER NOT NULL,
+            crm INTEGER NOT NULL,
+            vev FLOAT,
+            t_rhp FLOAT NOT NULL,
+            horizons_json TEXT,
+            costs_json TEXT,
+            created_at DATETIME NOT NULL,
+            {extra_definition}
+            FOREIGN KEY(indicative_id) REFERENCES indicatives(id),
+            FOREIGN KEY(deal_id) REFERENCES deals(id),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """))
+    conn.execute(text(f"""
+        INSERT INTO kid_records__vev_nullable
+        SELECT id, indicative_id, deal_id, user_id, product_title, sri, mrm,
+               crm, vev, t_rhp, horizons_json, costs_json, created_at{extra_select}
+        FROM kid_records
+    """))
+    conn.execute(text("DROP TABLE kid_records"))
+    conn.execute(text("ALTER TABLE kid_records__vev_nullable RENAME TO kid_records"))
+    for definition in schema_objects:
+        conn.execute(text(definition))
+    if 'product_id' in extra:
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_kid_records_product_id ON kid_records(product_id)'))
+    conn.commit()
+
+
+def migrate_kid_evidence(conn):
+    columns = {row[1] for row in conn.execute(text('PRAGMA table_info(kid_records)'))}
+    if columns and 'calculation_evidence_json' not in columns:
+        conn.execute(text("ALTER TABLE kid_records ADD COLUMN calculation_evidence_json TEXT NOT NULL DEFAULT '{}'"))
+        conn.commit()
+
+
+def backfill_portfolio_memberships(engine):
+    """Copy the former single-portfolio links into the association table.
+
+    The legacy pointer is deliberately left in place for rollback and old
+    exports, but no new booking writes it. Former default portfolios become
+    ordinary deletable portfolios; an unclassified deal is now a valid and
+    explicit state in the UI.
+    """
+    with Session(engine) as s:
+        existing = {
+            (m.deal_id, m.portfolio_id)
+            for m in s.exec(select(DealPortfolioMembership)).all()
+        }
+        for deal in s.exec(select(Deal).where(Deal.portfolio_id != None)).all():  # noqa: E711
+            key = (deal.id, deal.portfolio_id)
+            if key not in existing:
+                s.add(DealPortfolioMembership(
+                    deal_id=deal.id,
+                    portfolio_id=deal.portfolio_id,
+                    added_by_user_id=deal.user_id,
+                ))
+        for portfolio in s.exec(select(Portfolio).where(Portfolio.is_default == True)).all():  # noqa: E712
+            portfolio.is_default = False
+            s.add(portfolio)
+        s.commit()
+
+
+def backfill_rfq_statuses(engine):
+    """RFQ statuses used to be posed by the caller, which only ever wrote
+    'draft', 'retenue' or 'clos': 'envoye'/'quote' existed as labels but
+    nothing set them, so a tender with five prices in hand still displayed
+    "Brouillon", and de-selecting a response left it on "Retenue" with
+    nothing retained. They're deduced from the facts now — realign the rows
+    written before that. Terminal states (booked, sans suite) are left alone,
+    exactly as the derivation itself leaves them. A durable marker makes this
+    full-table migration run once rather than at every application startup.
+
+    _derive_status is imported lazily: api\\rfq.py imports this module for
+    get_session, so a module-level import here would be circular."""
+    from sqlmodel import select
+    from ...core.workflow import derive_rfq_status
+    with Session(engine) as s:
+        s.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                key TEXT PRIMARY KEY,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        marker = "rfq_statuses_derived_v1"
+        if s.execute(text(
+                "SELECT 1 FROM app_migrations WHERE key = :key"),
+                {"key": marker}).first():
+            return
+        rfqs = s.exec(select(RfqRequest)).all()
+        quotes_by_rfq: dict[int, list] = {}
+        for q in s.exec(select(RfqQuote)).all():
+            quotes_by_rfq.setdefault(q.rfq_id, []).append(q)
+        for r in rfqs:
+            derived = derive_rfq_status(
+                r.status, r.selected_quote_id, quotes_by_rfq.get(r.id, []))
+            if derived != r.status:
+                r.status = derived
+                s.add(r)
+        s.execute(text(
+            "INSERT OR IGNORE INTO app_migrations(key) VALUES (:key)"),
+            {"key": marker})
+        s.commit()
+
+
+def retire_four_eyes_fixing_policy(engine):
+    """Move historical deals to the single automatic provider workflow."""
+    from ...core.audit import record_audit_event
+
+    marker = "fixing_policy_auto_only_v1"
+    with Session(engine) as session:
+        session.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                key TEXT PRIMARY KEY,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        if session.execute(text(
+                "SELECT 1 FROM app_migrations WHERE key = :key"),
+                {"key": marker}).first():
+            return
+
+        legacy_deals = session.exec(select(Deal).where(
+            Deal.fixing_policy != "AUTO_YAHOO")).all()
+        migrated_ids: list[int] = []
+        for deal in legacy_deals:
+            previous = deal.fixing_policy
+            deal.fixing_policy = "AUTO_YAHOO"
+            session.add(deal)
+            migrated_ids.append(deal.id)
+            record_audit_event(
+                session,
+                action="FIXING_POLICY_AUTOMATED",
+                object_type="DEAL",
+                object_id=deal.id,
+                actor_user_id=None,
+                actor_type="SYSTEM",
+                result="SUCCESS",
+                before={"fixing_policy": previous},
+                after={"fixing_policy": "AUTO_YAHOO"},
+                reason=(
+                    "Retrait du workflow Maker/Checker ; les clôtures "
+                    "fournisseur contrôlées deviennent officielles automatiquement."),
+                data_source="FIXING_OFFICIAL",
+                metadata={"migration": marker},
+            )
+
+        if migrated_ids:
+            pending = session.exec(select(LifecycleProposal).where(
+                LifecycleProposal.deal_id.in_(migrated_ids),
+                LifecycleProposal.status.in_([
+                    "PROPOSED", "VALIDATED", "MANUAL_REVIEW_REQUIRED",
+                ]),
+            )).all()
+            for proposal in pending:
+                proposal.status = "STALE"
+                proposal.error_message = (
+                    "Proposition humaine retirée lors du passage aux fixings automatiques.")
+                proposal.updated_at = datetime.utcnow()
+                session.add(proposal)
+
+        session.execute(text(
+            "INSERT INTO app_migrations(key) VALUES (:key)"), {"key": marker})
+        session.commit()
