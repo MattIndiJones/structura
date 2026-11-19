@@ -64,7 +64,8 @@ en français. Code, commentaires, noms de fichiers/variables : anglais.
 - **La CI** (`.github/workflows/`) : `ci.yml` lance les tests des fichiers modifiés
   et de leurs consommateurs directs sur chaque PR **et chaque push sur `main`** ;
   `nightly.yml` lance les suites complètes backend et frontend chaque nuit de
-  semaine. C'est ce passage nocturne qui fait office de garde-fou, pas la session.
+  semaine, et les parcours de bout en bout de `e2e/` (Playwright, après build).
+  C'est ce passage nocturne qui fait office de garde-fou, pas la session.
 - Une modification de documentation seule ne justifie aucun pytest. Une modification
   de tests seule se valide d'abord avec les tests modifiés ; la suite complète n'est
   pas requise par défaut.

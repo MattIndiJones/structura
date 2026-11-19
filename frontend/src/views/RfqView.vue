@@ -122,448 +122,16 @@
           <!-- Deux colonnes dès qu'il y a la place : à gauche ce qu'on
                demande et à qui, à droite le produit qu'on fait pricer. -->
           <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
-            <div class="card flex flex-col gap-3">
-              <div class="grid grid-cols-2 gap-3">
-                <div class="flex flex-col gap-1">
-                  <label class="label">Nom *</label>
-                  <input v-model="form.name" type="text" class="input" placeholder="Autocall Athena USD 3Y — Client X" />
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Date de l'AO</label>
-                  <input v-model="form.ao_date" type="date" class="input" />
-                </div>
-              </div>
+            <RfqCreateRequest />
 
-              <div class="flex flex-col gap-1">
-                <label class="label">Type de RFQ</label>
-                <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
-                  <button :class="['px-2 py-1 transition-colors', form.kind === 'indicatif' ? 'bg-slate-700 text-slate-200 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                          @click="onKindToggle('indicatif')">Indicatif</button>
-                  <button :class="['px-2 py-1 transition-colors', form.kind === 'to_trade' ? 'bg-amber-900/80 text-amber-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                          @click="onKindToggle('to_trade')">To trade</button>
-                </div>
-                <p class="text-[10px] text-slate-600 mt-0.5">
-                  {{ form.kind === 'indicatif'
-                    ? "Sonder un niveau de prix pour affiner une idée, avec les Economics du produit."
-                    : "Préparer un trade avec ses termes, son panier et son calendrier contractuel complets." }}
-                </p>
-              </div>
-
-              <div class="flex flex-col gap-1">
-                <label class="label">Sens (notre côté)</label>
-                <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
-                  <button :class="['px-2 py-1 transition-colors', form.sens === 'achat' ? 'bg-emerald-900/70 text-emerald-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                          @click="form.sens = 'achat'">↓ Achat (nous achetons)</button>
-                  <button :class="['px-2 py-1 transition-colors', form.sens === 'vente' ? 'bg-blue-900/70 text-blue-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                          @click="form.sens = 'vente'">↑ Vente (nous vendons)</button>
-                </div>
-                <p class="text-[10px] text-slate-600 mt-0.5">{{ sensHint(form.sens) }}</p>
-              </div>
-
-              <div class="grid grid-cols-2 gap-3">
-                <div class="flex flex-col gap-1">
-                  <label class="label">Format juridique</label>
-                  <input v-model="form.transaction_format" class="input" list="rfq-formats"
-                         placeholder="EMTN, BMTN, OTC…" />
-                  <datalist id="rfq-formats">
-                    <option value="EMTN" /><option value="BMTN" /><option value="OTC" />
-                  </datalist>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Instrument</label>
-                  <input v-model="form.instrument_family" class="input" list="rfq-instruments"
-                         placeholder="Note, Swap…" />
-                  <datalist id="rfq-instruments">
-                    <option value="Note" /><option value="Certificat" />
-                    <option value="Swap" /><option value="Option" />
-                  </datalist>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Famille de payoff</label>
-                  <select v-model="form.payoff_family" class="select">
-                    <option value="">— Choisir une famille —</option>
-                    <option v-if="legacyPayoffFamily" :value="legacyPayoffFamily">
-                      Ancien libellé : {{ legacyPayoffFamily }} — à classer
-                    </option>
-                    <option v-for="family in PAYOFF_FAMILIES" :key="family.code"
-                            :value="family.label">{{ family.label }}</option>
-                  </select>
-                  <p v-if="form.payoff_family === 'Autre'" class="text-[10px] text-slate-500">
-                    Décrivez le payoff ci-dessous.
-                  </p>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Référence documentaire</label>
-                  <input v-model="form.documentation_reference" class="input"
-                         placeholder="Term sheet / ISDA / confirmation" />
-                </div>
-                <div class="col-span-2 flex flex-col gap-1">
-                  <label class="label">Description du payoff</label>
-                  <textarea v-model="form.payoff_description" class="input" rows="2"
-                            placeholder="Précisions propres à cette RFQ"></textarea>
-                </div>
-              </div>
-
-              <div v-if="!opportuniteContexte" class="rounded-lg border p-3 flex flex-col gap-3"
-                   style="border-color: var(--border); background: var(--surface2)">
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <div class="text-xs font-semibold">Contexte Client facultatif</div>
-                    <p class="text-[10px] mt-0.5" style="color: var(--subtle)">
-                      Laissez désactivé pour une RFQ Produit autonome.
-                    </p>
-                  </div>
-                  <button class="btn-ghost btn-sm" @click="toggleDirectCommercial">
-                    {{ commercialLinkEnabled ? 'Retirer le contexte' : 'Rattacher à un Client' }}
-                  </button>
-                </div>
-                <div v-if="commercialLinkEnabled" class="grid grid-cols-2 gap-2">
-                  <div class="col-span-2">
-                    <label class="label">Client</label>
-                    <select v-model="form.client_id" class="select" @change="onDirectClientChange">
-                      <option :value="null">— Choisir —</option>
-                      <option v-for="client in directClients" :key="client.id" :value="client.id">
-                        {{ client.name }}
-                      </option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="label">Mandat / périmètre</label>
-                    <select v-model="form.mandate_id" class="select" :disabled="!form.client_id">
-                      <option :value="null">— Obligatoire —</option>
-                      <option v-for="mandat in directMandates" :key="mandat.id" :value="mandat.id">
-                        {{ mandat.name }}
-                      </option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="label">Opportunity éventuelle</label>
-                    <select v-model="form.opportunity_id" class="select"
-                            :disabled="!form.client_id" @change="onDirectOpportunityChange">
-                      <option :value="null">— Aucune —</option>
-                      <option v-for="opp in directOpportunities" :key="opp.id" :value="opp.id">
-                        {{ opp.title || opp.reference }}
-                      </option>
-                    </select>
-                  </div>
-                  <div class="col-span-2">
-                    <label class="label">Contact principal éventuel</label>
-                    <select v-model="form.primary_affiliation_id" class="select"
-                            :disabled="!form.client_id">
-                      <option :value="null">— Aucun —</option>
-                      <option v-for="contact in directContacts" :key="contact.affiliation_id"
-                              :value="contact.affiliation_id">
-                        {{ contact.first_name }} {{ contact.last_name }}
-                      </option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div class="flex items-center gap-1 text-[10px] border border-slate-700 rounded overflow-hidden w-fit">
-                <button :class="['px-2 py-1 transition-colors', form.source === 'template' ? 'bg-slate-700 text-slate-200 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                        @click="onSourceToggle('template')">Modèle générique</button>
-                <button :class="['px-2 py-1 transition-colors', form.source === 'script' ? 'bg-blue-900/80 text-blue-300 font-semibold' : 'text-slate-500 hover:text-slate-400']"
-                        @click="onSourceToggle('script')">Script existant</button>
-              </div>
-
-              <div v-if="form.source === 'template'" class="flex flex-col gap-1">
-                <label class="label">Type de produit</label>
-                <select v-model="form.template_type" class="select" @change="onTemplateChange">
-                  <option value="">Choisir un template…</option>
-                  <optgroup v-for="(items, group) in groupedTemplates" :key="group" :label="group">
-                    <option v-for="t in items" :key="t.key" :value="t.key">{{ t.label }}</option>
-                  </optgroup>
-                </select>
-                <p v-if="form.kind === 'to_trade'" class="text-[10px] text-slate-600 mt-0.5">
-                  Modèle générique ; termes à compléter ci-dessous ou à charger depuis un exemple.
-                </p>
-                <PayScriptPresetPicker :currency="form.currency" :start-date="form.strike_date"
-                  :underlying-count="createBasket.length" :disabled="!!sourceProduct"
-                  :on-apply="applyCreatePreset" />
-              </div>
-              <div v-else class="flex flex-col gap-1">
-                <label class="label">Script de la bibliothèque</label>
-                <select :value="librarySelectValue" class="select" @change="onLibrarySelect($event.target.value)">
-                  <option value="">Choisir un script…</option>
-                  <optgroup label="Scripts sauvegardés">
-                    <option v-for="s in scripts" :key="'s'+s.id" :value="'script:'+s.id">{{ s.name }}</option>
-                  </optgroup>
-                  <optgroup v-if="scriptedDeals.length" label="Deals bookés">
-                    <option v-for="d in scriptedDeals" :key="'d'+d.id" :value="'deal:'+d.id">
-                      {{ d.reference }} — {{ d.product_type || d.contrepartie }}
-                    </option>
-                  </optgroup>
-                </select>
-                <p v-if="form.kind === 'to_trade'" class="text-[10px] text-slate-600 mt-0.5">
-                  Une RFQ to trade nécessite un calendrier contractuel complet.
-                </p>
-              </div>
-
-            </div>
-
-            <div class="card flex flex-col gap-3">
-              <!-- Panier contractuel -->
-              <div class="grid grid-cols-2 gap-3">
-                <div class="col-span-2 flex flex-col gap-2">
-                  <div class="flex items-center justify-between gap-3">
-                    <label class="label mb-0">Panier ({{ createBasket.length }} sous-jacent{{ createBasket.length > 1 ? 's' : '' }})</label>
-                    <button type="button" class="btn-secondary text-xs px-2 py-1"
-                            :disabled="!!sourceProduct" @click="addCreateUnderlying">
-                      + Ajouter un sous-jacent
-                    </button>
-                  </div>
-                  <div v-for="(underlying, index) in createBasket" :key="index"
-                       :class="['rounded-lg border p-2 grid grid-cols-12 gap-2 cursor-pointer',
-                                createActiveUnderlyingIdx === index ? 'border-blue-500 bg-blue-950/10' : 'border-slate-800']"
-                       @click="createActiveUnderlyingIdx = index">
-                    <div class="col-span-4">
-                      <label class="label">Sous-jacent</label>
-                      <select class="select" :value="underlying.ticker"
-                              :disabled="!!sourceProduct"
-                              @change="onUnderlyingSelect(index, $event.target.value)">
-                        <option value="">— Choisir —</option>
-                        <optgroup v-for="g in underlyingGroups" :key="g.group" :label="g.group">
-                          <option v-for="it in g.items" :key="it.ticker" :value="it.ticker">{{ it.label }}</option>
-                        </optgroup>
-                      </select>
-                    </div>
-                    <div class="col-span-3"><label class="label">Ticker</label>
-                      <input v-model="underlying.ticker" :readonly="!!sourceProduct"
-                             class="input font-mono text-xs" placeholder="Ticker"
-                             @blur="onUnderlyingSelect(index, underlying.ticker)" />
-                    </div>
-                    <div class="col-span-2"><label class="label">Vol. (%)</label>
-                      <input v-model.number="underlying.sigma" type="number" step="0.1"
-                             class="input" title="Volatilité en %" />
-                    </div>
-                    <div class="col-span-2"><label class="label">Div. (%)</label>
-                      <input v-model.number="underlying.q" type="number" step="0.1"
-                             class="input" title="Rendement du dividende en %" />
-                    </div>
-                    <button type="button" class="icon-btn-danger col-span-1"
-                            :disabled="createBasket.length === 1 || !!sourceProduct"
-                            :aria-label="`Retirer ${underlying.name || underlying.ticker}`"
-                            @click.stop="removeCreateUnderlying(index)">×</button>
-                    <div class="col-span-9"><label class="label">Nom du sous-jacent</label>
-                      <input v-model="underlying.name" :readonly="!!sourceProduct"
-                             class="input text-xs" placeholder="Nom du sous-jacent" />
-                    </div>
-                    <div class="col-span-3"><label class="label">Devise du sous-jacent</label>
-                    <select v-model="underlying.ccy" class="select" :disabled="!!sourceProduct">
-                      <option v-if="underlying.ccy && !['EUR','USD','GBP','JPY','CHF','SGD'].includes(underlying.ccy)">{{ underlying.ccy }}</option>
-                      <option>EUR</option><option>USD</option><option>GBP</option>
-                      <option>JPY</option><option>CHF</option><option>SGD</option>
-                    </select>
-                    <p v-if="catalogInstrument(underlying.ticker)?.ccy && underlying.ccy !== catalogInstrument(underlying.ticker).ccy" class="text-xs text-amber-700">Surcharge ; référence {{ catalogInstrument(underlying.ticker).ccy }}.</p>
-                    </div>
-                  </div>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Nominal</label>
-                  <input v-model="nominalRaw" @blur="formatNominal" @focus="unformatNominal"
-                         type="text" inputmode="numeric" class="input font-mono"
-                         placeholder="1 000 000" />
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Devise</label>
-                  <select v-model="form.currency" class="select">
-                    <option>EUR</option><option>USD</option><option>GBP</option>
-                    <option>JPY</option><option>CHF</option><option>SGD</option>
-                  </select>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Maturité (années)</label>
-                  <input v-model.number="form.T" type="number" step="0.5" class="input" />
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label"
-                         title="Date de constatation du niveau initial du ou des sous-jacents. C'est là que démarre la diffusion Monte Carlo.">Date de strike *</label>
-                  <input v-model="form.strike_date" :readonly="scriptConstats.some(c => c.role === 'initial_fixing')" type="date" class="input"
-                         @change="resolveFormDate('strike_date')" />
-                  <select v-if="!scriptConstats.some(c => c.role === 'initial_fixing')" v-model="form.strike_date_convention" class="select py-1 text-[11px]"
-                          title="Ce que devient cette date si elle tombe un week-end ou un jour férié du calendrier de la devise."
-                          @change="resolveFormDate('strike_date')">
-                    <option value="none">Aucun ajustement</option>
-                    <option value="following">Jour ouvré suivant</option>
-                    <option value="modified_following">Suivant, sauf changement de mois</option>
-                    <option value="preceding">Jour ouvré précédent</option>
-                    <option value="modified_preceding">Précédent, sauf changement de mois</option>
-                  </select>
-                  <span v-if="dateNotices.strike_date" class="text-[10px] text-amber-500">{{ dateNotices.strike_date }}</span>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label"
-                         title="Date d'échange du cash entre contreparties. Le prix coté est le montant qui bouge ce jour-là. Elle peut précéder la date de strike (forward start).">Date de valeur *</label>
-                  <input v-model="form.value_date" type="date" class="input"
-                         @change="resolveFormDate('value_date')" />
-                  <select v-model="form.value_date_convention" class="select py-1 text-[11px]"
-                          title="Ce que devient cette date si elle tombe un week-end ou un jour férié du calendrier de la devise."
-                          @change="resolveFormDate('value_date')">
-                    <option value="none">Aucun ajustement</option>
-                    <option value="following">Jour ouvré suivant</option>
-                    <option value="modified_following">Suivant, sauf changement de mois</option>
-                    <option value="preceding">Jour ouvré précédent</option>
-                    <option value="modified_preceding">Précédent, sauf changement de mois</option>
-                  </select>
-                  <span v-if="dateNotices.value_date" class="text-[10px] text-amber-500">{{ dateNotices.value_date }}</span>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label">Date de maturité</label>
-                  <input :value="createMaturityDate" type="date" readonly
-                         class="input bg-slate-800/40 text-slate-500 cursor-not-allowed" />
-                </div>
-                <div class="flex flex-col gap-1">
-                  <label class="label"
-                         title="Échange final des flux de cash. Proposée à trois jours ouvrés après la dernière constatation — modifiable, c'est le term sheet qui tranche.">Date de paiement *</label>
-                  <input v-model="form.payment_date" type="date" class="input"
-                         @change="paymentDateSaisie = true; resolveFormDate('payment_date')" />
-                  <select v-model="form.payment_date_convention" class="select py-1 text-[11px]"
-                          title="Ce que devient cette date si elle tombe un week-end ou un jour férié du calendrier de la devise."
-                          @change="resolveFormDate('payment_date')">
-                    <option value="none">Aucun ajustement</option>
-                    <option value="following">Jour ouvré suivant</option>
-                    <option value="modified_following">Suivant, sauf changement de mois</option>
-                    <option value="preceding">Jour ouvré précédent</option>
-                    <option value="modified_preceding">Précédent, sauf changement de mois</option>
-                  </select>
-                  <span v-if="dateNotices.payment_date" class="text-[10px] text-amber-500">{{ dateNotices.payment_date }}</span>
-                </div>
-              </div>
-
-              <!-- Termes du produit + calendrier(s) CONSTAT (dynamiques, extraits du script) -->
-              <div v-if="parsedParams.length || scriptConstats.length" class="border-t border-slate-800 pt-3">
-                <RfqParamsEditor :parsed-params="parsedParams" :param-overrides="paramOverrides"
-                                 :constats="scriptConstats" :constat-overrides="constatOverrides"
-                                 :currency="form.currency" />
-              </div>
-
-              <!-- Hypothèses de pricing (avancé, pour le calcul du prix modèle interne) -->
-              <details class="border-t border-slate-800 pt-3">
-                <summary class="label mb-0 cursor-pointer select-none">▸ Hypothèses de pricing (avancé)</summary>
-                <div class="flex items-center gap-3 mt-2">
-                  <button type="button" class="btn-secondary text-xs px-3 py-1.5"
-                          :disabled="!createBasket[createActiveUnderlyingIdx]?.ticker?.trim() || createYfLoading"
-                          :title="createBasket[createActiveUnderlyingIdx]?.ticker?.trim()
-                                  ? `Vol réalisée 1 an et rendement du dividende de ${createBasket[createActiveUnderlyingIdx].ticker} (Yahoo Finance)`
-                                  : 'Renseignez un ticker de sous-jacent ci-dessus'"
-                          @click="loadCreateUnderlyingParams">
-                    📡 Charger {{ createBasket[createActiveUnderlyingIdx]?.ticker || 'le sous-jacent' }}
-                  </button>
-                  <span v-if="createYfStatus" class="text-[10px] text-slate-500">{{ createYfStatus }}</span>
-                </div>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Date de pricing</label>
-                    <input v-model="form.pricing_date" type="date" class="input" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Taux sans risque (%)</label>
-                    <input v-model.number="advanced.r" type="number" step="0.1" class="input" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Modèle</label>
-                    <select v-model="advanced.model" class="select">
-                      <option value="constant">Constant (GBM)</option>
-                      <option value="heston">Heston</option>
-                      <option value="sabr">SABR</option>
-                      <option value="localvol">Dupire (Local Vol)</option>
-                      <option value="lsv">Local-Stochastic Vol</option>
-                    </select>
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Trajectoires (N)</label>
-                    <input v-model.number="advanced.N" type="number" step="1000" class="input" />
-                  </div>
-                </div>
-
-                <div v-if="createBasket[createActiveUnderlyingIdx]" class="mt-3 border-t border-slate-800 pt-3">
-                  <div class="label">Volatilité · {{ createBasket[createActiveUnderlyingIdx].ticker || 'sous-jacent' }}</div>
-                  <UnderlyingVolFields :au="createBasket[createActiveUnderlyingIdx]"
-                                       :model="advanced.model" :horizon="form.T" :rate="advanced.r" />
-                </div>
-
-                <div v-if="createBasket.length > 1" class="mt-3 overflow-x-auto">
-                  <div class="label mb-1">Corrélations du panier</div>
-                  <table class="text-[11px] border-collapse">
-                    <thead><tr><th class="p-1"></th><th v-for="u in createBasket" :key="u.ticker" class="p-1 font-mono">{{ u.ticker || '—' }}</th></tr></thead>
-                    <tbody>
-                      <tr v-for="(row, i) in createCorrMatrix" :key="i">
-                        <th class="p-1 text-left font-mono">{{ createBasket[i]?.ticker || '—' }}</th>
-                        <td v-for="(_, j) in row" :key="j" class="p-1">
-                          <input v-if="j > i" type="number" min="-1" max="1" step="0.05"
-                                 class="input w-20 text-center" :value="createCorrMatrix[i][j]"
-                                 @input="setCorrelation(createCorrMatrix, i, j, $event.target.value)" />
-                          <span v-else class="inline-block w-20 text-center text-slate-600">{{ i === j ? '1.00' : createCorrMatrix[i][j].toFixed(2) }}</span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                <!-- Les mêmes cartes que Marché & Paramètres, dans le MÊME ORDRE,
-                     sur l'état de l'AO. Elles acceptent leur courbe en prop et retombent sur
-                     le Pricer quand on ne leur en donne pas : une seule
-                     implémentation, deux écrans, aucun état partagé. -->
-                <div class="flex flex-col gap-3 mt-3 pt-3 border-t border-slate-800">
-                  <DividendCurveCard :sous-jacents="ao.panier" :index-actif="createActiveUnderlyingIdx"
-                                     :horizon="form.T" />
-                  <YieldCurveCard :courbe="ao.yieldCurve" :taux-plat="advanced.r" />
-                  <FundingCurveCard :courbe="ao.fundingCurve" />
-                </div>
-              </details>
-            </div>
+            <RfqCreateProduct />
           </div>
 
         </div>
 
         <!-- Détail RFQ -->
         <div v-else-if="rfq.current" class="flex flex-col gap-4 max-w-[1900px]">
-          <div class="flex items-start justify-between gap-2 flex-wrap">
-            <div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-lg font-bold text-slate-100">{{ rfq.current.name || rfq.current.reference }}</h2>
-                <span :class="['text-[9px] rounded px-1.5 py-0.5 border', sensBadge(rfq.current.sens)]" :title="sensHint(rfq.current.sens)">{{ sensLabel(rfq.current.sens) }}</span>
-                <span :class="['text-[9px] rounded px-1.5 py-0.5 border', kindBadge(rfq.current.kind)]">{{ kindLabel(rfq.current.kind) }}</span>
-              </div>
-              <div class="text-xs text-slate-500 font-mono">{{ rfq.current.reference }} · {{ rfq.current.template_type || 'script personnalisé' }}</div>
-              <div v-if="rfq.current.pilot_desk_id" class="text-xs text-slate-500">
-                {{ rfq.current.organization_name }} · Desk pilote {{ rfq.current.pilot_desk_name }} · Responsable {{ rfq.current.responsible_user_name }} · Créateur {{ rfq.current.creator_name }}
-              </div>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <button v-if="rfq.current.access_rights?.includes('organize')" class="btn-secondary btn-sm" @click="openShares">Partager entre desks</button>
-              <button v-if="rfq.current.access_rights?.includes('organize')" class="btn-secondary btn-sm" @click="openAssignment">Affecter / transférer</button>
-              <button v-if="can(rfq.current, 'solicit')" class="btn-secondary btn-sm" :disabled="!rfq.current.product_id || detailTermsDirty" @click="showExchange = true">Préparer la demande partagée</button>
-              <button v-if="rfq.current.kind === 'indicatif'" class="btn-secondary text-xs px-3 py-1.5" title="Créer une RFQ 'to trade' à partir de celle-ci, avec un script précis"
-                      @click="convertToTrade(rfq.current)">📐 Convertir en RFQ to trade</button>
-              <button class="btn-secondary text-xs px-3 py-1.5" title="Créer une nouvelle RFQ à partir de celle-ci"
-                      @click="duplicateRfq(rfq.current)">⎘ Dupliquer</button>
-              <button v-if="can(rfq.current, 'organize')" class="icon-btn-danger" title="Supprimer" aria-label="Supprimer la RFQ" @click="deleteRfq(rfq.current.id)">🗑</button>
-            </div>
-          </div>
-          <AlertMessage v-if="rfq.current.pilot_desk_id && !can(rfq.current, 'prepare')" kind="info">
-            Dossier en consultation : les modifications nécessitent une habilitation du desk.
-          </AlertMessage>
-          <div v-if="rfq.current.commercial_context || rfq.current.transaction_format
-                     || rfq.current.instrument_family || rfq.current.payoff_family"
-               class="card py-2.5 px-3 flex items-center gap-2 flex-wrap text-xs">
-            <span v-if="rfq.current.commercial_context?.client" class="badge badge-accent">
-              Client · {{ rfq.current.commercial_context.client.name }}
-            </span>
-            <span v-if="rfq.current.commercial_context?.mandate" class="badge badge-muted">
-              Mandat · {{ rfq.current.commercial_context.mandate.name }}
-            </span>
-            <span v-if="rfq.current.transaction_format" class="badge badge-muted">
-              {{ rfq.current.transaction_format }}
-            </span>
-            <span v-if="rfq.current.instrument_family" class="badge badge-muted">
-              {{ rfq.current.instrument_family }}
-            </span>
-            <span v-if="rfq.current.payoff_family" class="badge badge-muted">
-              {{ payoffFamilyForDisplay(rfq.current.payoff_family) }}
-            </span>
-          </div>
+          <RfqDetailHeader />
 
           <!-- Deux colonnes figées : à gauche tout l'AO (produit, prix,
                script, cotations), à droite le contrôle du prix. La grille ne
@@ -578,272 +146,10 @@
                qu'exige la table des flux pour ne pas défiler. -->
           <div class="flex flex-col gap-4 min-[1650px]:grid min-[1650px]:grid-cols-[minmax(0,1fr)_560px] min-[1650px]:items-start">
             <div class="flex flex-col gap-4 min-w-0">
-              <!-- ── L'état de l'écran par rapport à la BASE ────────────
-                   Les termes saisis dans « Paramètres de pricing » ne vivent
-                   qu'en mémoire : « Calculer prix modèle » n'envoie que les
-                   hypothèses de modèle, jamais les termes. Le seul bouton qui
-                   les persistait vivait à l'INTÉRIEUR du bloc replié — modifier
-                   une date puis quitter la perdait sans un mot, et l'écran
-                   continuait d'afficher une valeur que la base n'avait pas.
-
-                   Rendue TOUJOURS visible, et pas seulement en cas d'écart :
-                   une barre qui n'apparaît qu'au moment du problème ne se
-                   cherche pas, elle se remarque — ou pas. Là, la question
-                   « est-ce que ce que je vois est en base ? » a une réponse
-                   affichée en permanence, sans rien déplier. -->
-              <div class="card flex flex-wrap items-center gap-3"
-                   :class="detailTermsDirty ? 'border-amber-600/50 bg-amber-900/10' : ''">
-                <span class="text-xs font-semibold"
-                      :class="detailTermsDirty ? 'text-amber-400' : 'text-emerald-500'">
-                  {{ detailTermsDirty ? '⚠ Modifications non enregistrées' : '✓ Écran conforme à la base' }}
-                </span>
-                <span class="text-[11px] flex-1 min-w-40"
-                      :class="detailTermsDirty ? 'text-slate-400' : 'text-slate-600'">
-                  {{ detailTermsDirty
-                    ? 'Ce qui est affiché ne correspond pas à la base. Quitter cette page le perd.'
-                    : 'Les termes affichés sont ceux enregistrés.' }}
-                </span>
-                <button type="button" class="btn-primary text-xs px-3 py-1.5 shrink-0"
-                        :disabled="!detailTermsDirty || savingTerms"
-                        title="Écrit les termes contractuels de l'AO en base. Refusé par le serveur si une cotation existe déjà — ils sont alors figés."
-                        @click="saveDetailTerms">
-                  {{ savingTerms ? 'Enregistrement…' : '💾 Enregistrer les termes' }}
-                </button>
-                <button type="button" class="text-[11px] underline shrink-0"
-                        :class="detailTermsDirty ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-400'"
-                        title="Recharger les termes tels qu'ils sont enregistrés en base"
-                        @click="refreshDetailParams">
-                  {{ detailTermsDirty ? 'Abandonner' : 'Recharger' }}
-                </button>
-              </div>
-              <AlertMessage v-if="termsError" kind="error" dismissible @dismiss="termsError = ''">{{ termsError }}</AlertMessage>
-
-              <!-- Détails du produit -->
-              <div class="card grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div>
-                  <div class="label mb-0.5">Date de l'AO</div>
-                  <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.ao_date) }}</div>
-                </div>
-                <div>
-                  <div class="label mb-0.5">Panier ({{ underlyingSummaries.length }})</div>
-                  <div class="text-xs text-slate-200 font-mono">
-                    <SensitiveValue>{{ underlyingSummaries.join(' / ') || '—' }}</SensitiveValue>
-                  </div>
-                </div>
-                <div>
-                  <div class="label mb-0.5">Nominal</div>
-                  <div class="text-xs text-slate-200"><SensitiveValue>{{ fmtNominal(rfq.current.params?.notional) }} {{ rfq.current.params?.currency || '' }}</SensitiveValue></div>
-                </div>
-                <div>
-                  <div class="label mb-0.5">Date de strike</div>
-                  <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.params?.strike_date) || '—' }}</div>
-                </div>
-                <div>
-                  <div class="label mb-0.5">Date de valeur</div>
-                  <div class="text-xs text-slate-200">{{ fmtDateOnly(rfq.current.params?.value_date) || '—' }}</div>
-                </div>
-                <div>
-                  <div class="label mb-0.5">Maturité</div>
-                  <div class="text-xs text-slate-200">
-                    {{ fmtDateOnly(detailMaturityDate) || '—' }}
-                    <span v-if="rfq.current.params?.T" class="text-slate-500">({{ fmtTenor(rfq.current.params.T) }} ans)</span>
-                  </div>
-                </div>
-                <!-- La date de paiement est un terme CONTRACTUEL, gelé comme le
-                     strike et la maturité. La cacher dans « paramètres de
-                     pricing (modifiables) », parmi les hypothèses de modèle, a
-                     produit un AO réglé trois ans avant son échéance sans que
-                     rien ne se voie. Sa place est ici, avec les trois autres. -->
-                <div>
-                  <div class="label mb-0.5">Date de paiement</div>
-                  <div class="text-xs" :class="reglementIncoherent ? 'text-red-400 font-semibold' : 'text-slate-200'">
-                    {{ fmtDateOnly(rfq.current.params?.payment_date) || '—' }}
-                    <span v-if="reglementIncoherent" :title="`Le règlement précède la maturité du ${fmtDateOnly(detailMaturityDate)}`">⚠</span>
-                  </div>
-                </div>
-                <div>
-                  <div class="label mb-0.5">Statut</div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs text-slate-200">{{ statusLabel(rfq.current.status) }}</span>
-                    <button v-if="rfq.current.status !== 'clos' && can(rfq.current, 'prepare')"
-                            :disabled="rfq.current.status === 'sans_suite' && !!rfq.current.exchange_round"
-                            class="text-[10px] underline text-slate-500 hover:text-slate-300"
-                            :title="rfq.current.status === 'sans_suite'
-                                    ? (rfq.current.exchange_round ? 'La clôture est définitive ; utilisez Nouveau tour dans Diffusion RFQ' : 'Rendre l\'AO au statut déduit de ses cotations')
-                                    : 'AO abandonné ou perdu — il ne donnera pas lieu à un trade'"
-                            @click="toggleSansSuite">
-                      {{ rfq.current.status === 'sans_suite' ? (rfq.current.exchange_round ? 'Tour clôturé' : 'Rouvrir') : 'Sans suite' }}
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <div class="label mb-0.5">Sens (notre côté)</div>
-                  <select class="select py-1 px-2 text-xs" :value="rfq.current.sens || 'achat'"
-                          :disabled="!!rfq.current.quotes?.length || !can(rfq.current, 'prepare')"
-                          :title="rfq.current.quotes?.length ? 'Sens figé dès la première sollicitation' : sensHint(rfq.current.sens)"
-                          @change="updateSens($event.target.value, $event.target)">
-                    <option value="achat">↓ Achat (nous achetons)</option>
-                    <option value="vente">↑ Vente (nous vendons)</option>
-                  </select>
-                </div>
-              </div>
+              <RfqDetailTerms />
 
               <!-- Prix modèle — params modifiables avant recalcul -->
-              <div class="card flex flex-col gap-3">
-                <div class="flex items-center gap-4">
-                  <div class="stat-box flex-1">
-                    <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Prix modèle Structura</div>
-                    <div class="text-xl font-bold text-slate-100"><SensitiveValue>{{ fmtPrice(rfq.current.model_price) }}</SensitiveValue></div>
-                    <!-- Ligne toujours rendue : sans elle, la tuile gagnait un cran
-                         de hauteur au premier calcul et tout le bloc sautait. -->
-                    <div class="text-[10px] text-slate-600 mt-0.5">
-                      {{ rfq.current.model_price_at ? 'Calculé le ' + fmtDate(rfq.current.model_price_at) : 'Pas encore calculé' }}
-                    </div>
-                  </div>
-                  <!-- Les deux libellés partagent la même cellule de grille : le
-                       bouton se dimensionne sur le plus long et ne bouge plus en
-                       passant à « Calcul… ». Une largeur en dur serait à refaire à
-                       chaque changement de libellé ou de police. -->
-                  <button v-if="can(rfq.current, 'price')" class="btn-price-model grid shrink-0" :disabled="computing || !!rfq.current.booked_deal" @click="computeModelPrice">
-                    <span class="col-start-1 row-start-1" :class="computing ? 'invisible' : ''">Calculer prix modèle</span>
-                    <span class="col-start-1 row-start-1" :class="computing ? '' : 'invisible'">Calcul…</span>
-                  </button>
-                </div>
-
-                <details v-if="can(rfq.current, 'price')" class="border-t border-slate-800 pt-3">
-                  <summary class="label mb-0 cursor-pointer select-none">▸ Paramètres de pricing (modifiables)</summary>
-                  <SensitiveValue mode="input">
-                  <div class="mt-2 flex flex-col gap-3">
-                    <fieldset :disabled="!!rfq.current.quotes?.length">
-                      <RfqParamsEditor :parsed-params="detailParsedParams" :param-overrides="detailParamOverrides"
-                                       :constats="detailScriptConstats" :constat-overrides="detailConstatOverrides"
-                                       :currency="rfq.current.params?.currency || 'EUR'" />
-                    </fieldset>
-
-                    <!-- L'éditeur ci-dessus ne vivait qu'en mémoire : le calcul du
-                         prix n'envoie que les hypothèses de modèle, jamais les
-                         termes. Un échéancier modifié se perdait donc au premier
-                         rechargement de l'AO. Cette barre est le seul chemin qui
-                         les persiste. -->
-                    <div class="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-3">
-                      <button type="button" class="btn-primary text-xs px-3 py-1.5 shrink-0"
-                              :disabled="!detailTermsDirty || savingTerms"
-                              title="Enregistre l'échéancier, les termes du produit et les dates sur l'AO. Refusé par le serveur si une cotation existe déjà — les termes contractuels sont alors figés."
-                              @click="saveDetailTerms">
-                        💾 Enregistrer les termes
-                      </button>
-                      <span class="text-[11px]" :class="detailTermsDirty ? 'text-amber-500' : 'text-slate-600'">
-                        {{ detailTermsDirty
-                          ? 'Modifications non enregistrées — elles seront perdues sans cette sauvegarde.'
-                          : 'Termes enregistrés.' }}
-                      </span>
-                      <button type="button" class="text-[11px] underline text-slate-500 hover:text-slate-300 shrink-0"
-                              title="Recharger les termes tels qu'ils sont enregistrés sur l'AO"
-                              @click="refreshDetailParams">Recharger</button>
-                    </div>
-
-                    <div class="flex items-center gap-3 border-t border-slate-800 pt-3">
-                      <div v-if="detailBasket.length > 1" class="flex flex-wrap gap-1">
-                        <button v-for="(underlying, index) in detailBasket" :key="underlying.ticker || index"
-                                type="button" class="btn-secondary text-xs px-2 py-1"
-                                :class="detailActiveUnderlyingIdx === index ? 'border-blue-500 text-blue-300' : ''"
-                                @click="detailActiveUnderlyingIdx = index">
-                          {{ underlying.ticker || underlying.name }}
-                        </button>
-                      </div>
-                      <button type="button" class="btn-secondary text-xs px-3 py-1.5"
-                              :disabled="!underlyingSummary.ticker || detailYfLoading"
-                              :title="underlyingSummary.ticker
-                                      ? `Vol réalisée 1 an et rendement du dividende de ${underlyingSummary.ticker} (Yahoo Finance)`
-                                      : 'Aucun ticker de sous-jacent sur cette RFQ'"
-                              @click="loadDetailUnderlyingParams">
-                        📡 Charger les paramètres du sous-jacent
-                      </button>
-                      <span v-if="detailYfStatus" class="text-[10px] text-slate-500">{{ detailYfStatus }}</span>
-                    </div>
-                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <div class="flex flex-col gap-1">
-                        <label class="label">Date de pricing</label>
-                        <input v-model="detailAdvanced.valuation_date" type="date" class="input" />
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <label class="label">Taux sans risque (%)</label>
-                        <input v-model.number="detailAdvanced.r" type="number" step="0.1" class="input" />
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <label class="label">Modèle</label>
-                        <select v-model="detailAdvanced.model" class="select">
-                          <option value="constant">Constant (GBM)</option>
-                          <option value="heston">Heston</option>
-                          <option value="sabr">SABR</option>
-                          <option value="localvol">Dupire (Local Vol)</option>
-                          <option value="lsv">Local-Stochastic Vol</option>
-                        </select>
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <label class="label">Trajectoires (N)</label>
-                        <input v-model.number="detailAdvanced.N" type="number" step="1000" class="input" />
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <label class="label">Date de strike</label>
-                        <input v-model="detailAdvanced.strike_date" type="date" class="input" :readonly="detailScriptConstats.some(c => c.role === 'initial_fixing')"
-                               :disabled="!!rfq.current.quotes?.length" />
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <label class="label">Date de valeur</label>
-                        <input v-model="detailAdvanced.value_date" type="date" class="input"
-                               :disabled="!!rfq.current.quotes?.length" />
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <label class="label">Date de maturité</label>
-                        <input :value="detailMaturityDate" type="date" readonly
-                               class="input bg-slate-800/40 text-slate-500 cursor-not-allowed" />
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <label class="label"
-                               title="Date d'échange final des flux de cash — celle du term sheet. C'est elle qui actualise le remboursement, pas la maturité.">Date de paiement ⓘ</label>
-                        <input v-model="detailAdvanced.payment_date" type="date" class="input"
-                               :disabled="!!rfq.current.quotes?.length" />
-                      </div>
-                    </div>
-                    <div v-if="detailBasket[detailActiveUnderlyingIdx]" class="mt-3 border-t border-slate-800 pt-3">
-                      <div class="label">Volatilité · {{ detailBasket[detailActiveUnderlyingIdx].ticker || 'sous-jacent' }}</div>
-                      <UnderlyingVolFields :au="detailBasket[detailActiveUnderlyingIdx]"
-                                           :model="detailAdvanced.model" :horizon="detailHorizon" :rate="detailAdvanced.r" />
-                    </div>
-
-                    <div v-if="detailBasket.length > 1" class="mt-3 overflow-x-auto border-t border-slate-800 pt-3">
-                      <div class="label mb-1">Corrélations du panier</div>
-                      <table class="text-[11px] border-collapse">
-                        <thead><tr><th class="p-1"></th><th v-for="u in detailBasket" :key="u.ticker" class="p-1 font-mono">{{ u.ticker || '—' }}</th></tr></thead>
-                        <tbody>
-                          <tr v-for="(row, i) in detailCorrMatrix" :key="i">
-                            <th class="p-1 text-left font-mono">{{ detailBasket[i]?.ticker || '—' }}</th>
-                            <td v-for="(_, j) in row" :key="j" class="p-1">
-                              <input v-if="j > i" type="number" min="-1" max="1" step="0.05"
-                                     class="input w-20 text-center" :value="detailCorrMatrix[i][j]"
-                                     @input="setCorrelation(detailCorrMatrix, i, j, $event.target.value)" />
-                              <span v-else class="inline-block w-20 text-center text-slate-600">{{ i === j ? '1.00' : detailCorrMatrix[i][j].toFixed(2) }}</span>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <!-- Les mêmes cartes qu'à la création, dans l'ordre du Pricer,
-                         sur l'état du détail. Ce sont des hypothèses de MODÈLE : elles
-                         restent ajustables cotations en main, contrairement
-                         aux dates ci-dessus qui, elles, sont contractuelles. -->
-                    <div class="flex flex-col gap-3 mt-3 pt-3 border-t border-slate-800">
-                      <DividendCurveCard :sous-jacents="aoDetail.panier" :index-actif="detailActiveUnderlyingIdx"
-                                         :horizon="detailHorizon" />
-                      <YieldCurveCard :courbe="aoDetail.yieldCurve" :taux-plat="detailAdvanced.r" />
-                      <FundingCurveCard :courbe="aoDetail.fundingCurve" />
-                    </div>
-                  </div>
-                  </SensitiveValue>
-                </details>
-              </div>
+              <RfqDetailPricing />
               <AlertMessage v-if="computeError" kind="error">{{ computeError }}</AlertMessage>
 
               <!-- Script (collapsible) -->
@@ -853,251 +159,7 @@
               </details>
 
               <!-- Quotes -->
-              <div class="card flex flex-col gap-3">
-                <div class="flex items-center justify-between">
-                  <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Fournisseurs sollicités</div>
-                  <div class="flex items-center gap-2">
-                    <span v-if="bestQuote" class="text-[10px] text-slate-500" :title="sensHint(rfq.current.sens)">
-                      Meilleure réponse ({{ rfq.current.sens === 'vente' ? 'prix le plus haut' : 'prix le plus bas' }}) :
-                      <span class="text-slate-300 font-semibold"><SensitiveValue>{{ fmtPrice(bestQuote.price) }}</SensitiveValue></span>
-                      ({{ providerLabel(bestQuote.provider) }})
-                    </span>
-                    <button v-if="!rfq.current.booked_deal && can(rfq.current, 'prepare')" class="btn-secondary text-xs" @click="openAddQuote">+ Ajouter un fournisseur</button>
-                  </div>
-                </div>
-
-                <AlertMessage v-if="mutationError" kind="error" dismissible @dismiss="mutationError = ''; rejectedMutation = null">
-                  {{ mutationError }}
-                  <p v-if="rejectedMutation" class="mt-1">Saisie refusée · {{ rejectedMutation.label }} :
-                    <SensitiveValue>{{ rejectedMutation.value }}</SensitiveValue>.
-                    {{ rejectedMutation.reloadFailed ? 'Rechargement impossible ; dernière valeur connue affichée.' : 'Valeur enregistrée restaurée.' }}
-                  </p>
-                </AlertMessage>
-
-                <!-- Un AO s'exécute une fois : une fois booké, plus de bouton de
-                     booking, on renvoie vers le deal. Le serveur refuse le doublon
-                     de toute façon (deals.py:book_deal, 409). -->
-                <div v-if="rfq.current.booked_deal"
-                     class="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
-                  <span class="text-xs text-slate-300">
-                    📋 AO exécuté — deal <DealReferenceLink
-                      :deal-id="rfq.current.booked_deal.id"
-                      :reference="rfq.current.booked_deal.reference"
-                      class="font-mono text-slate-200" />.
-                  </span>
-                  <button class="btn-secondary text-xs px-3 py-1.5 shrink-0"
-                          @click="openBookedDeal">→ Voir le booking</button>
-                </div>
-
-                <div v-if="rfq.current.booked_deal && rfq.current.selected_quote_id"
-                     class="flex items-start gap-3 flex-wrap rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
-                  <div class="min-w-0 flex-1">
-                    <div class="text-xs font-bold text-slate-300">
-                      Motif de sélection figé au booking
-                      <span v-if="bestQuote && !selectedIsBest" class="ml-1 text-amber-400">
-                        · meilleur prix non retenu
-                      </span>
-                    </div>
-                    <div v-if="rfq.current.selection_reason_note"
-                         class="text-[11px] text-slate-500 mt-1">
-                      {{ rfq.current.selection_reason_note }}
-                    </div>
-                  </div>
-                  <span class="badge badge-muted shrink-0">
-                    {{ selectionReasonLabel(rfq.current.selection_reason_code) }}
-                  </span>
-                </div>
-
-                <div v-else-if="rfq.current.selected_quote_id" class="flex items-center justify-between gap-3 rounded-lg border border-amber-800/60 bg-amber-950/20 px-3 py-2">
-                  <span class="text-xs text-amber-300">
-                    ⭐ Réponse retenue —
-                    <span v-if="rfq.current.selected_quote_revision !== selectedQuote?.revision" class="font-semibold">
-                      révision historique à requalifier en cliquant sur Retenir à nouveau.
-                    </span>
-                    <span v-if="selectedQuote?.origin === 'NETWORK'">{{ confirmedExecution ? 'accord de traitement confirmé ; ' : 'cotation réseau publiée ; confirmation de traitement requise avant booking. ' }}</span>
-                    {{ modelPriceRecorded
-                      ? 'prix modèle enregistré, prête à contrôler dans le Pricer.'
-                      : 'calculez le prix modèle Structura avant le booking.' }}
-                    <span v-if="rfq.current.kind === 'indicatif'" class="text-amber-500/80">
-                      RFQ indicative — pensée pour explorer, pas pour trader.
-                    </span>
-                  </span>
-                  <div class="flex items-center gap-2 shrink-0">
-                    <button v-if="rfq.current.kind === 'indicatif'" class="btn-secondary text-xs px-3 py-1.5"
-                            @click="convertToTrade(rfq.current)">📐 Convertir en RFQ to trade</button>
-                    <button v-if="!modelPriceRecorded && can(rfq.current, 'price')" class="btn-price-model"
-                            :disabled="computing" @click="computeModelPrice">
-                      {{ computing ? 'Calcul…' : 'Calculer prix modèle' }}
-                    </button>
-                    <button v-else-if="can(rfq.current, 'book') && (confirmedExecution || (selectedQuote?.origin !== 'NETWORK' && !activeExecution))" class="btn-primary text-xs px-3 py-1.5"
-                            @click="bookFromRfq">📋 Booker cette réponse</button>
-                  </div>
-                </div>
-
-                <RfqExecutionPanel :rfq="rfq.current" />
-
-                <div v-if="rfq.current.selected_quote_id && !rfq.current.booked_deal && can(rfq.current, 'select')"
-                     class="flex items-end gap-3 flex-wrap rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
-                  <div class="min-w-0">
-                    <div class="text-xs font-bold text-slate-300">
-                      Motif de sélection
-                      <span v-if="bestQuote && !selectedIsBest" class="ml-1 text-amber-400">
-                        · meilleur prix non retenu
-                      </span>
-                    </div>
-                    <div class="text-[11px] text-slate-500 mt-0.5">
-                      Facultatif et non bloquant. Il documente le choix sans transformer
-                      une habitude en interdiction fournisseur.
-                    </div>
-                  </div>
-                  <select v-model="selectionReasonCode" class="select py-1.5 text-xs min-w-[190px]">
-                    <option value="">Non renseigné</option>
-                    <option v-for="reason in SELECTION_REASONS" :key="reason.value"
-                            :value="reason.value">{{ reason.label }}</option>
-                  </select>
-                  <input v-model="selectionReasonNote" class="input py-1.5 text-xs min-w-[230px] flex-1"
-                         placeholder="Précision factuelle (facultative)" />
-                  <button class="btn-secondary text-xs px-3 py-1.5 shrink-0"
-                          :disabled="!selectionReasonChanged"
-                          @click="saveSelectionReason">Enregistrer</button>
-                </div>
-                <AlertMessage v-if="selectionReasonError" kind="error" dismissible
-                              @dismiss="selectionReasonError = ''">
-                  {{ selectionReasonError }}
-                </AlertMessage>
-
-                <div v-if="!rfq.current.quotes?.length" class="text-xs text-slate-600 py-2">
-                  Aucun fournisseur sollicité pour l'instant.
-                </div>
-
-                <SensitiveValue v-else>
-                <div class="table-shell" tabindex="0" role="region">
-                <table class="w-full text-xs min-w-[1280px]">
-                  <thead>
-                    <tr class="text-left text-slate-500 border-b border-slate-800">
-                      <th class="py-1.5 pr-2 font-medium">Fournisseur</th>
-                      <th class="py-1.5 pr-2 font-medium">Contact</th>
-                      <th class="py-1.5 pr-2 font-medium num">Prix</th>
-                      <th class="py-1.5 pr-2 font-medium num"
-                          title="Écart au prix modèle Structura, signé de notre côté : positif = en notre faveur (à l'achat, coter sous le modèle ; à la vente, au-dessus).">Écart</th>
-                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Statut</th>
-                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Fermeté</th>
-                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap">Date réponse</th>
-                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap"
-                      title="Renseignée d'office à l'heure de réponse + 2 h dès qu'on connaît celle-ci — une cotation ne se tient pas plus longtemps. Modifiable ensuite, et jamais écrasée une fois saisie.">Valide jusqu'au</th>
-                      <th class="py-1.5 pr-2 font-medium whitespace-nowrap" title="Le fournisseur voit le meilleur prix du marché et peut s'aligner, ou garder le deal à son propre prix.">Last look</th>
-                      <th class="py-1.5 pr-2 font-medium"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <template v-for="q in rfq.current.quotes" :key="q.id">
-                    <tr :class="['border-b border-slate-800/60', q.id === rfq.current.selected_quote_id ? 'bg-amber-950/10' : '']">
-                      <td class="py-1.5 pr-2 text-slate-300 whitespace-nowrap">
-                        <span v-if="q.parent_quote_id" class="text-slate-600 mr-1">↳</span>
-                        <span :class="q.parent_quote_id ? 'text-slate-400 italic' : ''">
-                          {{ q.parent_quote_id ? 'Last look' : providerLabel(q.provider) }}
-                          <div v-if="q.origin !== 'NETWORK' && q.identity_status === 'TO_QUALIFY' && !rfq.current.booked_deal && can(rfq.current, 'prepare')" class="flex flex-col gap-1 mt-2 whitespace-normal">
-                            <span class="text-amber-700">Identité juridique à qualifier</span>
-                            <select v-model="legalDraft[q.id]" class="select text-xs"><option :value="undefined">Choisir une contrepartie</option><option v-for="legal in legalCounterparties" :key="legal.id" :value="legal.id">{{ legal.name }}</option></select>
-                            <input v-model="legalReasons[q.id]" class="input text-xs" placeholder="Motif de la qualification" minlength="3" />
-                            <button class="btn-secondary btn-sm" @click="qualifyQuote(q)">Qualifier l’identité</button>
-                          </div>
-                          <span v-if="q.origin === 'NETWORK'" class="badge badge-accent ml-1">Réseau · v{{ q.publication.revision }} · {{ publicationStateLabel(q.publication.state) }}</span>
-                          <span v-else-if="q.revision" class="text-[10px] text-slate-500 ml-1">r{{ q.revision }} · {{ q.currency }}</span>
-                          <details v-if="q.origin === 'NETWORK'" class="text-xs mt-1"><summary class="cursor-pointer">Réponse publiée et conditions</summary><div class="max-w-sm whitespace-normal space-y-1"><p>{{ q.publication.response.counterparty_name }} · émetteur {{ q.publication.response.issuer_name || 'Sans objet' }}</p><p>{{ q.publication.response.documentation_reference }}</p><p>{{ q.publication.response.conditions_type === 'NONE' ? 'Sans condition supplémentaire' : 'Réponse conditionnelle' }}</p><p v-for="(condition, i) in q.publication.response.conditions" :key="i">{{ quoteConditionLabel(condition.code) }} : {{ condition.description }}</p><p v-if="q.publication.withdrawal_reason">Retrait : {{ q.publication.withdrawal_reason }}</p></div></details>
-                        </span>
-                      </td>
-                      <td class="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{{ q.contact || '—' }}</td>
-                      <td class="py-1.5 pr-2">
-                        <input type="number" class="input py-1 px-2 w-24"
-                               :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
-                               :value="q.price ?? ''"
-                               @change="onQuotePriceChange(q, $event.target.value, $event.target)" />
-                      </td>
-                      <td class="py-1.5 pr-2 num whitespace-nowrap" :class="spreadClass(q)">{{ spreadBps(q) }}</td>
-                      <td class="py-1.5 pr-2">
-                        <select class="select py-1 px-2 min-w-[125px]" :value="q.status"
-                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')" @change="updateQuoteField(q, 'status', $event.target.value, $event.target)">
-                          <option value="en_attente">En attente</option>
-                          <option value="recu">Reçu</option>
-                          <option value="decline">Décliné</option>
-                          <option value="expire">Expiré</option>
-                        </select>
-                      </td>
-                      <td class="py-1.5 pr-2">
-                        <select class="select py-1 px-2 min-w-[125px]" :value="q.firmness || 'UNKNOWN'"
-                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
-                                @change="updateQuoteField(q, 'firmness', $event.target.value, $event.target)">
-                          <option value="UNKNOWN">À qualifier</option>
-                          <option value="INDICATIVE">Indicative</option>
-                          <option value="FIRM">Ferme</option>
-                        </select>
-                      </td>
-                      <td class="py-1.5 pr-2">
-                        <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
-                               :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
-                               :value="toDatetimeLocal(q.quoted_at)"
-                               @change="onQuoteDateChange(q, $event.target.value, $event.target)" />
-                      </td>
-                      <td class="py-1.5 pr-2">
-                        <input type="datetime-local" class="input py-1 px-2 min-w-[170px]"
-                               :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || !can(rfq.current, 'prepare')"
-                               :value="toDatetimeLocal(q.valid_until)"
-                               @change="onQuoteValidityChange(q, $event.target.value, $event.target)" />
-                      </td>
-                      <td class="py-1.5 pr-2">
-                        <select v-if="!q.parent_quote_id" class="select py-1 px-2 min-w-[80px]"
-                                :disabled="!!rfq.current.booked_deal || activeExecution?.quote_id === q.id || q.origin === 'NETWORK' || q.price == null || !can(rfq.current, 'prepare')"
-                                :value="q.last_look ? 'oui' : 'non'"
-                                @change="onLastLookToggle(q, $event.target.value === 'oui', $event.target)">
-                          <option value="non">Non</option>
-                          <option value="oui">Oui</option>
-                        </select>
-                      </td>
-                      <td class="py-1.5 pr-2 text-right whitespace-nowrap">
-                        <button :class="['text-xs mr-2', q.id === rfq.current.selected_quote_id ? 'text-amber-400 font-semibold' : 'text-slate-600 hover:text-amber-400']"
-                                :disabled="!!rfq.current.booked_deal || !!activeExecution || !q.comparable || !can(rfq.current, 'select')"
-                                :title="!q.comparable ? 'Seule une cotation finale, active et non remplacée peut être retenue' : (q.id === rfq.current.selected_quote_id ? 'Réponse retenue — cliquer pour désélectionner' : 'Retenir cette réponse')"
-                                @click="onSelectQuote(q)">
-                          {{ q.id === rfq.current.selected_quote_id ? (rfq.current.selected_quote_revision === q.revision ? '★ Retenue' : '☆ Retenir à nouveau') : '☆ Retenir' }}
-                        </button>
-                        <button v-if="q.origin !== 'NETWORK' && !rfq.current.booked_deal && can(rfq.current, 'prepare')" class="text-slate-600 hover:text-red-400" @click="removeQuote(q.id)">✕</button>
-                      </td>
-                    </tr>
-                    </template>
-                  </tbody>
-                </table>
-                </div>
-                </SensitiveValue>
-
-                <!-- Add quote inline form -->
-                <div v-if="addingQuote" class="flex items-end gap-2 pt-2 border-t border-slate-800">
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Fournisseur</label>
-                    <select v-model="quoteForm.provider" class="select">
-                      <option v-for="p in rfq.providers" :key="p.id" :value="p.label">{{ p.label }}</option>
-                      <option value="autre">Autre (banque non listée)</option>
-                    </select>
-                  </div>
-                  <div v-if="quoteForm.provider === 'autre'" class="flex flex-col gap-1">
-                    <label class="label">Nom de la banque</label>
-                    <input v-model="quoteForm.customProvider" type="text" class="input" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <label class="label">Contact</label>
-                    <select v-if="availableQuoteContacts.length" v-model="quoteForm.contact" class="select">
-                      <option value="">— Choisir un contact —</option>
-                      <option v-for="contact in availableQuoteContacts" :key="contact.id" :value="contact.name">
-                        {{ contact.name }}{{ contact.email ? ` · ${contact.email}` : '' }}
-                      </option>
-                    </select>
-                    <input v-else v-model="quoteForm.contact" type="text" class="input"
-                           placeholder="Nom / email (optionnel)" />
-                  </div>
-                  <button class="btn-primary text-xs px-3 py-2" @click="submitAddQuote">Ajouter</button>
-                  <button class="btn-secondary text-xs px-3 py-2" @click="addingQuote = false">Annuler</button>
-                </div>
-              </div>
+              <RfqQuotesCard />
             </div>
 
             <SensitiveValue><RfqPricingPanel :rfq="rfq.current" :pricing="rfq.lastPricing" :can-price="can(rfq.current, 'price')" /></SensitiveValue>
@@ -1185,12 +247,16 @@
 </template>
 
 <script setup>
+import RfqCreateRequest from './rfq/RfqCreateRequest.vue'
+import RfqCreateProduct from './rfq/RfqCreateProduct.vue'
+import RfqDetailHeader from './rfq/RfqDetailHeader.vue'
+import RfqDetailTerms from './rfq/RfqDetailTerms.vue'
+import RfqDetailPricing from './rfq/RfqDetailPricing.vue'
+import RfqQuotesCard from './rfq/RfqQuotesCard.vue'
+import { RFQ_CONTEXT } from './rfq/context.js'
 import BackLink from '../components/ui/BackLink.vue'
 import SensitiveValue from '../components/SensitiveValue.vue'
-import RfqExecutionPanel from '../components/RfqExecutionPanel.vue'
-import { publicationStateLabel, quoteConditionLabel } from '../utils/rfqQuoteStates.js'
-import DealReferenceLink from '../components/DealReferenceLink.vue'
-import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick, provide } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useRfqStore } from '../stores/rfq.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
@@ -1198,20 +264,13 @@ import { useProductsStore } from '../stores/products.js'
 import { useMarketAssumptions } from '../composables/useMarketAssumptions.js'
 import { fractionToPercent, fractionToPercentExact } from '../utils/underlyingDefaults.js'
 import { recordMarketReference } from '../utils/marketProvenance.js'
-import {
-  PAYOFF_FAMILIES, canonicalPayoffFamily, payoffFamilyForDisplay,
-  payoffFamilyForModel,
-} from '../utils/payoffFamilies.js'
-import YieldCurveCard from '../components/YieldCurveCard.vue'
-import FundingCurveCard from '../components/FundingCurveCard.vue'
-import DividendCurveCard from '../components/DividendCurveCard.vue'
-import UnderlyingVolFields from '../components/UnderlyingVolFields.vue'
+import { canonicalPayoffFamily, payoffFamilyForModel } from '../utils/payoffFamilies.js'
 import { calibrateUnderlying } from '../utils/smileCalibration.js'
 import { surfaceCalibrationKey } from '../utils/volSurface.js'
 import { apiFetch } from '../utils/api.js'
-import { calendarValue, serializeCalendars, fixingDate, parameterValues, tenorString, tenorPair } from '../utils/payscriptEconomics.js'
+import { fixingDate, parameterValues } from '../utils/payscriptEconomics.js'
 import { templateMeta, examples } from '../data/payscriptTemplates.js'
-import { underlyingGroups, ensureUnderlyings, catalogInstrument, selectCatalogUnderlying } from '../data/commonUnderlyings.js'
+import { ensureUnderlyings, selectCatalogUnderlying } from '../data/commonUnderlyings.js'
 import {
   emptyRfqUnderlying, normaliseCorrelation, rfqBasketFromParams,
   rfqUnderlyingToParams,
@@ -1222,12 +281,16 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import AlertMessage from '../components/ui/AlertMessage.vue'
 import DataFilterBar from '../components/ui/DataFilterBar.vue'
 import { useDataFilter } from '../composables/useDataFilter.js'
-import RfqParamsEditor from '../components/RfqParamsEditor.vue'
-import PayScriptPresetPicker from '../components/PayScriptPresetPicker.vue'
 import RfqPricingPanel from '../components/RfqPricingPanel.vue'
 import RfqExchangePanel from '../components/RfqExchangePanel.vue'
 import CcrCreditCheck from '../components/CcrCreditCheck.vue'
 import { formatDate, formatDateTime, formatPercent, formatInt, formatBps } from '../utils/format.js'
+import {
+  addYears, buildConstatsPayload, can, canonical, contractualSubset, kindBadge, kindLabel,
+  normalizedFamily, replaceBasket, restoreConstatOverrides, sensBadge, sensHint, sensLabel,
+  shareRights, statusBadge, statusLabel, syncConstatOverrides, toDatetimeLocal, todayIso,
+  withDefaultValidity, yearsBetween,
+} from './rfq/rfqLabels.js'
 
 // Catalogue de sous-jacents : chargé depuis la base au montage.
 onMounted(ensureUnderlyings)
@@ -1240,38 +303,14 @@ async function qualifyQuote(quote) {
   await rfq.updateQuote(rfq.current.id, quote.id, { counterparty_id: legalDraft[quote.id], identity_reason: legalReasons[quote.id].trim() })
 }
 
-// ── CONSTAT calendar helpers — mirror of pricing.js's constatOverrides
-// shape/serialization (see RfqParamsEditor.vue's docstring), duplicated
-// here rather than imported since pricing.js's version is tangled up with
-// that store's own script/parseScript state.
-function syncConstatOverrides(constats, values) {
-  const names = new Set(constats.map(c => c.name))
-  for (const name of Object.keys(values)) if (!names.has(name)) delete values[name]
-  for (const c of constats) values[c.name] = calendarValue(c, values[c.name])
-}
-const tenorStr = tenorString
-const parseTenor = tenorPair
-function buildConstatsPayload(constats, values) {
-  return serializeCalendars(constats, values, fixingDate(constats, values))
-}
-function restoreConstatOverrides(constats, values, saved) {
-  for (const c of constats) values[c.name] = calendarValue(c, saved?.[c.name])
-}
-
 const rfq = useRfqStore()
 const demoMode = useDemoModeStore()
-const can = (row, right) => !row?.pilot_desk_id || row.access_rights?.includes(right)
 const myDesks = ref([])
 const organizationDesks = ref([])
 const pilotDeskOptions = computed(() => myDesks.value.filter(d => d.rights.includes('prepare')))
 const showShares = ref(false)
 const rfqShares = ref([])
 const shareError = ref('')
-const shareRights = [
-  { key: 'read', label: 'Lire' }, { key: 'prepare', label: 'Contribuer / manuel' },
-  { key: 'price', label: 'Pricing interne' }, { key: 'select', label: 'Sélectionner' },
-  { key: 'solicit', label: 'Solliciter' },
-]
 const shareDraft = reactive({ desk_id: null, rights: ['read'], reason: '', expires_at: '' })
 const showAssignment = ref(false)
 const assignmentMembers = ref([])
@@ -1425,32 +464,6 @@ const groupedTemplates = computed(() => {
   return groups
 })
 
-function todayIso() {
-  const now = new Date()
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
-}
-
-// addBizDays a disparu avec les dates devinees : il ne comptait que les jours
-// de semaine, sans aucun ferie, et servait a proposer une value date a
-// strike + 2. Les jours ouvres vivent desormais cote serveur, sur un vrai
-// calendrier par devise (core/calendars.py).
-function addYears(isoDate, years) {
-  const d = new Date(isoDate)
-  d.setDate(d.getDate() + Math.round(years * 365.25))
-  return d.toISOString().split('T')[0]
-}
-// Inverse of addYears (same 365.25-day year) — turns an absolute calendar end
-// back into the tenor /api/price expects.
-function yearsBetween(fromIso, toIso) {
-  const days = (new Date(toIso) - new Date(fromIso)) / 86400000
-  return Math.round((days / 365.25) * 1e4) / 1e4
-}
-// A tenor derived from a calendar rarely lands round (2.9986 years for a
-// 3Y schedule) — display it rounded, price the exact value.
-function fmtTenor(t) {
-  return Number.isFinite(t) ? String(Math.round(t * 100) / 100) : t
-}
-
 const form = reactive({
   pilot_desk_id: null,
   previous_round_id: null,
@@ -1487,7 +500,6 @@ const form = reactive({
 })
 const legacyPayoffFamily = computed(() => form.payoff_family
   && !canonicalPayoffFamily(form.payoff_family) ? form.payoff_family : '')
-const normalizedFamily = value => canonicalPayoffFamily(value) || value || ''
 let lastSuggestedFamily = ''
 const dateNotices = reactive({ strike_date: '', value_date: '', payment_date: '' })
 
@@ -1529,10 +541,6 @@ const detailBasket = reactive(rfqBasketFromParams([], form.currency))
 const detailActiveUnderlyingIdx = ref(0)
 const detailCorrMatrix = ref([[1]])
 
-function replaceBasket(target, rows) {
-  target.splice(0, target.length, ...rows)
-}
-
 function setCreateBasket(underlyings, correlation = null) {
   replaceBasket(createBasket, rfqBasketFromParams(underlyings, form.currency))
   createActiveUnderlyingIdx.value = 0
@@ -1559,13 +567,6 @@ function removeCreateUnderlying(index) {
     .map(row => row.filter((_, j) => j !== index))
   createCorrMatrix.value = normaliseCorrelation(reduced, createBasket.length)
   createActiveUnderlyingIdx.value = Math.min(createActiveUnderlyingIdx.value, createBasket.length - 1)
-}
-
-function setCorrelation(target, i, j, raw) {
-  const value = Math.max(-1, Math.min(1, Number(raw) || 0))
-  const matrix = Array.isArray(target) ? target : target.value
-  matrix[i][j] = value
-  matrix[j][i] = value
 }
 
 // ── Hypothèses de marché de l'appel d'offres ──────────────────────
@@ -2093,18 +1094,6 @@ const termsError   = ref('')
 // Photo des termes tels que l'éditeur les affichait au dernier chargement.
 const termsBaseline = ref('')
 
-// Tri récursif des clés : les termes stockés viennent du serveur, ceux de
-// l'éditeur sont reconstruits — sans canonisation, deux objets identiques
-// mais différemment ordonnés passeraient pour une modification. Même règle
-// que le _normalise() de rfq_controls.py côté serveur.
-function canonical(v) {
-  if (Array.isArray(v)) return v.map(canonical)
-  if (v && typeof v === 'object') {
-    return Object.keys(v).sort().reduce((o, k) => { o[k] = canonical(v[k]); return o }, {})
-  }
-  return v
-}
-
 // Termes contractuels tels que l'éditeur les tient en ce moment. On repart
 // des params STOCKÉS et on n'écrase que ce que l'éditeur pilote : une
 // reconstruction complète depuis le formulaire réduisait un panier worst-of
@@ -2127,19 +1116,6 @@ function detailTermsPayload() {
       ? yearsBetween(detailAdvanced.strike_date, detailCalendarEnd.value)
       : (stored.T ?? null),
   }
-}
-
-// Sous-ensemble contractuel — ce que le serveur compare pour décider si les
-// termes ont bougé (product_terms). Les hypothèses de modèle en sont exclues.
-function contractualSubset(p) {
-  return JSON.stringify(canonical({
-    user_params: p.user_params ?? {},
-    constats: p.constats ?? {},
-    strike_date: p.strike_date ?? null,
-    value_date: p.value_date ?? null,
-    payment_date: p.payment_date ?? null,
-    T: p.T ?? null,
-  }))
 }
 
 // Le règlement final ne peut pas précéder la dernière constatation. Le serveur
@@ -2661,22 +1637,6 @@ function updateQuoteField(q, field, value, element) {
   return saveQuoteField(q,field,value,{[field]:value},element)
 }
 
-// Une cotation vit quelques heures, pas quelques jours : dès qu'on connaît
-// l'heure de réponse, on tient le prix pour valable deux heures. C'est une
-// valeur proposée — une validité déjà saisie n'est jamais écrasée, et le
-// serveur exige de toute façon une validité postérieure à la réponse
-// (api/rfq.py update_quote).
-const DEFAULT_VALIDITY_HOURS = 2
-
-function withDefaultValidity(q, quotedAtIso, payload) {
-  if (quotedAtIso && !q.valid_until) {
-    payload.valid_until = new Date(
-      new Date(quotedAtIso).getTime() + DEFAULT_VALIDITY_HOURS * 3600_000
-    ).toISOString()
-  }
-  return payload
-}
-
 function onQuotePriceChange(q, value, element) {
   const price = value === '' ? null : Number(value)
   const payload = { price }
@@ -2696,14 +1656,6 @@ function onQuoteDateChange(q, value, element) {
 
 function onQuoteValidityChange(q, value, element) {
   return saveQuoteField(q,'valid_until',value,{ valid_until: value ? new Date(value).toISOString() : null },element)
-}
-
-// <input type="datetime-local"> expects "YYYY-MM-DDTHH:mm" in local time.
-function toDatetimeLocal(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const pad = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 const fmtDateOnly = formatDate
@@ -2739,45 +1691,6 @@ function spreadClass(q) {
   const e = edgeBps(q)
   if (e === null) return 'text-slate-600'
   return e >= 0 ? 'text-green-400' : 'text-red-400'
-}
-
-// Statuts déduits côté serveur du déroulé de l'AO (api/rfq.py
-// _derive_status) — sauf « Bookée » (posé au booking) et « Sans suite »
-// (posé à la main : AO abandonné ou perdu).
-const STATUS_LABELS = { draft: 'Brouillon', envoye: 'Envoyée', quote: 'Cotée', retenue: 'Retenue', clos: 'Bookée', sans_suite: 'Sans suite' }
-const STATUS_BADGES = {
-  draft:      'bg-slate-800 text-slate-400 border-slate-700',
-  sans_suite: 'bg-red-900/40 text-red-300 border-red-900',
-  envoye:  'bg-blue-900/50 text-blue-300 border-blue-800',
-  quote:   'bg-green-900/50 text-green-400 border-green-800',
-  retenue: 'bg-amber-900/50 text-amber-300 border-amber-800',
-  clos:    'bg-slate-800 text-slate-500 border-slate-700',
-}
-function statusLabel(s) { return STATUS_LABELS[s] || s }
-function statusBadge(s) { return STATUS_BADGES[s] || STATUS_BADGES.draft }
-
-const KIND_LABELS = { indicatif: 'Indicatif', to_trade: 'To trade' }
-const KIND_BADGES = {
-  indicatif: 'bg-slate-800 text-slate-400 border-slate-700',
-  to_trade:  'bg-amber-900/40 text-amber-300 border-amber-800',
-}
-function kindLabel(k) { return KIND_LABELS[k] || KIND_LABELS.indicatif }
-function kindBadge(k) { return KIND_BADGES[k] || KIND_BADGES.indicatif }
-
-// Notre côté du trade, pas celui de la contrepartie — attention, Deal.sens
-// suit la convention INVERSE ("Vente (banque vend)" = nous achetons), d'où
-// l'inversion au moment de préremplir le booking (pricing.js:loadFromRfq).
-const SENS_LABELS = { achat: '↓ Achat', vente: '↑ Vente' }
-const SENS_BADGES = {
-  achat: 'bg-emerald-900/40 text-emerald-300 border-emerald-800',
-  vente: 'bg-blue-900/40 text-blue-300 border-blue-800',
-}
-function sensLabel(s) { return SENS_LABELS[s] || SENS_LABELS.achat }
-function sensBadge(s) { return SENS_BADGES[s] || SENS_BADGES.achat }
-function sensHint(s) {
-  return s === 'vente'
-    ? 'Nous vendons le produit : la meilleure réponse est le prix le PLUS HAUT (on encaisse davantage).'
-    : 'Nous achetons le produit aux fournisseurs : la meilleure réponse est le prix le PLUS BAS (on paie moins).'
 }
 
 async function updateSens(value,element) {
@@ -2843,19 +1756,6 @@ const selectedIsBest = computed(
   () => !!selectedQuote.value && !!bestQuote.value
         && Math.abs(selectedQuote.value.price - bestQuote.value.price) <= 1e-9)
 
-const SELECTION_REASONS = [
-  { value: 'price', label: 'Prix' },
-  { value: 'client_request', label: 'Demande du Client' },
-  { value: 'documentation', label: 'Documentation / programme' },
-  { value: 'credit', label: 'Crédit / contrepartie' },
-  { value: 'concentration', label: 'Concentration' },
-  { value: 'relationship', label: 'Relation fournisseur' },
-  { value: 'execution_quality', label: "Qualité d'exécution" },
-  { value: 'other', label: 'Autre' },
-]
-function selectionReasonLabel(code) {
-  return SELECTION_REASONS.find(reason => reason.value === code)?.label || 'Non renseigné'
-}
 const selectionReasonCode = ref('')
 const selectionReasonNote = ref('')
 const selectionReasonError = ref('')
@@ -2923,4 +1823,30 @@ watch(() => fixingDate(scriptConstats.value, constatOverrides), value => {
 watch(() => fixingDate(detailScriptConstats.value, detailConstatOverrides), value => {
   if (detailScriptConstats.value.some(c => c.role === 'initial_fixing')) detailAdvanced.strike_date = value
 }, { flush: 'sync' })
+
+// Shared with the panels extracted in P1-10 (U3). Declared last: every
+// binding below exists by now, and provide() still runs during setup.
+provide(RFQ_CONTEXT, {
+  activeExecution, addCreateUnderlying, addingQuote, advanced, ao, aoDetail, applyCreatePreset,
+  availableQuoteContacts, bestQuote, bookFromRfq, commercialLinkEnabled, computeModelPrice,
+  computing, confirmedExecution, constatOverrides, convertToTrade, createActiveUnderlyingIdx,
+  createBasket, createCorrMatrix, createMaturityDate, createYfLoading, createYfStatus, dateNotices,
+  deleteRfq, detailActiveUnderlyingIdx, detailAdvanced, detailBasket, detailConstatOverrides,
+  detailCorrMatrix, detailHorizon, detailMaturityDate, detailParamOverrides, detailParsedParams,
+  detailScriptConstats, detailTermsDirty, detailYfLoading, detailYfStatus, directClients,
+  directContacts, directMandates, directOpportunities, duplicateRfq, fmtDate, fmtDateOnly,
+  fmtNominal, fmtPrice, form, formatNominal, groupedTemplates, legacyPayoffFamily,
+  legalCounterparties, legalDraft, legalReasons, librarySelectValue, loadCreateUnderlyingParams,
+  loadDetailUnderlyingParams, modelPriceRecorded, mutationError, nominalRaw, onDirectClientChange,
+  onDirectOpportunityChange, onKindToggle, onLastLookToggle, onLibrarySelect, onQuoteDateChange,
+  onQuotePriceChange, onQuoteValidityChange, onSelectQuote, onSourceToggle, onTemplateChange,
+  onUnderlyingSelect, openAddQuote, openAssignment, openBookedDeal, openShares, opportuniteContexte,
+  paramOverrides, parsedParams, paymentDateSaisie, providerLabel, qualifyQuote, quoteForm,
+  refreshDetailParams, reglementIncoherent, rejectedMutation, removeCreateUnderlying, removeQuote,
+  resolveFormDate, rfq, saveDetailTerms, saveSelectionReason, savingTerms, scriptConstats,
+  scriptedDeals, scripts, selectedIsBest, selectedQuote, selectionReasonChanged,
+  selectionReasonCode, selectionReasonError, selectionReasonNote, showExchange, sourceProduct,
+  spreadBps, spreadClass, submitAddQuote, termsError, toggleDirectCommercial, toggleSansSuite,
+  underlyingSummaries, underlyingSummary, unformatNominal, updateQuoteField, updateSens,
+})
 </script>
