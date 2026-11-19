@@ -105,10 +105,11 @@ def configure(body: ChannelCreate, admin: Admin, session: Database):
         raise HTTPException(422, "Choisissez une autre installation")
     if body.role == "BANK" and (not body.channel_id or not body.secret):
         raise HTTPException(422, "Importez l'identifiant de canal et la clé communiqués par le demandeur")
+    channel_secret = body.secret or secrets.token_hex(32)
     channel = RfqChannel(id=str(body.channel_id or uuid4()), relationship_id=relation.id,
         relationship_version=relation.version, entity_id=entity_id, role=body.role,
         peer_installation_id=str(body.peer_installation_id), peer_url=transport.endpoint(body.peer_url),
-        secret=body.secret or secrets.token_hex(32), agreement_hash=transport.agreement(session, relation), configured_by=admin.id)
+        secret=transport.seal_channel_secret(channel_secret), agreement_hash=transport.agreement(session, relation), configured_by=admin.id)
     cp = session.get(Counterparty, body.peer_counterparty_id)
     if not cp or not cp.active:
         raise HTTPException(422, "Rapprochement juridique local de votre organisation requis")
@@ -127,7 +128,7 @@ def configure(body: ChannelCreate, admin: Admin, session: Database):
         session.rollback()
         raise HTTPException(409, "Identifiant de canal ou relation déjà appairé")
     # Key shown once, to the administrator creating/importing this pairing only.
-    return {**row(channel), "pairing": {"channel_id": channel.id, "secret": channel.secret,
+    return {**row(channel), "pairing": {"channel_id": channel.id, "secret": channel_secret,
         "installation_id": local_id, "agreement_hash": channel.agreement_hash}}
 
 

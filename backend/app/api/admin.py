@@ -414,6 +414,16 @@ def delete_counterparty(
     session.commit()
 
 
+# ── Audit trail integrity (P1-8, S6) ───────────────────────────────
+
+@router.get("/audit/integrity")
+def audit_integrity(admin: Annotated[User, Depends(get_current_admin)],
+                    session: Annotated[Session, Depends(get_session)]):
+    """Recompute the hash chain of the business audit trail."""
+    from ..db.audit_integrity import verify_chain
+    return verify_chain(session.connection())
+
+
 # ── Data browser (read-only + delete, see core/admin_registry.py) ─────
 
 @router.get("/browse")

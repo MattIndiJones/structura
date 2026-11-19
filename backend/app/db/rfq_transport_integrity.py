@@ -2,9 +2,26 @@
 from sqlalchemy import text
 
 
+def seal_channel_secrets(connection) -> int:
+    """Seal the channel keys stored in clear before P1-8 (S5)."""
+    from ..core.secret_store import available
+    from ..services.rfq_transport import SEALED_CHANNEL_PREFIX, seal_channel_secret
+    if not available() or not connection.execute(text(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rfq_channels'")).first():
+        return 0
+    rows = connection.execute(text("SELECT id, secret FROM rfq_channels WHERE secret NOT LIKE :p"),
+                              {"p": SEALED_CHANNEL_PREFIX + "%"}).all()
+    for channel_id, secret in rows:
+        connection.execute(text("UPDATE rfq_channels SET secret=:s WHERE id=:id"),
+                           {"s": seal_channel_secret(secret), "id": channel_id})
+    return len(rows)
+
+
 def install_transport_guards(engine):
     if engine.dialect.name != "sqlite":
         return
+    with engine.begin() as connection:
+        seal_channel_secrets(connection)
     with engine.begin() as connection:
         for table in ("rfq_transport_inbox", "rfq_installation"):
             for operation in ("UPDATE", "DELETE"):

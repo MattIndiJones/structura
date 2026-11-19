@@ -4,7 +4,8 @@ import { usePricingStore } from './pricing.js'
 import { useProductsStore } from './products.js'
 import { useRfqStore } from './rfq.js'
 import { clearUnderlyings } from '../data/commonUnderlyings.js'
-import { sessionToken, sessionInstallation, installationUrl, saveSession, clearSession, sessionFetch } from '../utils/session.js'
+import { sessionToken, sessionInstallation, installationUrl, saveSession, clearSession, sessionFetch,
+  replaceSessionToken, tokenExpiry } from '../utils/session.js'
 import { accessErrorMessage } from '../utils/accessErrors.js'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -34,6 +35,58 @@ export const useAuthStore = defineStore('auth', () => {
   const canSettleTrading = computed(() => hasBusinessCapability('trading.settle', ['admin', 'organization_admin', 'ops_maker']))
   const readOnly        = computed(() => user.value?.read_only === true)
 
+  // ── Renewal (P1-8, S4) ───────────────────────────────────────────
+  // A token lasts 30 minutes: the open tab renews it five minutes before its
+  // end. The server ends the session 12 hours after the login, renewals
+  // included; the tab then returns to the login screen with a notice.
+  const RENEW_BEFORE_MS = 5 * 60 * 1000
+  let renewalTimer = null
+
+  function scheduleRenewal() {
+    clearTimeout(renewalTimer)
+    renewalTimer = null
+    // The development portal issues its own tokens, renewed nowhere else.
+    if (!token.value || user.value?.role === 'platform_admin') return
+    const expiry = tokenExpiry(token.value)
+    if (!expiry) return
+    renewalTimer = setTimeout(renewToken, Math.max(expiry - Date.now() - RENEW_BEFORE_MS, 1000))
+  }
+
+  async function renewToken() {
+    const current = token.value
+    if (!current) return
+    let res
+    try {
+      res = await sessionFetch('/api/auth/refresh', { method: 'POST', headers: { Authorization: `Bearer ${current}` } })
+    } catch {
+      if (token.value === current) renewalTimer = setTimeout(renewToken, 30000)
+      return
+    }
+    if (token.value !== current) return
+    if (res.status === 401) {
+      const data = await res.json().catch(() => ({}))
+      clearLocal()
+      sessionStorage.setItem('auth_notice', data.detail || 'Session expirée : reconnectez-vous.')
+      if (typeof window !== 'undefined' && window.location) window.location.hash = '#/login'
+      return
+    }
+    if (res.ok) {
+      const data = await res.json()
+      replaceSessionToken(data.access_token)
+      token.value = data.access_token
+    }
+    scheduleRenewal()
+  }
+
+  // A tab woken up after a sleep renews at once rather than on a late timer.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || !token.value) return
+      const expiry = tokenExpiry(token.value)
+      if (expiry && expiry - Date.now() < RENEW_BEFORE_MS) renewToken()
+    })
+  }
+
   function authHeaders() {
     return token.value ? { Authorization: `Bearer ${token.value}` } : {}
   }
@@ -44,6 +97,7 @@ export const useAuthStore = defineStore('auth', () => {
     installation.value = descriptor
     user.value = identity
     if (identity.role === 'platform_admin') sessionStorage.setItem('development_admin_token', accessToken)
+    scheduleRenewal()
   }
 
   async function validatedSession(accessToken, descriptor) {
@@ -110,6 +164,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (token.value !== expectedToken) return
       user.value = await res.json()
       if (installation.value && !sameInstallation(user.value.installation, installation.value)) clearLocal()
+      else scheduleRenewal()
     } catch {
       if (token.value === expectedToken) clearLocal()
     }
@@ -138,6 +193,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function clearLocal() {
+    clearTimeout(renewalTimer)
+    renewalTimer = null
     token.value = null
     user.value  = null
     installation.value = null
@@ -174,7 +231,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   return { token, user, installation, isAuthenticated, isAdmin, isPlatformAdmin, canManageSimulation, isOrganizationAdmin, canAdministerOrganization, canPrice, canBook, canManageTrading, canSettleTrading, readOnly,
-    login, activate, developmentLogin, developmentAdminLogin, fetchMe, openConsultation, logout, authHeaders }
+    login, activate, developmentLogin, developmentAdminLogin, fetchMe, openConsultation, logout, authHeaders, renewToken }
 })
 
 function sameInstallation(actual, expected) {

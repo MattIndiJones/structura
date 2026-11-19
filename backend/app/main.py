@@ -79,6 +79,9 @@ app = FastAPI(
 
 app.add_middleware(DocumentUploadLimitMiddleware)
 
+from .core.security_headers import install_security_headers
+install_security_headers(app)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[v.strip() for v in __import__("os").environ.get(
@@ -98,7 +101,7 @@ configure_lifecycle_handlers(refresh_deal_core, build_watchlist_row)
 @app.middleware("http")
 async def consultation_read_only(request: Request, call_next):
     if consultation_mode() and request.method not in {"GET", "HEAD", "OPTIONS"}:
-        allowed = {"/api/auth/login", "/api/auth/logout", "/api/auth/logout-all", "/_instance/stop", "/_instance/consultation-session"}
+        allowed = {"/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/api/auth/logout-all", "/_instance/stop", "/_instance/consultation-session"}
         if request.url.path not in allowed:
             return JSONResponse(status_code=403, content={"detail":
                 "Consultation en lecture seule : modification et recalcul désactivés."})

@@ -64,6 +64,8 @@ def create_app(config=None):
             await asyncio.to_thread(consultations.shutdown)
 
     app = FastAPI(title="Structura — contrôleur de simulation isolé", lifespan=lifespan)
+    from ..core.security_headers import install_security_headers
+    install_security_headers(app)
 
     async def delegated_admin(request: Request):
         if hasattr(request.state, "simulation_actor"):

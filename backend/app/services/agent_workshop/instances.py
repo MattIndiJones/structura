@@ -53,7 +53,8 @@ class Instances:
                 raise RuntimeError('Ancienne simulation sans identifiants techniques privés ; créez une nouvelle simulation. Le book existant est conservé.')
             credentials = {'username': 'workshop_admin', 'email': key + '-bootstrap@recette.invalid',
                            'password': secrets.token_urlsafe(32)}
-            atomic_write(directory / BOOTSTRAP_FILENAME, json.dumps(credentials))
+            from ...core.secret_store import write_secret
+            write_secret(directory / BOOTSTRAP_FILENAME, json.dumps(credentials))
         return credentials
 
     def restore_baseline(self, directory, key):

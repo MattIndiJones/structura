@@ -44,12 +44,14 @@ def load_key(provider: str) -> str | None:
     if from_env:
         return from_env
     path = _KEY_DIR / filename
+    from ...core.secret_store import SecretUnavailable, read_secret
     try:
         if path.exists():
-            stored = path.read_text(encoding="utf-8").strip()
+            # Sealed by Windows on first read (P1-8, S5).
+            stored = read_secret(path).strip()
             if stored:
                 return stored
-    except OSError:
+    except (OSError, SecretUnavailable):
         pass
     return None
 

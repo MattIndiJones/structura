@@ -119,7 +119,8 @@ def prepare(root, base_port=8100):
             if (directory / "structura.db").exists() or (directory / "platform.db").exists():
                 raise ValueError("Identifiants de bootstrap manquants pour une base existante.")
             names = ["admin"] if config.kind == "platform" else ["superuser", "front", "operations", "controller"]
-            atomic_json(private, {name: secrets.token_urlsafe(32) for name in names})
+            from ..core.secret_store import write_secret
+            write_secret(private, json.dumps({name: secrets.token_urlsafe(32) for name in names}))
         credentials(config)
         if config.kind == "organization":
             for source in (ROOT / "backend" / "data" / "ff_factors").glob("*.parquet"):

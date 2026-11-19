@@ -10,7 +10,8 @@ def simulation_credentials(directory):
     if not path.exists():
         return None
     try:
-        value = json.loads(path.read_text(encoding='utf-8'))
+        from .secret_store import read_secret
+        value = json.loads(read_secret(path))
         password = value.get('password')
         if (value.get('username') != 'workshop_admin' or not isinstance(value.get('email'), str)
                 or not isinstance(password, str) or len(password) < 32 or len(password.encode()) > 72):

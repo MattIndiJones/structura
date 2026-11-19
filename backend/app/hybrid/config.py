@@ -85,7 +85,8 @@ def current_config() -> InstallationConfig | None:
 
 
 def credentials(config: InstallationConfig) -> dict[str, str]:
-    payload = json.loads((config.data_dir / ".bootstrap_credentials.json").read_text(encoding="utf-8"))
+    from ..core.secret_store import read_secret
+    payload = json.loads(read_secret(config.data_dir / ".bootstrap_credentials.json"))
     expected = {"admin"} if config.kind == "platform" else {"superuser", "front", "operations", "controller"}
     if set(payload) != expected or any(not isinstance(p, str) or len(p) < 24 for p in payload.values()):
         raise RuntimeError("Identifiants privés de bootstrap incomplets ou invalides.")

@@ -92,8 +92,28 @@ def channel_current(session, channel, *, confirmed=True, protective=False):
     return relation
 
 
+# Channel keys are sealed by Windows in the database (P1-8, S5): a copy of
+# the database read from another account cannot forge a channel's messages.
+SEALED_CHANNEL_PREFIX = "dpapi1:"
+
+
+def seal_channel_secret(value_hex: str) -> str:
+    from ..core.secret_store import MARKER, available, seal
+    if not available():
+        return value_hex
+    return SEALED_CHANNEL_PREFIX + seal(value_hex)[len(MARKER):].decode("ascii")
+
+
+def channel_key(channel) -> bytes:
+    stored = channel.secret
+    if stored.startswith(SEALED_CHANNEL_PREFIX):
+        from ..core.secret_store import MARKER, unseal
+        stored = unseal(MARKER + stored[len(SEALED_CHANNEL_PREFIX):].encode("ascii"))[0]
+    return bytes.fromhex(stored)
+
+
 def signature(channel, value):
-    return hmac.new(bytes.fromhex(channel.secret), canonical(value).encode(), hashlib.sha256).hexdigest()
+    return hmac.new(channel_key(channel), canonical(value).encode(), hashlib.sha256).hexdigest()
 
 
 def envelope(session, channel, operation, message):

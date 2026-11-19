@@ -80,7 +80,7 @@ def inventory(root, runtime_root):
             # Remove credentials, documents and runtime payloads only beside an
             # identified old installation, never an arbitrary temporary parent.
             if path.name in {"structura.db", "platform.db"}:
-                for name in (".jwt_secret", ".bootstrap_credentials.json", ".developer_private.pem", ".process.json"):
+                for name in (".jwt_secret", ".session_secret", ".bootstrap_credentials.json", ".developer_private.pem", ".process.json"):
                     candidate = path.parent / name
                     if candidate.is_file():
                         targets.add(safe_path(candidate, root))

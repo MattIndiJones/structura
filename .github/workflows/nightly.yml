@@ -31,7 +31,8 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -r requirements.lock.txt
+      # Every package pinned with the hash of each published file (P1-8, S12).
+      - run: python -m pip install --require-hashes -r requirements.lock.txt
       - run: python backend/scripts/check_environment.py
       - name: Suite backend complète (parallèle, un processus par cœur)
         run: python -m pytest backend/tests -q -n auto --dist load -rfE --junitxml=backend-tests.xml
@@ -61,3 +62,25 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build:skip-tests
+
+  # Known vulnerabilities in the locked dependencies (P1-8, S12). Nightly, not
+  # on each pull request: an advisory published overnight must not block an
+  # unrelated change, but it must be seen the next morning.
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pip-audit==2.9.0
+      - name: Paquets Python verrouillés
+        # The lock pins every package: audit it as written, without resolving.
+        run: pip-audit --strict --disable-pip --require-hashes -r requirements.lock.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Paquets npm
+        working-directory: frontend
+        run: npm audit --audit-level=high
