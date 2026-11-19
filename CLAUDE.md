@@ -170,6 +170,12 @@ devait servir.
 
 ## Base de données
 
+**Une évolution de schéma est une nouvelle migration numérotée** dans
+`backend/app/db/migrations/` (`m0002_…`), atomique et enregistrée dans
+`schema_migrations`. Ne jamais modifier `m0001_baseline.py`, la base figée au
+19/11/2026 : un test l'interdit. Mode d'emploi dans
+`docs/projects/platform/MIGRATIONS_P1_7_2026-11-19.md`.
+
 `backend/data/structura.db` (SQLite) n'est **jamais versionné** (`.gitignore`) — les
 deals, scripts, études AMC, RFQ etc. de Philippe sont des données réelles, pas du code.
 Sur un nouveau clone, le démarrage exige une installation métier ou un workspace

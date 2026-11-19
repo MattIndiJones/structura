@@ -286,6 +286,28 @@ def _database_check() -> dict:
             **({} if foreign_keys else {"error": "FOREIGN_KEYS_OFF"})}
 
 
+_EXPECTED_SCHEMA = None
+
+
+def _schema_version() -> dict:
+    """Schema version of the database against the last migration this code
+    knows (db/migrations, P1-7). Informative: startup refuses a newer
+    database and migrates an older one before serving."""
+    global _EXPECTED_SCHEMA
+    from sqlalchemy import text
+    from .db import migrations
+    from .db.database import engine
+    if _EXPECTED_SCHEMA is None:
+        _EXPECTED_SCHEMA = migrations.discover()[-1].version
+    try:
+        with engine.connect() as connection:
+            version = max(migrations.applied(connection), default=0)
+    except Exception:
+        logger.exception("Contrôle de santé : version du schéma illisible")
+        return {"version": None, "expected": _EXPECTED_SCHEMA}
+    return {"version": version, "expected": _EXPECTED_SCHEMA}
+
+
 async def _database_status(timeout: float = 2.0) -> dict:
     try:
         return await asyncio.wait_for(asyncio.to_thread(_database_check), timeout)
@@ -303,6 +325,8 @@ async def health():
     body, and as a 503 on /health/ready."""
     database = await _database_status()
     result = {"status": "ok" if database["ok"] else "degraded", "version": VERSION, "database": database}
+    if database["ok"]:
+        result["schema"] = await asyncio.to_thread(_schema_version)
     if os.environ.get("STRUCTURA_INSTANCE_ID"):
         result.update(instance_id=os.environ["STRUCTURA_INSTANCE_ID"], process_id=os.getpid())
     if os.environ.get("STRUCTURA_BOOTSTRAP_PROFILE") == "admin_workbench":

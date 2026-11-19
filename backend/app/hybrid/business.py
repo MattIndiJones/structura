@@ -9,6 +9,7 @@ from sqlalchemy import text
 from .config import credentials
 from ..core.audit import record_audit_event
 from ..db.models import Entity, User, RfqDesk, RfqDeskMembership, RfqBankPublicationPolicy, RfqInstallation
+from ..db.migrations import BOOKKEEPING_TABLES
 
 
 class HybridBootstrap(SQLModel, table=True):
@@ -43,7 +44,7 @@ def preflight(engine, config):
     with engine.connect() as connection:
         tables = {row[0] for row in connection.execute(text(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'"))}
-        if tables - (set(SQLModel.metadata.tables) | {"app_migrations"}):
+        if tables - (set(SQLModel.metadata.tables) | BOOKKEEPING_TABLES):
             raise RuntimeError("Schéma préexistant non identifié ; aucune mise à jour appliquée.")
         if AdminWorkbenchIdentity.__tablename__ in tables and connection.execute(text(
                 "SELECT 1 FROM admin_workbench_identity LIMIT 1")).first():
@@ -60,7 +61,7 @@ def preflight(engine, config):
             return
         # An interrupted first boot may have created empty tables and schema
         # markers. It cannot have committed private rows without its identity.
-        for table in tables - {"app_migrations"}:
+        for table in tables - BOOKKEEPING_TABLES:
             identifier = '"' + table.replace('"', '""') + '"'
             if connection.execute(text(f"SELECT 1 FROM {identifier} LIMIT 1")).first():
                 raise RuntimeError("Base préexistante sans bootstrap identifié ; aucune mise à jour appliquée.")

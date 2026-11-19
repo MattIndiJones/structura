@@ -10,6 +10,11 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Migrations numérotées et version du schéma — 19/11](projects/platform/MIGRATIONS_P1_7_2026-11-19.md)
+— P1-7 : base du 19/11 figée en migration 1, migrations suivantes numérotées, chacune atomique et
+enregistrée dans `schema_migrations` ; refus d'une base plus récente, copie avant montée de version.
+Comment écrire une migration.
+
 [Écran d'erreur, vues découpées et parcours de bout en bout — 19/11](projects/platform/ECRANS_P1_10_2026-11-19.md)
 — P1-10 : écran d'erreur global à la place de la page blanche, rechargement unique sur fragment
 manquant ; Booking, RFQ et Risk Management découpés en panneaux, DOM et styles inchangés ; cinq
@@ -1060,6 +1065,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [MIGRATIONS_P1_7_2026-11-19.md](projects/platform/MIGRATIONS_P1_7_2026-11-19.md) | 19/11 | Migrations numérotées, table de version, base figée (P1-7) | Fait localement | — |
 | [ECRANS_P1_10_2026-11-19.md](projects/platform/ECRANS_P1_10_2026-11-19.md) | 19/11 | Écran d'erreur global, trois vues découpées, parcours de bout en bout nocturnes (P1-10) | Fait localement | Logique de `RfqView.vue` à répartir, `AmcView.vue` (avec QISTRA), départ silencieux refusé par Valo Explain |
 | [SECURITE_P1_8_2026-11-19.md](projects/platform/SECURITE_P1_8_2026-11-19.md) | 19/11 | En-têtes, sessions courtes renouvelées, secrets scellés, audit chaîné, dépendances verrouillées (P1-8) | Fait localement | Clé RSA du portail, identifiants d'agents, rotation des canaux RFQ, frein de connexion persistant (S7) |
 | [PRICING_INTERACTIF_P1_4_2026-11-19.md](projects/platform/PRICING_INTERACTIF_P1_4_2026-11-19.md) | 19/11 | Pricing interactif en file : processus préchauffés, délai, annulation, abandon (P1-4) | Fait localement | Autres analyses du Pricer (profil, trajectoires, backtest, solveur, grille, MTF) |
