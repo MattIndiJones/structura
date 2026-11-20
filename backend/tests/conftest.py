@@ -20,7 +20,7 @@ les données versionnées, les facteurs Fama-French, y sont recopiées : la suit
 voit ce que voit la CI. Un test qui veut son propre dossier pose toujours le
 sien.
 
-── 2. L'intégrité référentielle est appliquée par défaut ─────────────
+── 2. L'intégrité référentielle est toujours appliquée ──────────────
 
 SQLite n'applique les clés étrangères que si on le demande, connexion par
 connexion. `db/database.py` le fait pour le moteur de production. Les tests
@@ -35,18 +35,23 @@ prise de connexion. L'application ne crée elle-même que le moteur de
 production, qui l'applique déjà : la règle ne peut pas rendre un test plus
 strict que la production.
 
-Les modules de test qui n'y sont pas encore conformes sont listés dans
-`SANS_INTEGRITE`. La règle suit le test EN COURS, pas le module qui a créé le
-moteur : la plupart des moteurs viennent de modules d'aide partagés, dont les
-propres tests sont conformes. Le cas typique est une convention de
-fixture, pas un défaut : `Deal(user_id=1, entity_id=7, …)` sans créer la ligne
-`User` ni l'`Entity`. Un module sort de la liste quand ses fixtures créent ce
-qu'elles référencent ; la liste ne doit que raccourcir.
+Il n'y a pas d'exemption. Mesuré le 19/11/2026 à la mise en place de la
+règle : 464 échecs dans 49 modules, tous `FOREIGN KEY constraint failed`.
+Il s'agissait le plus souvent d'une fixture qui insérait `Deal(user_id=1)` ou
+`User(entity_id=7)` sans créer la ligne qu'elle nommait. Ces modules ont été
+exemptés le temps de leur mise en conformité, puis la liste a été vidée le
+20/11/2026. Les fixtures créent désormais ce qu'elles référencent, avec les
+aides de `integrity_fixtures.py`.
+
+La mise en conformité a trouvé deux vrais défauts. `delete_client` et
+`delete_script` supprimaient le parent dans le même flush que ses enfants : sans
+`relationship()`, SQLAlchemy n'ordonne pas ces suppressions. Une fixture qui
+échoue sur une clé étrangère se corrige en créant le parent, pas en coupant la
+contrainte.
 """
 import atexit
 import os
 import shutil
-import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -81,54 +86,11 @@ from sqlmodel import SQLModel  # noqa: E402
 
 from backend.tests.sqlite_engines import _create_engine, foreign_keys_on, moteur_sqlite  # noqa: E402
 
-# ── 2. Intégrité référentielle par défaut ────────────────────────────
-
-# Test modules (file stem) whose fixtures insert rows referencing parents they
-# never create. The rule follows the RUNNING test, not the module that built
-# the engine: most engines come from shared helpers (test_workflow_controls,
-# test_ccr…) whose own tests conform. Measured on 19/11/2026 on the full suite:
-# 464 failures, all FOREIGN KEY constraint failed, mostly a User inserted with
-# an entity_id whose Entity was never created. Shrink only.
-SANS_INTEGRITE: frozenset[str] = frozenset({
-    "test_admin_registry", "test_amc_studies", "test_c19_archives",
-    "test_calibration_window", "test_client_affiliations", "test_client_analytics",
-    "test_client_api", "test_client_card", "test_client_coherence",
-    "test_client_constraints", "test_client_constraints_ref", "test_client_demo_seed",
-    "test_client_import", "test_client_intelligence", "test_client_lot2",
-    "test_client_technical", "test_contractual_timeline", "test_fixing_finality_registry",
-    "test_fixings_releves", "test_inlife_pricing", "test_kid_mrm",
-    "test_legal_identity_workflows", "test_lifecycle_c26", "test_market_data_lot4",
-    "test_market_snapshot_rate", "test_mtm_explain", "test_mtm_realized_sessions",
-    "test_pnl_c22", "test_portfolio_barriers", "test_portfolio_corr_greek",
-    "test_portfolio_pnl", "test_portfolios_crud", "test_reference_governance",
-    "test_releves_consommateurs", "test_review_followup_2026_10_24",
-    "test_review_probable_fixes_2026_10_24", "test_rfq", "test_rfq_desk_access",
-    "test_risk_c21", "test_risk_dates", "test_shocks", "test_underlyings_catalog",
-    "test_valuation_semantics", "test_var_engine", "test_variantes_comparaison",
-    "test_variantes_filiation", "test_workflow_controls", "test_workflow_phase2",
-    "test_workshop_consultation",
-})
+# ── 2. Intégrité référentielle, sans exemption ────────────────────────────
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _OWN_FILES = {Path(__file__).resolve(), _TESTS_DIR / "sqlite_engines.py"}
-_integrity = {"on": True}
 _sqlmodel_create_engine = sqlmodel.create_engine
-
-
-def _apply_rule(dbapi_connection, record, *_):
-    """Apply the current test's rule on every connection, pooled ones included.
-
-    An exemption only withdraws what the rule itself set: a test that enables
-    the constraint on its own engine keeps it, exempt module or not."""
-    if not isinstance(dbapi_connection, sqlite3.Connection):
-        return
-    set_by_rule = record.info.get("foreign_keys_by_rule", False)
-    if _integrity["on"] == set_by_rule:
-        return
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=%s" % ("ON" if _integrity["on"] else "OFF"))
-    cursor.close()
-    record.info["foreign_keys_by_rule"] = _integrity["on"]
 
 
 def _created_by_a_test():
@@ -152,9 +114,8 @@ def _with_integrity(original):
     def create_engine(*args, **kwargs):
         engine = original(*args, **kwargs)
         if (engine.dialect.name == "sqlite" and _created_by_a_test()
-                and not event.contains(engine, "checkout", _apply_rule)):
-            event.listen(engine, "connect", _apply_rule)
-            event.listen(engine, "checkout", _apply_rule)
+                and not event.contains(engine, "connect", foreign_keys_on)):
+            event.listen(engine, "connect", foreign_keys_on)
         return engine
     create_engine.__wrapped__ = original
     return create_engine
@@ -164,20 +125,12 @@ sqlalchemy.create_engine = _with_integrity(_create_engine)
 sqlmodel.create_engine = _with_integrity(_sqlmodel_create_engine)
 
 
-@pytest.fixture(autouse=True)
-def _integrite_referentielle(request):
-    _integrity["on"] = Path(str(request.node.fspath)).stem not in SANS_INTEGRITE
-    yield
-    _integrity["on"] = True
-
-
 _moteur_sqlite = moteur_sqlite
 
 
 @pytest.fixture
 def moteur_integre():
-    """Un moteur qui applique les clés étrangères, comme la production,
-    y compris dans un module exempté."""
+    """Un moteur qui applique les clés étrangères, comme la production."""
     return moteur_sqlite(integrite=True)
 
 

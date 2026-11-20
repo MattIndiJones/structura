@@ -12,6 +12,7 @@ from sqlmodel import SQLModel, Session, create_engine
 
 from backend.app.api import portfolios as portfolios_api
 from backend.app.db.models import Deal, Portfolio, ValuationRun
+from backend.tests.integrity_fixtures import seeded_session
 
 USER = SimpleNamespace(id=1, role='user', entity_id=None)
 
@@ -19,7 +20,8 @@ USER = SimpleNamespace(id=1, role='user', entity_id=None)
 def _make_session():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    return Session(eng)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(eng, USER)
 
 
 def _add_deal(s: Session, reference: str, names_tickers: list[tuple[str, str]],

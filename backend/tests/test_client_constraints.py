@@ -27,12 +27,15 @@ from backend.app.core.client_controls import (
     validate_scalar_constraints, RATING_SCALE,
 )
 from backend.app.db.models import Client
+from backend.tests.integrity_fixtures import seeded_session
+from backend.tests.integrity_fixtures import DEFAULT_ACTOR, ensure_users, seeded_session
 
 
 def _session() -> Session:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    return Session(engine)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(engine)
 
 
 def _client(session: Session) -> Client:
@@ -71,7 +74,7 @@ def test_le_compare_and_swap_en_base_refuse_deux_sessions_sur_la_meme_version():
     """Le WHERE version=N ferme la fenêtre entre lecture et écriture."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    with Session(engine) as creation:
+    with seeded_session(engine) as creation:
         client = _client(creation)
         client_id = client.id
 

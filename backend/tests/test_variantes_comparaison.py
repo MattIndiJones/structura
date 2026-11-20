@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from backend.app.core.variants import MODE_AVENANT, MODE_ROLL
+from backend.tests.integrity_fixtures import ensure_entities, ensure_users
 
 USER = SimpleNamespace(id=1, entity_id=1)
 
@@ -108,6 +109,7 @@ def client(monkeypatch):
 
     from backend.app.main import app
     with Session(moteur) as s:
+        ensure_entities(s, 1)
         u = User(username="phil", email="phil@test.local", password_hash="x", entity_id=1)
         s.add(u); s.commit(); s.refresh(u)
         uid = u.id

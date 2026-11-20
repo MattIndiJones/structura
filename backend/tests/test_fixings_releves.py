@@ -19,6 +19,7 @@ from backend.app.db.models import Counterparty, Deal, DealEvent, Entity, Product
 from backend.app.db.product_migrations import migrate_product_links
 from backend.app.services.product_repository import load_product
 from backend.tests.test_business_permissions import access_case
+from backend.tests.integrity_fixtures import DEFAULT_ACTOR, ensure_users, seeded_session
 
 
 SCRIPT_MOYENNE = """PARAM COUPON = 8%
@@ -120,7 +121,8 @@ def test_le_modele_porte_le_lien_releve_constatation():
     agrégat."""
     engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(engine)
-    with Session(engine) as s:
+    with seeded_session(engine, DEFAULT_ACTOR) as s:
+        s.add(Deal(id=1, reference="DEAL-RELEVES", user_id=1)); s.flush()   # the events' deal
         parent = DealEvent(deal_id=1, event_index=1, event_date="2027-09-10",
                            t_years=1.0, reduction="AVG", label="Obs. 1")
         s.add(parent)
@@ -158,7 +160,8 @@ def test_un_releve_ne_porte_pas_de_regle_d_agregation():
     pour une même information, ce sont deux endroits qui peuvent diverger."""
     engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(engine)
-    with Session(engine) as s:
+    with seeded_session(engine, DEFAULT_ACTOR) as s:
+        s.add(Deal(id=1, reference="DEAL-RELEVES", user_id=1)); s.flush()   # the events' deal
         parent = DealEvent(deal_id=1, event_index=1, event_date="2027-09-10",
                            t_years=1.0, reduction="AVG", label="Obs. 1")
         s.add(parent)

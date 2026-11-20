@@ -12,6 +12,7 @@ from backend.app.core.amc_manifest import ManualParams, BlockToggles
 from backend.app.core.fifo.loader import _order_from_item, load_orders
 from backend.app.core.amc_confidence import build_confidence
 from backend.app.core.amc_managerskill import compute_manager_skill_score
+from backend.tests.integrity_fixtures import DEFAULT_ACTOR, ensure_users, seeded_session
 
 
 @pytest.fixture(autouse=True)
@@ -334,6 +335,7 @@ def test_saved_snapshot_archive_and_ownership(tmp_path):
     SQLModel.metadata.create_all(engine)
     user = SimpleNamespace(id=41, role="user", entity_id=None)
     other = SimpleNamespace(id=42, role="user", entity_id=None)
+    seeded_session(engine, user, other).close()      # the study's owner and the other account
     result = {"meta": {"isin": "GENERIC"}, "_artifacts": {"brinson": {"check_pct": 1.25}, "ai": {"generation_id": "test"}}}
     with Session(engine) as session:
         saved = create_study(AmcStudyCreate(isin="GENERIC", result=result, synthese="Conclusion"), user, session)

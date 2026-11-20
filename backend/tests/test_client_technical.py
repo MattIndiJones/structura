@@ -29,12 +29,13 @@ from backend.app.core.client_technical import (
 from backend.app.db.models import (
     Client, ClientTradeHistory, Deal, Underlying,
 )
+from backend.tests.integrity_fixtures import seeded_session
 
 
 def _session() -> Session:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    session = Session(engine)
+    session = seeded_session(engine)
     # Le catalogue, réduit à ce qui sert ici.
     session.add_all([
         Underlying(ticker="^STOXX50E", label="Euro Stoxx 50",

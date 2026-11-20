@@ -1,6 +1,6 @@
-# Isolation des tests et intégrité référentielle par défaut
+# Isolation des tests et intégrité référentielle sans exemption
 
-État local au 19/11/2026. Réponse à P1-6 de l'[audit technique du 16/11](../../audits/AUDIT_GLOBAL_TECHNIQUE_2026-11-16.md),
+État au 20/11/2026. Réponse à P1-6 de l'[audit technique du 16/11](../../audits/AUDIT_GLOBAL_TECHNIQUE_2026-11-16.md),
 constats D2 et D5.
 
 ## 1. Les données du poste sont hors d'atteinte (D5)
@@ -29,10 +29,11 @@ production le fait (`db/database.py`). Les moteurs en mémoire des tests ne le f
 pas, d'où le retrait du jeu de démonstration, vert en test et en échec sur la vraie base.
 
 `sqlalchemy.create_engine` et `sqlmodel.create_engine` sont enveloppés. Tout moteur SQLite
-**créé depuis un fichier de `backend/tests`** pose `PRAGMA foreign_keys=ON` à la connexion
-et à chaque prise dans le pool.
+**créé depuis un fichier de `backend/tests`** pose `PRAGMA foreign_keys=ON` à chaque
+connexion. Depuis le 20/11, il n'y a plus d'exemption.
 
-Trois choix, chacun issu d'une mesure fausse :
+Trois choix, chacun issu d'une mesure fausse. Les deux derniers ont servi pendant la
+mise en conformité et sont tombés avec la liste :
 
 - **L'appelant est reconnu par le chemin du fichier, pas par le nom du module.** Pytest
   importe les tests sous `tests.test_x`, alors que les modules qui réutilisent leurs aides
@@ -72,10 +73,43 @@ Vérification après remplissage :
 
 La suite complète n'a pas été relancée après le remplissage ; la nocturne le fera.
 
-## Reste à faire
+## Mise en conformité du 20/11/2026 : la liste est vide
 
-La liste ne doit que raccourcir. Un fichier en sort quand ses fixtures créent ce qu'elles
-référencent. L'ordre utile est celui des aides partagées d'abord : une aide qui crée
-l'`Entity` de ses `User` peut libérer plusieurs fichiers à la fois. `test_client_demo_seed`
-et `test_mtm_realized_sessions` sont dans la liste pour un seul et trois tests
-respectivement ; ce sont les premiers candidats.
+Les 49 fichiers sont sortis de `SANS_INTEGRITE`, puis la liste a été supprimée, avec
+l'option de mesure `--toute-integrite` qui servait à la vider. Les fixtures créent
+désormais ce qu'elles référencent. `backend/tests/integrity_fixtures.py` porte les aides,
+toutes idempotentes :
+
+- `ensure_entities(session, *ids)` crée les organisations nommées ;
+- `ensure_users(session, *acteurs)` crée chaque acteur et son organisation, avec l'`id`
+  et l'`entity_id` exacts du module. Semer l'acteur par défaut (entité 1) dans un module
+  dont l'acteur a `entity_id=None` faisait répondre « Deal introuvable » ;
+- `seeded_session(engine, *acteurs)` ouvre une session dont les acteurs existent,
+  committés, parce que plusieurs services font un rollback en cours de route ;
+- `ensure_uat_batch(session, id)` crée le lot de recette qu'un deal UAT référence.
+
+Une règle d'écriture est apparue en chemin. Les modèles n'ont pas de `relationship()`,
+donc SQLAlchemy n'ordonne ni les insertions ni les suppressions entre tables liées dans
+un même flush. Il faut faire un `flush()` après le parent avant d'insérer l'enfant, et
+un `flush()` après les enfants avant de supprimer le parent.
+
+**Deux vrais défauts de l'application**, trouvés par ce passage et corrigés :
+
+- `delete_client` (`api/clients.py`) supprimait les couvertures et le client dans le même
+  flush ;
+- `delete_script` (`api/scripts_db.py`) faisait de même avec les variantes et leur
+  script d'origine.
+
+Sur la base de production, les deux suppressions pouvaient échouer sur une clé
+étrangère, selon l'ordre retenu par SQLAlchemy.
+
+Vérification :
+
+- les 19 derniers fichiers exemptés, avec toutes les contraintes : 499 réussis ;
+- les 56 fichiers touchés (les 49 d'origine, les fichiers modifiés et les consommateurs
+  des aides), sans option : 1 249 réussis.
+
+La suite complète n'a pas été relancée ; la nocturne le fera.
+
+Une fixture qui échoue sur une clé étrangère se corrige en créant le parent, pas en
+coupant la contrainte.

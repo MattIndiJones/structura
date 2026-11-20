@@ -29,12 +29,14 @@ from backend.app.core.client_intelligence import (
 from backend.app.db.models import (
     Affiliation, Client, ClientTradeHistory, Opportunity, Person,
 )
+from backend.tests.integrity_fixtures import seeded_session
 
 
 def _session() -> Session:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    return Session(engine)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(engine)
 
 
 CONTRAINTES = {

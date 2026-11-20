@@ -15,12 +15,15 @@ from backend.app.core.client_intelligence import (
     Transaction, client_intelligence, provider_selection_analysis,
 )
 from backend.app.db.models import Client, ClientMandate, ClientTradeHistory, Deal
+from backend.tests.integrity_fixtures import seeded_session
+from backend.tests.integrity_fixtures import ensure_uat_batch
 
 
 def _session() -> Session:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    return Session(engine)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(engine)
 
 
 def _history(client_id, mandate_id, index, *, transaction_format,
@@ -79,6 +82,7 @@ def test_un_client_reel_exclut_les_deals_uat_par_defaut():
     session = _session()
     client = Client(entity_id=1, name="Client réel", data_origin="native")
     session.add(client)
+    ensure_uat_batch(session, 99)                    # the lot of the UAT deal
     session.flush()
     session.add_all([
         Deal(reference="DEAL-REAL", entity_id=1, user_id=1,

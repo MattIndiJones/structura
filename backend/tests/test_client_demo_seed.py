@@ -13,6 +13,8 @@ fichier confronte tout le module à un portefeuille entier.
 from datetime import date
 
 import pytest
+from backend.tests.integrity_fixtures import seeded_session
+from types import SimpleNamespace
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from backend.app.core.client_cycle import compute_cycle
@@ -402,7 +404,7 @@ def test_le_fichier_d_import_demontre_bien_ses_anomalies():
 
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    session = Session(engine)
+    session = seeded_session(engine, SimpleNamespace(id=1, entity_id=None))   # the importing user
 
     rapport = analyser(
         session, json.dumps(fichier_import()).encode(), format_="json",

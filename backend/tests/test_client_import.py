@@ -29,6 +29,7 @@ from backend.app.db.models import (
     Affiliation, Client, ClientImportBatch, ClientMandate, ClientTradeHistory,
     Person, User,
 )
+from backend.tests.integrity_fixtures import ensure_entities, ensure_users
 
 
 @pytest.fixture
@@ -44,6 +45,7 @@ def app_client(monkeypatch):
     from backend.app.main import app
 
     session = Session(engine)
+    ensure_entities(session, 1)
     session.add(User(id=1, username="alice", email="a@d.com", password_hash="x",
                      role="user", entity_id=1))
     session.commit()
@@ -276,6 +278,8 @@ def test_deux_lignes_identiques_du_fichier_restent_deux_souscriptions():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
+        ensure_users(session, User(id=1, username="alice", email="a@d.com", password_hash="x"))
+        session.commit()                 # appliquer() rolls back between its two passes
         charge = {
             "clients": [{"name": "Bank A"}],
             "transactions": [

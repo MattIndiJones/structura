@@ -29,6 +29,7 @@ from backend.app.db.database import get_session
 from backend.app.db.models import (
     ConstraintDefinition, Counterparty, Underlying, User,
 )
+from backend.tests.integrity_fixtures import ensure_entities, ensure_users
 
 
 @pytest.fixture
@@ -43,6 +44,7 @@ def app_client(monkeypatch):
     from backend.app.main import app
 
     session = Session(engine)
+    ensure_entities(session, 1, 99)
     alice = User(id=1, username="alice", email="a@d.com",
                  password_hash="x", role="user", entity_id=1)
     session.add(alice)

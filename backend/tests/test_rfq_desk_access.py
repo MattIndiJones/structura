@@ -18,16 +18,20 @@ def desk_case():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
+        # Parents first: no relationship orders these inserts within one flush.
         session.add_all([Entity(id=1, name="ClientTech"), Entity(id=2, name="Autre")])
+        session.flush()
         users = [User(id=i, username=f"desk-{i}", email=f"desk-{i}@example.test",
                       password_hash="x", entity_id=entity, role=role)
                  for i, entity, role in [(1, 1, "user"), (2, 1, "user"),
                                          (3, 1, "user"), (4, 2, "user"),
                                          (5, 1, "admin")]]
         session.add_all(users)
+        session.flush()
         session.add_all([RfqDesk(id=11, entity_id=1, name="Sales"),
                          RfqDesk(id=12, entity_id=1, name="Structuration"),
                          RfqDesk(id=21, entity_id=2, name="Sales")])
+        session.flush()
         session.add_all([
             RfqDeskMembership(desk_id=11, user_id=1,
                               rights_json=json.dumps(["read", "prepare", "price", "select", "solicit", "organize", "book"])),

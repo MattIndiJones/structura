@@ -26,12 +26,16 @@ from backend.app.db.models import (
     Affiliation, Client, ClientTradeHistory, Deal, DealEvent, Interaction,
     Opportunity, Person,
 )
+from backend.tests.integrity_fixtures import seeded_session
+from backend.tests.integrity_fixtures import DEFAULT_ACTOR, ensure_users, seeded_session
+from types import SimpleNamespace
 
 
 def _session() -> Session:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    return Session(engine)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(engine)
 
 
 def _client(session, nom):
@@ -414,6 +418,7 @@ def test_evenement_annule_non_projete_et_mes_dossiers_respecte():
     autre = _trade(
         session, client, affiliation, "2024-02-15", ref="D-AUTRE",
         maturite="2027-02-15")
+    ensure_users(session, SimpleNamespace(id=2, entity_id=1))     # the colleague who owns it
     autre.user_id = 2
     annule = _trade(
         session, client, affiliation, "2024-03-15", ref="D-ANNULE",

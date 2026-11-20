@@ -39,10 +39,10 @@ synchrone. 15 tests backend sur vrais processus, 11 frontend, build.
 — P1-9 : journal tournant par installation, traces d'uvicorn et des tâches de fond, treize erreurs
 absorbées tracées, santé qui contrôle la base (`/health/ready` en 503). 13 tests, 1 082 consommateurs.
 
-[Isolation des tests et intégrité référentielle — 19/11](projects/platform/ISOLATION_TESTS_2026-11-19.md)
+[Isolation des tests et intégrité référentielle — 19-20/11](projects/platform/ISOLATION_TESTS_2026-11-19.md)
 — P1-6 : dossier de données temporaire pour toute la session de tests, clés étrangères appliquées
-par défaut aux moteurs SQLite des tests. 464 violations mesurées sur 49 fichiers, exemptés en attendant
-leurs fixtures.
+à tous les moteurs SQLite des tests, sans exemption depuis le 20/11. Les 464 violations des 49 fichiers
+ont été corrigées dans leurs fixtures. Deux venaient de vrais défauts de suppression de l'application.
 
 [Découpage du store du Pricer — 18/11](projects/pricing/DECOUPAGE_STORE_PRICING_2026-11-18.md)
 — `stores/pricing.js` (3 668 lignes) en quatorze modules installés sur un contexte partagé ; même
@@ -1076,7 +1076,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 | [SECURITE_P1_8_2026-11-19.md](projects/platform/SECURITE_P1_8_2026-11-19.md) | 19/11 | En-têtes, sessions courtes renouvelées, secrets scellés, audit chaîné, dépendances verrouillées (P1-8) | Fait localement | Clé RSA du portail, identifiants d'agents, rotation des canaux RFQ, frein de connexion persistant (S7) |
 | [PRICING_INTERACTIF_P1_4_2026-11-19.md](projects/platform/PRICING_INTERACTIF_P1_4_2026-11-19.md) | 19/11 | Pricing interactif en file : processus préchauffés, délai, annulation, abandon (P1-4) | Fait localement ; toutes les analyses du Pricer dans la file le 20/11 | Routes synchrones des autres appelants (booking, AO, scripts) |
 | [DIAGNOSTIC_P1_9_2026-11-19.md](projects/platform/DIAGNOSTIC_P1_9_2026-11-19.md) | 19/11 | Journaux par installation, erreurs absorbées, santé avec la base (P1-9) | Fait localement | Blocs AMC et de formatage ; métriques et alertes (P2-6) |
-| [ISOLATION_TESTS_2026-11-19.md](projects/platform/ISOLATION_TESTS_2026-11-19.md) | 19/11 | Isolation des données et intégrité référentielle des tests (P1-6) | Fait localement ; 49 fichiers exemptés | Vider `SANS_INTEGRITE`, aides partagées d'abord |
+| [ISOLATION_TESTS_2026-11-19.md](projects/platform/ISOLATION_TESTS_2026-11-19.md) | 19-20/11 | Isolation des données et intégrité référentielle des tests (P1-6) | Fait : plus aucune exemption, deux défauts de suppression corrigés | — |
 | [WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md](projects/platform/WORKSHOP_DIAGNOSTIC_CONFIGURATION_2026-10-14.md) | 14/10 | Paramètres pleine largeur, calendrier multi-RFQ, funding/marges, cadences, estimation et reprise | Raccordé localement ; recette ciblée sans IA | Lancer explicitement le suivi de cinq ans ; qualifier les branches non exercées et l’ergonomie détaillée |
 | [RFQ_NETWORK_ACTION_PLAN_2026-10-12.md](projects/platform/RFQ_NETWORK_ACTION_PLAN_2026-10-12.md) | 12/10 | Destinataires par organisation, réception bancaire, publication contrôlée, retour automatique et manuel ; lots 0 à 8 | Lot 0 cadré avec premier prototype ; lot 1 cadré | Compléments d'écran, choix du pilote, réalisation des lots 1 à 8 et recette réseau ; aucune reprise des anciens tests |
 | [RFQ_NETWORK_LOT_0_IMPLEMENTATION_2026-10-12.md](projects/platform/RFQ_NETWORK_LOT_0_IMPLEMENTATION_2026-10-12.md) | 12/10 | Prototype demandeur/banque ; préparation RFQ depuis Product, moteurs actuels, Pricer et scroll interne | Raccordement livré sur branche ; 154 tests backend ciblés, 424 frontend et build ; recette isolée | Propriété, droits, partenaires, réception bancaire, transport et booking réseau dans les lots suivants |

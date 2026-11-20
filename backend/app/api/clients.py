@@ -1107,6 +1107,10 @@ def delete_client(
     for ligne in session.exec(
             select(ClientCoverage).where(ClientCoverage.client_id == client.id)).all():
         session.delete(ligne)
+    # The coverage rows reference the client: write their deletion first. In
+    # one flush, nothing orders the two (no relationship between the models),
+    # and the database's foreign key refused to delete the client.
+    session.flush()
     record_audit_event(
         session, action="CLIENT_DELETED", object_type="client",
         object_id=client.id, actor_user_id=current.id, result="SUCCESS",

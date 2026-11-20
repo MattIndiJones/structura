@@ -20,6 +20,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from backend.app.api import deals as deals_api
 from backend.app.db.models import AuditEvent, Deal, DealEvent
 from backend.tests.deals_patch import patch_deals
+from backend.tests.integrity_fixtures import seeded_session
 
 TODAY = date.today()
 STRIKE = TODAY - timedelta(days=400)
@@ -38,7 +39,8 @@ AT MATURITY:
 def _session():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    return Session(eng)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(eng, SimpleNamespace(id=1, entity_id=None))
 
 
 def _prix_plats(niveau):

@@ -20,6 +20,7 @@ from backend.app.core import var_engine as ve
 from backend.app.core.compute.pricers.var_scenario import price_var_scenario_job
 from backend.app.core.product.inputs import terms_from_input
 from backend.app.services.product_repository import stage_internal_product
+from backend.tests.integrity_fixtures import seeded_session
 
 var_api = importlib.import_module("backend.app.api.var")
 
@@ -324,7 +325,8 @@ def test_univers_complet_publie_la_var_globale_sans_scope_reduit():
 def _make_session():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    return Session(eng)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(eng, USER)
 
 
 def test_api_var_marque_le_global_incomplet_en_echec_et_publie_le_scope_reduit():

@@ -6,12 +6,14 @@ from sqlmodel import SQLModel, Session, create_engine
 
 from backend.app.api import portfolios as portfolios_api
 from backend.app.db.models import Deal, DealEvent, ValuationRun
+from backend.tests.integrity_fixtures import seeded_session
 
 
 def _session():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    return Session(engine)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(engine, SimpleNamespace(id=1, entity_id=None))
 
 
 def _greeks(delta: float, valuation_date: str) -> dict:
