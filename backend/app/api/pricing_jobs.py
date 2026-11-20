@@ -6,8 +6,9 @@ Same calculations as POST /api/price, /api/price/in-life and
 its drill-down, solver, grid), run by core/compute/interactive.py in a worker
 process: the request is validated here, the job id comes back at once, the
 screen polls it and can cancel it. The synchronous routes stay for the other
-callers (booking, AO, scripts, tests), and for the stress scenarios and the
-MtF comparison, which run their own process pool (see interactive.ANALYSES).
+callers (booking, AO, scripts, tests). The stress scenarios and the MtF
+comparison, which run their own process pool, are queued too but run in a
+server thread (see interactive.POOL_ANALYSES).
 """
 from __future__ import annotations
 
@@ -17,7 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..core.compute.interactive import QueueFull, get_runner
 from ..core.schemas import (BacktestCompareRequest, BacktestRequest, GridRequest, MtfDrilldownRequest,
-                            MtfRequest, PathsRequest, PricingRequest, ProbaRequest, ProfileRequest, SolverRequest)
+                            MtfComparisonRequest, MtfRequest, PathsRequest, PricingRequest, ProbaRequest, ProfileRequest, ScenarioRequest,
+                            SolverRequest)
 from ..db.models import User
 from .auth import get_current_pricer
 from .inlife import ImpliedFundingRequest, InLifePricingRequest
@@ -94,6 +96,16 @@ def submit_solve(req: SolverRequest, current: Pricer):
 @router.post("/grid", status_code=202, responses=returns(PricingJob, status_code=202))
 def submit_grid(req: GridRequest, current: Pricer):
     return _submit("grid", req, current)
+
+
+@router.post("/scenarios", status_code=202, responses=returns(PricingJob, status_code=202))
+def submit_scenarios(req: ScenarioRequest, current: Pricer):
+    return _submit("scenarios", req, current)
+
+
+@router.post("/mtf-compare", status_code=202, responses=returns(PricingJob, status_code=202))
+def submit_mtf_compare(req: MtfComparisonRequest, current: Pricer):
+    return _submit("mtf_compare", req, current)
 
 
 _GONE = "Calcul introuvable ou expiré."

@@ -61,10 +61,7 @@ def _env_number(name: str, default: float, cast=float, minimum=None):
 # ── What runs inside a worker ──────────────────────────────────────
 
 # The Pricer's analyses, run like the price (P1-4, second step). Each takes
-# only its validated request. Not here: the stress scenarios and the MtF
-# comparison, which start their own process pool — a worker is a daemon
-# process, forbidden to have children, and killing it on cancellation would
-# leave its pool running.
+# only its validated request.
 ANALYSES = {
     "profile": ("api.pricing", "profile_endpoint"),
     "paths": ("api.pricing", "paths_endpoint"),
@@ -76,9 +73,20 @@ ANALYSES = {
     "solve": ("api.simulation", "solve_endpoint"),
     "grid": ("api.simulation", "grid_endpoint"),
 }
+# The stress scenarios and the MtF comparison start their own process pool
+# (run_batch). A worker is a daemon process, forbidden to have children, and
+# killing it would leave its pool running. They run instead in a thread of
+# the server, one at a time: cancellation, deadline and abandonment reach
+# run_batch through executor.ambient_cancel, which terminates the pool's
+# processes — the same stop a long batch already had.
+POOL_ANALYSES = {
+    "scenarios": ("api.scenarios", "scenarios_endpoint"),
+    "mtf_compare": ("api.pricing", "mtf_comparison_endpoint"),
+}
+POOL_CONCURRENCY = 1
 # A backtest over years of history, a candidate comparison, a solver or a
 # grid can legitimately run longer than a price: their deadline is longer.
-LONG_RUNNING = frozenset({"backtest", "backtest_compare", "solve", "grid", "mtf"})
+LONG_RUNNING = frozenset({"backtest", "backtest_compare", "solve", "grid", "mtf", "mtf_compare"})
 LONG_TIMEOUT_SECONDS = 1800.0
 
 
@@ -91,8 +99,8 @@ def execute(kind: str, request: Any) -> dict:
     if kind == "price":
         endpoint = import_module(f"{_PACKAGE}.api.pricing").price_endpoint
         call = lambda: endpoint(request)                          # noqa: E731
-    elif kind in ANALYSES:
-        module, name = ANALYSES[kind]
+    elif kind in ANALYSES or kind in POOL_ANALYSES:
+        module, name = ANALYSES.get(kind) or POOL_ANALYSES[kind]
         endpoint = getattr(import_module(f"{_PACKAGE}.{module}"), name)
         call = lambda: endpoint(request)                          # noqa: E731
     elif kind in ("in_life", "implied_funding"):
@@ -155,6 +163,7 @@ class Job:
     last_seen: float = field(default_factory=time.monotonic)
     cancel_requested: bool = False
     outcome: dict | None = None
+    cancel_event: threading.Event | None = None      # pool analyses, run in a thread
 
     def snapshot(self, position: int | None = None) -> dict:
         now = time.monotonic()
@@ -207,7 +216,9 @@ class InteractiveRunner:
                  abandon_after: float | None = None, retention: float = RETENTION_SECONDS,
                  target: Callable[[str, Any], dict] = execute,
                  warm_modules: tuple[str, ...] = WARM_MODULES,
-                 max_active_per_user: int = MAX_ACTIVE_PER_USER):
+                 max_active_per_user: int = MAX_ACTIVE_PER_USER,
+                 pool_target: Callable[[str, Any], dict] = execute,
+                 pool_kinds: frozenset[str] = frozenset(POOL_ANALYSES)):
         self.workers = workers or _env_number("STRUCTURA_PRICING_WORKERS", DEFAULT_WORKERS, int, 1)
         self.timeout = timeout or _env_number("STRUCTURA_PRICING_TIMEOUT_SECONDS",
                                               DEFAULT_TIMEOUT_SECONDS, float, 1.0)
@@ -220,6 +231,8 @@ class InteractiveRunner:
         self._jobs: dict[str, Job] = {}
         self._queue: collections.deque[str] = collections.deque()
         self._slots: list[_Slot] = []
+        self._pool_target, self._pool_kinds = pool_target, pool_kinds
+        self._threads: dict[str, Job] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -251,6 +264,12 @@ class InteractiveRunner:
                 self._finish(slot.job, "cancelled", dict(status_code=503,
                                                          detail="Serveur arrêté pendant le calcul."))
             slot.stop(kill=slot.job is not None or not slot.ready)
+        with self._lock:
+            for job in self._threads.values():
+                job.cancel_event.set()           # run_batch stops its pool
+                if job.status == "running":
+                    self._finish(job, "cancelled", dict(status_code=503,
+                                                        detail="Serveur arrêté pendant le calcul."))
 
     # -- requests --
 
@@ -364,41 +383,88 @@ class InteractiveRunner:
 
     def _enforce_deadlines(self) -> None:
         now = time.monotonic()
+        for job in [job for job in self._threads.values() if job.status == "running"]:
+            stop = self._deadline(job, now)
+            if stop is not None:
+                job.cancel_event.set()           # run_batch terminates the pool's processes
+                self._finish(job, *stop)
         for slot in self._slots:
             job = slot.job
-            if job is None:
-                continue
-            if job.cancel_requested:
-                status, outcome = "cancelled", dict(status_code=499, detail="Calcul annulé.")
-            elif now - job.started > self.timeout_for(job.kind):
-                status, outcome = "timeout", dict(status_code=504, detail=(
-                    f"Calcul interrompu après {self.timeout_for(job.kind):g} s. Réduisez le nombre de "
-                    "trajectoires ou de Greeks, ou vérifiez que le script se termine."))
-                logger.warning("Pricing interactif %s interrompu après %g s", job.kind, self.timeout_for(job.kind))
-            elif now - job.last_seen > self.abandon_after:
-                status, outcome = "abandoned", dict(status_code=499, detail=(
-                    "Calcul arrêté : plus aucun écran ne le suivait."))
-            else:
+            stop = self._deadline(job, now) if job is not None else None
+            if stop is None:
                 continue
             slot.job = None
-            self._finish(job, status, outcome)
+            self._finish(job, *stop)
             slot.stop(kill=True)               # replaced on the next tick
         self._slots = [slot for slot in self._slots if slot.process.is_alive()]
 
+    def _deadline(self, job: Job, now: float):
+        if job.cancel_requested:
+            return "cancelled", dict(status_code=499, detail="Calcul annulé.")
+        if now - job.started > self.timeout_for(job.kind):
+            logger.warning("Pricing interactif %s interrompu après %g s", job.kind, self.timeout_for(job.kind))
+            return "timeout", dict(status_code=504, detail=(
+                f"Calcul interrompu après {self.timeout_for(job.kind):g} s. Réduisez le nombre de "
+                "trajectoires ou de Greeks, ou vérifiez que le script se termine."))
+        if now - job.last_seen > self.abandon_after:
+            return "abandoned", dict(status_code=499, detail="Calcul arrêté : plus aucun écran ne le suivait.")
+        return None
+
     def _dispatch(self) -> None:
         idle = [slot for slot in self._slots if slot.ready and slot.job is None]
-        while self._queue and idle:
-            job = self._jobs[self._queue.popleft()]
+        waiting: collections.deque[str] = collections.deque()
+        while self._queue:
+            job_id = self._queue.popleft()
+            job = self._jobs[job_id]
             if job.status != "queued":
                 continue
-            slot = idle.pop()
-            try:
-                slot.connection.send((job.id, job.kind, job.request))
-            except (OSError, ValueError) as error:
-                self._finish(job, "failed", dict(status_code=500, detail=(
-                    f"Envoi du calcul impossible ({type(error).__name__}).")))
+            if job.kind in self._pool_kinds:
+                if len(self._threads) < POOL_CONCURRENCY:
+                    self._start_thread(job)
+                    continue
+            elif idle:
+                slot = idle.pop()
+                try:
+                    slot.connection.send((job.id, job.kind, job.request))
+                except (OSError, ValueError) as error:
+                    self._finish(job, "failed", dict(status_code=500, detail=(
+                        f"Envoi du calcul impossible ({type(error).__name__}).")))
+                    continue
+                job.status, job.started, slot.job = "running", time.monotonic(), job
                 continue
-            job.status, job.started, slot.job = "running", time.monotonic(), job
+            waiting.append(job_id)
+        self._queue = waiting
+
+    def _start_thread(self, job: Job) -> None:
+        job.cancel_event = threading.Event()
+        job.status, job.started = "running", time.monotonic()
+        self._threads[job.id] = job
+        threading.Thread(target=self._run_in_thread, args=(job,), name="structura-pricing-pool",
+                         daemon=True).start()
+
+    def _run_in_thread(self, job: Job) -> None:
+        from .executor import ambient_cancel
+        token = ambient_cancel.set(job.cancel_event.is_set)
+        try:
+            outcome = self._pool_target(job.kind, job.request)
+        except BaseException as error:                             # noqa: BLE001 — must answer
+            outcome = dict(ok=False, status_code=500,
+                           detail=f"Erreur interne du calcul ({type(error).__name__}).",
+                           traceback=traceback.format_exc())
+        finally:
+            ambient_cancel.reset(token)
+        with self._lock:
+            # The slot frees only once the pool is really stopped.
+            self._threads.pop(job.id, None)
+            if job.status != "running":          # cancelled, timed out or abandoned meanwhile
+                return
+            if outcome.get("ok"):
+                self._finish(job, "done", outcome)
+                return
+            if outcome.get("traceback"):
+                logger.error("Pricing interactif %s en échec\n%s", job.kind, outcome["traceback"])
+            self._finish(job, "failed", dict(status_code=outcome.get("status_code", 500),
+                                             detail=outcome.get("detail")))
 
     def _forget_old(self) -> None:
         now = time.monotonic()

@@ -1,6 +1,5 @@
 // Fonctions pures du store, sans état.
 // Partie du store du Pricer (src/stores/pricing.js), découpé le 18/11/2026.
-import { apiErrorMessage, apiFetch } from '../../utils/api.js'
 import { defaultUnderlying } from '../../utils/underlyingDefaults.js'
 import { examples } from '../../data/payscriptTemplates.js'
 import { reactive } from 'vue'
@@ -81,14 +80,6 @@ export function _datePlusYears(iso, years) {
 export function _frDate(iso) {
   const [year, month, day] = String(iso || '').split('-')
   return day ? `${day}/${month}/${year}` : String(iso || '')
-}
-
-export async function _fetchMtf(endpoint, body) {
-  const response = await apiFetch(endpoint, { method: 'POST',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  const data = await response.json()
-  if (!response.ok) throw Error(apiErrorMessage(data, 'Calcul Mark to Future impossible.'))
-  return data
 }
 
 export function _histVolUrl(tickers, asof = '') {

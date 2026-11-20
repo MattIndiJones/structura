@@ -36,13 +36,10 @@ const started = route => vi.waitFor(() => {
 describe('analyses du Pricer dans la file de calcul', () => {
   it('chaque analyse a sa route de file et son nom à l’écran', () => {
     for (const route of ['/api/profile', '/api/paths', '/api/proba', '/api/backtest', '/api/backtest/compare',
-      '/api/mtf', '/api/mtf/drilldown', '/api/solve', '/api/grid']) {
+      '/api/mtf', '/api/mtf/drilldown', '/api/solve', '/api/grid', '/api/scenarios', '/api/mtf/compare']) {
       expect(JOB_ROUTES[route]).toBeTruthy()
       expect(JOB_LABELS[route]).toBeTruthy()
     }
-    // Their own process pool keeps these two out of the queue.
-    expect(JOB_ROUTES['/api/scenarios']).toBeUndefined()
-    expect(JOB_ROUTES['/api/mtf/compare']).toBeUndefined()
   })
 
   it('le prix et ses variantes forment une famille, chaque analyse la sienne', () => {

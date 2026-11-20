@@ -587,6 +587,12 @@ async function call(method, path, { query, body } = {}) {
  */
 
 /**
+ * @typedef {Object} MtfComparisonRequest
+ * @property {MtfRequest} a
+ * @property {MtfRequest} b
+ */
+
+/**
  * Explication détaillée de quelques scénarios à UNE date de l'éventail MTF.
  *
  * n_outer / n_inner / n_dates / seed doivent reprendre ceux du run à expliquer :
@@ -913,6 +919,42 @@ async function call(method, path, { query, body } = {}) {
  * @property {string} source
  * @property {boolean} moved
  * @property {string} payment_date
+ */
+
+/**
+ * Stress grid — price under combined spot x vol shocks (market data, not
+ * script PARAMs). spot_shocks are multiplicative fractions (e.g. -0.10 = -10%
+ * spot), vol_shocks are additive fractions (e.g. 0.05 = +5pp vol).
+ * @typedef {Object} ScenarioRequest
+ * @property {52|104|208} [steps_per_year]
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} underlyings
+ * @property {Array<Array<number>>} corr_matrix
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {number} [seed]
+ * @property {boolean} [antithetic]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Array<Array<number>>} [yield_curve]
+ * @property {number} [sigma_r]
+ * @property {number} [a_r]
+ * @property {string} [barrier_monitoring]
+ * @property {Object} [constats]
+ * @property {(Object|null)} [frozen_schedule]
+ * @property {(string|null)} [anchor]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {(VariantOverrides|null)} [variant]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [valuation_date]
+ * @property {(string|null)} [maturity_date]
+ * @property {Array<Array<number>>} [funding_curve]
+ * @property {number} [funding_spread]
+ * @property {Array<number>} [spot_shocks]
+ * @property {Array<number>} [vol_shocks]
+ * @property {number} [N]
  */
 
 /**
@@ -1319,6 +1361,16 @@ export function submitMtf(body) {
 }
 
 /**
+ * POST /api/price/jobs/mtf-compare
+ * Submit Mtf Compare
+ * @param {MtfComparisonRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitMtfCompare(body) {
+  return call('POST', '/api/price/jobs/mtf-compare', { body })
+}
+
+/**
  * POST /api/price/jobs/mtf-drilldown
  * Submit Mtf Drilldown
  * @param {MtfDrilldownRequest} body
@@ -1366,6 +1418,16 @@ export function submitProba(body) {
  */
 export function submitProfile(body) {
   return call('POST', '/api/price/jobs/profile', { body })
+}
+
+/**
+ * POST /api/price/jobs/scenarios
+ * Submit Scenarios
+ * @param {ScenarioRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitScenarios(body) {
+  return call('POST', '/api/price/jobs/scenarios', { body })
 }
 
 /**
