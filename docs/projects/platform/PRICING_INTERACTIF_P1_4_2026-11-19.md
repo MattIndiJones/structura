@@ -45,11 +45,42 @@ remplace est arrêté côté serveur.
 
 **Les routes synchrones restent** pour le booking, l'appel d'offres, les scripts et les tests.
 
+## Second pas, le 20/11 : les analyses du Pricer
+
+**Neuf analyses passent par la même file**, avec le même suivi, la même annulation et le même
+abandon. Chacune a sa route de soumission sous `/api/price/jobs/` :
+
+- profil, trajectoires, probabilités ;
+- backtest et comparateur de sous-jacents ;
+- Mark to Future et son détail par date ;
+- solveur et grille.
+
+Le processus de calcul appelle la même fonction que la route synchrone (`ANALYSES`, dans
+`core/compute/interactive.py`). Le test le vérifie pour cinq d'entre elles : résultat identique,
+hors durée mesurée.
+
+- **Délai plus long pour les calculs longs** : backtest, comparateur, solveur, grille et Mark to
+  Future peuvent légitimement dépasser les 600 s d'un prix. Leur délai est de 30 min, ou celui de
+  `STRUCTURA_PRICING_TIMEOUT_SECONDS` s'il est plus grand.
+- **Un suivi par famille de calcul** (`jobChannel`, dans `utils/pricingJobs.js`) :
+  - le prix, ses Greeks, la valorisation en cours de vie et le spread implicite forment une
+    famille : un nouveau calcul de la famille remplace le précédent, comme avant ;
+  - chaque analyse forme la sienne : la relancer remplace la précédente du même type, sans
+    toucher au prix qui tourne à côté.
+
+  Sans cette séparation, lancer le comparateur puis un prix aurait annulé le comparateur.
+- **Ligne d'état** : elle nomme désormais le calcul suivi (« Probabilités · calcul en cours ·
+  12 s »), et « Annuler » arrête celui-là.
+- **Restent synchrones** : les scénarios de stress et la comparaison de deux modèles en Mark to
+  Future.
+  - Ils lancent leur propre pool de processus, ce que ne peut pas faire un processus de la file,
+    déclaré `daemon`.
+  - Le tuer à l'annulation laisserait en outre ses enfants tourner.
+  - Les faire passer par la file demanderait d'arrêter tout l'arbre de processus.
+
 ## Ce qui reste
 
-- Les autres analyses du Pricer (profil, trajectoires, probabilités, backtest, solveur,
-  grille, MTF) restent synchrones. Elles passeront par la même file avec une entrée par
-  fonction dans `execute`.
+- Scénarios de stress et comparaison Mark to Future, pour la raison ci-dessus.
 - Les routes synchrones n'ont toujours ni délai ni annulation.
 - Les calculs en file vivent en mémoire : un redémarrage du serveur les perd, comme les
   requêtes qu'ils remplacent.

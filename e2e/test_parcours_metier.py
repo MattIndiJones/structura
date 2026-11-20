@@ -33,6 +33,18 @@ def test_parcours_pricer_price_par_la_file_et_annule(signed_in, instance, saved_
     expect(page.get_by_role("button", name="▶ Pricer", exact=True)).to_be_enabled(timeout=30_000)
 
 
+def test_une_analyse_du_pricer_passe_par_la_file(signed_in, instance, saved_script):
+    """P1-4, second step: the probabilities run as a job, named on the status line."""
+    page = signed_in
+    page.goto(f"{instance.url}/#/pricer/{saved_script('Parcours probabilités')}")
+    settle(page)
+    page.get_by_role("button", name="🎲 Probabilités", exact=True).click()
+    with page.expect_response(lambda r: r.url.endswith("/api/price/jobs/proba") and r.request.method == "POST") as submitted:
+        page.get_by_role("button", name="▶ Analyser", exact=True).click()
+    assert submitted.value.status == 202, submitted.value.text()
+    expect(page.get_by_text(re.compile(r"chemins analysés")).first).to_be_visible(timeout=120_000)
+
+
 def test_un_script_enregistre_rouvre_avec_sa_vol(signed_in, instance, saved_script):
     """Constat du 19/11 : la σ enregistrée (23 %) devenait 30 % quand le catalogue
     reconnaissait l'action, et le premier pricing était écarté comme périmé."""

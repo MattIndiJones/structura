@@ -60,6 +60,28 @@ def _env_number(name: str, default: float, cast=float, minimum=None):
 
 # ── What runs inside a worker ──────────────────────────────────────
 
+# The Pricer's analyses, run like the price (P1-4, second step). Each takes
+# only its validated request. Not here: the stress scenarios and the MtF
+# comparison, which start their own process pool — a worker is a daemon
+# process, forbidden to have children, and killing it on cancellation would
+# leave its pool running.
+ANALYSES = {
+    "profile": ("api.pricing", "profile_endpoint"),
+    "paths": ("api.pricing", "paths_endpoint"),
+    "proba": ("api.pricing", "proba_endpoint"),
+    "backtest": ("api.pricing", "backtest_endpoint"),
+    "backtest_compare": ("api.pricing", "backtest_compare_endpoint"),
+    "mtf": ("api.pricing", "mtf_endpoint"),
+    "mtf_drilldown": ("api.pricing", "mtf_drilldown_endpoint"),
+    "solve": ("api.simulation", "solve_endpoint"),
+    "grid": ("api.simulation", "grid_endpoint"),
+}
+# A backtest over years of history, a candidate comparison, a solver or a
+# grid can legitimately run longer than a price: their deadline is longer.
+LONG_RUNNING = frozenset({"backtest", "backtest_compare", "solve", "grid", "mtf"})
+LONG_TIMEOUT_SECONDS = 1800.0
+
+
 def execute(kind: str, request: Any) -> dict:
     """Run one interactive calculation through its HTTP endpoint function,
     so the queued path returns exactly what the synchronous route returns."""
@@ -68,6 +90,10 @@ def execute(kind: str, request: Any) -> dict:
 
     if kind == "price":
         endpoint = import_module(f"{_PACKAGE}.api.pricing").price_endpoint
+        call = lambda: endpoint(request)                          # noqa: E731
+    elif kind in ANALYSES:
+        module, name = ANALYSES[kind]
+        endpoint = getattr(import_module(f"{_PACKAGE}.{module}"), name)
         call = lambda: endpoint(request)                          # noqa: E731
     elif kind in ("in_life", "implied_funding"):
         module = import_module(f"{_PACKAGE}.api.inlife")
@@ -87,7 +113,7 @@ def execute(kind: str, request: Any) -> dict:
                     traceback=traceback.format_exc())
 
 
-WARM_MODULES = ("api.pricing", "api.inlife")
+WARM_MODULES = ("api.pricing", "api.inlife", "api.simulation")
 
 
 def _worker_main(connection, target, warm_modules) -> None:
@@ -196,6 +222,9 @@ class InteractiveRunner:
         self._slots: list[_Slot] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+
+    def timeout_for(self, kind: str) -> float:
+        return max(self.timeout, LONG_TIMEOUT_SECONDS) if kind in LONG_RUNNING else self.timeout
 
     # -- lifecycle --
 
@@ -341,11 +370,11 @@ class InteractiveRunner:
                 continue
             if job.cancel_requested:
                 status, outcome = "cancelled", dict(status_code=499, detail="Calcul annulé.")
-            elif now - job.started > self.timeout:
+            elif now - job.started > self.timeout_for(job.kind):
                 status, outcome = "timeout", dict(status_code=504, detail=(
-                    f"Calcul interrompu après {self.timeout:g} s. Réduisez le nombre de "
+                    f"Calcul interrompu après {self.timeout_for(job.kind):g} s. Réduisez le nombre de "
                     "trajectoires ou de Greeks, ou vérifiez que le script se termine."))
-                logger.warning("Pricing interactif %s interrompu après %g s", job.kind, self.timeout)
+                logger.warning("Pricing interactif %s interrompu après %g s", job.kind, self.timeout_for(job.kind))
             elif now - job.last_seen > self.abandon_after:
                 status, outcome = "abandoned", dict(status_code=499, detail=(
                     "Calcul arrêté : plus aucun écran ne le suivait."))

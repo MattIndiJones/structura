@@ -60,6 +60,73 @@ async function call(method, path, { query, body } = {}) {
  */
 
 /**
+ * Underlying comparator — backtest the same script against a pool of
+ * candidate underlyings, one at a time, then (if basket_size > 1) against
+ * combinations drawn from the best `shortlist_n` single performers only —
+ * testing every C(N, basket_size) combination is combinatorially
+ * infeasible for any non-trivial candidate pool.
+ * @typedef {Object} BacktestCompareRequest
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} candidates
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Object} [constats]
+ * @property {(string|null)} [anchor]
+ * @property {number} [basket_size]
+ * @property {number} [shortlist_n]
+ * @property {(string|null)} [start_date]
+ * @property {(string|null)} [end_date]
+ * @property {string} [history_mode]
+ * @property {number} [max_delay_days]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {number} [freq]
+ * @property {number} [invest_pct]
+ * @property {number} [rf_rate]
+ */
+
+/**
+ * @typedef {Object} BacktestRequest
+ * @property {52|104|208} [steps_per_year]
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} underlyings
+ * @property {Array<Array<number>>} corr_matrix
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {number} [seed]
+ * @property {boolean} [antithetic]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Array<Array<number>>} [yield_curve]
+ * @property {number} [sigma_r]
+ * @property {number} [a_r]
+ * @property {string} [barrier_monitoring]
+ * @property {Object} [constats]
+ * @property {(Object|null)} [frozen_schedule]
+ * @property {(string|null)} [anchor]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {(VariantOverrides|null)} [variant]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [valuation_date]
+ * @property {(string|null)} [maturity_date]
+ * @property {Array<Array<number>>} [funding_curve]
+ * @property {number} [funding_spread]
+ * @property {(string|null)} [start_date]
+ * @property {(string|null)} [end_date]
+ * @property {string} [history_mode]
+ * @property {number} [max_delay_days]
+ * @property {number} [freq]
+ * @property {number} [invest_pct]
+ * @property {number} [rf_rate]
+ */
+
+/**
  * Resolve one date against a settlement calendar.
  *
  * Serves the two things a UI needs and cannot compute itself: moving a typed
@@ -318,6 +385,46 @@ async function call(method, path, { query, body } = {}) {
  */
 
 /**
+ * 2D price heatmap over two script PARAM ranges (stored units).
+ * @typedef {Object} GridRequest
+ * @property {52|104|208} [steps_per_year]
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} underlyings
+ * @property {Array<Array<number>>} corr_matrix
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {number} [seed]
+ * @property {boolean} [antithetic]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Array<Array<number>>} [yield_curve]
+ * @property {number} [sigma_r]
+ * @property {number} [a_r]
+ * @property {string} [barrier_monitoring]
+ * @property {Object} [constats]
+ * @property {(Object|null)} [frozen_schedule]
+ * @property {(string|null)} [anchor]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {(VariantOverrides|null)} [variant]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [valuation_date]
+ * @property {(string|null)} [maturity_date]
+ * @property {Array<Array<number>>} [funding_curve]
+ * @property {number} [funding_spread]
+ * @property {string} param_x
+ * @property {number} x_min
+ * @property {number} x_max
+ * @property {number} [x_steps]
+ * @property {string} param_y
+ * @property {number} y_min
+ * @property {number} y_max
+ * @property {number} [y_steps]
+ * @property {number} [N]
+ */
+
+/**
  * @typedef {Object} HestonFit
  * @property {(number|null)} [vanilla_limit_bp]
  * @property {('atm'|'atm_digital'|'atm_smile'|null)} [mode]
@@ -480,6 +587,97 @@ async function call(method, path, { query, body } = {}) {
  */
 
 /**
+ * Explication détaillée de quelques scénarios à UNE date de l'éventail MTF.
+ *
+ * n_outer / n_inner / n_dates / seed doivent reprendre ceux du run à expliquer :
+ * ils fixent les tirages (le rang de la date indexe le RNG interne), donc c'est
+ * ce qui garantit que le mark du panneau est exactement celui du graphique.
+ * scenario_ids sont des indices dans les tableaux `pvs` / `alive` de la réponse
+ * /api/mtf — le client sélectionne lui-même ses quantiles, ce qui évite de
+ * recalculer tout l'éventail pour en expliquer cinq trajectoires.
+ * @typedef {Object} MtfDrilldownRequest
+ * @property {52|104|208} [steps_per_year]
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} underlyings
+ * @property {Array<Array<number>>} corr_matrix
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {number} [seed]
+ * @property {boolean} [antithetic]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Array<Array<number>>} [yield_curve]
+ * @property {number} [sigma_r]
+ * @property {number} [a_r]
+ * @property {string} [barrier_monitoring]
+ * @property {Object} [constats]
+ * @property {(Object|null)} [frozen_schedule]
+ * @property {(string|null)} [anchor]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {(VariantOverrides|null)} [variant]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [valuation_date]
+ * @property {(string|null)} [maturity_date]
+ * @property {Array<Array<number>>} [funding_curve]
+ * @property {number} [funding_spread]
+ * @property {(Array<number>|null)} [mtm_dates]
+ * @property {(string|null)} [context_fingerprint]
+ * @property {(string|null)} [lsv_qualification]
+ * @property {number} main_price
+ * @property {(number|null)} [reference_paths]
+ * @property {boolean} [gbm_atm_curve]
+ * @property {boolean} [indicative_heston]
+ * @property {number} t
+ * @property {Array<number>} scenario_ids
+ * @property {Array<string>} [labels]
+ * @property {number} [n_outer]
+ * @property {number} [n_inner]
+ * @property {number} [n_dates]
+ */
+
+/**
+ * Mark-to-Future — nested Monte Carlo. main_price is the t=0 fair price
+ * (% of notional, from a prior /price call), used as the P(MTM >= P0) threshold.
+ * @typedef {Object} MtfRequest
+ * @property {52|104|208} [steps_per_year]
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} underlyings
+ * @property {Array<Array<number>>} corr_matrix
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {number} [seed]
+ * @property {boolean} [antithetic]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Array<Array<number>>} [yield_curve]
+ * @property {number} [sigma_r]
+ * @property {number} [a_r]
+ * @property {string} [barrier_monitoring]
+ * @property {Object} [constats]
+ * @property {(Object|null)} [frozen_schedule]
+ * @property {(string|null)} [anchor]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {(VariantOverrides|null)} [variant]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [valuation_date]
+ * @property {(string|null)} [maturity_date]
+ * @property {Array<Array<number>>} [funding_curve]
+ * @property {number} [funding_spread]
+ * @property {(Array<number>|null)} [mtm_dates]
+ * @property {number} main_price
+ * @property {(number|null)} [reference_paths]
+ * @property {boolean} [gbm_atm_curve]
+ * @property {boolean} [indicative_heston]
+ * @property {number} [n_outer]
+ * @property {number} [n_inner]
+ * @property {number} [n_dates]
+ */
+
+/**
  * Manual per-underlying override in display units.
  * @typedef {Object} MtmOverrideUL
  * @property {(number|null)} [sigma]
@@ -517,6 +715,38 @@ async function call(method, path, { query, body } = {}) {
  * @property {Array<number>} [at_dates]
  * @property {Array<Object>} [monitors]
  * @property {(string|null)} [errors]
+ */
+
+/**
+ * @typedef {Object} PathsRequest
+ * @property {52|104|208} [steps_per_year]
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} underlyings
+ * @property {Array<Array<number>>} corr_matrix
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {number} [seed]
+ * @property {boolean} [antithetic]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Array<Array<number>>} [yield_curve]
+ * @property {number} [sigma_r]
+ * @property {number} [a_r]
+ * @property {string} [barrier_monitoring]
+ * @property {Object} [constats]
+ * @property {(Object|null)} [frozen_schedule]
+ * @property {(string|null)} [anchor]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {(VariantOverrides|null)} [variant]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [valuation_date]
+ * @property {(string|null)} [maturity_date]
+ * @property {Array<Array<number>>} [funding_curve]
+ * @property {number} [funding_spread]
+ * @property {number} [N_stat]
+ * @property {number} [N_display]
  */
 
 /**
@@ -599,6 +829,67 @@ async function call(method, path, { query, body } = {}) {
  */
 
 /**
+ * @typedef {Object} ProbaRequest
+ * @property {52|104|208} [steps_per_year]
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} underlyings
+ * @property {Array<Array<number>>} corr_matrix
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {number} [seed]
+ * @property {boolean} [antithetic]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Array<Array<number>>} [yield_curve]
+ * @property {number} [sigma_r]
+ * @property {number} [a_r]
+ * @property {string} [barrier_monitoring]
+ * @property {Object} [constats]
+ * @property {(Object|null)} [frozen_schedule]
+ * @property {(string|null)} [anchor]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {(VariantOverrides|null)} [variant]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [valuation_date]
+ * @property {(string|null)} [maturity_date]
+ * @property {Array<Array<number>>} [funding_curve]
+ * @property {number} [funding_spread]
+ * @property {number} [N]
+ */
+
+/**
+ * @typedef {Object} ProfileRequest
+ * @property {52|104|208} [steps_per_year]
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} underlyings
+ * @property {Array<Array<number>>} corr_matrix
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {number} [seed]
+ * @property {boolean} [antithetic]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Array<Array<number>>} [yield_curve]
+ * @property {number} [sigma_r]
+ * @property {number} [a_r]
+ * @property {string} [barrier_monitoring]
+ * @property {Object} [constats]
+ * @property {(Object|null)} [frozen_schedule]
+ * @property {(string|null)} [anchor]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {(VariantOverrides|null)} [variant]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [valuation_date]
+ * @property {(string|null)} [maturity_date]
+ * @property {Array<Array<number>>} [funding_curve]
+ * @property {number} [funding_spread]
+ */
+
+/**
  * Realized volatility, dividends and correlation at a date, or an error.
  * The history's provenance fields are carried over as they come.
  * @typedef {Object} RealizedMarket
@@ -650,6 +941,46 @@ async function call(method, path, { query, body } = {}) {
  * @typedef {Object} SmileCalibration
  * @property {Object} dossier
  * @property {Object} calibration_evidence
+ */
+
+/**
+ * Solve for the script PARAM value that hits a target price (bisection).
+ * target_price/lo/hi are in the PARAM's stored units (fraction for % params).
+ * @typedef {Object} SolverRequest
+ * @property {52|104|208} [steps_per_year]
+ * @property {string} script
+ * @property {Array<UnderlyingParams>} underlyings
+ * @property {Array<Array<number>>} corr_matrix
+ * @property {number} [r]
+ * @property {number} [T]
+ * @property {number} [seed]
+ * @property {boolean} [antithetic]
+ * @property {string} [model]
+ * @property {Object} [user_params]
+ * @property {Array<Array<number>>} [yield_curve]
+ * @property {number} [sigma_r]
+ * @property {number} [a_r]
+ * @property {string} [barrier_monitoring]
+ * @property {Object} [constats]
+ * @property {(Object|null)} [frozen_schedule]
+ * @property {(string|null)} [anchor]
+ * @property {(string|null)} [settlement_ccy]
+ * @property {(VariantOverrides|null)} [variant]
+ * @property {(string|null)} [strike_date]
+ * @property {(string|null)} [value_date]
+ * @property {(string|null)} [payment_date]
+ * @property {(string|null)} [valuation_date]
+ * @property {(string|null)} [maturity_date]
+ * @property {Array<Array<number>>} [funding_curve]
+ * @property {number} [funding_spread]
+ * @property {string} param_name
+ * @property {number} target_price
+ * @property {number} lo
+ * @property {number} hi
+ * @property {number} [N]
+ * @property {number} [tol]
+ * @property {number} [param_tol]
+ * @property {number} [max_iter]
  */
 
 /**
@@ -928,6 +1259,36 @@ export function priceInLife(body) {
 }
 
 /**
+ * POST /api/price/jobs/backtest
+ * Submit Backtest
+ * @param {BacktestRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitBacktest(body) {
+  return call('POST', '/api/price/jobs/backtest', { body })
+}
+
+/**
+ * POST /api/price/jobs/backtest-compare
+ * Submit Backtest Compare
+ * @param {BacktestCompareRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitBacktestCompare(body) {
+  return call('POST', '/api/price/jobs/backtest-compare', { body })
+}
+
+/**
+ * POST /api/price/jobs/grid
+ * Submit Grid
+ * @param {GridRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitGrid(body) {
+  return call('POST', '/api/price/jobs/grid', { body })
+}
+
+/**
  * POST /api/price/jobs/implied-funding
  * Submit Implied Funding
  * @param {ImpliedFundingRequest} body
@@ -948,6 +1309,36 @@ export function submitInLife(body) {
 }
 
 /**
+ * POST /api/price/jobs/mtf
+ * Submit Mtf
+ * @param {MtfRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitMtf(body) {
+  return call('POST', '/api/price/jobs/mtf', { body })
+}
+
+/**
+ * POST /api/price/jobs/mtf-drilldown
+ * Submit Mtf Drilldown
+ * @param {MtfDrilldownRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitMtfDrilldown(body) {
+  return call('POST', '/api/price/jobs/mtf-drilldown', { body })
+}
+
+/**
+ * POST /api/price/jobs/paths
+ * Submit Paths
+ * @param {PathsRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitPaths(body) {
+  return call('POST', '/api/price/jobs/paths', { body })
+}
+
+/**
  * POST /api/price/jobs/price
  * Submit Price
  * @param {PricingRequest} body
@@ -955,6 +1346,36 @@ export function submitInLife(body) {
  */
 export function submitPrice(body) {
   return call('POST', '/api/price/jobs/price', { body })
+}
+
+/**
+ * POST /api/price/jobs/proba
+ * Submit Proba
+ * @param {ProbaRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitProba(body) {
+  return call('POST', '/api/price/jobs/proba', { body })
+}
+
+/**
+ * POST /api/price/jobs/profile
+ * Submit Profile
+ * @param {ProfileRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitProfile(body) {
+  return call('POST', '/api/price/jobs/profile', { body })
+}
+
+/**
+ * POST /api/price/jobs/solve
+ * Submit Solve
+ * @param {SolverRequest} body
+ * @returns {Promise<PricingJob>}
+ */
+export function submitSolve(body) {
+  return call('POST', '/api/price/jobs/solve', { body })
 }
 
 /**

@@ -1,7 +1,7 @@
 // Pricing, Greeks, profil, trajectoires, probabilités, backtest, comparateur, assistant de script et dictée.
 // Partie du store du Pricer (src/stores/pricing.js), découpé le 18/11/2026.
 import { apiErrorMessage, apiFetch } from '../../utils/api.js'
-import { JOB_TERMINAL, cancelQueuedCalculation, runQueuedCalculation } from '../../utils/pricingJobs.js'
+import { JOB_TERMINAL, cancelQueuedCalculation, jobChannel, runQueuedCalculation } from '../../utils/pricingJobs.js'
 import { ref } from 'vue'
 import { _defaultUnderlying, _plausibleIsoDate } from './helpers.js'
 
@@ -19,28 +19,44 @@ export function installRuns(s) {
   } = s
 
   // ── File de calcul interactive (P1-4) ─────────────────────────────
-  // Le prix, les Greeks et le spread implicite passent par la file du
-  // serveur (utils/pricingJobs.js) : l'écran suit le calcul et peut l'arrêter.
+  // Le prix, les Greeks, le spread implicite et les analyses passent par la
+  // file du serveur (utils/pricingJobs.js) : l'écran suit le calcul et peut
+  // l'arrêter. `pricingJob` est le calcul que montre la ligne d'état et
+  // qu'arrête « Annuler » : le dernier lancé. Chaque famille de calcul
+  // (jobChannel) a son propre calcul en cours : relancer une analyse remplace
+  // la précédente du même type, sans toucher au prix qui tourne à côté.
   const pricingJob = ref(null)
+  const currentJobs = {}
 
   async function _queuedCalculation(route, body) {
+    const channel = jobChannel(route)
     let mine = null
     try {
       return await runQueuedCalculation(route, body, {
         onState: state => {
-          if (mine === null) mine = state.job_id
-          else if (pricingJob.value?.id !== mine) return
+          if (mine === null) { mine = state.job_id; currentJobs[channel] = mine }
+          else if (pricingJob.value && pricingJob.value.id !== mine) return
           pricingJob.value = {
-            id: mine, queue_position: state.queue_position, elapsed_ms: state.elapsed_ms,
+            id: mine, route, queue_position: state.queue_position, elapsed_ms: state.elapsed_ms,
             status: pricingJob.value?.id === mine && pricingJob.value.status === 'cancelling'
               && !JOB_TERMINAL.has(state.status) ? 'cancelling' : state.status,
           }
         },
-        isCurrent: id => pricingJob.value?.id === id,
+        isCurrent: id => currentJobs[channel] === id,
       })
     } finally {
+      if (mine !== null && currentJobs[channel] === mine) delete currentJobs[channel]
       if (mine !== null && pricingJob.value?.id === mine) pricingJob.value = null
     }
+  }
+
+  /** Le résultat d'une analyse passée par la file : la donnée, ou l'erreur
+   *  lisible ; null si un calcul plus récent du même type l'a remplacée. */
+  async function _queuedAnalysis(route, body) {
+    const res = await _queuedCalculation(route, body)
+    if (res.superseded) return null
+    if (!res.ok) throw new Error(apiErrorMessage(res.data, 'Erreur serveur'))
+    return res.data
   }
 
   /** Arrête le calcul en cours : le serveur tue son processus. */
@@ -317,13 +333,8 @@ export function installRuns(s) {
     loading.value = true; error.value = null
     _startProgress(800)
     try {
-      const res = await apiFetch('/api/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(_baseBody()),
-      })
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err) }
-      else { profile.value = await res.json(); rightTab.value = 'profile' }
+      const data = await _queuedAnalysis('/api/profile', _baseBody())
+      if (data) { profile.value = data; rightTab.value = 'profile' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
   }
@@ -335,13 +346,8 @@ export function installRuns(s) {
     loading.value = true; error.value = null
     _startProgress(1500)
     try {
-      const res = await apiFetch('/api/paths', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ..._baseBody(), N_stat: 500, N_display: 50 }),
-      })
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err) }
-      else { paths.value = await res.json(); rightTab.value = 'paths' }
+      const data = await _queuedAnalysis('/api/paths', { ..._baseBody(), N_stat: 500, N_display: 50 })
+      if (data) { paths.value = data; rightTab.value = 'paths' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
   }
@@ -353,13 +359,8 @@ export function installRuns(s) {
     loading.value = true; error.value = null
     _startProgress(2000)
     try {
-      const res = await apiFetch('/api/proba', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ..._baseBody(), N: 5000 }),
-      })
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err) }
-      else { proba.value = await res.json(); rightTab.value = 'proba' }
+      const data = await _queuedAnalysis('/api/proba', { ..._baseBody(), N: 5000 })
+      if (data) { proba.value = data; rightTab.value = 'proba' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
   }
@@ -375,10 +376,7 @@ export function installRuns(s) {
     loading.value = true; error.value = null; backtest.value = null
     _startProgress(8000)
     try {
-      const res = await apiFetch('/api/backtest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const payload = await _queuedAnalysis('/api/backtest', {
           ..._baseBody(),
           start_date: params.start_date || null,
           end_date: params.end_date || null,
@@ -387,12 +385,9 @@ export function installRuns(s) {
           rf_rate: params.rf_rate ?? 2.0,
           history_mode: params.history_mode ?? 'following',
           max_delay_days: params.max_delay_days ?? 10,
-        }),
       })
-      const payload = await res.json()
-      if (!isCurrent()) return
-      if (!res.ok) error.value = apiErrorMessage(payload)
-      else { backtest.value = payload; rightTab.value = 'backtest' }
+      if (!payload || !isCurrent()) return
+      backtest.value = payload; rightTab.value = 'backtest'
     } catch (e) { if (isCurrent()) error.value = e.message }
     finally { if (revision === backtestRevision) { loading.value = false; _stopProgress() } }
   }
@@ -417,10 +412,7 @@ export function installRuns(s) {
     const isCurrent = () => revision === comparatorRevision && contextCurrent() && inputs === JSON.stringify(_snapshotInputs())
     comparatorLoading.value = true; comparatorError.value = ''; comparator.value = null
     try {
-      const res = await apiFetch('/api/backtest/compare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const payload = await _queuedAnalysis('/api/backtest/compare', {
           script: script.value,
           candidates,
           r: globalParams.r / 100,
@@ -446,11 +438,8 @@ export function installRuns(s) {
           rf_rate: params.rf_rate ?? 2.0,
           history_mode: params.history_mode ?? 'following',
           max_delay_days: params.max_delay_days ?? 10,
-        }),
       })
-      const payload = await res.json()
-      if (!isCurrent()) return
-      if (!res.ok) throw new Error(apiErrorMessage(payload))
+      if (!payload || !isCurrent()) return
       comparator.value = payload
     } catch (e) {
       if (isCurrent()) comparatorError.value = e.message
@@ -567,5 +556,5 @@ export function installRuns(s) {
     validateScript()
   }
 
-  Object.assign(s, { pricingJob, cancelPricing, _queuedCalculation, _inLifeBody, _avecTermesDOrigine, _validatePricingDates, runInLifePricing, runPricing, impliedFunding, runImpliedFunding, runGreeks, runProfile, runPaths, runProba, backtestRevision, runBacktest, comparator, comparatorError, comparatorLoading, comparatorRevision, runBacktestCompare, adoptBasket, scriptAssistantPayload, loadTranscribeEngines, prepareTranscribe, transcribeAudio, adoptGeneratedScript })
+  Object.assign(s, { pricingJob, cancelPricing, _queuedCalculation, _queuedAnalysis, _inLifeBody, _avecTermesDOrigine, _validatePricingDates, runInLifePricing, runPricing, impliedFunding, runImpliedFunding, runGreeks, runProfile, runPaths, runProba, backtestRevision, runBacktest, comparator, comparatorError, comparatorLoading, comparatorRevision, runBacktestCompare, adoptBasket, scriptAssistantPayload, loadTranscribeEngines, prepareTranscribe, transcribeAudio, adoptGeneratedScript })
 }

@@ -4,6 +4,7 @@ import { calibrateUnderlying } from '../../utils/smileCalibration.js'
 import { computed } from 'vue'
 import { surfaceCalibrationKey } from '../../utils/volSurface.js'
 import { _fetchMtf } from './helpers.js'
+import { apiErrorMessage } from '../../utils/api.js'
 
 export function installMtf(s) {
   const {
@@ -15,6 +16,15 @@ export function installMtf(s) {
   } = s
   let mtfRevision = 0
   let mtfDrillRevision = 0
+
+  // Le Mark to Future et son détail passent par la file de calcul (P1-4) ;
+  // la comparaison de deux modèles garde sa route, qui lance son propre pool.
+  async function _queuedMtf(route, body) {
+    const res = await s._queuedCalculation(route, body)
+    if (res.superseded) return null
+    if (!res.ok) throw Error(apiErrorMessage(res.data, 'Calcul Mark to Future impossible.'))
+    return res.data
+  }
 
   // ── Mark to Future (nested Monte Carlo) ────────────────────────────
   const mtfIsStale = computed(() => mtfContext.value !== null &&
@@ -139,8 +149,8 @@ export function installMtf(s) {
       if (models.length === 1) {
         if (prepared[0].status === 'rejected') throw prepared[0].reason
         const body = prepared[0].value
-        const fan = await _fetchMtf('/api/mtf', body)
-        if (!current()) return
+        const fan = await _queuedMtf('/api/mtf', body)
+        if (!fan || !current()) return
         mtfComparison.value = null
         mtfActiveLeg.value = null
         _applyMtfResult(fan, body)
@@ -154,7 +164,7 @@ export function installMtf(s) {
         } else {
           const leg = legs.a.body ? legs.a : legs.b
           if (leg.body) {
-            try { leg.result = await _fetchMtf('/api/mtf', leg.body) }
+            try { leg.result = await _queuedMtf('/api/mtf', leg.body) }
             catch (failure) { leg.error = failure.message }
           }
         }
@@ -182,8 +192,8 @@ export function installMtf(s) {
     mtfDrillError.value = null
     mtfDrill.value = null
     try {
-      const detail = await _fetchMtf('/api/mtf/drilldown', { ...body, t, scenario_ids: ids, labels })
-      if (revision === mtfDrillRevision && !mtfIsStale.value) mtfDrill.value = detail
+      const detail = await _queuedMtf('/api/mtf/drilldown', { ...body, t, scenario_ids: ids, labels })
+      if (detail && revision === mtfDrillRevision && !mtfIsStale.value) mtfDrill.value = detail
     } catch (e) {
       if (revision === mtfDrillRevision && !mtfIsStale.value) mtfDrillError.value = e.message
     } finally { if (revision === mtfDrillRevision) mtfDrillLoading.value = false }

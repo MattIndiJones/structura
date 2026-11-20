@@ -161,6 +161,7 @@ import { useRouter } from 'vue-router'
 import { usePricingStore } from '../stores/pricing.js'
 import { useDemoModeStore } from '../stores/demoMode.js'
 import { confirmer } from '../composables/useConfirm.js'
+import { JOB_LABELS } from '../utils/pricingJobs.js'
 
 const store = usePricingStore()
 const demo = useDemoModeStore()
@@ -182,13 +183,14 @@ async function newPricing() {
 const eventsInitialDealId = ref(store.openedDeal?.id || null)
 
 function pricingJobLabel(job) {
-  if (job.status === 'cancelling') return 'Arrêt du calcul…'
+  const name = JOB_LABELS[job.route] || 'Calcul'
+  if (job.status === 'cancelling') return `${name} · arrêt du calcul…`
   if (job.status === 'queued') {
     return job.queue_position > 1
-      ? `En attente d’un processus de calcul (${job.queue_position - 1} calcul(s) devant)…`
-      : 'En attente d’un processus de calcul…'
+      ? `${name} · en attente d’un processus de calcul (${job.queue_position - 1} calcul(s) devant)…`
+      : `${name} · en attente d’un processus de calcul…`
   }
-  return `Calcul en cours · ${Math.round((job.elapsed_ms || 0) / 1000)} s`
+  return `${name} · calcul en cours · ${Math.round((job.elapsed_ms || 0) / 1000)} s`
 }
 
 function formatWork(value) {
