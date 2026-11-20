@@ -1,6 +1,5 @@
 // Solveur, grille et scénarios.
 // Partie du store du Pricer (src/stores/pricing.js), découpé le 18/11/2026.
-import { apiErrorMessage, apiFetch } from '../../utils/api.js'
 
 export function installSimulationTools(s) {
   const {
@@ -83,18 +82,13 @@ export function installSimulationTools(s) {
     const sequentialMs = cells * (N || 2000) / (45 * 2000) * 3000
     _startProgress(POOL_SPAWN_OVERHEAD_MS + sequentialMs / EFFECTIVE_SPEEDUP)
     try {
-      const res = await apiFetch('/api/scenarios', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const data = await s._queuedAnalysis('/api/scenarios', {
           ..._baseBody(),
           spot_shocks: spot_shocks_pct.map(v => v / 100),
           vol_shocks: vol_shocks_pct.map(v => v / 100),
           N: N || 2000,
-        }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
-      else { scenarios.value = await res.json(); rightTab.value = 'scenarios' }
+      if (data) { scenarios.value = data; rightTab.value = 'scenarios' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
   }

@@ -20,6 +20,7 @@ paid per job. This is also why a job's payload must be plain, picklable data
 caller's live Python objects."""
 from __future__ import annotations
 import logging
+from contextvars import ContextVar
 from concurrent.futures import (
     FIRST_COMPLETED, ThreadPoolExecutor, ProcessPoolExecutor, wait,
 )
@@ -30,6 +31,12 @@ from .job import JobResult
 from .pricers import PRICERS
 
 logger = logging.getLogger(__name__)
+
+# Cancellation handed down by whoever runs a calculation on behalf of a
+# cancellable job (core/compute/interactive.py, the stress scenarios and the
+# MtF comparison), without threading a callback through every endpoint that
+# happens to call run_batch. An explicit should_cancel takes precedence.
+ambient_cancel: ContextVar[Optional[Callable[[], bool]]] = ContextVar("structura_ambient_cancel", default=None)
 
 
 def _run_one(kind: str, payload: dict) -> dict:
@@ -68,6 +75,8 @@ def run_batch(
     waiting for the whole batch to drain."""
     if not jobs:
         return []
+    if should_cancel is None:
+        should_cancel = ambient_cancel.get()
     Executor = ProcessPoolExecutor if use_processes else ThreadPoolExecutor
     results: list[JobResult] = []
     workers = max(1, min(max_workers, len(jobs)))

@@ -3,7 +3,6 @@
 import { calibrateUnderlying } from '../../utils/smileCalibration.js'
 import { computed } from 'vue'
 import { surfaceCalibrationKey } from '../../utils/volSurface.js'
-import { _fetchMtf } from './helpers.js'
 import { apiErrorMessage } from '../../utils/api.js'
 
 export function installMtf(s) {
@@ -17,8 +16,8 @@ export function installMtf(s) {
   let mtfRevision = 0
   let mtfDrillRevision = 0
 
-  // Le Mark to Future et son détail passent par la file de calcul (P1-4) ;
-  // la comparaison de deux modèles garde sa route, qui lance son propre pool.
+  // Le Mark to Future, son détail et la comparaison de deux modèles passent
+  // par la file de calcul (P1-4).
   async function _queuedMtf(route, body) {
     const res = await s._queuedCalculation(route, body)
     if (res.superseded) return null
@@ -158,7 +157,8 @@ export function installMtf(s) {
         const legs = Object.fromEntries(prepared.map((leg, i) => [['a', 'b'][i], leg.status === 'fulfilled'
           ? { model: models[i], body: leg.value } : { model: models[i], error: leg.reason.message }]))
         if (legs.a.body && legs.b.body) {
-          const pair = await _fetchMtf('/api/mtf/compare', { a: legs.a.body, b: legs.b.body })
+          const pair = await _queuedMtf('/api/mtf/compare', { a: legs.a.body, b: legs.b.body })
+          if (!pair || !current()) return
           Object.assign(legs.a, pair.a, { model: models[0] })
           Object.assign(legs.b, pair.b, { model: models[1] })
         } else {

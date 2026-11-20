@@ -45,6 +45,17 @@ def test_une_analyse_du_pricer_passe_par_la_file(signed_in, instance, saved_scri
     expect(page.get_by_text(re.compile(r"chemins analysés")).first).to_be_visible(timeout=120_000)
 
 
+def test_les_scenarios_de_stress_passent_par_la_file(signed_in, instance, saved_script):
+    """P1-4, last step: the stress grid, which runs its own process pool, is a job too."""
+    page = signed_in
+    price_in_pricer(page, instance, saved_script("Parcours scénarios"))
+    page.get_by_role("button", name="🎯 Scénarios", exact=True).click()
+    with page.expect_response(lambda r: r.url.endswith("/api/price/jobs/scenarios") and r.request.method == "POST") as submitted:
+        page.get_by_role("button", name="▶ Calculer", exact=True).click()
+    assert submitted.value.status == 202, submitted.value.text()
+    expect(page.locator("table").filter(has_text="%").first).to_be_visible(timeout=120_000)
+
+
 def test_un_script_enregistre_rouvre_avec_sa_vol(signed_in, instance, saved_script):
     """Constat du 19/11 : la σ enregistrée (23 %) devenait 30 % quand le catalogue
     reconnaissait l'action, et le premier pricing était écarté comme périmé."""

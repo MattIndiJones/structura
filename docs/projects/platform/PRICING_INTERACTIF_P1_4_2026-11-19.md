@@ -71,17 +71,41 @@ hors durée mesurée.
   Sans cette séparation, lancer le comparateur puis un prix aurait annulé le comparateur.
 - **Ligne d'état** : elle nomme désormais le calcul suivi (« Probabilités · calcul en cours ·
   12 s »), et « Annuler » arrête celui-là.
-- **Restent synchrones** : les scénarios de stress et la comparaison de deux modèles en Mark to
-  Future.
-  - Ils lancent leur propre pool de processus, ce que ne peut pas faire un processus de la file,
-    déclaré `daemon`.
-  - Le tuer à l'annulation laisserait en outre ses enfants tourner.
-  - Les faire passer par la file demanderait d'arrêter tout l'arbre de processus.
+## Dernier pas, le 20/11 : les calculs qui lancent leur propre pool
+
+**Les scénarios de stress et la comparaison de deux modèles en Mark to Future** lancent leur
+propre pool de processus (`run_batch`). Un processus de la file, déclaré `daemon`, n'a pas le droit
+d'avoir des enfants, et le tuer à l'annulation laisserait tourner ceux de son pool.
+
+**Ils passent donc par la file, mais tournent dans un fil du serveur** (`POOL_ANALYSES`) :
+
+- **Mêmes routes, même suivi** : la route de soumission, le suivi, l'annulation, le délai et
+  l'abandon sont ceux des autres calculs.
+- **Comment l'arrêt les atteint** : l'annulation, le dépassement de délai et l'abandon arrivent à
+  `run_batch` par une variable de contexte (`executor.ambient_cancel`). `run_batch` termine alors
+  les processus de son pool, le même arrêt qu'un long lot avait déjà. Une annulation explicite
+  passée par l'appelant reste prioritaire.
+- **Un seul calcul de ce type à la fois**, puisque chacun occupe déjà un pool. Il ne prend aucun
+  processus de la file, et un prix lancé à côté passe sans attendre.
+- **Libération de la place** : elle ne se libère qu'une fois le pool réellement arrêté, pour que
+  deux pools ne se chevauchent pas.
+- **Délai** : la comparaison Mark to Future a le délai long, 30 min ; les scénarios ont celui d'un
+  prix.
+
+**Tests** (`test_pricing_jobs_pools.py`) :
+
+- les scénarios passés par la file rendent le résultat de la route synchrone ;
+- l'annulation, puis le dépassement de délai, arrêtent les processus du pool ;
+- un seul calcul à pool tourne à la fois, sans retenir les prix ;
+- `run_batch` entend l'annulation transmise, et une annulation explicite prime.
+
+Un parcours de bout en bout lance les scénarios depuis l'écran.
 
 ## Ce qui reste
 
-- Scénarios de stress et comparaison Mark to Future, pour la raison ci-dessus.
-- Les routes synchrones n'ont toujours ni délai ni annulation.
+- **Tous les calculs interactifs du Pricer passent désormais par la file.**
+- **Les routes synchrones** restent sans délai ni annulation pour leurs autres appelants : booking,
+  appel d'offres, scripts et tests.
 - Les calculs en file vivent en mémoire : un redémarrage du serveur les perd, comme les
   requêtes qu'ils remplacent.
 

@@ -63,8 +63,10 @@ def _without_timing(value):
 def test_chaque_analyse_declaree_designe_une_fonction_de_route():
     for kind, (module, name) in interactive.ANALYSES.items():
         assert callable(getattr(importlib.import_module(f"backend.app.{module}"), name)), kind
-    # The scenarios and the MtF comparison keep their own process pool.
-    assert "scenarios" not in interactive.ANALYSES and "mtf_compare" not in interactive.ANALYSES
+    # The scenarios and the MtF comparison run in a server thread instead
+    # (POOL_ANALYSES, test_pricing_jobs_pools.py).
+    for kind, (module, name) in interactive.POOL_ANALYSES.items():
+        assert callable(getattr(importlib.import_module(f"backend.app.{module}"), name)), kind
 
 
 def test_les_analyses_longues_ont_un_delai_plus_long():
@@ -83,7 +85,7 @@ def _client(monkeypatch, runner, user_id):
 
 
 @pytest.mark.parametrize("path", ["profile", "paths", "proba", "backtest", "backtest-compare", "mtf",
-                                  "mtf-drilldown", "solve", "grid"])
+                                  "mtf-drilldown", "solve", "grid", "scenarios", "mtf-compare"])
 def test_les_routes_d_analyse_valident_avant_de_mettre_en_file(monkeypatch, path):
     queued = []
     fake = SimpleNamespace(submit=lambda kind, request, user: queued.append(kind) or {})
