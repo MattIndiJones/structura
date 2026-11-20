@@ -134,6 +134,7 @@ import SensitiveValue from '../components/SensitiveValue.vue'
 import DealReferenceLink from '../components/DealReferenceLink.vue'
 import { useDemoModeStore } from '../stores/demoMode'
 import { apiFetch } from '../utils/api'
+import { confirmer } from '../composables/useConfirm.js'
 import { localDay, readMtmResponse, runTimestamp } from '../composables/useBookingMtm'
 import { noteJson, useValuationNoteDraft } from '../composables/useValuationNoteDraft'
 import { useValuationRunSelection, runSelectionWarnings } from '../composables/useValuationRunSelection'
@@ -189,18 +190,22 @@ const signed = (v, n = 2) => `${v >= 0 ? '+' : ''}${v.toFixed(n)}`
 const dateTime = v => runTimestamp(v)?.toLocaleString('fr-FR') || '—'
 const dealReference = id => deals.value.find(d => d.id === id)?.reference || `Deal ${id}`
 const marketLabel = m => `${valuationSourceLabel(m?.source || 'unknown')} · ${m?.model || 'Modèle non renseigné'}`
-async function perform(label, action) {
+// A read can be abandoned: leaving only drops its answer (alive=false). An
+// operation that writes — a draft, a note, a frozen PDF, a valuation run — is
+// confirmed before leaving, rather than the departure being silently refused.
+let busyWrites = false
+async function perform(label, action, { writes = true } = {}) {
   if (busy.value) return
-  busy.value = true; error.value = ''; phase.value = label; seconds.value = 0
+  busy.value = true; busyWrites = writes; error.value = ''; phase.value = label; seconds.value = 0
   clock = setInterval(() => seconds.value++, 1000)
   try { await action() } catch (e) { if (alive) error.value = e.message }
-  finally { clearInterval(clock); busy.value = false }
+  finally { clearInterval(clock); busy.value = false; busyWrites = false }
 }
 async function fetchRuns() {
   runs.value = dealId.value ? await noteJson(`/api/valuation-notes/sources/${dealId.value}`) : []
 }
 async function loadRuns() {
-  await perform('Lecture des calculs disponibles', async () => { resetSelection(); runs.value = []; clearFilters(); await fetchRuns() })
+  await perform('Lecture des calculs disponibles', async () => { resetSelection(); runs.value = []; clearFilters(); await fetchRuns() }, { writes: false })
 }
 async function refreshLibrary() { notes.value = await noteJson('/api/valuation-notes') }
 function clearPreview() {
@@ -283,9 +288,12 @@ function receiveAiSuggestion(data) {
     original: draft.value[data.section], noteId: note.value.id }
 }
 function acceptSuggestion() { if (canAccept.value) { draft.value[suggestion.value.section] = suggestion.value.text; suggestion.value = null } }
-function beforeUnload(e) { if (dirty.value || busy.value) { e.preventDefault(); e.returnValue = '' } }
+function beforeUnload(e) { if (dirty.value || (busy.value && busyWrites)) { e.preventDefault(); e.returnValue = '' } }
 onBeforeRouteLeave(async () => {
-  if (busy.value) return false
+  if (busy.value && !busyWrites) return true
+  if (busy.value) return confirmer({ titre: 'Quitter pendant l’opération ?',
+    message: `« ${phase.value} » est en cours. Le serveur la termine, mais cet écran n’en affichera pas le résultat.`,
+    confirmer: 'Quitter quand même' })
   try { await flush(); return true } catch { return window.confirm('Le brouillon n’a pas été enregistré. Quitter et perdre les dernières modifications ?') }
 })
 onMounted(async () => {
@@ -300,8 +308,9 @@ onMounted(async () => {
       resetSelection(ids, true)
       if (ids.some(id => !selectedIds.value.includes(id))) throw new Error('Un des calculs demandés est indisponible. Sélectionnez les MtM dans le tableau.')
     }
-  })
-  if (!error.value && !note.value && route.query.auto === '1' && canGenerate.value) await generate()
+  }, { writes: false })
+  // Not after the view was left during its read: generating writes a note.
+  if (alive && !error.value && !note.value && route.query.auto === '1' && canGenerate.value) await generate()
 })
 onBeforeUnmount(() => { alive = false; selectionEpoch++; clearInterval(clock); dispose(); clearPreview(); window.removeEventListener('beforeunload', beforeUnload) })
 </script>

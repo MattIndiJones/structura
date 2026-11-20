@@ -680,9 +680,20 @@ export function installLoaders(s) {
       // pour qu'un champ ajouté après la sauvegarde arrive avec sa valeur par
       // défaut plutôt qu'en undefined. Absents des scripts enregistrés avant
       // que ce soit sauvegardé : on garde alors ce qui est à l'écran.
+      //
+      // Une vol enregistrée est une hypothèse du pricing enregistré, comme
+      // sur un deal ou un produit rouvert : marquée 'saved', elle n'est plus
+      // remplacée par le défaut de sa classe d'actif quand le catalogue
+      // arrive (marketInputs.js). Sans ce marquage, un script enregistré sans
+      // origine de vol (créé par l'API, ou avant tout réglage) rouvrait à
+      // 30 % au lieu de sa σ, quelques secondes après l'ouverture — un autre
+      // prix, et le premier pricing lancé entre-temps écarté comme périmé.
+      // Une origine explicite (saisie, marché) est gardée telle quelle.
       if (Array.isArray(saved.underlyings) && saved.underlyings.length) {
-        underlyings.value = saved.underlyings.map(
-          (u, i) => ({ ..._defaultUnderlying(i + 1), ...u }))
+        underlyings.value = saved.underlyings.map((u, i) => ({
+          ..._defaultUnderlying(i + 1), ...u, _smileDefaults: false,
+          vol_level_source: u.vol_level_source && u.vol_level_source !== 'default' ? u.vol_level_source : 'saved',
+        }))
       }
       if (Array.isArray(saved.corr_matrix) && saved.corr_matrix.length) {
         corrMatrix.value = saved.corr_matrix.map(row => [...row])
