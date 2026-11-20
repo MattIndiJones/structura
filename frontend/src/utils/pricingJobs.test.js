@@ -77,6 +77,6 @@ describe('file de calcul interactive', () => {
   })
 
   it('refuse une route sans file plutôt que de la contourner', async () => {
-    await expect(runQueuedCalculation('/api/profile', {}, fast)).rejects.toThrow('sans file')
+    await expect(runQueuedCalculation('/api/scenarios', {}, fast)).rejects.toThrow('sans file')
   })
 })

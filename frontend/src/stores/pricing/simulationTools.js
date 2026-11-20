@@ -29,20 +29,15 @@ export function installSimulationTools(s) {
     _startProgress((N || 8000) / 8000 * ((max_iter || 40) / 40) * 1500)
     try {
       if (lo == null || hi == null || lo === '' || hi === '' || !(Number(lo) < Number(hi))) throw new Error('Renseignez deux bornes de recherche croissantes.')
-      const res = await apiFetch('/api/solve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const data = await s._queuedAnalysis('/api/solve', {
           ..._baseBody({ omit: [param_name] }),
           param_name,
           target_price: target_price_pct / 100,
           lo: toStoredUnits(param_name, lo),
           hi: toStoredUnits(param_name, hi),
           N: N || 8000, tol: tol || 1e-4, max_iter: max_iter || 40,
-        }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
-      else { solver.value = await res.json(); rightTab.value = 'simulation' }
+      if (data) { solver.value = data; rightTab.value = 'simulation' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
   }
@@ -54,20 +49,15 @@ export function installSimulationTools(s) {
     _startProgress((N || 4000) * (x_steps || 9) * (y_steps || 9) / (4000 * 81) * 3000)
     try {
       if ([x_min, x_max, y_min, y_max].some(v => v == null || v === '') || !(Number(x_min) < Number(x_max)) || !(Number(y_min) < Number(y_max))) throw new Error('Renseignez les bornes croissantes de chaque axe.')
-      const res = await apiFetch('/api/grid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const data = await s._queuedAnalysis('/api/grid', {
           ..._baseBody({ omit: [param_x, param_y] }),
           param_x, x_min: toStoredUnits(param_x, x_min), x_max: toStoredUnits(param_x, x_max),
           x_steps: x_steps || 9,
           param_y, y_min: toStoredUnits(param_y, y_min), y_max: toStoredUnits(param_y, y_max),
           y_steps: y_steps || 9,
           N: N || 4000,
-        }),
       })
-      if (!res.ok) { const err = await res.json(); error.value = apiErrorMessage(err, 'Erreur serveur') }
-      else { grid.value = await res.json(); rightTab.value = 'simulation' }
+      if (data) { grid.value = data; rightTab.value = 'simulation' }
     } catch (e) { error.value = e.message }
     finally { loading.value = false; _stopProgress() }
   }

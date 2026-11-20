@@ -8,6 +8,34 @@ export const JOB_ROUTES = {
   '/api/price': 'price',
   '/api/price/in-life': 'in-life',
   '/api/price/implied-funding': 'implied-funding',
+  // Les analyses du Pricer depuis le 20/11. Les scénarios de stress et la
+  // comparaison Mark to Future gardent leur route : ils lancent leur propre
+  // pool de processus, ce qu'un processus de la file ne peut pas faire.
+  '/api/profile': 'profile',
+  '/api/paths': 'paths',
+  '/api/proba': 'proba',
+  '/api/backtest': 'backtest',
+  '/api/backtest/compare': 'backtest-compare',
+  '/api/mtf': 'mtf',
+  '/api/mtf/drilldown': 'mtf-drilldown',
+  '/api/solve': 'solve',
+  '/api/grid': 'grid',
+}
+// Prix, Greeks, cours de vie et spread implicite décrivent le même produit :
+// un nouveau calcul de cette famille remplace le précédent. Une analyse ne
+// remplace que la même analyse.
+// Le nom du calcul sur la ligne d'état : avec les analyses dans la file,
+// « Calcul en cours » ne dit plus lequel tourne.
+export const JOB_LABELS = {
+  '/api/price': 'Prix', '/api/price/in-life': 'Valorisation en cours de vie',
+  '/api/price/implied-funding': 'Spread implicite', '/api/profile': 'Profil de payoff',
+  '/api/paths': 'Chemins Monte Carlo', '/api/proba': 'Probabilités', '/api/backtest': 'Backtest',
+  '/api/backtest/compare': 'Comparateur de sous-jacents', '/api/mtf': 'Mark to Future',
+  '/api/mtf/drilldown': 'Détail du Mark to Future', '/api/solve': 'Solveur', '/api/grid': 'Grille de prix',
+}
+export const PRICING_ROUTES = new Set(['/api/price', '/api/price/in-life', '/api/price/implied-funding'])
+export function jobChannel(route) {
+  return PRICING_ROUTES.has(route) ? 'pricing' : route
 }
 export const JOB_TERMINAL = new Set(['done', 'failed', 'cancelled', 'timeout', 'abandoned'])
 
