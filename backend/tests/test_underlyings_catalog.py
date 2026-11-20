@@ -15,6 +15,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from backend.app.api import admin as admin_api
 from backend.app.db import database as db
 from backend.app.db.models import Underlying
+from backend.tests.integrity_fixtures import seeded_session
 
 ADMIN = SimpleNamespace(id=1, entity_id=1, role="admin")
 
@@ -32,7 +33,8 @@ def _underlying_update(**values):
 def _session() -> Session:
     engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(engine)
-    return Session(engine)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(engine, ADMIN)
 
 
 @pytest.fixture

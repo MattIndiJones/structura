@@ -22,6 +22,7 @@ from backend.app.db.models import DealEvent, OptimizerResearch, ArchivedDocument
 from backend.app.services import archived_documents as archives
 from backend.app.services.rfq_model_reference import snapshot
 from backend.tests.deals_patch import patch_deals
+from backend.tests.integrity_fixtures import DEFAULT_ACTOR, ensure_users
 
 
 @pytest.mark.parametrize("upgraded", [False, True])
@@ -36,6 +37,7 @@ def test_optimizer_terminal_evidence_is_null_safe_and_undeletable(tmp_path, upgr
             migrate(conn)
             migrate(conn)
     with Session(engine) as session:
+        ensure_users(session, DEFAULT_ACTOR)       # the research's owner (user_id=1)
         row = OptimizerResearch(id="study", user_id=1, command_key="key", title="Étude",
             summary="S", product_family="phoenix", pricing_date="2026-10-21",
             status="COMPLETED", request_hash="hash", request_json="{}", context_json="{}",

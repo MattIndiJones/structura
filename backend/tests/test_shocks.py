@@ -16,6 +16,8 @@ from backend.app.db.models import Deal, DealEvent, Portfolio, ShockRun
 from backend.app.core.product.inputs import terms_from_input
 from backend.app.services.product_repository import stage_internal_product
 from backend.tests.deals_patch import patch_deals
+from backend.tests.integrity_fixtures import seeded_session
+from backend.tests.integrity_fixtures import ensure_users
 
 TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=400)
@@ -26,6 +28,7 @@ USER = SimpleNamespace(id=1, role='user', entity_id=None)
 
 def _add_deal(s: Session, script: str, reference: str, n_underlyings: int = 1,
               nominal: float = 1_000_000.0, portfolio_id=None) -> tuple[Deal, list]:
+    ensure_users(s, USER)          # reused on fresh sessions by other modules
     names = [f"UL{i+1}" for i in range(n_underlyings)]
     tickers = [f"TK{i+1}" for i in range(n_underlyings)]
     corr = [[1.0 if i == j else 0.3 for j in range(n_underlyings)] for i in range(n_underlyings)]
@@ -79,7 +82,8 @@ def _add_deal(s: Session, script: str, reference: str, n_underlyings: int = 1,
 def _make_session():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    return Session(eng)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(eng, USER)
 
 
 def _fake_prices(tks, start, end):

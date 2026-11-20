@@ -16,6 +16,7 @@ from backend.app.api import deals as deals_api
 from backend.app.api import portfolios as portfolios_api
 from backend.app.db.models import Deal, DealEvent, Portfolio
 from backend.tests.deals_patch import patch_deals
+from backend.tests.integrity_fixtures import seeded_session
 
 TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=100)
@@ -80,7 +81,8 @@ def _add_deal(s: Session, script: str, reference: str, ticker: str,
 def _make_session():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    return Session(eng)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(eng, USER)
 
 
 def _fake_prices_by_ticker(ticker_spot: dict):
@@ -211,7 +213,7 @@ def test_barriers_are_listed_before_the_strike_has_happened():
 
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    s = Session(eng)
+    s = seeded_session(eng, USER)
     today = date.today()
     strike = (today + timedelta(days=31)).isoformat()
     deal = Deal(

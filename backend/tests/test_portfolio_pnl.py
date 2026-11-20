@@ -15,6 +15,7 @@ from backend.app.api import portfolios as portfolios_api
 from backend.app.db.models import Deal, DealEvent, Portfolio
 from backend.tests.product_helpers import attach_product_to_deal
 from backend.tests.deals_patch import patch_deals
+from backend.tests.integrity_fixtures import seeded_session
 
 TODAY = date.today()
 VALUE_D = TODAY - timedelta(days=400)
@@ -64,7 +65,8 @@ def _add_deal(s: Session, script: str, reference: str,
 def _make_session():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    return Session(eng)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(eng, USER)
 
 
 def _fake_prices(price_at):

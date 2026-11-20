@@ -20,6 +20,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from backend.app.api.auth import get_current_user
 from backend.app.db.database import get_session
 from backend.app.db.models import AuditEvent, Client, Deal, User
+from backend.tests.integrity_fixtures import ensure_entities, ensure_users
 
 
 @pytest.fixture
@@ -43,6 +44,7 @@ def app_client(monkeypatch):
     from backend.app.main import app
 
     session = Session(engine)
+    ensure_entities(session, 1, 99)
 
     alice = User(id=1, username="alice", email="alice@desk.com",
                  password_hash="x", role="user", entity_id=1)

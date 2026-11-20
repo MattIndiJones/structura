@@ -10,12 +10,16 @@ from fastapi import HTTPException
 
 from backend.app.core import admin_registry
 from backend.app.db.models import AuditEvent, Deal, Entity, RfqRequest, User
+from types import SimpleNamespace
+from backend.tests.integrity_fixtures import seeded_session
+from backend.tests.integrity_fixtures import ensure_users
 
 
 def _make_session() -> Session:
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    return Session(eng)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(eng, SimpleNamespace(id=1, entity_id=None))
 
 
 def _add_deal(s: Session) -> Deal:
@@ -81,6 +85,7 @@ def test_deals_inventory_exposes_owner_and_entity_names():
 
 def test_deals_table_refuses_former_admin_correction_path_and_audits_it():
     s = _make_session()
+    ensure_users(s, SimpleNamespace(id=7, entity_id=None, role="admin"))    # the audited actor
     deal = _add_deal(s)
 
     with pytest.raises(HTTPException) as exc:

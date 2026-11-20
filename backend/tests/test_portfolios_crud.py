@@ -8,13 +8,17 @@ from backend.app.api import deals as deals_api
 from backend.app.api import portfolios as portfolios_api
 from backend.app.db import database as database_module
 from backend.app.db.models import Deal, DealPortfolioMembership, Entity, Portfolio, User
+from backend.tests.integrity_fixtures import seeded_session
+
+# The accounts the portfolios and deals of these tests belong to (P1-6).
+OWNERS = (SimpleNamespace(id=1, entity_id=None), SimpleNamespace(id=2, entity_id=None))
 
 
 def test_portfolio_count_uses_the_live_risk_perimeter():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
 
-    with Session(engine) as session:
+    with seeded_session(engine, *OWNERS) as session:
         portfolio = Portfolio(name="Book EUR", user_id=1, is_default=True)
         session.add(portfolio)
         session.flush()
@@ -30,7 +34,7 @@ def test_portfolio_count_uses_the_live_risk_perimeter():
 def test_legacy_pointer_is_backfilled_once_and_default_lock_is_retired(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
+    with seeded_session(engine, *OWNERS) as session:
         portfolio = Portfolio(name="Ancien défaut", user_id=1, is_default=True)
         session.add(portfolio)
         session.flush()
@@ -55,7 +59,7 @@ def test_admin_lists_every_owners_portfolios_while_user_stays_scoped():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
 
-    with Session(engine) as session:
+    with seeded_session(engine, *OWNERS) as session:
         session.add(Portfolio(name="Admin book", user_id=1, is_default=True))
         session.add(Portfolio(name="Test book", user_id=2, is_default=True))
         session.commit()
@@ -71,7 +75,7 @@ def test_admin_assigns_a_deal_only_to_a_portfolio_of_its_owner():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
 
-    with Session(engine) as session:
+    with seeded_session(engine, *OWNERS) as session:
         admin_book = Portfolio(name="Admin book", user_id=1, is_default=True)
         owner_book = Portfolio(name="Test book", user_id=2, is_default=True)
         session.add(admin_book)
@@ -108,7 +112,7 @@ def test_same_deal_can_belong_to_multiple_portfolios():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
 
-    with Session(engine) as session:
+    with seeded_session(engine, *OWNERS) as session:
         first = Portfolio(name="Mandat", user_id=2)
         second = Portfolio(name="Desk", user_id=2)
         session.add(first)
@@ -138,7 +142,7 @@ def test_admin_deletes_portfolio_without_deleting_deal_or_other_membership():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
 
-    with Session(engine) as session:
+    with seeded_session(engine, *OWNERS) as session:
         deleted = Portfolio(name="Vue temporaire", user_id=2, is_default=True)
         kept = Portfolio(name="Vue conservée", user_id=2)
         session.add(deleted)

@@ -137,6 +137,7 @@ def session_with_flat_history(monkeypatch):
     SQLModel.metadata.create_all(engine)
     session = Session(engine)
     session.add(User(id=1, username="u", email="u@x", password_hash="x"))
+    session.flush()                  # the owner before its portfolio: no relationship orders them
     session.add(Portfolio(id=1, name="P", user_id=1, is_default=True))
     session.commit()
 

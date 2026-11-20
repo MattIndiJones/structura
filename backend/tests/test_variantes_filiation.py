@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from backend.app.core.variants import (
     MODE_AVENANT, MODE_ROLL, VariantError, decrire_ecarts, lire, resoudre, valider,
 )
+from backend.tests.integrity_fixtures import ensure_entities, ensure_users
 
 PARENT = {
     "script_text": "PARAM M_PDI_BAR = 50%\nCONSTAT() OBS\nAT OBS.last:\n  PAY 1\n",
@@ -220,6 +221,7 @@ def client(monkeypatch):
     from backend.app.db.models import User
 
     with Session(moteur) as s:
+        ensure_entities(s, 1)
         u = User(username="phil", email="phil@test.local",
                  password_hash="x", entity_id=1)
         s.add(u); s.commit(); s.refresh(u)
@@ -544,6 +546,7 @@ def _autre_utilisateur(nom="autre", entity_id=1):
     from backend.app.db.models import User
     from sqlmodel import Session
     with Session(db.engine) as s:
+        ensure_entities(s, entity_id)
         u = User(username=nom, email=f"{nom}@test.local",
                  password_hash="x", entity_id=entity_id)
         s.add(u); s.commit(); s.refresh(u)

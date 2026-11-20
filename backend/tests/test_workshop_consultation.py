@@ -133,8 +133,9 @@ def test_native_viewer_preserves_books_campaign_and_reuses_its_process(setup):
     native = create_engine(f'sqlite:///{database}')
     SQLModel.metadata.create_all(native)
     with Session(native) as session:
-        entity=Entity(id=2,name='Maison Hector'); session.add(entity)
+        entity=Entity(id=2,name='Maison Hector'); session.add(entity); session.flush()
         session.add(User(id=3,username='agent_hector',email='hector@recette.invalid',password_hash='unused',role='admin',entity_id=2))
+        session.flush()   # the owner before its deal: no relationship orders them (P1-6)
         session.add(Deal(id=1,user_id=3,entity_id=2,reference='CONSULT-001',contrepartie='BNP Paribas',nominal=10_000_000,
                          devise='EUR',strike_date='2025-10-13',value_date='2025-10-13',maturity_date='2026-04-13',
                          payment_date='2026-04-16',script_snapshot='AT MATURITYDATE:\n    PAY 1',market_snapshot_json='{}'))

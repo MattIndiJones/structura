@@ -10,6 +10,7 @@ from backend.app.core.schemas import PricingRequest
 from backend.app.core.valuation_context import build_pricing_receipt
 from backend.app.services.product_receipts import signed_receipt
 from backend.app.services.product_repository import stage_internal_product
+from backend.tests.integrity_fixtures import ensure_users
 
 
 def pricing_receipt_for_deal_payload(payload: dict) -> dict:
@@ -82,12 +83,15 @@ def attach_product_to_deal(session, deal, *, entity_id=None):
         "payment_date": deal.payment_date or deal.maturity_date,
         "settlement_ccy": deal.devise or "EUR",
     })
+    owner = SimpleNamespace(
+        id=deal.user_id,
+        entity_id=entity_id if entity_id is not None else getattr(deal, "entity_id", None),
+    )
+    # The product's owner exists, as it does in production (P1-6).
+    ensure_users(session, owner)
     product = stage_internal_product(
         session,
-        user=SimpleNamespace(
-            id=deal.user_id,
-            entity_id=entity_id if entity_id is not None else getattr(deal, "entity_id", None),
-        ),
+        user=owner,
         name=f"Produit {deal.reference}",
         terms=terms,
         reason="Fixture reliée au Product canonique.",

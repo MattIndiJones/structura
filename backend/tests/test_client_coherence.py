@@ -28,6 +28,7 @@ from backend.app.db.models import (
     Affiliation, Client, ClientTradeHistory, Counterparty, Entity, Interaction, Person, User,
 )
 from backend.tests.product_helpers import add_pricing_receipt
+from backend.tests.integrity_fixtures import DEFAULT_ACTOR, ensure_users, seeded_session
 
 
 @pytest.fixture
@@ -219,7 +220,7 @@ def test_plusieurs_lignes_le_meme_jour_ne_contredisent_pas_les_deux_ecrans():
     afficher 5 d'un côté et 3 de l'autre sur le même écran."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    session = Session(engine)
+    session = seeded_session(engine)
 
     client = Client(name="Bank A", entity_id=1)
     session.add(client); session.commit(); session.refresh(client)

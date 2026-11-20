@@ -28,17 +28,23 @@ from backend.app.services.product_repository import (
     load_product, stage_internal_product, stage_revision,
 )
 from backend.tests.deals_patch import patch_deals
+from backend.tests.integrity_fixtures import seeded_session
 
 
 MAKER = SimpleNamespace(id=1, entity_id=7, role="user")
 CHECKER = SimpleNamespace(id=2, entity_id=7, role="checker")
 OTHER_CHECKER = SimpleNamespace(id=3, entity_id=8, role="checker")
+# The operator who enters the fixings of the fixture (fixing_entered_by=4).
+FIXING_OPERATOR = SimpleNamespace(id=4, entity_id=7, role="ops_maker")
+# The administrator several tests act as (actor_user_id=99).
+ADMIN_ACTOR = SimpleNamespace(id=99, entity_id=None, role="admin")
 
 
 def _session() -> Session:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    return Session(engine)
+    # The actors the fixtures book under exist, as in production (P1-6).
+    return seeded_session(engine, MAKER, CHECKER, OTHER_CHECKER, FIXING_OPERATOR, ADMIN_ACTOR)
 
 
 def _deal(session: Session, script: str = "AT MATURITY\n  PAY 0.25") -> Deal:
@@ -420,6 +426,11 @@ def test_watchlist_filters_on_commercial_ids_without_requiring_them(monkeypatch)
 
 def test_watchlist_row_exposes_commercial_ids_without_changing_counterparty():
     session = _session()
+    from backend.app.db.models import Client, ClientMandate
+    session.add(Client(id=12, entity_id=7, name="Client projeté"))
+    session.flush()
+    session.add(ClientMandate(id=34, entity_id=7, client_id=12, name="Mandat projeté"))
+    session.flush()
     deal = Deal(
         reference="DEAL-COMMERCIAL-PROJECTION", entity_id=7, user_id=1,
         client_id=12, mandate_id=34, status="actif", contrepartie="Issuer SA",

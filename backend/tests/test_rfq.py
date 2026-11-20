@@ -34,6 +34,7 @@ from backend.app.core.references import next_reference
 from backend.app.core.rfq_controls import booking_terms_differences, pricing_input_hash
 from backend.app.services.product_receipts import signed_receipt
 from backend.app.services.product_repository import load_product
+from backend.tests.integrity_fixtures import DEFAULT_ACTOR, ensure_users, seeded_session
 
 USER = User(id=1, entity_id=1, username="rfq-front", email="front@example.test",
             password_hash="test-only", role="user", is_active=True)
@@ -1907,6 +1908,7 @@ def test_allocation_de_references_est_atomique_sous_concurrence(tmp_path):
         connect_args={"check_same_thread": False, "timeout": 30},
     )
     SQLModel.metadata.create_all(eng)
+    seeded_session(eng, DEFAULT_ACTOR).close()        # the RFQs' owner (user_id=1)
     prefix = "RFQ-20991231-"
 
     def allocate(i):
@@ -1954,7 +1956,7 @@ def test_backfill_statuts_rfq_est_une_migration_executee_une_seule_fois(monkeypa
 
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(eng)
-    with Session(eng) as s:
+    with seeded_session(eng, DEFAULT_ACTOR) as s:
         rfq = RfqRequest(reference="RFQ-BACKFILL", user_id=1, status="draft")
         s.add(rfq)
         s.flush()

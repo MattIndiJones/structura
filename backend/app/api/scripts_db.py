@@ -288,6 +288,9 @@ def delete_script(
             f"auteur soit prévenu : demandez-lui de les retirer d'abord.")
     for e in miennes:
         session.delete(e)
+    # The variants reference their origin (parent_id): delete them first. In
+    # one flush SQLite checks each row at once, and refused the origin.
+    session.flush()
     session.delete(s)
     session.commit()
 

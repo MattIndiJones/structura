@@ -72,6 +72,7 @@ def test_migration_rend_vev_nullable_sur_une_base_existante():
                 created_at DATETIME NOT NULL)""",
         ):
             conn.execute(text(statement))
+        conn.execute(text("INSERT INTO users(id) VALUES (1)"))     # the record's author
         conn.commit()
         _make_kid_vev_nullable(conn)
         vev_column = next(row for row in conn.execute(text(

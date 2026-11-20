@@ -11,6 +11,7 @@ from backend.app.db.models import (Underlying, Counterparty, RfqProvider, RfqQuo
                                    AuditEvent, ReferenceCatalogState, User, DealContractVersion)
 from backend.app.core.ccr import service as credit
 from backend.app.services.legal_identity import provider_identity, quote_counterparty
+from backend.tests.integrity_fixtures import ensure_entities, ensure_users
 
 REASON='Qualification du référentiel par le desk'
 
@@ -77,6 +78,7 @@ def test_restart_preserves_catalog_moves_deactivations_and_even_an_empty_catalog
     monkeypatch.setattr(database,'engine',engine)
     database.init_db()
     with Session(engine) as session:
+        ensure_entities(session, 1)
         actor=User(username='catalog-admin',email='catalog@example.test',password_hash='fixture',role='admin',entity_id=1)
         session.add(actor);session.commit()
         item=session.exec(select(Underlying).where(Underlying.ticker=='BNP.PA')).first()
@@ -128,8 +130,10 @@ def test_legacy_quote_migration_never_invents_a_historical_identity(tmp_path,mon
     engine=create_engine(f'sqlite:///{tmp_path/"legacy-quotes.db"}')
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
+        ensure_users(session, User(id=1, username='legacy', email='legacy@example.test', password_hash='fixture'))
         session.add_all([Counterparty(id=1,name='Bank'),RfqProvider(id=1,label='Bank',counterparty_id=1)])
         session.add(RfqRequest(id=1,user_id=1,reference='LEGACY',name='Archive',script_snapshot='AT MATURITY\n  PAY 1',params_json='{}'))
+        session.flush()                  # the request before its quote: no relationship orders them
         session.add(RfqQuote(id=1,rfq_id=1,provider='Bank'))
         session.commit()
     with engine.begin() as connection:

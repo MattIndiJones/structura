@@ -16,6 +16,7 @@ from backend.app.db.database import get_session
 from backend.app.db.models import DealEvent, ValuationRun
 from backend.tests.test_portfolio_corr_greek import _make_session, _add_deal
 from backend.tests.test_ccr_scope import scope_client
+from backend.tests.integrity_fixtures import ensure_uat_batch
 
 
 def test_missing_scenario_factor_is_rejected():
@@ -147,6 +148,7 @@ def test_risk_scope_defaults_to_production_with_explicit_uat():
     with _make_session() as session:
         a = _add_deal(session, 'PROD', [('Action', 'ACT')], {}, per_underlying={'Action': {'delta': .1}})
         b = _add_deal(session, 'UAT', [('Action', 'ACT')], {}, per_underlying={'Action': {'delta': .9}})
+        ensure_uat_batch(session, 1)                # the lot the UAT deal belongs to
         b.uat_batch_id = 1
         session.add(b); session.commit()
         prod = portfolios._aggregate_risk([a,b], session)

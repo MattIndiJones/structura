@@ -144,6 +144,11 @@ def test_kid_revision_failure_does_not_retain_an_orphan_record(product_client, m
 def test_kid_evidence_migration_is_additive_idempotent_and_preserves_links():
     engine = create_engine('sqlite://')
     with engine.connect() as conn:
+        # The tables the rebuilt kid_records points to, with the rows it names (P1-6).
+        for parent in ('users', 'indicatives', 'deals', 'products'):
+            conn.execute(text(f'CREATE TABLE {parent}(id INTEGER PRIMARY KEY)'))
+        conn.execute(text('INSERT INTO users(id) VALUES (1)'))
+        conn.execute(text('INSERT INTO products(id) VALUES (42)'))
         conn.execute(text('''CREATE TABLE kid_records (
             id INTEGER PRIMARY KEY, indicative_id INTEGER, deal_id INTEGER, user_id INTEGER NOT NULL,
             product_title TEXT NOT NULL, sri INTEGER NOT NULL,mrm INTEGER NOT NULL,crm INTEGER NOT NULL,

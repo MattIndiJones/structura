@@ -30,6 +30,7 @@ from backend.app.db.models import (
 from backend.app.db import database as database_api
 from backend.app.services.product_repository import stage_internal_product
 from backend.tests.deals_patch import patch_deals
+from backend.tests.integrity_fixtures import ensure_users
 
 
 USER = SimpleNamespace(id=1, entity_id=7, role="user")
@@ -41,7 +42,11 @@ OTHER_CHECKER = SimpleNamespace(id=4, entity_id=8, role="checker")
 def _session() -> Session:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    return Session(engine)
+    session = Session(engine)
+    # The actors the fixtures book for exist, as they do in production.
+    ensure_users(session, USER, OPS_MAKER, CHECKER, OTHER_CHECKER)
+    session.commit()
+    return session
 
 
 def _params() -> dict:
@@ -633,6 +638,7 @@ def test_startup_migration_retires_four_eyes_and_stales_pending_proposal(
     engine = create_engine(f"sqlite:///{tmp_path / 'automatic-fixings.db'}")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
+        ensure_users(session, USER, OPS_MAKER, CHECKER, OTHER_CHECKER)
         deal = _deal(session)
         proposal = _proposal(session, deal)
         deal_id, proposal_id = deal.id, proposal.id
