@@ -8,8 +8,10 @@ from ..services.calibration_evidence import sign_calibration
 from ..core.schemas import VolatilitySurfaceParams
 from ..core.volatility_surface import TermSSVISurface, fit_left_wing
 from ..core.smile_calibration import calibrate_surface
+from .contracts import ContractRoute, returns
+from .responses import LeftWingAdjustment, SmileCalibration, ValidatedSurface
 
-router=APIRouter(prefix='/api/volatility',tags=['volatility'],
+router=APIRouter(prefix='/api/volatility',tags=['volatility'],route_class=ContractRoute,
                  dependencies=[Depends(get_current_user)])
 
 
@@ -26,7 +28,7 @@ class LeftWingRequest(SurfaceRequest):
     dividend: float = Field(ge=0, le=2)
 
 
-@router.post('/left-wing')
+@router.post('/left-wing', responses=returns(LeftWingAdjustment))
 def adjust_left_wing(req: LeftWingRequest):
     try:
         original = req.surface.model_dump()
@@ -52,13 +54,13 @@ class CalibrationRequest(SurfaceRequest):
     heston_fit: HestonFit | None = None
 
 
-@router.post('/validate')
+@router.post('/validate', responses=returns(ValidatedSurface))
 def validate_surface(req: SurfaceRequest):
     surface=TermSSVISurface(req.surface.model_dump())
     return dict(surface=req.surface.model_dump(),certificate=surface.certificate())
 
 
-@router.post('/calibrate')
+@router.post('/calibrate', responses=returns(SmileCalibration))
 def calibrate(req: CalibrationRequest):
     try:
         options = {} if req.heston_fit is None else {'heston_fit': (

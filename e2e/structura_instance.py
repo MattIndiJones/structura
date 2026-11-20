@@ -149,6 +149,8 @@ def _environment(data_dir: Path, port: int, control: str) -> dict:
         "STRUCTURA_WORKSHOP_CHILD": "1",
         "STRUCTURA_DISABLE_SCHEDULER": "1",
         "STRUCTURA_DISABLE_RFQ_TRANSPORT": "1",
+        # The journeys also check every documented response (api/contracts.py).
+        "STRUCTURA_VALIDATE_RESPONSES": "1",
         "STRUCTURA_INSTANCE_CONTROL_TOKEN": control,
         "STRUCTURA_WORKSHOP_ROOT": str(data_dir / "agent_workshop"),
         "STRUCTURA_STUDIES_ROOT": str(data_dir / "studies"),

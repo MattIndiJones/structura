@@ -6,14 +6,16 @@ from ..db.database import get_session
 from ..db.models import Underlying, User
 from ..services.market_data import dividend_profile, load_hist_vol, load_hist_prices
 from .auth import get_current_user
+from .contracts import ContractRoute, returns
+from .responses import HistoricalPrices, RealizedMarket, UnderlyingGroup
 
 router = APIRouter(
-    prefix="/api/finance", tags=["market-data"],
+    prefix="/api/finance", tags=["market-data"], route_class=ContractRoute,
     dependencies=[Depends(get_current_user)],
 )
 
 
-@router.get("/hist_vol")
+@router.get("/hist_vol", responses=returns(RealizedMarket))
 async def hist_vol_endpoint(
     tickers: str,
     period: str = "1y",
@@ -29,7 +31,7 @@ async def hist_vol_endpoint(
                          **({'session_aware': True} if session_aware else {}))
 
 
-@router.get("/hist_prices")
+@router.get("/hist_prices", responses=returns(HistoricalPrices))
 async def hist_prices_endpoint(
     tickers: str, start: str = "2010-01-01", end: Optional[str] = None
 ):
@@ -40,7 +42,7 @@ async def hist_prices_endpoint(
     return load_hist_prices(tks, start, end, allow_partial=True)
 
 
-@router.get("/underlyings")
+@router.get("/underlyings", responses=returns(list[UnderlyingGroup]))
 def list_underlyings_endpoint(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],

@@ -10,6 +10,11 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Contrats de réponse et client généré — 19/11](projects/platform/API_TYPEE_P1_11_2026-11-19.md)
+— P1-11 : 26 réponses typées (les vingt routes les plus appelées et la file de pricing), contrôlées
+strictement pendant les tests et les parcours, production inchangée ; client JS généré depuis
+OpenAPI, avec contrôle de dérive.
+
 [Migrations numérotées et version du schéma — 19/11](projects/platform/MIGRATIONS_P1_7_2026-11-19.md)
 — P1-7 : base du 19/11 figée en migration 1, migrations suivantes numérotées, chacune atomique et
 enregistrée dans `schema_migrations` ; refus d'une base plus récente, copie avant montée de version.
@@ -1065,6 +1070,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [API_TYPEE_P1_11_2026-11-19.md](projects/platform/API_TYPEE_P1_11_2026-11-19.md) | 19/11 | Contrats de réponse, contrôle strict en test, client généré (P1-11) | Fait localement | Autres appels du front à passer par le client |
 | [MIGRATIONS_P1_7_2026-11-19.md](projects/platform/MIGRATIONS_P1_7_2026-11-19.md) | 19/11 | Migrations numérotées, table de version, base figée (P1-7) | Fait localement | — |
 | [ECRANS_P1_10_2026-11-19.md](projects/platform/ECRANS_P1_10_2026-11-19.md) | 19/11 | Écran d'erreur global, trois vues découpées, parcours de bout en bout nocturnes (P1-10) | Fait localement | Logique de `RfqView.vue` à répartir, `AmcView.vue` (avec QISTRA), départ silencieux refusé par Valo Explain |
 | [SECURITE_P1_8_2026-11-19.md](projects/platform/SECURITE_P1_8_2026-11-19.md) | 19/11 | En-têtes, sessions courtes renouvelées, secrets scellés, audit chaîné, dépendances verrouillées (P1-8) | Fait localement | Clé RSA du portail, identifiants d'agents, rotation des canaux RFQ, frein de connexion persistant (S7) |

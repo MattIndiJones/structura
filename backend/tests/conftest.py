@@ -59,6 +59,9 @@ for _name in [name for name in os.environ if name.startswith("STRUCTURA_") and n
 # The configuration the nightly full suite runs under.
 os.environ.setdefault("STRUCTURA_DISABLE_SCHEDULER", "1")
 os.environ.setdefault("STRUCTURA_DISABLE_RFQ_TRANSPORT", "1")
+# Every documented response is checked against its contract (api/contracts.py,
+# P1-11): a route that drifts from what it declares fails the test that calls it.
+os.environ["STRUCTURA_VALIDATE_RESPONSES"] = "1"
 
 _REPOSITORY_DATA = Path(__file__).resolve().parents[1] / "data"
 SESSION_DATA_DIR = Path(tempfile.mkdtemp(prefix="structura-tests-"))

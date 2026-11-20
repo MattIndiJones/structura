@@ -405,6 +405,7 @@ import { useDealsStore } from '../stores/deals.js'
 import { useProductsStore } from '../stores/products.js'
 import { useAuthStore } from '../stores/auth.js'
 import { apiFetch } from '../utils/api.js'
+import { eligibleCounterparties, relationships as listTradingRelationships } from '../api/generated.js'
 import HelpTip from './HelpTip.vue'
 import CcrCreditCheck from './CcrCreditCheck.vue'
 import BaseModal from './ui/BaseModal.vue'
@@ -434,12 +435,10 @@ const noteRelations = computed(() => relationships.value.filter(r => r.status===
   && counterparties.value.find(c=>c.id===r.counterparty_id)?.name===form.contrepartie))
 onMounted(async () => {
   try {
-    const res = await apiFetch('/api/deals/counterparties')
-    if (res.ok) counterparties.value = await res.json()
+    counterparties.value = await eligibleCounterparties()
   } catch { /* list stays empty — the select just shows the placeholder */ }
   try {
-    const res=await apiFetch('/api/trading/relationships')
-    if(res.ok) relationships.value=await res.json()
+    relationships.value = await listTradingRelationships()
   } catch { /* Explicit selection is required before using the journal. */ }
 })
 
