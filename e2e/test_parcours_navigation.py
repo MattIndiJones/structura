@@ -89,3 +89,18 @@ def test_l_administration_ouvre_ses_ecrans(page, instance):
 def test_une_route_inconnue_ramene_a_l_accueil(signed_in, instance):
     signed_in.goto(f"{instance.url}/#/cette-page-n-existe-pas")
     expect(signed_in.get_by_role("heading", name="Bonjour, structureur")).to_be_visible()
+
+
+def test_on_quitte_valo_explain_pendant_son_chargement(signed_in, instance):
+    """Constat du 19/11 : pendant son chargement, qui ne fait que lire, Valo
+    Explain refusait qu'on le quitte, sans rien dire. La liste des notes est
+    retenue ici pour que l'écran reste en chargement le temps du départ."""
+    page = signed_in
+    held = []
+    page.route("**/api/valuation-notes", lambda route: held.append(route))
+    page.goto(f"{instance.url}/#/valo-explain")
+    expect(page.get_by_text("Chargement de Valo Explain")).to_be_visible()
+    page.goto(f"{instance.url}/#/risk")
+    expect(page.get_by_role("heading", name="Risk Management")).to_be_visible()
+    for route in held:
+        route.abort()

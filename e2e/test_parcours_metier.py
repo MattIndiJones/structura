@@ -6,6 +6,7 @@ données de marché sont saisies : aucun parcours ne dépend d'un téléchargeme
 """
 import re
 
+import pytest
 from playwright.sync_api import expect
 
 from conftest import book_from_pricer, price_in_pricer, settle
@@ -30,6 +31,20 @@ def test_parcours_pricer_price_par_la_file_et_annule(signed_in, instance, saved_
         page.get_by_role("button", name="Annuler", exact=True).click()
     assert cancelled.value.status == 200, cancelled.value.text()
     expect(page.get_by_role("button", name="▶ Pricer", exact=True)).to_be_enabled(timeout=30_000)
+
+
+def test_un_script_enregistre_rouvre_avec_sa_vol(signed_in, instance, saved_script):
+    """Constat du 19/11 : la σ enregistrée (23 %) devenait 30 % quand le catalogue
+    reconnaissait l'action, et le premier pricing était écarté comme périmé."""
+    page = signed_in
+    page.goto(f"{instance.url}/#/pricer/{saved_script('Parcours vol enregistrée')}")
+    settle(page)                                   # catalogue de sous-jacents compris
+    with page.expect_request(lambda r: r.url.endswith("/api/price/jobs/price")) as submitted:
+        page.get_by_role("button", name="▶ Pricer", exact=True).click()
+    sent = submitted.value.post_data_json["underlyings"][0]
+    assert sent["sigma"] == pytest.approx(0.23)
+    expect(page.get_by_text(re.compile(r"IC 95% \[\d")).first).to_be_visible(timeout=120_000)
+    expect(page.get_by_text("Les paramètres ont changé pendant le calcul")).to_have_count(0)
 
 
 def test_parcours_booking_du_pricer_a_la_fiche(signed_in, instance, saved_script, dates):
