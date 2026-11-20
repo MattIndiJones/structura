@@ -53,8 +53,10 @@ from .auth import get_current_pricer
 from .auth import receipt_signing_secret
 from ..services.product_receipts import signed_receipt
 from .pricing import _clean_flux
+from .contracts import ContractRoute, returns
+from .responses import InLifeResult
 
-router = APIRouter(prefix="/api", tags=["pricing"])
+router = APIRouter(prefix="/api", tags=["pricing"], route_class=ContractRoute)
 
 
 class InLifePricingRequest(BaseModel):
@@ -408,7 +410,7 @@ def build_request_residual(req, variant: VariantTerms | None = None, *, retain_t
                             getattr(req, "corr_matrix", None), paiement, produit)
 
 
-@router.post("/price/in-life")
+@router.post("/price/in-life", responses=returns(InLifeResult))
 @with_request_grid
 def price_in_life(
     req: InLifePricingRequest,

@@ -24,6 +24,8 @@ from ...services.business_access import deal_entity_id as _deal_entity_id, can_r
 from ._router import router
 from .common import _niveau_initial_constate
 from .serializers import _amendment_row, _audit_row, _deal_row, _fixing_version_row, _get_events, _get_lifecycle_proposals, _proposal_row
+from ..contracts import returns
+from ..responses import DealDetail, DealRow, EligibleCounterparty
 
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
@@ -57,7 +59,7 @@ class DealUpdate(BaseModel):
     selected_quote_id: Optional[int] = None
 
 
-@router.get("")
+@router.get("", responses=returns(list[DealRow]))
 def list_deals(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
@@ -84,7 +86,7 @@ def list_deals(
 # NOTE: declared before GET /{deal_id} on purpose — FastAPI matches routes in
 # declaration order, and a literal path segment must not be captured as a
 # deal_id (same reason as /watchlist below).
-@router.get("/counterparties")
+@router.get("/counterparties", responses=returns(list[EligibleCounterparty]))
 def eligible_counterparties(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
@@ -415,7 +417,7 @@ def pending_amendment_requests(
     return rows
 
 
-@router.get("/{deal_id}")
+@router.get("/{deal_id}", responses=returns(DealDetail))
 def get_deal(
     deal_id: int,
     current: Annotated[User, Depends(get_current_user)],

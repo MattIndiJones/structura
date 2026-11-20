@@ -26,6 +26,8 @@ from ...services.business_access import can_read_deal as _can_access_deal
 from ._router import router
 from .common import _evenements_pour_la_note, _niveau_initial_constate
 from .serializers import _get_events
+from ..contracts import returns
+from ..responses import DealMtm
 
 @router.get("/{deal_id}/reprice")
 def reprice_inputs(
@@ -154,7 +156,7 @@ def _mtm_core(deal: Deal, session: Session, n_paths: int = 20000,
     )
 
 
-@router.post("/{deal_id}/mtm")
+@router.post("/{deal_id}/mtm", responses=returns(DealMtm))
 def deal_mtm(
     deal_id: int,
     current: Annotated[User, Depends(get_current_user)],

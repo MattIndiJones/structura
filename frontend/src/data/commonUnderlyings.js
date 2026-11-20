@@ -9,7 +9,7 @@
 // les vues qui l'utilisent (`v-for`, `.flatMap`) n'aient rien à changer.
 
 import { reactive } from 'vue'
-import { apiFetch } from '../utils/api.js'
+import { listUnderlyings } from '../api/generated.js'
 import { sessionToken, sessionInstallation } from '../utils/session.js'
 
 export const underlyingGroups = reactive([])
@@ -31,8 +31,7 @@ export function ensureUnderlyings({ force = false } = {}) {
   if (!force && loadedAt && Date.now() - loadedAt < CATALOG_CACHE_MS) return Promise.resolve(underlyingGroups)
   if (!force && chargement) return chargement
   const version = ++generation
-  const request = apiFetch('/api/finance/underlyings')
-    .then(async res => { if (!res.ok) throw new Error('Référentiel indisponible.'); return res.json() })
+  const request = listUnderlyings()
     .then(groupes => {
       if (version !== generation || activeContext !== JSON.stringify([sessionToken(), sessionInstallation()?.installation_id || null])) return underlyingGroups
       // Remplissage sur place : remplacer la référence casserait toutes les

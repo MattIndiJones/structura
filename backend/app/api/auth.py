@@ -25,7 +25,9 @@ from ..hybrid.development import DevelopmentTicket
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+from .contracts import ContractRoute, returns
+from .responses import CurrentUser, LoginOptions
+router = APIRouter(prefix="/api/auth", tags=["auth"], route_class=ContractRoute)
 
 from ..runtime import consultation_mode
 from ..core import consultation_sessions
@@ -291,7 +293,7 @@ def get_current_simulation_admin(current: Annotated[User, Depends(get_current_us
     return current
 
 
-@router.get("/options")
+@router.get("/options", responses=returns(LoginOptions))
 def login_options():
     from ..hybrid.admin_workbench import options
     return {"registration_enabled": not current_config() and os.environ.get("STRUCTURA_BOOTSTRAP_PROFILE") == "simulation"
@@ -379,7 +381,7 @@ def development_session(body: DevelopmentTicket,
     return {"access_token": _make_token(user.id, user.role, user.entity_id, origin, auth_version=user.auth_version), "token_type": "bearer"}
 
 
-@router.get("/me")
+@router.get("/me", responses=returns(CurrentUser))
 def me(current: Annotated[User, Depends(get_current_user)], token: Annotated[str, Depends(_oauth2)]):
     from ..runtime import consultation_mode, business_today
     from ..hybrid.development import enabled

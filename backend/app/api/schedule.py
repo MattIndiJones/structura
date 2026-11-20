@@ -12,8 +12,11 @@ from ..core.calendars import (
 )
 from ..core.schedule import (generate_schedule, generate_observation_schedule, observation_window,
                              parse_tenor, period_windows, StubConvention)
+from .contracts import ContractRoute, returns
+from .responses import CalendarCatalog, GeneratedSchedule, ResolvedBusinessDay
 
-router = APIRouter(prefix="/api", tags=["schedule"], dependencies=[Depends(get_current_pricer)])
+router = APIRouter(prefix="/api", tags=["schedule"], dependencies=[Depends(get_current_pricer)],
+                   route_class=ContractRoute)
 
 
 def _parse_date(s: str, field: str) -> date:
@@ -23,7 +26,7 @@ def _parse_date(s: str, field: str) -> date:
         raise HTTPException(status_code=422, detail=f"{field} invalide (attendu YYYY-MM-DD): {s!r}")
 
 
-@router.get("/calendar/catalog")
+@router.get("/calendar/catalog", responses=returns(CalendarCatalog))
 def calendar_catalog():
     return {"codes": CALENDAR_CODES, "observation_codes": OBSERVATION_CODES,
             "settlement_codes": SETTLEMENT_CODES, "joins": ["all_open", "any_open"]}
@@ -33,7 +36,7 @@ def _calendars(req):
     return calendar_context(req.model_dump(exclude_none=True), req.currency)
 
 
-@router.post("/schedule/generate")
+@router.post("/schedule/generate", responses=returns(GeneratedSchedule))
 async def generate_schedule_endpoint(req: ScheduleRequest):
     """Build a CONSTAT()/CONSTAT()() date schedule and its year-fraction preview."""
     start = _parse_date(req.first_observation_date or req.start_date, "first_observation_date")
@@ -65,7 +68,7 @@ async def generate_schedule_endpoint(req: ScheduleRequest):
     }
 
 
-@router.post("/calendar/resolve")
+@router.post("/calendar/resolve", responses=returns(ResolvedBusinessDay))
 def resolve_business_day(req: BusinessDayRequest):
     """Une date contractuelle, resolue sur le calendrier de sa devise.
 

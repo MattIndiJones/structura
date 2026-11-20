@@ -10,8 +10,10 @@ from ..db.models import Alert, AlertRead, Deal, SchedulerRun, User
 from .auth import get_current_admin, get_current_user
 from ..services.lifecycle_alerts import refresh_book
 from ..services.business_access import can_read_deal
+from .contracts import ContractRoute, returns
+from .responses import AlertList
 
-router = APIRouter(prefix="/api/alerts", tags=["alerts"])
+router = APIRouter(prefix="/api/alerts", tags=["alerts"], route_class=ContractRoute)
 
 
 def _admin(current: User) -> bool:
@@ -72,7 +74,7 @@ def list_scheduler_runs(
     } for row in rows]
 
 
-@router.get("")
+@router.get("", responses=returns(AlertList))
 def list_alerts(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],

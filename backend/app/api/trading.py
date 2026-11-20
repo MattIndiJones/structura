@@ -18,8 +18,10 @@ from ..core.audit import commit_rejection
 from ..core.access import has_capability
 from ..runtime import business_today
 from ..services.business_access import can_read_deal
+from .contracts import ContractRoute, returns
+from .responses import TradingRelationshipRow
 
-router = APIRouter(prefix="/api/trading", tags=["Trading relationships"])
+router = APIRouter(prefix="/api/trading", tags=["Trading relationships"], route_class=ContractRoute)
 Current = Annotated[User, Depends(get_current_user)]
 Database = Annotated[Session, Depends(get_session)]
 _booking_lock = threading.RLock()
@@ -74,7 +76,7 @@ def relation(row):
     return {"id": row.id, "version": row.version, **json.loads(row.terms_json)}
 
 
-@router.get("/relationships")
+@router.get("/relationships", responses=returns(list[TradingRelationshipRow]))
 def relationships(current: Current, session: Database):
     return [relation(r) for r in session.exec(select(TradingRelationship).where(
         TradingRelationship.entity_id == entity_id(current))).all()]

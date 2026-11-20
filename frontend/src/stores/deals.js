@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { durableCommand } from '../utils/commands.js'
 import { ref } from 'vue'
 import { apiFetch } from '../utils/api.js'
+import { listDeals } from '../api/generated.js'
 
 function errorMessage(err, fallback) {
   const detail = err?.detail
@@ -54,9 +55,7 @@ export const useDealsStore = defineStore('deals', () => {
   async function loadDeals() {
     loading.value = true; error.value = null
     try {
-      const res = await apiFetch('/api/deals')
-      if (!res.ok) throw new Error('Erreur chargement deals')
-      deals.value = await res.json()
+      deals.value = await listDeals()
     } catch (e) { error.value = e.message }
     finally { loading.value = false }
   }

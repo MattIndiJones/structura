@@ -15,8 +15,10 @@ from ..db.database import get_session
 from ..db.models import AmcStudy, User
 from .auth import get_current_user
 from ..services.business_access import can_read_organization_record
+from .contracts import ContractRoute, returns
+from .responses import AmcStudySummary
 
-router = APIRouter(prefix="/api/amc/studies", tags=["amc-studies"])
+router = APIRouter(prefix="/api/amc/studies", tags=["amc-studies"], route_class=ContractRoute)
 
 
 class AmcStudyCreate(BaseModel):
@@ -50,7 +52,7 @@ def _detail_row(s: AmcStudy) -> dict:
     }
 
 
-@router.get("")
+@router.get("", responses=returns(list[AmcStudySummary]))
 def list_studies(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],

@@ -17,8 +17,10 @@ from ..core.schemas import PricingRequest
 from ..db.models import User
 from .auth import get_current_pricer
 from .inlife import ImpliedFundingRequest, InLifePricingRequest
+from .contracts import ContractRoute, returns
+from .responses import PricingJob
 
-router = APIRouter(prefix="/api/price/jobs", tags=["pricing"])
+router = APIRouter(prefix="/api/price/jobs", tags=["pricing"], route_class=ContractRoute)
 
 Pricer = Annotated[User, Depends(get_current_pricer)]
 
@@ -30,17 +32,17 @@ def _submit(kind, request, current):
         raise HTTPException(429, str(error)) from error
 
 
-@router.post("/price", status_code=202)
+@router.post("/price", status_code=202, responses=returns(PricingJob, status_code=202))
 def submit_price(req: PricingRequest, current: Pricer):
     return _submit("price", req, current)
 
 
-@router.post("/in-life", status_code=202)
+@router.post("/in-life", status_code=202, responses=returns(PricingJob, status_code=202))
 def submit_in_life(req: InLifePricingRequest, current: Pricer):
     return _submit("in_life", req, current)
 
 
-@router.post("/implied-funding", status_code=202)
+@router.post("/implied-funding", status_code=202, responses=returns(PricingJob, status_code=202))
 def submit_implied_funding(req: ImpliedFundingRequest, current: Pricer):
     return _submit("implied_funding", req, current)
 
@@ -48,7 +50,7 @@ def submit_implied_funding(req: ImpliedFundingRequest, current: Pricer):
 _GONE = "Calcul introuvable ou expiré."
 
 
-@router.get("/{job_id}")
+@router.get("/{job_id}", responses=returns(PricingJob))
 def job_status(job_id: str, current: Pricer):
     state = get_runner().status(job_id, current.id)
     if state is None:
@@ -56,7 +58,7 @@ def job_status(job_id: str, current: Pricer):
     return state
 
 
-@router.delete("/{job_id}")
+@router.delete("/{job_id}", responses=returns(PricingJob))
 def cancel_job(job_id: str, current: Pricer):
     state = get_runner().cancel(job_id, current.id)
     if state is None:
