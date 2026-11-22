@@ -11,7 +11,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 
 from .config import current_config
 from .control_services import owned_stop
@@ -78,7 +79,7 @@ def create_app(config=None):
                 raise ValueError("Caller")
             payload = jwt.decode(authorization[7:], trust["public_key"], algorithms=["RS256"],
                 audience=str(config.installation_id), issuer=trust["installation_id"],
-                options={"require_exp": True, "require_iss": True, "require_aud": True, "require_jti": True})
+                options={"require": ["exp", "iss", "aud", "jti"]})
             path = request.url.path + ("?" + request.url.query if request.url.query else "")
             digest = hashlib.sha256(await request.body()).hexdigest()
             if payload.get("purpose") != "simulation_request" or payload.get("method") != request.method or payload.get("path") != path \

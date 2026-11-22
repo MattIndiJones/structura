@@ -14,7 +14,7 @@ MIN_PYTHON = (3, 11)
 MODULES = (
     "fastapi", "uvicorn", "numpy", "scipy", "statsmodels", "pydantic",
     "httpx", "yfinance", "pandas", "pyarrow", "matplotlib", "reportlab",
-    "openpyxl", "holidays", "sqlmodel", "sqlalchemy", "jose", "bcrypt",
+    "openpyxl", "holidays", "sqlmodel", "sqlalchemy", "jwt", "bcrypt",
     "faster_whisper",
 )
 

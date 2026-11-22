@@ -2,7 +2,9 @@
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
+
+from backend.app.core.session_security import unverified_claims
 from sqlalchemy import event, text
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -87,7 +89,7 @@ def test_enabled_registration_persists_regular_user_and_issues_usable_session(re
         assert user.is_active and not user.password_change_required
         assert session.exec(text("PRAGMA foreign_key_check")).all() == []
         version = user.auth_version
-    claims = jwt.get_unverified_claims(token)
+    claims = unverified_claims(token)
     assert claims["jti"] and claims["session_version"] == version
     login = client.post("/api/auth/login", data={"username": body["username"], "password": body["password"]})
     assert login.status_code == 200, login.text

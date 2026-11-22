@@ -3,6 +3,16 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 
+import jwt
+
+
+def unverified_claims(token: str) -> dict:
+    """Claims of a token whose signature a caller has ALREADY checked.
+
+    PyJWT skips every claim check (expiry, audience, issuer) along with the
+    signature here, exactly like python-jose's get_unverified_claims did."""
+    return jwt.decode(token, options={"verify_signature": False})
+
 
 def validate_password(password: str) -> str:
     if len(password) < 12 or len(password.encode("utf-8")) > 72:

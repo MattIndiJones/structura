@@ -3,7 +3,9 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
+
+from backend.app.core.session_security import unverified_claims
 from sqlmodel import Session, select
 
 from backend.tests.test_hybrid_bootstrap import managed
@@ -74,7 +76,7 @@ def test_grants_reject_wrong_scope_expiry_and_disabled_account(managed, monkeypa
     other, _ = issue(platform,str(configs[2].installation_id),str(configs[2].organization_id),"front",{"kind":"DEVELOPMENT_PORTAL"})
     assert client.post("/api/auth/development-session",json={"ticket":other},headers=HEADERS).status_code == 401
     ticket, _ = issue(platform,str(config.installation_id),str(config.organization_id),"front",{"kind":"DEVELOPMENT_PORTAL"})
-    payload = jwt.get_unverified_claims(ticket)
+    payload = unverified_claims(ticket)
     payload["exp"] = datetime.now(timezone.utc) - timedelta(seconds=1)
     expired = jwt.encode(payload,(platform.data_dir / ".developer_private.pem").read_text(),algorithm="RS256")
     assert client.post("/api/auth/development-session",json={"ticket":expired},headers=HEADERS).status_code == 401
@@ -84,3 +86,37 @@ def test_grants_reject_wrong_scope_expiry_and_disabled_account(managed, monkeypa
     assert client.post("/api/auth/development-session",json={"ticket":ticket},headers=HEADERS).status_code == 403
     monkeypatch.setenv("STRUCTURA_DEVELOPER_ACCESS","0")
     assert client.post("/api/auth/development-session",json={"ticket":ticket},headers=HEADERS).status_code == 404
+
+
+def _hs256(claims, key: bytes) -> str:
+    # Forged by hand: PyJWT itself refuses to HMAC-sign with a PEM key.
+    import base64, hashlib, hmac
+    part = lambda data: base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
+    head = part({"alg": "HS256", "typ": "JWT"}) + "." + part(claims)
+    return head + "." + base64.urlsafe_b64encode(hmac.new(key, head.encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
+
+
+def test_ticket_hmac_signed_with_portal_public_key_is_refused(managed, monkeypatch):
+    """GHSA-3qf3-8w2g-rqmx: python-jose took a public key, DER without PEM
+    armour, as an HMAC secret, so anyone holding the portal's public key could
+    forge HS256 tickets. The verifier pins RS256 and PyJWT refuses PEM keys
+    for HMAC: every forgery must be rejected, whichever encoding of the key."""
+    from cryptography.hazmat.primitives import serialization
+    from fastapi import HTTPException
+    import pytest
+    from backend.app.hybrid.development import verify
+    config, engine, client, configs = managed
+    platform = configs[0]
+    monkeypatch.setenv("STRUCTURA_DEVELOPER_ACCESS","1")
+    genuine, _ = issue(platform,str(config.installation_id),str(config.organization_id),"front",{"kind":"DEVELOPMENT_PORTAL"})
+    claims = unverified_claims(genuine)
+    assert verify(config, genuine)["sub"] == "front"
+    pem = json.loads((config.data_dir / ".developer_trust.json").read_text(encoding="utf-8"))["public_key"]
+    public = serialization.load_pem_public_key(pem.encode())
+    der = public.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    for key in (pem.encode(), der):
+        forged = _hs256(claims, key)
+        with pytest.raises(HTTPException) as refused:
+            verify(config, forged)
+        assert refused.value.status_code == 401
+        assert client.post("/api/auth/development-session",json={"ticket":forged},headers=HEADERS).status_code == 401

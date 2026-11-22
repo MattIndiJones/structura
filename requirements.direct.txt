@@ -21,12 +21,12 @@ holidays==0.103
 exchange-calendars==4.13.2
 faster-whisper==1.2.1
 python-dotenv==1.2.2
-pytest==8.4.2
-pytest-asyncio==0.24.0
-pytest-xdist==3.6.1
+pytest==9.2.0
+pytest-asyncio==1.5.0
+pytest-xdist==3.8.0
 sqlmodel==0.0.38
 SQLAlchemy==2.0.51
-python-jose[cryptography]==3.5.0
+PyJWT[crypto]==2.15.1
 bcrypt==4.3.0
 # Parcours de bout en bout (e2e/, P1-10) et recettes de l’atelier.
 playwright==1.63.0

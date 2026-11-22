@@ -1,14 +1,16 @@
 """P1-8 / S4: 30-minute tokens renewed by the open tab, 12-hour sessions."""
 import time
 
-from jose import jwt
+import jwt
+
+from backend.app.core.session_security import unverified_claims
 
 from backend.app.api import auth
 from backend.tests.test_hybrid_bootstrap import login, managed  # noqa: F401  (fixture)
 
 
 def _claims(headers):
-    return jwt.get_unverified_claims(headers["Authorization"].split(" ", 1)[1])
+    return unverified_claims(headers["Authorization"].split(" ", 1)[1])
 
 
 def _bearer(token):

@@ -9,13 +9,14 @@ from typing import Annotated, Optional
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from sqlalchemy import update
 from ..db.database import get_session
 from ..db.models import Entity, User, RevokedSession
-from ..core.session_security import session_claims, session_digest, validate_password
+from ..core.session_security import session_claims, session_digest, unverified_claims, validate_password
 from ..core.audit import record_audit_event
 from pydantic import field_validator
 from ..core.workflow import amendment_four_eyes_enabled
@@ -159,7 +160,7 @@ def get_current_user(
     )
     try:
         config = _identity_config()
-        options = {"require_exp": True, **({"require_iss": True, "require_aud": True} if config else {})}
+        options = {"require": ["exp", *(["iss", "aud"] if config else [])]}
         payload = jwt.decode(token, _SECRET, algorithms=[_ALGO], options=options,
             **({"issuer": str(config.installation_id), "audience": str(config.installation_id)} if config else {}))
         user_id = int(payload["sub"])
@@ -242,7 +243,7 @@ def refresh(current: Annotated[User, Depends(get_current_user)],
             token: Annotated[str, Depends(_oauth2)]):
     """A new 30-minute token for the same session. The session start is
     carried over: renewing never extends it past 12 hours after the login."""
-    payload = jwt.get_unverified_claims(token)  # Already verified by get_current_user.
+    payload = unverified_claims(token)  # Already verified by get_current_user.
     return {"access_token": _make_token(current.id, current.role, current.entity_id,
                                         payload.get("developer_origin"), auth_version=current.auth_version,
                                         auth_time=_session_start(payload)),
@@ -252,7 +253,7 @@ def refresh(current: Annotated[User, Depends(get_current_user)],
 @router.post("/logout", status_code=204)
 def logout(request: Request, current: Annotated[User, Depends(get_current_user)],
            token: Annotated[str, Depends(_oauth2)], session: Annotated[Session, Depends(get_session)]):
-    payload = jwt.get_unverified_claims(token)  # Already verified by get_current_user.
+    payload = unverified_claims(token)  # Already verified by get_current_user.
     if consultation_mode():
         consultation_sessions.audit({"action": "LOGOUT", "user_id": current.id},
                                     digest=session_digest(payload), expires_at=payload["exp"])
@@ -386,7 +387,7 @@ def me(current: Annotated[User, Depends(get_current_user)], token: Annotated[str
     from ..runtime import consultation_mode, business_today
     from ..hybrid.development import enabled
     config = current_config()
-    origin = jwt.get_unverified_claims(token).get("developer_origin") if config else None
+    origin = unverified_claims(token).get("developer_origin") if config else None
     from ..hybrid.admin_workbench import options
     return {
         **options(),

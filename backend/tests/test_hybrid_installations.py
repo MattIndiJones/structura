@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
 import pytest
 
 from backend.app.hybrid.config import current_config, credentials, signing_secret

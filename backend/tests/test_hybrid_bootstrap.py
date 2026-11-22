@@ -3,7 +3,7 @@ import json
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
 import pytest
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, select

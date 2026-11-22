@@ -1,7 +1,9 @@
 """C02 acceptance with real HTTP authentication and isolated managed databases."""
 import json
 import pytest
-from jose import jwt
+import jwt
+
+from backend.app.core.session_security import unverified_claims
 from sqlmodel import Session, select
 
 from backend.tests.test_hybrid_bootstrap import managed, login
@@ -117,7 +119,7 @@ def test_managed_organization_is_unique_and_name_locked(managed):
 def test_pre_c02_token_requires_reauthentication(managed):
     config, engine, client, _ = managed
     headers = login(client, config, 'front')
-    payload = jwt.get_unverified_claims(headers['Authorization'][7:])
+    payload = unverified_claims(headers['Authorization'][7:])
     payload.pop('jti')
     old = jwt.encode(payload, auth._SECRET, algorithm='HS256')
     assert client.get('/api/auth/me', headers={'Authorization': 'Bearer ' + old}).status_code == 401

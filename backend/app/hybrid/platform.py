@@ -13,14 +13,15 @@ from typing import Annotated
 import bcrypt
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import credentials, current_config, signing_secret, DirectoryEntry
 from .development import DevelopmentTarget, enabled, origins, require_access, issue
-from ..core.session_security import session_claims, session_digest, validate_password
+from ..core.session_security import session_claims, session_digest, unverified_claims, validate_password
 from pydantic import BaseModel, field_validator
 
 
@@ -111,7 +112,7 @@ def create_app():
     def admin(token: Annotated[str, Depends(oauth)]):
         try:
             payload = jwt.decode(token, secret, algorithms=["HS256"], audience=str(config.installation_id),
-                issuer=str(config.installation_id), options={"require_exp": True, "require_aud": True, "require_iss": True})
+                issuer=str(config.installation_id), options={"require": ["exp", "aud", "iss"]})
             with connect(config) as connection:
                 digest = session_digest(payload)
                 user = connection.execute("SELECT * FROM platform_users WHERE id=? AND active=1", (int(payload["sub"]),)).fetchone()
@@ -129,7 +130,7 @@ def create_app():
 
     @app.post("/api/auth/logout", status_code=204)
     def logout(token: Annotated[str, Depends(oauth)], user=Depends(admin)):
-        payload = jwt.get_unverified_claims(token)
+        payload = unverified_claims(token)
         with connect(config) as connection:
             connection.execute("INSERT OR IGNORE INTO platform_revoked_sessions VALUES(?,?)", (session_digest(payload), payload["exp"]))
             audit(connection, user["id"], "LOGOUT")

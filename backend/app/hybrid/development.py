@@ -5,7 +5,8 @@ import os
 from uuid import uuid4
 
 from fastapi import HTTPException, Request
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 from pydantic import BaseModel, ConfigDict
 
 from .config import current_config
@@ -74,7 +75,7 @@ def verify(config, ticket):
     try:
         payload = jwt.decode(ticket, trust["public_key"], algorithms=["RS256"],
             audience=str(config.installation_id), issuer=trust["installation_id"],
-            options={"require_exp": True, "require_aud": True, "require_iss": True, "require_iat": True, "require_jti": True})
+            options={"require": ["exp", "aud", "iss", "iat", "jti"]})
         if payload.get("purpose") != "development_access" or payload.get("organization_id") != str(config.organization_id):
             raise ValueError("Scope")
         if payload.get("sub") not in {"superuser", "front", "operations", "controller"}:
