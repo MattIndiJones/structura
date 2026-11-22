@@ -10,6 +10,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from backend.app.api import deals as deals_api
 from backend.app.api.pricing import price_endpoint
+from backend.app.core.calendars import BusinessDayConvention, adjust
 from backend.app.core.deal_valuation import MtmRequest
 from backend.app.core.payscript.engine import run_mc
 from backend.app.core.payscript.parser import parse_script
@@ -81,8 +82,12 @@ def test_concurrent_grids_and_exception_do_not_change_other_calculations():
 @pytest.mark.parametrize('booked_grid',[52,104,208])
 @pytest.mark.parametrize('model',['localvol','heston'])
 def test_stm_pricing_booking_lifecycle_grid_override_and_replay(monkeypatch,basket,booked_grid,model):
-    strike=date.today()-timedelta(days=3)
-    maturity=strike+timedelta(days=1096)
+    # Both ends sit on XPAR sessions, whatever day the suite runs: the initial
+    # fixing is taken on a session, and maturity is the last observation, which
+    # the 'following' schedule rolls forward — unrolled, the booking rightly
+    # rejects the deal whenever the three-year anniversary is a closed day.
+    strike=adjust(date.today()-timedelta(days=3),'XPAR',BusinessDayConvention.PRECEDING)
+    maturity=adjust(strike+timedelta(days=1096),'XPAR',BusinessDayConvention.FOLLOWING)
     underlyings=[asset('STM','STMPA.PA',.54646136,.007388)]
     if basket: underlyings.insert(0,asset('SG','GLE.PA',.34952353,.028009))
     corr=[[1.,.32012317],[.32012317,1.]] if basket else [[1.]]
@@ -124,7 +129,10 @@ def test_stm_pricing_booking_lifecycle_grid_override_and_replay(monkeypatch,bask
         assert original['market_used']['steps_per_year']==booked_grid
         assert original['market_used']['grid_warning'] is None
         if model == 'localvol':
-            assert original['mtm']==quote.price
+            # Same paths, same grid: the replay matches the quote up to the
+            # last published decimal. Emission times rounded to six decimals
+            # can tip that rounding by one unit on some days (26/03/2026).
+            assert abs(original['mtm']-quote.price) <= 1e-6+1e-12
         else:
             # Emission calendar times are rounded to six decimals; the live
             # horizon is ACT/365.25. A tiny extra interval changes variance

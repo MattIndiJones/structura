@@ -1,6 +1,7 @@
 """Launcher selection, legacy entry point and precise process ownership."""
 import runpy
 import sys
+from pathlib import Path
 
 import pytest
 from backend.app.hybrid import launcher
@@ -76,17 +77,68 @@ def test_occupied_admin_port_does_not_replace_its_occupant_or_block_portal(menu,
     assert not stopped
 
 
-def test_backend_without_explicit_environment_opens_launcher(monkeypatch):
+def _load_script(path, name):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_backend_without_explicit_environment_hands_over_to_launcher_script(monkeypatch):
+    # run.py must not depend on the checkout's .venv being present (CI has
+    # none): only the hand-over to scripts/launch_structura.py is its job.
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    run_module = _load_script(root / "backend" / "run.py", "structura_run_under_test")
+    handed = []
+    monkeypatch.delenv("STRUCTURA_INSTALLATION_CONFIG",raising=False)
+    monkeypatch.delenv("STRUCTURA_DATA_DIR",raising=False)
+    monkeypatch.setattr(runpy,"run_path",lambda path,run_name=None:handed.append((Path(path),run_name)))
+    run_module.main()
+    assert handed == [((root / "scripts" / "launch_structura.py").resolve(),"__main__")]
+
+
+@pytest.fixture
+def launch_script(tmp_path, monkeypatch):
+    # A throwaway checkout root with its own .venv, so neither the real one nor
+    # its absence matters, and no real menu or interpreter is ever started.
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     sys.path.insert(0,str(root / "backend"))
     from app.hybrid import launcher as entry_launcher
-    invoked = []
-    monkeypatch.delenv("STRUCTURA_INSTALLATION_CONFIG",raising=False)
-    monkeypatch.delenv("STRUCTURA_DATA_DIR",raising=False)
-    monkeypatch.setattr(entry_launcher,"main",lambda:invoked.append(True))
-    runpy.run_path(str(root / "backend" / "run.py"),run_name="__main__")
-    assert invoked == [True]
+    script = _load_script(root / "scripts" / "launch_structura.py", "structura_launch_under_test")
+    venv = tmp_path / ".venv"
+    (venv / "Scripts").mkdir(parents=True)
+    (venv / "Scripts" / "python.exe").write_bytes(b"")
+    monkeypatch.setattr(script,"ROOT",tmp_path)
+    opened, spawned = [], []
+    monkeypatch.setattr(entry_launcher,"main",lambda:opened.append(True))
+    monkeypatch.setattr(script.subprocess,"Popen",lambda args,**kw:spawned.append(args))
+    return script, venv, opened, spawned
+
+
+def test_launcher_script_opens_menu_inside_project_python(launch_script, monkeypatch):
+    script, venv, opened, spawned = launch_script
+    monkeypatch.setattr(sys,"prefix",str(venv))
+    script.main()
+    assert opened == [True] and spawned == []
+
+
+def test_launcher_script_relaunches_itself_with_project_python(launch_script, tmp_path, monkeypatch):
+    script, venv, opened, spawned = launch_script
+    monkeypatch.setattr(sys,"prefix",str(tmp_path / "another-python"))
+    script.main()
+    assert opened == []
+    assert spawned == [[str(venv / "Scripts" / "python.exe"), str(Path(script.__file__).resolve())]]
+
+
+def test_launcher_script_refuses_without_project_python(launch_script):
+    script, venv, opened, spawned = launch_script
+    (venv / "Scripts" / "python.exe").unlink()
+    with pytest.raises(RuntimeError, match="Python du projet introuvable"):
+        script.main()
+    assert opened == [] and spawned == []
 
 
 def test_full_admin_has_its_own_manifest_and_separate_data_directory(menu):
