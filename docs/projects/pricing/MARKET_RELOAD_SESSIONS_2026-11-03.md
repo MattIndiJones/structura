@@ -172,3 +172,75 @@ Tests : dix cas ajoutés à `test_venue_closures.py`. Les neuf cas de comporteme
 sans la correction ; le dixième, la place inconnue toujours refusée, est une garde ;
 266 tests des consommateurs de la règle et 40 des chargements de prix réussis. Pas de
 mesure sur une série réelle à cette date.
+
+## Complément du 22/11/2026 : Euro Stoxx 50
+
+Constaté sur un Autocall Athena (strike 15/09/2025, valorisation 22/11/2026) :
+« Historique incomplet ou hors politique : ^STOXX50E (UNBOUNDED_HISTORY_GAP) », alors que
+le même produit sur SAN.PA se price.
+
+**Cause.** Un indice n'a pas de suffixe de place, et Yahoo déclare `^STOXX50E` sur `ZRH`,
+absent de la table des places. Aucun calendrier n'était donc retenu : Pâques et les fins
+d'année comptaient comme des lacunes (trois intervalles de plus de trois jours sur la
+fenêtre du produit).
+
+**Lacune réelle du fournisseur.** Les barres Yahoo de l'indice suivent exactement le
+calendrier SIX (724 séances sur 724, du 03/01/2024 au 20/11/2026). Par rapport à Eurex
+(XEUR), il manque dix séances : Ascension, lundi de Pentecôte, 1er août et 2 janvier.
+SAN.PA, SAP.DE, ASML.AS et l'ETF EXW1.DE ont du volume ces dix jours. Le calendrier
+officiel STOXX n'a pas pu être consulté ; XEUR est retenu comme calendrier de l'indice.
+
+**Correction** (`core/venue_closures.py`). `^STOXX50E` suit XEUR, quelle que soit la place
+déclarée. Associer `ZRH` à XSWX aurait qualifié ces dix séances de fermetures. Elles restent
+comptées comme des jours sans cotation : la limite de trois jours de D03 ne change pas, et
+une séance manquante à côté du lundi de Pentecôte reste refusée.
+
+**Ce qui reste ouvert.**
+
+- Le rechargement de la volatilité réalisée de `^STOXX50E` reste refusé, désormais avec sa
+  vraie raison : clôtures manquantes sur séances XEUR. La qualification par séances exige
+  toutes les clôtures : il faut une source complète ou une décision sur leur traitement.
+- Une constatation contractuelle tombant un de ces dix jours n'a pas de clôture Yahoo.
+
+Tests : six cas ajoutés à `test_venue_closures.py`, dont quatre échouent sans la correction.
+Rejeu de la route `/api/price/in-life` sur cours réels, dans un dossier de données isolé.
+
+### Extension aux sept autres indices (23/11/2026)
+
+`^FCHI` (XPAR), `^GDAXI` (XETR), `^FTSE` (XLON), `^IBEX` (XMAD), `^SSMI` (XSWX), `^N225`
+(XTKS) et `^HSI` (XHKG) étaient refusés pour la même raison. Mesure Yahoo du 03/01/2022 au
+20/11/2026 contre chaque calendrier : aucune barre hors séance, aucun intervalle de plus de
+trois jours une fois les fermetures retirées. Trois séances du calendrier restent sans
+barre : `^SSMI` le 19/02/2024, `^HSI` les 01/09 et 08/09/2023. Elles comptent comme des
+jours sans cotation.
+
+La qualification de la volatilité lit la même table `INDEX_CALENDARS`, car Yahoo déclare
+`^FTSE` sur `FGI` et `^N225` sur `OSA`, deux codes inconnus de la table des places. Sur cours
+réels, ces sept indices rechargent une volatilité sur 252 rendements et se pricent en cours
+de vie, `^HSI` avec un règlement en EUR ou USD. La limite de trois jours et le refus d'une
+clôture manquante sont inchangés.
+
+**Limite relevée, non traitée.** `^HSI` réglé en HKD reste refusé : `core/calendars.py` n'a
+pas de calendrier de jours ouvrés pour cette devise, et aucun défaut global ne doit s'y
+substituer.
+
+Tests : 29 cas paramétrés ajoutés à `test_venue_closures.py`, dont 22 échouent sans la
+correction et 7 sont des gardes.
+
+### Indices américains et tickers sans point (23/11/2026)
+
+`^GSPC`, `^NDX`, `^DJI` et `^RUT` se pricaient, mais leur rechargement de volatilité disait
+« place de cotation inconnue » (codes Yahoo SNP, NIM, DJI, WCB). Ils suivent désormais XNYS,
+ou XNAS pour `^NDX`. Du 03/01/2022 au 20/11/2026, leurs 1 227 barres coïncident exactement
+avec ces calendriers.
+
+La qualification lisait aussi un ticker sans point comme un suffixe de place : `T` (AT&T)
+devenait Tokyo, `L` Londres, `DE` (Deere) Xetra, `MC` Madrid et `AS` Amsterdam. Yahoo déclare
+ces cinq titres sur le NYSE. La qualification passe maintenant par `venue_calendar`, seule
+résolution de place : un ticker sans point prend la place sourcée, et sans place sourcée il
+reste refusé. Un suffixe réel comme `GLE.PA` se lit toujours sans appel au fournisseur.
+
+Sur cours réels, ces neuf tickers rechargent une volatilité sur 252 rendements.
+
+Tests : 27 cas ajoutés à `test_venue_closures.py`, dont 22 échouent sans la correction et
+5 sont des gardes ; 220 tests ciblés réussis.

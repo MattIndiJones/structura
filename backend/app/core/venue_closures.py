@@ -10,9 +10,9 @@ still count as before and a missing close on an open weekday is still a gap,
 so the rule only stops penalising closures; it accepts nothing it refused for
 any other reason.
 
-The venue is the provider's declared exchange, else the ticker suffix. An
-unknown venue, or a calendar that cannot be built, leaves the calendar-day
-rule unchanged: the check fails closed, as before.
+The venue is an index's own calendar, else the provider's declared exchange,
+else the ticker suffix. An unknown venue, or a calendar that cannot be built,
+leaves the calendar-day rule unchanged: the check fails closed, as before.
 """
 from __future__ import annotations
 
@@ -31,9 +31,21 @@ SUFFIX_CALENDARS = {'PA': 'XPAR', 'MI': 'XMIL', 'AS': 'XAMS', 'BR': 'XBRU', 'DE'
                     'L': 'XLON', 'SW': 'XSWX', 'T': 'XTKS', 'HK': 'XHKG', 'SI': 'XSES',
                     'MC': 'XMAD', 'TO': 'XTSE', 'AX': 'XASX'}
 
+# An index has no listing suffix, and the generic history path keeps no declared
+# exchange. Each calendar below was checked against the provider's bars.
+# Yahoo declares ^STOXX50E on ZRH and publishes it on the SIX calendar, while
+# its constituents trade on Ascension, Whit Monday, 1 August and 2 January.
+# Those days are missing quotes: mapping ZRH to XSWX would call them closures.
+INDEX_CALENDARS = {'^STOXX50E': 'XEUR', '^FCHI': 'XPAR', '^GDAXI': 'XETR', '^FTSE': 'XLON',
+                   '^IBEX': 'XMAD', '^SSMI': 'XSWX', '^N225': 'XTKS', '^HSI': 'XHKG',
+                   '^GSPC': 'XNYS', '^NDX': 'XNAS', '^DJI': 'XNYS', '^RUT': 'XNYS'}
+
 
 def venue_calendar(ticker: str, source: dict | None = None) -> str | None:
     """Exchange calendar name of a listing, never inferred from its currency."""
+    index_calendar = INDEX_CALENDARS.get(ticker.upper())
+    if index_calendar:
+        return index_calendar
     declared = VENUES.get((source or {}).get('exchange'))
     if declared:
         return declared

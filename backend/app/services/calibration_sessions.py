@@ -6,7 +6,7 @@ consumer keeps genuine simultaneous closes and requires every expected quote.
 from datetime import date, timezone
 
 from ..core.fixing_finality import VENUES, session_calendar
-from ..core.venue_closures import SUFFIX_CALENDARS  # noqa: F401  (one table, re-exported)
+from ..core.venue_closures import venue_calendar
 
 
 def qualify_calibration_sessions(history, tickers, asof, *, venue_loader=None):
@@ -20,7 +20,7 @@ def qualify_calibration_sessions(history, tickers, asof, *, venue_loader=None):
     sources = {tk: dict(source) for tk, source in history.get('sources', {}).items()}
     for ticker in tickers:
         source = sources.setdefault(ticker, {})
-        name = VENUES.get(source.get('exchange')) or SUFFIX_CALENDARS.get(ticker.rsplit('.', 1)[-1])
+        name = venue_calendar(ticker, source)
         if not name and venue_loader is not None:
             reference = venue_loader(ticker)
             name = VENUES.get(reference.get('exchange'))
