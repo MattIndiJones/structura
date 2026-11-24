@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0}</style>
+</head>
+<body>
+<title>Structura React</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;450;500;550;600;650;700&family=Geist+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+<script>
+  (function () {
+    var root = document.documentElement;
+    if (!root.getAttribute('data-theme')) root.setAttribute('data-theme', 'light');
+    var palette = 'nuit';
+    try { palette = localStorage.getItem('structura-palette') || 'nuit'; } catch (e) {}
+    root.setAttribute('data-palette', ['nuit', 'indigo', 'aubergine'].indexOf(palette) >= 0 ? palette : 'nuit');
+  })();
+</script>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+<script src="engine.js"></script>
+<script src="charts.js"></script>
+<script src="screens.js"></script>
+</body>
+</html>

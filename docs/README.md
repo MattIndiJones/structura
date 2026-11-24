@@ -1,5 +1,11 @@
 # Notes du projet Structura
 
+[Prompt Codex : migration du front vers React — 23/11](projects/platform/MIGRATION_REACT_PROMPT_CODEX_2026-11-23.md)
+— Cahier des charges de migration vers un nouveau projet front, sans toucher au backend FastAPI :
+logique reprise à l'identique, invariants métier, harnais de parité Vue/React, portes de validation
+et arrêt à chaque lot. [Prototype de référence](projects/platform/prototype-react-2026-11-23/README.md).
+*À faire : rien n'est lancé.*
+
 [Audit global fonctionnel, technique et produit — 16/11](audits/AUDIT_GLOBAL_EXECUTIF_2026-11-16.md)
 — Synthèse exécutive et [rapport technique](audits/AUDIT_GLOBAL_TECHNIQUE_2026-11-16.md) sur `main`,
 commit `eca6f52`, selon le cahier des charges de l'audit QISTRA : six axes, statuts
@@ -1070,6 +1076,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [MIGRATION_REACT_PROMPT_CODEX_2026-11-23.md](projects/platform/MIGRATION_REACT_PROMPT_CODEX_2026-11-23.md) | 23/11 | Prompt de migration du front vers React, avec prototype de référence | À faire | Lancer le Lot 0 dans Codex ; décider du sort de l'AMC avant son portage |
 | [API_TYPEE_P1_11_2026-11-19.md](projects/platform/API_TYPEE_P1_11_2026-11-19.md) | 19/11 | Contrats de réponse, contrôle strict en test, client généré (P1-11) | Fait localement | Autres appels du front à passer par le client |
 | [MIGRATIONS_P1_7_2026-11-19.md](projects/platform/MIGRATIONS_P1_7_2026-11-19.md) | 19/11 | Migrations numérotées, table de version, base figée (P1-7) | Fait localement | — |
 | [ECRANS_P1_10_2026-11-19.md](projects/platform/ECRANS_P1_10_2026-11-19.md) | 19/11 | Écran d'erreur global, trois vues découpées, parcours de bout en bout nocturnes (P1-10) | Fait localement | Logique de `RfqView.vue` à répartir, `AmcView.vue` (avec QISTRA) ; constats des parcours corrigés le 20/11 |
