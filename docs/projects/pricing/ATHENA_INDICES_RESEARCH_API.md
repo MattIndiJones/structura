@@ -2,26 +2,20 @@
 
 Structura calcule le prix d'émission, le coupon, les constats contractuels, le MTM résiduel et les créances. QISTRA fournit les instantanés de marché et les fixings datés, tient les poches et le cash et chaîne le niveau dans l'ordre des séances. L'API traite des millésimes de recherche avec des hypothèses figées.
 
-## Réinstaller le service Athena sur un poste QISTRA
+## Utiliser Athena depuis le dossier Structura habituel
 
-Le backend de calcul et le worker sont livrés ensemble sur la branche `codex/structured-product-index-pricing` de Structura. Depuis le dossier qui héberge les dépôts, créer un checkout dédié au service.
+L’API de pricing et le worker Athena sont intégrés à `main` de Structura. Sur chaque poste, mettre le dossier Structura existant à jour avec `git pull --ff-only` depuis `main`. Utiliser son environnement Python, préparé avec le `requirements.txt` du dépôt.
 
-```powershell
-git clone --branch codex/structured-product-index-pricing https://github.com/MattIndiJones/structura.git structura-athena-indices
-```
-
-Si ce checkout existe déjà, utiliser `git pull --ff-only` depuis sa branche Athena. Préparer un environnement Python avec le `requirements.txt` de Structura ou réutiliser un environnement Structura compatible.
-
-Depuis la racine de QISTRA, démarrer le service avec le compte Windows qui utilise le lanceur QISTRA. Adapter les deux chemins au poste.
+Depuis la racine de QISTRA, démarrer le service avec le compte Windows qui utilise le lanceur QISTRA. Adapter les chemins de l’exemple au dossier Structura du poste.
 
 ```powershell
 & .\.venv\Scripts\python.exe -B scripts/manage_athena_structura.py start `
-  --checkout 'C:\chemin\structura-athena-indices' `
+  --checkout 'C:\chemin\structura' `
   --python 'C:\chemin\structura\.venv\Scripts\python.exe'
 & .\.venv\Scripts\python.exe -B scripts/manage_athena_structura.py status
 ```
 
-Le gestionnaire crée le profil de connexion Windows et démarre l’API et le worker sur la même base isolée. Quand `status` indique `running`, ouvrir le lanceur QISTRA habituel, puis **Structured Product Indices → Athena → Calculer avec Structura**. Charger **Exemple synthétique**, choisir le coupon déterminé au prix cible et lancer le backtest. Le statut **Terminé**, les coupons résolus, les constats et les MTM vérifient le parcours jusqu’au worker.
+Le gestionnaire crée le profil de connexion Windows et démarre l’API et le worker sur la même base de recherche isolée. Quand `status` indique `running`, ouvrir le lanceur QISTRA habituel, puis **Structured Product Indices → Athena → Calculer avec Structura**. Charger **Exemple synthétique**, choisir le coupon déterminé au prix cible et lancer le backtest. Le statut **Terminé**, les coupons résolus, les constats et les MTM vérifient le parcours jusqu’au worker.
 
 ## Parcours d'un backtest
 
