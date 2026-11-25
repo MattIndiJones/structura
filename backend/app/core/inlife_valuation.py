@@ -333,7 +333,8 @@ def _compiler_variante(variant: VariantTerms, p: InLifeProduct,
 
 def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
                    T_elapsed: float, asof: date,
-                   variant: Optional[VariantTerms] = None, *, retain_terminated=False) -> Residual:
+                   variant: Optional[VariantTerms] = None, *, retain_terminated=False,
+                   include_flow_labels: bool = False) -> Residual:
     """Rejoue le passé sur cours réels et construit le produit résiduel.
 
     L'historique arrive de l'appelant, en cours NUS : un payoff ne se lit pas
@@ -426,6 +427,7 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
     replay = eval_script_on_history(
         compiled, dates_list, prices, start_idx, p.tenor, user_params, tickers, r_frac,
         origine=p.strike_date,
+        include_flow_labels=include_flow_labels,
         reference_levels={
             u["ticker"]: float(p.strike_levels.get(u["name"], 0.0) or 0.0)
             for u in underlyings_json if u.get("ticker") and u.get("name")

@@ -58,6 +58,7 @@ from .api.rfq_reconciliation import router as rfq_reconciliation_router
 from .api.admin import router as admin_router
 from .api.alerts import router as alerts_router
 from .api.compute import router as compute_router
+from .api.structured_indices import router as structured_indices_router
 from .api.var import router as var_router
 from .api.products import router as products_router
 from .api.product_optimizer import router as product_optimizer_router
@@ -221,6 +222,7 @@ app.include_router(rfq_reconciliation_router)
 app.include_router(admin_router)
 app.include_router(alerts_router)
 app.include_router(compute_router)
+app.include_router(structured_indices_router)
 app.include_router(var_router)
 app.include_router(products_router)
 app.include_router(product_optimizer_router)

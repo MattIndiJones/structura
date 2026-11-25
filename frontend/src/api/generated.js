@@ -60,6 +60,302 @@ async function call(method, path, { query, body } = {}) {
  */
 
 /**
+ * @typedef {Object} AthenaBarrierCheck
+ * @property {'call'|'coupon'|'capital'} kind
+ * @property {string} observation_date
+ * @property {number} fixing
+ * @property {number} initial_fixing
+ * @property {number} ratio
+ * @property {number} threshold
+ * @property {boolean} condition_met
+ */
+
+/**
+ * @typedef {Object} AthenaBatchTicket
+ * @property {number} id
+ * @property {'queued'|'running'|'completed'|'completed_with_failures'|'failed'|'cancelled'} status
+ * @property {number} total_jobs
+ * @property {string} request_key
+ * @property {string} results_path
+ */
+
+/**
+ * @typedef {Object} AthenaCouponClaim
+ * @property {string} event_id
+ * @property {string} observed_date
+ * @property {string} payment_date
+ * @property {number} amount
+ * @property {'coupon'} kind
+ * @property {(number|null)} [memory_periods]
+ */
+
+/**
+ * @typedef {Object} AthenaFixedCoupon
+ * @property {'fixed'} mode
+ * @property {number} fixed_coupon
+ */
+
+/**
+ * @typedef {Object} AthenaFixedQuote
+ * @property {'fixed'} mode
+ */
+
+/**
+ * @typedef {Object} AthenaFixing
+ * @property {string} day
+ * @property {number} spot
+ * @property {string} reference
+ */
+
+/**
+ * @typedef {Object} AthenaIssueBatch
+ * @property {string} request_key
+ * @property {string} [label]
+ * @property {number} [max_workers]
+ * @property {Array<AthenaIssueRequest>} jobs
+ */
+
+/**
+ * @typedef {Object} AthenaIssueRequest
+ * @property {string} note_id
+ * @property {AthenaTerms} terms
+ * @property {AthenaMarket} market
+ * @property {AthenaPricing} pricing
+ * @property {((AthenaFixedCoupon|AthenaSolvedCoupon)|null)} [coupon]
+ * @property {((AthenaFixedQuote|AthenaSolvedQuote)|null)} [quote]
+ * @property {number} initial_fixing
+ * @property {string} initial_fixing_reference
+ */
+
+/**
+ * @typedef {Object} AthenaLifecycleRequest
+ * @property {AthenaVintage} vintage
+ * @property {string} as_of
+ * @property {Array<AthenaFixing>} fixings
+ */
+
+/**
+ * @typedef {Object} AthenaLifecycleResult
+ * @property {string} day
+ * @property {string} note_id
+ * @property {string} terms_reference
+ * @property {string} receipt_id
+ * @property {boolean} terminated
+ * @property {'active'|'called'|'matured'} status
+ * @property {(AthenaRedemption|null)} redemption
+ * @property {(Array<AthenaCouponClaim>|null)} [coupon_claims]
+ * @property {(Array<AthenaParticipationClaim>|null)} [participation_claims]
+ * @property {(AthenaOptionSettlement|null)} [option_settlement]
+ * @property {Array<AthenaBarrierCheck>} barriers
+ * @property {Object<string, string>} fixing_references
+ */
+
+/**
+ * @typedef {Object} AthenaMarkBatch
+ * @property {string} request_key
+ * @property {string} [label]
+ * @property {number} [max_workers]
+ * @property {Array<AthenaMarkRequest>} jobs
+ */
+
+/**
+ * @typedef {Object} AthenaMarkRequest
+ * @property {AthenaVintage} vintage
+ * @property {AthenaMarket} market
+ * @property {AthenaPricing} pricing
+ * @property {Array<AthenaFixing>} fixings
+ */
+
+/**
+ * @typedef {Object} AthenaMarket
+ * @property {string} as_of
+ * @property {string} reference
+ * @property {number} spot
+ * @property {number} rate
+ * @property {number} volatility
+ * @property {number} dividend_yield
+ * @property {number} funding_spread
+ * @property {(Array<Array<*>>|null)} [dividend_curve]
+ * @property {(Array<Array<*>>|null)} [yield_curve]
+ * @property {(Array<Array<*>>|null)} [funding_curve]
+ * @property {(VolatilitySurfaceParams|null)} [vol_surface]
+ */
+
+/**
+ * @typedef {Object} AthenaObservation
+ * @property {string} observation_date
+ * @property {string} payment_date
+ */
+
+/**
+ * @typedef {Object} AthenaOptionSettlement
+ * @property {string} event_id
+ * @property {string} observed_date
+ * @property {string} payment_date
+ * @property {number} amount
+ * @property {'option_payoff'} kind
+ */
+
+/**
+ * @typedef {Object} AthenaParticipationClaim
+ * @property {string} event_id
+ * @property {string} observed_date
+ * @property {string} payment_date
+ * @property {number} amount
+ * @property {'participation'} kind
+ */
+
+/**
+ * @typedef {Object} AthenaPayoffCapability
+ * @property {string} id
+ * @property {string} version
+ * @property {Array<string>} issue_models
+ * @property {Array<string>} mtm_models
+ */
+
+/**
+ * @typedef {Object} AthenaPricing
+ * @property {'constant'|'heston'|'sabr'|'localvol'} [model]
+ * @property {number} [n_paths]
+ * @property {number} [seed]
+ * @property {52|104|208} [steps_per_year]
+ * @property {boolean} [antithetic]
+ * @property {(number|null)} [v0]
+ * @property {(number|null)} [kappa]
+ * @property {(number|null)} [theta]
+ * @property {(number|null)} [xi]
+ * @property {(number|null)} [rho_h]
+ * @property {(number|null)} [alpha]
+ * @property {(number|null)} [beta]
+ * @property {(number|null)} [rho]
+ * @property {(number|null)} [nu]
+ * @property {(number|null)} [skew]
+ * @property {(number|null)} [curvature]
+ */
+
+/**
+ * @typedef {Object} AthenaPricingCatalogue
+ * @property {'athena-pricing-v1'} [version]
+ * @property {string} default_model
+ * @property {Array<AthenaPricingModel>} models
+ * @property {Array<AthenaPayoffCapability>} payoffs
+ */
+
+/**
+ * @typedef {Object} AthenaPricingField
+ * @property {string} name
+ * @property {string} label
+ * @property {string} help
+ * @property {'integer'|'boolean'|'number'} kind
+ * @property {(number|boolean)} default
+ * @property {(Array<number>|null)} [choices]
+ * @property {(number|null)} [minimum]
+ * @property {(number|null)} [maximum]
+ * @property {(number|null)} [scale]
+ */
+
+/**
+ * @typedef {Object} AthenaPricingModel
+ * @property {string} id
+ * @property {string} label
+ * @property {Array<AthenaPricingField>} fields
+ * @property {Array<AthenaPricingField>} market_fields
+ * @property {Array<'dividend_curve'|'yield_curve'|'funding_curve'>} market_curves
+ * @property {boolean} [supports_vol_surface]
+ * @property {(number|null)} [reference_volatility]
+ */
+
+/**
+ * @typedef {Object} AthenaRealizedVolatility
+ * @property {'RMS_LOG_RETURNS'} [method]
+ * @property {252} [window_sessions]
+ * @property {252} [annualization]
+ * @property {Array<AthenaVolatilityObservation>} observations
+ */
+
+/**
+ * @typedef {Object} AthenaRealizedVolatilityRequest
+ * @property {Array<AthenaVolatilityClose>} closes
+ * @property {Array<string>} sessions
+ */
+
+/**
+ * @typedef {Object} AthenaRedemption
+ * @property {string} event_id
+ * @property {string} observed_date
+ * @property {string} payment_date
+ * @property {number} amount
+ * @property {('redemption'|null)} [kind]
+ */
+
+/**
+ * @typedef {Object} AthenaSolvedCoupon
+ * @property {'solve_to_target'} mode
+ * @property {number} target_price
+ * @property {number} min_coupon
+ * @property {number} max_coupon
+ * @property {number} [price_tolerance]
+ */
+
+/**
+ * @typedef {Object} AthenaSolvedQuote
+ * @property {'solve_to_target'} mode
+ * @property {'participation'|'redemption_cap'|'single_coupon'} quantity
+ * @property {number} target_price
+ * @property {number} minimum
+ * @property {number} maximum
+ * @property {number} [price_tolerance]
+ */
+
+/**
+ * @typedef {Object} AthenaTerms
+ * @property {string} strike_date
+ * @property {Array<AthenaObservation>} observations
+ * @property {string} calendar_reference
+ * @property {3|6|12} [observation_months]
+ * @property {number} [call_barrier]
+ * @property {(Array<number>|null)} [call_barriers]
+ * @property {number} [protection_barrier]
+ * @property {(number|null)} [coupon_barrier]
+ * @property {(boolean|null)} [coupon_memory]
+ * @property {(boolean|null)} [reverse_convertible]
+ * @property {(number|null)} [maturity_years]
+ * @property {((CapitalGuaranteedPayoff|BoosterPayoff|AutocallGearPutPayoff|EuropeanPutPayoff|EuropeanCallPayoff)|null)} [payoff]
+ * @property {number} [settlement_lag]
+ * @property {'SX5E'} [underlying]
+ * @property {'EUR'} [currency]
+ */
+
+/**
+ * @typedef {Object} AthenaVintage
+ * @property {string} note_id
+ * @property {AthenaTerms} terms
+ * @property {number} initial_fixing
+ * @property {string} initial_fixing_reference
+ * @property {(number|null)} [annual_coupon]
+ */
+
+/**
+ * @typedef {Object} AthenaVolatilityClose
+ * @property {string} day
+ * @property {number} close
+ */
+
+/**
+ * @typedef {Object} AthenaVolatilityObservation
+ * @property {string} day
+ * @property {number} volatility
+ */
+
+/**
+ * @typedef {Object} AutocallGearPutPayoff
+ * @property {'autocall-gear-put-sx5e'} id
+ * @property {number} put_strike
+ * @property {number} gearing
+ * @property {(number|null)} [single_coupon]
+ */
+
+/**
  * Underlying comparator — backtest the same script against a pool of
  * candidate underlyings, one at a time, then (if basket_size > 1) against
  * combinations drawn from the best `shortlist_n` single performers only —
@@ -127,6 +423,13 @@ async function call(method, path, { query, body } = {}) {
  */
 
 /**
+ * @typedef {Object} BoosterPayoff
+ * @property {'booster-sx5e'} id
+ * @property {(number|null)} [participation]
+ * @property {(number|null)} [redemption_cap]
+ */
+
+/**
  * Resolve one date against a settlement calendar.
  *
  * Serves the two things a UI needs and cannot compute itself: moving a typed
@@ -160,6 +463,13 @@ async function call(method, path, { query, body } = {}) {
  * @property {number} [rate]
  * @property {number} [dividend]
  * @property {(HestonFit|null)} [heston_fit]
+ */
+
+/**
+ * @typedef {Object} CapitalGuaranteedPayoff
+ * @property {'capital-guaranteed-sx5e'} id
+ * @property {number} participation_strike
+ * @property {(number|null)} [participation]
  */
 
 /**
@@ -372,6 +682,18 @@ async function call(method, path, { query, body } = {}) {
  * @property {number} id
  * @property {string} name
  * @property {(string|null)} [country]
+ */
+
+/**
+ * @typedef {Object} EuropeanCallPayoff
+ * @property {number} strike_ratio
+ * @property {'european-call-sx5e'} id
+ */
+
+/**
+ * @typedef {Object} EuropeanPutPayoff
+ * @property {number} strike_ratio
+ * @property {'european-put-sx5e'} id
  */
 
 /**
@@ -1477,6 +1799,55 @@ export function generateSchedule(body) {
  */
 export function relationships() {
   return call('GET', '/api/trading/relationships')
+}
+
+/**
+ * POST /api/v1/structured-indices/athena/issue-batches
+ * Submit Issue Batch
+ * @param {AthenaIssueBatch} body
+ * @returns {Promise<AthenaBatchTicket>}
+ */
+export function submitIssueBatch(body) {
+  return call('POST', '/api/v1/structured-indices/athena/issue-batches', { body })
+}
+
+/**
+ * POST /api/v1/structured-indices/athena/lifecycle
+ * Check Lifecycle
+ * @param {AthenaLifecycleRequest} body
+ * @returns {Promise<AthenaLifecycleResult>}
+ */
+export function checkLifecycle(body) {
+  return call('POST', '/api/v1/structured-indices/athena/lifecycle', { body })
+}
+
+/**
+ * POST /api/v1/structured-indices/athena/mtm-batches
+ * Submit Mark Batch
+ * @param {AthenaMarkBatch} body
+ * @returns {Promise<AthenaBatchTicket>}
+ */
+export function submitMarkBatch(body) {
+  return call('POST', '/api/v1/structured-indices/athena/mtm-batches', { body })
+}
+
+/**
+ * GET /api/v1/structured-indices/athena/pricing-models
+ * Pricing Models
+ * @returns {Promise<AthenaPricingCatalogue>}
+ */
+export function pricingModels() {
+  return call('GET', '/api/v1/structured-indices/athena/pricing-models')
+}
+
+/**
+ * POST /api/v1/structured-indices/athena/realized-volatility
+ * Apply Structura's estimator to the caller's qualified closing series.
+ * @param {AthenaRealizedVolatilityRequest} body
+ * @returns {Promise<AthenaRealizedVolatility>}
+ */
+export function realizeVolatility(body) {
+  return call('POST', '/api/v1/structured-indices/athena/realized-volatility', { body })
 }
 
 /**

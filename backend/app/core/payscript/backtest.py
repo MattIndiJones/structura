@@ -190,8 +190,11 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                             tickers: list[str], r: float = 0.03,
                             origine: date | str | None = None,
                             reference_levels: dict[str, float] | None = None,
-                            history_policy: dict | None = None) -> dict | None:
+                            history_policy: dict | None = None, *,
+                            include_flow_labels: bool = False) -> dict | None:
     """Replay PayScript using actual historical close prices.
+
+    Include PayScript labels only for consumers that identify individual legs.
 
     Chaque date de l'échéancier se lit à sa DATE — voir `_LectureParDate`.
     `origine` est la date calendaire de t = 0 quand on rejoue UN contrat : son
@@ -511,6 +514,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                     "t": t_y, "cf": fl["v"], "date": dates[hi],
                     "payment_t": payment_t,
                     "payment_date": payment_date, **historical_dates,
+                    **({"label": fl["lbl"]} if include_flow_labels else {}),
                 })
             if st["done"]:
                 done = True
@@ -560,6 +564,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                     cfs.append({
                         "t": maturity_t, "cf": fl["v"], "date": dates[mhi],
                         "payment_t": payment_t, "payment_date": payment_date, **historical_dates,
+                        **({"label": fl["lbl"]} if include_flow_labels else {}),
                     })
                 if st["done"]:
                     done = True

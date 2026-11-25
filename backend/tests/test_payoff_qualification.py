@@ -78,7 +78,7 @@ def test_memory_panel_has_known_missed_catchup_reset_unpaid_and_recall_cashflows
 @pytest.mark.parametrize('key', q.APPROVED_SOURCES)
 def test_economic_change_invalidates_source_approval_even_with_identical_declarations(key, monkeypatch):
     source = PRODUCTS[key]['script']
-    quantity = 'PART' if key in {'capital_garanti', 'booster'} else 'COUPON'
+    quantity = {'capital_garanti': 'PART', 'booster': 'PART', 'put': 'STRIKE', 'call': 'STRIKE'}.get(key, 'COUPON')
     # Modify an expression, leaving PARAM, calendar, flow label and STOP intact.
     lines = source.splitlines()
     index = next(i for i, line in enumerate(lines) if line.strip().startswith('PAY ') and quantity in line)
@@ -86,7 +86,11 @@ def test_economic_change_invalidates_source_approval_even_with_identical_declara
     changed = {**PRODUCTS[key], 'script': '\n'.join(lines)}
     assert [(p.name, p.kind) for p in parse_script(source).params] == [(p.name, p.kind) for p in parse_script(changed['script']).params]
     monkeypatch.setitem(PRODUCTS, key, changed)
-    assert next(f for f in capabilities()['families'] if f['product_family'] == key)['status'] == 'UNSUPPORTED'
+    optimizer_family = next((f for f in capabilities()['families'] if f['product_family'] == key), None)
+    if key in {'call', 'put'}:
+        assert optimizer_family is None
+    else:
+        assert optimizer_family['status'] == 'UNSUPPORTED'
     with pytest.raises(ValueError, match='qualification'):
         q.qualify_payoff(key, changed['script'])
 

@@ -1030,6 +1030,8 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 ### `projects/pricing/`
 
+[API Athena pour QISTRA](projects/pricing/ATHENA_INDICES_RESEARCH_API.md) — Contrat de pricing, worker et installation sur un autre poste.
+
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
 | [COMPARAISON_AUTOCALL_4ANS_MODELES_2026-10-06.md](projects/pricing/COMPARAISON_AUTOCALL_4ANS_MODELES_2026-10-06.md) | 06/10 | Athena 4 ans, cinq modèles de vol, mono et worst-of à deux actifs | Dix prix calculés et flux réconciliés | Hypothèses explicites non calibrées ; convergence du pas et calibration hors périmètre |

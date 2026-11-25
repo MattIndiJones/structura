@@ -25,7 +25,11 @@ APPROVED_SOURCES = {
     "capital_garanti": "8e6b78e68e0789ca8b9d1b3ad0c440f57201405aeafdd0ab82f25ab5828cf651",
     "booster": "2ee5adb2581170bc3f4949cc55576e6dc89e61bfbacb980c9303e1380460e787",
     "autocall_gear_put": "24eab56a2f920661dc44c1cbae44f3356c09916c1065313f526b2e7736003e3b",
+    "put": "852f069145f2bfab879b2432e83250ab06fa8e0edfcf9b215783d67bc3f820a2",
+    "call": "316072f502186e712dc02d0b10def817d319348892e28dd168c80766d0ad8dd1",
 }
+_VANILLA_OPTIONS = {"call", "put"}
+_MATURITY_PAYOFFS = {"reverse_convertible", "capital_garanti", "booster"} | _VANILLA_OPTIONS
 SCOPE = ("Logique des flux sur trajectoires de référence et grille synthétique ; "
          "ne valide ni les termes du produit, ni les calendriers de production, "
          "ni le modèle de pricing.")
@@ -33,7 +37,16 @@ SCOPE = ("Logique des flux sur trajectoires de référence et grille synthétiqu
 
 def reference_cases(key):
     """Inputs in engine units; boundary, missed coupon, reset and worst-of cases."""
-    scheduled = key not in {"reverse_convertible", "capital_garanti", "booster"}
+    scheduled = key not in _MATURITY_PAYOFFS
+    if key in _VANILLA_OPTIONS:
+        for strike in (.7, 1., 1.3):
+            terminal_levels = (0., .3, strike - .1, strike - 1e-7, strike, strike + 1e-7, strike + .1, 2., 3.)
+            for level in terminal_levels:
+                for first_is_worst in (True, False):
+                    path = [level, level + .1] if first_is_worst else [level + .1, level]
+                    yield dict(name=f"{key}_k{strike}_spot{level}_first{first_is_worst}",
+                               levels=[path], params={"STRIKE": strike})
+        return
     levels = [
         ("early_call", [1., .5, .5, .5]),
         ("second_call", [.8, 1., .5, .5]),
@@ -65,7 +78,7 @@ def expected_cashflows(key, levels, p):
     def pay(rank, amount, label):
         if amount != 0:
             flows.append([rank, float(amount), label])
-    scheduled = key not in {"reverse_convertible", "capital_garanti", "booster"}
+    scheduled = key not in _MATURITY_PAYOFFS
     memo = 0
     if scheduled:
         for rank, level in enumerate(perf, 1):
@@ -88,6 +101,10 @@ def expected_cashflows(key, levels, p):
         pay(rank, 1., "Capital — remboursement à maturité")
         pay(rank, min(p["CAP"]-1., (level-1.)*p["PART"]) if level >= 1. else 0., "Participation plafonnée")
         pay(rank, -max(1.-level, 0.), "Put vendu — perte en capital")
+    elif key == "put":
+        pay(rank, max(0., p["STRIKE"] - level), "Put")
+    elif key == "call":
+        pay(rank, max(0., level - p["STRIKE"]), "Call")
     elif key == "autocall_gear_put":
         pay(rank, 1., "Remboursement nominal")
         pay(rank, -min(1., p["GEARING"]*(1.-level/p["M_PUT_STRIKE"])) if level < p["M_PUT_STRIKE"] else 0.,
@@ -100,11 +117,11 @@ def expected_cashflows(key, levels, p):
     return flows, rank
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=len(APPROVED_SOURCES))
 def _run_panel(key, source, version):
     from .engine import _eval_paths
 
-    scheduled = key not in {"reverse_convertible", "capital_garanti", "booster"}
+    scheduled = key not in _MATURITY_PAYOFFS
     calendar = {"STARTDATE": "2026-01-02"}
     if scheduled:
         calendar["OBSERVATIONDATES"] = dict(first_observation_date="2026-04-02", end_date="2027-01-02",
@@ -136,8 +153,12 @@ def _run_panel(key, source, version):
         cases.append({**case, "expected": expected, "actual": actual, "stop_rank": stop})
     digest = hashlib.sha256(json.dumps(dict(version=version, calendar=calendar, cases=cases),
                                        sort_keys=True, allow_nan=False).encode()).hexdigest()
-    affinity = {"participation": "PIECEWISE_AFFINE", "redemption_cap": "PIECEWISE_AFFINE"} if key == "booster" else {
-        "participation" if key == "capital_garanti" else "coupon": "AFFINE"}
+    if key == "booster":
+        affinity = {"participation": "PIECEWISE_AFFINE", "redemption_cap": "PIECEWISE_AFFINE"}
+    elif key in _VANILLA_OPTIONS:
+        affinity = {"strike_ratio": "PIECEWISE_AFFINE"}
+    else:
+        affinity = {"participation" if key == "capital_garanti" else "coupon": "AFFINE"}
     return dict(status="REFERENCE_PATHS_PASSED", family=key, source_hash=script_source_hash(source),
                 panel_version=version, reference_panel_hash=digest, case_count=len(cases),
                 parameter_affinity=affinity, scope=SCOPE), cases

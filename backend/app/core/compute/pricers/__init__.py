@@ -13,6 +13,7 @@ from .var_scenario import price_var_scenario_job
 from .scenario_grid import price_scenario_grid_job
 from .product_optimizer import price_optimizer_candidate_job
 from .mtf import price_mtf_job
+from .athena import ATHENA_ISSUE_KIND, ATHENA_MTM_KIND, price_athena_issue_job, price_athena_mark_job
 
 PRICERS = {
     "payscript_reprice": price_payscript_job,
@@ -20,4 +21,6 @@ PRICERS = {
     "scenario_grid": price_scenario_grid_job,
     "product_optimizer_candidate": price_optimizer_candidate_job,
     "mark_to_future": price_mtf_job,
+    ATHENA_ISSUE_KIND: price_athena_issue_job,
+    ATHENA_MTM_KIND: price_athena_mark_job,
 }

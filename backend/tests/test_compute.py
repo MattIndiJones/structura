@@ -9,16 +9,19 @@ so the suite stays fast despite the per-process spawn overhead on Windows."""
 import math
 import time
 from datetime import datetime, timedelta
+from itertools import islice
 
 import pytest
 from sqlmodel import SQLModel, Session, create_engine, select
 
+from backend.app.core.compute import executor
 from backend.app.core.compute.executor import run_batch
 from backend.app.core.compute.pricers.payscript import price_payscript_job
 from backend.app.core.compute.queue_store import (
     enqueue_batch, claim_next_batch, pending_jobs, record_job_result, finalize_batch,
     cancel_batch, relaunch_batch, delete_batch,
 )
+from backend.app.db import trading_models  # noqa: F401 — registers RFQ foreign-key targets
 from backend.app.db.models import ComputeBatch, ComputeJob, User
 from backend.app.core.payscript.parser import parse_script
 from backend.app.core.payscript.engine import run_mc
@@ -96,6 +99,37 @@ def test_run_batch_unknown_kind_raises_per_job():
 
 def test_run_batch_empty_jobs_returns_empty():
     assert run_batch("payscript_reprice", [], max_workers=4) == []
+
+
+def test_run_batch_refills_the_same_process_pool_and_reports_each_job(monkeypatch):
+    real_pool = executor.ProcessPoolExecutor
+    pool_sizes = []
+
+    def new_pool(*, max_workers):
+        pool_sizes.append(max_workers)
+        return real_pool(max_workers=max_workers)
+
+    monkeypatch.setattr(executor, "ProcessPoolExecutor", new_pool)
+    initial = [(0, _payload()), (1, {}), (2, _payload()), (3, _payload())]
+    queued = iter((i, _payload()) for i in range(4, 12))
+    limits = []
+    completed = []
+
+    def take_jobs(limit):
+        limits.append(limit)
+        return list(islice(queued, limit))
+
+    results = run_batch(
+        "payscript_reprice", initial, max_workers=2, window_size=4,
+        more_jobs=take_jobs, on_result=lambda job_id, _result: completed.append(job_id),
+    )
+
+    assert pool_sizes == [2]
+    assert len(limits) >= 3
+    assert all(1 <= limit <= 4 for limit in limits)
+    assert sorted(completed) == list(range(12))
+    assert [result.job_id for result in results] == completed
+    assert [result.job_id for result in results if not result.ok] == [1]
 
 
 # ── queue_store lifecycle ────────────────────────────────────────────

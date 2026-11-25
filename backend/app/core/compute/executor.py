@@ -22,8 +22,9 @@ from __future__ import annotations
 import logging
 from contextvars import ContextVar
 from concurrent.futures import (
-    FIRST_COMPLETED, ThreadPoolExecutor, ProcessPoolExecutor, wait,
+    FIRST_COMPLETED, BrokenExecutor, ThreadPoolExecutor, ProcessPoolExecutor, wait,
 )
+from itertools import chain
 import time
 from typing import Callable, Optional
 
@@ -62,6 +63,7 @@ def run_batch(
     on_tick: Optional[Callable[[], None]] = None,
     job_timeout_seconds: float = 300.0,
     window_size: int | None = None,
+    more_jobs: Optional[Callable[[int], list[tuple[int, dict]]]] = None,
 ) -> list[JobResult]:
     """Runs every (job_id, payload) pair independently and in parallel,
     isolating failures per job — one bad scenario/deal must never abort the
@@ -72,7 +74,13 @@ def run_batch(
     on_result, if given, fires synchronously as each job completes (not
     necessarily in job_index order — as_completed yields whichever finishes
     first) — this is how queue_store.py persists partial progress without
-    waiting for the whole batch to drain."""
+    waiting for the whole batch to drain.
+
+    A durable caller can supply more_jobs(limit) to claim up to limit jobs
+    when active work falls below worker capacity. This keeps one warm pool
+    while bounding the number of claimed jobs. An empty refill ends the
+    source, and a timeout or cancelled lease ends the pool as usual.
+    """
     if not jobs:
         return []
     if should_cancel is None:
@@ -106,12 +114,25 @@ def run_batch(
         stopped = True
 
     def fill() -> None:
+        nonlocal remaining, more_jobs
         while len(active) < window:
+            job = next(remaining, None)
+            if job is None:
+                if more_jobs is None or len(active) >= workers:
+                    return
+                refill = more_jobs(window - len(active))
+                if not refill:
+                    more_jobs = None
+                    return
+                remaining = iter(refill)
+                continue
+            job_id, payload = job
             try:
-                job_id, payload = next(remaining)
-            except StopIteration:
-                return
-            active[ex.submit(_run_one, kind, payload)] = (job_id, time.monotonic())
+                future = ex.submit(_run_one, kind, payload)
+            except BrokenExecutor:
+                remaining = chain((job,), remaining)
+                raise
+            active[future] = (job_id, time.monotonic())
 
     try:
         fill()
@@ -141,15 +162,29 @@ def run_batch(
                     emit(JobResult(job_id=job_id, ok=False, error=reason))
                 return results
 
+            pool_failure = None
             for future in done:
                 job_id, _started = active.pop(future)
                 try:
-                    emit(JobResult(job_id=job_id, ok=True, result=future.result()))
+                    result = future.result()
                 except Exception as exc:
                     # A process pool attaches the worker's traceback as the cause.
                     logger.warning("Calcul %s en échec", job_id, exc_info=exc)
                     emit(JobResult(job_id=job_id, ok=False, error=str(exc)))
+                    if isinstance(exc, BrokenExecutor):
+                        pool_failure = exc
+                else:
+                    emit(JobResult(job_id=job_id, ok=True, result=result))
+            if pool_failure is not None:
+                raise pool_failure
             fill()
+    except BrokenExecutor as exc:
+        # All these jobs were already handed to the executor or claimed by
+        # the caller's refill. Leave unclaimed jobs for a fresh pool.
+        for job_id, _started in active.values():
+            emit(JobResult(job_id=job_id, ok=False, error=str(exc)))
+        for job_id, _payload in remaining:
+            emit(JobResult(job_id=job_id, ok=False, error=str(exc)))
     finally:
         if not stopped:
             ex.shutdown(wait=True, cancel_futures=False)
