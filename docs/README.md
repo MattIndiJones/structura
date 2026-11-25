@@ -10,6 +10,12 @@ depuis le 05/11, générateur UAT depuis le 24/10, fixtures de booking périmée
 barrière en clôture quotidienne, Yahoo source unique, KID indicatif, aucune sauvegarde
 périodique. Lecture seule du code, sans navigateur. *Suivi.*
 
+[Lanceur : choix entre Vue et React — 25/11](projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md)
+— Le menu Démarrer ouvre le choix de version de `structura-react` ; `--vue` ouvre Vue
+directement. `.venv` resynchronisé sur PyJWT après le pull, erreur d'import désormais
+affichée. React vérifié de bout en bout sur 18100–18108 ; 23 tests ciblés. Thème et
+petites fenêtres : 03/11.
+
 [Contrats de réponse et client généré — 19/11](projects/platform/API_TYPEE_P1_11_2026-11-19.md)
 — P1-11 : 26 réponses typées (les vingt routes les plus appelées et la file de pricing), contrôlées
 strictement pendant les tests et les parcours, production inchangée ; client JS généré depuis
@@ -90,10 +96,6 @@ Compléments du 18/11 : même correction pour le MtM du deal en marché actuel, 
 continuité corrigée à la source (un férié de place n'est plus une lacune, cours nus et
 ajustés, tous chemins) ; reconduction alignée sur le Pricer. Complément du 19/11 : D03
 à la date demandée, le jour où la place est fermée, le dernier cours connu fait foi.
-
-[Lanceur : présentation et adaptation aux petites fenêtres — 03/11](projects/platform/STRUCTURA_LAUNCHER_2026-10-13.md)
-— Thème ivoire et bleu nuit, accès Admin prioritaire, cartes compactes ;
-14 tests ciblés et contrôles de disposition Tkinter, capture native indisponible.
 
 [Rapport général et reprise sur un autre ordinateur — 01/11](audits/RAPPORT_PROJET_ET_REPRISE_2026-11-01.md)
 — Avis sur le projet, architecture et points forts, corrections de la conversation,

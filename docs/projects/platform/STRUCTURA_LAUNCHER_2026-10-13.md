@@ -3,6 +3,64 @@
 Date : 13/10/2026. Branche : `codex/hybrid-saas-foundation`.
 Changements locaux, sans commit, push ni merge.
 
+## Choix de la version Vue ou React — 25/11/2026
+
+**Entrées.** Le raccourci « Structura » du menu Démarrer, `lancer_structura.bat` et
+`backend/run.py` sans argument passent par `scripts/launch_structura.py`. Quand le clone
+`structura-react` est à côté de `structura`, ce script ouvre son choix de version
+(`structura-react/scripts/launch_versions.py`), avec l'interpréteur du `.venv` de
+Structura, comme le fait `structura-react/lancer_structura.vbs`. Sans ce clone, le menu
+Vue s'ouvre comme avant. `launch_structura.py --vue` ouvre directement le menu Vue.
+
+**« Ouvrir Vue »** exécute `lancer_structura.vbs`, qui passe désormais `--vue` :
+s'il passait par le `.bat`, le choix se rouvrirait en boucle. Le `.vbs` ne dépend plus
+d'un chemin absolu `C:\Users\admin\…`. Le `.bat` transmet ses arguments.
+
+**« Ouvrir React »** (`launch_versions.py --react`) copie le backend de Structura au
+commit épinglé `fa7ff711` et le build `structura-react/dist` dans
+`structura-react/.runtime/launcher/<commit>-<empreinte du build>`. Il ouvre ensuite le
+même menu sur un runtime séparé : ports 18100–18108 (Admin sur 18108), données dans
+`structura-react/.runtime/launcher/data`. Vue garde 8000 et 8100–8107 et ses données de
+`.runtime/hybrid-saas` : les deux versions peuvent tourner ensemble. Un nouveau build
+React n'est pris qu'après l'arrêt des services React encore actifs.
+
+**Erreur visible.** Si le menu Vue ne peut pas importer ses modules, une boîte
+« Structura — lancement impossible » donne l'erreur et la commande de mise à jour du
+`.venv`. Sous `pythonw`, rien ne s'affichait jusque-là.
+
+### Incident du 25/11 et remise en état du poste
+
+- Après le pull de `fa7ff71`, le `.venv` n'avait pas suivi le commit `39aeb49` (PyJWT
+  remplace python-jose) : `import jwt` échouait avant toute fenêtre, et le raccourci ne
+  faisait rien. Correction : `.venv\Scripts\python.exe -m pip install --require-hashes -r
+  requirements.lock.txt` (PyJWT 2.15.1, cryptography 50.0.2, pillow 13.0.0, pytest 9.2.0,
+  entre autres). python-jose, ecdsa, rsa et pyasn1 restent installés, mais ne sont plus
+  importés.
+- Le clone `structura-react`, propriété du groupe Administrateurs, n'était accessible qu'en
+  lecture au compte Philippe : ni build, ni `.runtime`. Philippe a accordé le même droit
+  que sur `structura` (`icacls … /grant "PC-MAISON\Philippe:(OI)(CI)M"`) et ajouté le
+  clone à `safe.directory`. Ensuite : `npm ci` puis `npm run build`. Le poste a Node 24.12
+  et le projet déclare `^20.19.0` : simple avertissement. Ce build local n'est pas
+  l'artefact qualifié du Lot 16.
+- Reste ouvert : `npm run verify:legacy` échoue dans ce clone. Git for Windows
+  (`core.autocrlf=true` au niveau système) a extrait `src/legacy-core` en CRLF, alors que
+  le manifeste attend les octets commités. Ni le build ni le lanceur n'en dépendent.
+
+### Vérifications du 25/11
+
+- 23 tests de `backend/tests/test_structura_launcher.py`, dont 6 nouveaux : choix
+  proposé, `--vue` conservé à la relance, absence de boucle, erreur d'import affichée.
+- Ouvertures réelles sur le poste : le raccourci ouvre « Structura — Choix de la
+  version » ; le `.vbs` ouvre le menu Vue, et `launcher-ui.json` le donne prêt ;
+  `--react` ouvre « Structura React — Votre espace de travail » sur le vrai
+  `.runtime/launcher`, avec neuf installations préparées, sans base ni service.
+- Chemin React complet sur un état jetable : copie en 5,8 s, Admin et portail
+  démarrés en 35,9 s, `/health/ready` à 200, `index.html` et bundle React servis, session
+  Admin de développement délivrée. Arrêt en 4,7 s, processus terminés et ports libérés.
+- Non exercés : le clic dans la fenêtre de choix (son bouton Vue exécute le `.vbs`, testé
+  directement), une recette visuelle par capture et les services Vue réels, laissés
+  arrêtés pour ne pas toucher au workspace Admin.
+
 ## Refonte visuelle du 03/11/2026
 
 Le lanceur adopte un fond ivoire, une identité latérale bleu nuit et des accents
