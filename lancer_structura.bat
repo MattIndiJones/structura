@@ -5,4 +5,4 @@ if not exist "%~dp0.venv\Scripts\pythonw.exe" (
   pause
   exit /b 1
 )
-start "" "%~dp0.venv\Scripts\pythonw.exe" "%~dp0scripts\launch_structura.py"
+start "" "%~dp0.venv\Scripts\pythonw.exe" "%~dp0scripts\launch_structura.py" %*

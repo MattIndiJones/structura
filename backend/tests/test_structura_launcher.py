@@ -103,30 +103,44 @@ def test_backend_without_explicit_environment_hands_over_to_launcher_script(monk
 def launch_script(tmp_path, monkeypatch):
     # A throwaway checkout root with its own .venv, so neither the real one nor
     # its absence matters, and no real menu or interpreter is ever started.
+    # The checkout sits one level down, so its structura-react sibling belongs
+    # to this test alone and never to the real clone next to the repository.
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     sys.path.insert(0,str(root / "backend"))
     from app.hybrid import launcher as entry_launcher
     script = _load_script(root / "scripts" / "launch_structura.py", "structura_launch_under_test")
-    venv = tmp_path / ".venv"
+    venv = tmp_path / "structura" / ".venv"
     (venv / "Scripts").mkdir(parents=True)
     (venv / "Scripts" / "python.exe").write_bytes(b"")
-    monkeypatch.setattr(script,"ROOT",tmp_path)
-    opened, spawned = [], []
+    monkeypatch.setattr(script,"ROOT",tmp_path / "structura")
+    monkeypatch.setattr(sys,"argv",[str(root / "scripts" / "launch_structura.py")])
+    opened, spawned, directories = [], [], []
     monkeypatch.setattr(entry_launcher,"main",lambda:opened.append(True))
-    monkeypatch.setattr(script.subprocess,"Popen",lambda args,**kw:spawned.append(args))
-    return script, venv, opened, spawned
+    def popen(args, **kw):
+        spawned.append(args)
+        directories.append(kw.get("cwd"))
+    monkeypatch.setattr(script.subprocess,"Popen",popen)
+    return script, venv, opened, spawned, directories
+
+
+@pytest.fixture
+def react_chooser(tmp_path):
+    chooser = tmp_path / "structura-react" / "scripts" / "launch_versions.py"
+    chooser.parent.mkdir(parents=True)
+    chooser.write_text("", encoding="utf-8")
+    return chooser
 
 
 def test_launcher_script_opens_menu_inside_project_python(launch_script, monkeypatch):
-    script, venv, opened, spawned = launch_script
+    script, venv, opened, spawned, _ = launch_script
     monkeypatch.setattr(sys,"prefix",str(venv))
     script.main()
     assert opened == [True] and spawned == []
 
 
 def test_launcher_script_relaunches_itself_with_project_python(launch_script, tmp_path, monkeypatch):
-    script, venv, opened, spawned = launch_script
+    script, venv, opened, spawned, _ = launch_script
     monkeypatch.setattr(sys,"prefix",str(tmp_path / "another-python"))
     script.main()
     assert opened == []
@@ -134,11 +148,66 @@ def test_launcher_script_relaunches_itself_with_project_python(launch_script, tm
 
 
 def test_launcher_script_refuses_without_project_python(launch_script):
-    script, venv, opened, spawned = launch_script
+    script, venv, opened, spawned, _ = launch_script
     (venv / "Scripts" / "python.exe").unlink()
     with pytest.raises(RuntimeError, match="Python du projet introuvable"):
         script.main()
     assert opened == [] and spawned == []
+
+
+@pytest.mark.parametrize("inside_project_python", [True, False])
+def test_shortcut_offers_the_version_chooser_when_react_sits_next_to_the_checkout(
+        launch_script, react_chooser, tmp_path, monkeypatch, inside_project_python):
+    script, venv, opened, spawned, directories = launch_script
+    monkeypatch.setattr(sys,"prefix",str(venv if inside_project_python else tmp_path / "another-python"))
+    script.main()
+    # The React checkout has no interpreter: the chooser runs on this one,
+    # from its own directory, exactly as its lancer_structura.vbs does.
+    assert opened == []
+    assert spawned == [[str(venv / "Scripts" / "python.exe"), "-B", str(react_chooser)]]
+    assert directories == [tmp_path / "structura-react"]
+
+
+def test_vue_flag_opens_the_vue_menu_even_beside_the_chooser(launch_script, react_chooser, monkeypatch):
+    script, venv, opened, spawned, _ = launch_script
+    monkeypatch.setattr(sys,"prefix",str(venv))
+    script.main(["--vue"])
+    assert opened == [True] and spawned == []
+
+
+def test_vue_flag_survives_the_relaunch_with_project_python(launch_script, react_chooser, tmp_path, monkeypatch):
+    script, venv, opened, spawned, _ = launch_script
+    monkeypatch.setattr(sys,"prefix",str(tmp_path / "another-python"))
+    script.main(["--vue"])
+    # Without the flag the relaunched script would offer the chooser again.
+    assert opened == []
+    assert spawned == [[str(venv / "Scripts" / "python.exe"), str(Path(script.__file__).resolve()), "--vue"]]
+
+
+def test_menu_that_cannot_import_says_so_instead_of_vanishing(launch_script, monkeypatch):
+    # A .venv left behind by a pull (PyJWT missing on 25/11) killed the menu
+    # before any window: pythonw showed nothing at all.
+    script, venv, opened, spawned, _ = launch_script
+    monkeypatch.setattr(sys,"prefix",str(venv))
+    monkeypatch.setitem(sys.modules,"app.hybrid.launcher",None)
+    shown = []
+    monkeypatch.setattr(script,"show_error",shown.append)
+    with pytest.raises(ImportError):
+        script.main()
+    assert opened == [] and len(shown) == 1
+    assert "pip install --require-hashes -r requirements.lock.txt" in shown[0]
+
+
+def test_vue_shortcut_called_by_the_react_chooser_cannot_loop_back_to_it():
+    # structura-react's "Ouvrir Vue" runs lancer_structura.vbs: it must open the
+    # Vue menu itself, from its own folder, while the .bat stays the entry point.
+    root = Path(__file__).resolve().parents[2]
+    shortcut = (root / "lancer_structura.vbs").read_text(encoding="ascii")
+    code = "\n".join(line for line in shortcut.splitlines() if not line.lstrip().startswith("'"))
+    assert r'".venv\Scripts\pythonw.exe"' in code and r'"scripts\launch_structura.py"' in code
+    assert '" --vue"' in code and ".bat" not in code
+    assert "C:\\Users" not in code
+    assert "--vue" not in (root / "lancer_structura.bat").read_text(encoding="ascii")
 
 
 def test_full_admin_has_its_own_manifest_and_separate_data_directory(menu):
