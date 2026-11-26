@@ -2,7 +2,7 @@
 export function defaultUnderlying(n = 1, ccy = 'EUR') {
   return {
     name: `Sous-jacent ${n}`, ticker: '', ccy,
-    sigma: 20, q: 2, sigma_fx: 0, rho_sfx: 0, ccyh: 0,
+    sigma: 20, q: 2, sigma_fx: 0, rho_sfx: 0, ccyh: 0, fx_mode: '', r_ccy: null, ccyCurveEnabled: false, ccyCurve: [],
     dividendCurveEnabled: false, dividendDecay: 10,
     v0: 4, kappa: 2, theta: 4, xi: 35, rho_h: -70, rho_rS: 40,
     alpha: 20, beta: 50, rho: -30, nu: 40,

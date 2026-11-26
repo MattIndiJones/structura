@@ -13,6 +13,7 @@ from .models import MODELS
 from .time_grid import durations as _durations
 from .local_vol import _build_dividend_step_matrix
 from .rates import _blend_rate_factor
+from .fx_overlay import asset_carry_rate, heston_effective_theta, heston_variance_shift, sabr_alpha_drift
 
 
 # Largest coefficient move a nearest-PSD repair may make before the matrix is
@@ -261,7 +262,7 @@ def _simulate_gbm(ts: int, n: int, N: int, dt: float, sq_dt: float,
         q_adj = u.get("sigma_fx", 0.0) * u.get("rho_sfx", 0.0) * sig
         q_term = (u.get("q", 0.02) if dividend_steps is None
                   else dividend_steps[:, i, None])
-        drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5 * sig * sig
+        drift = asset_carry_rate(u, r_term) - q_term - q_adj - 0.5 * sig * sig
         lengths = _durations(dt, ts)[:, None]
         log_ret = drift * lengths + sig * np.sqrt(lengths) * z_i
         S[1:, i, :] = S[0, i] * np.exp(np.cumsum(log_ret, axis=0))
@@ -322,6 +323,7 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
             kap = u.get("kappa", 2.0)
             th  = u.get("theta", 0.04)
             xi  = u.get("xi", 0.35)
+            c_fx = heston_variance_shift(u)
             rhop = math.sqrt(max(0.0, 1.0 - rh*rh))
 
             cz_i = _blend_rate_factor(Zc[step, i, :], Z_r[step], u.get("rho_rS", 0.0)) if Z_r is not None else Zc[step, i, :]
@@ -331,7 +333,8 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
             zv = rh * cz_i + rhop * z_perp_var      # full variance Brownian W_V
 
             V_old  = V[i]
-            V_next = _heston_qe_vectorized(V_old, kap, th, xi, dt, zv)
+            th_eff = heston_effective_theta(th, kap, c_fx, V_old)
+            V_next = _heston_qe_vectorized(V_old, kap, th_eff, xi, dt, zv)
             V_bar  = (V_old + V_next) / 2
             V[i]   = V_next
             if factor_out is not None:
@@ -362,13 +365,13 @@ def _simulate_heston(ts: int, n: int, N: int, dt: float, sq_dt: float,
             bumped_variance = rh*rh * V_bar + rhop*rhop * sv*sv
             q_term = (u.get("q", 0.02) if dividend_steps is None
                       else dividend_steps[step, i])
-            drift = (r_term + u.get("ccyh", 0.0) - q_term
+            drift = (asset_carry_rate(u, r_term, step) - q_term
                      - q_adj - 0.5 * bumped_variance)
 
             # Andersen (2007) spot update — see docstring for the martingale
             # derivation, unchanged from the original per-path formula.
             z_S_perp  = rhop * cz_i - rh * z_perp_var
-            corr_term = rh / xi * (V_next - V_old - kap * (th - V_bar) * dt)
+            corr_term = rh / xi * (V_next - V_old - kap * (th_eff - V_bar) * dt)
             S[step+1, i, :] = S[step, i, :] * np.exp(
                 drift*dt + corr_term + rhop * sv * sq_dt * z_S_perp
             )
@@ -428,7 +431,8 @@ def _simulate_sabr(ts: int, n: int, N: int, dt: float, sq_dt: float,
 
             # Lognormal SDE for stochastic vol α
             alpha_old = alpha[i]
-            alpha_new = alpha_old * np.exp(nu * sq_dt * z_a - 0.5 * nu**2 * dt)
+            alpha_new = alpha_old * np.exp(nu * sq_dt * z_a - 0.5 * nu**2 * dt
+                                           + sabr_alpha_drift(u) * dt)
 
             # CEV effective vol: σ = α_old * S^(β−1)
             # Use alpha_old (not alpha_bar) to avoid correlation bias with z_S.
@@ -449,7 +453,7 @@ def _simulate_sabr(ts: int, n: int, N: int, dt: float, sq_dt: float,
             q_adj = u.get("sigma_fx", 0.0) * u.get("rho_sfx", 0.0) * sig
             q_term = (u.get("q", 0.02) if dividend_steps is None
                       else dividend_steps[step, i])
-            drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5 * sig**2
+            drift = asset_carry_rate(u, r_term, step) - q_term - q_adj - 0.5 * sig**2
             S[step + 1, i, :] = S_c * np.exp(drift * dt + sig * sq_dt * z_S)
             alpha[i] = alpha_new
             if factor_out is not None:
@@ -504,7 +508,7 @@ def _simulate_lv(ts: int, n: int, N: int, dt: float, sq_dt: float,
             q_adj = u.get("sigma_fx", 0.0) * u.get("rho_sfx", 0.0) * lvs
             q_term = (u.get("q", 0.02) if dividend_steps is None
                       else dividend_steps[step, i])
-            drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5*lvs**2
+            drift = asset_carry_rate(u, r_term, step) - q_term - q_adj - 0.5*lvs**2
             S[step+1, i, :] = S_c * np.exp(drift*dt + lvs*sq_dt*z_i)
 
     return S
@@ -520,8 +524,16 @@ _LSV_MIN_BUCKET_PATHS = 30
 _LSV_CONDITIONAL_BUCKETS = 200
 
 
+def _lsv_conditional_grid(logKmin: float, logKmax: float) -> tuple[int, float]:
+    """Buckets of the particle estimator: the historical [.2, 3] grid keeps
+    exactly 200, a wider offline domain keeps the same resolution."""
+    buckets = max(_LSV_CONDITIONAL_BUCKETS,
+                  round((logKmax-logKmin)/math.log(15)*(_LSV_CONDITIONAL_BUCKETS-1))+1)
+    return buckets, (logKmax-logKmin)/(buckets-1)
+
+
 def _lsv_conditional_variance(bucket_indices: np.ndarray, variance: np.ndarray,
-                              n_buckets: int) -> np.ndarray:
+                              n_buckets: int, bucket_means_out: list | None = None) -> np.ndarray:
     """Estimate E[V|S], widening only thin spot buckets to local neighbours.
 
     Substituting E[V] in a thin tail erases the spot/variance dependence and
@@ -546,6 +558,8 @@ def _lsv_conditional_variance(bucket_indices: np.ndarray, variance: np.ndarray,
         count = cumulative_count[hi] - cumulative_count[lo]
     means = np.zeros(n_buckets)
     means[occupied] = np.maximum(cumulative_sum[hi]-cumulative_sum[lo], 0.) / np.maximum(count, 1)
+    if bucket_means_out is not None:
+        bucket_means_out.append((occupied, means[occupied]))
     return means[bucket_indices]
 
 
@@ -629,12 +643,14 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
             xi    = u.get("xi", 0.35)
             rho_h = u.get("rho_h", -0.70)
             rhop  = math.sqrt(max(0.0, 1.0 - rho_h*rho_h))
+            c_fx = heston_variance_shift(u)
 
             # Variance Brownian, correlated with the spot driver via rho_h —
             # same construction as _simulate_heston's zv.
             zv_i = rho_h * Zc[step, i, :] + rhop * Zv[step, i, :]
             V_old = V[i]
-            V_next = _heston_qe_vectorized(V_old, kappa, theta, xi, dt, zv_i)
+            V_next = _heston_qe_vectorized(
+                V_old, kappa, heston_effective_theta(theta, kappa, c_fx, V_old), xi, dt, zv_i)
 
             S_c = S[step, i, :]
             logS = np.log(np.maximum(S_c, 1e-8)) - (math.log(local_vol_anchor[i]) if local_vol_anchor is not None else 0.)
@@ -676,7 +692,7 @@ def _simulate_lsv(ts: int, n: int, N: int, dt: float, sq_dt: float,
             q_adj = u.get("sigma_fx", 0.0) * u.get("rho_sfx", 0.0) * eff_vol
             q_term = (u.get("q", 0.02) if dividend_steps is None
                       else dividend_steps[step, i])
-            drift = r_term + u.get("ccyh", 0.0) - q_term - q_adj - 0.5*eff_vol**2
+            drift = asset_carry_rate(u, r_term, step) - q_term - q_adj - 0.5*eff_vol**2
             S[step+1, i, :] = S_c * np.exp(drift*dt + eff_vol*sq_dt*z_i)
             V[i] = V_next
             if factor_out is not None:

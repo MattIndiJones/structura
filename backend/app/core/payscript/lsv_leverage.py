@@ -29,7 +29,7 @@ def supports_frozen_lsv(underlyings, *, yield_curve=None, sigma_r=0.,
     return (not yield_curve and not sigma_r and barrier_monitoring == "weekly"
             and not strike_set_t and not residual and bool(underlyings)
             and all(u.get("vol_surface") and not u.get("dividend_curve")
-                    and not u.get("ccyh") and not u.get("sigma_fx", 0.) * u.get("rho_sfx", 0.)
+                    and not u.get("ccyh") and not u.get("fx_mode") and not u.get("sigma_fx", 0.) * u.get("rho_sfx", 0.)
                     for u in underlyings))
 
 
@@ -104,6 +104,78 @@ def _fit_marginal(intervals, r, q, params, lo, hi, nodes, target_bytes, training
         time += dt
     grid.setflags(write=False)
     return grid, tuple(limited)
+
+
+OWN_MEASURE_TRAINING_PATHS = 131_072
+OWN_MEASURE_SEED = 52_711
+
+
+@lru_cache(maxsize=16)
+def _particle_leverage(intervals, rates, q, params, lo, hi, nodes, target_bytes, training_paths):
+    """Leverage on the grid nodes from the SAME particle estimator the
+    pricing paths use, run on a mono-asset sample under drift rates[step] - q.
+
+    The frozen fit (_fit_marginal) smooths E[V|S] with a Gaussian kernel and is
+    qualified on SSVI surfaces; on the parametric Dupire grid it left a
+    systematic residual (-0.07 pt on a 3-year 80 % put against local vol),
+    where the particle estimator stays within Monte Carlo error.
+    """
+    from .diffusion import (_heston_qe_vectorized, _lsv_conditional_grid,
+                            _lsv_conditional_variance)
+    v0, kappa, theta, xi, rho = params
+    target = np.frombuffer(target_bytes, dtype=np.float64).reshape(len(intervals), nodes)
+    log_nodes = np.linspace(lo, hi, nodes)
+    node_step = (hi - lo) / (nodes - 1)
+    buckets, bucket_step = _lsv_conditional_grid(lo, hi)
+    bucket_centres = lo + (np.arange(buckets) + .5) * bucket_step
+    rng = np.random.default_rng(OWN_MEASURE_SEED)
+    log_spot = np.zeros(training_paths)
+    variance = np.full(training_paths, v0)
+    rho_independent = math.sqrt(max(0., 1 - rho**2))
+    grid = np.empty_like(target)
+    for step, dt in enumerate(intervals):
+        position = np.clip((log_spot - lo) / node_step, 0., nodes - 1 - 1e-9)
+        k0 = position.astype(int)
+        frac = position - k0
+        local = target[step, k0] * (1. - frac) + target[step, k0 + 1] * frac
+        bucket = np.clip(((log_spot - lo) / bucket_step).astype(int), 0, buckets - 2)
+        captured = []
+        conditional = _lsv_conditional_variance(bucket, variance, buckets, bucket_means_out=captured)
+        occupied, means = captured[0]
+        node_mean = np.interp(log_nodes, bucket_centres[occupied], means)
+        grid[step] = np.clip(target[step] / np.sqrt(np.maximum(node_mean, 1e-6)), LEVERAGE_MIN, LEVERAGE_MAX)
+        leverage = np.clip(local / np.sqrt(np.maximum(conditional, 1e-6)), LEVERAGE_MIN, LEVERAGE_MAX)
+        effective = np.clip(leverage * np.sqrt(np.maximum(variance, 0.)), .001, EFFECTIVE_VOL_CAP)
+        z_s, z_v = rng.standard_normal((2, training_paths))
+        log_spot += (rates[step] - q - .5 * effective**2) * dt + effective * math.sqrt(dt) * z_s
+        variance = _heston_qe_vectorized(variance, kappa, theta, xi, dt, rho * z_s + rho_independent * z_v)
+    grid.setflags(write=False)
+    return grid
+
+
+def own_measure_leverage(underlyings, r, intervals, local_grid, *, diagnostics=None,
+                         training_paths=OWN_MEASURE_TRAINING_PATHS):
+    """Leverage of each asset fitted under ITS OWN measure.
+
+    A quanto or compo asset's surface is quoted in its currency: the Gyöngy
+    condition L^2 E[V|S] = sigma_loc^2 holds under that measure, with drift
+    r_ccy - q and no quanto term. L is a diffusion coefficient, so the
+    deal-measure paths reuse it unchanged; only their drifts move (spot and
+    variance, see fx_overlay). A deal-currency asset in the same basket is fitted
+    at the deal rate, as before.
+    """
+    from .fx_overlay import asset_carry_rate
+    grids, nodes, lo, hi = local_grid
+    deal = np.broadcast_to(np.asarray(r, dtype=float), (len(intervals),))
+
+    def per_step(u):
+        # Hashable per-step carry: the asset's own curve (or flat r_ccy), or the deal's.
+        return tuple(float(asset_carry_rate(u, deal[k], k)) for k in range(len(intervals)))
+    return tuple(_particle_leverage(
+        tuple(float(t) for t in intervals), per_step(u), float(u.get("q", .02)),
+        _variance_parameters(u), lo, hi, nodes,
+        np.ascontiguousarray(grid, dtype=np.float64).tobytes(), training_paths,
+    ) for u, grid in zip(underlyings, grids))
 
 
 def frozen_leverage(underlyings, r, intervals, local_grid, *, diagnostics=None, training_paths=TRAINING_PATHS):

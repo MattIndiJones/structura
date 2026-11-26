@@ -110,6 +110,28 @@ class UnderlyingParams(BaseModel):
     sigma_fx: float = Field(default=0.0, ge=0.0, le=10.0)
     rho_sfx: float = Field(default=0.0, ge=-1.0, le=1.0)
     ccyh: float = 0.0
+    # Cross-currency treatment, see payscript/fx_overlay.py. None keeps the
+    # historical drift (deal rate + ccyh - rho*sigma*sigma_fx) for every
+    # product saved before quanto/compo existed. r_ccy is the flat risk-free
+    # rate of the asset's own currency, required by both modes.
+    fx_mode: Literal['quanto', 'compo'] | None = Field(default=None, exclude_if=lambda value: value is None)
+    r_ccy: float | None = Field(default=None, ge=-0.05, le=0.5, exclude_if=lambda value: value is None)
+    # Zero curve of the asset's own currency, [[maturity_years, zero_rate]] in
+    # engine units, same format and validation as the deal's yield_curve. Empty
+    # keeps the flat r_ccy, which then also serves as the fallback rate.
+    ccy_curve: List[List[float]] = Field(default_factory=list, max_length=64,
+                                         exclude_if=lambda value: not value)
+
+    @field_validator('ccy_curve')
+    @classmethod
+    def validate_ccy_curve(cls, curve):
+        return validate_term_curve(curve, "courbe de taux de la devise du sous-jacent")
+
+    @field_validator('fx_mode', mode='before')
+    @classmethod
+    def blank_fx_mode_is_historical(cls, value):
+        # The Pricer's « Historique » choice is an empty string.
+        return value or None
     # Heston
     v0: float = 0.04
     kappa: float = 2.0

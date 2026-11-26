@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/variants", tags=["variants"])
 # table, une volatilité de variante partirait à 34,27 au lieu de 0,3427.
 _POURCENTS_UL = {
     "sigma", "q", "sigma_fx", "rho_sfx", "v0", "theta", "xi", "rho_h",
-    "rho_rS", "alpha", "beta", "rho", "nu", "skew", "curvature",
+    "rho_rS", "alpha", "beta", "rho", "nu", "skew", "curvature", "r_ccy",
 }
 
 

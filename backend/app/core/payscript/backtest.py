@@ -15,7 +15,7 @@ from .evaluation import cle_de_fenetre
 # ── Historical backtest ─────────────────────────────────────────────
 
 def _historical_running_extrema(prices_by_ticker: dict, tickers: list[str], ref: dict,
-                                 lo_hi: int, hi_hi: int) -> tuple[float, float]:
+                                 lo_hi: int, hi_hi: int) -> tuple[float, float, float]:
     """Worst-of-min / best-of-max across EVERY trading day in (lo_hi, hi_hi] —
     not just the window's endpoint — using the real daily closes already
     loaded for the backtest. A barrier breached and recovered BETWEEN two AT
@@ -28,8 +28,12 @@ def _historical_running_extrema(prices_by_ticker: dict, tickers: list[str], ref:
 
     Returns (math.inf, -math.inf) if the window is empty or no ticker has
     data for any day in it — neutral for the caller's running min()/max(),
-    so an empty/missing window never falsely narrows or widens the extrema."""
-    wmin, bmax = math.inf, -math.inf
+    so an empty/missing window never falsely narrows or widens the extrema.
+
+    The third value is the highest worst-of (WOF_MAX). It is read only on days
+    where every asset quotes: the minimum of a partial basket overstates the
+    worst-of and would knock out a product that never touched its barrier."""
+    wmin, bmax, wmax = math.inf, -math.inf, -math.inf
     for hi in range(lo_hi + 1, hi_hi + 1):
         spots = []
         for tk in tickers:
@@ -41,7 +45,9 @@ def _historical_running_extrema(prices_by_ticker: dict, tickers: list[str], ref:
             continue
         wmin = min(wmin, min(spots))
         bmax = max(bmax, max(spots))
-    return wmin, bmax
+        if len(spots) == len(tickers):
+            wmax = max(wmax, min(spots))
+    return wmin, bmax, wmax
 
 
 def _historical_per_asset_extrema(prices_by_ticker: dict, tickers: list[str], ref: dict,
@@ -411,7 +417,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
 
     ctx = {
         "spots": [1.0]*n, "reference_spots": [ref[tk] for tk in tickers], "accum": 0.0, "index": 0,
-        "wof_min": 1.0, "bof_max": 1.0, "t": 0.0,
+        "wof_min": 1.0, "bof_max": 1.0, "wof_max": 1.0, "t": 0.0,
         "s_min": [1.0]*n, "s_max": [1.0]*n, "s_prev": [1.0]*n, "realvol": 0.0,
         "done": False, "memo": full_params, "total_cf": 0.0,
     }
@@ -423,6 +429,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     obs_idx = 0
     wof_run = 1.0
     bof_run = 1.0
+    wof_max_run = 1.0
     s_min_run = [1.0] * n
     s_max_run = [1.0] * n
     T_actual = T_max
@@ -439,9 +446,10 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
         # Fold in every trading day since the last observation (or inception)
         # before evaluating the script's condition at this date — see
         # _historical_running_extrema.
-        w_win, b_win = _historical_running_extrema(prices_by_ticker, tickers, ref, prev_hi, hi)
+        w_win, b_win, wx_win = _historical_running_extrema(prices_by_ticker, tickers, ref, prev_hi, hi)
         wof_run = min(wof_run, w_win)
         bof_run = max(bof_run, b_win)
+        wof_max_run = max(wof_max_run, wx_win)
         pa_min, pa_max = _historical_per_asset_extrema(prices_by_ticker, tickers, ref, prev_hi, hi)
         s_min_run = [min(a, b) for a, b in zip(s_min_run, pa_min)]
         s_max_run = [max(a, b) for a, b in zip(s_max_run, pa_max)]
@@ -477,7 +485,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                     "s_min": list(s_min_run), "s_max": list(s_max_run),
                     "realvol": _rv_at(hi),
                     "t": t_y, "wof_min": wof_run,
-                    "bof_max": bof_run, "index": obs_idx + 1})
+                    "bof_max": bof_run, "wof_max": wof_max_run, "index": obs_idx + 1})
         obs_idx += 1
         for ev_i, ev in enumerate(step_map[t_obs]):
             if done:
@@ -527,9 +535,10 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             maturity_t = lecture.effective_time(T_max) if history_policy is not None else T_max
             if history_policy is not None:
                 T_actual = maturity_t
-            w_win, b_win = _historical_running_extrema(prices_by_ticker, tickers, ref, prev_hi, mhi)
+            w_win, b_win, wx_win = _historical_running_extrema(prices_by_ticker, tickers, ref, prev_hi, mhi)
             wof_run = min(wof_run, w_win)
             bof_run = max(bof_run, b_win)
+            wof_max_run = max(wof_max_run, wx_win)
             pa_min, pa_max = _historical_per_asset_extrema(prices_by_ticker, tickers, ref, prev_hi, mhi)
             s_min_run = [min(a, b) for a, b in zip(s_min_run, pa_min)]
             s_max_run = [max(a, b) for a, b in zip(s_max_run, pa_max)]
@@ -542,7 +551,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
                         "s_min": list(s_min_run), "s_max": list(s_max_run),
                         "realvol": _rv_at(mhi),
                         "t": maturity_t,
-                        "wof_min": wof_run, "bof_max": bof_run})
+                        "wof_min": wof_run, "bof_max": bof_run, "wof_max": wof_max_run})
             for ev in mat_events:
                 if done:
                     break
@@ -574,9 +583,10 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
     # BETWEEN two observation dates must show in the inherited state (min/max
     # folding is idempotent, re-folding an already-scanned window is harmless).
     if end_idx > prev_hi:
-        w_tail, b_tail = _historical_running_extrema(prices_by_ticker, tickers, ref, prev_hi, end_idx)
+        w_tail, b_tail, wx_tail = _historical_running_extrema(prices_by_ticker, tickers, ref, prev_hi, end_idx)
         wof_run = min(wof_run, w_tail)
         bof_run = max(bof_run, b_tail)
+        wof_max_run = max(wof_max_run, wx_tail)
         pa_min, pa_max = _historical_per_asset_extrema(prices_by_ticker, tickers, ref, prev_hi, end_idx)
         s_min_run = [min(a, b) for a, b in zip(s_min_run, pa_min)]
         s_max_run = [max(a, b) for a, b in zip(s_max_run, pa_max)]
@@ -618,6 +628,7 @@ def eval_script_on_history(compiled: CompiledScript, dates: list[str],
             "index": obs_idx,
             "wof_min": wof_run,
             "bof_max": bof_run,
+            "wof_max": wof_max_run,
             "accum": ctx.get("accum", 0.0),
             "s_min": list(s_min_run),
             "s_max": list(s_max_run),

@@ -80,6 +80,6 @@ def validate_pricing_calibrations(request, effective_horizon: float, *, secret: 
         if not math.isclose(underlying.sigma, reference, rel_tol=1e-10, abs_tol=5.1e-9):
             raise ValueError('Niveau de volatilité modifié depuis la calibration.')
         if (request.yield_curve or request.sigma_r or underlying.dividend_curve
-                or underlying.dividend_decay or underlying.ccyh
+                or underlying.dividend_decay or underlying.ccyh or underlying.fx_mode
                 or underlying.sigma_fx*underlying.rho_sfx):
             raise ValueError('Calibration qualifiée uniquement à taux et dividende plats, sans quanto. Choisissez des hypothèses manuelles explicites pour ce contexte.')

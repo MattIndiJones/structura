@@ -156,7 +156,7 @@ export function installParsePrepare(s) {
     const frozenLsv = globalParams.model === 'lsv' && !s.isPreStrike()
       && !yieldCurve.enabled && !_rateParams().sigma_r && globalParams.barrierMonitoring === 'weekly'
       && underlyings.value.every(u => u.vol_surface && !_buildDividendCurve(u).length
-        && !Number(u.ccyh) && !(u.sigma_fx * u.rho_sfx))
+        && !Number(u.ccyh) && !u.fx_mode && !(u.sigma_fx * u.rho_sfx))
     const items=underlyings.value.filter(u=>!frozenLsv && u.vol_surface && ['sabr','lsv'].includes(globalParams.model))
     if(!items.length) return scriptReady
     const context=()=>({model:globalParams.model,horizon:globalParams.T,rate:globalParams.r})

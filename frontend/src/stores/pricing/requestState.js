@@ -111,7 +111,7 @@ export function installRequestState(s) {
   }
 
   function _hestonEvidence(u, horizon = globalParams.T, rate = globalParams.r) {
-    if (yieldCurve.enabled || _rateParams().sigma_r || u.dividendCurveEnabled || u.ccyh
+    if (yieldCurve.enabled || _rateParams().sigma_r || u.dividendCurveEnabled || u.ccyh || u.fx_mode
         || u.sigma_fx * u.rho_sfx) return null
     return explicitHestonCalibration(u, horizon, rate)?.calibration_evidence ?? null
   }
@@ -130,6 +130,11 @@ export function installRequestState(s) {
       sigma_fx: u.sigma_fx / 100,
       rho_sfx: u.rho_sfx / 100,
       ccyh: u.ccyh / 10000,
+      ...(u.fx_mode ? {
+        fx_mode: u.fx_mode, r_ccy: Number(u.r_ccy) / 100,
+        ...(u.ccyCurveEnabled && u.ccyCurve?.length
+          ? { ccy_curve: u.ccyCurve.map(p => [Number(p.T), Number(p.rate) / 100]) } : {}),
+      } : {}),
       v0: u.v0 / 100,
       kappa: u.kappa,
       theta: u.theta / 100,

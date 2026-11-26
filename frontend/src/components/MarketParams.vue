@@ -262,6 +262,23 @@
 
         <div v-if="au.showQuanto" class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs mt-2 pt-2 border-t border-slate-700">
           <div>
+            <label class="label">Change
+              <HelpTip width="w-72" text="Quanto : la performance du sous-jacent dans sa devise est payée dans la devise du deal, sans risque de change. Compo : le sous-jacent est converti dans la devise du deal au cours de change du jour, l'investisseur porte le change. « Historique » garde l'ancien calcul (drift au taux du deal) des produits enregistrés avant le 26/11/2026." />
+            </label>
+            <select v-model="au.fx_mode" class="select">
+              <option value="">Historique</option>
+              <option value="quanto">Quanto</option>
+              <option value="compo">Compo</option>
+            </select>
+          </div>
+          <div v-if="au.fx_mode">
+            <label class="label">Taux {{ au.ccy }} (%)
+              <HelpTip text="Taux sans risque plat de la devise du sous-jacent. Il porte le forward du sous-jacent ; la courbe de taux du deal reste celle de l'actualisation." />
+            </label>
+            <SensitiveValue mode="input"><input v-model.number="au.r_ccy" type="number" step="0.05" class="input" /></SensitiveValue>
+          </div>
+          <CcyCurveEditor v-if="au.fx_mode" :au="au" />
+          <div>
             <label class="label">σ<sub>FX</sub> (%) <span class="text-slate-600 font-normal">vol FX</span>
               <HelpTip text="Volatilité du taux de change entre la devise du sous-jacent (CCY) et la devise du deal. N'a d'effet que si les deux diffèrent (⚠ CCY ≠ deal ci-dessus)." />
             </label>
@@ -269,7 +286,7 @@
           </div>
           <div>
             <label class="label">ρ(S,FX) (%) <span class="text-slate-600 font-normal">corr</span>
-              <HelpTip text="Corrélation entre le sous-jacent et le taux de change — pilote l'ajustement quanto du drift (le sous-jacent est payé dans une devise, converti dans une autre à un taux fixé d'avance)." />
+              <HelpTip text="Corrélation entre le sous-jacent et le change exprimé en unités de devise du deal pour une unité de devise du sous-jacent (EUR par USD pour un S&P 500 dans un deal EUR). Elle pilote l'ajustement quanto du drift et, en compo, la volatilité du sous-jacent converti." />
             </label>
             <SensitiveValue mode="input"><input v-model.number="au.rho_sfx" type="number" step="1" min="-100" max="100" class="input" /></SensitiveValue>
           </div>
@@ -362,6 +379,7 @@ import UnderlyingVolFields from './UnderlyingVolFields.vue'
 import DividendCurveCard from './DividendCurveCard.vue'
 import YieldCurveCard from './YieldCurveCard.vue'
 import FundingCurveCard from './FundingCurveCard.vue'
+import CcyCurveEditor from './CcyCurveEditor.vue'
 import SensitiveValue from './SensitiveValue.vue'
 import HelpTip from './HelpTip.vue'
 import { formatNumber } from '../utils/format.js'

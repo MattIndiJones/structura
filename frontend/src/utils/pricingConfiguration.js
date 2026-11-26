@@ -29,7 +29,7 @@ export function readPricingConfiguration(data) {
   if (global.underlyings != null && (!Array.isArray(global.underlyings) || !global.underlyings.length
       || global.underlyings.some(u => !object(u)))) throw Error('Panier de configuration invalide.')
   for (const underlying of global.underlyings || []) {
-    for (const key of ['sigma','q','v0','theta','xi','rho_h','kappa','alpha','beta','rho','nu','skew','curvature','rho_rS','sigma_fx','rho_sfx','ccyh','dividendDecay']) {
+    for (const key of ['sigma','q','v0','theta','xi','rho_h','kappa','alpha','beta','rho','nu','skew','curvature','rho_rS','sigma_fx','rho_sfx','ccyh','dividendDecay','r_ccy']) {
       if (underlying[key] != null && (typeof underlying[key] !== 'number' || !Number.isFinite(underlying[key]))) throw Error('Hypothèse de sous-jacent invalide : '+key)
     }
     if (underlying.vol_surface != null) {

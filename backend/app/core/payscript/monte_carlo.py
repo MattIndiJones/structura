@@ -15,10 +15,18 @@ from .bridge import bridge_metadata, bridge_note, resolve_bridge_substeps, valid
 from .parser import CompiledScript
 from .time_grid import durations as _durations, metadata as _axis_metadata, step_at as _step_at, time_at as _time_at, times as _times
 from .diffusion import _atm_step_vols, _bridge_extrema, _local_vol_at_spot, _simulate_gbm, _simulate_heston, _simulate_lsv, _simulate_lv, _simulate_sabr, cholesky, validate_model
+from .fx_overlay import FX_MODES, apply_compo, attach_ccy_curves, compo_indices, fx_mode, validate_fx_terms
 from .evaluation import _basket_references, _constater, _eval_paths, _fixer_le_strike_sur_les_trajectoires, _rangs_observation, _strike_fix_steps, _window_steps
 from .local_vol import _build_lv_grid
 from .mc_axis import SY, TIME_AXIS_POLICY, _event_schedule, _simulation_axis
 from .rates import _build_rate_term, _df_at_time, _forward_rate_arr, _funding_df_arr, _rate_coupled_factor, _stochastic_rate_paths, _validate_short_rate_parameters
+
+
+def _reads_wof_max(script) -> bool:
+    """Whether the script reads WOF_MAX: every CONSTAT carries the script text."""
+    import re
+    return any(re.search(r"\bWOF_MAX\b", getattr(c, "source", "") or "", re.I)
+               for c in getattr(script, "constats", None) or ())
 
 
 # ── Main Monte Carlo entry point ────────────────────────────────────
@@ -91,6 +99,7 @@ def run_mc(script: CompiledScript,
            value_date_t: float = 0.0,
            wof_min_init=None,
            bof_max_init=None,
+           wof_max_init=None,
            index_offset: int = 0,
            memo_init: dict | None = None,
            accum_init: float = 0.0,
@@ -124,6 +133,7 @@ def run_mc(script: CompiledScript,
         )
     use_bridge = barrier_monitoring == "continuous"
     validate_model(model, underlyings)
+    validate_fx_terms(underlyings, model, path_simulator)
     user_params = effective_parameters(script.params, user_params)
     n = len(underlyings)
     T = T_max + dt_add
@@ -188,6 +198,9 @@ def run_mc(script: CompiledScript,
     # touches no random state, so the stream is unchanged.
     rates = _build_rate_term(yield_curve or [], ts, dt, r, dr)
     df_arr = rates.df
+    # Same construction for each quanto/compo asset's own-currency curve, on
+    # the same grid. Drift, FX leg, Dupire grid and LSV leverage read it.
+    underlyings = attach_ccy_curves(underlyings, ts, dt)
 
     # Le spread emetteur s'applique APRES, sur l'actualisation seule : r_det
     # ci-dessous continue de porter les forwards sans risque, donc le drift des
@@ -223,6 +236,18 @@ def run_mc(script: CompiledScript,
             residual=(spot_base is not None or fix_state_init is not None) and local_vol_anchor is None)
     else:
         frozen_lsv = False
+    # LSV with a quanto or compo asset: the leverage is fitted on the asset's
+    # own measure, where its surface is quoted, never on the deal-measure paths
+    # the particle method would otherwise use. See lsv_leverage.own_measure_leverage.
+    fx_lsv = use_lsv and any(fx_mode(u) in FX_MODES for u in underlyings)
+    if fx_lsv:
+        frozen_lsv = False
+        if (sigma_r or strike_set_t or local_vol_anchor is not None
+                or spot_base is not None or fix_state_init is not None
+                or any(u.get("dividend_curve") for u in underlyings)):
+            raise ValueError(
+                "LSV quanto/compo : disponible à l'émission, sans taux stochastique ni courbe de dividende. "
+                "La valorisation en cours de vie demande encore la vol locale ou Heston.")
     if use_lsv and local_vol_anchor is not None and not frozen_lsv:
         raise ValueError('LSV résiduel : surface SSVI, taux et dividendes plats, sans quanto, et monitoring sur grille MC requis.')
     if use_lv or use_lsv:
@@ -231,7 +256,12 @@ def run_mc(script: CompiledScript,
     if frozen_lsv and lsv_leverage is None:
         lsv_leverage = frozen_leverage(underlyings, r_eff, _durations(dt, ts), lv_data, diagnostics=lsv_limits,
             training_paths=RESIDUAL_TRAINING_PATHS if local_vol_anchor is not None else TRAINING_PATHS)
-    if lsv_leverage is not None and (not frozen_lsv or len(lsv_leverage) != n
+    if fx_lsv and lsv_leverage is None:
+        from .lsv_leverage import own_measure_leverage
+        lsv_leverage = own_measure_leverage(underlyings, r_eff if rates.step_fwd is None else rates.step_fwd,
+                                            _durations(dt, ts), lv_data,
+                                            diagnostics=lsv_limits)
+    if lsv_leverage is not None and (not (frozen_lsv or fx_lsv) or len(lsv_leverage) != n
                                     or any(g.shape != (ts, lv_data[1]) for g in lsv_leverage)):
         raise ValueError("Le levier LSV ne correspond pas à la grille de pricing.")
 
@@ -247,6 +277,10 @@ def run_mc(script: CompiledScript,
     # (base/anti) gets its own rate path from Z_r/-Z_r, paired like Z/Zv/Za.
     use_stoch_rate = sigma_r > 0
     Z_r = rng.standard_normal((ts, N_pairs)) if use_stoch_rate else None
+    # FX leg of compo assets, independent from the asset Brownian. Drawn only
+    # when a compo asset exists, so every other product keeps its rng stream.
+    _compo = compo_indices(underlyings)
+    W_fx = rng.standard_normal((ts, len(_compo), N_pairs)) if _compo else None
 
     # Coupling the assets to the rate factor changes how the diffusion block
     # must be factorised — see _blend_rate_factor. Only when the factor is
@@ -390,6 +424,9 @@ def run_mc(script: CompiledScript,
         S_base = _simulate_gbm(ts, n, N_pairs, dt, sq_dt, underlyings,
                                 r_eff, L, Z, _sim_spot_mult, vol_add, r_path_base, Z_r,
                                 vol_out=vol_base, step_vols=step_vols)
+    if W_fx is not None:
+        S_base = apply_compo(S_base, Z, L, W_fx, underlyings, dt, ts, r_eff,
+                             r_path_base, Z_r, vol_out=vol_base)
     S_base = _apply_delayed_bump(S_base)
     # Bridge extrema from the (possibly bumped) paths — the bridge scales with
     # the level in log-space, so post-bump is the consistent order. Uniform
@@ -447,7 +484,7 @@ def run_mc(script: CompiledScript,
                                           flows_at_payment=flows_at_payment,
                                           flow_labels_out=labels_base,
                                           bridge_min=br_min_b, bridge_max=br_max_b,
-                                          wof_min_init=wof_min_init, bof_max_init=bof_max_init,
+                                          wof_min_init=wof_min_init, bof_max_init=bof_max_init, wof_max_init=wof_max_init,
                                           index_offset=index_offset, memo_init=memo_init,
                                           accum_init=accum_init,
                                           s_min_init=s_min_init, s_max_init=s_max_init,
@@ -483,6 +520,8 @@ def run_mc(script: CompiledScript,
             np.negative(Za, out=Za)
         if Z_r is not None:
             np.negative(Z_r, out=Z_r)
+        if W_fx is not None:
+            np.negative(W_fx, out=W_fx)
         Z_r_anti = Z_r if use_stoch_rate else None
         # Same buffer as the base leg — its bridge extrema were drawn above and
         # nothing reads it any more.
@@ -507,6 +546,9 @@ def run_mc(script: CompiledScript,
             S_anti = _simulate_gbm(ts, n, N_pairs, dt, sq_dt, underlyings,
                                     r_eff, L, Z, _sim_spot_mult, vol_add, r_path_anti, Z_r_anti,
                                     vol_out=vol_anti, step_vols=step_vols)
+        if W_fx is not None:
+            S_anti = apply_compo(S_anti, Z, L, W_fx, underlyings, dt, ts, r_eff,
+                                 r_path_anti, Z_r_anti, vol_out=vol_anti)
         S_anti = _apply_delayed_bump(S_anti)
         br_min_a, br_max_a = _bridge_extrema(
             S_anti, vol_anti, dt, rng, corr, substeps=refinement,
@@ -536,7 +578,7 @@ def run_mc(script: CompiledScript,
                                               flows_at_payment=flows_at_payment,
                                               flow_labels_out=labels_anti,
                                               bridge_min=br_min_a, bridge_max=br_max_a,
-                                              wof_min_init=wof_min_init, bof_max_init=bof_max_init,
+                                              wof_min_init=wof_min_init, bof_max_init=bof_max_init, wof_max_init=wof_max_init,
                                               index_offset=index_offset, memo_init=memo_init,
                                               accum_init=accum_init,
                                               s_min_init=s_min_init, s_max_init=s_max_init,
@@ -629,10 +671,13 @@ def run_mc(script: CompiledScript,
         # entitled to know the price used a matrix it did not supply.
         "corr_repair": corr_repair or None,
         "barrier_monitoring": barrier_monitoring,
-        "barrier_monitoring_note": bridge_note(n, corr, refinement) if use_bridge else None,
+        "barrier_monitoring_note": (bridge_note(n, corr, refinement)
+                                    + (" WOF_MAX, plus haut du worst-of, se lit sur la grille MC en panier."
+                                       if n > 1 and _reads_wof_max(script) else "")) if use_bridge else None,
         "barrier_monitoring_details": bridge_details,
         **({"local_vol_wings": local_vol_wings} if local_vol_wings else {}),
         **({"lsv_frozen_leverage": True} if frozen_lsv else {}),
+        **({"lsv_own_measure_leverage": True} if fx_lsv else {}),
         **({"lsv_limits": lsv_limits} if lsv_limits else {}),
         # Publish the actual distinct contractual fixings used by each window.
         "constatation_windows": _window_report(script, ts, dt) or None,

@@ -331,6 +331,9 @@ class _RunningState(NamedTuple):
     cum_sq_ret: np.ndarray
     rv_sumsq0: object
     rv_t0: object
+    # Plus haut courant du worst-of (WOF_MAX) : le max dans le temps du min
+    # entre actifs, qui ne se deduit ni de S_MAX ni de BOF_MAX.
+    WOF_max: np.ndarray | None = None
 
 
 def _fixer_le_strike_sur_les_trajectoires(S: np.ndarray, k: int, bridge_min=None,
@@ -371,7 +374,7 @@ def _fixer_le_strike_sur_les_trajectoires(S: np.ndarray, k: int, bridge_min=None
 def _running_state(script, S, n: int, N: int, bridge_min, bridge_max,
                    wof_min_init=None, bof_max_init=None,
                    s_min_init=None, s_max_init=None, wof0_init=None,
-                   realvol_state_init=None) -> _RunningState:
+                   realvol_state_init=None, wof_max_init=None) -> _RunningState:
     """Extrema courants et variance realisee cumulee.
 
     Tout se lit ici sur la TRAJECTOIRE, jamais sur les niveaux constates : une
@@ -390,6 +393,13 @@ def _running_state(script, S, n: int, N: int, bridge_min, bridge_max,
         WOF_min = np.minimum(WOF_min, wof_min_init)
     if bof_max_init is not None:
         BOF_max = np.maximum(BOF_max, bof_max_init)
+    # Le pont brownien donne un extremum PAR actif : le plus haut du worst-of
+    # n'en est l'exact qu'en mono sous-jacent. En panier, il se lit sur la
+    # grille, ce que dit la note de monitoring.
+    WOF_max = np.maximum.accumulate(
+        bridge_max[:, 0, :] if bridge_max is not None and n == 1 else WOF_path, axis=0)
+    if wof_max_init is not None:
+        WOF_max = np.maximum(WOF_max, wof_max_init)
 
     # Min/max par actif (S_MIN[i]/S_MAX[i]) — distincts de WOF_min/BOF_max qui
     # sont au niveau du panier. Puis vol realisee de l'indice WOF, annualisee
@@ -414,6 +424,7 @@ def _running_state(script, S, n: int, N: int, bridge_min, bridge_max,
         WOF, BOF, WOF_min, BOF_max, S_min, S_max, cum_sq_ret,
         realvol_state_init["sumsq"] if realvol_state_init else 0.0,
         realvol_state_init["t"] if realvol_state_init else 0.0,
+        WOF_max,
     )
 
 
@@ -471,7 +482,8 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 reference_spots=None,
                 flow_labels_out: list | None = None,
                 flow_observations_out: list | None = None,
-                analysis_out: list | None = None) -> list[float]:
+                analysis_out: list | None = None,
+                wof_max_init=None) -> list[float]:
     """Evaluate PayScript on pre-computed spot paths. Observation-only loop.
 
     wof_min_init / bof_max_init (None, a scalar, or array of shape (N,)) seed the
@@ -509,9 +521,10 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
     stay endpoint-based: those are discrete contractual fixings."""
     _st = _running_state(script, S, n, N, bridge_min, bridge_max,
                          wof_min_init, bof_max_init, s_min_init, s_max_init,
-                         wof0_init, realvol_state_init)
+                         wof0_init, realvol_state_init, wof_max_init=wof_max_init)
     WOF, BOF = _st.WOF, _st.BOF
     WOF_min, BOF_max = _st.WOF_min, _st.BOF_max
+    WOF_max = _st.WOF_max
     S_min, S_max = _st.S_min, _st.S_max
     cum_sq_ret = _st.cum_sq_ret
     rv_sumsq0, rv_t0 = _st.rv_sumsq0, _st.rv_t0
@@ -553,7 +566,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
             "reference_spots": _path_references(reference_spots, lvl_map, path),
             "accum": float(accum_init[path]) if _accum_by_path else accum_init,
             "index": 0,
-            "wof_min": 1.0, "bof_max": 1.0, "t": 0.0,
+            "wof_min": 1.0, "bof_max": 1.0, "wof_max": 1.0, "t": 0.0,
             "s_min": [1.0] * n, "s_max": [1.0] * n, "s_prev": [1.0] * n, "realvol": 0.0,
             "done": False, "memo": {**full_params}, "total_cf": 0.0, "total_cf_raw": 0.0,
         }
@@ -595,6 +608,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                                         / (_rv_t + max(1e-15, float(axis[step]) - float(axis[state_start_step])))))
             ctx["t"] = float(axis[step])
             ctx["wof_min"] = float(WOF_min[step - 1, path])
+            ctx["wof_max"] = float(WOF_max[step - 1, path])
             ctx["bof_max"] = float(BOF_max[step - 1, path])
             previous_time = None
 
@@ -685,6 +699,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                                         / (_rv_t + max(1e-15, float(axis[ts]) - float(axis[state_start_step])))))
             ctx["t"] = float(axis[ts])
             ctx["wof_min"] = float(WOF_min[ts - 1, path])
+            ctx["wof_max"] = float(WOF_max[ts - 1, path])
             ctx["bof_max"] = float(BOF_max[ts - 1, path])
             for ev in mat_events:
                 if done:
@@ -752,6 +767,7 @@ def _eval_paths(script: CompiledScript, S: np.ndarray, ts: int, n: int, N: int,
                 "accum": ctx["accum"],
                 "s_prev": list(ctx["spots"]),
                 "wof_min": float(WOF_min[ts - 1, path]),
+                "wof_max": float(WOF_max[ts - 1, path]),
                 "bof_max": float(BOF_max[ts - 1, path]),
                 "s_min": [float(v) for v in S_min[ts - 1, :, path]],
                 "s_max": [float(v) for v in S_max[ts - 1, :, path]],
@@ -784,7 +800,8 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                           realvol_state_init: dict | None = None,
                           lvl_map: dict | None = None,
                           rank_map: dict | None = None,
-                          state_start_step: int = 0, reference_spots=None) -> dict:
+                          state_start_step: int = 0, reference_spots=None,
+                          wof_max_init=None) -> dict:
     """Like _eval_paths but returns per-path outcome classification.
 
     df_arr (ts+1,) — optional deterministic discount curve; None falls back to
@@ -792,9 +809,10 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
     bridge_min/bridge_max: continuous-monitoring extrema, see _eval_paths."""
     _st = _running_state(script, S, n, N, bridge_min, bridge_max,
                          wof_min_init, bof_max_init, s_min_init, s_max_init,
-                         wof0_init, realvol_state_init)
+                         wof0_init, realvol_state_init, wof_max_init=wof_max_init)
     WOF, BOF = _st.WOF, _st.BOF
     WOF_min, BOF_max = _st.WOF_min, _st.BOF_max
+    WOF_max = _st.WOF_max
     S_min, S_max = _st.S_min, _st.S_max
     cum_sq_ret = _st.cum_sq_ret
     rv_sumsq0, rv_t0 = _st.rv_sumsq0, _st.rv_t0
@@ -835,7 +853,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
             "reference_spots": _path_references(reference_spots, lvl_map, path),
             "accum": float(accum_init[path]) if _accum_by_path else accum_init,
             "index": 0,
-            "wof_min": 1.0, "bof_max": 1.0, "t": 0.0,
+            "wof_min": 1.0, "bof_max": 1.0, "wof_max": 1.0, "t": 0.0,
             "s_min": [1.0]*n, "s_max": [1.0]*n, "s_prev": [1.0]*n, "realvol": 0.0,
             "done": False, "memo": {**full_params}, "total_cf": 0.0, "total_cf_raw": 0.0,
         }
@@ -873,6 +891,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                                         / (_rv_t + max(1e-15, float(axis[step]) - float(axis[state_start_step])))))
             ctx["t"] = float(axis[step])
             ctx["wof_min"] = float(WOF_min[step-1, path])
+            ctx["wof_max"] = float(WOF_max[step-1, path])
             ctx["bof_max"] = float(BOF_max[step-1, path])
             previous_time = None
             for ev_i, ev in enumerate(step_map[step]):
@@ -931,6 +950,7 @@ def _eval_paths_detailed(script: CompiledScript, S: np.ndarray, ts: int, n: int,
                                         / (_rv_t + max(1e-15, float(axis[ts]) - float(axis[state_start_step])))))
             ctx["t"] = float(axis[ts])
             ctx["wof_min"] = float(WOF_min[ts-1, path])
+            ctx["wof_max"] = float(WOF_max[ts-1, path])
             ctx["bof_max"] = float(BOF_max[ts-1, path])
             for ev in mat_events:
                 if done:

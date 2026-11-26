@@ -512,7 +512,7 @@ def _validate_atm_mtf_options(req, valuation, residual):
     if not (req.gbm_atm_curve or req.indicative_heston):
         return
     if (req.reference_paths is None or residual is not None or valuation.T > 10. + 1e-9
-            or any(u.get('ccyh') or u.get('sigma_fx')*u.get('rho_sfx')
+            or any(u.get('ccyh') or u.get('fx_mode') or u.get('sigma_fx')*u.get('rho_sfx')
                    for u in valuation.underlyings)):
         raise ValueError('L’étude ATM est disponible à l’émission, jusqu’à 10 ans et sans quanto.')
     if req.gbm_atm_curve and (req.model != 'constant' or any(

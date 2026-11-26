@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any, Literal
 
 from pydantic import (
-    BaseModel, ConfigDict, Field, RootModel, model_serializer, model_validator,
+    BaseModel, ConfigDict, Field, RootModel, field_validator, model_serializer, model_validator,
 )
 
 from ..valuation_context import canonical_fingerprint, canonical_json
@@ -50,6 +50,15 @@ class UnderlyingIdentity(FrozenModel):
     name: str = Field(min_length=1)
     ticker: str = ""
     ccy: str = Field(min_length=3, max_length=3)
+    # Quanto or compo is a clause of the term sheet, not a market assumption:
+    # a pricing context must never be able to turn one into the other. Absent
+    # for every product saved before 26/11/2026, so their fingerprint is unchanged.
+    fx_mode: Literal["quanto", "compo"] | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("fx_mode", mode="before")
+    @classmethod
+    def blank_is_historical(cls, value):
+        return value or None
 
 
 class ContractParameter(FrozenModel):

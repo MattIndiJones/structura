@@ -83,7 +83,7 @@ def _greeks_state(ctx: dict) -> dict:
     state = ctx["state"]
     return {
         "spot_base": ctx["norm_spots"],
-        "wof_min": state["wof_min"], "bof_max": state["bof_max"],
+        "wof_min": state["wof_min"], "bof_max": state["bof_max"], "wof_max": state.get("wof_max"),
         "index": state["index"], "memo": state["memo"],
         "accum": state["accum"], "s_min": state["s_min"],
         "s_max": state["s_max"], "s_prev": state["s_prev"],

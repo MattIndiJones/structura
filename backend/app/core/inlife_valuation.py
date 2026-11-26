@@ -176,6 +176,11 @@ def _engine_underlyings(market: dict, underlyings_json: list) -> list[dict]:
             "dividend_decay": g("dividendDecay", 0.0),
             "sigma_fx": g("sigma_fx", 0.0), "rho_sfx": g("rho_sfx", 0.0),
             "ccyh": g("ccyh", 0.0, 10000.0),
+            **({"fx_mode": u["fx_mode"], "r_ccy": g("r_ccy", None),
+                # Pillars left on screen behind a disabled switch never priced.
+                "ccy_curve": [[float(n["T"]), float(n["rate"]) / 100.0] for n in u.get("ccyCurve") or []]
+                if u.get("ccyCurveEnabled", True) else []}
+               if u.get("fx_mode") else {}),
             "v0": g("v0", 0.04), "kappa": u.get("kappa") or 2.0,
             "theta": g("theta", 0.04), "xi": g("xi", 0.35),
             "rho_h": g("rho_h", -0.70), "rho_rS": g("rho_rS", 0.40),
@@ -410,7 +415,7 @@ def build_residual(p: InLifeProduct, prices: dict, dates_list: list,
             "memo": {}, "index": 0, "accum": 0.0, "wof_last": 1.0,
             # None = comportement jour 0 de run_mc, cf. _eval_paths : rien
             # d'hérité, rien de neutralisé à la main.
-            "wof_min": None, "bof_max": None,
+            "wof_min": None, "bof_max": None, "wof_max": None,
             "s_min": None, "s_max": None, "s_prev": None,
             "realvol_state": None, "fix_state": None,
         }

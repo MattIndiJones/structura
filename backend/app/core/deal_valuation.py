@@ -511,7 +511,7 @@ def mtm_core(
         constats=terms.constats.to_dict(),
         state={
             "spot_mult": norm_spots, "spot_base": norm_spots,
-            "wof_min_init": state["wof_min"], "bof_max_init": state["bof_max"],
+            "wof_min_init": state["wof_min"], "bof_max_init": state["bof_max"], "wof_max_init": state.get("wof_max"),
             "index_offset": state["index"], "memo_init": state["memo"],
             "accum_init": state["accum"], "s_min_init": state["s_min"],
             "s_max_init": state["s_max"], "s_prev_init": state["s_prev"],

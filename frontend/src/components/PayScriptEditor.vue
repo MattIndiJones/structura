@@ -357,7 +357,7 @@ const referenceSections = [
     { kw: 'COUPON * INDEX', desc: 'Cumul d’un coupon par période, sans annualisation implicite' },
     { kw: 'INDIC(condition)', desc: '1 si la condition est vraie, 0 sinon' },
     { kw: 'M_', desc: 'Barrière surveillée par Booking ; observable et direction déduits de son usage' },
-    { kw: 'WOF_MIN / BOF_MAX / S_MIN[i]', desc: 'Extrema historiques depuis le fixing initial (barrières américaines)' },
+    { kw: 'WOF_MIN / BOF_MAX / WOF_MAX / S_MIN[i]', desc: 'Extrema historiques depuis le fixing initial (barrières américaines)' },
   ] },
 ]
 

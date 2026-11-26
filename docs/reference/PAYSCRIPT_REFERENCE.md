@@ -96,6 +96,7 @@ autres scripts, la fiche de l'assistant présente des indicateurs structurels.
 | `BOF` | Best-of : niveau courant du plus haut sous-jacent |
 | `WOF_MIN` | Minimum **atteint depuis l'origine** par le worst-of (barrière américaine) |
 | `BOF_MAX` | Maximum atteint depuis l'origine par le best-of |
+| `WOF_MAX` | Maximum atteint depuis l'origine par le worst-of : le plus haut, dans le temps, du plus bas des sous-jacents (barrière désactivante d'une Shark note worst-of). En panier sous monitoring continu, il se lit sur la grille MC |
 | `BASKET` | Moyenne des sous-jacents. `BASKET` ou `BASKET()` = équipondérée ; `BASKET(0.6, 0.4)` = pondérée, **exactement un poids par sous-jacent** |
 | `S` | `S[i]` : niveau du sous-jacent *i*, **indicé de 1 à N** |
 | `S_MIN` | `S_MIN[i]` : minimum atteint par le sous-jacent *i* depuis l'origine |
@@ -589,7 +590,7 @@ Après réduction, `WOF`, `BOF`, `BASKET` et `S[i]` valent directement la
 performance contre `S0` — il n'y a aucun rapport à écrire à la main.
 
 Tant que la fenêtre de départ n'est pas close, `S0` n'existe pas : les
-observations américaines (`WOF_MIN`, `BOF_MAX`, `S_MIN[i]`, `S_MAX[i]`) ne
+observations américaines (`WOF_MIN`, `BOF_MAX`, `WOF_MAX`, `S_MIN[i]`, `S_MAX[i]`) ne
 commencent à accumuler qu'après elle. Il n'y a rien dont une barrière puisse
 être le pourcentage avant.
 

@@ -139,6 +139,14 @@ export function installLoaders(s) {
       if (market?.[field] != null) out[field] = fractionToPercentExact(market[field])
     }
     if (market?.ccyh != null) out.ccyh = Number(market.ccyh) * 10000
+    if (market?.fx_mode) {
+      out.fx_mode = market.fx_mode
+      out.r_ccy = market.r_ccy == null ? null : fractionToPercentExact(market.r_ccy)
+      out.showQuanto = true
+      const ccyCurve = market.ccy_curve || []
+      out.ccyCurveEnabled = ccyCurve.length > 0
+      out.ccyCurve = ccyCurve.map(([T, rate]) => ({ T: Number(T), rate: fractionToPercentExact(rate) }))
+    }
     if (market?.kappa != null) out.kappa = Number(market.kappa)
     const curve = market?.dividend_curve || []
     if (curve.length) {
@@ -289,6 +297,9 @@ export function installLoaders(s) {
       underlyings.value = savedUnderlyings.map((u, i) => ({
         ..._defaultUnderlying(i + 1),
         ...Object.fromEntries(Object.entries(u).filter(([, v]) => v != null)),
+        // A snapshot carries the asset-currency curve's pillars; the switch is
+        // implied by them, or a reopened deal would reprice without its curve.
+        ccyCurveEnabled: u.ccyCurveEnabled ?? (u.ccyCurve?.length > 0),
         _smileDefaults: false,
         vol_level_source: 'saved',
       }))

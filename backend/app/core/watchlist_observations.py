@@ -15,6 +15,12 @@ def _positive(value):
     return value if math.isfinite(value) and value > 0 else None
 
 
+def _joint_wof_max(paths):
+    """Highest worst-of since the strike (1.0 at inception), on dates every asset quotes."""
+    common = set.intersection(*(set(p) for p in paths)) if paths else set()
+    return max([1.0] + [min(p[i] for p in paths) for i in common])
+
+
 def watchlist_observations(underlyings, initial_levels, history, strike, asof):
     """Never compact missing constituents or infer extrema from current spots.
 
@@ -27,6 +33,7 @@ def watchlist_observations(underlyings, initial_levels, history, strike, asof):
     all_indices = sorted((i for i, day in enumerate(dates) if day <= asof),
                          key=lambda i: dates[i])
     rows = []
+    joint_paths = []
     for underlying in underlyings:
         name, ticker = underlying["name"], underlying.get("ticker", "")
         initial = _positive(initial_levels.get(name))
@@ -67,6 +74,7 @@ def watchlist_observations(underlyings, initial_levels, history, strike, asof):
         if source_dates and any(i >= len(source_dates) or source_dates[i] < strike for i in indices):
             continue
         path = [1.0] + [valid[i] / initial for i in indices]
+        joint_paths.append({i: valid[i] / initial for i in indices})
         row.update(min_perf=min(path), max_perf=max(path), extrema_status="AVAILABLE")
     current_complete = bool(rows) and all(r["perf"] is not None for r in rows)
     extrema_complete = bool(rows) and all(r["min_perf"] is not None for r in rows)
@@ -75,6 +83,9 @@ def watchlist_observations(underlyings, initial_levels, history, strike, asof):
         bof=max(r["perf"] for r in rows) if current_complete else None,
         basket=sum(r["perf"] for r in rows) / len(rows) if current_complete else None,
         wof_min=min(r["min_perf"] for r in rows) if extrema_complete else None,
+        # Highest worst-of: the max over common dates of the min across assets,
+        # which per-asset extrema cannot give.
+        wof_max=_joint_wof_max(joint_paths) if extrema_complete and len(joint_paths) == len(rows) else None,
         bof_max=max(r["max_perf"] for r in rows) if extrema_complete else None,
         coverage=dict(total=len(rows), current_available=sum(r["perf"] is not None for r in rows),
                       extrema_available=sum(r["min_perf"] is not None for r in rows),

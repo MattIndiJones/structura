@@ -594,7 +594,7 @@
       "key": "twin_win",
       "label": "Twin Win",
       "family": "capital",
-      "description": "Gain sur la valeur absolue de la performance, plafonné, tant que la barrière américaine n'est pas franchie. Barrière franchie : le capital suit le worst-of.",
+      "description": "Gain sur la valeur absolue de la performance, plafonné, tant que la barrière américaine n'est pas franchie. Barrière franchie : le capital suit le worst-of, hausse plafonnée au même niveau.",
       "underlyings": {
         "min": 1,
         "max": 5
@@ -618,7 +618,8 @@
       "script": [
         "UNDERLYING Basket",
         "",
-        "# Twin Win — performance absolue plafonnée tant que la barrière n'est pas franchie",
+        "# Twin Win — performance absolue plafonnée tant que la barrière n'est pas franchie,",
+        "# hausse plafonnée au même niveau après franchissement",
         "PARAM CAP",
         "PARAM M_KI_BAR",
         "",
@@ -634,7 +635,7 @@
         "  SET DNS = MIN(CAP, MAX(1, 2 - WORSTOF(Basket.yield)))",
         "  PAY 1 \"Capital — remboursement à maturité\"",
         "  PAY (1 - BREACHED) * (MAX(UPS, DNS) - 1) \"Performance absolue plafonnée\"",
-        "  PAY BREACHED * MAX(WORSTOF(Basket.yield) - 1, 0) \"Hausse après franchissement\"",
+        "  PAY BREACHED * (UPS - 1) \"Hausse plafonnée après franchissement\"",
         "  PAY -BREACHED * MAX(1 - WORSTOF(Basket.yield), 0) \"Put vendu — perte en capital\""
       ],
       "version": "2.0"
@@ -689,7 +690,7 @@
       "key": "shark_note",
       "label": "Shark note",
       "family": "capital",
-      "description": "Capital garanti et participation à la hausse, remplacée par un rebate si le best-of a touché la barrière désactivante pendant la vie du produit.",
+      "description": "Capital garanti et participation à la hausse, remplacée par un rebate si le worst-of a touché la barrière désactivante pendant la vie du produit. Désactivation et participation portent sur la même performance.",
       "underlyings": {
         "min": 1,
         "max": 5
@@ -726,7 +727,7 @@
         "  Basket.spot0 = Basket.spot@StartDate",
         "",
         "AT MaturityDate:",
-        "  SET KO = INDIC(BOF_MAX >= M_KO_BAR)",
+        "  SET KO = INDIC(WOF_MAX >= M_KO_BAR)",
         "  SET CALL = PART * MAX(0, WORSTOF(Basket.yield) - STRIKE)",
         "  PAY 1 \"Remboursement nominal\"",
         "  PAY CALL \"Participation à la hausse\"",

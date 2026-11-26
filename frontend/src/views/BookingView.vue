@@ -347,6 +347,7 @@ function gaugeObservableLabel(deal, observable) {
   }
   if (observable === 'WOF_MIN') return `${single || 'Worst-of'} · plus bas depuis le strike`
   if (observable === 'BOF_MAX') return `${single || 'Best-of'} · plus haut depuis le strike`
+  if (observable === 'WOF_MAX') return `${single || 'Worst-of'} · plus haut depuis le strike`
   if (observable === 'BASKET') return 'Panier'
   const indexed = /^S(?:_MIN|_MAX)?\[(\d+)\]$/.exec(observable || '')
   if (indexed) return tickerOf(rows[Number(indexed[1]) - 1]) || observable

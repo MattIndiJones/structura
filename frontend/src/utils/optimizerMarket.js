@@ -22,7 +22,7 @@ export function optimizerMarketFromPricer(input) {
   const tickers = input.underlyings.map(u => u.ticker?.trim())
   if (tickers.some(t => !t) || new Set(tickers).size !== tickers.length)
     throw Error('Renseignez des tickers distincts dans le Pricer.')
-  if (input.underlyings.some(u => u.ccy !== input.currency || Number(u.ccyh || 0) !== 0
+  if (input.underlyings.some(u => u.ccy !== input.currency || u.fx_mode || Number(u.ccyh || 0) !== 0
     || Number(u.sigma_fx || 0)*Number(u.rho_sfx || 0) !== 0))
     throw Error('Même devise requise, sans hypothèse FX/quanto ou basis à convertir.')
   const market = {

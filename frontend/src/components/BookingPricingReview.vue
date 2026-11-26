@@ -92,6 +92,12 @@ function underlyingFields(u) {
   for (const [key, label, percent] of modelFields) {
     if (u[key] != null) fields.push({ key, label, value: percent ? pct(u[key]) : number(u[key]) })
   }
+  if (u.fx_mode) {
+    fields.push({ key: 'fx_mode', label: 'Change', value: u.fx_mode === 'compo' ? 'Compo' : 'Quanto' })
+    if (u.r_ccy != null) fields.push({ key: 'r_ccy', label: `Taux ${u.ccy}`, value: pct(u.r_ccy) })
+    if (u.ccyCurve?.length) fields.push({ key: 'ccy_curve', label: `Courbe ${u.ccy}`,
+      value: u.ccyCurve.map(p => `${number(p.T)}A ${pct(p.rate)}`).join(' · ') })
+  }
   if (u.sigma_fx != null && u.ccy !== props.snapshot.deal_ccy) {
     fields.push({ key: 'sigma_fx', label: 'Vol FX', value: pct(u.sigma_fx) })
     if (u.rho_sfx != null) fields.push({ key: 'rho_sfx', label: 'ρ spot/FX', value: pct(u.rho_sfx) })

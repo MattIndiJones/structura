@@ -714,6 +714,7 @@ def _live_mark(request: AthenaMarkRequest, history: _History) -> tuple[dict, lis
                       memory_periods=history.unpaid_coupon_periods, state={
         "wof_min_init": state["wof_min"],
         "bof_max_init": state["bof_max"],
+        "wof_max_init": state.get("wof_max"),
         "index_offset": state["index"],
         "memo_init": state["memo"],
         "accum_init": state["accum"],

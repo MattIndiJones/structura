@@ -388,7 +388,7 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
               'family': 'capital',
               'description': 'Gain sur la valeur absolue de la performance, plafonné, tant que la '
                              "barrière américaine n'est pas franchie. Barrière franchie : le "
-                             'capital suit le worst-of.',
+                             'capital suit le worst-of, hausse plafonnée au même niveau.',
               'underlyings': {'min': 1, 'max': 5},
               'tenors': ['1Y', '18M', '2Y', '3Y', '4Y', '5Y'],
               'constats': {'MATURITYDATE': {'role': 'maturity'},
@@ -397,7 +397,8 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
               'script': 'UNDERLYING Basket\n'
                         '\n'
                         "# Twin Win — performance absolue plafonnée tant que la barrière n'est pas "
-                        'franchie\n'
+                        'franchie,\n'
+                        '# hausse plafonnée au même niveau après franchissement\n'
                         'PARAM CAP\n'
                         'PARAM M_KI_BAR\n'
                         '\n'
@@ -414,8 +415,7 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                         '  PAY 1 "Capital — remboursement à maturité"\n'
                         '  PAY (1 - BREACHED) * (MAX(UPS, DNS) - 1) "Performance absolue '
                         'plafonnée"\n'
-                        '  PAY BREACHED * MAX(WORSTOF(Basket.yield) - 1, 0) "Hausse après '
-                        'franchissement"\n'
+                        '  PAY BREACHED * (UPS - 1) "Hausse plafonnée après franchissement"\n'
                         '  PAY -BREACHED * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte en '
                         'capital"'},
  'booster': {'label': 'Booster',
@@ -448,8 +448,9 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
  'shark_note': {'label': 'Shark note',
                 'family': 'capital',
                 'description': 'Capital garanti et participation à la hausse, remplacée par un '
-                               'rebate si le best-of a touché la barrière désactivante pendant la '
-                               'vie du produit.',
+                               'rebate si le worst-of a touché la barrière désactivante pendant la '
+                               'vie du produit. Désactivation et participation portent sur la même '
+                               'performance.',
                 'underlyings': {'min': 1, 'max': 5},
                 'tenors': ['1Y', '18M', '2Y', '3Y', '4Y', '5Y'],
                 'constats': {'MATURITYDATE': {'role': 'maturity'},
@@ -471,7 +472,7 @@ PRODUCTS: dict[str, dict] = {'autocall_athena': {'label': 'Autocall Athena (barr
                           '  Basket.spot0 = Basket.spot@StartDate\n'
                           '\n'
                           'AT MaturityDate:\n'
-                          '  SET KO = INDIC(BOF_MAX >= M_KO_BAR)\n'
+                          '  SET KO = INDIC(WOF_MAX >= M_KO_BAR)\n'
                           '  SET CALL = PART * MAX(0, WORSTOF(Basket.yield) - STRIKE)\n'
                           '  PAY 1 "Remboursement nominal"\n'
                           '  PAY CALL "Participation à la hausse"\n'

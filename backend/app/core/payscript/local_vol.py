@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import numpy as np
 from .time_grid import durations as _durations, time_at as _time_at, times as _times
+from .fx_overlay import FX_MODES, foreign_zero, fx_mode
 
 
 # ── Dupire local vol ────────────────────────────────────────────────
@@ -196,6 +197,12 @@ def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int 
     grids = []
     dividend_steps = _build_dividend_step_matrix(underlyings, ts, dt)
     for asset_index, u in enumerate(underlyings):
+        # A quanto or compo asset is quoted in its own currency: its surface is
+        # read on its own forward, carried at r_ccy (+ ccyh, as in the drift).
+        # Dupire's diffusion coefficient does not change with the measure, so
+        # the grid built there is the one the deal-measure paths diffuse on.
+        own_ccy = fx_mode(u) in FX_MODES
+        own_basis = u.get('ccyh', 0.0)
         if u.get('vol_surface'):
             from ..volatility_surface import surface_from_underlying
             surface = surface_from_underlying(u, _time_at(dt, ts))
@@ -207,6 +214,9 @@ def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int 
                 # to mid-step. Dupire derivatives are at fixed forward k.
                 r0 = rates.r_flat if rates.zero is None else float(rates.zero[step])
                 r1 = rates.r_flat if rates.zero is None else float(rates.zero[step+1])
+                if own_ccy:
+                    r0 = foreign_zero(u, step) + own_basis
+                    r1 = foreign_zero(u, step + 1) + own_basis
                 carry = (r0*_time_at(dt, step)+r1*_time_at(dt, step + 1))/2
                 carry -= (u.get('q',.02)*t if dividend_steps is None else
                           float(np.dot(dividend_steps[:step,asset_index], _durations(dt, ts)[:step]))+
@@ -247,6 +257,8 @@ def _build_lv_grid(underlyings, rates: "_RateTerm", ts: int, dt: float, nK: int 
             # Zero rate to this maturity — the right discount for a call
             # expiring at T_s. Falls back to the scalar when there is no curve.
             r_s = rates.r_flat if rates.zero is None else float(rates.zero[step + 1])
+            if own_ccy:
+                r_s = foreign_zero(u, step + 1) + own_basis
             # The Dupire surface needs the same cumulative dividend carry as
             # the paths. For a term structure this is the continuously
             # compounded zero-equivalent q(0,T); for the legacy flat case the

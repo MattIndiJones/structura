@@ -405,7 +405,7 @@ def _run_explain_step(cal: dict, spot: dict, uls: list, corr, model: str,
         strike_set_t=cal.get("strike_set_t"),
         state={
             "spot_mult": spot["norm_spots"], "spot_base": spot["norm_spots"],
-            "wof_min_init": st["wof_min"], "bof_max_init": st["bof_max"],
+            "wof_min_init": st["wof_min"], "bof_max_init": st["bof_max"], "wof_max_init": st.get("wof_max"),
             "index_offset": cal["index_offset"], "memo_init": st["memo"],
             "accum_init": st["accum"], "s_min_init": st["s_min"],
             "s_max_init": st["s_max"], "s_prev_init": st["s_prev"],
@@ -428,7 +428,7 @@ def _greeks_state(ctx: dict) -> dict:
     st = ctx["state"]
     return {
         "spot_base": ctx["norm_spots"],
-        "wof_min": st["wof_min"], "bof_max": st["bof_max"],
+        "wof_min": st["wof_min"], "bof_max": st["bof_max"], "wof_max": st.get("wof_max"),
         "index": st["index"], "memo": st["memo"], "accum": st["accum"],
         "s_min": st["s_min"], "s_max": st["s_max"], "s_prev": st["s_prev"],
         "realvol_state": st["realvol_state"], "fix_state": st["fix_state"],

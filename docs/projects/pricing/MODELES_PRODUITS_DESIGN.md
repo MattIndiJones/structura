@@ -128,6 +128,10 @@ compilent**. Tous déclarent valeur et unité (D1) ; la convention `M_` est en p
 - Noms trompeurs : `PLANCHER` du Booster n'est pas un plancher (perte 1 pour 1) ; `REBATE`
   de la Digitale est le coupon ; « Reverse Convertible » à barrière 80 % est une BRC.
 - Shark worst-of : KO sur `BOF_MAX`, participation sur `WOF` — à confirmer côté métier.
+  **Tranché le 26/11/2026** : désactivation et participation sur la même performance, comme
+  le standard de marché. Nouveau moniteur `WOF_MAX` (plus haut atteint par le worst-of), fiche
+  passée à `INDIC(WOF_MAX >= M_KO_BAR)`. Sur un worst-of 2 actifs à ρ = 0,5, 3 ans, KO 130 %,
+  rebate 3 % : 92,95 contre 93,13 avec l'ancien KO best-of (`test_wof_max.py`).
 
 **Sources et couverture**
 

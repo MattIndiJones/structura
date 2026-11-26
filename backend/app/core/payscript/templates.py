@@ -66,7 +66,7 @@ TEMPLATES: dict[str, dict] = {
     'twin_win': {
         "label": 'Twin Win',
         "group": 'Produits à capital',
-        "script": 'UNDERLYING Basket\n\n# Twin Win — performance absolue plafonnée tant que la barrière n\'est pas franchie\nPARAM CAP\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  SET BREACHED = INDIC(WOF_MIN < M_KI_BAR)\n  SET UPS = MIN(CAP, MAX(1, WORSTOF(Basket.yield)))\n  SET DNS = MIN(CAP, MAX(1, 2 - WORSTOF(Basket.yield)))\n  PAY 1 "Capital — remboursement à maturité"\n  PAY (1 - BREACHED) * (MAX(UPS, DNS) - 1) "Performance absolue plafonnée"\n  PAY BREACHED * MAX(WORSTOF(Basket.yield) - 1, 0) "Hausse après franchissement"\n  PAY -BREACHED * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte en capital"',
+        "script": 'UNDERLYING Basket\n\n# Twin Win — performance absolue plafonnée tant que la barrière n\'est pas franchie,\n# hausse plafonnée au même niveau après franchissement\nPARAM CAP\nPARAM M_KI_BAR\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  SET BREACHED = INDIC(WOF_MIN < M_KI_BAR)\n  SET UPS = MIN(CAP, MAX(1, WORSTOF(Basket.yield)))\n  SET DNS = MIN(CAP, MAX(1, 2 - WORSTOF(Basket.yield)))\n  PAY 1 "Capital — remboursement à maturité"\n  PAY (1 - BREACHED) * (MAX(UPS, DNS) - 1) "Performance absolue plafonnée"\n  PAY BREACHED * (UPS - 1) "Hausse plafonnée après franchissement"\n  PAY -BREACHED * MAX(1 - WORSTOF(Basket.yield), 0) "Put vendu — perte en capital"',
     },
     'booster': {
         "label": 'Booster',
@@ -76,7 +76,7 @@ TEMPLATES: dict[str, dict] = {
     'shark_note': {
         "label": 'Shark note',
         "group": 'Produits à capital',
-        "script": 'UNDERLYING Basket\n\n# Shark note — capital garanti, participation perdue au-delà de la barrière\nPARAM PART\nPARAM STRIKE\nPARAM M_KO_BAR\nPARAM REBATE\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  SET KO = INDIC(BOF_MAX >= M_KO_BAR)\n  SET CALL = PART * MAX(0, WORSTOF(Basket.yield) - STRIKE)\n  PAY 1 "Remboursement nominal"\n  PAY CALL "Participation à la hausse"\n  PAY -1 * KO * (CALL - REBATE) "Barrière touchée : rebate à la place de la participation"',
+        "script": 'UNDERLYING Basket\n\n# Shark note — capital garanti, participation perdue au-delà de la barrière\nPARAM PART\nPARAM STRIKE\nPARAM M_KO_BAR\nPARAM REBATE\n\nCONSTAT StartDate\nCONSTAT MaturityDate\n\nAT StartDate:\n  Basket.spot0 = Basket.spot@StartDate\n\nAT MaturityDate:\n  SET KO = INDIC(WOF_MAX >= M_KO_BAR)\n  SET CALL = PART * MAX(0, WORSTOF(Basket.yield) - STRIKE)\n  PAY 1 "Remboursement nominal"\n  PAY CALL "Participation à la hausse"\n  PAY -1 * KO * (CALL - REBATE) "Barrière touchée : rebate à la place de la participation"',
     },
     'call': {
         "label": 'Call',

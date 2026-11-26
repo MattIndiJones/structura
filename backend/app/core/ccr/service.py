@@ -375,7 +375,7 @@ def joint_scenarios(runtimes, request, times, outer_times=None):
             if not key or key in keys:
                 raise ValueError("Identifiant de facteur absent ou dupliqué")
             keys.append(key)
-            risk = {k: u.get(k, 0) for k in ("sigma", "q", "sigma_fx", "rho_sfx", "ccyh")}
+            risk = {k: u.get(k, 0) for k in ("sigma", "q", "sigma_fx", "rho_sfx", "ccyh", "fx_mode", "r_ccy", "ccy_curve")}
             if key in factors and factors[key] != risk:
                 raise ValueError(f"Hypothèses de marché incompatibles pour {key}")
             factors[key] = risk

@@ -393,6 +393,20 @@ def _mtf_reject_unsupported(model: str, barrier_monitoring: str,
             "l'année 1 donnerait un éventail cohérent en apparence mais faux. "
             "Repassez en dividende plat pour cette analyse."
         )
+    # The outer and inner generators diffuse here, outside run_mc: they do not
+    # lay the compo FX leg, and an inner run restarts its step count at each
+    # mark, so it would read a foreign curve at the wrong date. A flat quanto
+    # goes through the simulators' drift and stays exact.
+    for u in underlyings or []:
+        if u.get("fx_mode") == "compo":
+            raise ValueError(
+                "Le compo n'est pas encore supporté en Mark-to-Future : les scénarios "
+                "extérieurs et intérieurs ne portent pas la trajectoire de change. "
+                "Passez le sous-jacent en quanto ou en historique pour cette analyse.")
+        if u.get("fx_mode") and u.get("ccy_curve"):
+            raise ValueError(
+                "La courbe de taux de la devise du sous-jacent n'est pas encore supportée en "
+                "Mark-to-Future. Repassez en taux plat de devise pour cette analyse.")
     supported = MTF_PRICER_MODELS if aligned_grid else {'constant'}
     if model not in supported:
         if aligned_grid:
@@ -704,6 +718,7 @@ def run_mark_to_future(script: CompiledScript,
         pending = np.array([bool(row) for row in claim_rows])
         wof_min_k = np.array([st["wof_min"] for st in outer_states])
         bof_max_k = np.array([st["bof_max"] for st in outer_states])
+        wof_max_k = np.array([st.get("wof_max", 1.0) for st in outer_states])
         index_k = np.array([st["index"] for st in outer_states], dtype=np.int64)
         accum_k = np.array([st["accum"] for st in outer_states], dtype=float)
         memo_k = [st["memo"] for st in outer_states]
@@ -767,6 +782,7 @@ def run_mark_to_future(script: CompiledScript,
                     step_map, mat_events, {}, record=False,
                     wof_min_init=np.repeat(wof_min_k[sl], n_inner),
                     bof_max_init=np.repeat(bof_max_k[sl], n_inner),
+                    wof_max_init=np.repeat(wof_max_k[sl], n_inner),
                     index_offset=np.repeat(index_k[sl], n_inner),
                     memo_init=[memo_k[i] for i in range(start, end) for _ in range(n_inner)],
                     accum_init=np.repeat(accum_k[sl], n_inner),

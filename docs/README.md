@@ -1,5 +1,15 @@
 # Notes du projet Structura
 
+[Sous-jacents quanto et compo — 26/11](projects/pricing/QUANTO_COMPO_2026-11-26.md)
+— Mode de change par sous-jacent : quanto au taux de la devise du sous-jacent (l'ancien drift
+partait du taux du deal), compo par trajectoire de change corrélée sur le brownien du
+sous-jacent, sous les cinq modèles de vol (variance Heston/LSV et α SABR corrigés sous la
+mesure du deal, grille Dupire et levier LSV sous la mesure du sous-jacent). Validé contre
+Black-Scholes et par changement de numéraire ; prix historiques inchangés au bit. LSV quanto
+en cours de vie refusée. Twin Win
+plafonné après franchissement. Nouveau moniteur `WOF_MAX` : la Shark note worst-of se désactive
+sur le worst-of ([modèles de produits](projects/pricing/MODELES_PRODUITS_DESIGN.md)). *Fait, non commité.*
+
 [Audit global fonctionnel, technique et produit — 16/11](audits/AUDIT_GLOBAL_EXECUTIF_2026-11-16.md)
 — Synthèse exécutive et [rapport technique](audits/AUDIT_GLOBAL_TECHNIQUE_2026-11-16.md) sur `main`,
 commit `eca6f52`, selon le cahier des charges de l'audit QISTRA : six axes, statuts
@@ -1034,6 +1044,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [QUANTO_COMPO_2026-11-26.md](projects/pricing/QUANTO_COMPO_2026-11-26.md) | 26/11 | Quanto et compo par sous-jacent, cinq modèles de vol, courbe de la devise | Fait | LSV en cours de vie, compo et courbe en Mark-to-Future, fixings compo en cours de vie |
 | [COMPARAISON_AUTOCALL_4ANS_MODELES_2026-10-06.md](projects/pricing/COMPARAISON_AUTOCALL_4ANS_MODELES_2026-10-06.md) | 06/10 | Athena 4 ans, cinq modèles de vol, mono et worst-of à deux actifs | Dix prix calculés et flux réconciliés | Hypothèses explicites non calibrées ; convergence du pas et calibration hors périmètre |
 | [VOL_SURFACE_EDITOR_2026-10-07.md](projects/pricing/VOL_SURFACE_EDITOR_2026-10-07.md) | 07/10 | Profils indicatifs Actions/Indices par niveau de vol, courbes éditables, matrice et consommation moteur | Implémenté ; tests ciblés, build et recette navigateur | Ajustements paramétriques approximatifs, précision et chocs de forme SSVI à approfondir |
 | [PAYSCRIPT_PRESETS_EDITOR_2026-10-07.md](projects/pricing/PAYSCRIPT_PRESETS_EDITOR_2026-10-07.md) | 07/10 | Éditeur unique, réglages avancés locaux et 15 exemples préremplis partagés Pricer/RFQ | Implémenté ; 109 tests backend ciblés, build avec 284 tests frontend et recette navigateur | Termes illustratifs à adapter ; pas de nouvelle recette de booking/cycle de vie |

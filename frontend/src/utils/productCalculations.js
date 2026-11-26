@@ -87,6 +87,13 @@ function snapshotRows(snapshot = {}) {
       for (const [t, vol] of surface.atm_nodes || []) addRow(rows, `ul:${index}:surface:atm:${t}`, group,
         `Surface ATM ${t}A`, vol*100, 'percent', active)
     }
+    if (underlying.fx_mode) {
+      addRow(rows, `ul:${index}:fx_mode`, group, 'Traitement du change', underlying.fx_mode === 'compo' ? 'Compo' : 'Quanto', 'text')
+      addRow(rows, `ul:${index}:r_ccy`, group, 'Taux de la devise du sous-jacent', underlying.r_ccy)
+      for (const pillar of underlying.ccyCurve || []) {
+        addRow(rows, `ul:${index}:ccy_curve:${pillar.T}`, group, `Courbe ${underlying.ccy || 'devise'} ${pillar.T}A`, pillar.rate)
+      }
+    }
     if (numeric(underlying.sigma_fx) || numeric(underlying.rho_sfx) || numeric(underlying.ccyh)) {
       addRow(rows, `ul:${index}:sigma_fx`, group, 'Volatilité FX', underlying.sigma_fx)
       addRow(rows, `ul:${index}:rho_sfx`, group, 'Corrélation sous-jacent/FX', underlying.rho_sfx)

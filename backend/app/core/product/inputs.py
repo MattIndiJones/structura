@@ -15,7 +15,7 @@ TERM_FIELDS = frozenset({
     "script", "underlyings", "user_params", "constats", "T", "strike_date",
     "value_date", "maturity_date", "payment_date", "anchor", "settlement_ccy", "frozen_schedule",
 })
-IDENTITY_FIELDS = frozenset({"name", "ticker", "ccy"})
+IDENTITY_FIELDS = frozenset({"name", "ticker", "ccy", "fx_mode"})
 
 
 def terms_from_input(payload: dict, *, allow_unresolved: bool = False) -> ProductTerms:

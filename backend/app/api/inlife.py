@@ -142,6 +142,9 @@ def _snapshot_underlying(u: UnderlyingParams) -> dict:
         "dividendDecay": u.dividend_decay * 100,
         "sigma_fx": u.sigma_fx * 100, "rho_sfx": u.rho_sfx * 100,
         "ccyh": u.ccyh * 10000,
+        **({"fx_mode": u.fx_mode, "r_ccy": None if u.r_ccy is None else u.r_ccy * 100,
+            "ccyCurve": [{"T": t, "rate": taux * 100} for t, taux in u.ccy_curve]}
+           if u.fx_mode else {}),
         "v0": u.v0 * 100, "kappa": u.kappa, "theta": u.theta * 100, "xi": u.xi * 100,
         "rho_h": u.rho_h * 100, "rho_rS": u.rho_rS * 100,
         "alpha": u.alpha * 100, "beta": u.beta * 100,
@@ -243,7 +246,7 @@ class ResidualContext:
         spots = self.residuel.norm_spots
         return dict(
             spot_mult=spots, spot_base=spots,
-            wof_min_init=etat["wof_min"], bof_max_init=etat["bof_max"],
+            wof_min_init=etat["wof_min"], bof_max_init=etat["bof_max"], wof_max_init=etat.get("wof_max"),
             index_offset=etat["index"], memo_init=etat["memo"],
             accum_init=etat["accum"],
             s_min_init=etat["s_min"], s_max_init=etat["s_max"],
@@ -486,7 +489,7 @@ def price_in_life(
                 strike_set_t=residuel.strike_set_t,
                 state={
                     "spot_base": residuel.norm_spots,
-                    "wof_min": etat["wof_min"], "bof_max": etat["bof_max"],
+                    "wof_min": etat["wof_min"], "bof_max": etat["bof_max"], "wof_max": etat.get("wof_max"),
                     "index": etat["index"], "memo": etat["memo"],
                     "accum": etat["accum"],
                     "s_min": etat["s_min"], "s_max": etat["s_max"],

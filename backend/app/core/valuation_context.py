@@ -302,7 +302,7 @@ def run_valuation(script, context: ValuationContext | dict, *,
 _PCT_FIELDS = {
     "sigma", "q", "dividend_decay", "sigma_fx", "rho_sfx", "v0",
     "theta", "xi", "rho_h", "rho_rS", "alpha", "beta", "rho", "nu",
-    "skew", "curvature",
+    "skew", "curvature", "r_ccy",
 }
 
 
@@ -315,6 +315,10 @@ def _display_underlying(raw: dict) -> dict:
                 for node in (value or [])
             ]
             out["dividendCurveEnabled"] = bool(value)
+        elif key == "ccy_curve":
+            out["ccyCurve"] = [{"T": float(node[0]), "rate": float(node[1]) * 100.0}
+                               for node in (value or [])]
+            out["ccyCurveEnabled"] = bool(value)
         elif key == "dividend_decay":
             out["dividendDecay"] = float(value or 0.0) * 100.0
         elif key == "ccyh":

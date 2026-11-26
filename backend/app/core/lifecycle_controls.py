@@ -19,7 +19,7 @@ from .payscript.parser import effective_T_max, parse_script, resolve_constats
 
 
 _PATH_OBSERVABLE = re.compile(
-    r"\b(?:WOF_MIN|BOF_MAX|S_MIN\s*\[|S_MAX\s*\[|REALVOL)",
+    r"\b(?:WOF_MIN|BOF_MAX|WOF_MAX|S_MIN\s*\[|S_MAX\s*\[|REALVOL)",
     re.IGNORECASE,
 )
 _KI_STATE = re.compile(r"(?:^|_)(?:KI|KNOCK_?IN|BREACH(?:ED)?)(?:$|_)", re.IGNORECASE)

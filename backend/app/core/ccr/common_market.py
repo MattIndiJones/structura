@@ -50,6 +50,11 @@ def harmonize_market(trades, deals, session, request, histories, progress=None):
     for ticker, values in candidates.items():
         # Quanto terms can depend on the settlement currency. Do not erase a
         # real contractual difference to force a common equity diffusion.
+        # The FX treatment, the asset-currency rate and its curve are compared as
+        # values: a string or a missing rate cannot go through max - min below.
+        for key in ("fx_mode", "r_ccy", "ccy_curve"):
+            if len({json.dumps(v[3].get(key) or None) for v in values}) > 1:
+                raise ValueError(f"{ticker} : paramètres quanto incompatibles ({key})")
         for key in ("sigma_fx", "rho_sfx", "ccyh"):
             if max(v[3].get(key, 0) for v in values) - min(v[3].get(key, 0) for v in values) > 1e-10:
                 raise ValueError(f"{ticker} : paramètres quanto incompatibles ({key})")

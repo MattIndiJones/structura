@@ -986,18 +986,19 @@ def test_historical_running_extrema_finds_mid_window_dip():
     prices = {"TK1": [100.0] * 10}
     prices["TK1"][5] = 40.0   # dip on day 5, flat elsewhere
     ref = {"TK1": 100.0}
-    wmin, bmax = _historical_running_extrema(prices, ["TK1"], ref, lo_hi=0, hi_hi=9)
+    wmin, bmax, wmax = _historical_running_extrema(prices, ["TK1"], ref, lo_hi=0, hi_hi=9)
     assert wmin == pytest.approx(0.40)
     assert bmax == pytest.approx(1.0)
+    assert wmax == pytest.approx(1.0)
 
 
 def test_historical_running_extrema_empty_window_is_neutral():
-    """No days in (lo_hi, hi_hi] -> (inf, -inf), a no-op for the caller's
+    """No days in (lo_hi, hi_hi] -> (inf, -inf, -inf), a no-op for the caller's
     running min()/max() — must never falsely narrow or widen the extrema."""
     prices = {"TK1": [100.0] * 5}
     ref = {"TK1": 100.0}
-    wmin, bmax = _historical_running_extrema(prices, ["TK1"], ref, lo_hi=3, hi_hi=3)
-    assert wmin == math.inf and bmax == -math.inf
+    wmin, bmax, wmax = _historical_running_extrema(prices, ["TK1"], ref, lo_hi=3, hi_hi=3)
+    assert wmin == math.inf and bmax == -math.inf and wmax == -math.inf
 
 
 BACKTEST_KI_SCRIPT = """

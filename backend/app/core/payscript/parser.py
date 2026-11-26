@@ -78,7 +78,7 @@ _SAFE_MATH = {
 # Nom PayScript -> expression Python émise par le transpileur.
 MARKET_VARS = {
     'WOF': 'min(_c["spots"])', 'BOF': 'max(_c["spots"])',
-    'WOF_MIN': '_c["wof_min"]', 'BOF_MAX': '_c["bof_max"]',
+    'WOF_MIN': '_c["wof_min"]', 'BOF_MAX': '_c["bof_max"]', 'WOF_MAX': '_c["wof_max"]',
     'ACCUM': '_c["accum"]', 'INDEX': '_c["index"]',
     'T': '_c["t"]', 'N': 'len(_c["spots"])',
     'REALVOL': '_c["realvol"]',
@@ -952,7 +952,7 @@ def parse_script(code: str) -> CompiledScript:
 # this from usage keeps it impossible for the monitoring metadata to diverge
 # from the payoff itself. Conflicting usages → direction None (the watchlist
 # shows a neutral gap, no color).
-_MONITOR_OBS = r'(WOF_MIN|BOF_MAX|WOF|BOF|BASKET(?:\(\))?|S\[\d+\]|S_MIN\[\d+\]|S_MAX\[\d+\])'
+_MONITOR_OBS = r'(WOF_MIN|BOF_MAX|WOF_MAX|WOF|BOF|BASKET(?:\(\))?|S\[\d+\]|S_MIN\[\d+\]|S_MAX\[\d+\])'
 
 
 def _blocs_et_references(lines: list[dict]) -> list[tuple[str | None, set[str]]]:

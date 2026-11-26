@@ -241,6 +241,8 @@ def build_watchlist_row(deal: Deal, session: Session, today: date) -> dict:
                 return wof_min
             if obs == "BOF_MAX":
                 return bof_max
+            if obs == "WOF_MAX":
+                return observations_data.get("wof_max")
             if obs in {"BASKET", "BASKET()"}:
                 return observations_data["basket"]
             m_s = re.fullmatch(r"(S|S_MIN|S_MAX)\[(\d+)\]", obs)
