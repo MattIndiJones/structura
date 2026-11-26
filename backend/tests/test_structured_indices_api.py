@@ -125,6 +125,11 @@ def test_pricing_catalogue_publishes_the_inputs_accepted_by_athena(athena_api):
     assert response.status_code == 200, response.text
     catalogue = response.json()
     assert catalogue["version"] == "athena-pricing-v1"
+    assert catalogue["fx_modes"] == [
+        {"mode": mode, "currencies": ["USD", "GBP", "JPY", "CHF"],
+         "models": ["constant"], "payoffs": ["athena-sx5e"]}
+        for mode in ("quanto", "compo")
+    ]
     models = {model["id"]: model for model in catalogue["models"]}
     assert set(models) == {"constant", "heston", "sabr", "localvol"}
     model = models["constant"]
@@ -291,6 +296,51 @@ def test_athena_issue_lifecycle_and_mtm_through_real_worker(athena_api):
     assert day_after_claim["event_id"] == claim["event_id"]
     assert day_after_claim["pv"] == pytest.approx(106. * exp(-.03 / 365.25), abs=1e-10)
     assert by_day["2024-01-22"]["claims"] == []
+
+
+@pytest.mark.parametrize("mode", ["quanto", "compo"])
+def test_native_fx_modes_round_trip_issue_lifecycle_and_mtm_over_http(athena_api, mode):
+    client, headers = athena_api
+    owner = headers["research"]
+    issue_request = _issue_request()
+    issue_request["terms"].update(currency="USD", fx_mode=mode)
+    fx = {"asset_rate": .02, "volatility": 0., "correlation": 0.}
+    if mode == "compo":
+        fx.update(spot=1.1, reference="fx-strike")
+    issue_request["market"].update(fx=fx, volatility=0.)
+    ticket = _submit(client, owner, ISSUE_BATCHES, f"issue-{mode}", [issue_request])
+    assert run_compute_worker.process_next_batch("fx-issue-test", 2, use_processes=True)
+    result = _poll(client, owner, ticket)
+    assert result["status"] == "completed", result["jobs"]
+    quote = result["jobs"][0]["result"]
+    assert (quote["fx_mode"], quote["payment_currency"]) == (mode, "USD")
+
+    fixing = {"day": "2024-01-17", "spot": 3980., "reference": "official-sx5e"}
+    dated_fx = dict(fx)
+    if mode == "compo":
+        fixing.update(fx_spot=1.2, fx_reference="fx-constat")
+        dated_fx.update(spot=1., reference="fx-snapshot")
+    life_request = {"vintage": quote["vintage"], "as_of": fixing["day"], "fixings": [fixing]}
+    life = client.post(LIFECYCLE, headers=owner, json=life_request)
+    assert life.status_code == 200, life.text
+    checked = life.json()
+    assert (checked["fx_mode"], checked["payment_currency"]) == (mode, "USD")
+    assert checked["status"] == ("called" if mode == "compo" else "active")
+
+    mark_request = {
+        "vintage": quote["vintage"], "fixings": [fixing], "pricing": issue_request["pricing"],
+        "market": {**_market(fixing["day"], 3980.), "fx": dated_fx, "volatility": 0.},
+    }
+    ticket = _submit(client, owner, MTM_BATCHES, f"mtm-{mode}", [mark_request])
+    assert run_compute_worker.process_next_batch("fx-mtm-test", 2, use_processes=True)
+    result = _poll(client, owner, ticket)
+    assert result["status"] == "completed", result["jobs"]
+    mark = result["jobs"][0]["result"]
+    assert (mark["fx_mode"], mark["payment_currency"]) == (mode, "USD")
+    assert mark["barriers"] == checked["barriers"]
+    if mode == "compo":
+        assert mark["fx_fixing_references"] == {"2023-01-17": "fx-strike", "2024-01-17": "fx-constat"}
+        assert mark["fx_fixing_references"] == checked["fx_fixing_references"]
 
 
 def test_phoenix_lifecycle_round_trips_active_and_terminal_cashflows_over_http(athena_api):

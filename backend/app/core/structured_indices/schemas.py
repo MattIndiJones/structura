@@ -23,6 +23,10 @@ CurvePoint = tuple[ModelNumber, ModelNumber]
 Curve = Annotated[tuple[CurvePoint, ...], Field(max_length=64)]
 PositiveModelNumber = Annotated[ModelNumber, Field(gt=0)]
 Correlation = Annotated[ModelNumber, Field(ge=-1, le=1)]
+AthenaFxMode = Literal["quanto", "compo"]
+AthenaPaymentCurrency = Literal["EUR", "USD", "GBP", "JPY", "CHF"]
+ATHENA_FX_CURRENCIES = ("USD", "GBP", "JPY", "CHF")
+ATHENA_FX_MODELS = ("constant",)
 MAX_MATURITY_MONTHS = 120
 ATHENA_TEMPLATE_VERSION = "athena-sx5e-v1"
 ATHENA_STEP_DOWN_VERSION = "athena-step-down-sx5e-v1"
@@ -148,10 +152,16 @@ class AthenaTerms(AthenaContract):
     )
     settlement_lag: int = Field(2, strict=True, ge=0, le=10)
     underlying: Literal["SX5E"] = "SX5E"
-    currency: Literal["EUR"] = "EUR"
+    currency: AthenaPaymentCurrency = "EUR"
+    fx_mode: AthenaFxMode | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_terms(self) -> Self:
+        if self.fx_mode is None and self.currency != "EUR":
+            raise ValueError("Une devise de paiement différente de l’EUR exige le mode quanto ou compo.")
+        if self.fx_mode is not None and (self.currency not in ATHENA_FX_CURRENCIES
+                                         or self.payoff_version != ATHENA_TEMPLATE_VERSION):
+            raise ValueError("Le mode de change est qualifié pour l’Athena classique SX5E hors EUR.")
         days = tuple(row.observation_date for row in self.observations)
         if days[0] <= self.strike_date or days != tuple(sorted(set(days))):
             raise ValueError("Les constats doivent être uniques et ordonnés après le strike.")
@@ -263,6 +273,8 @@ class AthenaTerms(AthenaContract):
         return ATHENA_STEP_DOWN_VERSION if self.call_barriers is not None else ATHENA_TEMPLATE_VERSION
 
     def validate_pricing(self, pricing: "AthenaPricing") -> None:
+        if self.fx_mode is not None and pricing.model not in ATHENA_FX_MODELS:
+            raise ValueError("Le quanto et le compo Athena utilisent le modèle GBM.")
         if self.payoff is not None and pricing.model not in QUOTED_PAYOFF_MODELS:
             raise ValueError("Le modèle demandé n’est pas qualifié pour le payoff sélectionné.")
         if self.reverse_convertible and pricing.model not in REVERSE_CONVERTIBLE_MODELS:
@@ -279,9 +291,12 @@ class AthenaVintage(AthenaContract):
     initial_fixing: Level
     initial_fixing_reference: Reference
     annual_coupon: CouponRate | None = Field(None, exclude_if=lambda value: value is None)
+    initial_fx_spot: Level | None = Field(default=None, exclude_if=lambda value: value is None)
+    initial_fx_reference: Reference | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_completed_terms(self) -> Self:
+        _validate_fx_spot(self.terms.fx_mode, self.initial_fx_spot, self.initial_fx_reference, "au strike")
         payoff = self.terms.payoff
         if payoff is None:
             if self.annual_coupon is None:
@@ -291,10 +306,27 @@ class AthenaVintage(AthenaContract):
         return self
 
 
+def _validate_fx_spot(mode: AthenaFxMode | None, spot: Level | None, reference: Reference | None, location: str) -> None:
+    if mode == "compo" and (spot is None or reference is None):
+        raise ValueError(f"Le compo Athena exige le fixing de change et sa référence {location}.")
+    if mode != "compo" and (spot is not None or reference is not None):
+        raise ValueError(f"Le fixing de change {location} est réservé au compo Athena.")
+
+
 class AthenaFixing(AthenaContract):
     day: date
     spot: FixingLevel
     reference: Reference
+    fx_spot: Level | None = Field(default=None, exclude_if=lambda value: value is None)
+    fx_reference: Reference | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class AthenaFxMarket(AthenaContract):
+    asset_rate: Rate
+    volatility: ModelNumber = Field(ge=0, le=2)
+    correlation: Correlation
+    spot: Level | None = Field(default=None, exclude_if=lambda value: value is None)
+    reference: Reference | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class AthenaMarket(AthenaContract):
@@ -316,6 +348,7 @@ class AthenaMarket(AthenaContract):
     yield_curve: Curve | None = Field(default=None, exclude_if=lambda value: value is None)
     funding_curve: Curve | None = Field(default=None, exclude_if=lambda value: value is None)
     vol_surface: VolatilitySurfaceParams | None = Field(default=None, exclude_if=lambda value: value is None)
+    fx: AthenaFxMarket | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_curves(self) -> Self:
@@ -328,6 +361,12 @@ class AthenaMarket(AthenaContract):
         if self.funding_curve:
             validate_term_curve(self.funding_curve, "courbe de funding")
         return self
+
+    def validate_fx(self, terms: AthenaTerms) -> None:
+        if (self.fx is None) != (terms.fx_mode is None):
+            raise ValueError("Renseignez le marché FX uniquement lorsque le mode de change est défini.")
+        if self.fx is not None:
+            _validate_fx_spot(terms.fx_mode, self.fx.spot, self.fx.reference, f"au {self.as_of}")
 
     def validate_model(self, pricing: "AthenaPricing") -> None:
         if self.vol_surface is not None:
@@ -492,6 +531,7 @@ class AthenaIssueRequest(AthenaContract):
             raise ValueError("L'instantané d'émission doit être daté du strike.")
         self._validate_issue_economics()
         self.terms.validate_pricing(self.pricing)
+        self.market.validate_fx(self.terms)
         self.market.validate_model(self.pricing)
         self.pricing.check_size(self.market.as_of, self.terms.observations[-1].observation_date)
         return self
@@ -522,6 +562,8 @@ def _check_fixing_dates(vintage: AthenaVintage, as_of: date, fixings: tuple[Athe
     eligible_days = {row.observation_date for row in vintage.terms.observations if row.observation_date <= as_of}
     if len(set(days)) != len(days) or not set(days) <= eligible_days:
         raise ValueError("Fournir des fixings uniques, datés des constats échus.")
+    for fixing in fixings:
+        _validate_fx_spot(vintage.terms.fx_mode, fixing.fx_spot, fixing.fx_reference, f"au constat du {fixing.day}")
 
 
 class AthenaLifecycleRequest(AthenaContract):
@@ -545,6 +587,7 @@ class AthenaMarkRequest(AthenaContract):
     def validate_mark(self) -> Self:
         _check_fixing_dates(self.vintage, self.market.as_of, self.fixings)
         self.vintage.terms.validate_pricing(self.pricing)
+        self.market.validate_fx(self.vintage.terms)
         self.market.validate_model(self.pricing)
         self.pricing.check_size(self.market.as_of, self.vintage.terms.observations[-1].observation_date)
         return self

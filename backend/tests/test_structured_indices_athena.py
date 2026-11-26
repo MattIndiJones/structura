@@ -76,6 +76,93 @@ def _issue(coupon, *, spot=5200, volatility=0.0, pricing=PRICING):
     )
 
 
+
+def test_native_quanto_matches_legacy_gbm_market_mapping_at_issue_and_mtm():
+    native_rate, payment_rate, fx_volatility, correlation = .03, .045, .12, .7
+    q, vol = .05, .20
+    coupon = AthenaFixedCoupon(mode="fixed", fixed_coupon=.06)
+    baseline = _issue(coupon, spot=5000., volatility=vol).model_dump(mode="json")
+    native_terms = {**baseline["terms"], "currency": "USD", "fx_mode": "quanto"}
+    native_fx = {"asset_rate": native_rate, "volatility": fx_volatility, "correlation": correlation}
+    legacy_q = q + payment_rate - native_rate + correlation * vol * fx_volatility
+    market = {**baseline["market"], "rate": payment_rate, "dividend_yield": q}
+    native = price_athena_issue(AthenaIssueRequest.model_validate({
+        **baseline, "terms": native_terms, "market": {**market, "fx": native_fx},
+    }))
+    legacy = price_athena_issue(AthenaIssueRequest.model_validate({
+        **baseline, "market": {**market, "dividend_yield": legacy_q},
+    }))
+    assert native["price"] == pytest.approx(legacy["price"], abs=1e-10)
+    assert (native["fx_mode"], native["payment_currency"]) == ("quanto", "USD")
+    assert "initial_fx_spot" not in native["vintage"]
+    assert "fx_mode" not in legacy and "payment_currency" not in legacy
+
+    dated = {**market, "as_of": str(SEMIANNUAL), "reference": "mtm", "spot": 4900.}
+    native_mark = price_athena_mark(AthenaMarkRequest.model_validate({
+        "vintage": native["vintage"], "market": {**dated, "fx": native_fx},
+        "pricing": baseline["pricing"], "fixings": [],
+    }))
+    legacy_mark = price_athena_mark(AthenaMarkRequest.model_validate({
+        "vintage": legacy["vintage"], "market": {**dated, "dividend_yield": legacy_q},
+        "pricing": baseline["pricing"], "fixings": [],
+    }))
+    assert native_mark["residual_pv"] == pytest.approx(legacy_mark["residual_pv"], abs=1e-10)
+    assert native_mark["next_call"] == legacy_mark["next_call"]
+
+
+def test_native_compo_keeps_contractual_fx_fixings_distinct_from_mtm_spot():
+    coupon = AthenaFixedCoupon(mode="fixed", fixed_coupon=.06)
+    baseline = _issue(coupon, spot=5000.).model_dump(mode="json")
+    initial_fx = {"asset_rate": .02, "volatility": 0., "correlation": 0., "spot": 1.1, "reference": "fx-strike"}
+    request = AthenaIssueRequest.model_validate({
+        **baseline, "terms": {**baseline["terms"], "currency": "USD", "fx_mode": "compo"},
+        "market": {**baseline["market"], "fx": initial_fx},
+    })
+    issue = price_athena_issue(request)
+    assert (issue["vintage"]["initial_fx_spot"], issue["vintage"]["initial_fx_reference"]) == (1.1, "fx-strike")
+    prior = AthenaMarkRequest.model_validate({
+        "vintage": issue["vintage"], "fixings": [], "pricing": baseline["pricing"],
+        "market": {**baseline["market"], "as_of": str(SEMIANNUAL), "spot": 4800.,
+                   "fx": {**initial_fx, "spot": 1.2, "reference": "fx-mtm"}},
+    })
+    # The stock lost 4% but FX more than offsets it. The seen over-strike composite
+    # spot carries forward with zero composite drift and vol under these inputs.
+    assert price_athena_mark(prior)["next_call"]["probability"] == 1.
+
+    fixing = {"day": str(FIRST), "spot": 4800., "reference": "sx5e-first", "fx_spot": 1.2, "fx_reference": "fx-first"}
+    terms = {"vintage": issue["vintage"], "fixings": [fixing]}
+    life = check_athena_lifecycle(AthenaLifecycleRequest.model_validate({**terms, "as_of": str(FIRST)}))
+    assert life["status"] == "called" and life["payment_currency"] == "USD"
+    assert life["barriers"][0]["fixing"] == pytest.approx(5760.)
+    assert life["barriers"][0]["initial_fixing"] == pytest.approx(5500.)
+    assert life["barriers"][0]["ratio"] == pytest.approx(5760. / 5500.)
+    assert life["fx_fixing_references"] == {str(STRIKE): "fx-strike", str(FIRST): "fx-first"}
+    paid = request.terms.observations[0].payment_date
+    mark = price_athena_mark(AthenaMarkRequest.model_validate({
+        **terms, "pricing": baseline["pricing"],
+        "market": {**baseline["market"], "as_of": str(FIRST), "spot": 4800.,
+                   "fx": {**initial_fx, "spot": 1.0, "reference": "snapshot-not-contractual-fixing"}},
+    }))
+    assert mark["status"] == "called" and mark["residual_pv"] == 0.
+    assert mark["claims"][0]["pv"] == pytest.approx(106 * exp(-.03 * (paid - FIRST).days / 365.25))
+    assert mark["fx_fixing_references"] == life["fx_fixing_references"]
+
+    first_no_call = {**fixing, "fx_spot": 1.0}
+    final = {**first_no_call, "day": str(FINAL), "spot": 5100., "fx_spot": .6, "fx_reference": "fx-final"}
+    maturity = check_athena_lifecycle(AthenaLifecycleRequest.model_validate({
+        **terms, "as_of": str(FINAL), "fixings": [first_no_call, final],
+    }))
+    assert maturity["status"] == "matured"
+    assert not maturity["barriers"][-1]["condition_met"]
+    assert maturity["redemption"]["amount"] == pytest.approx(100. * 5100. * .6 / 5500.)
+
+    with pytest.raises(ValidationError, match="exige le fixing de change"):
+        AthenaLifecycleRequest.model_validate({
+            **terms, "as_of": str(FIRST),
+            "fixings": [{key: value for key, value in fixing.items() if key != "fx_reference"}],
+        })
+
+
 MONTHLY_DATES = (date(2025, 12, 3), date(2026, 1, 5), date(2026, 2, 3))
 
 

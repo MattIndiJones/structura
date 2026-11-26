@@ -4,10 +4,10 @@ from typing import Literal
 
 from ..schemas import PricingRequest, UnderlyingParams
 from .schemas import (
-    ATHENA_MODEL_PARAMETERS, ATHENA_STEP_DOWN_MODELS, ATHENA_STEP_DOWN_VERSION,
+    ATHENA_FX_CURRENCIES, ATHENA_FX_MODELS, ATHENA_MODEL_PARAMETERS, ATHENA_STEP_DOWN_MODELS, ATHENA_STEP_DOWN_VERSION,
     ATHENA_TEMPLATE_VERSION, PHOENIX_MEMORY_TEMPLATE_VERSION, PHOENIX_MODELS, PHOENIX_TEMPLATE_VERSION,
     QUOTED_PAYOFF_IDS, QUOTED_PAYOFF_MODELS, REVERSE_CONVERTIBLE_MODELS, REVERSE_CONVERTIBLE_TEMPLATE_VERSION,
-    AthenaContract, AthenaMarket, AthenaPricing,
+    AthenaContract, AthenaFxMode, AthenaMarket, AthenaPaymentCurrency, AthenaPricing,
 )
 
 
@@ -40,11 +40,19 @@ class AthenaPayoffCapability(AthenaContract):
     mtm_models: list[str]
 
 
+class AthenaFxCapability(AthenaContract):
+    mode: AthenaFxMode
+    currencies: list[AthenaPaymentCurrency]
+    models: list[str]
+    payoffs: list[str]
+
+
 class AthenaPricingCatalogue(AthenaContract):
     version: Literal["athena-pricing-v1"] = "athena-pricing-v1"
     default_model: str
     models: list[AthenaPricingModel]
     payoffs: list[AthenaPayoffCapability]
+    fx_modes: list[AthenaFxCapability]
 
 
 def _field(name: str, schema: dict, default: int | float | bool, *, scale: int | None = None) -> AthenaPricingField:
@@ -72,6 +80,11 @@ def athena_pricing_catalogue() -> AthenaPricingCatalogue:
               "sabr": "SABR", "localvol": "Local Vol (Dupire)"}
     return AthenaPricingCatalogue(
         default_model=pricing["model"]["default"],
+        fx_modes=[
+            AthenaFxCapability(mode=mode, currencies=list(ATHENA_FX_CURRENCIES),
+                               models=list(ATHENA_FX_MODELS), payoffs=["athena-sx5e"])
+            for mode in ("quanto", "compo")
+        ],
         payoffs=[
             AthenaPayoffCapability(id="athena-sx5e", version=ATHENA_TEMPLATE_VERSION,
                                   issue_models=list(ATHENA_MODEL_PARAMETERS), mtm_models=list(ATHENA_MODEL_PARAMETERS)),

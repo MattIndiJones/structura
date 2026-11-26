@@ -183,6 +183,8 @@ def _market_reference(market: AthenaMarket) -> str:
 
 def _with_receipt(operation: str, request, result: dict) -> dict:
     terms = request.terms if isinstance(request, AthenaIssueRequest) else request.vintage.terms
+    if terms.fx_mode is not None:
+        result = {**result, "fx_mode": terms.fx_mode, "payment_currency": terms.currency}
     return {**result, "receipt_id": _reference("athena-receipt", {
         "template": terms.payoff_version,
         "payoff": _payoff(terms),
@@ -236,14 +238,26 @@ def _next_call(script, vintage: AthenaVintage, market: AthenaMarket, pricing: At
     return diagnostic
 
 
+def _contract_strike(vintage: AthenaVintage) -> float:
+    return (vintage.initial_fixing * vintage.initial_fx_spot
+            if vintage.terms.fx_mode == "compo" else vintage.initial_fixing)
+
+
+def _contract_spot(vintage: AthenaVintage, market: AthenaMarket) -> float:
+    return market.spot * market.fx.spot if vintage.terms.fx_mode == "compo" else market.spot
+
+
 def _value_mc(script, vintage: AthenaVintage, market: AthenaMarket, pricing: AthenaPricing, *, state=None,
               include_next_call: bool = False, memory_periods: int = 0) -> dict:
-    normalized_spot = market.spot / vintage.initial_fixing
+    normalized_spot = _contract_spot(vintage, market) / _contract_strike(vintage)
     underlying = {
         "name": _UNDERLYING, "ticker": _UNDERLYING, "ccy": _CURRENCY,
         "spot0": vintage.initial_fixing, "sigma": market.volatility, "q": market.dividend_yield,
         **pricing.underlying_parameters(),
     }
+    if vintage.terms.fx_mode is not None:
+        underlying.update(fx_mode=vintage.terms.fx_mode, r_ccy=market.fx.asset_rate,
+                          sigma_fx=market.fx.volatility, rho_sfx=market.fx.correlation)
     if market.dividend_curve:
         underlying["dividend_curve"] = [list(point) for point in market.dividend_curve]
     if market.vol_surface is not None:
@@ -385,6 +399,8 @@ def price_athena_issue(request: AthenaIssueRequest) -> dict:
             initial_fixing=request.initial_fixing,
             initial_fixing_reference=request.initial_fixing_reference,
             annual_coupon=coupon,
+            initial_fx_spot=request.market.fx.spot if request.terms.fx_mode == "compo" else None,
+            initial_fx_reference=request.market.fx.reference if request.terms.fx_mode == "compo" else None,
         )
         return vintage, _value_mc(script, vintage, request.market, request.pricing)
 
@@ -448,6 +464,7 @@ class _History:
     payment_day: date | None = None
     unpaid_coupon_periods: int = 0
     memory_releases: dict[str, int] = field(default_factory=dict)
+    fx_references: dict[str, str] = field(default_factory=dict)
 
     def replay_inputs(self) -> tuple[dict[str, list[float]], list[str]]:
         return {_UNDERLYING: list(self.prices.values())}, [day.isoformat() for day in self.prices]
@@ -456,9 +473,11 @@ class _History:
 def _history(vintage: AthenaVintage, as_of: date, fixings: tuple[AthenaFixing, ...]) -> _History:
     terms = vintage.terms
     observations = terms.observations
-    initial = vintage.initial_fixing
+    initial = _contract_strike(vintage)
     history = _History({terms.strike_date: initial},
                        {terms.strike_date.isoformat(): vintage.initial_fixing_reference}, [])
+    if terms.fx_mode == "compo":
+        history.fx_references[terms.strike_date.isoformat()] = vintage.initial_fx_reference
     by_day = {fixing.day: fixing for fixing in fixings}
     for observation, barrier in zip(observations, terms.effective_call_barriers, strict=True):
         day = observation.observation_date
@@ -468,10 +487,14 @@ def _history(vintage: AthenaVintage, as_of: date, fixings: tuple[AthenaFixing, .
         if fixing is None:
             raise ValueError(f"Fixing Athena manquant à la date contractuelle du {day}.")
         day_iso = day.isoformat()
-        history.prices[day] = fixing.spot
+        payoff_spot = fixing.spot
+        if terms.fx_mode == "compo":
+            payoff_spot *= fixing.fx_spot
+            history.fx_references[day_iso] = fixing.fx_reference
+        history.prices[day] = payoff_spot
         history.references[day_iso] = fixing.reference
-        ratio = fixing.spot / initial
-        base = {"observation_date": day_iso, "fixing": fixing.spot,
+        ratio = payoff_spot / initial
+        base = {"observation_date": day_iso, "fixing": payoff_spot,
                 "initial_fixing": initial, "ratio": ratio}
         called = False
         if terms.has_autocall:
@@ -510,7 +533,7 @@ def _historical_flows(vintage: AthenaVintage, history: _History, *, include_labe
     payoff = eval_script_on_history(
         script, days, prices, 0, max(day for event in script.events for day in event.dates),
         _params(vintage.terms, vintage.annual_coupon), [_UNDERLYING],
-        origine=vintage.terms.strike_date, reference_levels={_UNDERLYING: vintage.initial_fixing},
+        origine=vintage.terms.strike_date, reference_levels={_UNDERLYING: _contract_strike(vintage)},
         include_flow_labels=include_labels,
     )
     return payoff["cash_flows"] if payoff else []
@@ -680,6 +703,7 @@ def check_athena_lifecycle(request: AthenaLifecycleRequest) -> dict:
         "redemption": redemption,
         **claims,
         "fixing_references": history.references,
+        **({"fx_fixing_references": history.fx_references} if history.fx_references else {}),
     })
 
 
@@ -690,18 +714,18 @@ def _live_mark(request: AthenaMarkRequest, history: _History) -> tuple[dict, lis
     product = InLifeProduct(
         script_snapshot=_payoff(terms),
         underlyings=[{"name": _UNDERLYING, "ticker": _UNDERLYING, "ccy": _CURRENCY}],
-        strike_levels={_UNDERLYING: vintage.initial_fixing},
+        strike_levels={_UNDERLYING: _contract_strike(vintage)},
         strike_date=terms.strike_date,
         value_date=terms.strike_date,
         tenor=_year_fraction(terms.observations[-1].observation_date, terms.strike_date),
-        currency=_CURRENCY,
+        currency=terms.currency,
         payment_date=terms.observations[-1].payment_date,
         market={"r": market.rate * 100, "user_params": _params(terms, vintage.annual_coupon)},
         frozen_schedule=schedule,
     )
     # The snapshot spot only fills the off-observation edge of replay. On a
     # contractual day the exact fixing stays in history, independently of spot.
-    history.prices.setdefault(market.as_of, market.spot)
+    history.prices.setdefault(market.as_of, _contract_spot(vintage, market))
     prices, days = history.replay_inputs()
     phoenix = terms.coupon_barrier is not None
     residual = build_residual(product, prices, days, _year_fraction(market.as_of, terms.strike_date), market.as_of,
@@ -770,5 +794,6 @@ def price_athena_mark(request: AthenaMarkRequest) -> dict:
         "claims": claims,
         "barriers": [row for row in history.barriers if row["observation_date"] == day],
         "fixing_references": history.references,
+        **({"fx_fixing_references": history.fx_references} if history.fx_references else {}),
         "pricing": request.pricing.model_dump(mode="json"),
     })

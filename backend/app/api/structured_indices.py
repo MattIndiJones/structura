@@ -15,7 +15,8 @@ from ..core.compute.queue_store import enqueue_batch
 from ..core.structured_indices.athena import check_athena_lifecycle
 from ..core.structured_indices.pricing_catalogue import AthenaPricingCatalogue, athena_pricing_catalogue
 from ..core.structured_indices.schemas import (
-    AthenaContract, AthenaIssueRequest, AthenaLifecycleRequest, AthenaMarkRequest, Level, Reference,
+    AthenaContract, AthenaFxMode, AthenaIssueRequest, AthenaLifecycleRequest, AthenaMarkRequest, AthenaPaymentCurrency,
+    Level, Reference,
 )
 from ..core.valuation_context import json_transport_fingerprint
 from ..db.database import get_session
@@ -244,6 +245,9 @@ class AthenaLifecycleResult(AthenaContract):
     )
     barriers: list[AthenaBarrierCheck]
     fixing_references: dict[str, str]
+    fx_fixing_references: dict[str, str] | None = Field(default=None, exclude_if=lambda value: value is None)
+    fx_mode: AthenaFxMode | None = Field(default=None, exclude_if=lambda value: value is None)
+    payment_currency: AthenaPaymentCurrency | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 @router.post("/lifecycle")
