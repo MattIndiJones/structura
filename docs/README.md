@@ -1044,6 +1044,7 @@ local n'a été contrôlé lors de la revue documentaire du 05/10.
 
 | Note | Date | Objet | État | Reste à faire |
 |---|---|---|---|---|
+| [RATES_CREDIT_IMPLEMENTATION_PLAN.md](projects/pricing/RATES_CREDIT_IMPLEMENTATION_PLAN.md) | 26/11 | Templates taux et crédit, moteur Structura, interface React et API QISTRA | Plan et inventaire du lot 0 | Obtenir les courbes OIS et Euribor, les fixings Euribor et les cotes CDS pour la recette de marché |
 | [QUANTO_COMPO_2026-11-26.md](projects/pricing/QUANTO_COMPO_2026-11-26.md) | 26/11 | Quanto et compo par sous-jacent, cinq modèles de vol, courbe de la devise | Fait | LSV en cours de vie, compo et courbe en Mark-to-Future, fixings compo en cours de vie |
 | [COMPARAISON_AUTOCALL_4ANS_MODELES_2026-10-06.md](projects/pricing/COMPARAISON_AUTOCALL_4ANS_MODELES_2026-10-06.md) | 06/10 | Athena 4 ans, cinq modèles de vol, mono et worst-of à deux actifs | Dix prix calculés et flux réconciliés | Hypothèses explicites non calibrées ; convergence du pas et calibration hors périmètre |
 | [VOL_SURFACE_EDITOR_2026-10-07.md](projects/pricing/VOL_SURFACE_EDITOR_2026-10-07.md) | 07/10 | Profils indicatifs Actions/Indices par niveau de vol, courbes éditables, matrice et consommation moteur | Implémenté ; tests ciblés, build et recette navigateur | Ajustements paramétriques approximatifs, précision et chocs de forme SSVI à approfondir |
