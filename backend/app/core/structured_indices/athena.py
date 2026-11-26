@@ -153,7 +153,8 @@ def _params(terms: AthenaTerms, coupon: float | None) -> dict:
             "M_PUT_STRIKE": payoff.put_strike, "GEARING": payoff.gearing,
         }
     if terms.reverse_convertible:
-        return {"COUPON": coupon * terms.maturity_years, "M_KI_BAR": terms.protection_barrier}
+        years = terms.maturity_months / 12 if terms.maturity_months is not None else terms.maturity_years
+        return {"COUPON": coupon * years, "M_KI_BAR": terms.protection_barrier}
     # Catalogue COUPON is per observation; the frozen rate is annual.
     return {
         "COUPON": coupon * terms.observation_months / 12,

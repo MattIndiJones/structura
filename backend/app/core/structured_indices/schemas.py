@@ -23,6 +23,7 @@ CurvePoint = tuple[ModelNumber, ModelNumber]
 Curve = Annotated[tuple[CurvePoint, ...], Field(max_length=64)]
 PositiveModelNumber = Annotated[ModelNumber, Field(gt=0)]
 Correlation = Annotated[ModelNumber, Field(ge=-1, le=1)]
+MAX_MATURITY_MONTHS = 120
 ATHENA_TEMPLATE_VERSION = "athena-sx5e-v1"
 ATHENA_STEP_DOWN_VERSION = "athena-step-down-sx5e-v1"
 ATHENA_STEP_DOWN_MODELS = ("constant",)
@@ -112,12 +113,12 @@ QuotedPayoff = Annotated[
 
 class AthenaTerms(AthenaContract):
     strike_date: date
-    observations: tuple[AthenaObservation, ...] = Field(min_length=1, max_length=40)
+    observations: tuple[AthenaObservation, ...] = Field(min_length=1, max_length=MAX_MATURITY_MONTHS)
     calendar_reference: Reference
-    observation_months: Literal[3, 6, 12] = 12
+    observation_months: Literal[1, 3, 6, 12] = 12
     call_barrier: Barrier = 1.0
     call_barriers: tuple[Barrier, ...] | None = Field(
-        None, min_length=1, max_length=40, exclude_if=lambda value: value is None,
+        None, min_length=1, max_length=MAX_MATURITY_MONTHS, exclude_if=lambda value: value is None,
         description="Seuils de rappel en décimal, ordonnés par constat, dernier constat compris.",
     )
     protection_barrier: Barrier = .60
@@ -137,6 +138,10 @@ class AthenaTerms(AthenaContract):
         None, strict=True, ge=1, le=10, exclude_if=lambda value: value is None,
         description="Nombre contractuel d’années appliqué au coupon annuel du Reverse Convertible.",
     )
+    maturity_months: int | None = Field(
+        None, strict=True, ge=3, le=MAX_MATURITY_MONTHS, exclude_if=lambda value: value is None,
+        description="Durée contractuelle en mois, en alternative à la durée historique en années.",
+    )
     payoff: QuotedPayoff | None = Field(
         None, exclude_if=lambda value: value is None,
         description="Termes du Capital garanti, du Booster, de l’autocall Gear Put ou d’une option européenne.",
@@ -150,13 +155,17 @@ class AthenaTerms(AthenaContract):
         days = tuple(row.observation_date for row in self.observations)
         if days[0] <= self.strike_date or days != tuple(sorted(set(days))):
             raise ValueError("Les constats doivent être uniques et ordonnés après le strike.")
-        if (days[-1] - self.strike_date).days > 3700 or len(days) * self.observation_months > 120:
+        if (days[-1] - self.strike_date).days > 3700 or len(days) * self.observation_months > MAX_MATURITY_MONTHS:
             raise ValueError("Le pilote couvre des échéances d'au plus dix ans.")
+        if self.maturity_months is not None:
+            if self.maturity_years is not None:
+                raise ValueError("Indiquer la maturité en mois ou en années.")
+            self._validate_maturity_months(days, self.maturity_months)
         if self.payoff is not None:
             self._validate_quoted_payoff()
         elif self.reverse_convertible:
-            if self.maturity_years is None or len(days) != 1:
-                raise ValueError("Le Reverse Convertible exige une durée en années et un seul constat à maturité.")
+            if (self.maturity_years is None and self.maturity_months is None) or len(days) != 1:
+                raise ValueError("Le Reverse Convertible exige une durée contractuelle et un seul constat à maturité.")
             if (self.observation_months != 12 or self.call_barrier != 1.
                     or self.call_barriers is not None or self.coupon_barrier is not None
                     or self.coupon_memory is not None):
@@ -187,6 +196,20 @@ class AthenaTerms(AthenaContract):
             if event.payment_date != add_business_days(event.observation_date, self.settlement_lag, "TARGET"):
                 raise ValueError(f"Règlement TARGET incompatible avec le constat du {event.observation_date}.")
         return self
+
+    def _validate_maturity_months(self, days: tuple[date, ...], months: int) -> None:
+        interval = self.observation_months if self.has_autocall else months
+        if months % interval:
+            raise ValueError("La fréquence des constats doit diviser la maturité.")
+        offsets = range(interval, months + 1, interval)
+        # Modified Following preserves the nominal month. The caller supplies the effective
+        # observation dates under its named calendar, so keep the actual business days.
+        strike_month = self.strike_date.year * 12 + self.strike_date.month
+        if len(days) != len(offsets) or any(
+            day.year * 12 + day.month != strike_month + offset
+            for day, offset in zip(days, offsets, strict=True)
+        ):
+            raise ValueError("Les dates de constat ne correspondent pas à la maturité et à la fréquence contractuelles.")
 
     def _validate_quoted_payoff(self) -> None:
         if any(term is not None for term in (
@@ -504,7 +527,7 @@ def _check_fixing_dates(vintage: AthenaVintage, as_of: date, fixings: tuple[Athe
 class AthenaLifecycleRequest(AthenaContract):
     vintage: AthenaVintage
     as_of: date
-    fixings: tuple[AthenaFixing, ...] = Field(max_length=40)
+    fixings: tuple[AthenaFixing, ...] = Field(max_length=MAX_MATURITY_MONTHS)
 
     @model_validator(mode="after")
     def validate_fixings(self) -> Self:
@@ -516,7 +539,7 @@ class AthenaMarkRequest(AthenaContract):
     vintage: AthenaVintage
     market: AthenaMarket
     pricing: AthenaPricing
-    fixings: tuple[AthenaFixing, ...] = Field(max_length=40)
+    fixings: tuple[AthenaFixing, ...] = Field(max_length=MAX_MATURITY_MONTHS)
 
     @model_validator(mode="after")
     def validate_mark(self) -> Self:

@@ -12,7 +12,7 @@ from backend.app.core.structured_indices.schemas import (
     AthenaSolvedCoupon, AthenaTerms,
 )
 from backend.tests.test_structured_indices_athena import (
-    FINAL, FIRST, PRICING, STRIKE, _fixing, _mark, _market, _terms, _vintage,
+    FINAL, FIRST, PRICING, SEMIANNUAL, STRIKE, _fixing, _mark, _market, _terms, _vintage,
 )
 
 
@@ -29,6 +29,7 @@ def _reverse_terms(*, lag=2):
     {"maturity_years": 0},
     {"maturity_years": 11},
     {"maturity_years": 2.0},
+    {"maturity_months": 24},
     {"observations": _terms().observations},
     {"observation_months": 6},
     {"call_barrier": .90},
@@ -38,7 +39,7 @@ def _reverse_terms(*, lag=2):
     {"coupon_memory": True},
 ])
 def test_reverse_convertible_terms_reject_noncontractual_settings(invalid):
-    assert not {"reverse_convertible", "maturity_years"} & _terms().model_dump().keys()
+    assert not {"reverse_convertible", "maturity_years", "maturity_months"} & _terms().model_dump().keys()
     with pytest.raises(ValidationError):
         AthenaTerms.model_validate({**_reverse_terms().model_dump(), **invalid})
 
@@ -65,6 +66,26 @@ def test_reverse_convertible_issue_and_solve_with_unconditional_two_year_coupon(
     assert solved["status"] == "issued"
     assert solved["coupon_rate"] == pytest.approx(.06, abs=.000001)
     assert solved["price"] == pytest.approx(expected, abs=.0002)
+
+
+def test_six_month_reverse_convertible_prorates_issue_and_terminal_coupon():
+    terms = AthenaTerms.model_validate({
+        **_terms(days=(SEMIANNUAL,), lag=0).model_dump(),
+        "reverse_convertible": True, "maturity_months": 6,
+    })
+    vintage = _vintage(terms)
+    request = AthenaIssueRequest(
+        note_id=vintage.note_id, market=_market(STRIKE), terms=terms, pricing=PRICING,
+        coupon=AthenaFixedCoupon(mode="fixed", fixed_coupon=.06), initial_fixing=vintage.initial_fixing,
+        initial_fixing_reference=vintage.initial_fixing_reference,
+    )
+    assert price_athena_issue(request)["price"] == pytest.approx(
+        103. * exp(-.03 * (SEMIANNUAL - STRIKE).days / 365.25), abs=.0002,
+    )
+    fixings = (_fixing(SEMIANNUAL, 5200.),)
+    life = check_athena_lifecycle(AthenaLifecycleRequest(vintage=vintage, as_of=SEMIANNUAL, fixings=fixings))
+    assert [claim["amount"] for claim in life["coupon_claims"]] == [3.]
+    assert sum(claim["pv"] for claim in _mark(vintage, SEMIANNUAL, fixings)["claims"]) == pytest.approx(103.)
 
 
 def test_reverse_convertible_does_not_test_barrier_or_pay_coupon_before_maturity():

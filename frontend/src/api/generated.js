@@ -312,7 +312,7 @@ async function call(method, path, { query, body } = {}) {
  * @property {string} strike_date
  * @property {Array<AthenaObservation>} observations
  * @property {string} calendar_reference
- * @property {3|6|12} [observation_months]
+ * @property {1|3|6|12} [observation_months]
  * @property {number} [call_barrier]
  * @property {(Array<number>|null)} [call_barriers]
  * @property {number} [protection_barrier]
@@ -320,6 +320,7 @@ async function call(method, path, { query, body } = {}) {
  * @property {(boolean|null)} [coupon_memory]
  * @property {(boolean|null)} [reverse_convertible]
  * @property {(number|null)} [maturity_years]
+ * @property {(number|null)} [maturity_months]
  * @property {((CapitalGuaranteedPayoff|BoosterPayoff|AutocallGearPutPayoff|EuropeanPutPayoff|EuropeanCallPayoff)|null)} [payoff]
  * @property {number} [settlement_lag]
  * @property {'SX5E'} [underlying]

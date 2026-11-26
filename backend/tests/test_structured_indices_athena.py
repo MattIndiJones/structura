@@ -76,6 +76,53 @@ def _issue(coupon, *, spot=5200, volatility=0.0, pricing=PRICING):
     )
 
 
+MONTHLY_DATES = (date(2025, 12, 3), date(2026, 1, 5), date(2026, 2, 3))
+
+
+def test_monthly_three_month_note_prorates_coupons_and_preserves_dated_terms():
+    legacy = _terms(MONTHLY_DATES, months=1)
+    assert "maturity_months" not in legacy.model_dump(mode="json")
+    terms = AthenaTerms.model_validate({**legacy.model_dump(), "maturity_months": 3})
+    request = _issue(AthenaFixedCoupon(mode="fixed", fixed_coupon=.06)).model_copy(update={"terms": terms})
+    issue = price_athena_issue(request)
+    first_payment = terms.observations[0].payment_date
+    assert issue["vintage"]["terms"]["maturity_months"] == 3
+    assert issue["price"] == pytest.approx(100.5 * exp(-.03 * (first_payment - STRIKE).days / 365.25), abs=.0002)
+
+    vintage = AthenaVintage.model_validate(issue["vintage"])
+    first, second, final = MONTHLY_DATES
+    fixings = (_fixing(first, 4500.), _fixing(second, 4500.), _fixing(final, 5000.))
+    life = check_athena_lifecycle(AthenaLifecycleRequest(vintage=vintage, as_of=final, fixings=fixings))
+    assert life["status"] == "called"
+    assert life["redemption"]["amount"] == pytest.approx(101.5)
+    assert _mark(vintage, final, fixings)["claims"][0]["amount"] == pytest.approx(101.5)
+
+
+@pytest.mark.parametrize(("days", "interval", "months"), [
+    (MONTHLY_DATES, 6, 3),
+    (MONTHLY_DATES[:2], 1, 3),
+    ((MONTHLY_DATES[0], MONTHLY_DATES[-1], date(2026, 3, 3)), 1, 3),
+])
+def test_explicit_maturity_rejects_incompatible_observation_schedule(days, interval, months):
+    with pytest.raises(ValidationError, match="maturité"):
+        AthenaTerms.model_validate({**_terms(days, months=interval).model_dump(), "maturity_months": months})
+
+
+def test_ten_year_monthly_step_down_keeps_all_barriers_and_fixings():
+    strike_month = STRIKE.year * 12 + STRIKE.month - 1
+    days = tuple(date(month // 12, month % 12 + 1, STRIKE.day)
+                 for month in range(strike_month + 1, strike_month + 121))
+    terms = AthenaTerms.model_validate({
+        **_terms(days, months=1).model_dump(), "maturity_months": 120, "call_barriers": (1.,) * 120,
+    })
+    vintage = _vintage(terms)
+    fixings = tuple(_fixing(day, 4500.) for day in days)
+    life = check_athena_lifecycle(AthenaLifecycleRequest(vintage=vintage, as_of=days[-1], fixings=fixings))
+    assert life["status"] == "matured"
+    assert len([row for row in life["barriers"] if row["kind"] == "call"]) == 120
+    assert _mark(vintage, days[-1], fixings)["claims"][0]["amount"] == pytest.approx(100.)
+
+
 STEP_DOWN_DATES = (SEMIANNUAL, FIRST, date(2027, 5, 3), FINAL)
 
 
