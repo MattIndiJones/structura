@@ -440,6 +440,55 @@ d'actualisation non finis ou nuls sont refusés dans cette branche. Ces contrôl
 ne valent pas qualification de tous les modèles et usages : voir le
 [rapport C15](../audits/REMEDIATION_C15_2026-10-21.md).
 
+#### Profil de taux déterministe
+
+Le Pricer FRN et IRS utilise le profil `rates-deterministic-v1`. Les dates et conventions viennent de l’échéancier Product. Chaque occurrence de `AT FLOATING_COUPON:` lit `EURIBOR_RATE` en fraction signée, `YEAR_FRACTION` et `IS_FIXED`. `AT FIXED_COUPON:` lit `YEAR_FRACTION` sur la jambe fixe de l’IRS. `AT PRINCIPAL:` désigne le remboursement du FRN.
+
+`PARAM MARGIN` lit la marge contractuelle convertie de points de base en fraction. `PARAM FIXED_RATE` lit le taux de la jambe fixe. Ces paramètres se déclarent sans valeur par défaut dans le script. Les autres paramètres scalaires peuvent être déclarés dans le script ou renseignés avec leurs valeurs effectives. `PAY` et `FLOW` expriment une fraction signée du nominal, dans le sens porteur pour le FRN et receveur fixe pour l’IRS. Le moteur applique ensuite le sens de la position et actualise à la date de paiement.
+
+Le profil accepte les conditions de paiement et les opérateurs scalaires sur les données de la période. Les blocs accèdent aux seuls observables de leur jambe. Le résultat d’un payoff personnalisé est étiqueté scénario déterministe. Un taux au pair est calculé sur la formule linéaire qualifiée du swap. La conservation rattache la source et les paramètres effectivement exécutés au reçu de calcul. [Modèles exécutables](../../backend/app/core/product/rates_payscript.py) · [Recette taux](../../backend/tests/test_rates_credit_payscript.py)
+
+#### Profil de coupon de taux Monte Carlo
+
+Le profil `rates-exotic-coupon-v1` valorise une formule de coupon sur les trajectoires Hull–White. Il accepte des `PARAM` scalaires et un unique `PAY` en fraction du nominal. Le marché, les fixings acquis, les dates et les règles d’exercice sont fournis par le moteur.
+
+| Événement | Observables du coupon |
+|---|---|
+| `AT CMS_COUPON:` | `CMS_RATE`, `YEAR_FRACTION` |
+| `AT CMS_SPREAD_COUPON:` | `CMS_SPREAD`, `YEAR_FRACTION` |
+| `AT RANGE_COUPON:` | `RANGE_FRACTION`, `YEAR_FRACTION`, `ANNUAL_RATE` |
+
+Une formule peut employer les opérations arithmétiques, `MIN`, `MAX`, `ABS` et `INDIC` avec une comparaison simple. Les taux et les seuils sont des fractions. Dans le range accrual, la fraction correspond à la somme des poids des constats éligibles divisée par le poids total. Le reçu trace les observables, la source du script et les valeurs effectives des paramètres.
+
+```
+PARAM CAP_STRIKE = 2%
+AT CMS_COUPON:
+  PAY MAX(CMS_RATE - CAP_STRIKE, 0) * YEAR_FRACTION "Caplet CMS"
+```
+
+[Profil de calcul](../../backend/app/core/product/exotic_rates_payscript.py) · [Recette scriptée](../../backend/tests/test_exotic_rates_payscript.py)
+
+#### Profil de payoff crédit Monte Carlo
+
+Le profil `credit-exotic-payoff-v1` accepte une formule de prime ou coupon, une formule de règlement au défaut, ou les deux. Chaque formule contient des `PARAM` scalaires et un bloc avec un seul `PAY`. Les paramètres de l’arrêté priment sur leurs valeurs par défaut. Le bloc `PAY` renvoie une fraction numérique comprise entre 0 et 1.
+
+| Événement | Observables | Unité de `PAY` |
+|---|---|---|
+| `AT CDS_PREMIUM:` | `COUPON_RATE` | Fraction annuelle du nominal |
+| `AT CLN_COUPON:` | `COUPON_RATE` | Fraction annuelle du nominal |
+| `AT CDS_PROTECTION:` | `RECOVERY_FRACTION`, `DEFAULT_RANK` | Fraction du nominal au défaut |
+| `AT CLN_DEFAULT_REDEMPTION:` | `RECOVERY_FRACTION`, `DEFAULT_RANK` | Fraction du nominal au défaut |
+
+Le moteur fixe les fractions de période, le prorata de la prime CDS au défaut, le rang de déclenchement, les délais, le nominal et le sens signé. Le remboursement en survie de la CLN reste au pair. Les legs emploient les montants scriptés dans les trajectoires et la référence déterministe. Le reçu conserve les recouvrements bruts et trace séparément les fractions de règlement effectivement calculées pour chaque nom.
+
+```
+PARAM MULTIPLIER = 0.5
+AT CDS_PROTECTION:
+  PAY MULTIPLIER * (1 - RECOVERY_FRACTION) "Protection partielle"
+```
+
+Le profil s’applique aux scénarios sur contrats vivants de la recette Monte Carlo. Le booking et le traitement des faits réalisés au défaut demandent la qualification opérationnelle de ces formules. [Compilateur](../../backend/app/core/product/exotic_credit_payscript.py) · [Recette crédit](../../backend/tests/test_exotic_credit_payscript.py)
+
 #### Extrema et barrières continues — C16
 
 En mono, chaque extremum marginal est tiré selon sa loi conditionnelle analytique

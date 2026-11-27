@@ -1,0 +1,257 @@
+{
+  "fixture_id": "eur-frn-irs-abc",
+  "fixture_version": 1,
+  "provenance": {
+    "kind": "synthetic",
+    "source": "docs/projects/pricing/RATES_CREDIT_IMPLEMENTATION_PLAN.md#jeu-synthétique-commun-frn-et-irs-eur",
+    "results_source": "docs/projects/pricing/RATES_CREDIT_IMPLEMENTATION_PLAN.md#prix-attendus-du-frn-et-de-lirs",
+    "clock_source": "docs/projects/pricing/RATES_CREDIT_IMPLEMENTATION_PLAN.md#horloge-validée-pour-les-témoins",
+    "curve_formula": "exp(-continuous_zero_rate * calendar_days_from_anchor / 365)",
+    "forward_formula": "(pseudo_discount_factor(start) / pseudo_discount_factor(end) - 1) / act360_fraction"
+  },
+  "units": {
+    "amount": "EUR",
+    "rate": "decimal_fraction",
+    "spread": "basis_points",
+    "curve_factor": "dimensionless",
+    "clean_price": "per_100_notional",
+    "dv01": "EUR_change_for_plus_1_bp"
+  },
+  "tolerances": {
+    "amount_eur": "0.01",
+    "rate_fraction": "0.00000001",
+    "curve_factor": "0.00000000000001"
+  },
+  "terms": {
+    "currency": "EUR",
+    "notional_eur": "1000000",
+    "effective_date": "2026-09-21",
+    "maturity_date": "2028-09-21",
+    "calendar": "TARGET",
+    "business_day_convention": "modified_following",
+    "roll_day": 21,
+    "floating": {
+      "index": "EURIBOR",
+      "tenor": "3M",
+      "frequency_months": 3,
+      "day_count": "ACT/360",
+      "fixing_lag_target_days": 2,
+      "payment_lag_target_days": 0
+    },
+    "frn": {
+      "position": "long",
+      "margin_bp": "100",
+      "funding_bp": "0",
+      "principal_fraction": "1",
+      "principal_flow_id": "frn-principal",
+      "principal_payment_date": "2028-09-21",
+      "include_subscription_cash": false
+    },
+    "irs": {
+      "position": "receive_fixed",
+      "collateral_currency": "EUR",
+      "collateral_index": "ESTR",
+      "floating_margin_bp": "0",
+      "fixed_rate": "0.0253021092847019",
+      "fixed_frequency_months": 12,
+      "fixed_day_count": "30E/360",
+      "exchange_notional": false
+    }
+  },
+  "floating_periods": [
+    {
+      "period_id": "float-01", "frn_flow_id": "frn-coupon-01", "irs_flow_id": "irs-floating-01",
+      "start_unadjusted": "2026-09-21", "end_unadjusted": "2026-12-21",
+      "start_adjusted": "2026-09-21", "end_adjusted": "2026-12-21",
+      "fixing_date": "2026-09-17", "payment_date": "2026-12-21", "act360_days": 91,
+      "a_frn_coupon_eur": "8780.12", "a_irs_floating_abs_eur": "6252.34"
+    },
+    {
+      "period_id": "float-02", "frn_flow_id": "frn-coupon-02", "irs_flow_id": "irs-floating-02",
+      "start_unadjusted": "2026-12-21", "end_unadjusted": "2027-03-21",
+      "start_adjusted": "2026-12-21", "end_adjusted": "2027-03-22",
+      "fixing_date": "2026-12-17", "payment_date": "2027-03-22", "act360_days": 91,
+      "a_frn_coupon_eur": "8780.12", "a_irs_floating_abs_eur": "6252.34"
+    },
+    {
+      "period_id": "float-03", "frn_flow_id": "frn-coupon-03", "irs_flow_id": "irs-floating-03",
+      "start_unadjusted": "2027-03-21", "end_unadjusted": "2027-06-21",
+      "start_adjusted": "2027-03-22", "end_adjusted": "2027-06-21",
+      "fixing_date": "2027-03-18", "payment_date": "2027-06-21", "act360_days": 91,
+      "a_frn_coupon_eur": "8780.12", "a_irs_floating_abs_eur": "6252.34"
+    },
+    {
+      "period_id": "float-04", "frn_flow_id": "frn-coupon-04", "irs_flow_id": "irs-floating-04",
+      "start_unadjusted": "2027-06-21", "end_unadjusted": "2027-09-21",
+      "start_adjusted": "2027-06-21", "end_adjusted": "2027-09-21",
+      "fixing_date": "2027-06-17", "payment_date": "2027-09-21", "act360_days": 92,
+      "a_frn_coupon_eur": "8876.82", "a_irs_floating_abs_eur": "6321.27"
+    },
+    {
+      "period_id": "float-05", "frn_flow_id": "frn-coupon-05", "irs_flow_id": "irs-floating-05",
+      "start_unadjusted": "2027-09-21", "end_unadjusted": "2027-12-21",
+      "start_adjusted": "2027-09-21", "end_adjusted": "2027-12-21",
+      "fixing_date": "2027-09-17", "payment_date": "2027-12-21", "act360_days": 91,
+      "a_frn_coupon_eur": "8780.12", "a_irs_floating_abs_eur": "6252.34"
+    },
+    {
+      "period_id": "float-06", "frn_flow_id": "frn-coupon-06", "irs_flow_id": "irs-floating-06",
+      "start_unadjusted": "2027-12-21", "end_unadjusted": "2028-03-21",
+      "start_adjusted": "2027-12-21", "end_adjusted": "2028-03-21",
+      "fixing_date": "2027-12-17", "payment_date": "2028-03-21", "act360_days": 91,
+      "a_frn_coupon_eur": "8780.12", "a_irs_floating_abs_eur": "6252.34"
+    },
+    {
+      "period_id": "float-07", "frn_flow_id": "frn-coupon-07", "irs_flow_id": "irs-floating-07",
+      "start_unadjusted": "2028-03-21", "end_unadjusted": "2028-06-21",
+      "start_adjusted": "2028-03-21", "end_adjusted": "2028-06-21",
+      "fixing_date": "2028-03-17", "payment_date": "2028-06-21", "act360_days": 92,
+      "a_frn_coupon_eur": "8876.82", "a_irs_floating_abs_eur": "6321.27"
+    },
+    {
+      "period_id": "float-08", "frn_flow_id": "frn-coupon-08", "irs_flow_id": "irs-floating-08",
+      "start_unadjusted": "2028-06-21", "end_unadjusted": "2028-09-21",
+      "start_adjusted": "2028-06-21", "end_adjusted": "2028-09-21",
+      "fixing_date": "2028-06-19", "payment_date": "2028-09-21", "act360_days": 92,
+      "a_frn_coupon_eur": "8876.82", "a_irs_floating_abs_eur": "6321.27"
+    }
+  ],
+  "fixed_periods": [
+    {
+      "flow_id": "irs-fixed-01", "start_date": "2026-09-21", "end_date": "2027-09-21",
+      "payment_date": "2027-09-21", "fraction_30e360": "1", "coupon_eur": "25302.11"
+    },
+    {
+      "flow_id": "irs-fixed-02", "start_date": "2027-09-21", "end_date": "2028-09-21",
+      "payment_date": "2028-09-21", "fraction_30e360": "1", "coupon_eur": "25302.11"
+    }
+  ],
+  "clock": {
+    "timezone": "Europe/Paris",
+    "daily_market_availability_local": "09:00:00",
+    "fixing_due_local": "11:00:00",
+    "inclusive_cutoff": true
+  },
+  "curve_definitions": {
+    "ois": {"role": "discount", "currency": "EUR", "index": "ESTR", "continuous_zero_rate": "0.0200"},
+    "euribor": {"role": "projection", "currency": "EUR", "index": "EURIBOR", "tenor": "3M", "continuous_zero_rate": "0.0250"},
+    "day_count": "ACT/365F",
+    "interpolation": "log_linear_factor",
+    "extrapolation": false
+  },
+  "fixings": [
+    {
+      "fixing_id": "euribor-3m-2026-09-17-v1", "version": 1, "observation_date": "2026-09-17",
+      "index": "EURIBOR", "tenor": "3M", "currency": "EUR", "rate": "0.0310", "status": "validated",
+      "available_at": "2026-09-17T11:00:00+02:00", "validated_at": "2026-09-17T11:00:00+02:00"
+    },
+    {
+      "fixing_id": "euribor-3m-2026-12-17-v1", "version": 1, "observation_date": "2026-12-17",
+      "index": "EURIBOR", "tenor": "3M", "currency": "EUR", "rate": "0.0280", "status": "validated",
+      "available_at": "2026-12-17T11:00:00+01:00", "validated_at": "2026-12-17T11:00:00+01:00"
+    }
+  ],
+  "first_payment": {
+    "fact_id": "first-floating-payment-v1",
+    "effect_date": "2026-12-21",
+    "available_at": "2026-12-21T12:00:00+01:00",
+    "validated_at": "2026-12-21T12:00:00+01:00",
+    "frn_flow_id": "frn-coupon-01",
+    "irs_flow_id": "irs-floating-01",
+    "frn_cash_eur": "10363.89",
+    "irs_cash_eur": "-7836.11"
+  },
+  "snapshots": {
+    "A": {
+      "market_id": "eur-frn-irs-abc-A-v1", "market_version": 1,
+      "market_date": "2026-09-16", "valuation_date": "2026-09-16", "settlement_date": "2026-09-16",
+      "market_available_at": "2026-09-16T09:00:00+02:00", "market_validated_at": "2026-09-16T09:00:00+02:00",
+      "cutoff_local": "2026-09-16T12:00:00+02:00", "cutoff_utc": "2026-09-16T10:00:00+00:00",
+      "anchor_to_terminal_days": 736,
+      "ois_pillars": [["2026-09-16", "1"], ["2028-09-21", "0.9604736150914566"]],
+      "euribor_pillars": [["2026-09-16", "1"], ["2028-09-21", "0.9508385886131090"]],
+      "first_required_projection_date": "2026-09-21",
+      "acquired_fixing_ids": [], "first_payment_state": "future", "accrued_days": 0,
+      "frn_expected_eur": {"coupon_pv": "68945.35", "principal_pv": "960473.62", "dirty_pv": "1029418.96", "accrued": "0.00", "clean_pv": "1029418.96"},
+      "frn_clean_price": "102.94189618",
+      "irs_expected_eur": {"fixed_pv": "49096.31", "floating_pv_abs": "49096.31", "net_pv": "0.00"},
+      "irs_par_rate": "0.025302109285",
+      "dv01_eur": {"frn_projection": "197.00", "irs_projection": "-197.00", "frn_discount": "-201.47", "irs_discount": "-1.85"}
+    },
+    "B": {
+      "market_id": "eur-frn-irs-abc-B-v1", "market_version": 1,
+      "market_date": "2026-11-02", "valuation_date": "2026-11-02", "settlement_date": "2026-11-02",
+      "market_available_at": "2026-11-02T09:00:00+01:00", "market_validated_at": "2026-11-02T09:00:00+01:00",
+      "cutoff_local": "2026-11-02T12:00:00+01:00", "cutoff_utc": "2026-11-02T11:00:00+00:00",
+      "anchor_to_terminal_days": 689,
+      "ois_pillars": [["2026-11-02", "1"], ["2028-09-21", "0.9629503514328859"]],
+      "euribor_pillars": [["2026-11-02", "1"], ["2028-09-21", "0.9539044394695700"]],
+      "first_required_projection_date": "2026-12-21",
+      "acquired_fixing_ids": ["euribor-3m-2026-09-17-v1"], "first_payment_state": "future", "accrued_days": 42,
+      "frn_expected_eur": {"coupon_pv": "70702.66", "principal_pv": "962950.35", "dirty_pv": "1033653.01", "accrued": "4783.33", "clean_pv": "1028869.67"},
+      "frn_clean_price": "102.88696745",
+      "irs_expected_eur": {"fixed_pv": "49222.91", "floating_pv_abs": "50802.43", "net_pv": "-1579.52"},
+      "irs_par_rate": "0.026114033294",
+      "dv01_eur": {"frn_projection": "172.49", "irs_projection": "-172.49", "frn_discount": "-188.72", "irs_discount": "-1.83"}
+    },
+    "C": {
+      "market_id": "eur-frn-irs-abc-C-v1", "market_version": 1,
+      "market_date": "2026-12-21", "valuation_date": "2026-12-21", "settlement_date": "2026-12-21",
+      "market_available_at": "2026-12-21T09:00:00+01:00", "market_validated_at": "2026-12-21T09:00:00+01:00",
+      "cutoff_local": "2026-12-21T16:00:00+01:00", "cutoff_utc": "2026-12-21T15:00:00+00:00",
+      "anchor_to_terminal_days": 640,
+      "ois_pillars": [["2026-12-21", "1"], ["2028-09-21", "0.9655392811652148"]],
+      "euribor_pillars": [["2026-12-21", "1"], ["2028-09-21", "0.9571112779029973"]],
+      "first_required_projection_date": "2027-03-22",
+      "acquired_fixing_ids": ["euribor-3m-2026-09-17-v1", "euribor-3m-2026-12-17-v1"], "first_payment_state": "paid", "accrued_days": 0,
+      "frn_expected_eur": {"coupon_pv": "61350.19", "principal_pv": "965539.28", "dirty_pv": "1026889.47", "accrued": "0.00", "clean_pv": "1026889.47"},
+      "frn_clean_price": "102.68894662",
+      "irs_expected_eur": {"fixed_pv": "49355.25", "floating_pv_abs": "43924.24", "net_pv": "5431.01"},
+      "irs_par_rate": "0.022517886056",
+      "dv01_eur": {"frn_projection": "147.99", "irs_projection": "-147.99", "frn_discount": "-175.34", "irs_discount": "-1.84"}
+    }
+  },
+  "additional_references": {
+    "forward_rate_by_act360_days": {"91": "0.024734537834", "92": "0.024735385806"},
+    "a_first_payment_ois_factor": "0.9947535370413465",
+    "b_first_frn_coupon_eur": "10363.89",
+    "b_first_irs_floating_eur": "-7836.11",
+    "c_second_frn_coupon_eur": "9605.56",
+    "c_frn_cum_payment_dirty_pv_eur": "1037253.36",
+    "c_irs_cum_payment_net_pv_eur": "-2405.10"
+  },
+  "variants": {
+    "future_fixing_preloaded": {
+      "base_snapshot": "A", "preloaded_fixing_id": "euribor-3m-2026-09-17-v1", "expected_state": "projected"
+    },
+    "first_fixing_boundary": {
+      "before_cutoff": "2026-09-17T10:59:59+02:00", "at_cutoff": "2026-09-17T11:00:00+02:00"
+    },
+    "missing_fixing": [
+      {"base_snapshot": "B", "excluded_fixing_id": "euribor-3m-2026-09-17-v1", "expected_state": "fixing_unavailable"},
+      {"base_snapshot": "C", "excluded_fixing_id": "euribor-3m-2026-12-17-v1", "expected_state": "fixing_unavailable"}
+    ],
+    "indicative_fixing": {
+      "base_snapshot": "B", "fixing_id": "euribor-3m-2026-09-17-v1", "status": "indicative",
+      "validated_at": null, "expected_state": "fixing_unavailable"
+    },
+    "late_first_fixing_correction": {
+      "base_snapshot": "B", "at_cutoff": "2026-11-02T12:01:00+01:00",
+      "fixing": {
+        "fixing_id": "euribor-3m-2026-09-17-v2", "version": 2, "supersedes": "euribor-3m-2026-09-17-v1",
+        "observation_date": "2026-09-17", "index": "EURIBOR", "tenor": "3M", "currency": "EUR",
+        "rate": "0.0311", "status": "validated",
+        "available_at": "2026-11-02T12:01:00+01:00", "validated_at": "2026-11-02T12:01:00+01:00"
+      }
+    },
+    "first_payment_boundary": {
+      "base_snapshot": "C",
+      "before_cutoff": "2026-12-21T11:59:00+01:00", "before_state": "due_open",
+      "at_cutoff": "2026-12-21T12:00:00+01:00", "at_state": "paid"
+    },
+    "negative_projection_rate": {
+      "base_snapshot": "A", "continuous_zero_rate": "-0.0050",
+      "first_forward_rate": "-0.004928434379", "first_irs_floating_eur": "1245.80"
+    }
+  }
+}

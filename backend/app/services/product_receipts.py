@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..core.valuation_context import (
     canonical_fingerprint, canonical_json, json_transport_fingerprint,
@@ -13,6 +13,9 @@ from ..core.valuation_context import (
 
 _SIGNATURE_VERSION = 2
 _DOMAIN = "product-pricing-v2:"
+_RATES_DOMAIN = "product-rates-pricing-v1:"
+_CREDIT_DOMAIN = "product-credit-pricing-v1:"
+_EXOTIC_DOMAIN = "product-exotic-monte-carlo-v1:"
 
 
 def _signature(secret: str, claims: dict, *, domain: str = _DOMAIN,
@@ -95,3 +98,42 @@ def verify_server_receipt(receipt: dict, *, secret: str) -> dict:
             "Le résultat de pricing ne porte pas une preuve serveur valide. "
             "Relancez le pricing avant de le conserver.")
     return evidence
+
+
+def _signed_native_receipt(evidence: dict, *, secret: str, domain: str) -> dict:
+    claims = {**evidence, "version": 1, "calculated_at": datetime.now(timezone.utc).isoformat()}
+    return {**claims, "server_signature": _signature(secret, claims, domain=domain)}
+
+
+def _verify_native_receipt(receipt: dict, *, secret: str, domain: str) -> dict:
+    claims = {key: value for key, value in receipt.items() if key != "server_signature"}
+    valid = claims.get("version") == 1 and hmac.compare_digest(
+        _signature(secret, claims, domain=domain), str(receipt.get("server_signature") or ""),
+    )
+    if not valid:
+        raise ValueError("Le reçu a été modifié ou ne porte pas une preuve serveur valide.")
+    return claims
+
+
+def signed_rates_receipt(evidence: dict, *, secret: str) -> dict:
+    return _signed_native_receipt(evidence, secret=secret, domain=_RATES_DOMAIN)
+
+
+def verify_rates_receipt(receipt: dict, *, secret: str) -> dict:
+    return _verify_native_receipt(receipt, secret=secret, domain=_RATES_DOMAIN)
+
+
+def signed_credit_receipt(evidence: dict, *, secret: str) -> dict:
+    return _signed_native_receipt(evidence, secret=secret, domain=_CREDIT_DOMAIN)
+
+
+def verify_credit_receipt(receipt: dict, *, secret: str) -> dict:
+    return _verify_native_receipt(receipt, secret=secret, domain=_CREDIT_DOMAIN)
+
+
+def signed_exotic_receipt(evidence: dict, *, secret: str) -> dict:
+    return _signed_native_receipt(evidence, secret=secret, domain=_EXOTIC_DOMAIN)
+
+
+def verify_exotic_receipt(receipt: dict, *, secret: str) -> dict:
+    return _verify_native_receipt(receipt, secret=secret, domain=_EXOTIC_DOMAIN)

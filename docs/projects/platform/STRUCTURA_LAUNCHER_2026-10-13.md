@@ -3,6 +3,71 @@
 Date : 13/10/2026. Branche : `codex/hybrid-saas-foundation`.
 Changements locaux, sans commit, push ni merge.
 
+## React unifié et ouverture dans Chrome — 27/11/2026
+
+Le sélecteur propose **Ouvrir React** et **Ouvrir l’historique**. React assemble
+le frontend et le backend de la branche courante et utilise son répertoire de
+données habituel, `.runtime/launcher/data`, sur 18100–18108. L’entrée historique
+ouvre Vue. L’espace local de recette 18208 est conservé sur disque. Les mises à
+niveau SQLite du React habituel utilisent la sauvegarde du mécanisme de migration.
+Si une version précédente de React est encore active, le lanceur demande de
+l’arrêter et de rouvrir le menu pour charger le nouveau build.
+
+Le lanceur ouvre la page dans un onglet Google Chrome ordinaire. **Arrêter
+Structura** et la fermeture de la fenêtre du lanceur arrêtent les services de la
+session. Windows récupère ses descendants à sa sortie. Chrome s’exécute hors de
+ce groupe et la fermeture d’un onglet Chrome est gérée par le navigateur.
+L’arrêt propre expose toute erreur et permet de confirmer la fermeture de la
+session si nécessaire.
+
+### Temps d’ouverture et d’arrêt du React unifié
+
+**Mettre à jour React** prépare les sources locales des dépôts Structura et
+Structura React. Cette action vérifie les sources, les dépendances et les
+réglages de compilation. Elle exécute TypeScript et Vite lorsque le paquet doit
+être reconstruit, puis publie le reçu atomiquement. Depuis la racine de
+Structura, la même mise à jour est disponible avec
+`.venv\Scripts\python.exe -B ..\structura-react\scripts\launch_versions.py --update-react`.
+
+**Ouvrir React** compare les sources locales et le contenu du paquet déjà publié.
+Si le paquet manque ou ne correspond plus aux sources, le menu indique l’action
+**Mettre à jour React**. Le contrôle d’ouverture et celui qui précède le
+lancement de Chrome utilisent les empreintes des fichiers et ne demandent ni
+Node ni npm. Le paquet préparé fixe les dépendances et l’environnement de build
+jusqu’à la prochaine mise à jour explicite.
+
+`application.txt` identifie le paquet en service. Une mise à jour peut être
+préparée pendant que les services tournent. Pour la charger, arrêter Structura
+depuis le menu puis choisir **Ouvrir React**. Un deuxième clic sur **Ouvrir React**
+restaure la fenêtre d’ouverture ou le menu déjà ouvert.
+
+Pour **Structura Admin** et **Écran de simulation**, le lanceur React ouvre
+Chrome dès qu’Admin répond. Le portail reste arrêté jusqu’à une action qui
+en a besoin. Depuis Admin, **Choisir un autre compte** et **Accès aux six
+organisations** demandent le démarrage du portail et attendent sa réponse
+avant de changer de page. Les entrées **Console SaaS**, **Une organisation**
+et **Les six organisations** continuent à démarrer le portail depuis le
+lanceur. Le portail démarré depuis Admin est rattaché au même lanceur, qui
+l’arrête avec les autres services de la session.
+L’arrêt confirme la sortie des processus et la libération des ports. Un calcul
+ou une campagne en cours peut prolonger la fermeture propre.
+
+Sous Windows, la vérification du démarrage fait un test TCP court avant de
+consulter `/health`. La réponse HTTP et l’identité du lancement restent requises.
+Les dépendances de régression AMC, de génération PDF et de l’intervalle du Valo
+Explain sont chargées au premier usage. Les contrôles SQLite restent synchrones.
+Sur la même base de recette déjà initialisée, la médiane de deux démarrages par
+version est passée de 8,73 s à 7,31 s jusqu’à la confirmation HTTP d’Admin. Cette
+mesure exclut la vérification du paquet et le rendu de Chrome.
+
+Avant la séparation de la mise à jour, la préparation à l’ouverture mesurait
+32,0 s et le démarrage séquentiel 16,7 s. L’ancienne vérification du paquet
+précompilé prenait 4,8 s.
+Quand l’ouverture Admin démarrait deux services, la recette mesurait 16,9 s
+en série et 10,9 s en parallèle. Un autre essai parallèle a pris 18,4 s.
+Les fermetures à vide ont confirmé les PID sortis et les ports libérés en 1,3 à
+2,2 s environ. Ces mesures excluent le rendu de l’onglet Chrome.
+
 ## Choix de la version Vue ou React — 25/11/2026
 
 **Entrées.** Le raccourci « Structura » du menu Démarrer, `lancer_structura.bat` et

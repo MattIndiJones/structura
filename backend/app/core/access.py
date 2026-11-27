@@ -55,12 +55,17 @@ def require_capability(user, capability: str):
         raise HTTPException(403, "Votre profil ne permet pas cette action.")
 
 
-def require_booking_permission(user):
+def can_book(user) -> bool:
     from ..hybrid.config import current_config
     # Preserve standalone Front booking; managed installations use explicit book rights.
     if current_config() is None and user.role == "user" and getattr(user, "is_active", True):
-        return
-    require_capability(user, "book")
+        return True
+    return has_capability(user, "book")
+
+
+def require_booking_permission(user):
+    if not can_book(user):
+        raise HTTPException(403, "Votre profil ne permet pas cette action.")
 
 
 def require_managed_capability(user, capability):

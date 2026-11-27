@@ -4,14 +4,16 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from sqlalchemy import update, func
+from sqlalchemy import case, func, update
 from sqlmodel import Session, select
 
 from ..core.audit import record_audit_event
+from ..core.product import native_schedule
 from ..core.product.models import (
-    CommercialContext, Product, ProductTerms, TradeIntent,
+    CommercialContext, NativeProductTerms, NativeTerms, Product, ProductTerms, TradeIntent, product_terms_schema,
 )
 from ..core.product.models import CalculationRef
+from ..core.product.native_schedule_models import NativeSchedule
 from ..core.references import next_reference
 from ..core.valuation_context import canonical_fingerprint, canonical_json
 from ..db.models import (
@@ -24,6 +26,32 @@ class ProductError(ValueError):
     def __init__(self, code: str, message: str, status: int = 409):
         super().__init__(message)
         self.code, self.status = code, status
+
+
+def _stored_terms_match(terms: ProductTermsVersion, product: Product) -> bool:
+    fingerprint = product.terms_fingerprint
+    if fingerprint == terms.fingerprint:
+        return True
+    if not isinstance(product.terms, ProductTerms):
+        return False
+    # Older v1 snapshots may have been hashed before defaults were materialized.
+    try:
+        payload = json.loads(terms.terms_json)
+        return (canonical_fingerprint(payload) == terms.fingerprint
+                and ProductTerms.model_validate(payload).fingerprint == fingerprint)
+    except ValueError:
+        return False
+
+
+def _check_schedule_binding(product: Product) -> None:
+    archive = product.native_schedule
+    if archive is None:
+        return
+    terms = product.terms
+    if (not isinstance(terms, NativeProductTerms)
+            or (archive.product_id, archive.terms_version) != (product.product_id, product.terms_version)
+            or (archive.instrument_type, archive.terms_fingerprint) != (terms.instrument_type, terms.fingerprint)):
+        raise ProductError("PRODUCT_SCHEDULE_INVALID", "L’échéancier figé ne correspond pas aux termes demandés.")
 
 
 def owned_record(session: Session, product_id: int, user: User, *, right: str = "price",
@@ -75,29 +103,62 @@ def owned_record(session: Session, product_id: int, user: User, *, right: str = 
 
 
 def load_product(session: Session, product_id: int, *, revision: int | None = None,
-                 terms_version: int | None = None, calculation_page: tuple[int, int] | None = None) -> Product:
+                 terms_version: int | None = None, calculation_page: tuple[int, int] | None = None,
+                 allow_native: bool = False) -> Product:
     row = session.get(ProductRecord, product_id)
     if row is None:
         raise ProductError("PRODUCT_NOT_FOUND", "Produit introuvable.", 404)
-    projection = select(ProductRevision) if calculation_page is None else select(
-        ProductRevision.terms_version, func.json_remove(ProductRevision.snapshot_json, '$.calculations').label('snapshot_json'))
+    selected_revision = row.revision if revision is None else revision
+    projection = select(ProductRevision)
+    if calculation_page is not None and not allow_native:
+        snapshot_json = ProductRevision.snapshot_json
+        projection = select(ProductRevision.revision, ProductRevision.terms_version, case(
+            (func.json_valid(snapshot_json), func.json_remove(snapshot_json, '$.calculations')),
+            else_=snapshot_json,
+        ).label('snapshot_json'))
     rev = session.exec(projection.where(
         ProductRevision.product_id == product_id,
-        ProductRevision.revision == (row.revision if revision is None else revision),
+        ProductRevision.revision == selected_revision,
     )).first()
     if rev is None:
         raise ProductError("PRODUCT_REVISION_NOT_FOUND", "Révision produit introuvable.", 404)
     if revision is None and terms_version is None and rev.terms_version != row.terms_version:
         raise ProductError('PRODUCT_REVISION_INCONSISTENT',
                            'La révision courante et sa version de termes sont incohérentes ; requalification requise.')
+    if allow_native and revision is not None and terms_version is not None and rev.terms_version != terms_version:
+        raise ProductError('PRODUCT_REVISION_INCONSISTENT',
+                           'La version des termes ne correspond pas à la révision demandée.')
     version = rev.terms_version if terms_version is None else terms_version
     terms = session.exec(select(ProductTermsVersion).where(
         ProductTermsVersion.product_id == product_id, ProductTermsVersion.version == version,
     )).first()
     if terms is None:
         raise ProductError("PRODUCT_TERMS_NOT_FOUND", "Version des termes introuvable.", 404)
-    snapshot = json.loads(rev.snapshot_json)
-    if calculation_page is not None:
+    try:
+        terms_payload = json.loads(terms.terms_json)
+        schema = product_terms_schema(terms_payload)
+    except ValueError as exc:
+        raise ProductError("PRODUCT_TERMS_INVALID", "Les termes archivés sont invalides.") from exc
+    if schema == 2 and not allow_native:
+        raise ProductError("PRODUCT_TERMS_UNSUPPORTED", "Cette opération est réservée aux produits PayScript.")
+    if schema == 2 and rev.terms_version != version:
+        # Native schedules belong to historical terms, not to the current snapshot.
+        rev = session.exec(projection.where(
+            ProductRevision.product_id == product_id,
+            ProductRevision.terms_version == version,
+        ).order_by(ProductRevision.revision.desc())).first()
+        if rev is None:
+            raise ProductError("PRODUCT_REVISION_NOT_FOUND", "Révision produit introuvable.", 404)
+        selected_revision = rev.revision
+    try:
+        snapshot = json.loads(rev.snapshot_json)
+        if not isinstance(snapshot, dict) or (calculation_page is not None and type(snapshot.get('revision')) is not int):
+            raise ValueError("Révision archivée invalide.")
+    except ValueError as exc:
+        raise ProductError("PRODUCT_TERMS_INVALID", "Les termes ou la révision archivés sont invalides.") from exc
+    if schema == 2 and (snapshot.get('product_id'), snapshot.get('revision')) != (product_id, selected_revision):
+        raise ProductError("PRODUCT_REVISION_INCONSISTENT", "La révision archivée ne correspond pas au dossier demandé.")
+    if calculation_page is not None and schema == 1:
         offset, limit = calculation_page
         calculations = session.exec(select(
             ProductCalculationRun.id, ProductCalculationRun.terms_version, ProductCalculationRun.kind,
@@ -107,11 +168,21 @@ def load_product(session: Session, product_id: int, *, revision: int | None = No
                 ProductCalculationRun.input_revision < snapshot['revision'])
           .order_by(ProductCalculationRun.id.desc()).offset(offset).limit(limit)).all()
         snapshot['calculations'] = [dict(c._mapping) for c in reversed(calculations)]
-        for c in snapshot['calculations']: c['calculated_at'] = c['calculated_at'].isoformat()
-    return Product.model_validate({
-        **snapshot, "terms": json.loads(terms.terms_json),
-        "terms_version": version,
-    })
+        for item in snapshot['calculations']:
+            item['calculated_at'] = item['calculated_at'].isoformat()
+    if snapshot.get("native_schedule") is not None:
+        try:
+            snapshot["native_schedule"] = NativeSchedule.model_validate(snapshot["native_schedule"])
+        except ValueError as exc:
+            raise ProductError("PRODUCT_SCHEDULE_INVALID", "L’échéancier figé est invalide.") from exc
+    try:
+        product = Product.model_validate({**snapshot, "terms": terms_payload, "terms_version": version})
+    except (TypeError, ValueError) as exc:
+        raise ProductError("PRODUCT_TERMS_INVALID", "Les termes ou la révision archivés sont invalides.") from exc
+    if not _stored_terms_match(terms, product):
+        raise ProductError("PRODUCT_TERMS_INVALID", "L’empreinte des termes archivés est incohérente.")
+    _check_schedule_binding(product)
+    return product
 
 
 def stage_revision(session: Session, product: Product, *, expected_revision: int,
@@ -125,8 +196,17 @@ def stage_revision(session: Session, product: Product, *, expected_revision: int
     version = session.exec(select(ProductTermsVersion).where(
         ProductTermsVersion.product_id == product.product_id,
         ProductTermsVersion.version == product.terms_version)).first()
-    if version is None or version.fingerprint != product.terms_fingerprint:
+    if version is None or not _stored_terms_match(version, product):
         raise ProductError('PRODUCT_TERMS_INVALID', 'La version des termes ne correspond pas au Product.')
+    _check_schedule_binding(product)
+    if isinstance(product.terms, NativeProductTerms) and product.native_schedule is None:
+        try:
+            prepared = native_schedule.resolve_native_schedule(
+                product.terms, product_id=product.product_id, terms_version=product.terms_version,
+            )
+        except ValueError as exc:
+            raise ProductError("PRODUCT_SCHEDULE_INVALID", str(exc), 422) from exc
+        product = product.model_copy(update={"native_schedule": prepared.schedule})
     revision = expected_revision + 1
     now = datetime.utcnow()
     result = session.execute(update(ProductRecord).where(
@@ -221,7 +301,7 @@ def stage_internal_product(
     )
 
 
-def stage_terms(session: Session, product: Product, terms: ProductTerms, *,
+def stage_terms(session: Session, product: Product, terms: ProductTerms | NativeTerms, *,
                 actor_id: int, reason: str) -> Product:
     from .rfq_bank import case_for_product
     if case_for_product(session, product.product_id):
@@ -238,7 +318,7 @@ def stage_terms(session: Session, product: Product, terms: ProductTerms, *,
         fingerprint=terms.fingerprint, terms_json=canonical_json(terms.model_dump(mode="json")),
         reason=reason,
     ))
-    return product.model_copy(update={"terms": terms, "terms_version": version})
+    return product.model_copy(update={"terms": terms, "terms_version": version, "native_schedule": None})
 
 
 def stage_booked_terms_amendment(session: Session, product: Product,
@@ -277,7 +357,7 @@ def lock_command_actor(session: Session, user: User):
     session.expire_all()
 
 
-def previous_command(session: Session, user: User, key: str, payload: dict) -> Product | None:
+def previous_command(session: Session, user: User, key: str, payload: dict, *, allow_native: bool = False) -> Product | None:
     lock_command_actor(session, user)
     command = session.exec(select(ProductCommand).where(
         ProductCommand.user_id == user.id, ProductCommand.command_key == key)).first()
@@ -285,8 +365,8 @@ def previous_command(session: Session, user: User, key: str, payload: dict) -> P
         return None
     if command.input_hash != canonical_fingerprint(payload):
         raise ProductError("PRODUCT_COMMAND_CONFLICT", "Cette clé de commande a déjà été utilisée avec un autre contenu.")
-    owned_record(session, command.product_id, user)
-    return load_product(session, command.product_id, revision=command.result_revision)
+    owned_record(session, command.product_id, user, right="prepare" if allow_native else "price")
+    return load_product(session, command.product_id, revision=command.result_revision, allow_native=allow_native)
 
 
 def stage_command(session: Session, user: User, key: str, payload: dict, product: Product):

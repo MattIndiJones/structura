@@ -20,7 +20,9 @@ from sqlmodel import Session, select
 from ..db.database import get_session
 from ..db.models import ComputeBatch, ComputeJob, User
 from .auth import get_current_user, get_current_admin, get_current_pricer
+from .research_rates_credit import research_batch_readable
 from ..core.compute.queue_store import enqueue_batch, cancel_batch, relaunch_batch, delete_batch
+from ..core.structured_indices.rates_credit_evidence import RESEARCH_RATES_JOB_KINDS
 
 router = APIRouter(prefix="/api/compute", tags=["compute"])
 
@@ -41,10 +43,13 @@ class ComputeBatchCreate(BaseModel):
 
 
 def _batch_row(b: ComputeBatch) -> dict:
+    params = json.loads(b.params_json) if b.params_json else {}
+    if b.kind in RESEARCH_RATES_JOB_KINDS:
+        params.pop("product_bindings", None)
     return {
         "id": b.id, "kind": b.kind, "label": b.label, "status": b.status,
         "total_jobs": b.total_jobs, "completed_jobs": b.completed_jobs, "failed_jobs": b.failed_jobs,
-        "params": json.loads(b.params_json) if b.params_json else {},
+        "params": params,
         "cost_estimate": json.loads(b.cost_estimate_json) if b.cost_estimate_json else {},
         "result_summary": json.loads(b.result_summary_json) if b.result_summary_json else {},
         "worker_name": b.worker_name,
@@ -59,14 +64,19 @@ def _batch_row(b: ComputeBatch) -> dict:
     }
 
 
-def _job_row(j: ComputeJob) -> dict:
-    return {
+def _job_row(j: ComputeJob, *, research: bool = False) -> dict:
+    row = {
         "id": j.id, "job_index": j.job_index, "label": j.label, "status": j.status,
         "result": json.loads(j.result_json) if j.result_json else {},
         "error": j.error, "attempt": j.attempt,
         "started_at": j.started_at.isoformat() if j.started_at else None,
         "finished_at": j.finished_at.isoformat() if j.finished_at else None,
     }
+    if research:
+        job = json.loads(j.payload_json)["job"]
+        row.update(job_id=job["job_id"], millesime_id=job["millesime"]["millesime_id"],
+                   valuation_date=job["valuation_date"], cutoff=job["cutoff"])
+    return row
 
 
 @router.post("/batches", status_code=201)
@@ -99,7 +109,11 @@ def list_batches(
         select(ComputeBatch).where(ComputeBatch.user_id == current.id)
         .order_by(ComputeBatch.created_at.desc())
     ).all()
-    return [_batch_row(b) for b in batches]
+    rows = []
+    for batch in batches:
+        if research_batch_readable(session, batch, current):
+            rows.append(_batch_row(batch))
+    return rows
 
 
 @router.get("/batches/{batch_id}")
@@ -111,12 +125,15 @@ def get_batch(
     batch = session.get(ComputeBatch, batch_id)
     if not batch or batch.user_id != current.id:
         raise HTTPException(404, "Batch introuvable")
+    if not research_batch_readable(session, batch, current):
+        raise HTTPException(404, "Batch introuvable")
+    row = _batch_row(batch)
     jobs = session.exec(
         select(ComputeJob).where(ComputeJob.batch_id == batch_id)
         .order_by(ComputeJob.job_index)
     ).all()
-    row = _batch_row(batch)
-    row["jobs"] = [_job_row(j) for j in jobs]
+    research = batch.kind in RESEARCH_RATES_JOB_KINDS
+    row["jobs"] = [_job_row(j, research=research) for j in jobs]
     return row
 
 
@@ -149,6 +166,9 @@ def admin_delete_batch(
     admin: Annotated[User, Depends(get_current_admin)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    batch = session.get(ComputeBatch, batch_id)
+    if batch is not None and batch.kind in RESEARCH_RATES_JOB_KINDS:
+        raise HTTPException(409, "Un lot de recette Research est une archive à conserver.")
     if not delete_batch(session, batch_id):
         raise HTTPException(404, "Batch introuvable")
 

@@ -13,12 +13,21 @@ def _gen_ref(entity_name: str | None, session: Session) -> str:
     return next_reference(session, Deal, f"{prefix}-{business_today().strftime('%Y%m%d')}-")
 
 
+def _market_snapshot_for_read(deal: Deal) -> dict:
+    try:
+        market = json.loads(deal.market_snapshot_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return market if isinstance(market, dict) else {}
+
+
 def _deal_row(
     d: Deal,
     events: list | None = None,
     session: Session | None = None,
     risk_terminal_date: date | None = None,
 ) -> dict:
+    market = _market_snapshot_for_read(d)
     portfolio_ids = []
     if session is not None:
         portfolio_ids = list(session.exec(
@@ -29,6 +38,10 @@ def _deal_row(
         # migration. New bookings never write the legacy pointer.
         if not portfolio_ids and d.portfolio_id is not None:
             portfolio_ids = [d.portfolio_id]
+    margin = d.fair_value - d.price_traded if d.sens == "vente" else d.price_traded - d.fair_value
+    if (market.get("kind") == "native_template_booking_v1" and d.product_type == "CDS" and d.nominal
+            and "initial_settlement_pv_eur" in market):
+        margin = 100 * (market["economic_dirty_pv_eur"] + market["initial_settlement_pv_eur"]) / d.nominal
     row = {
         "id": d.id,
         "product_id": d.product_id,
@@ -49,8 +62,8 @@ def _deal_row(
         # deal booké hors parcours client, ce qui reste valide.
         "client_id": d.client_id,
         "market_data_provider": (
-            market_data_provider_for_deal(d, session)
-            if session is not None else DEFAULT_MARKET_DATA_PROVIDER
+            "synthetic" if market.get("kind") in ("native_exotic_booking_v1", "native_template_booking_v1")
+            else market_data_provider_for_deal(d, session) if session is not None else DEFAULT_MARKET_DATA_PROVIDER
         ),
         "opportunity_id": d.opportunity_id,
         "primary_affiliation_id": d.primary_affiliation_id,
@@ -85,9 +98,7 @@ def _deal_row(
         # vend, nous achetons, et payer 98 un produit qui en vaut 100 nous fait
         # gagner 2. La soustraction nue rendait −2 sur ce cas, et l'infobulle de
         # l'écran décrivait pourtant le bon comportement.
-        "margin": round(
-            (d.fair_value - d.price_traded) if d.sens == "vente"
-            else (d.price_traded - d.fair_value), 4),
+        "margin": round(margin, 4),
         "trade_date": d.trade_date,
         "strike_date": d.strike_date,
         "value_date": d.value_date,
@@ -102,7 +113,7 @@ def _deal_row(
         "settlement_date": d.settlement_date,
         "resolution_outcome": d.resolution_outcome,
         "underlyings": json.loads(d.underlyings_json),
-        "market_snapshot": json.loads(d.market_snapshot_json),
+        "market_snapshot": market,
         "greeks": json.loads(d.greeks_json) if d.greeks_json else {},
         "greeks_computed_at": d.greeks_computed_at.isoformat() if d.greeks_computed_at else None,
         "latest_valuation_run_id": d.latest_valuation_run_id,

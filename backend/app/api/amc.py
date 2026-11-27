@@ -25,12 +25,10 @@ from ..core.amc_engine import (
     ff_data_status,
     ff_refresh,
 )
-from ..core.amc_pdf import generate_pdf, generate_study_pdf
 from ..core.amc_manifest import (
     detect_study_folder, blank_template, StudyManifest,
     MANIFEST_DOC, BLOCK_CATALOG,
 )
-from ..core.amc_study import run_study
 
 router = APIRouter(prefix="/api/amc", tags=["amc"])
 
@@ -133,6 +131,8 @@ def export_pdf(
 ):
     """Generate a professional PDF report from analysis results."""
     try:
+        from ..core.amc_pdf import generate_pdf
+
         pdf_bytes = generate_pdf(req.result, req.meta or {})
         filename = f"AMC_FF_{req.meta.get('isin', 'report')}_{__import__('datetime').date.today()}.pdf"
         return StreamingResponse(
@@ -342,6 +342,8 @@ def study_run(
     try:
         folder = study_folder(req.folder, current)
         with study_slot():
+            from ..core.amc_study import run_study
+
             return run_study(req.manifest, folder)
     except HTTPException:
         raise
@@ -359,6 +361,8 @@ def study_export_pdf(
 ):
     """Generate the extended study report PDF (blocs A/B/C/D + confiance)."""
     try:
+        from ..core.amc_pdf import generate_study_pdf
+
         pdf_bytes = generate_study_pdf(
             req.study_result,
             synthese_text=req.synthese_text,

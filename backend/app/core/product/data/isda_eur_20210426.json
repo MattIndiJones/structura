@@ -1,0 +1,212 @@
+{
+  "fixture_version": 1,
+  "benchmark_id": "isda-eur-estr-20210426",
+  "provenance": {
+    "kind": "published_historical_benchmark",
+    "publishers": [
+      "ISDA",
+      "S&P Global"
+    ],
+    "index_url": "https://www.cdsmodel.com/rfr-test-grids.html",
+    "archive_url": "https://www.cdsmodel.com/assets/cds-model/rfr-test-grids/EUR/EUR_ESTER_20210426.zip",
+    "archive_sha256": "f859e49978d6c8f6d6cc64eff3907ac67f4a1e527c7dcb720f08c09dc5e71a9a",
+    "archive_size_bytes": 415381,
+    "workbook_member": "EUR_ESTER_20210426.xlsx",
+    "workbook_sha256": "79efda2a2d3bdacc377da487a1807c206977a85026192e7c01deca5e9bdc7db5",
+    "source_access": "public_download",
+    "redistribution_rights": "unverified"
+  },
+  "contract_terms": {
+    "instrument": "CDS_SINGLE_NAME",
+    "currency": "EUR",
+    "position": "PROTECTION_BUYER",
+    "coupon_bp": 100,
+    "notional_eur": 10000000,
+    "notional_evidence": {
+      "method": "accrued_premium_divided_by_coupon_fraction_and_act_360_fraction",
+      "workbook_defined_name": "Notional",
+      "workbook_reference": "'Test Grid'!#REF!"
+    }
+  },
+  "cds_conventions": {
+    "profile": "isda_standard_cds_converter",
+    "specification_url": "https://cdsmodel.com/assets/cds-model/docs/ISDA%20Standard%20CDS%20Contract%20Converter%20Specification%20-%20Sept%204%2C%202009.pdf",
+    "calendar": "weekdays_only",
+    "premium_frequency_months": 3,
+    "premium_day_count": "ACT/360",
+    "premium_payment_adjustment": "Following",
+    "step_in_calendar_days": 1,
+    "initial_settlement_business_days": 3,
+    "calibration_model": "constant_hazard"
+  },
+  "cds_chronology": {
+    "trade_date": "2021-04-26",
+    "initial_accrual_start_date": "2021-03-22",
+    "step_in_date": "2021-04-27",
+    "initial_cash_settlement_date": "2021-04-29",
+    "protection_end_inclusive_date": "2026-06-20",
+    "final_accrual_end_exclusive_date": "2026-06-21",
+    "final_premium_payment_date": "2026-06-22"
+  },
+  "ois_quotes": {
+    "currency": "EUR",
+    "index": "ESTR",
+    "instrument": "ois_swap",
+    "rate_unit": "fraction",
+    "source_sheet": "RFR Curve",
+    "source_range": "A3:C19",
+    "source_type_code": "S",
+    "source_publication_timestamp": null,
+    "intraday_eligibility": "unverified",
+    "readiness": "raw_quotes",
+    "chronology": {
+      "anchor_date": "2021-04-26",
+      "locked_rate_date": "2021-04-23",
+      "spot_date": "2021-04-28"
+    },
+    "conventions": {
+      "profile": "isda_eur_rfr_2021-04-07",
+      "specification_date": "2021-04-07",
+      "documentation_url": "https://www.cdsmodel.com/documentation.html",
+      "calendar": "weekdays_only",
+      "locked_rate_business_days": -1,
+      "spot_business_days": 2,
+      "fixed_day_count": "ACT/360",
+      "payment_adjustment": "Modified Following",
+      "single_payment_through_tenor": "1Y",
+      "fixed_frequency_months_beyond_1y": 12,
+      "interpolation": "log_linear_discount_factors"
+    },
+    "rows": [
+      {
+        "source_cells": "A3:C3",
+        "tenor": "1M",
+        "rate": -0.005683
+      },
+      {
+        "source_cells": "A4:C4",
+        "tenor": "3M",
+        "rate": -0.005699
+      },
+      {
+        "source_cells": "A5:C5",
+        "tenor": "6M",
+        "rate": -0.005727
+      },
+      {
+        "source_cells": "A6:C6",
+        "tenor": "1Y",
+        "rate": -0.00576
+      },
+      {
+        "source_cells": "A7:C7",
+        "tenor": "2Y",
+        "rate": -0.00572
+      },
+      {
+        "source_cells": "A8:C8",
+        "tenor": "3Y",
+        "rate": -0.005399
+      },
+      {
+        "source_cells": "A9:C9",
+        "tenor": "4Y",
+        "rate": -0.00489
+      },
+      {
+        "source_cells": "A10:C10",
+        "tenor": "5Y",
+        "rate": -0.00429
+      },
+      {
+        "source_cells": "A11:C11",
+        "tenor": "6Y",
+        "rate": -0.00361
+      },
+      {
+        "source_cells": "A12:C12",
+        "tenor": "7Y",
+        "rate": -0.00289
+      },
+      {
+        "source_cells": "A13:C13",
+        "tenor": "8Y",
+        "rate": -0.00217
+      },
+      {
+        "source_cells": "A14:C14",
+        "tenor": "9Y",
+        "rate": -0.00145
+      },
+      {
+        "source_cells": "A15:C15",
+        "tenor": "10Y",
+        "rate": -0.00078
+      },
+      {
+        "source_cells": "A16:C16",
+        "tenor": "12Y",
+        "rate": 0.000431
+      },
+      {
+        "source_cells": "A17:C17",
+        "tenor": "15Y",
+        "rate": 0.00189
+      },
+      {
+        "source_cells": "A18:C18",
+        "tenor": "20Y",
+        "rate": 0.00313
+      },
+      {
+        "source_cells": "A19:C19",
+        "tenor": "30Y",
+        "rate": 0.00336
+      }
+    ]
+  },
+  "scenario_source": {
+    "sheet": "Test Grid",
+    "columns": {
+      "trade_date": "A",
+      "protection_end_inclusive_date": "B",
+      "currency": "C",
+      "coupon_bp": "D",
+      "quoted_spread_bp": "E",
+      "calibration_recovery_fraction": "F",
+      "clean_upfront_fraction": "G",
+      "cash_settlement_eur_buyer_to_seller": "H",
+      "clean_price_per_100": "I",
+      "days_accrued": "J",
+      "accrued_premium_eur": "K",
+      "initial_cash_settlement_date": "L",
+      "step_in_date": "M"
+    }
+  },
+  "scenarios": [
+    {
+      "id": "isda-eur-estr-20210426-50bp",
+      "source_cells": "A2407:M2407",
+      "market_inputs": {
+        "quoted_spread_bp": 50,
+        "calibration_recovery_fraction": 0.4
+      }
+    },
+    {
+      "id": "isda-eur-estr-20210426-100bp",
+      "source_cells": "A2427:M2427",
+      "market_inputs": {
+        "quoted_spread_bp": 100,
+        "calibration_recovery_fraction": 0.4
+      }
+    },
+    {
+      "id": "isda-eur-estr-20210426-150bp",
+      "source_cells": "A2447:M2447",
+      "market_inputs": {
+        "quoted_spread_bp": 150,
+        "calibration_recovery_fraction": 0.4
+      }
+    }
+  ]
+}

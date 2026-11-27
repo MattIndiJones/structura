@@ -20,10 +20,11 @@ from ...core.watchlist_observations import watchlist_observations
 from ...core.payoff_terms import classify_param_barrier
 from ...core.workflow import AmendmentStatus
 from ...services.product_repository import ProductError, load_product, owned_record
+from ...services.exotic_product_booking import is_native_exotic_deal, is_native_template_deal
 from ...services.business_access import deal_entity_id as _deal_entity_id, can_read_deal as _can_access_deal
 from ._router import router
 from .common import _niveau_initial_constate
-from .serializers import _amendment_row, _audit_row, _deal_row, _fixing_version_row, _get_events, _get_lifecycle_proposals, _proposal_row
+from .serializers import _amendment_row, _audit_row, _deal_row, _fixing_version_row, _get_events, _get_lifecycle_proposals, _market_snapshot_for_read, _proposal_row
 from ..contracts import returns
 from ..responses import DealDetail, DealRow, EligibleCounterparty
 
@@ -355,8 +356,9 @@ def _deal_terms(deal: Deal) -> list[dict]:
         compiled = parse_script(deal.script_snapshot)
     except ValueError:
         return []
-    market = json.loads(deal.market_snapshot_json) if deal.market_snapshot_json else {}
-    up = market.get("user_params", {}) or {}
+    up = _market_snapshot_for_read(deal).get("user_params")
+    if not isinstance(up, dict):
+        up = {}
     terms = []
     for p in compiled.params:
         v = up.get(p.name, p.stored_val)
@@ -382,7 +384,9 @@ def _script_flags(deal: Deal) -> dict:
     except ValueError:
         return {"has_stop": False, "has_ki_param": False, "has_autocall_param": False}
     scalar_params = [p for p in compiled.params if p.kind == "scalar"]
-    values = json.loads(deal.market_snapshot_json or "{}").get("user_params", {})
+    values = _market_snapshot_for_read(deal).get("user_params")
+    if not isinstance(values, dict):
+        values = {}
     kinds = {classify_param_barrier(p.name, values.get(p.name, p.stored_val)) for p in scalar_params}
     return {
         "has_stop": compiled.has_stop,
@@ -434,12 +438,20 @@ def get_deal(
     # old raw terms with today's calendar algorithm or read the latest terms.
     row['frozen_schedule'] = None
     row['calendar_status'] = 'UNAVAILABLE'
+    exotic = is_native_exotic_deal(deal)
+    template = is_native_template_deal(deal)
+    native = exotic or template
     if deal.product_id is not None and deal.product_terms_version is not None:
         try:
-            owned_record(session, deal.product_id, current)
-            contract = load_product(session, deal.product_id, terms_version=deal.product_terms_version)
-            frozen = contract.terms.resolved_events.to_dict() if contract.terms.resolved_events else None
-            if frozen and (not row['schedule'] or frozen.get('schedule') == row['schedule']):
+            if not native:
+                owned_record(session, deal.product_id, current)
+            contract = load_product(session, deal.product_id, terms_version=deal.product_terms_version, allow_native=native)
+            if native:
+                profile = "native_template_v1" if template else "native_exotic_act365f"
+                frozen = {"profile": profile, "schedule": contract.native_schedule.model_dump(mode="json")} if contract.native_schedule else None
+            else:
+                frozen = contract.terms.resolved_events.to_dict() if contract.terms.resolved_events else None
+            if frozen and (frozen.get('schedule') == row['schedule'] or (not template and not row['schedule'])):
                 row['frozen_schedule'] = frozen
                 row['calendar_status'] = 'FROZEN'
         except (ProductError, ValueError, TypeError):
@@ -460,8 +472,9 @@ def get_deal(
             _fixing_version_row(version))
     for event in row.get("events", []):
         event["fixing_versions"] = versions_by_event.get(event["id"], [])
-    row["terms"] = _deal_terms(deal)
-    row["flags"] = _script_flags(deal)
+    row["terms"] = ([{"label": "Contrat", "value": deal.product_type if template else "Exotique natif · ACT/365F"}]
+                    if native else _deal_terms(deal))
+    row["flags"] = {} if native else _script_flags(deal)
     row["lifecycle_proposals"] = [
         _proposal_row(p) for p in _get_lifecycle_proposals(deal_id, session)]
     row["amendment_requests"] = [
