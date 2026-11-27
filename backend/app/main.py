@@ -59,8 +59,17 @@ from .api.admin import router as admin_router
 from .api.alerts import router as alerts_router
 from .api.compute import router as compute_router
 from .api.structured_indices import router as structured_indices_router
+from .api.research_rates_credit import router as research_rates_credit_router
 from .api.var import router as var_router
 from .api.products import router as products_router
+from .api.rates_pricer import router as rates_pricer_router
+from .api.credit_pricer import router as credit_pricer_router
+from .api.native_reports import router as native_reports_router
+from .api.native_template_booking import router as native_template_booking_router
+from .api.exotic_pricer import router as exotic_pricer_router
+from .api.exotic_summary import router as exotic_summary_router
+from .api.exotic_payscript import router as exotic_payscript_router
+from .api.exotic_products import lifecycle_router as exotic_lifecycle_router, router as exotic_products_router
 from .api.product_optimizer import router as product_optimizer_router
 from .api.trading import router as trading_router
 from .api.agent_workshop import router as agent_workshop_router, admin_router as admin_agent_workshop_router
@@ -223,7 +232,17 @@ app.include_router(admin_router)
 app.include_router(alerts_router)
 app.include_router(compute_router)
 app.include_router(structured_indices_router)
+app.include_router(research_rates_credit_router)
 app.include_router(var_router)
+app.include_router(rates_pricer_router)
+app.include_router(credit_pricer_router)
+app.include_router(native_reports_router)
+app.include_router(native_template_booking_router)
+app.include_router(exotic_pricer_router)
+app.include_router(exotic_summary_router)
+app.include_router(exotic_payscript_router)
+app.include_router(exotic_products_router)
+app.include_router(exotic_lifecycle_router)
 app.include_router(products_router)
 app.include_router(product_optimizer_router)
 app.include_router(trading_router)

@@ -104,6 +104,10 @@ def refresh_deal_core(
     actor_user_id: int | None = None,
 ) -> dict:
     """Refresh indicative data with persistent, visible error reporting."""
+    from ...services.exotic_product_booking import is_native_scheduled_deal
+    if is_native_scheduled_deal(deal):
+        raise HTTPException(409, {"code": "EXOTIC_LIFECYCLE_UNQUALIFIED",
+                                 "message": "Les événements de ce Deal sont suivis dans son registre contractuel."})
     deal_id = deal.id
     reference = deal.reference
     user_id = deal.user_id

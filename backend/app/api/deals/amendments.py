@@ -164,6 +164,10 @@ def request_amendment(
     if (not deal or not _can_access_deal(deal, current, session)
             or (current_config() is None and deal.user_id != current.id)):
         raise HTTPException(404, "Deal introuvable")
+    from ...services.exotic_product_booking import is_native_scheduled_deal
+    if is_native_scheduled_deal(deal):
+        raise HTTPException(409, {"code": "EXOTIC_AMENDMENT_UNQUALIFIED",
+                                 "message": "L’amendement officiel de ce Deal natif reste à qualifier."})
     old_value = _amendment_current_value(deal, body.field_name)
     if old_value == body.new_value:
         commit_rejection(

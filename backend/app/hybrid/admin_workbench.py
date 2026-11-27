@@ -1,6 +1,8 @@
 """Complete local development application, independent of client installations."""
 import json
+import logging
 import os
+import subprocess
 
 from fastapi import HTTPException, Request
 from sqlmodel import SQLModel, Field
@@ -8,6 +10,9 @@ from sqlalchemy import text
 
 from .config import credentials, read_config
 from ..db.migrations import BOOKKEEPING_TABLES
+
+
+logger = logging.getLogger(__name__)
 
 
 class AdminWorkbenchIdentity(SQLModel, table=True):
@@ -89,12 +94,7 @@ def seed(engine):
     return {"accounts": 1, "admin_workbench": True}
 
 
-def login(request: Request):
-    from sqlmodel import Session, select
-    from ..db.database import engine
-    from ..db.models import User
-    from ..api.auth import _make_token
-    from ..core.audit import record_audit_event
+def _require_local_development(request: Request):
     installation = config()
     if not installation or os.environ.get("STRUCTURA_DEVELOPER_ACCESS") != "1":
         raise HTTPException(404, "Accès Admin local désactivé.")
@@ -104,6 +104,42 @@ def login(request: Request):
             or origin and origin not in allowed or request.headers.get("sec-fetch-site") == "cross-site" \
             or request.headers.get("X-Structura-Development") != "1":
         raise HTTPException(403, "Accès Admin limité au lanceur et au navigateur local.")
+    return installation
+
+
+def open_portal(request: Request):
+    from .deployment import launcher_command, load_layout, start
+
+    installation = _require_local_development(request)
+    root = installation.data_dir.parent
+    try:
+        with launcher_command(root):
+            record = json.loads((installation.data_dir / ".process.json").read_text(encoding="utf-8"))
+            launch_id = os.environ.get("STRUCTURA_LAUNCH_ID")
+            if (not isinstance(record, dict) or not launch_id or record.get("launch_id") != launch_id
+                    or record.get("installation_id") != str(installation.installation_id)
+                    or record.get("server_pid") != os.getpid()
+                    or not isinstance(record.get("launcher_id"), str) or not record["launcher_id"]):
+                raise ValueError("Le workspace Admin doit être ouvert par son lanceur.")
+            platform = next((item for item in load_layout(root) if item.key == "platform"), None)
+            descriptor = json.loads((installation.data_dir / "platform.json").read_text(encoding="utf-8"))
+            if platform is None or platform.kind != "platform" or platform.public_descriptor() != descriptor:
+                raise ValueError("Le portail ne correspond pas à l’installation locale du workspace Admin.")
+            start(platform, developer_access=True, launcher_id=record["launcher_id"])
+    except (OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+        logger.warning("Ouverture du portail depuis Admin impossible : %s", exc)
+        raise HTTPException(503, "Le portail local ne peut pas démarrer. Réessayez depuis Structura Admin.") from exc
+    return {"url": descriptor["url"]}
+
+
+def login(request: Request):
+    from sqlmodel import Session, select
+    from ..db.database import engine
+    from ..db.models import User
+    from ..api.auth import _make_token
+    from ..core.audit import record_audit_event
+
+    _require_local_development(request)
     with Session(engine) as session:
         user = session.exec(select(User).where(User.username == "admin", User.role == "admin", User.is_active == True)).first()
         if not user:

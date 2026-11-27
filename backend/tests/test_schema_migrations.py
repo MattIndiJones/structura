@@ -86,11 +86,12 @@ def test_la_base_figee_ne_change_plus():
         "se modifie pas : annulez la modification et écrivez une nouvelle migration m0002_….")
 
 
-def test_une_base_neuve_recoit_la_v1_une_seule_fois(tmp_path):
+def test_une_base_neuve_applique_les_migrations_une_seule_fois(tmp_path):
     engine = _engine(tmp_path / "structura.db")
     SQLModel.metadata.create_all(engine)
     report = migrations.upgrade(engine)
-    assert report["from"] == 0 and report["applied"] == [1] and report["backup"] is None
+    assert report["from"] == 0 and report["applied"] == [m.version for m in migrations.discover()]
+    assert report["backup"] is None
     assert migrations.upgrade(engine)["applied"] == []
     state = migrations.status(engine)
     assert state["version"] == state["expected"] and state["pending"] == [] and state["modified"] == []
@@ -103,7 +104,7 @@ def test_une_installation_anterieure_passe_en_v1_sans_changer_de_schema(tmp_path
     SQLModel.metadata.create_all(engine)
     migrations.discover()[0].module.upgrade(engine)
     before = _schema(engine)
-    assert migrations.upgrade(engine)["applied"] == [1]
+    assert migrations.upgrade(engine, migrations=migrations.discover()[:1])["applied"] == [1]
     assert _schema(engine) == before
     assert _versions(engine) == [1]
 

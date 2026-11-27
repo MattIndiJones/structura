@@ -27,6 +27,7 @@ from sqlmodel import Session, select
 from ..db.database import engine
 from ..db.models import Deal, Alert, SchedulerRun
 from ..core.audit import record_audit_event
+from .exotic_product_booking import is_native_scheduled_deal
 from .product_lifecycle import stage_product_lifecycle
 
 log = logging.getLogger("structura.lifecycle")
@@ -77,6 +78,8 @@ def refresh_book(session: Session, user_id: int | None = None, *, current=None) 
     if current is not None:
         from .business_access import visible_deals
         deals = visible_deals(session, deals, current)
+    # Native contracts require validated facts even when the settlement date has passed.
+    deals = [deal for deal in deals if not is_native_scheduled_deal(deal)]
 
     today = business_today()
     summary = {"deals": len(deals), "refreshed": 0, "settled": 0,

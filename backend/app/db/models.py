@@ -92,6 +92,24 @@ class ProductCommand(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class NativeValuationContextRecord(SQLModel, table=True):
+    """Immutable preparation attached to the identity of a Product and its terms."""
+    __tablename__ = "native_valuation_contexts"
+    __table_args__ = (UniqueConstraint("user_id", "command_key"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id")
+    command_key: str
+    # The reference survives numeric ID reuse without preventing UAT cleanup.
+    product_id: int
+    product_reference: str
+    fingerprint: str
+    context_json: str = Field(sa_column=Column(Text, nullable=False))
+    received_market_fingerprint: str
+    received_market_json: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class BookingCommand(SQLModel, table=True):
     """Successful booking intent, committed atomically with its local position."""
     __tablename__ = "booking_commands"
@@ -802,6 +820,26 @@ class DealContractVersion(SQLModel, table=True):
         default=None, foreign_key="trade_amendment_requests.id", index=True)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class NativeExoticLifecycleEntry(SQLModel, table=True):
+    """Append-only proposal or decision scoped to a frozen exotic Deal version."""
+    __tablename__ = "native_exotic_lifecycle_entries"
+    __table_args__ = (UniqueConstraint("actor_id", "command_key"), UniqueConstraint("proposal_id"))
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # Reference and schedule are part of the binding. The audit evidence
+    # outlives a permitted removal of an isolated recipe Deal or user.
+    deal_id: int = Field(index=True)
+    deal_reference: str
+    contract_version: int
+    schedule_fingerprint: str
+    actor_id: int
+    command_key: str
+    proposal_id: Optional[int] = Field(default=None)
+    entry_hash: str
+    entry_json: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime
 
 
 class Document(SQLModel, table=True):

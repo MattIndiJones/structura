@@ -1,5 +1,4 @@
 """Shared launcher controller and a small French desktop menu."""
-from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import json
@@ -10,7 +9,7 @@ import webbrowser
 from uuid import uuid4
 
 from .control_services import prepare_controls
-from .deployment import ROOT, prepare, start, stop, probe, stop_candidate
+from .deployment import ROOT, launcher_command, prepare, start, stop, probe, stop_candidate
 
 
 ACTION_HELP = {
@@ -25,33 +24,27 @@ ACTION_HELP = {
 
 
 class Launcher:
-    def __init__(self, runtime_root=None, base_port=8100):
+    def __init__(self, runtime_root=None, base_port=8100, *, parallel_admin_start=False, defer_admin_portal=False):
         self.root = Path(runtime_root or ROOT / ".runtime" / "hybrid-saas").resolve()
         self.configs = prepare(self.root, base_port)
         self.platform = next(config for config in self.configs if config.kind == "platform")
         self.controls = prepare_controls(self.platform)
+        self.parallel_admin_start = parallel_admin_start
+        self.defer_admin_portal = defer_admin_portal
         self.launcher_id = str(uuid4())
         self.opened = {}
         self.progress = lambda message: None
 
-    @contextmanager
     def command(self):
-        from ..services.agent_workshop.lease import CampaignLease
-        directory = self.root / "launcher-lock"
-        directory.mkdir(exist_ok=True)
-        try:
-            lease = CampaignLease(directory)
-        except ValueError as exc:
-            raise RuntimeError("Une autre action du lanceur est en cours. Attendez sa fin.") from exc
-        try:
-            yield
-        finally:
-            lease.close()
+        return launcher_command(self.root)
 
     def launch(self, action="admin", organization=None, open_browser=True):
         if action not in {"all", "admin", "platform", "organization", "simulation"}:
             raise ValueError("Choix de lancement inconnu.")
-        selected = [self.controls["admin-workbench"], self.platform] if action in {"admin", "simulation"} else [self.platform]
+        admin_action = action in {"admin", "simulation"}
+        selected = [self.controls["admin-workbench"]] if admin_action else [self.platform]
+        if admin_action and not self.defer_admin_portal:
+            selected.append(self.platform)
         if action == "all":
             selected += [c for c in self.configs if c.kind == "organization"]
         elif action == "organization":
@@ -60,18 +53,31 @@ class Launcher:
                 raise ValueError("Organisation inconnue.")
             selected.append(match)
         started, results, warnings = [], [], []
+        parallel = self.parallel_admin_start and admin_action and len(selected) > 1
         with self.command():
             try:
-                for config in selected:
-                    self.progress(f"Démarrage : {config.name}…")
-                    result = start(config, developer_access=True, launcher_id=self.launcher_id)
-                    results.append(result)
-                    if result["started"]:
-                        started.append(config)
+                if parallel:
+                    results = self._start_admin_services(selected, started)
+                else:
+                    for config in selected:
+                        self.progress(f"Démarrage : {config.name}…")
+                        result = start(config, developer_access=True, launcher_id=self.launcher_id)
+                        results.append(result)
+                        if result["started"]:
+                            started.append(config)
                 self.opened.update({config.key: config for config in selected})
-            except BaseException:
+            except BaseException as error:
+                cleanup_errors = []
                 for config in reversed(started):
-                    stop(config, timeout_seconds=240 if config.service in {"simulation_controller", "admin_workbench"} else 40)
+                    try:
+                        stop(config, timeout_seconds=240 if config.service in {"simulation_controller", "admin_workbench"} else 40)
+                    except Exception as cleanup_error:
+                        if not parallel:
+                            raise
+                        cleanup_errors.append(f"{config.name} — {cleanup_error}")
+                if cleanup_errors:
+                    message = "\n".join([str(error), "Vérifiez l’arrêt des services suivants.", *cleanup_errors])
+                    raise RuntimeError(message) from error
                 raise
         url = self.platform.public_descriptor()["url"] + "/#/login"
         if action == "organization":
@@ -84,6 +90,35 @@ class Launcher:
         if open_browser:
             webbrowser.open(url)
         return {"url": url, "services": results, "warnings": warnings}
+
+    def _start_admin_services(self, configs, started):
+        pending = []
+        error = None
+        with ThreadPoolExecutor(max_workers=len(configs)) as pool:
+            try:
+                for config in configs:
+                    self.progress(f"Démarrage : {config.name}…")
+                    future = pool.submit(start, config, developer_access=True, launcher_id=self.launcher_id)
+                    pending.append((config, future))
+            except BaseException as exc:
+                error = exc
+
+        # The executor has drained both launches, including a late success
+        # after the other service failed. Keep acknowledgements in menu order.
+        results = []
+        for config, future in pending:
+            try:
+                result = future.result()
+            except BaseException as exc:
+                if error is None:
+                    error = exc
+            else:
+                results.append(result)
+                if result["started"]:
+                    started.append(config)
+        if error is not None:
+            raise error
+        return results
 
     def status(self):
         rows = []

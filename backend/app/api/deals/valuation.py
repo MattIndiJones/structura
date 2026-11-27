@@ -951,10 +951,12 @@ def list_valuation_runs(
     run_type: Optional[str] = None,
     include_payload: bool = False,
 ):
+    from ...services.exotic_deal_valuation import RUN_TYPE as EXOTIC_MTM_RUN_TYPE
+
     deal = session.get(Deal, deal_id)
     if not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Deal introuvable")
-    statement = select(ValuationRun).where(ValuationRun.deal_id == deal_id)
+    statement = select(ValuationRun).where(ValuationRun.deal_id == deal_id, ValuationRun.run_type != EXOTIC_MTM_RUN_TYPE)
     if run_type:
         normalized_type = run_type.strip().upper()
         if normalized_type not in {"MTM", "GREEKS", "REPORT"}:
@@ -972,9 +974,11 @@ def get_valuation_run(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    from ...services.exotic_deal_valuation import RUN_TYPE as EXOTIC_MTM_RUN_TYPE
+
     run = session.get(ValuationRun, run_id)
     deal = session.get(Deal, run.deal_id) if run else None
-    if not run or not deal or not _can_access_deal(deal, current, session):
+    if not run or run.run_type == EXOTIC_MTM_RUN_TYPE or not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Run de valorisation introuvable")
     return _valuation_run_row(run, include_payload=True)
 
@@ -985,9 +989,11 @@ def replay_saved_valuation_run(
     current: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_session)],
 ):
+    from ...services.exotic_deal_valuation import RUN_TYPE as EXOTIC_MTM_RUN_TYPE
+
     run = session.get(ValuationRun, run_id)
     deal = session.get(Deal, run.deal_id) if run else None
-    if not run or not deal or not _can_access_deal(deal, current, session):
+    if not run or run.run_type == EXOTIC_MTM_RUN_TYPE or not deal or not _can_access_deal(deal, current, session):
         raise HTTPException(404, "Run de valorisation introuvable")
     try:
         return replay_valuation_run(run)

@@ -153,6 +153,10 @@ def mtm_core(
             "code": "DEAL_PRODUCT_MISSING",
             "message": "Le deal ne possède pas de Product canonique.",
         })
+    from ..services.exotic_product_booking import is_native_scheduled_deal
+    if is_native_scheduled_deal(deal):
+        raise HTTPException(409, {"code": "EXOTIC_DEAL_MTM_UNQUALIFIED",
+                                  "message": "La valorisation résiduelle de ce contrat requiert le moteur natif."})
     try:
         product = load_product(session, deal.product_id)
     except ProductError as exc:

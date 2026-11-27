@@ -14,6 +14,8 @@ from .scenario_grid import price_scenario_grid_job
 from .product_optimizer import price_optimizer_candidate_job
 from .mtf import price_mtf_job
 from .athena import ATHENA_ISSUE_KIND, ATHENA_MTM_KIND, price_athena_issue_job, price_athena_mark_job
+from .research_rates_credit import research_rates_credit_issue_job, research_rates_credit_mtm_job
+from ...structured_indices.rates_credit_evidence import RESEARCH_RATES_ISSUE, RESEARCH_RATES_MTM
 
 PRICERS = {
     "payscript_reprice": price_payscript_job,
@@ -23,4 +25,6 @@ PRICERS = {
     "mark_to_future": price_mtf_job,
     ATHENA_ISSUE_KIND: price_athena_issue_job,
     ATHENA_MTM_KIND: price_athena_mark_job,
+    RESEARCH_RATES_ISSUE: research_rates_credit_issue_job,
+    RESEARCH_RATES_MTM: research_rates_credit_mtm_job,
 }

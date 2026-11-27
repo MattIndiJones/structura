@@ -16,9 +16,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import requests
-import statsmodels.api as sm
 import yfinance as yf
-from scipy import stats as _scipy_stats
 
 # ── Persistent FF factor store (never auto-deleted, updated via /ff-refresh) ──
 from ..runtime import data_path
@@ -573,6 +571,9 @@ def run_analysis(
     Y = merged["excess_ret"]
     if not np.isfinite(Y).all() or Y.std() <= 1e-12:
         raise ValueError("Rendements constants ou non finis : inférence factorielle indisponible")
+    import statsmodels.api as sm
+    from scipy import stats as _scipy_stats
+
     X = sm.add_constant(merged[available])
     if len(Y) < max(20, len(available) + 5) or np.linalg.matrix_rank(X) < X.shape[1]:
         raise ValueError("Observations ou rang insuffisants pour cette régression")

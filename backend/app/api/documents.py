@@ -1,6 +1,7 @@
 """Document library — store, list, download generated documents (KID PDF, term sheets, etc.)."""
 from __future__ import annotations
 import json
+from functools import cache
 from uuid import uuid4
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from sqlmodel import Session, select
 
 from ..db.database import get_session
 from ..db.models import Deal, Document, User
+from ..core.product.asset_class import ProductAsset, product_terms_asset_class
 from ..core.product.models import FrozenObject
 from ..services.product_repository import ProductError, load_product, owned_record, stage_revision
 from .auth import get_current_user
@@ -68,6 +70,17 @@ def _accessible(doc, current, session):
     return doc.user_id == current.id
 
 
+def _document_terms(doc: Document, session: Session) -> tuple[int, int] | None:
+    if doc.product_id is not None and doc.product_terms_version is not None:
+        return doc.product_id, doc.product_terms_version
+    if doc.deal_id is not None:
+        deal = session.get(Deal, doc.deal_id)
+        if (deal is not None and deal.product_id is not None and deal.product_terms_version is not None
+                and doc.product_id in (None, deal.product_id)):
+            return deal.product_id, deal.product_terms_version
+    return None
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.get("")
@@ -76,6 +89,7 @@ def list_documents(
     session: Annotated[Session, Depends(get_session)],
     deal_id: Optional[int] = None,
     product_id: Optional[int] = None,
+    asset: ProductAsset | None = None,
 ):
     q = select(Document)
     if deal_id is not None:
@@ -83,7 +97,24 @@ def list_documents(
     if product_id is not None:
         q = q.where(Document.product_id == product_id)
     docs = session.exec(q.order_by(Document.created_at.desc())).all()
-    return [_doc_row(d) for d in docs if _accessible(d, current, session)]
+    accessible = [doc for doc in docs if _accessible(doc, current, session)]
+    if asset is None:
+        return [_doc_row(doc) for doc in accessible]
+
+    @cache
+    def terms_asset(product_id: int, version: int) -> ProductAsset | None:
+        try:
+            product = load_product(session, product_id, terms_version=version, allow_native=True)
+        except ProductError:
+            return None
+        return product_terms_asset_class(product.terms)
+
+    rows = []
+    for doc in accessible:
+        terms = _document_terms(doc, session)
+        if terms is not None and terms_asset(*terms) == asset:
+            rows.append(_doc_row(doc))
+    return rows
 
 
 @router.post("", status_code=201)

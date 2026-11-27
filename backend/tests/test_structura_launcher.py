@@ -1,10 +1,15 @@
 """Launcher selection, legacy entry point and precise process ownership."""
+from concurrent.futures import ThreadPoolExecutor
+import json
 import runpy
 import sys
 from pathlib import Path
+from threading import Barrier, Event, get_ident
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
-from backend.app.hybrid import launcher
+from backend.app.hybrid import deployment, launcher
 
 
 @pytest.fixture
@@ -27,6 +32,13 @@ def menu(tmp_path, monkeypatch):
     return controller, active, started, stopped, urls
 
 
+@pytest.fixture
+def parallel_menu(menu):
+    controller, active, started, stopped, urls = menu
+    parallel = launcher.Launcher(controller.root, controller.platform.port, parallel_admin_start=True)
+    return parallel, active, started, stopped, urls
+
+
 def test_menu_choices_start_only_needed_services_and_reuse_them(menu):
     controller, active, started, stopped, urls = menu
     controller.launch("admin")
@@ -46,6 +58,129 @@ def test_menu_choices_start_only_needed_services_and_reuse_them(menu):
     controller.stop()
     assert not active and set(stopped) == set(started)
     assert "simulation" not in stopped
+
+
+@pytest.mark.parametrize("action,destination", [("admin", "/"), ("simulation", "/agent-workshop")])
+def test_deferred_admin_waits_only_for_admin_then_defers_the_portal(menu, monkeypatch, action, destination):
+    legacy, active, started, stopped, urls = menu
+    controller = launcher.Launcher(legacy.root, legacy.platform.port, defer_admin_portal=True)
+    original_start = launcher.start
+
+    def admin_only(config, **kwargs):
+        assert config.key == "admin-workbench"
+        return original_start(config, **kwargs)
+
+    def open_admin(url):
+        assert set(active) == {"admin-workbench"}
+        urls.append(url)
+
+    monkeypatch.setattr(launcher, "start", admin_only)
+    monkeypatch.setattr(launcher.webbrowser, "open", open_admin)
+    result = controller.launch(action)
+    assert started == ["admin-workbench"]
+    assert [service["key"] for service in result["services"]] == ["admin-workbench"]
+    assert urls == [f"http://127.0.0.1:8000/#/login?development_admin=1&next={destination}"]
+    assert not stopped
+
+    monkeypatch.setattr(launcher, "start", original_start)
+    console = controller.launch("platform", open_browser=False)
+    assert started == ["admin-workbench", "platform"]
+    assert [service["key"] for service in console["services"]] == ["platform"]
+    assert console["url"].endswith("/#/login?console=1&next=/platform")
+    controller.stop()
+    assert not active and set(stopped) == {"admin-workbench", "platform"}
+
+
+def test_deferred_portal_started_from_admin_belongs_to_the_launcher(menu):
+    legacy, active, _, stopped, _ = menu
+    controller = launcher.Launcher(legacy.root, legacy.platform.port, defer_admin_portal=True)
+    controller.launch("admin", open_browser=False)
+    assert set(controller.opened) == {"admin-workbench"}
+
+    # An explicit browser request starts the portal outside Launcher.launch.
+    portal = controller.platform
+    active[portal.key] = portal
+    (portal.data_dir / ".process.json").write_text(json.dumps({
+        "installation_id": str(portal.installation_id), "launcher_id": controller.launcher_id,
+    }), encoding="utf-8")
+
+    controller.stop()
+    assert not active and set(stopped) == {"admin-workbench", "platform"}
+
+
+@pytest.mark.parametrize("action", ["admin", "simulation"])
+def test_parallel_admin_starts_both_services_and_preserves_menu_order(parallel_menu, monkeypatch, action):
+    controller, active, started, stopped, urls = parallel_menu
+    ready = Barrier(2, timeout=4)
+    platform_finished = Event()
+    original = launcher.start
+
+    def start_together(config, **kwargs):
+        assert kwargs == {"developer_access": True, "launcher_id": controller.launcher_id}
+        ready.wait()
+        if config.key == "admin-workbench":
+            assert platform_finished.wait(4)
+        result = original(config, **kwargs)
+        if config.key == "platform":
+            platform_finished.set()
+        return result
+
+    monkeypatch.setattr(launcher, "start", start_together)
+    result = controller.launch(action)
+    assert started == ["platform", "admin-workbench"]
+    assert [row["key"] for row in result["services"]] == ["admin-workbench", "platform"]
+    assert set(controller.opened) == set(active) == {"admin-workbench", "platform"}
+    assert urls == [result["url"]] and not stopped
+    assert ("/agent-workshop" in result["url"]) == (action == "simulation")
+
+
+@pytest.mark.parametrize("platform_reused", [False, True])
+def test_parallel_failure_drains_late_platform_and_only_stops_new_services(parallel_menu, monkeypatch, platform_reused):
+    controller, active, started, stopped, urls = parallel_menu
+    if platform_reused:
+        active["platform"] = controller.platform
+    platform_starting, admin_failed, finish_platform = Event(), Event(), Event()
+    original = launcher.start
+
+    def fail_then_finish(config, **kwargs):
+        if config.key == "admin-workbench":
+            assert platform_starting.wait(4)
+            admin_failed.set()
+            raise RuntimeError("Échec Admin témoin")
+        assert config.key == "platform"
+        platform_starting.set()
+        assert finish_platform.wait(4)
+        return original(config, **kwargs)
+
+    monkeypatch.setattr(launcher, "start", fail_then_finish)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(controller.launch, "admin")
+        try:
+            assert admin_failed.wait(4)
+            assert not future.done()
+        finally:
+            finish_platform.set()
+        with pytest.raises(RuntimeError, match="Échec Admin témoin"):
+            future.result(timeout=4)
+    assert not urls and not controller.opened
+    assert (set(active), stopped, started) == (
+        ({"platform"}, [], []) if platform_reused else (set(), ["platform"], ["platform"])
+    )
+
+
+def test_parallel_option_keeps_organization_launch_sequential(parallel_menu, monkeypatch):
+    controller, active, started, _, _ = parallel_menu
+    original = launcher.start
+    calling_thread = get_ident()
+
+    def start_in_caller(config, **kwargs):
+        assert get_ident() == calling_thread
+        return original(config, **kwargs)
+
+    monkeypatch.setattr(launcher, "start", start_in_caller)
+    result = controller.launch("organization", "leonteq", open_browser=False)
+    assert started == [row["key"] for row in result["services"]] == ["platform", "leonteq"]
+    assert set(active) == {"platform", "leonteq"}
 
 
 def test_failed_partial_launch_only_stops_newly_created_services(menu, monkeypatch):
@@ -75,6 +210,96 @@ def test_occupied_admin_port_does_not_replace_its_occupant_or_block_portal(menu,
     controller.launch("platform")
     assert active["platform"] and "admin-workbench" not in active
     assert not stopped
+
+
+@pytest.fixture
+def start_service(tmp_path, monkeypatch):
+    (tmp_path / "logs").mkdir()
+    config = SimpleNamespace(key="admin-workbench", name="Admin", data_dir=tmp_path,
+                             port=19508, installation_id="installation-temoin")
+    bind = Mock()
+    socket = Mock()
+    socket.return_value.__enter__ = Mock(return_value=SimpleNamespace(bind=bind))
+    socket.return_value.__exit__ = Mock(return_value=False)
+    monkeypatch.setattr(deployment, "socket", SimpleNamespace(socket=socket))
+    monkeypatch.setattr(deployment, "environment", lambda _config: {})
+    return config, bind
+
+
+def test_cold_start_skips_http_on_closed_port_and_waits_for_its_own_health(start_service, monkeypatch):
+    config, bind = start_service
+    accepts = Mock(side_effect=[False, False, True, True])
+    launch_environment = {}
+    answers = []
+
+    def probe(_config):
+        assert _config is config and launch_environment
+        launch_id = "ancienne-session" if not answers else launch_environment["STRUCTURA_LAUNCH_ID"]
+        answers.append(launch_id)
+        return {"launch_id": launch_id, "process_id": 42}
+
+    def popen(_command, *, env, **_kwargs):
+        assert not answers
+        launch_environment.update(env)
+        return SimpleNamespace(pid=41, poll=lambda: None)
+
+    monkeypatch.setattr(deployment, "_accepts_local_connections", accepts)
+    monkeypatch.setattr(deployment, "probe", probe)
+    monkeypatch.setattr(deployment.subprocess, "Popen", popen)
+
+    result = deployment.start(config, developer_access=True, launcher_id="lanceur-temoin")
+
+    assert result["started"] and result["pid"] == 42 and result["launcher_pid"] == 41
+    assert accepts.call_count == 4
+    assert answers == ["ancienne-session", launch_environment["STRUCTURA_LAUNCH_ID"]]
+    bind.assert_called_once_with(("127.0.0.1", config.port))
+    record = json.loads((config.data_dir / ".process.json").read_text(encoding="utf-8"))
+    assert record["server_pid"] == result["pid"]
+    assert record["launch_id"] == answers[-1]
+    assert record["launcher_id"] == "lanceur-temoin"
+
+
+def test_live_service_is_reused_after_http_identity_check(start_service, monkeypatch):
+    config, bind = start_service
+    record_path = config.data_dir / ".process.json"
+    record = {"installation_id": config.installation_id, "pid": 41, "launch_id": "session-temoin",
+              "launcher_id": "ancien-lanceur"}
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    accepts = Mock(return_value=True)
+    probe = Mock(return_value={"process_id": 42, "launch_id": record["launch_id"], "developer_access": True})
+    no_process = Mock(side_effect=AssertionError("Ne pas lancer un deuxième service"))
+    monkeypatch.setattr(deployment, "_accepts_local_connections", accepts)
+    monkeypatch.setattr(deployment, "probe", probe)
+    monkeypatch.setattr(deployment.subprocess, "Popen", no_process)
+
+    result = deployment.start(config, developer_access=True, launcher_id="lanceur-temoin")
+
+    assert result == {"key": config.key, "started": False, "reused": True, "pid": 42}
+    accepts.assert_called_once_with(config.port)
+    probe.assert_called_once_with(config)
+    bind.assert_not_called()
+    no_process.assert_not_called()
+    assert json.loads(record_path.read_text(encoding="utf-8")) == {**record, "launcher_id": "lanceur-temoin"}
+
+
+@pytest.mark.parametrize("accepts", [False, True])
+def test_occupied_port_is_preserved_even_when_its_listener_is_not_ready(start_service, monkeypatch, accepts):
+    config, bind = start_service
+    bind.side_effect = OSError("Port déjà réservé")
+    probe = Mock(return_value=None)
+    no_process = Mock(side_effect=AssertionError("Ne pas lancer sur un port occupé"))
+    monkeypatch.setattr(deployment, "_accepts_local_connections", Mock(return_value=accepts))
+    monkeypatch.setattr(deployment, "probe", probe)
+    monkeypatch.setattr(deployment.subprocess, "Popen", no_process)
+    monkeypatch.setattr(deployment, "stop", no_process)
+
+    with pytest.raises(RuntimeError, match="Port 19508 occupé"):
+        deployment.start(config, launcher_id="lanceur-temoin")
+
+    assert probe.call_count == int(accepts)
+    bind.assert_called_once_with(("127.0.0.1", config.port))
+    no_process.assert_not_called()
+    assert not (config.data_dir / ".process.json").exists()
 
 
 def _load_script(path, name):

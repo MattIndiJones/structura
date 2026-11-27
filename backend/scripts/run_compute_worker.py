@@ -37,6 +37,7 @@ from backend.app.core.compute.queue_store import (
 )
 from backend.app.core.compute.executor import run_batch
 from backend.app.core.compute.pricers.athena import ATHENA_JOB_KINDS
+from backend.app.core.structured_indices.rates_credit_evidence import RESEARCH_RATES_JOB_KINDS
 
 
 def process_next_batch(worker_name: str, max_workers: int, use_processes: bool,
@@ -55,7 +56,7 @@ def process_next_batch(worker_name: str, max_workers: int, use_processes: bool,
     effective_workers = max(1, min(max_workers, int(params.get("max_workers", max_workers))))
     window_size = effective_workers * 2
     timeout = float(params.get("job_timeout_seconds", job_timeout_seconds))
-    warm_athena_pool = kind in ATHENA_JOB_KINDS
+    warm_research_pool = kind in ATHENA_JOB_KINDS or kind in RESEARCH_RATES_JOB_KINDS
 
     print(f"[{worker_name}] batch #{batch_id} ({kind!r}, {label!r}) — "
           f"fenêtres de {window_size} job(s)")
@@ -93,10 +94,10 @@ def process_next_batch(worker_name: str, max_workers: int, use_processes: bool,
             break
         run_batch(
             kind, job_payloads, max_workers=effective_workers,
-            use_processes=warm_athena_pool or use_processes, on_result=_on_result,
+            use_processes=warm_research_pool or use_processes, on_result=_on_result,
             should_cancel=_cancelled_or_lease_lost, on_tick=_tick,
             job_timeout_seconds=timeout, window_size=window_size,
-            more_jobs=_take_jobs if warm_athena_pool else None,
+            more_jobs=_take_jobs if warm_research_pool else None,
         )
         if _cancelled_or_lease_lost():
             return True

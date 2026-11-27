@@ -314,6 +314,12 @@ def development_admin_session(request: Request):
     return login(request)
 
 
+@router.post("/development-portal", include_in_schema=False)
+def development_portal(request: Request):
+    from ..hybrid.admin_workbench import open_portal
+    return open_portal(request)
+
+
 @router.post("/login")
 def login(
     request: Request,

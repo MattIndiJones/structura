@@ -1,4 +1,5 @@
 """Prepare and operate only explicitly owned, fictitious local installations."""
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 import os
@@ -25,6 +26,23 @@ ORGANIZATIONS = (
     ("leonteq", "Leonteq", "request_rfq"),
     ("kepler-cheuvreux-solutions", "Kepler Cheuvreux Solutions", "request_rfq"),
 )
+
+
+@contextmanager
+def launcher_command(root):
+    """Serialize desktop commands and portal starts requested by Admin."""
+    from ..services.agent_workshop.lease import CampaignLease
+
+    directory = root / "launcher-lock"
+    directory.mkdir(exist_ok=True)
+    try:
+        lease = CampaignLease(directory)
+    except ValueError as exc:
+        raise RuntimeError("Une autre action du lanceur est en cours. Attendez sa fin.") from exc
+    try:
+        yield
+    finally:
+        lease.close()
 
 
 def atomic_json(path, payload):
@@ -272,6 +290,13 @@ def stop(config, timeout_seconds=40):
             kernel.CloseHandle(handle)
 
 
+def _accepts_local_connections(port):
+    """Avoid a full HTTP connect timeout before the local process is listening."""
+    with socket.socket() as sock:
+        sock.settimeout(.05)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
 def start(config, developer_access=False, launcher_id=None):
     # A service opened from the portal belongs to the launcher's current scope.
     # Read the parent's live control record so a reused portal adopts the window
@@ -285,7 +310,7 @@ def start(config, developer_access=False, launcher_id=None):
                 metadata = json.loads(path.read_text(encoding="utf-8"))
                 if metadata.get("launch_id") == os.environ.get("STRUCTURA_LAUNCH_ID"):
                     launcher_id = metadata.get("launcher_id")
-    existing = probe(config)
+    existing = probe(config) if _accepts_local_connections(config.port) else None
     if existing:
         if bool(existing.get("developer_access")) != developer_access:
             raise RuntimeError("Le mode développeur du service existant diffère ; aucun redémarrage implicite.")
@@ -322,7 +347,7 @@ def start(config, developer_access=False, launcher_id=None):
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise RuntimeError(f"{config.name} a quitté ; consulter son journal privé.")
-            health = probe(config)
+            health = probe(config) if _accepts_local_connections(config.port) else None
             if health and health.get("launch_id") == launch_id:
                 record["server_pid"] = health["process_id"]
                 atomic_json(config.data_dir / ".process.json", record)
